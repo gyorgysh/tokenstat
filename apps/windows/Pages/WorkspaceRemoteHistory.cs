@@ -56,7 +56,8 @@ internal static class WorkspaceRemoteHistory
         }
         catch { /* Do not claim that a commit was pushed without an upstream. */ }
         string? ownAvatar = null;
-        try { ownAvatar = Format.Text(await AppServices.Host.CallAsync("account.status"), "avatar"); }
+        string ownHandle = "", ownName = "";
+        try { var status = await AppServices.Host.CallAsync("account.status"); var account = status["account"] ?? status; ownAvatar = Format.Text(account, "avatar"); ownHandle = Format.Text(account, "handle"); ownName = Format.Text(account, "displayName"); }
         catch { /* History remains usable while account status is unavailable. */ }
         var list = new StackPanel { Spacing = 4 };
         foreach (var commit in array)
@@ -118,7 +119,7 @@ internal static class WorkspaceRemoteHistory
             var content = new Grid { ColumnSpacing = Theme.SpaceS };
             content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var avatar = Marks.Avatar(url: Format.Flag(commit, "mine") ? ownAvatar : null, name: author, size: 30);
+            var avatar = Marks.Avatar(url: Format.Flag(commit, "mine") || (ownHandle.Length > 0 && author.Equals(ownHandle, StringComparison.OrdinalIgnoreCase)) || (ownName.Length > 0 && author.Equals(ownName, StringComparison.OrdinalIgnoreCase)) ? ownAvatar : null, name: author, size: 30);
             avatar.VerticalAlignment = VerticalAlignment.Top;
             content.Children.Add(avatar);
             Grid.SetColumn(body, 1);

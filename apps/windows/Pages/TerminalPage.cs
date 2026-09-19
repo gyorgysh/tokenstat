@@ -103,6 +103,7 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         _close = Buttons.ToolbarIcon(ActionIcon.Disconnect, "Close this session", async (_, _) => await _session.CloseAsync());
         _respawn = Buttons.ToolbarIcon(ActionIcon.Refresh, "Start a fresh shell", async (_, _) =>
         {
+            _terminal.Reset();
             await _session.RespawnAsync(CurrentRows(), CurrentCols());
         });
 
@@ -244,6 +245,7 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         catch (Exception ex) { if (IsLoaded) Banner(ex.Message); return; }
         if (!IsLoaded) { await _session.DetachAsync(); return; }
         _loaded = true;
+        await _session.ResizeAsync(CurrentRows(), CurrentCols());
         RefreshOnUi();
         _terminal.FocusTerminal();
     }
@@ -278,8 +280,9 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
             && string.IsNullOrEmpty(_session.LastError)
             ? Visibility.Visible
             : Visibility.Collapsed;
-        _title.Text = $"{label} · {ShortId(_session.Id)}";
+        _title.Text = StartingLabel();
         _size.Text = $"{_session.Cols}×{_session.Rows}";
+        _terminal.SetGeometry(_session.Rows, _session.Cols);
         _kill.IsEnabled = _session.Alive && !_session.Closed;
         _close.IsEnabled = !_session.Closed;
         _respawn.Visibility = (!_session.Alive || _session.Closed)
@@ -340,7 +343,7 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
             var peer = cut < 0 ? rest : rest[..cut];
             var inner = cut < 0 ? "" : rest[(cut + 1)..];
             var tail = inner.Length <= 6 ? inner : inner[^6..];
-            return $"{peer}:{tail}";
+            return tail;
         }
         return id.Length <= 6 ? id : id[^6..];
     }

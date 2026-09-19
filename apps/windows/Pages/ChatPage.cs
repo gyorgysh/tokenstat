@@ -27,7 +27,7 @@ namespace Tokenstat.Pages;
 /// bypass sit as pills beside it. Enter sends, Shift+Enter inserts a
 /// newline, Escape stops a running turn. Approvals sit in the transcript.
 /// </summary>
-internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
+internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 {
     private const int AttachmentCap = 12 * 1024 * 1024;
 
@@ -552,6 +552,8 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             await RefreshCatalogAsync();
             _openChat = FindChat(id);
+            _outboxKey = await OutboxKeyAsync(id);
+            _authorizedQueue.Clear();
             if (_openChat is null)
             {
                 await ShowListAsync();
@@ -602,7 +604,7 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
         RebuildTranscript(full: true);
         _root.Children.Add(_transcript);
         RefreshCost();
-        _root.Children.Add(_costHost);
+        // Usage remains in the inspector; the transcript contains messages only.
         _composerDock.Visibility = Visibility.Visible;
         _composerDock.Child = Composer();
     }
@@ -1468,6 +1470,7 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
         _draft.Background = Theme.PanelBrush;
         _draft.BorderThickness = new Thickness(0);
         _draft.MinHeight = 76;
+        well.Children.Add(PendingMessages());
         well.Children.Add(_draft);
         RebuildAttachStrip();
         well.Children.Add(_attachStrip);
@@ -1688,6 +1691,7 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
         _composerActions.Children.Clear();
         if (Busy())
         {
+            _composerActions.Children.Add(ActionIconGlyph.PrimaryButton("Queue", ActionIcon.Send, async (_, _) => await SendAsync()));
             _composerActions.Children.Add(ActionIconGlyph.Button("Stop", ActionIcon.Stop, async (_, _) => await StopAsync()));
         }
         else
@@ -1748,42 +1752,30 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
     /// second Enter or Send click cannot slip through `Busy()` mid-flight
     /// and double-send the turn.
     private bool _sending;
+    private bool _queueing;
 
     private async Task SendAsync()
     {
-        if (_openId is null || Busy() || _sending) return;
+        if (_openId is not string chat || _sending || _queueing) return;
         var text = _draft.Text.Trim();
-        // An attached image is content on its own: text is only mandatory
-        // when there is nothing attached. The host substitutes the viewing
-        // prompt for an empty caption.
         if (text.Length == 0 && _attachments.Count == 0) return;
-        var ids = new JsonArray();
-        foreach (var file in _attachments) ids.Add(file.Id);
-        _sending = true;
+        var attachmentIds = _attachments.Select(file => file.Id).ToArray();
+        _queueing = true;
         try
         {
-            var updated = await CallChatAsync("chat.send", new JsonObject
-            {
-                ["id"] = _openId,
-                ["text"] = text,
-                ["attachmentIds"] = ids,
-            });
-            _draft.Text = "";
-            _attachments.Clear();
-            _openChat = updated;
-            _started = true;
-            _running = true;
-            PaintConversation();
-            StartPoll();
+            var key = await OutboxKeyAsync(chat);
+            if (_openId != chat || !IsLoaded) return;
+            if (_openChat?["sendRevision"] is null) throw new InvalidOperationException("Update the host to use reliable message delivery.");
+            var item = new QueuedChatMessage(Guid.NewGuid().ToString("N"), text, attachmentIds, Format.Long(_openChat, "sendRevision"));
+            ChatOutbox.Shared.Update(key, rows => rows.Add(item));
+            _outboxKey = key; _authorizedQueue.Add(item.Id);
+            if (_draft.Text.Trim() == text) _draft.Text = "";
+            _attachments.RemoveAll(file => attachmentIds.Contains(file.Id));
+            await DrainQueueAsync();
+            PaintConversation(); StartPoll();
         }
-        catch (Exception ex)
-        {
-            Banner(ex.Message);
-        }
-        finally
-        {
-            _sending = false;
-        }
+        catch (Exception ex) { Banner(ex.Message); }
+        finally { _queueing = false; }
     }
 
     private async Task StopAsync()
@@ -1955,7 +1947,10 @@ internal sealed class ChatPage : Page, IInspectorContent, IToolbarItems
                         RefreshCost();
                     }
                 }
-                if (!Busy()) return;
+                if (!Busy())
+                {
+                    if (!await DrainQueueOnUiAsync(chatId)) return;
+                }
             }
             catch (OperationCanceledException)
             {

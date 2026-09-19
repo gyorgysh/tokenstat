@@ -62,6 +62,19 @@ public sealed partial class SmokeApp : Application
             H264Streamer? streamer = null;
             try
             {
+                var tree = EditorTree.Create();
+                tree.Height = 90;
+                var filename = new TextBlock { Text = "README.md" };
+                var fileNode = new TreeViewNode { Content = filename };
+                tree.RootNodes.Add(fileNode);
+                body.Children.Add(tree);
+                tree.UpdateLayout();
+                await Task.Delay(250);
+                if (Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(filename) is null || filename.ActualWidth <= 0)
+                    throw new Exception("File tree rendered a node type name instead of the filename content");
+                if (tree.CanDragItems || tree.CanReorderItems) throw new Exception("File tree permits visual-only file moves");
+                body.Children.Remove(tree);
+                Program.Log("PASS: production file tree renders filename content in native containers");
                 await terminal.Ready;
                 terminal.Write(System.Text.Encoding.UTF8.GetBytes("\u001b[2J\u001b[H\u001b[31mred\u001b[0m\r\n"));
                 // A UTF-8 scalar split across host reads must remain intact.
@@ -77,7 +90,17 @@ public sealed partial class SmokeApp : Application
                 await web.ExecuteScriptAsync("terminal.input('hello\\r', true)");
                 if (System.Text.Encoding.UTF8.GetString(await typed.Task.WaitAsync(TimeSpan.FromSeconds(5))) != "hello\r")
                     throw new Exception("Terminal keyboard input did not reach the host bridge");
-                Program.Log("PASS: production terminal renders VT colors, split UTF-8 and direct input");
+                var originalCols = terminal.Cols;
+                terminal.Width = 320;
+                terminal.Height = 150;
+                body.UpdateLayout();
+                await Task.Delay(350);
+                if (terminal.Cols >= originalCols || terminal.Rows > 10)
+                    throw new Exception("Terminal did not refit after the viewport shrank");
+                terminal.Width = 640;
+                terminal.Height = 200;
+                body.UpdateLayout();
+                Program.Log("PASS: production terminal renders VT colors, split UTF-8, direct input and fits a shrinking viewport");
                 var cards = new FlowPanel { MinimumItemWidth = 300, Spacing = 10 };
                 var shortCard = new Border { MinHeight = 40 };
                 var tallCard = new Border { MinHeight = 80 };
@@ -89,6 +112,12 @@ public sealed partial class SmokeApp : Application
                 cards.Measure(new Windows.Foundation.Size(300, double.PositiveInfinity));
                 if (cards.DesiredSize.Height != 130) throw new Exception("Responsive cards did not wrap to fit a narrow viewport");
                 Program.Log("PASS: responsive device cards align and wrap");
+                var stable = new NavigationViewItem { Tag = "live:1", Content = new TextBlock { Text = "Before" } };
+                IList<object> liveRows = new List<object> { stable };
+                NavigationRows.Reconcile(liveRows, new[] { new NavigationViewItem { Tag = "live:1", Content = new TextBlock { Text = "After" } } }, "live:", 0);
+                if (!ReferenceEquals(liveRows[0], stable) || ((TextBlock)stable.Content).Text != "After")
+                    throw new Exception("Sidebar refresh replaced a live navigation container");
+                Program.Log("PASS: sidebar refresh retains live row containers");
                 var hosts = new NavigationViewItem { Tag = "ssh:Hosts" };
                 var ssh = new NavigationViewItem { Tag = "ssh:Hosts", MenuItems = { hosts }, IsExpanded = true };
                 var files = new NavigationViewItem { Tag = "ws:folder:Files" };

@@ -4,6 +4,7 @@
     <NoWarn>CA1416</NoWarn><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../../apps/windows/Pages/ChatOutbox.cs" Link="ChatOutbox.cs" />
     <Compile Include="../../../apps/windows/Pages/ScreenViewport.cs" Link="ScreenViewport.cs" />
     <Compile Include="../../../apps/windows/Pages/ScreenFrame.cs" Link="ScreenFrame.cs" />
     <Compile Include="../../../apps/windows/Navigation/LiveRoute.cs" Link="LiveRoute.cs" />

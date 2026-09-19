@@ -42,6 +42,43 @@ Check(ScreenFrame.Parse(encoded[..^1]) is null, "Truncated video must be rejecte
 System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(encoded.AsSpan(28), uint.MaxValue);
 Check(ScreenFrame.Parse(encoded) is null, "Oversized video length must be rejected without overflow");
 Console.WriteLine("PASS: screen wire preserves codec input and rejects invalid lengths");
+var outboxDirectory = Path.Combine(Path.GetTempPath(), "tokenstat-outbox-test-" + Guid.NewGuid().ToString("N"));
+try
+{
+    var key = ChatOutbox.Key("account", "remote:peer:folder", "chat");
+    Check(key != ChatOutbox.Key("other", "remote:peer:folder", "chat"), "Queues must be isolated by account");
+    Check(key != ChatOutbox.Key("account", "remote:other:folder", "chat"), "Queues must be isolated by owning machine");
+    var first = new QueuedChatMessage("first", "one", [], 4);
+    var second = new QueuedChatMessage("second", "two", ["attachment"], 4);
+    var outbox = new ChatOutbox(outboxDirectory);
+    outbox.Update(key, rows => { rows.Add(first); rows.Add(second); });
+    var reopened = new ChatOutbox(outboxDirectory);
+    Check(reopened.Read(key).Select(item => item.Id).SequenceEqual(new[] { "first", "second" }), "Queue must survive reopening in order");
+    outbox.Update(key, rows => rows[0] = first with { Text = "edited" });
+    var staleRefused = false;
+    try { outbox.Stage(key, first, 1234); } catch (InvalidOperationException) { staleRefused = true; }
+    Check(staleRefused && reopened.Read(key)[0].AttemptedAt is null, "A stale draft snapshot must never be sent");
+    outbox.Update(key, rows => rows[0] = first);
+    var attempted = outbox.Stage(key, first, 1234);
+    var duplicateRefused = false;
+    try { reopened.Stage(key, first, 1235); } catch (InvalidOperationException) { duplicateRefused = true; }
+    Check(duplicateRefused, "A second window must not send a claimed message");
+    Check(reopened.Read(key)[0].AttemptedAt == 1234, "Uncertain delivery must survive restart");
+    var remaining = reopened.Accept(key, attempted, 5);
+    Check(remaining.Count == 1 && remaining[0].Revision == 5, "Accepted turn must advance only its waiting successors");
+    outbox.Update(key, rows => rows.Add(new QueuedChatMessage("different", "new context", [], 9)));
+    remaining = outbox.Accept(key, remaining[0], null);
+    Check(remaining.Single().Revision == 9, "Receipt recovery must not authorize a different context");
+    try { outbox.Update(key, rows => { rows.Clear(); throw new IOException("interrupted"); }); }
+    catch (IOException) { }
+    Check(reopened.Read(key).Count == 1, "A failed mutation must preserve the previous queue");
+    try { outbox.Update(key, rows => { for (var i = 0; i < 21; i++) rows.Add(new QueuedChatMessage(i.ToString(), "x", [], 0)); }); }
+    catch (IOException) { }
+    Check(reopened.Read(key).Count == 1, "Capacity rejection must not replace pending messages");
+    Console.WriteLine("PASS: durable chat queue isolates owners, preserves order and uncertain delivery, and advances accepted context only");
+}
+finally { Directory.Delete(outboxDirectory, recursive: true); }
+
 static NamedPipeServerStream Server() => new(HostClient.PipeName, PipeDirection.InOut, 20,
     PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
 static async Task Reply(NamedPipeServerStream pipe, string result)

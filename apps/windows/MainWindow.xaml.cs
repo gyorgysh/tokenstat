@@ -23,6 +23,7 @@ namespace Tokenstat;
 public sealed partial class MainWindow : Window
 {
     private readonly NavigationView _nav = new();
+    private readonly Dictionary<string, Button> _pinnedNavigation = new();
     private readonly Dictionary<string, bool> _chatGroupExpansion = new();
     private readonly Frame _frame = new();
     /// <summary>
@@ -140,16 +141,29 @@ public sealed partial class MainWindow : Window
         _nav.Resources["NavigationViewContentBackground"] = _chromeBackground;
         _nav.Resources["NavigationViewContentGridBorderBrush"] = _chromeBorder;
 
+        var pinned = new StackPanel { Spacing = 2, Margin = new Thickness(4, 0, 4, 8) };
         foreach (var section in Sections.Standalone)
         {
-            _nav.MenuItems.Add(Item(section));
+            var item = Item(section);
+            item.Visibility = Visibility.Collapsed;
+            _nav.MenuItems.Add(item);
+            var tag = "global:" + section;
+            var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
+            content.Children.Add(GlobalIcon(section));
+            content.Children.Add(new TextBlock { Text = section.Label(), VerticalAlignment = VerticalAlignment.Center });
+            var button = new Button { Content = content, HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left, BorderThickness = new Thickness(0), Padding = new Thickness(12),
+                Background = _chromeSidebar, MinWidth = 0 };
+            button.Click += (_, _) => { if (ReferenceEquals(_nav.SelectedItem, item)) Show(tag); else _nav.SelectedItem = item; };
+            ToolTipService.SetToolTip(button, section.Label());
+            _pinnedNavigation[tag] = button;
+            pinned.Children.Add(button);
         }
+        _nav.PaneCustomContent = pinned;
         _nav.MenuItems.Add(new NavigationViewItemSeparator());
-        _nav.MenuItems.Add(new NavigationViewItemHeader { Content = "GLOBAL" });
-        foreach (var section in Sections.Everywhere)
-        {
-            _nav.MenuItems.Add(Item(section));
-        }
+        var global = new NavigationViewItem { Content = "GLOBAL", SelectsOnInvoked = false, IsExpanded = true };
+        foreach (var section in Sections.Everywhere) global.MenuItems.Add(Item(section));
+        _nav.MenuItems.Add(global);
         _nav.MenuItems.Add(new NavigationViewItemSeparator());
         _nav.MenuItems.Add(SshGroup());
         _nav.MenuItems.Add(new NavigationViewItemSeparator());
@@ -321,13 +335,22 @@ public sealed partial class MainWindow : Window
         AppServices.Update.Changed += () => DispatcherQueue.TryEnqueue(RefreshUpdateBadge);
     }
 
+    private static IconElement GlobalIcon(GlobalSection section) => section switch
+    {
+        GlobalSection.Home => new SymbolIcon(Symbol.AllApps),
+        GlobalSection.Machines => new FontIcon { Glyph = char.ToString((char)0xE770), FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets") },
+        GlobalSection.Notes => new SymbolIcon(Symbol.Document),
+        GlobalSection.Automations => new FontIcon { Glyph = char.ToString((char)0xE945), FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets") },
+        _ => new SymbolIcon(section.Symbol()),
+    };
+
     private static NavigationViewItem Item(GlobalSection section)
     {
         return new NavigationViewItem
         {
             Content = section.Label(),
             Tag = "global:" + section,
-            Icon = new SymbolIcon { Symbol = section.Symbol() },
+            Icon = GlobalIcon(section),
         };
     }
 
@@ -788,6 +811,8 @@ public sealed partial class MainWindow : Window
             return;
         }
         // Live rows under the folder parents, like the Mac sidebar.
+        foreach (var pair in _pinnedNavigation)
+            pair.Value.Background = pair.Key == tag ? Theme.AccentSoftBrush : _chromeSidebar;
         if (tag.StartsWith(SidebarLive.SessionPrefix, StringComparison.Ordinal)
             && SidebarLive.TrySplit(tag, SidebarLive.SessionPrefix, out var termFolder, out var sessionId))
         {
@@ -856,6 +881,13 @@ public sealed partial class MainWindow : Window
 
     private void Show(string tag)
     {
+        foreach (var pair in _pinnedNavigation)
+            pair.Value.Background = pair.Key == tag ? Theme.AccentSoftBrush : _chromeSidebar;
+        if (tag.StartsWith("sshterm:", StringComparison.Ordinal))
+        {
+            SetContent(new SshPage(SSHSection.Hosts, tag["sshterm:".Length..]));
+            return;
+        }
         if (tag.StartsWith("global:", StringComparison.Ordinal))
         {
             if (Enum.TryParse<GlobalSection>(tag["global:".Length..], out var section))
@@ -1026,7 +1058,7 @@ public sealed partial class MainWindow : Window
         head.Children.Add(new TextBlock
         {
             Text = "All folders",
-            FontSize = 18,
+            FontSize = 28,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             VerticalAlignment = VerticalAlignment.Center,
         });
@@ -1064,57 +1096,90 @@ public sealed partial class MainWindow : Window
                 EmptyArtKind.WorkspaceAccess));
             return;
         }
-        var list = new StackPanel { Spacing = Theme.SpaceS };
-        if (array is not null)
+        var totals = new FlowPanel { MinimumItemWidth = 200, Spacing = Theme.SpaceM };
+        foreach (var metric in new[] { ("Workspaces", (array?.Count ?? 0) + remote.Count), ("Local folders", array?.Count ?? 0), ("Remote folders", remote.Count) })
         {
-            foreach (var folder in array)
+            var metricBody = new StackPanel { Spacing = Theme.SpaceS };
+            metricBody.Children.Add(new SymbolIcon { Symbol = Symbol.Folder, Foreground = Theme.AccentBrush, HorizontalAlignment = HorizontalAlignment.Left });
+            metricBody.Children.Add(new TextBlock { Text = metric.Item2.ToString(), FontSize = 28 });
+            metricBody.Children.Add(new TextBlock { Text = metric.Item1, Opacity = 0.7 });
+            totals.Children.Add(new Border { Child = metricBody, Background = Theme.PanelBrush,
+                BorderBrush = Theme.BorderBrush, BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(Theme.SpaceL) });
+        }
+        root.Children.Add(totals);
+        var filters = new Grid { ColumnSpacing = Theme.SpaceM };
+        filters.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        filters.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var search = new TextBox { PlaceholderText = "Search folders, paths, or machines", MinWidth = 120 };
+        var machine = new ComboBox { MinWidth = 160 };
+        machine.Items.Add("All machines"); machine.Items.Add("This PC");
+        foreach (var label in remote.Select(folder => folder.MachineLabel).Distinct()) machine.Items.Add(label);
+        machine.SelectedIndex = 0;
+        Grid.SetColumn(machine, 1); filters.Children.Add(search); filters.Children.Add(machine);
+        root.Children.Add(filters);
+        var list = new FlowPanel { MinimumItemWidth = 280, Spacing = Theme.SpaceM };
+        var rows = new List<(string Search, string Machine, UIElement View)>();
+        var summaries = new Dictionary<string, JsonNode>(_liveSummaries);
+        foreach (var peer in remote.Select(folder => folder.PeerKey).Distinct())
+        {
+            try
             {
-                var id = Format.Text(folder, "id");
-                if (string.IsNullOrEmpty(id))
-                {
-                    continue;
-                }
-                list.Children.Add(OverviewFolderRow(
-                    Format.Text(folder, "name", Format.Text(folder, "path", id)),
-                    Format.Text(folder, "path", id),
-                    "ws:" + id + ":Files"));
+                var summaryRows = Format.Items(await RemoteWorkspaces.CallOnPeerAsync(peer, "workspace.summary"));
+                foreach (var summary in summaryRows ?? new JsonArray())
+                    if (summary is not null) summaries[RemoteWorkspaces.Join(peer, Format.Text(summary, "id"))] = summary;
             }
+            catch { /* A folder remains openable even when counts are unavailable. */ }
         }
-        foreach (var folder in remote)
+        void AddFolder(string id, string name, string path, string machineLabel, JsonNode? git)
         {
-            list.Children.Add(OverviewFolderRow(
-                folder.DisplayName,
-                string.IsNullOrEmpty(folder.Path) ? "On " + folder.MachineLabel : folder.Path,
-                "ws:" + folder.Id + ":Files"));
+            summaries.TryGetValue(id, out var summary);
+            var view = OverviewFolderRow(name, path, "ws:" + id + ":Launcher", machineLabel, git, summary);
+            rows.Add((name + " " + path + " " + machineLabel, machineLabel, view));
         }
-        root.Children.Add(Chrome.Card("Folders", list));
+        foreach (var folder in array ?? new JsonArray())
+        {
+            var id = Format.Text(folder, "id");
+            if (id.Length > 0) AddFolder(id, Format.Text(folder, "name", id), Format.Text(folder, "path"), "This PC", folder?["git"]);
+        }
+        foreach (var folder in remote) AddFolder(folder.Id, folder.Name, folder.Path, folder.MachineLabel, folder.Git);
+        void Filter()
+        {
+            list.Children.Clear();
+            foreach (var row in rows)
+                if ((machine.SelectedIndex == 0 || row.Machine == machine.SelectedItem?.ToString()) &&
+                    (string.IsNullOrWhiteSpace(search.Text) || row.Search.Contains(search.Text, StringComparison.OrdinalIgnoreCase))) list.Children.Add(row.View);
+        }
+        search.TextChanged += (_, _) => Filter(); machine.SelectionChanged += (_, _) => Filter();
+        Filter(); root.Children.Add(list);
     }
 
-    private UIElement OverviewFolderRow(string title, string subtitle, string tag)
+    private UIElement OverviewFolderRow(string title, string subtitle, string tag, string machine, JsonNode? git, JsonNode? summary)
     {
+        var body = new StackPanel { Spacing = Theme.SpaceM };
+        var heading = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+        heading.Children.Add(new SymbolIcon { Symbol = Symbol.Folder, Foreground = Theme.AccentBrush });
+        var identity = new StackPanel { Spacing = 2 };
+        identity.Children.Add(new TextBlock { Text = title, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+        identity.Children.Add(new TextBlock { Text = machine, FontSize = 12, Opacity = 0.7 });
+        heading.Children.Add(identity); body.Children.Add(heading);
+        body.Children.Add(new TextBlock { Text = subtitle.StartsWith(@"\\?\") ? subtitle[4..] : subtitle, Opacity = 0.55, FontSize = 12, TextWrapping = TextWrapping.Wrap });
+        var branch = Format.Text(git, "branch");
+        if (branch.Length > 0) body.Children.Add(new TextBlock { Text = "⑂ " + WorkspaceGit.ShortBranch(branch), Opacity = 0.8 });
+        if (summary is not null)
+        {
+            body.Children.Add(new TextBlock { Text = $"{Format.Long(summary, "sessions")} sessions · {Format.Long(summary, "chats")} chats", Opacity = 0.8 });
+            body.Children.Add(new TextBlock { Text = $"{Format.Long(summary, "tasks")} tasks · {Format.Long(summary, "notes")} notes", FontSize = 12, Opacity = 0.65 });
+            var changed = Format.Long(summary, "changed");
+            body.Children.Add(new TextBlock { Text = changed == 0 ? "No pending changes" : $"{changed} changed files", Foreground = Theme.AccentBrush, FontSize = 12 });
+        }
+        body.Children.Add(new Border { Height = 1, Background = Theme.BorderBrush });
+        body.Children.Add(new TextBlock { Text = "Open workspace ↗", Foreground = Theme.AccentBrush, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Right });
         var open = new Button
         {
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Left,
-            Content = new StackPanel
-            {
-                Spacing = 2,
-                Children =
-                {
-                    new TextBlock
-                    {
-                        Text = title,
-                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                        TextWrapping = TextWrapping.Wrap,
-                    },
-                    new TextBlock
-                    {
-                        Text = subtitle,
-                        Opacity = 0.7,
-                        TextWrapping = TextWrapping.Wrap,
-                    },
-                },
-            },
+            HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush, Content = body,
+            CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(Theme.SpaceL),
         };
         open.Click += (_, _) =>
         {
@@ -1254,6 +1319,21 @@ public sealed partial class MainWindow : Window
         try
         {
             var (sessions, chats) = await SidebarLive.FetchFastAsync();
+            try
+            {
+                var sshSessions = Format.Items(await AppServices.Host.CallAsync("ssh.session.list"));
+                var sshGroup = FindNavItem("ssh:" + SSHSection.Hosts);
+                if (sshGroup is not null && sshSessions is not null)
+                {
+                    var wanted = sshSessions.Where(item => Format.Flag(item, "alive")).Select(item => new NavigationViewItem
+                    {
+                        Tag = "sshterm:" + Format.Text(item, "id"), Content = Format.Text(item, "label", "SSH session"),
+                        Icon = new SymbolIcon { Symbol = Symbol.Link },
+                    }).ToList();
+                    NavigationRows.Reconcile(sshGroup.MenuItems, wanted, "sshterm:");
+                }
+            }
+            catch { /* Keep reachable session rows on a transient host failure. */ }
             if (slow)
             {
                 await TryLoadFoldersAsync(refresh: true);
@@ -1361,14 +1441,7 @@ public sealed partial class MainWindow : Window
                 continue;
             }
             var folderId = rest[..cut];
-            for (var i = parent.MenuItems.Count - 1; i >= 0; i--)
-            {
-                if (parent.MenuItems[i] is NavigationViewItem child
-                    && SidebarLive.IsLiveTag(child.Tag as string))
-                {
-                    parent.MenuItems.RemoveAt(i);
-                }
-            }
+            var desiredSessions = new List<NavigationViewItem>();
             _liveSummaries.TryGetValue(folderId, out var summary);
             foreach (var child in parent.MenuItems)
             {
@@ -1389,19 +1462,18 @@ public sealed partial class MainWindow : Window
                 if (sectionKind == WorkspaceSection.Chat)
                 {
                     if (section.MenuItems.Count > 0) _chatGroupExpansion[sectionTag] = section.IsExpanded;
-                    section.MenuItems.Clear();
                     if (chatsByFolder.TryGetValue(folderId, out var recent)) count = Math.Max(count, recent.Count);
                 }
                 SidebarLive.ApplyCount(section, count);
             }
             if (sessionsByFolder.TryGetValue(folderId, out var sessions) && sessions.Count > 0)
             {
-                var at = ChildIndex(parent, "ws:" + folderId + ":Sessions");
                 foreach (var session in sessions)
                 {
-                    parent.MenuItems.Insert(++at, SidebarLive.SessionItem(folderId, session));
+                    desiredSessions.Add(SidebarLive.SessionItem(folderId, session));
                 }
             }
+            NavigationRows.Reconcile(parent.MenuItems, desiredSessions, SidebarLive.SessionPrefix, ChildIndex(parent, "ws:" + folderId + ":Sessions") + 1);
             if (chatsByFolder.TryGetValue(folderId, out var chats) && chats.Count > 0)
             {
                 var expanded = _liveChatExpanded.Contains(folderId);
@@ -1423,28 +1495,31 @@ public sealed partial class MainWindow : Window
                     ? Math.Min(chats.Count, SidebarLive.InlineChats)
                     : Math.Min(chats.Count, SidebarLive.CollapsedChats);
                 var chatSection = (NavigationViewItem)parent.MenuItems[ChildIndex(parent, "ws:" + folderId + ":Chat")];
-                var at = -1;
+                var desiredChats = new List<NavigationViewItem>();
                 for (var i = 0; i < shown; i++)
                 {
-                    chatSection.MenuItems.Insert(++at, SidebarLive.ChatItem(folderId, chats[i]));
+                    desiredChats.Add(SidebarLive.ChatItem(folderId, chats[i]));
                 }
                 if (chats.Count > SidebarLive.CollapsedChats)
                 {
                     var label = expanded
                         ? "Show less"
                         : "Show " + (Math.Min(chats.Count, SidebarLive.InlineChats) - shown) + " more";
-                    chatSection.MenuItems.Insert(++at, SidebarLive.ActionItem(
+                    desiredChats.Add(SidebarLive.ActionItem(
                         SidebarLive.ChatMorePrefix + folderId, label));
                 }
                 if (chats.Count > SidebarLive.InlineChats)
                 {
-                    chatSection.MenuItems.Insert(++at, SidebarLive.ActionItem(
+                    desiredChats.Add(SidebarLive.ActionItem(
                         SidebarLive.ChatAllPrefix + folderId, "See all chats"));
                 }
+                NavigationRows.Reconcile(chatSection.MenuItems, desiredChats, "wschat", 0);
                 var chatTag = "ws:" + folderId + ":Chat";
                 chatSection.IsExpanded = _chatGroupExpansion.GetValueOrDefault(chatTag)
                     || (selectedTag is not null && LiveRoute.TrySplit(selectedTag, SidebarLive.ChatPrefix, out var selectedFolderId, out _) && selectedFolderId == folderId);
             }
+            else if (parent.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(row => Equals(row.Tag, "ws:" + folderId + ":Chat")) is { } emptyChats)
+                NavigationRows.Reconcile(emptyChats.MenuItems, Array.Empty<NavigationViewItem>(), "wschat", 0);
         }
 
         if (selectedTag is not null
@@ -1457,7 +1532,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>Index of a section child, or the end when it is missing.</summary>
     private static int ChildIndex(NavigationViewItem parent, string tag)
     {
         for (var i = 0; i < parent.MenuItems.Count; i++)
@@ -1615,6 +1689,9 @@ public sealed partial class MainWindow : Window
         SyncTitleBarSplit();
         _nav.PaneHeader = _nav.IsPaneOpen ? LogoOpen() : LogoClosed();
         var show = _nav.IsPaneOpen ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var button in _pinnedNavigation.Values)
+            if (button.Content is StackPanel content)
+                foreach (var label in content.Children.OfType<TextBlock>()) label.Visibility = show;
         foreach (var item in _nav.MenuItems)
         {
             if (item is NavigationViewItemHeader header)

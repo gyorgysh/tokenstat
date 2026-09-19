@@ -166,3 +166,27 @@ Real-machine acceptance still includes Mac → Windows and Windows → Mac scree
 view/control, display selection, revocation while dragging, Always-on mode after
 quitting the Windows app, and LAN versus relay connections. The synthetic test
 does not replace these checks.
+
+### Desktop follow-up regressions
+
+The terminal reads retained output from the owning host rather than the destructive
+subscription cache, and the shared PTY host retains a bounded 1 MiB replay tail after
+acknowledgement. Update the host on the remote Mac as well as the Windows client for
+that retention fix. Earlier output beyond that tail is reported as dropped.
+Viewport resize requests are serialized; the terminal uses the host's agreed grid
+without replacing its own viewport capacity. SSH processes survive page navigation
+and can be reopened from the SSH sidebar group.
+
+The native UI regression checks the production file-tree template and terminal
+shrinking; the host regression checks replay after acknowledgement. The sidebar
+keeps live row containers and pins Home, Insights and Devices above scrolling groups.
+
+Windows chat now saves pending messages under LocalAppData/tokenstat/outbox, scoped
+by account, owning workspace and conversation. It supports queuing during a turn,
+editing, moving and removing waiting messages, and receipt checks for uncertain
+sends. Delivery captures the host sendRevision and claims the exact saved payload
+before sending with a stable clientMessageId. Waiting successors advance only after
+a confirmed acceptance for that context. Navigation/restart pauses pending messages;
+Use latest context explicitly resumes them. It does not yet run queues in the
+background after leaving the conversation or automatically deliver on reconnection.
+Do not describe that as complete Mac/iOS/Android queue parity.

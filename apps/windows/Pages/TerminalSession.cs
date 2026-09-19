@@ -69,8 +69,6 @@ internal sealed class TerminalSession
 
     private int _readsSinceInfo;
 
-    private bool _subscribed;
-
     private bool _starting;
 
     private TerminalSession(string workspaceId, string? sessionId)
@@ -139,7 +137,6 @@ internal sealed class TerminalSession
         _starting = true;
         try
         {
-            await EnsureSubscribedAsync();
             await ResizeAsync(rows, cols);
         }
         finally
@@ -153,6 +150,8 @@ internal sealed class TerminalSession
         // A new terminal surface must replay retained output, including VT
         // state, instead of starting blank at the previous view's offset.
         Offset = 0;
+        Dropped = 0;
+        HasOutput = false;
         _poll = new CancellationTokenSource();
         _ = PollAsync(_poll.Token);
     }
@@ -248,7 +247,6 @@ internal sealed class TerminalSession
         ExitCode = null;
         LastError = "";
         _failures = 0;
-        _subscribed = false;
         await SpawnAsync(rows, cols);
         if (!string.IsNullOrEmpty(Id) && _poll is null)
         {
@@ -368,35 +366,6 @@ internal sealed class TerminalSession
         RaiseChanged();
     }
 
-    /// <summary>
-    /// A remote session reads from a pushed cache once subscribed, so the
-    /// poll loop stays local. Local sessions read the manager directly and
-    /// need no subscription. Best effort: a refused subscribe still leaves
-    /// the forwarded poll path working.
-    /// </summary>
-    private async Task EnsureSubscribedAsync()
-    {
-        if (_subscribed || !IsRemoteId(Id))
-        {
-            return;
-        }
-        try
-        {
-            await AppServices.Host.CallAsync(
-                "stream.open",
-                new JsonObject
-                {
-                    ["kind"] = "pty.subscribe",
-                    ["id"] = Id,
-                });
-            _subscribed = true;
-        }
-        catch
-        {
-            // Forwarded reads still work without the subscription.
-        }
-    }
-
     private async Task RefreshInfoAsync()
     {
         var id = Id;
@@ -471,7 +440,9 @@ internal sealed class TerminalSession
             JsonNode chunk;
             try
             {
-                chunk = await AppServices.Host.CallAsync(
+                // Read the owning host's retained ring. The pushed cache is
+                // acknowledged destructively and cannot replay an existing TUI.
+                chunk = await RemoteWorkspaces.CallWorkspaceAsync(id,
                     "pty.read",
                     new JsonObject
                     {
@@ -479,8 +450,7 @@ internal sealed class TerminalSession
                         ["offset"] = Offset,
                         ["waitMs"] = 400,
                         ["viewer"] = TerminalViewer.Id,
-                    },
-                    TimeSpan.FromSeconds(8));
+                    });
             }
             catch (Exception ex)
             {
@@ -511,6 +481,7 @@ internal sealed class TerminalSession
                 return;
             }
             _failures = 0;
+            if (LastError.Length > 0) { LastError = ""; RaiseChanged(); }
             backoffMs = 50;
             var next = Format.Long(chunk, "nextOffset");
             if (next > Offset)
@@ -522,8 +493,12 @@ internal sealed class TerminalSession
             {
                 Dropped += dropped;
             }
-            Paused = Format.Flag(chunk, "paused");
-            RaiseChanged();
+            var paused = Format.Flag(chunk, "paused");
+            if (Paused != paused || dropped > 0)
+            {
+                Paused = paused;
+                RaiseChanged();
+            }
             var encoded = Format.Text(chunk, "data");
             if (encoded.Length != 0)
             {
@@ -537,6 +512,12 @@ internal sealed class TerminalSession
                 {
                     // Skip a malformed chunk rather than killing the session.
                 }
+            }
+            // Older hosts may ignore waitMs. Bound their idle reads too.
+            if (encoded.Length == 0)
+            {
+                try { await Task.Delay(50, token); }
+                catch (OperationCanceledException) { return; }
             }
             _readsSinceInfo++;
             if (_readsSinceInfo >= 40)

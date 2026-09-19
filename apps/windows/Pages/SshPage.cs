@@ -38,7 +38,7 @@ internal sealed class SshPage : Page, IToolbarItems
     private readonly Border _stripHost = new();
     private readonly Border _bodyHost = new();
 
-    public SshPage(SSHSection section = SSHSection.Hosts)
+    public SshPage(SSHSection section = SSHSection.Hosts, string? sessionId = null)
     {
         _section = section;
         _listView = new ScrollViewer
@@ -95,8 +95,8 @@ internal sealed class SshPage : Page, IToolbarItems
         root.Children.Add(_stripHost);
         root.Children.Add(_bodyHost);
         Content = root;
-        Loaded += async (_, _) => await LoadAsync();
-        Unloaded += (_, _) => { _ = CloseSessionAsync(); _terminal.Close(); };
+        Loaded += async (_, _) => { await LoadAsync(); if (IsLoaded && sessionId is not null) await AdoptSessionAsync(sessionId); };
+        Unloaded += (_, _) => { _poll?.Cancel(); _terminal.Close(); };
     }
 
     public event Action? ToolbarChanged { add { } remove { } }

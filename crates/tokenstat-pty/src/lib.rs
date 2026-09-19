@@ -41,6 +41,9 @@ use serde::Serialize;
 /// small enough that a runaway `yes` does not eat memory. The terminal emulator
 /// keeps its own scrollback; this is only the handoff window.
 const BUFFER_BYTES: usize = 8 * 1024 * 1024;
+// Keep a bounded replay tail after readers acknowledge output. A second
+// frontend needs terminal state even while the first frontend keeps reading.
+const REPLAY_BYTES: usize = 1024 * 1024;
 /// How much one `pty.read` returns. The ring stays large so a slow viewer
 /// does not lose the middle. A single RPC that base64s the whole window
 /// is what froze a first attach, especially on a phone.
@@ -200,6 +203,7 @@ impl Buffer {
     }
 
     fn discard_before(&mut self, offset: u64) {
+        let offset = offset.min(self.total.saturating_sub(REPLAY_BYTES as u64));
         let earliest = self.earliest();
         if offset > earliest {
             let count = (offset - earliest).min(self.data.len() as u64) as usize;
@@ -2619,6 +2623,21 @@ mod tests {
         b.push(&[b'x'; BUFFER_BYTES], false);
         assert_eq!(b.data.len(), BUFFER_BYTES);
         assert_eq!(b.total, BUFFER_BYTES as u64);
+    }
+
+    #[test]
+    fn acknowledged_output_remains_available_to_a_new_terminal() {
+        let mut b = Buffer::new();
+        let screen = b"\x1b[2J\x1b[H\x1b[31mexisting session\x1b[0m";
+        b.push(screen, false);
+        b.discard_before(b.total);
+        assert_eq!(b.read_from(0).bytes, screen);
+        assert_eq!(b.read_from(b.total).bytes.len(), 0);
+        b.push(&vec![b'x'; REPLAY_BYTES + 100], false);
+        b.discard_before(b.total);
+        assert_eq!(b.data.len(), REPLAY_BYTES);
+        assert!(b.data.len() < BUFFER_BYTES);
+        assert!(b.read_from(0).dropped > 0);
     }
 
     #[test]

@@ -150,6 +150,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     await LoadSessionsAsync();
                     break;
                 case WorkspaceSection.Sessions:
+                    LoadQuickActions();
                     await LoadSessionsAsync();
                     break;
                 case WorkspaceSection.Browser:
@@ -630,14 +631,17 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
 
     private void LoadQuickActions()
     {
-        var body = new StackPanel { Spacing = Theme.SpaceM, MaxWidth = 960, HorizontalAlignment = HorizontalAlignment.Left };
+        var body = new StackPanel { Spacing = Theme.SpaceM, MaxWidth = 780, HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 32, 0, 16) };
         body.Children.Add(new TextBlock
         {
             Text = "What do you want to do in " + _folderName + "?",
-            FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextAlignment = TextAlignment.Center, FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
         });
-        var links = new FlowPanel { MinimumItemWidth = 180, Spacing = Theme.SpaceM };
+        body.Children.Add(new TextBlock { Text = "Open the project where you left it, or start an agent that keeps running on its own.",
+            Opacity = 0.65, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 16) });
+        body.Children.Add(new TextBlock { Text = "Open", FontSize = 12, Opacity = 0.7 });
+        var links = new FlowPanel { MinimumItemWidth = 220, Spacing = Theme.SpaceM };
         foreach (var section in new[] { WorkspaceSection.Chat, WorkspaceSection.Files, WorkspaceSection.Browser, WorkspaceSection.Changes, WorkspaceSection.Pulls, WorkspaceSection.Todo })
         {
             var content = new StackPanel { Spacing = Theme.SpaceS, HorizontalAlignment = HorizontalAlignment.Center };
@@ -662,7 +666,9 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
     private async Task LoadSessionsAsync()
     {
         var launchers = new StackPanel { Spacing = Theme.SpaceS };
-        _root.Children.Add(Chrome.Card("Start a session", launchers));
+        launchers.MaxWidth = 780;
+        launchers.HorizontalAlignment = HorizontalAlignment.Stretch;
+        _root.Children.Add(launchers);
         await LoadLaunchersAsync(launchers);
         _sessionsHost.Children.Clear();
         _root.Children.Add(_sessionsHost);
@@ -681,36 +687,21 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         try
         {
             var catalog = await CallTargetAsync("launcher.catalog");
-            host.Children.Add(new TextBlock
-            {
-                Text = RemoteWorkspaces.IsRemote(_id)
-                    ? "Agents and shells run on the remote machine in this folder."
-                    : "Agents and shells run on this PC in this folder.",
-                Opacity = 0.7, FontSize = 12, TextWrapping = TextWrapping.Wrap,
-            });
-            var tiles = new FlowPanel { MinimumItemWidth = 220, Spacing = Theme.SpaceS };
+            host.Children.Add(new TextBlock { Text = "Run an agent", Opacity = 0.7, FontSize = 12 });
+            var tiles = new FlowPanel { MinimumItemWidth = 220, Spacing = Theme.SpaceM };
             foreach (var profile in Format.Items(catalog) ?? new JsonArray())
             {
                 if (profile is null || Format.Flag(profile, "hidden")) continue;
                 var id = Format.Text(profile, "id");
                 var installed = Format.Flag(profile, "installed");
-                var body = new StackPanel { Spacing = Theme.SpaceS };
+                var body = new StackPanel { Spacing = Theme.SpaceM, HorizontalAlignment = HorizontalAlignment.Center };
                 body.Children.Add(AgentMark.View(Format.Text(profile, "harnessId", id), 42));
                 body.Children.Add(new TextBlock
                 {
-                    Text = Format.Text(profile, "name", id),
+                    Text = Format.Text(profile, "name", id), HorizontalAlignment = HorizontalAlignment.Center,
                     FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 });
-                body.Children.Add(new TextBlock
-                {
-                    Text = !installed ? "Not installed" : Format.Text(profile, "readiness") switch
-                    {
-                        "signedIn" => "Signed in", "needsSignIn" => "Sign in required", "expired" => "Sign-in expired",
-                        _ => id == "shell" ? "Ready" : "Installed",
-                    },
-                    Opacity = 0.65, FontSize = 12,
-                });
-                var actions = new FlowPanel { Spacing = Theme.SpaceS };
+                var actions = new StackPanel { Spacing = Theme.SpaceS };
                 async Task RunAsync(Button button, string operation)
                 {
                     button.IsEnabled = false;
@@ -752,31 +743,42 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     }
                     finally { button.IsEnabled = true; }
                 }
-                if (installed)
+                var launch = new Button
                 {
-                    var launch = ActionIconGlyph.Button(id == "shell" ? "New shell" : "Launch", ActionIcon.Run, (_, _) => { });
-                    launch.Click += async (_, _) => await RunAsync(launch, "launch");
-                    actions.Children.Add(launch);
-                    if (Format.Flag(profile["signIn"], "supported"))
-                    {
-                        var signIn = ActionIconGlyph.Button("Sign in", ActionIcon.SignIn, (_, _) => { });
-                        signIn.Click += async (_, _) => await RunAsync(signIn, "signIn");
-                        actions.Children.Add(signIn);
-                    }
+                    Content = body, HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Center,
+                    Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush,
+                    CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(24), MinHeight = 110,
+                };
+                launch.Click += async (_, _) => await RunAsync(launch, installed ? "launch" : "install");
+                launch.IsEnabled = installed || !string.IsNullOrEmpty(Format.Text(profile, "installCommand"));
+                ToolTipService.SetToolTip(launch, installed ? "Launch " + Format.Text(profile, "name", id) : "Install " + Format.Text(profile, "name", id));
+                var tile = new Grid();
+                tile.Children.Add(launch);
+                var setup = Buttons.ToolbarIcon(ActionIcon.Settings, "Set up " + Format.Text(profile, "name", id), (_, _) => { });
+                setup.HorizontalAlignment = HorizontalAlignment.Right;
+                setup.VerticalAlignment = VerticalAlignment.Top;
+                setup.Margin = new Thickness(8);
+                setup.Width = 24; setup.Height = 24;
+                setup.Foreground = Theme.AccentBrush;
+                if (setup.Content is FontIcon gear) gear.FontSize = 14;
+                if (setup.Content is SymbolIcon symbol) { symbol.Width = 14; symbol.Height = 14; }
+                var options = new Flyout { Content = actions };
+                setup.Flyout = options;
+                if (Format.Flag(profile["signIn"], "supported"))
+                {
+                    var signIn = ActionIconGlyph.Button("Sign in", ActionIcon.SignIn, (_, _) => { });
+                    signIn.Click += async (_, _) => { options.Hide(); await RunAsync(signIn, "signIn"); };
+                    actions.Children.Add(signIn);
                 }
-                else if (!string.IsNullOrEmpty(Format.Text(profile, "installCommand")))
+                if (!string.IsNullOrEmpty(Format.Text(profile, "installCommand")))
                 {
-                    var install = ActionIconGlyph.Button("Install", ActionIcon.Download, (_, _) => { });
-                    install.Click += async (_, _) => await RunAsync(install, "install");
+                    var install = ActionIconGlyph.Button(installed ? "Reinstall" : "Install", ActionIcon.Download, (_, _) => { });
+                    install.Click += async (_, _) => { options.Hide(); await RunAsync(install, "install"); };
                     actions.Children.Add(install);
                 }
-                body.Children.Add(actions);
-                tiles.Children.Add(new Border
-                {
-                    Child = body, Padding = new Thickness(Theme.SpaceM),
-                    BorderBrush = Theme.BorderBrush, BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(Theme.CardRadius),
-                });
+                if (actions.Children.Count > 0) tile.Children.Add(setup);
+                tiles.Children.Add(tile);
             }
             host.Children.Add(tiles);
         }

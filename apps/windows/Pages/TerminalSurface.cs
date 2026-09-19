@@ -15,6 +15,7 @@ internal sealed class TerminalSurface : Grid
     private readonly WebView2 _web = new();
     private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly SemaphoreSlim _inputGate = new(1, 1);
+    private readonly SemaphoreSlim _resizeGate = new(1, 1);
     private bool _starting;
     private bool _closed;
     public int Rows { get; private set; } = 30;
@@ -61,7 +62,10 @@ internal sealed class TerminalSurface : Grid
                         Rows = Math.Clamp(message.GetProperty("rows").GetInt32(), 5, 200);
                         Cols = Math.Clamp(message.GetProperty("cols").GetInt32(), 20, 400);
                         if (type == "ready") { _ready.TrySetResult(); SendTheme(); }
-                        if (Resized is not null) await Resized(Rows, Cols);
+                        var rows = Rows; var cols = Cols;
+                        await _resizeGate.WaitAsync();
+                        try { if (!_closed && rows == Rows && cols == Cols && Resized is not null) await Resized(rows, cols); }
+                        finally { _resizeGate.Release(); }
                     }
                     else if (type == "copy")
                     {
@@ -93,6 +97,7 @@ internal sealed class TerminalSurface : Grid
     public void Write(byte[] bytes) => Send(new { type = "output", data = Convert.ToBase64String(bytes) });
     public void Paste(string text) => Send(new { type = "paste", data = text });
     public void Reset() => Send(new { type = "reset" });
+    public void SetGeometry(int rows, int cols) => Send(new { type = "geometry", rows = Math.Clamp(rows, 5, Rows), cols = Math.Clamp(cols, 20, Cols) });
     public void FocusTerminal()
     {
         if (_closed) return;
