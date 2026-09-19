@@ -117,10 +117,9 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
     private void OpenSurface(string key, string label, Func<Page> create, bool closable = true)
     {
         var tab = _tabStrip.Open(key, label, () => create(), closable);
-        if (tab.IconSource is null)
+        if (tab.IconSource is null && !key.StartsWith("terminal:"))
         {
-            if (key.StartsWith("terminal:")) tab.IconSource = new FontIconSource { Glyph = "\uE756" };
-            else if (key == "section:Launcher") tab.IconSource = new SymbolIconSource { Symbol = Symbol.AllApps };
+            if (key == "section:Launcher") tab.IconSource = new SymbolIconSource { Symbol = Symbol.AllApps };
             else if (key.StartsWith("section:") && Enum.TryParse<WorkspaceSection>(key[8..], out var section))
             {
                 tab.IconSource = section.Action().Icon() switch

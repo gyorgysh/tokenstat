@@ -122,6 +122,24 @@ public sealed partial class SmokeApp : Application
                 terminal.Height = 200;
                 body.UpdateLayout();
                 Program.Log("PASS: production terminal renders VT colors, split UTF-8, direct input and fits a shrinking viewport");
+                body.Children.Remove(terminal);
+                terminal.Width = double.NaN;
+                terminal.Height = double.NaN;
+                var terminalGrid = new Grid();
+                terminalGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                terminalGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                terminalGrid.Children.Add(new TextBlock { Text = "Terminal" });
+                Grid.SetRow(terminal, 1);
+                terminalGrid.Children.Add(terminal);
+                tabView.Height = 400;
+                body.Children.Add(tabView);
+                workspaceTabs.Open("terminal:test", "Shell", () => new Page { Content = terminalGrid });
+                body.UpdateLayout();
+                await Task.Delay(500);
+                if (terminal.ActualHeight < 300 || terminal.Rows < 15)
+                    throw new Exception($"Terminal tab collapsed to {terminal.ActualHeight}px / {terminal.Rows} rows");
+                body.Children.Remove(tabView);
+                Program.Log("PASS: a terminal page fills the native workspace tab content area");
                 var cards = new FlowPanel { MinimumItemWidth = 300, Spacing = 10 };
                 var shortCard = new Border { MinHeight = 40 };
                 var tallCard = new Border { MinHeight = 80 };
