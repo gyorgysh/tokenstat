@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+using System.Globalization;
 using System.Text.Json.Nodes;
 
 namespace Tokenstat.Navigation;
@@ -12,10 +13,40 @@ internal static class RemoteFeatureGate
 {
     public const int ChatMinProtocol = 4;
     public const int PullsMinProtocol = 3;
+    public const int FolderPickerMinProtocol = 7;
+    public const int CloneRepositoryMinProtocol = 7;
 
-    public static long? ProtocolOf(JsonNode? status) =>
-        status?["protocol"]?.GetValue<long?>()
-        ?? status?["protocolVersion"]?.GetValue<long?>();
+    public static long? ProtocolOf(JsonNode? status)
+    {
+        if (status is not JsonObject)
+        {
+            return null;
+        }
+        // The sessionless host response uses protocolVersion as a string.
+        // Also accept numeric versions and older cached status field names.
+        foreach (var key in new[] { "protocolVersion", "protocol", "version" })
+        {
+            if (status[key] is not JsonValue value)
+            {
+                continue;
+            }
+            if (value.TryGetValue<long>(out var number) && number > 0)
+            {
+                return number;
+            }
+            if (value.TryGetValue<int>(out var small) && small > 0)
+            {
+                return small;
+            }
+            if (value.TryGetValue<string>(out var text)
+                && long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out number)
+                && number > 0)
+            {
+                return number;
+            }
+        }
+        return null;
+    }
 
     public static bool SupportsChat(long? protocol) => protocol is null || protocol >= ChatMinProtocol;
     public static bool SupportsPulls(long? protocol) => protocol is null || protocol >= PullsMinProtocol;
@@ -49,8 +80,7 @@ internal static class RemoteFeatureGate
                     ["method"] = "protocol",
                     ["params"] = new JsonObject(),
                 });
-            return answer?["protocol"]?.GetValue<long?>()
-                ?? answer?["version"]?.GetValue<long?>();
+            return ProtocolOf(answer);
         }
         catch
         {

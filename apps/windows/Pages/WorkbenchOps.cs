@@ -27,8 +27,7 @@ internal static class WorkbenchOps
         try
         {
             var answer = await AppServices.Host.CallAsync("protocol", new JsonObject());
-            return answer?["protocolVersion"]?.GetValue<long?>()
-                ?? answer?["protocol"]?.GetValue<long?>();
+            return RemoteFeatureGate.ProtocolOf(answer);
         }
         catch
         {

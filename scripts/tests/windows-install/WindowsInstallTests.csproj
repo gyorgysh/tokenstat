@@ -13,5 +13,8 @@
     <Compile Include="../../../apps/windows/Host/HostProcess.cs" Link="HostProcess.cs" />
     <Compile Include="../../../apps/windows/AppServices.cs" Link="AppServices.cs" />
     <Compile Include="../../../apps/windows/Install/AppUpdateModel.cs" Link="AppUpdateModel.cs" />
+    <Compile Include="../../../apps/windows/Navigation/RemoteFeatureGate.cs" Link="RemoteFeatureGate.cs" />
+    <Compile Include="../../../apps/windows/Pages/WorkbenchOps.cs" Link="WorkbenchOps.cs" />
+    <Compile Include="../../../apps/windows/Pages/Format.cs" Link="Format.cs" />
   </ItemGroup>
 </Project>

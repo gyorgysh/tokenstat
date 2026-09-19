@@ -2,6 +2,8 @@
 using System.Reflection;
 using System.Text.Json.Nodes;
 using Tokenstat.Install;
+using Tokenstat.Navigation;
+using Tokenstat.Pages;
 
 var checks = 0;
 void Check(bool condition, string message)
@@ -89,7 +91,23 @@ Check(update.Current == AppUpdateModel.Stage.Idle, "Update returns to idle.");
 Tokenstat.Host.HostClient.Reply = () => Task.FromResult<JsonNode>(new JsonObject { ["newer"] = false });
 await update.CheckAndInstallAsync();
 Check(update.Current == AppUpdateModel.Stage.Idle, "Update gate releases after completion.");
-Console.WriteLine($"Windows installer: {checks} checks passed.");
+foreach (var json in new[] { "{\"protocolVersion\":\"22\"}", "{\"protocolVersion\":22}", "{\"protocol\":22}", "{\"version\":\"22\"}" })
+{
+    Check(RemoteFeatureGate.ProtocolOf(JsonNode.Parse(json)) == 22, "Read host wire version: " + json);
+}
+foreach (var json in new[] { "{}", "null", "[]", "{\"protocolVersion\":true}", "{\"protocolVersion\":\"invalid\"}", "{\"protocolVersion\":-1}", "{\"protocolVersion\":2.5}" })
+{
+    Check(RemoteFeatureGate.ProtocolOf(JsonNode.Parse(json)) is null, "Malformed protocol stays unknown: " + json);
+}
+Tokenstat.Host.HostClient.Reply = () => Task.FromResult<JsonNode>(new JsonObject { ["protocolVersion"] = "6" });
+var peerProtocol = await RemoteFeatureGate.PeerProtocolAsync("peer");
+Check(peerProtocol == 6, "Remote gate reads the actual sessionless protocol field.");
+Check(!RemoteFeatureGate.SupportsProtocol(peerProtocol, RemoteFeatureGate.FolderPickerMinProtocol), "Old host cannot browse remote folders.");
+Check(!WorkbenchOps.TaskExecution(await WorkbenchOps.ProtocolAsync()), "Old local host cannot run checked tasks.");
+Tokenstat.Host.HostClient.Reply = () => Task.FromResult<JsonNode>(new JsonObject { ["protocolVersion"] = "22" });
+Check(WorkbenchOps.WorkflowEditing(await WorkbenchOps.ProtocolAsync()), "Current local host supports workflow editing.");
+Check(WorkbenchOps.WorkflowEditing(await RemoteFeatureGate.PeerProtocolAsync("peer")), "Current remote host supports workflow editing.");
+Console.WriteLine($"Windows installer/protocol: {checks} checks passed.");
 
 namespace Tokenstat.Design
 {
