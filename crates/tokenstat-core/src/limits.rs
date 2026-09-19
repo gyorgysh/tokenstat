@@ -893,8 +893,10 @@ mod tests {
         // Codex carries unchanged fields forward itself, so the newest block
         // can hold windows with no plan named. The windows are the reading;
         // the plan must keep scanning older blocks instead of going missing.
-        let dir =
-            std::env::temp_dir().join(format!("tokenstat-codex-sparse-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "tokenstat-codex-sparse-plan-{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("rollout-sparse.jsonl");
