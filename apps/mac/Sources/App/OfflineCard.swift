@@ -14,7 +14,7 @@ struct OfflineCard: View {
     var connection: ConnectionModel?
 
     var body: some View {
-        if connectivity.isOffline {
+        if connectivity.isOffline, !connectivity.offlineDismissed {
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: "wifi.slash")
                     .font(Theme.font(15))
@@ -30,12 +30,15 @@ struct OfflineCard: View {
                         .lineLimit(2)
                 }
                 Spacer(minLength: Theme.Space.s)
-                Button("Try now", .refresh) {
-                    Task { await connectivity.checkNow() }
+                HStack(spacing: Theme.Space.xs) {
+                    Button("Try now", .refresh) {
+                        Task { await connectivity.checkNow() }
+                    }
+                    .buttonStyle(.borderless)
+                    .font(Theme.caption.weight(.medium))
+                    .foregroundStyle(Theme.accent)
+                    NoticeDismissButton { connectivity.dismissOffline() }
                 }
-                .buttonStyle(.borderless)
-                .font(Theme.caption.weight(.medium))
-                .foregroundStyle(Theme.accent)
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.vertical, Theme.Space.s)
@@ -47,7 +50,7 @@ struct OfflineCard: View {
             )
             .padding(.horizontal, Theme.Space.s)
             .padding(.bottom, Theme.Space.s)
-        } else if let connection, connection.severity != .ok {
+        } else if let connection, connection.severity != .ok, !connection.isDismissed {
             // Online, and something else is not answering: the service, or a
             // machine that is not on the tunnel. Same card, same language, so
             // the two are not learned as different kinds of news.
@@ -68,13 +71,16 @@ struct OfflineCard: View {
                         .lineLimit(3)
                 }
                 Spacer(minLength: Theme.Space.s)
-                Button("Try now", .refresh) {
-                    connectivity.checkNow()
-                    connection.reset()
+                HStack(spacing: Theme.Space.xs) {
+                    Button("Try now", .refresh) {
+                        connectivity.checkNow()
+                        connection.reset()
+                    }
+                    .buttonStyle(.borderless)
+                    .font(Theme.caption.weight(.medium))
+                    .foregroundStyle(Theme.accent)
+                    NoticeDismissButton { connection.dismiss() }
                 }
-                .buttonStyle(.borderless)
-                .font(Theme.caption.weight(.medium))
-                .foregroundStyle(Theme.accent)
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.vertical, Theme.Space.s)

@@ -70,6 +70,10 @@ final class ConnectivityModel {
     /// When the current offline stretch began. Nil while online or unknown.
     private(set) var offlineSince: Date?
 
+    /// Whether the current offline stretch was waved away. Cleared when the
+    /// internet comes back, so the next stretch shows again.
+    private(set) var offlineDismissed = false
+
     /// How long an offline stretch waits between egress probes.
     static let retryInterval: Duration = .seconds(30)
 
@@ -120,6 +124,12 @@ final class ConnectivityModel {
     /// the offline retry timer.
     func checkNow() {
         scheduleProbe()
+    }
+
+    /// Hide the offline card until the next stretch. The probe keeps running:
+    /// this waves the card away, not the retries.
+    func dismissOffline() {
+        offlineDismissed = true
     }
 
     /// The path changed. A satisfied path does not prove egress, so confirm
@@ -174,6 +184,7 @@ final class ConnectivityModel {
         status = .online
         NetworkGate.set(offline: false)
         offlineSince = nil
+        offlineDismissed = false
         probeTask?.cancel()
         NotificationCenter.default.post(name: .connectivityChanged, object: self)
         if wasOffline {

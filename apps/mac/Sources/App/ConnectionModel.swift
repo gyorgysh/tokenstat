@@ -185,6 +185,13 @@ final class ConnectionModel {
     /// Key to the name its owner gave it, so the card can say which machine.
     /// Empty until something that lists peers hands them over.
     private var peerNames: [String: String] = [:]
+    /// The warning the person already waved away, as the signature below.
+    ///
+    /// A machine asleep in a bag is not news twice. Dismissing hides this
+    /// warning until something changes (another machine stops, this one
+    /// answers and stops again, the service flips), rather than until the
+    /// next scheduled dial re-raises the same set.
+    private var dismissedSignature: String?
     private weak var connectivity: ConnectivityModel?
 
     func attach(_ connectivity: ConnectivityModel) {
@@ -195,6 +202,24 @@ final class ConnectionModel {
 
     /// Whether a machine that was reachable has stopped answering.
     var peerFailing: Bool { !unreachablePeers.isEmpty }
+
+    /// What is currently unwell, as one string. Two warnings with the same
+    /// signature are the same news.
+    private var signature: String {
+        "\(serviceFailing ? 1 : 0)|\(unreachablePeers.sorted().joined(separator: ","))"
+    }
+
+    /// Whether the current warning was dismissed and nothing changed since.
+    var isDismissed: Bool {
+        guard let dismissed = dismissedSignature else { return false }
+        return dismissed == signature
+    }
+
+    /// Hide the current warning until something changes. A new failure set
+    /// re-arms it on its own, and `reset()` re-arms it as well.
+    func dismiss() {
+        dismissedSignature = signature
+    }
 
     var severity: Severity {
         if isOffline { return .down }
@@ -258,12 +283,14 @@ final class ConnectionModel {
                 serviceFailures = 0
                 serviceFailing = false
                 lastServiceSuccess = Date()
+                clearDismissalIfWell()
             case .peer:
                 lastPeerSuccess = Date()
                 guard let peer else { return }
                 peerFailures[peer] = 0
                 peersSeenWorking.insert(peer)
                 unreachablePeers.remove(peer)
+                clearDismissalIfWell()
             }
             return
         }
@@ -290,6 +317,14 @@ final class ConnectionModel {
         }
     }
 
+    /// A warning that fully cleared is not the same warning when it comes
+    /// back. Forgetting the dismissal is what lets it show again.
+    private func clearDismissalIfWell() {
+        if !serviceFailing && unreachablePeers.isEmpty {
+            dismissedSignature = nil
+        }
+    }
+
     /// The network came back, or the person pressed Try now. Nothing is known
     /// again until the next call answers, which is honest: the counters were
     /// evidence about a network that no longer exists.
@@ -298,6 +333,7 @@ final class ConnectionModel {
         peerFailures.removeAll()
         serviceFailing = false
         unreachablePeers.removeAll()
+        dismissedSignature = nil
         // What each machine had proved is kept: a machine that answered five
         // minutes ago is still one this app has seen working, and forgetting
         // that would put every peer back behind the never-seen rule after any

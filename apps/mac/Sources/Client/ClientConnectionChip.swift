@@ -75,6 +75,12 @@ struct ClientConnectionChip: View {
                     .foregroundStyle(tint)
                 Text(connection.title)
                     .font(ClientType.label.weight(.semibold))
+                Spacer(minLength: 0)
+                // Tapping outside already closes this, but a popover with no
+                // visible way out reads as stuck. This closes the popover and
+                // leaves the chip: the warning itself stands until it clears,
+                // the same as the Android dialog's Close.
+                NoticeDismissButton { showDetail = false }
             }
             Text(connection.detail)
                 .font(ClientType.body)
