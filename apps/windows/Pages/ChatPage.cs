@@ -122,17 +122,15 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Content = _root,
         };
-        _scroll.ViewChanged += (_, args) =>
-        {
-            if (args == null || _scroll == null) return;
-            // Pinned while at the end; a scroll up hands control to the reader.
-            _followEnd = _scroll.ScrollableHeight - _scroll.VerticalOffset < 48;
-        };
+        _scroll.ViewChanged += (_, _) => OnTranscriptViewChanged();
+        var transcriptHost = new Grid();
+        transcriptHost.Children.Add(_scroll);
+        transcriptHost.Children.Add(_followPillHost);
         var layout = new Grid();
         layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         Grid.SetRow(_composerDock, 1);
-        layout.Children.Add(_scroll);
+        layout.Children.Add(transcriptHost);
         layout.Children.Add(_composerDock);
         Content = layout;
         RenderInspector();
@@ -332,7 +330,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _events = new JsonArray();
         _offset = 0;
         _transcript.Children.Clear();
-        _followEnd = true;
+        ResetTranscriptWindow();
         _composerDock.Child = null;
         _composerDock.Visibility = Visibility.Collapsed;
         _root.Children.Clear();
@@ -555,6 +553,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _events = new JsonArray();
         _attachments.Clear();
         _draft.Text = "";
+        ResetTranscriptWindow();
         try
         {
             await RefreshCatalogAsync();
@@ -607,7 +606,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _root.Children.Add(_titleBox);
 
         _transcript.Children.Clear();
-        _followEnd = true;
         RebuildTranscript(full: true);
         _root.Children.Add(_transcript);
         RefreshCost();
@@ -915,13 +913,13 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             enabled: enabled);
     }
 
-    private static string ItemContentKey(DisplayItem item) => item.Kind switch
+    private string ItemContentKey(DisplayItem item) => item.Kind switch
     {
         ItemKind.User => $"{item.Id}|{item.Text}",
         ItemKind.Assistant => $"{item.Id}|{item.Text}",
         ItemKind.Thinking => $"{item.Id}|{item.Text}",
-        ItemKind.Tool => $"{item.Id}|{item.Verb}|{item.Target}|{item.Running}|{item.Failed}|{item.Duration}|{item.Detail}",
-        ItemKind.Edit => $"{item.Id}|{item.Path}|{item.Added}|{item.Removed}|{item.Patch}",
+        ItemKind.Tool => $"{item.Id}|{item.Verb}|{item.Target}|{item.Running}|{item.Failed}|{item.Duration}|{item.Detail}|{CardExpanded(item)}",
+        ItemKind.Edit => $"{item.Id}|{item.Path}|{item.Added}|{item.Removed}|{item.Patch}|{CardExpanded(item)}",
         ItemKind.Approval => $"{item.Id}|{item.Pending}|{item.Approval?.ToJsonString()}",
         ItemKind.Attachment => $"{item.Id}|{item.Name}|{item.MediaType}|{item.Size}",
         ItemKind.Usage => $"{item.Id}|{item.Input}|{item.Output}|{item.Cost}",
@@ -936,7 +934,12 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             _transcript.Children.Clear();
         }
         var items = Coalesce(_events);
-        var desiredCount = items.Count + (Busy() ? 1 : 0);
+        _sliceOlder = SliceClamp(_sliceOlder, items.Count);
+        var start = SliceStart(items.Count, _sliceOlder);
+        var end = SliceEnd(items.Count, _sliceOlder);
+        var prefix = start > 0 ? 1 : 0;
+        var visible = end - start;
+        var desiredCount = prefix + visible + (Busy() ? 1 : 0);
 
         // The host has not answered yet. A question nobody replied to is not
         // an empty answer, so it gets the waiting picture, not a blank.
@@ -957,25 +960,49 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 _transcript.Children.Add(waiting);
             }
             if (_followEnd) _scroll?.ChangeView(null, _scroll.ScrollableHeight, null, true);
+            UpdateFollowPill();
             return;
         }
 
-        for (int i = 0; i < items.Count; i++)
+        if (prefix == 1)
         {
-            var item = items[i];
-            var key = ItemContentKey(item);
-
-            if (i < _transcript.Children.Count)
+            var earlierKey = "__earlier__:" + start;
+            var current = _transcript.Children.Count > 0
+                ? _transcript.Children[0] as FrameworkElement
+                : null;
+            if (current?.Tag as string != earlierKey)
             {
-                var existing = _transcript.Children[i] as FrameworkElement;
+                var earlier = ShowEarlierButton(start);
+                earlier.Tag = earlierKey;
+                if (_transcript.Children.Count > 0)
+                {
+                    _transcript.Children.RemoveAt(0);
+                    _transcript.Children.Insert(0, earlier);
+                }
+                else
+                {
+                    _transcript.Children.Add(earlier);
+                }
+            }
+        }
+
+        for (int i = 0; i < visible; i++)
+        {
+            var item = items[start + i];
+            var key = ItemContentKey(item);
+            var index = prefix + i;
+
+            if (index < _transcript.Children.Count)
+            {
+                var existing = _transcript.Children[index] as FrameworkElement;
                 if (existing?.Tag as string == key)
                 {
                     continue;
                 }
                 var updated = Render(item);
                 if (updated is FrameworkElement fe) fe.Tag = key;
-                _transcript.Children.RemoveAt(i);
-                _transcript.Children.Insert(i, updated);
+                _transcript.Children.RemoveAt(index);
+                _transcript.Children.Insert(index, updated);
             }
             else
             {
@@ -987,7 +1014,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
         if (Busy())
         {
-            var workingIdx = items.Count;
+            var workingIdx = prefix + visible;
             // The mood is part of the key, so thinking turning into replying
             // rebuilds the row instead of leaving a stale face behind.
             var workingKey = "__working__:" + LiveMood(items);
@@ -1015,7 +1042,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             _transcript.Children.RemoveAt(_transcript.Children.Count - 1);
         }
 
-        if (_followEnd) _scroll?.ChangeView(null, _scroll.ScrollableHeight, null, true);
+        if (_followEnd && _sliceOlder == 0)
+        {
+            _scroll?.ChangeView(null, _scroll.ScrollableHeight, null, true);
+        }
+        UpdateFollowPill();
     }
 
     private UIElement Render(DisplayItem item)
@@ -1024,7 +1055,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
         ItemKind.User => UserBubble(item.Text),
         ItemKind.Assistant => AssistantBody(item.Text),
-        ItemKind.Thinking => Muted(item.Text),
+        ItemKind.Thinking => ThinkingRow(item.Text),
         ItemKind.Tool => ToolRow(item),
         ItemKind.Edit => EditRow(item),
         ItemKind.Approval => ApprovalCard(item),
@@ -1077,9 +1108,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private FrameworkElement WorkingRow(List<DisplayItem> items)
     {
         var mood = LiveMood(items);
-        UIElement face = mood == PersonaMood.Thinking
+        FrameworkElement face = mood == PersonaMood.Thinking
             ? new PersonaPastime(FaceSeed(), 26, PersonaPastime.Repertoire.Thought)
             : new PersonaMark(FaceSeed(), 26, mood);
+        face.VerticalAlignment = VerticalAlignment.Center;
         var grid = new Grid { ColumnSpacing = Theme.SpaceS };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition
@@ -1096,7 +1128,12 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         };
         Grid.SetColumn(label, 1);
         grid.Children.Add(label);
-        return grid;
+        return new Border
+        {
+            Height = WorkingSeatHeight,
+            Padding = new Thickness(Theme.SpaceM, 0, Theme.SpaceM, 0),
+            Child = grid,
+        };
     }
 
     /// <summary>
@@ -1235,91 +1272,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         };
         ContextMenus.Copy(ContextMenus.Menu(block), "Copy code", () => code);
         return block;
-    }
-
-    private static UIElement ToolRow(DisplayItem item)
-    {
-        var title = item.Verb + (string.IsNullOrEmpty(item.Target) ? "" : "  " + item.Target);
-        if (item.Running) title += "  ·  working";
-        else if (item.Failed) title += "  ·  failed";
-        else if (!string.IsNullOrEmpty(item.Duration)) title += "  ·  " + item.Duration;
-        var body = new StackPanel { Spacing = 4 };
-        body.Children.Add(new TextBlock
-        {
-            Text = title,
-            FontWeight = FontWeights.SemiBold,
-            Foreground = item.Failed ? Theme.Brush(static () => Theme.Danger) : Theme.AccentBrush,
-            TextWrapping = TextWrapping.Wrap,
-        });
-        if (!string.IsNullOrEmpty(item.Detail))
-        {
-            body.Children.Add(new TextBlock
-            {
-                Text = item.Detail,
-                FontFamily = Fonts.Mono,
-                FontSize = 12,
-                Opacity = 0.78,
-                IsTextSelectionEnabled = true,
-                TextWrapping = TextWrapping.Wrap,
-            });
-        }
-        return Card(item.Verb, body);
-    }
-
-    private UIElement EditRow(DisplayItem item)
-    {
-        var heading = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        heading.Children.Add(new TextBlock
-        {
-            Text = item.Path,
-            FontFamily = Fonts.Mono,
-            FontSize = 12,
-            Opacity = 0.78,
-            TextWrapping = TextWrapping.Wrap,
-        });
-        // Diff counts stay steady as they update: tabular figures.
-        heading.Children.Add(Fonts.Tabular(new TextBlock
-        {
-            Text = "+" + item.Added,
-            Foreground = Theme.Brush(static () => Theme.DiffAdded),
-            FontSize = 12,
-            FontWeight = FontWeights.SemiBold,
-        }));
-        heading.Children.Add(Fonts.Tabular(new TextBlock
-        {
-            Text = "−" + item.Removed,
-            Foreground = Theme.Brush(static () => Theme.DiffRemoved),
-            FontSize = 12,
-            FontWeight = FontWeights.SemiBold,
-        }));
-        var body = new StackPanel { Spacing = Theme.SpaceS };
-        body.Children.Add(heading);
-        if (!string.IsNullOrEmpty(item.Patch))
-        {
-            var lines = new StackPanel { Spacing = 0 };
-            foreach (var line in item.Patch.Replace("\r\n", "\n").Split('\n'))
-            {
-                var tint = line.StartsWith('+')
-                    ? Theme.AccentSoft
-                    : line.StartsWith('-')
-                        ? ColorFrom(Theme.DiffRemoved, 36)
-                        : Theme.Panel;
-                lines.Children.Add(new Border
-                {
-                    Background = Theme.Brush(tint),
-                    Padding = new Thickness(8, 2, 8, 2),
-                    Child = new TextBlock
-                    {
-                        Text = line,
-                        FontFamily = Fonts.Mono,
-                        FontSize = 12,
-                        IsTextSelectionEnabled = true,
-                    },
-                });
-            }
-            body.Children.Add(lines);
-        }
-        return Card("Edit", body);
     }
 
     private UIElement ApprovalCard(DisplayItem item)
@@ -2355,9 +2307,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (node is JsonArray array) return array;
         return Format.Items(node) ?? new JsonArray();
     }
-
-    private static Windows.UI.Color ColorFrom(Windows.UI.Color tint, byte alpha) =>
-        Windows.UI.Color.FromArgb(alpha, tint.R, tint.G, tint.B);
 
     private static void Detach(UIElement element)
     {

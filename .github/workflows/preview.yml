@@ -1,7 +1,10 @@
 name: preview
 
-# Unsigned -dev artifacts for testers. Never a GitHub Release, never the
-# `release` environment, never signing secrets.
+# Unsigned -dev artifacts for testers. Never the `release` environment,
+# never signing secrets. A labeled PR stays artifacts-only (14 days).
+# workflow_dispatch of windows or all also publishes a rolling GitHub
+# prerelease tagged `preview` so an installed Preview build can
+# auto-update. That tag is not a versioned Release.
 #
 # Trigger:
 #   Actions → Preview → Run workflow, or add the `preview` label to a PR.
@@ -83,6 +86,9 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
       - name: Build unsigned Windows app
         id: package
         env:
@@ -100,12 +106,22 @@ jobs:
             "unsigned development build. not a release."
           ) -join "`n"
           Set-Content -Path "dist/$name/PREVIEW.txt" -Value $preview
+          scripts/pack-windows-installer.ps1 -StageDir "dist/$name" `
+            -Version $env:VERSION -Out dist
           Push-Location dist
           7z a "$name.zip" $name | Out-Null
-          $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
-          Set-Content -Path "$name.zip.sha256" -Value "$hash  $name.zip"
+          $zipHash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
+          $setup = "$name-setup.exe"
+          $setupHash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path "$name.zip.sha256" -Value "$zipHash  $name.zip"
+          Set-Content -Path "$setup.sha256" -Value "$setupHash  $setup"
+          @(
+            "$zipHash  $name.zip"
+            "$setupHash  $setup"
+          ) | Set-Content -Path SHA256SUMS -Encoding ascii
           Pop-Location
           "asset=$name.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "setup=$setup" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - uses: actions/upload-artifact@v7
         with:
@@ -113,7 +129,59 @@ jobs:
           path: |
             dist/${{ steps.package.outputs.asset }}
             dist/${{ steps.package.outputs.asset }}.sha256
+            dist/${{ steps.package.outputs.setup }}
+            dist/${{ steps.package.outputs.setup }}.sha256
+            dist/SHA256SUMS
           retention-days: 14
+
+  publish-windows-preview:
+    name: publish windows preview
+    needs: [version, windows]
+    if: >
+      github.event_name == 'workflow_dispatch' &&
+      (github.event.inputs.platforms == 'all' ||
+       github.event.inputs.platforms == 'windows')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: preview-windows-${{ github.run_number }}
+          path: dist
+
+      - name: Publish rolling preview prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          notes="Unsigned Preview ${VERSION}. Auto-update stays on this prerelease and does not promote to a stable Release."
+          files=(
+            dist/tokenstat-${VERSION}-windows-x64.zip
+            dist/tokenstat-${VERSION}-windows-x64-setup.exe
+            dist/SHA256SUMS
+          )
+          for f in "${files[@]}"; do
+            test -f "$f"
+          done
+          if gh release view preview >/dev/null 2>&1; then
+            # Each run names the zip after its -dev. version, so --clobber
+            # would leave the previous payload on the tag. Drop those first.
+            while IFS= read -r name; do
+              case "$name" in
+                tokenstat-*-windows-*.zip|tokenstat-*-windows-*-setup.exe|*.sha256|SHA256SUMS)
+                  gh release delete-asset preview "$name" --yes
+                  ;;
+              esac
+            done < <(gh release view preview --json assets --jq '.assets[].name')
+            gh release upload preview "${files[@]}"
+            gh release edit preview --prerelease --title "tokenstat preview" --notes "$notes"
+          else
+            gh release create preview --prerelease --title "tokenstat preview" --notes "$notes" "${files[@]}"
+          fi
 
   mac:
     name: mac app

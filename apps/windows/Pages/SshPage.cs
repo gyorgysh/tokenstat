@@ -29,6 +29,7 @@ internal sealed class SshPage : Page, IToolbarItems
     private readonly StackPanel _suggestRoot = new() { Spacing = Theme.SpaceS };
 
     private string? _sessionId;
+    private string? _pendingSessionId;
     private string? _sessionHostId;
     private long _offset;
     private CancellationTokenSource? _poll;
@@ -41,6 +42,7 @@ internal sealed class SshPage : Page, IToolbarItems
     public SshPage(SSHSection section = SSHSection.Hosts, string? sessionId = null)
     {
         _section = section;
+        _pendingSessionId = sessionId;
         _listView = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceM),
@@ -95,8 +97,41 @@ internal sealed class SshPage : Page, IToolbarItems
         root.Children.Add(_stripHost);
         root.Children.Add(_bodyHost);
         Content = root;
-        Loaded += async (_, _) => { await LoadAsync(); if (IsLoaded && sessionId is not null) await AdoptSessionAsync(sessionId); };
-        Unloaded += (_, _) => { _poll?.Cancel(); _terminal.Close(); };
+        Loaded += async (_, _) =>
+        {
+            _terminal.PrepareForReuse();
+            await LoadAsync();
+            if (IsLoaded && _pendingSessionId is not null) await AdoptSessionAsync(_pendingSessionId);
+        };
+        Unloaded += (_, _) =>
+        {
+            _poll?.Cancel();
+            _terminal.Close();
+        };
+    }
+
+    /// <summary>
+    /// Reuse the one SSH page so Hosts/Keys/session switches do not tear
+    /// WebView2 out of the tree. A new SshPage per section was the crash.
+    /// </summary>
+    public async Task OpenAsync(SSHSection section, string? sessionId = null)
+    {
+        _pendingSessionId = sessionId;
+        if (section != _section)
+        {
+            _section = section;
+            RefreshStrip();
+            await LoadAsync();
+        }
+        if (string.IsNullOrEmpty(sessionId))
+        {
+            ShowList();
+            return;
+        }
+        if (IsLoaded)
+        {
+            await AdoptSessionAsync(sessionId);
+        }
     }
 
     public event Action? ToolbarChanged { add { } remove { } }
@@ -1751,7 +1786,7 @@ internal sealed class SshPage : Page, IToolbarItems
             await _terminal.Ready;
             if (token.IsCancellationRequested) return;
             await _terminal.Resized!(_terminal.Rows, _terminal.Cols);
-            _terminal.FocusTerminal();
+            RunOnUi(() => { if (!token.IsCancellationRequested) _terminal.FocusTerminal(); });
         }
         catch (Exception ex)
         {
@@ -1788,7 +1823,11 @@ internal sealed class SshPage : Page, IToolbarItems
             {
                 _offset = next;
             }
-            _terminal.Write(Format.Bytes(chunk["data"]));
+            var bytes = Format.Bytes(chunk["data"]);
+            RunOnUi(() =>
+            {
+                if (!token.IsCancellationRequested) _terminal.Write(bytes);
+            });
             if (Format.Flag(chunk, "closed"))
             {
                 var error = Format.Text(chunk, "error");
@@ -1827,8 +1866,21 @@ internal sealed class SshPage : Page, IToolbarItems
 
     private void SessionBanner(string text)
     {
-        _status.Children.Clear();
-        _status.Children.Add(Chrome.Banner(text, Theme.Danger, Symbol.Important));
+        RunOnUi(() =>
+        {
+            _status.Children.Clear();
+            _status.Children.Add(Chrome.Banner(text, Theme.Danger, Symbol.Important));
+        });
+    }
+
+    private void RunOnUi(Action action)
+    {
+        if (DispatcherQueue.HasThreadAccess)
+        {
+            action();
+            return;
+        }
+        DispatcherQueue.TryEnqueue(() => action());
     }
 }
 

@@ -48,6 +48,14 @@ internal static class SelfInstall
         }
     }
 
+    /// <summary>
+    /// Unsigned Preview builds drop <c>PREVIEW.txt</c> next to the exe. That
+    /// file is the channel: auto-update reads the rolling GitHub prerelease
+    /// named <c>preview</c>, never a stable Release.
+    /// </summary>
+    public static bool IsPreviewChannel =>
+        File.Exists(Path.Combine(AppContext.BaseDirectory, "PREVIEW.txt"));
+
     public static bool IsDevBuild
     {
         get

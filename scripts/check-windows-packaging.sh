@@ -59,6 +59,25 @@ need "$CSPROJ" "<WindowsPackageType>None</WindowsPackageType>" \
 need "$CSPROJ" "<SelfContained>true</SelfContained>" \
     "must ship its own .NET runtime (SelfContained true)"
 
+ISS="scripts/windows/tokenstat.iss"
+PACK="scripts/pack-windows-installer.ps1"
+need "$ISS" "AppName=tokenstat" \
+    "installer product name must be tokenstat"
+need "$ISS" "PrivilegesRequired=lowest" \
+    "installer must stay per-user (no UAC)"
+need "$ISS" "LicenseFile=" \
+    "installer must show LICENSE"
+need "$ISS" 'Parameters: "--install"' \
+    "installer must run Tokenstat.exe --install rather than copy ARP itself"
+need "$ISS" "Uninstallable=no" \
+    "Inno must not write a second Add/Remove Programs row"
+need "$PACK" "ISCC" \
+    "pack script must compile the Inno script"
+if grep -qiE 'open source' "$ISS" "$PACK"; then
+    echo "installer copy must not call the product open source"
+    fail=1
+fi
+
 forbid "$CSPROJ" "WindowsAppSdkBootstrapInitialize>true<" \
     "enables the bootstrapper that puts up the Windows App Runtime dialog"
 forbid "$PUBLISH" "BootstrapInitialize.*true" \

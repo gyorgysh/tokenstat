@@ -24,7 +24,9 @@ Programs row all use those strings.
 
 ## Install
 
-The published folder is the installer. Double-click `Tokenstat.exe`:
+People download `tokenstat-<ver>-windows-x64-setup.exe`. The wizard shows the
+tokenstat mark and LICENSE, extracts to a temp folder, and runs
+`Tokenstat.exe --install`, which:
 
 1. Stages the complete folder, then swaps it into `%LOCALAPPDATA%\Programs\tokenstat`
 2. Writes a Start Menu shortcut
@@ -32,7 +34,9 @@ The published folder is the installer. Double-click `Tokenstat.exe`:
 4. Registers the per-user host task `ai.tokenstat.hostd`
 5. Relaunches from the install directory
 
-`--install` explicitly installs and opens the installed copy. `--uninstall` reverses it.
+The zip next to the setup exe is the auto-update payload, not the human
+installer. Double-clicking `Tokenstat.exe` from that zip still installs the
+same way. `--install` does it explicitly. `--uninstall` reverses it.
 A development build (`apps\windows\bin\...`, or `TOKENSTAT_DEV=1`) does not
 copy itself.
 
@@ -43,6 +47,11 @@ This is not a Store package and not a Windows Service.
 The host method `app.updateCheck` reports `winZipUrl`. `app.updateDownloadWin`
 fetches the zip and checks it against `SHA256SUMS`. The app then stages the
 files and offers Relaunch.
+
+A build with `PREVIEW.txt` next to the exe is the Preview channel: it reads
+the rolling GitHub prerelease tagged `preview` and only accepts a `-dev.`
+zip. Stable builds still reject prereleases. Preview never promotes onto a
+stable Release, and stable never fetches Preview bits.
 
 Authenticode is required only when the running `Tokenstat.exe` is already
 signed, and the replacement must be the same publisher. Preview builds are
@@ -60,7 +69,8 @@ Windows App SDK dependencies declared in `Tokenstat.csproj`.
 ```
 
 Produces `dist/tokenstat-<version>-windows-x64/` with `Tokenstat.exe` and
-`tokenstat-hostd.exe`. Zip that folder for GitHub Actions.
+`tokenstat-hostd.exe`. Preview and release wrap that folder with
+`scripts/pack-windows-installer.ps1` into `tokenstat-<version>-windows-x64-setup.exe`.
 The version defaults to the Cargo workspace version. Use `-Rid win-arm64`
 for ARM64. A failed native build, publish, or notice generation stops the
 script before staging an artifact; fix the first reported failure.

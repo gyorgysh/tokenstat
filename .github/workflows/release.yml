@@ -215,9 +215,64 @@ jobs:
           path: dist/Tokenstat-app-unsigned.zip
           retention-days: 7
 
+  windows-app:
+    name: build the windows app
+    needs: verify
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-windows-app
+          save-if: false
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build Windows app
+        id: package
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          scripts/build-windows-app.ps1 -Version $env:VERSION -Rid win-x64 -Out dist
+          $name = "tokenstat-$($env:VERSION)-windows-x64"
+          scripts/pack-windows-installer.ps1 -StageDir "dist/$name" `
+            -Version $env:VERSION -Out dist
+          Push-Location dist
+          7z a "$name.zip" $name | Out-Null
+          $zipHash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
+          $setup = "$name-setup.exe"
+          $setupHash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path "$name.zip.sha256" -Value "$zipHash  $name.zip"
+          Set-Content -Path "$setup.sha256" -Value "$setupHash  $setup"
+          Pop-Location
+          "asset=$name.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "setup=$setup" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-windows-app
+          path: |
+            dist/${{ steps.package.outputs.asset }}
+            dist/${{ steps.package.outputs.asset }}.sha256
+            dist/${{ steps.package.outputs.setup }}
+            dist/${{ steps.package.outputs.setup }}.sha256
+          retention-days: 7
+
   publish:
     name: publish github release
-    needs: [verify, build, app]
+    needs: [verify, build, app, windows-app]
     runs-on: macos-latest
     environment: release
     permissions:
@@ -454,7 +509,7 @@ jobs:
           # Gatekeeper refuses, which is worse than shipping no app at all.
           rm -f Tokenstat-app-unsigned.zip
           rm -f ./*.sha256 SHA256SUMS
-          for f in *.tar.gz *.zip *.dmg; do
+          for f in *.tar.gz *.zip *.dmg *.exe; do
             [ -f "$f" ] || continue
             shasum -a 256 "$f" >> SHA256SUMS
           done
@@ -479,4 +534,5 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/*.dmg
+            dist/*-setup.exe
             dist/SHA256SUMS

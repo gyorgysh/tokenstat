@@ -27,6 +27,10 @@ namespace Tokenstat.Pages;
 internal sealed class TerminalSession
 {
     private static readonly ConcurrentDictionary<string, TerminalSession> ByWorkspace = new();
+    private static readonly ConcurrentDictionary<string, TerminalSession> ById = new();
+
+    private static string Slot(string workspaceId, string? sessionId) =>
+        workspaceId + "\0" + (sessionId ?? "");
 
     public event Action<byte[]>? Output;
 
@@ -71,10 +75,13 @@ internal sealed class TerminalSession
 
     private bool _starting;
 
+    private readonly string _slot;
+
     private TerminalSession(string workspaceId, string? sessionId)
     {
         WorkspaceId = workspaceId;
         Id = sessionId ?? "";
+        _slot = Slot(workspaceId, sessionId);
     }
 
     /// <summary>
@@ -84,20 +91,16 @@ internal sealed class TerminalSession
     /// </summary>
     public static TerminalSession For(string workspaceId, string? sessionId)
     {
-        if (!string.IsNullOrEmpty(sessionId))
+        if (!string.IsNullOrEmpty(sessionId)
+            && ById.TryGetValue(sessionId, out var known)
+            && known.WorkspaceId == workspaceId
+            && !known.Closed)
         {
-            foreach (var existing in ByWorkspace.Values)
-            {
-                if (existing.Id == sessionId && existing.WorkspaceId == workspaceId)
-                {
-                    return existing;
-                }
-            }
-            var named = new TerminalSession(workspaceId, sessionId);
-            ByWorkspace[workspaceId] = named;
-            return named;
+            return known;
         }
-        return ByWorkspace.GetOrAdd(workspaceId, _ => new TerminalSession(workspaceId, null));
+        return ByWorkspace.GetOrAdd(
+            Slot(workspaceId, sessionId),
+            _ => new TerminalSession(workspaceId, sessionId));
     }
 
     public static bool IsRemoteId(string id) =>
@@ -225,10 +228,11 @@ internal sealed class TerminalSession
             }
         }
         Closed = true;
-        if (ByWorkspace.TryGetValue(WorkspaceId, out var current) && ReferenceEquals(current, this))
+        if (!string.IsNullOrEmpty(id))
         {
-            ByWorkspace.TryRemove(WorkspaceId, out _);
+            ById.TryRemove(id, out _);
         }
+        ByWorkspace.TryRemove(_slot, out _);
         RaiseChanged();
     }
 
@@ -357,7 +361,10 @@ internal sealed class TerminalSession
             HasOutput = false;
             Closed = false;
             LastError = string.IsNullOrEmpty(Id) ? "The host did not return a session id." : "";
-            ByWorkspace[WorkspaceId] = this;
+            if (!string.IsNullOrEmpty(Id))
+            {
+                ById[Id] = this;
+            }
         }
         catch (Exception ex)
         {

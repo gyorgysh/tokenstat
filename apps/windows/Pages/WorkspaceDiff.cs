@@ -116,6 +116,42 @@ internal static class WorkspaceDiff
     }
 
     /// <summary>
+    /// One commit as a workbench document: header then every file's diff,
+    /// like the Mac CommitView. Uses the diffs already on workspace.show.
+    /// </summary>
+    public static Task ShowCommitAsync(UIElement owner, JsonNode detail)
+    {
+        var diffs = detail["diffs"] as JsonArray;
+        var files = detail["files"] as JsonArray;
+        var reviewFiles = new List<(string Path, string Kind, long? Added, long? Removed)>();
+        if (diffs is not null)
+        {
+            foreach (var item in diffs)
+            {
+                var diffPath = Format.Text(item, "path");
+                if (string.IsNullOrEmpty(diffPath))
+                {
+                    continue;
+                }
+                var fileMeta = files?.FirstOrDefault(file => Format.Text(file, "path") == diffPath);
+                reviewFiles.Add((
+                    diffPath,
+                    Format.Text(fileMeta, "kind"),
+                    fileMeta?["added"] is null ? null : Format.Long(fileMeta, "added"),
+                    fileMeta?["removed"] is null ? null : Format.Long(fileMeta, "removed")));
+            }
+        }
+        var shortId = WorkspaceGit.ShortId(Format.Text(detail, "id"));
+        return ShowReviewAllAsync(
+            owner,
+            reviewFiles,
+            path => Task.FromResult(diffs?.FirstOrDefault(
+                item => Format.Text(item, "path") == path)),
+            shortId,
+            CommitHeader(detail));
+    }
+
+    /// <summary>
     /// Every changed file's diff on one screen, for the final read before a
     /// commit. Bounded: at most twenty files, sixty lines each, with a full
     /// diff per file for the rest. Selection and draft live above this
@@ -124,7 +160,9 @@ internal static class WorkspaceDiff
     public static async Task ShowReviewAllAsync(
         UIElement owner,
         IList<(string Path, string Kind, long? Added, long? Removed)> files,
-        Func<string, Task<JsonNode?>> loadDiff)
+        Func<string, Task<JsonNode?>> loadDiff,
+        string? title = null,
+        UIElement? header = null)
     {
         var shown = files.Take(ReviewMaxFiles).ToList();
         var leftover = files.Count - shown.Count;
@@ -134,9 +172,10 @@ internal static class WorkspaceDiff
             Text = "Reading every change…",
             Opacity = 0.7,
         });
+        var tabTitle = string.IsNullOrEmpty(title) ? "Review all" : title;
         var dialog = new ContentDialog
         {
-            Title = "Review all",
+            Title = tabTitle,
             Content = new ScrollViewer { MaxHeight = 560, Content = stack },
             CloseButtonText = "Close",
         };
@@ -147,7 +186,7 @@ internal static class WorkspaceDiff
         {
             ((ScrollViewer)dialog.Content).Content = null;
             stack.MinWidth = 0;
-            workbench.OpenReview("Review all", new ScrollViewer
+            workbench.OpenReview(tabTitle, new ScrollViewer
             {
                 Content = stack, Padding = new Thickness(Theme.SpaceM),
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -156,6 +195,10 @@ internal static class WorkspaceDiff
         }
         else pending = Chrome.ShowDialog(owner, dialog);
         stack.Children.Clear();
+        if (header is not null)
+        {
+            stack.Children.Add(header);
+        }
         var slots = new SemaphoreSlim(4);
         var loads = new List<Task>();
         foreach (var file in shown)
@@ -196,7 +239,7 @@ internal static class WorkspaceDiff
             }
             loads.Add(Load());
         }
-        if (shown.Count == 0) stack.Children.Add(Note("No changes to review."));
+        if (shown.Count == 0 && header is null) stack.Children.Add(Note("No changes to review."));
         if (leftover > 0)
         {
             stack.Children.Add(new TextBlock
@@ -418,6 +461,98 @@ internal static class WorkspaceDiff
         VerticalAlignment = VerticalAlignment.Top,
         Margin = new Thickness(0, 0, Theme.SpaceS, 0),
     };
+
+    private static UIElement CommitHeader(JsonNode detail)
+    {
+        var stack = new StackPanel { Spacing = Theme.SpaceS };
+        stack.Children.Add(new TextBlock
+        {
+            Text = Format.Text(detail, "subject", "(no message)"),
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            FontSize = 15,
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+        });
+        var body = Format.Text(detail, "body");
+        if (!string.IsNullOrEmpty(body))
+        {
+            stack.Children.Add(new TextBlock
+            {
+                Text = body,
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+                IsTextSelectionEnabled = true,
+            });
+        }
+        var meta = string.Join(" · ", new[]
+        {
+            Format.Text(detail, "author"),
+            AbsoluteTime(Format.Long(detail, "timestamp")),
+            WorkspaceGit.ShortId(Format.Text(detail, "id")),
+        }.Where(part => !string.IsNullOrEmpty(part)));
+        stack.Children.Add(new TextBlock
+        {
+            Text = meta,
+            FontSize = 12,
+            Opacity = 0.7,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        var parents = detail["parents"] as JsonArray;
+        if (parents is not null && parents.Count >= 2)
+        {
+            stack.Children.Add(new TextBlock
+            {
+                Text = "A merge, so there is nothing of its own to show. "
+                    + "Its changes belong to the commits it brought in.",
+                FontSize = 13,
+                Opacity = 0.7,
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
+        var files = detail["files"] as JsonArray;
+        var counts = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = Theme.SpaceS,
+        };
+        counts.Children.Add(new TextBlock
+        {
+            Text = "+" + Format.Long(detail, "added"),
+            Foreground = Theme.Brush(static () => Theme.DiffAdded),
+            FontSize = 12,
+        });
+        counts.Children.Add(new TextBlock
+        {
+            Text = "−" + Format.Long(detail, "removed"),
+            Foreground = Theme.Brush(static () => Theme.DiffRemoved),
+            FontSize = 12,
+        });
+        var fileCount = files?.Count ?? 0;
+        counts.Children.Add(new TextBlock
+        {
+            Text = $"· {fileCount} {(fileCount == 1 ? "file" : "files")}",
+            FontSize = 12,
+            Opacity = 0.7,
+        });
+        stack.Children.Add(counts);
+        return stack;
+    }
+
+    private static string AbsoluteTime(long unixSeconds)
+    {
+        if (unixSeconds <= 0)
+        {
+            return "";
+        }
+        try
+        {
+            return DateTimeOffset.FromUnixTimeSeconds(unixSeconds).LocalDateTime.ToString("g");
+        }
+        catch
+        {
+            return "";
+        }
+    }
 
     private static TextBlock Note(string text) => new()
     {

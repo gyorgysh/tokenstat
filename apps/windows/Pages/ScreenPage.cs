@@ -224,7 +224,14 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         RenderInspector();
 
         Loaded += async (_, _) => await StartAsync();
-        Unloaded += (_, _) => _ = CloseAsync();
+        Unloaded += (_, _) =>
+        {
+            DispatcherQueue.TryEnqueue(async () =>
+            {
+                try { await CloseAsync(); }
+                catch (Exception ex) { Tokenstat.Program.LogStartup("Screen close: " + ex); }
+            });
+        };
     }
 
     public event Action? ToolbarChanged { add { } remove { } }

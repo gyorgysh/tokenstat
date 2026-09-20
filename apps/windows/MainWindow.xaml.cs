@@ -921,7 +921,7 @@ public sealed partial class MainWindow : Window
             pair.Value.Background = pair.Key == tag ? Theme.AccentSoftBrush : _chromeSidebar;
         if (tag.StartsWith("sshterm:", StringComparison.Ordinal))
         {
-            SetContent(new SshPage(SSHSection.Hosts, tag["sshterm:".Length..]));
+            SetContent(Ssh(SSHSection.Hosts, tag["sshterm:".Length..]));
             return;
         }
         if (tag.StartsWith("global:", StringComparison.Ordinal))
@@ -933,7 +933,7 @@ public sealed partial class MainWindow : Window
                     GlobalSection.Home => new HomePage(),
                     GlobalSection.Insights => new InsightsPage(),
                     GlobalSection.Machines => new MachinesPage(),
-                    GlobalSection.Ssh => new SshPage(),
+                    GlobalSection.Ssh => Ssh(SSHSection.Hosts),
                     GlobalSection.Search => new WorkSearchPage(),
                     GlobalSection.Todo => new TodoPage(),
                     GlobalSection.Notes => new NotesPage(),
@@ -951,7 +951,7 @@ public sealed partial class MainWindow : Window
         {
             if (Enum.TryParse<SSHSection>(tag["ssh:".Length..], out var section))
             {
-                SetContent(new SshPage(section), preserveSelection: true);
+                SetContent(Ssh(section), preserveSelection: true);
             }
             return;
         }
@@ -988,6 +988,18 @@ public sealed partial class MainWindow : Window
     /// like the desktop Mac.
     /// </summary>
     private readonly Dictionary<string, WorkspaceTabsPage> _workbenches = new();
+    private SshPage? _sshPage;
+    private SshPage Ssh(SSHSection section, string? sessionId = null)
+    {
+        if (_sshPage is null)
+        {
+            _sshPage = new SshPage(section, sessionId);
+            return _sshPage;
+        }
+        _ = _sshPage.OpenAsync(section, sessionId);
+        return _sshPage;
+    }
+
     private WorkspaceTabsPage WorkspaceTabs(string id)
     {
         if (!_workbenches.TryGetValue(id, out var page))

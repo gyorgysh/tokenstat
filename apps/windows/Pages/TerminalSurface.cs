@@ -12,10 +12,12 @@ namespace Tokenstat.Pages;
 /// <summary>A local, bundled VT terminal. Terminal bytes are data, never HTML or script.</summary>
 internal sealed class TerminalSurface : Grid
 {
-    private readonly WebView2 _web = new();
-    private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private WebView2 _web = new();
+    private TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly SemaphoreSlim _inputGate = new(1, 1);
     private readonly SemaphoreSlim _resizeGate = new(1, 1);
+    private readonly SemaphoreSlim _lifecycle = new(1, 1);
+    private int _generation;
     private bool _starting;
     private bool _closed;
     public int Rows { get; private set; } = 30;
@@ -32,15 +34,43 @@ internal sealed class TerminalSurface : Grid
         ActualThemeChanged += (_, _) => SendTheme();
     }
 
+    /// <summary>
+    /// After <see cref="Close"/>, put a fresh WebView2 in the tree so a
+    /// cached page can come back. The PTY session is separate and survives.
+    /// Starts the new controller here: Grid.Loaded may already have fired
+    /// while this surface was closed.
+    /// </summary>
+    public void PrepareForReuse()
+    {
+        if (!_closed) return;
+        _web = new WebView2();
+        _ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _starting = false;
+        _closed = false;
+        Children.Clear();
+        Children.Add(_web);
+        _ = InitializeAsync();
+    }
+
     private async Task InitializeAsync()
     {
-        if (_starting || _closed) return;
-        _starting = true;
+        await _lifecycle.WaitAsync();
+        var claimed = false;
+        var started = false;
         try
         {
-            await _web.EnsureCoreWebView2Async();
-            if (_closed) return;
-            var core = _web.CoreWebView2;
+            if (_starting || _closed) return;
+            _starting = true;
+            claimed = true;
+            var web = _web;
+            var generation = _generation;
+            await web.EnsureCoreWebView2Async();
+            if (_closed || generation != _generation || !ReferenceEquals(web, _web))
+            {
+                try { web.Close(); } catch { /* Closed while the runtime was starting. */ }
+                return;
+            }
+            var core = web.CoreWebView2;
             core.SetVirtualHostNameToFolderMapping("terminal.tokenstat.invalid", Path.Combine(AppContext.BaseDirectory, "Assets"), CoreWebView2HostResourceAccessKind.DenyCors);
             core.Settings.AreDevToolsEnabled = false;
             core.Settings.AreBrowserAcceleratorKeysEnabled = false;
@@ -51,7 +81,8 @@ internal sealed class TerminalSurface : Grid
             core.PermissionRequested += (_, e) => e.State = CoreWebView2PermissionState.Deny;
             core.WebMessageReceived += async (_, e) =>
             {
-                if (_closed || e.Source != "https://terminal.tokenstat.invalid/Terminal/terminal.html") return;
+                if (_closed || generation != _generation
+                    || e.Source != "https://terminal.tokenstat.invalid/Terminal/terminal.html") return;
                 try
                 {
                     using var document = JsonDocument.Parse(e.WebMessageAsJson);
@@ -64,7 +95,11 @@ internal sealed class TerminalSurface : Grid
                         if (type == "ready") { _ready.TrySetResult(); SendTheme(); }
                         var rows = Rows; var cols = Cols;
                         await _resizeGate.WaitAsync();
-                        try { if (!_closed && rows == Rows && cols == Cols && Resized is not null) await Resized(rows, cols); }
+                        try
+                        {
+                            if (!_closed && generation == _generation && rows == Rows && cols == Cols
+                                && Resized is not null) await Resized(rows, cols);
+                        }
                         finally { _resizeGate.Release(); }
                     }
                     else if (type == "contextMenu")
@@ -85,7 +120,7 @@ internal sealed class TerminalSurface : Grid
                             catch (Exception ex) { Failed?.Invoke(ex.Message); }
                         });
                         ContextMenus.Add(menu, "Select all", () => Send(new { type = "selectAll" }));
-                        menu.ShowAt(_web, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions
+                        menu.ShowAt(web, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions
                         {
                             Position = new Windows.Foundation.Point(message.GetProperty("x").GetDouble(), message.GetProperty("y").GetDouble()),
                         });
@@ -106,15 +141,28 @@ internal sealed class TerminalSurface : Grid
                         var data = message.GetProperty("data").GetString() ?? "";
                         var bytes = type == "binary" ? data.Select(c => (byte)c).ToArray() : Encoding.UTF8.GetBytes(data);
                         await _inputGate.WaitAsync();
-                        try { if (!_closed && Input is not null) await Input(bytes); }
+                        try
+                        {
+                            if (!_closed && generation == _generation && Input is not null) await Input(bytes);
+                        }
                         finally { _inputGate.Release(); }
                     }
                 }
-                catch (Exception ex) { if (!_closed) Failed?.Invoke(ex.Message); }
+                catch (Exception ex) { if (!_closed && generation == _generation) Failed?.Invoke(ex.Message); }
             };
-            _web.Source = new Uri("https://terminal.tokenstat.invalid/Terminal/terminal.html");
+            web.Source = new Uri("https://terminal.tokenstat.invalid/Terminal/terminal.html");
+            started = true;
         }
-        catch (Exception ex) { _ready.TrySetException(ex); if (!_closed) Failed?.Invoke(ex.Message); }
+        catch (Exception ex)
+        {
+            _ready.TrySetException(ex);
+            if (!_closed) Failed?.Invoke(ex.Message);
+        }
+        finally
+        {
+            if (claimed && !started) _starting = false;
+            _lifecycle.Release();
+        }
     }
 
     public void Write(byte[] bytes) => Send(new { type = "output", data = Convert.ToBase64String(bytes) });
@@ -124,7 +172,8 @@ internal sealed class TerminalSurface : Grid
     public void FocusTerminal()
     {
         if (_closed) return;
-        _web.Focus(FocusState.Programmatic);
+        try { _web.Focus(FocusState.Programmatic); }
+        catch { /* The controller can already be gone on the way out. */ }
         Send(new { type = "focus" });
     }
     private void SendTheme()
@@ -149,7 +198,11 @@ internal sealed class TerminalSurface : Grid
     {
         if (_closed) return;
         _closed = true;
+        _generation++;
         _ready.TrySetCanceled();
-        _web.Close();
+        try { _web.Close(); }
+        catch { /* A controller already torn down must not take the process with it. */ }
+        try { Children.Remove(_web); }
+        catch { /* The visual tree may already have dropped this control. */ }
     }
 }

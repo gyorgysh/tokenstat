@@ -20,6 +20,11 @@ internal static class Program
         LogStartup($"Starting GUI; build={typeof(Program).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion}");
         AppDomain.CurrentDomain.UnhandledException += (_, e) => LogStartup($"Unhandled exception; terminating={e.IsTerminating}: {e.ExceptionObject}");
         AppDomain.CurrentDomain.ProcessExit += (_, _) => LogStartup($"Process exit; code={Environment.ExitCode}");
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            LogStartup($"Unobserved task exception: {e.Exception}");
+            e.SetObserved();
+        };
         try
         {
             return Run(args);

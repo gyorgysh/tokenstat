@@ -330,6 +330,15 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             _pageStatus.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
             return;
         }
+        if (content.Length > 200_000)
+        {
+            _pageStatus.Children.Clear();
+            _pageStatus.Children.Add(Chrome.Banner(
+                $"This file is too large to edit here ({content.Length:N0} characters).",
+                Theme.Warning,
+                Symbol.Important));
+            return;
+        }
         var tab = new EditorTab(this, _workspaceId, path, content);
         _open.Add(tab);
         var item = new TabViewItem
@@ -461,6 +470,8 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         private int _indent = 4;
         private bool _applying;
         private CancellationTokenSource? _highlightTimer;
+        private CancellationTokenSource? _layoutTimer;
+        private int _highlightGeneration;
         private JsonArray? _highlightSpans;
         private string? _highlightedText;
         private int _matchIndex;
@@ -672,24 +683,35 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
                 return;
             }
             _text = current;
-            RebuildLineStarts();
             HeaderChanged?.Invoke();
             RefreshStatus();
-            RefreshMatches();
+            _layoutTimer?.Cancel();
+            _layoutTimer = new CancellationTokenSource();
+            var layoutToken = _layoutTimer.Token;
+            _ = Task.Run(async () =>
+            {
+                try { await Task.Delay(80, layoutToken); }
+                catch (OperationCanceledException) { return; }
+                _owner.DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (layoutToken.IsCancellationRequested) return;
+                    RebuildLineStarts();
+                    RefreshMatches();
+                });
+            });
             _highlightTimer?.Cancel();
             _highlightTimer = new CancellationTokenSource();
             var token = _highlightTimer.Token;
+            var generation = ++_highlightGeneration;
             _ = Task.Run(async () =>
             {
-                try
+                try { await Task.Delay(300, token); }
+                catch (OperationCanceledException) { return; }
+                _owner.DispatcherQueue.TryEnqueue(async () =>
                 {
-                    await Task.Delay(300, token);
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
-                _owner.DispatcherQueue.TryEnqueue(async () => await HighlightAsync());
+                    if (generation != _highlightGeneration) return;
+                    await HighlightAsync();
+                });
             });
         }
 
@@ -862,6 +884,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         public async Task HighlightAsync()
         {
             var source = _text;
+            var generation = _highlightGeneration;
             if (source.Length > 200_000)
             {
                 _highlightSpans = null;
@@ -880,7 +903,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             {
                 return;
             }
-            if (source != _text)
+            if (generation != _highlightGeneration || source != _text)
             {
                 return;
             }
@@ -890,7 +913,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             var indent = (int)Format.Long(syntax, "indent");
             _indent = indent > 0 ? indent : 4;
             _highlightSpans = answer["spans"] as JsonArray;
-            if (_highlightSpans?.Count > 10_000)
+            if (_highlightSpans?.Count > 2_500)
             {
                 _highlightSpans = null;
                 _highlightNote = "Syntax highlighting paused for this large file.";

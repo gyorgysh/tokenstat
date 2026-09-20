@@ -163,6 +163,7 @@ internal sealed class AppUpdateModel
                 {
                     ["appVersion"] = AppInfo.Version,
                     ["supportsRetryAfter"] = true,
+                    ["preview"] = SelfInstall.IsPreviewChannel,
                 });
             if (OptLong(found, "retryAt") is long at && at > 0)
             {
@@ -180,6 +181,11 @@ internal sealed class AppUpdateModel
             HtmlUrl = Str(found, "htmlUrl") ?? "";
             WinZipUrl = Str(found, "winZipUrl");
             Newer = found["newer"] is JsonValue flag && flag.GetValue<bool>();
+            // Preview stays on Preview. Stable never fetches a -dev. build.
+            if (Newer && !ChannelAccepts(SelfInstall.IsPreviewChannel, Latest))
+            {
+                Newer = false;
+            }
             // Compare the skip against the fresh release, so skipping one
             // version still lets automatic checks discover later versions.
             if (!Newer || string.IsNullOrEmpty(Latest) || IsSkipped)
@@ -204,6 +210,7 @@ internal sealed class AppUpdateModel
         {
             var downloaded = await AppServices.Host.CallAsync(
                 "app.updateDownloadWin",
+                new JsonObject { ["preview"] = SelfInstall.IsPreviewChannel },
                 patience: TimeSpan.FromMinutes(5));
             var path = Str(downloaded, "path")
                 ?? throw new AppInstaller.Failure("The host did not return a download path.");
@@ -245,6 +252,18 @@ internal sealed class AppUpdateModel
     }
 
     public void Relaunch() => AppInstaller.Relaunch();
+
+    /// <summary>
+    /// Preview installs only accept a <c>-dev.</c> latest. Stable installs
+    /// never do. That is what stops an unsigned beta jumping onto a Release
+    /// and a signed build fetching Preview bits.
+    /// </summary>
+    internal static bool ChannelAccepts(bool previewInstall, string latest)
+    {
+        if (string.IsNullOrEmpty(latest)) return false;
+        var previewLatest = latest.Contains("-dev.", StringComparison.Ordinal);
+        return previewInstall ? previewLatest : !previewLatest;
+    }
 
     /// <summary>
     /// A release the user said they did not want to hear about again. Per

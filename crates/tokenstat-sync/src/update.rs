@@ -28,6 +28,11 @@ const CHECK_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const USER_AGENT: &str = concat!("tokenstat/", env!("CARGO_PKG_VERSION"));
 const RELEASE_MANIFEST_URL: &str = "https://tokenstat.ai/api/v1/releases/latest.json";
 const RELEASE_MANIFEST_MAX_BYTES: u64 = 256 * 1024;
+/// Rolling GitHub prerelease the unsigned Windows Preview channel reads.
+const PREVIEW_TAG: &str = "preview";
+/// Serialize GitHub release lookups so another caller cannot slip past a newly
+/// received cooldown. Shared by stable and Preview: the limit is the API.
+static CHECK_LOCK: std::sync::Mutex<u64> = std::sync::Mutex::new(0);
 
 #[derive(Debug, Error)]
 pub enum UpdateError {
@@ -252,9 +257,52 @@ pub fn check_latest_against(installed: &[&str]) -> Result<UpdateCheck, UpdateErr
     if let Some(release) = cached_site_release() {
         return release_check(oldest_installed(installed).to_owned(), release);
     }
-    // Serialize release lookups so another caller cannot slip past a newly
-    // received cooldown. Persist it so restarting the app does not bypass it.
-    static CHECK_LOCK: std::sync::Mutex<u64> = std::sync::Mutex::new(0);
+    let current = oldest_installed(installed).to_string();
+    match github_release("releases/latest")? {
+        None => Ok(empty_update_check(current)),
+        Some(release) => release_check(current, release),
+    }
+}
+
+/// Look up the rolling Preview prerelease (`preview` tag).
+///
+/// Stable [`check_latest_against`] still rejects every prerelease. This path
+/// is the only one that may read that tag, and it refuses a release that is
+/// not a prerelease so a mistaken stable publish on the same name cannot
+/// land on Preview installs.
+pub fn check_preview_against(installed: &[&str]) -> Result<UpdateCheck, UpdateError> {
+    let current = oldest_installed(installed).to_string();
+    match github_release(&format!("releases/tags/{PREVIEW_TAG}"))? {
+        None => Err(UpdateError::Message(
+            "No Preview release published yet.".into(),
+        )),
+        Some(release) => preview_release_check(current, release),
+    }
+}
+
+fn empty_update_check(current: String) -> UpdateCheck {
+    UpdateCheck {
+        current,
+        latest: String::new(),
+        newer: false,
+        html_url: format!("https://github.com/{REPO}/releases"),
+        asset_name: None,
+        asset_url: None,
+        sums_url: None,
+        asset_api_url: None,
+        sums_api_url: None,
+        app_dmg_name: None,
+        app_dmg_url: None,
+        app_win_name: None,
+        app_win_url: None,
+        app_win_api_url: None,
+    }
+}
+
+/// Fetch one GitHub release document, sharing the cooldown with other checks.
+///
+/// `Ok(None)` is a 404 with credentials: the repo exists, that name does not.
+fn github_release(path: &str) -> Result<Option<GhRelease>, UpdateError> {
     let mut cooldown = CHECK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let now = unix_now();
     let cooldown_path = stamp_path()
@@ -271,15 +319,11 @@ pub fn check_latest_against(installed: &[&str]) -> Result<UpdateCheck, UpdateErr
             retry_at: *cooldown,
         });
     }
-    let current = oldest_installed(installed).to_string();
     let client = client()?;
-    // Resolve only after the cooldown gate. Reuse the app's cached GitHub
-    // connection, including HTTPS git credentials, without starting sign-in.
-    // Keep the explicit updater environment override for existing CLI users.
     let token = github_token().or_else(|| {
         crate::forge::credential("github.com").map(|credential| credential.bearer().to_owned())
     });
-    let resp = release_request(&client, token.as_deref()).send()?;
+    let resp = github_release_request(&client, token.as_deref(), path).send()?;
     if let Some(retry_at) = release_retry_at(resp.status().as_u16(), resp.headers(), unix_now()) {
         *cooldown = retry_at;
         if let Some(path) = &cooldown_path {
@@ -288,8 +332,6 @@ pub fn check_latest_against(installed: &[&str]) -> Result<UpdateCheck, UpdateErr
         return Err(UpdateError::RateLimited { retry_at });
     }
     if resp.status().as_u16() == 404 {
-        // Public repo with no release yet is the common case. A private repo
-        // without GITHUB_TOKEN looks the same; mention that only as a footnote.
         if token.is_none() {
             return Err(UpdateError::Message(
                 "No GitHub Release found yet for this project. \
@@ -297,27 +339,10 @@ pub fn check_latest_against(installed: &[&str]) -> Result<UpdateCheck, UpdateErr
                     .into(),
             ));
         }
-        return Ok(UpdateCheck {
-            current,
-            latest: String::new(),
-            newer: false,
-            html_url: format!("https://github.com/{REPO}/releases"),
-            asset_name: None,
-            asset_url: None,
-            sums_url: None,
-            asset_api_url: None,
-            sums_api_url: None,
-            app_dmg_name: None,
-            app_dmg_url: None,
-            app_win_name: None,
-            app_win_url: None,
-            app_win_api_url: None,
-        });
+        return Ok(None);
     }
     if !resp.status().is_success() {
         let status = resp.status();
-        // Secondary limits can omit Retry-After. Do not confuse an unrelated
-        // permission failure with a limit just because both use HTTP 403.
         if status.as_u16() == 403
             && resp
                 .json::<serde_json::Value>()
@@ -337,7 +362,7 @@ pub fn check_latest_against(installed: &[&str]) -> Result<UpdateCheck, UpdateErr
             status
         )));
     }
-    release_check(current, resp.json()?)
+    resp.json().map(Some).map_err(UpdateError::from)
 }
 
 fn release_check(current: String, release: GhRelease) -> Result<UpdateCheck, UpdateError> {
@@ -390,6 +415,113 @@ fn release_check(current: String, release: GhRelease) -> Result<UpdateCheck, Upd
             .map(|a| a.url.clone())
             .filter(|u: &String| !u.is_empty()),
     })
+}
+
+fn preview_release_check(current: String, release: GhRelease) -> Result<UpdateCheck, UpdateError> {
+    if release.draft {
+        return Err(UpdateError::Message("Preview release is a draft.".into()));
+    }
+    if !release.prerelease {
+        return Err(UpdateError::Message(
+            "Preview feed is not a prerelease.".into(),
+        ));
+    }
+    let tag = release.tag_name.trim_start_matches('v');
+    if !tag.eq_ignore_ascii_case(PREVIEW_TAG) {
+        return Err(UpdateError::Message(
+            "Preview feed tag is not preview.".into(),
+        ));
+    }
+    let win = newest_preview_windows_zip(&release.assets);
+    let latest = win
+        .and_then(|a| version_from_windows_app_zip(&a.name))
+        .ok_or_else(|| UpdateError::Message("Preview release has no Windows app zip.".into()))?;
+    if !latest.contains("-dev.") {
+        return Err(UpdateError::Message(
+            "Preview zip is not a -dev. build.".into(),
+        ));
+    }
+    let newer = preview_is_newer(&latest, &current);
+    let sums = release
+        .assets
+        .iter()
+        .find(|a| a.name == "SHA256SUMS" || a.name.ends_with("SHA256SUMS"));
+    Ok(UpdateCheck {
+        current,
+        latest,
+        newer,
+        html_url: release.html_url,
+        asset_name: None,
+        asset_url: None,
+        sums_url: sums.map(|a| a.browser_download_url.clone()),
+        asset_api_url: None,
+        sums_api_url: sums
+            .map(|a| a.url.clone())
+            .filter(|u: &String| !u.is_empty()),
+        app_dmg_name: None,
+        app_dmg_url: None,
+        app_win_name: win.map(|a| a.name.clone()),
+        app_win_url: win.map(|a| a.browser_download_url.clone()),
+        app_win_api_url: win
+            .map(|a| a.url.clone())
+            .filter(|u: &String| !u.is_empty()),
+    })
+}
+
+/// Version encoded in `tokenstat-<ver>-windows-<arch>.zip`.
+pub fn version_from_windows_app_zip(name: &str) -> Option<String> {
+    let rest = name
+        .strip_prefix("tokenstat-")?
+        .strip_suffix(".zip")
+        .or_else(|| name.strip_prefix("tokenstat-")?.strip_suffix(".ZIP"))?;
+    let at = rest.rfind("-windows-")?;
+    let ver = &rest[..at];
+    if ver.is_empty() {
+        None
+    } else {
+        Some(ver.to_string())
+    }
+}
+
+fn parse_dev_version(raw: &str) -> Option<(u64, u64, u64, u64)> {
+    let s = raw.trim().trim_start_matches('v');
+    let (num, rest) = s.split_once("-dev.")?;
+    let mut n = num.split('.');
+    let major = n.next()?.parse().ok()?;
+    let minor = n.next()?.parse().ok()?;
+    let patch = n.next()?.parse().ok()?;
+    if n.next().is_some() {
+        return None;
+    }
+    let run = rest.split('.').next()?.parse().ok()?;
+    Some((major, minor, patch, run))
+}
+
+fn preview_is_newer(latest: &str, current: &str) -> bool {
+    match (parse_dev_version(latest), parse_dev_version(current)) {
+        (Some(a), Some(b)) => a > b,
+        _ => version_cmp(latest, current) == std::cmp::Ordering::Greater,
+    }
+}
+
+/// Rolling Preview tags can keep more than one uniquely named zip if a
+/// publish skipped the delete step. Take the highest `-dev.N`, never the
+/// first asset GitHub listed.
+fn newest_preview_windows_zip(assets: &[GhAsset]) -> Option<&GhAsset> {
+    assets
+        .iter()
+        .filter(|asset| is_windows_app_zip(&asset.name, windows_app_arch()))
+        .filter(|asset| {
+            version_from_windows_app_zip(&asset.name).is_some_and(|ver| ver.contains("-dev."))
+        })
+        .max_by(|left, right| {
+            let left_ver = version_from_windows_app_zip(&left.name).unwrap_or_default();
+            let right_ver = version_from_windows_app_zip(&right.name).unwrap_or_default();
+            match (parse_dev_version(&left_ver), parse_dev_version(&right_ver)) {
+                (Some(a), Some(b)) => a.cmp(&b),
+                _ => left_ver.cmp(&right_ver),
+            }
+        })
 }
 
 #[derive(Deserialize)]
@@ -504,13 +636,12 @@ fn is_rate_limit_message(body: &serde_json::Value) -> bool {
 
 /// Authentication is limited to this fixed API endpoint. Download redirects
 /// use their separate, unauthenticated client and never receive this token.
-fn release_request(
+fn github_release_request(
     client: &reqwest::blocking::Client,
     token: Option<&str>,
+    path: &str,
 ) -> reqwest::blocking::RequestBuilder {
-    let request = client.get(format!(
-        "https://api.github.com/repos/{REPO}/releases/latest"
-    ));
+    let request = client.get(format!("https://api.github.com/repos/{REPO}/{path}"));
     match token {
         Some(token) => request.bearer_auth(token),
         None => request,
@@ -636,8 +767,15 @@ pub fn download_app_image() -> Result<PathBuf, UpdateError> {
 /// files. Preview builds are unsigned, so the app skips Authenticode there
 /// the way a local Mac build skips Developer ID.
 pub fn download_windows_app_archive() -> Result<PathBuf, UpdateError> {
-    // As on macOS, a current host can be downloading for an older app.
-    let check = check_latest()?;
+    download_windows_zip(check_latest()?)
+}
+
+/// Same as [`download_windows_app_archive`], from the Preview prerelease.
+pub fn download_windows_preview_archive() -> Result<PathBuf, UpdateError> {
+    download_windows_zip(check_preview_against(&[env!("CARGO_PKG_VERSION")])?)
+}
+
+fn download_windows_zip(check: UpdateCheck) -> Result<PathBuf, UpdateError> {
     let url = check.app_win_url.as_deref().ok_or_else(|| {
         UpdateError::Message(format!(
             "release v{} has no Windows app download",
@@ -1991,11 +2129,14 @@ mod tests {
     #[test]
     fn release_auth_is_optional_and_targets_only_github_api() {
         let client = super::client().unwrap();
-        let anonymous = super::release_request(&client, None).build().unwrap();
-        assert!(!anonymous.headers().contains_key("authorization"));
-        let authenticated = super::release_request(&client, Some("fixture-token"))
+        let anonymous = super::github_release_request(&client, None, "releases/latest")
             .build()
             .unwrap();
+        assert!(!anonymous.headers().contains_key("authorization"));
+        let authenticated =
+            super::github_release_request(&client, Some("fixture-token"), "releases/latest")
+                .build()
+                .unwrap();
         assert_eq!(authenticated.url().scheme(), "https");
         assert_eq!(authenticated.url().host_str(), Some("api.github.com"));
         assert_eq!(
@@ -2003,6 +2144,13 @@ mod tests {
             "Bearer fixture-token"
         );
         assert!(authenticated.headers()["authorization"].is_sensitive());
+        let preview = super::github_release_request(&client, None, "releases/tags/preview")
+            .build()
+            .unwrap();
+        assert_eq!(
+            preview.url().path(),
+            "/repos/gyorgysh/tokenstat/releases/tags/preview"
+        );
     }
 
     #[test]
@@ -2377,6 +2525,149 @@ mod tests {
             "tokenstat-0.6.8-windows-x64.zip",
             "arm64"
         ));
+    }
+
+    #[test]
+    fn windows_app_zip_version_and_preview_run_order() {
+        assert_eq!(
+            super::version_from_windows_app_zip("tokenstat-1.0.7-dev.12.abc1234-windows-x64.zip")
+                .as_deref(),
+            Some("1.0.7-dev.12.abc1234")
+        );
+        assert_eq!(
+            super::version_from_windows_app_zip("tokenstat-1.0.7-windows-x64.zip").as_deref(),
+            Some("1.0.7")
+        );
+        assert!(super::preview_is_newer(
+            "1.0.7-dev.10.aaa",
+            "1.0.7-dev.9.bbb"
+        ));
+        assert!(!super::preview_is_newer(
+            "1.0.7-dev.9.aaa",
+            "1.0.7-dev.10.bbb"
+        ));
+        assert!(!super::preview_is_newer(
+            "1.0.7-dev.12.aaa",
+            "1.0.7-dev.12.bbb"
+        ));
+    }
+
+    fn preview_fixture(prerelease: bool, draft: bool, zip: &str) -> super::GhRelease {
+        super::GhRelease {
+            tag_name: "preview".into(),
+            html_url: format!("https://github.com/{}/releases/tag/preview", super::REPO),
+            prerelease,
+            draft,
+            assets: vec![
+                super::GhAsset {
+                    name: zip.into(),
+                    browser_download_url: format!(
+                        "https://github.com/{}/releases/download/preview/{zip}",
+                        super::REPO
+                    ),
+                    url: format!(
+                        "https://api.github.com/repos/{}/releases/assets/1",
+                        super::REPO
+                    ),
+                },
+                super::GhAsset {
+                    name: "SHA256SUMS".into(),
+                    browser_download_url: format!(
+                        "https://github.com/{}/releases/download/preview/SHA256SUMS",
+                        super::REPO
+                    ),
+                    url: format!(
+                        "https://api.github.com/repos/{}/releases/assets/2",
+                        super::REPO
+                    ),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn preview_feed_rejects_stable_or_draft_and_accepts_dev_zip() {
+        let zip = format!(
+            "tokenstat-1.0.7-dev.12.abc1234-windows-{}.zip",
+            super::windows_app_arch()
+        );
+        let ok = super::preview_release_check(
+            "1.0.7-dev.8.oldsha".into(),
+            preview_fixture(true, false, &zip),
+        )
+        .unwrap();
+        assert_eq!(ok.latest, "1.0.7-dev.12.abc1234");
+        assert!(ok.newer);
+        assert_eq!(ok.app_win_name.as_deref(), Some(zip.as_str()));
+        assert!(
+            super::preview_release_check(
+                "1.0.7-dev.8.oldsha".into(),
+                preview_fixture(false, false, &zip)
+            )
+            .is_err()
+        );
+        assert!(
+            super::preview_release_check(
+                "1.0.7-dev.8.oldsha".into(),
+                preview_fixture(true, true, &zip)
+            )
+            .is_err()
+        );
+        let stable = format!("tokenstat-1.0.7-windows-{}.zip", super::windows_app_arch());
+        assert!(
+            super::preview_release_check(
+                "1.0.7-dev.8.oldsha".into(),
+                preview_fixture(true, false, &stable)
+            )
+            .is_err()
+        );
+        let mut wrong_tag = preview_fixture(true, false, &zip);
+        wrong_tag.tag_name = "v1.0.7".into();
+        assert!(super::preview_release_check("1.0.7-dev.8.oldsha".into(), wrong_tag).is_err());
+    }
+
+    fn preview_zip_asset(name: &str, id: u8) -> super::GhAsset {
+        super::GhAsset {
+            name: name.to_string(),
+            browser_download_url: format!(
+                "https://github.com/{}/releases/download/preview/{name}",
+                super::REPO
+            ),
+            url: format!(
+                "https://api.github.com/repos/{}/releases/assets/{id}",
+                super::REPO
+            ),
+        }
+    }
+
+    #[test]
+    fn preview_feed_picks_the_newest_dev_zip_when_several_remain() {
+        let arch = super::windows_app_arch();
+        let older = format!("tokenstat-1.0.7-dev.9.oldsha-windows-{arch}.zip");
+        let newer = format!("tokenstat-1.0.7-dev.12.abc1234-windows-{arch}.zip");
+        for assets in [
+            vec![
+                preview_zip_asset(&older, 1),
+                preview_zip_asset(&newer, 2),
+                preview_zip_asset("SHA256SUMS", 9),
+            ],
+            vec![
+                preview_zip_asset(&newer, 2),
+                preview_zip_asset(&older, 1),
+                preview_zip_asset("SHA256SUMS", 9),
+            ],
+        ] {
+            let release = super::GhRelease {
+                tag_name: "preview".into(),
+                html_url: format!("https://github.com/{}/releases/tag/preview", super::REPO),
+                prerelease: true,
+                draft: false,
+                assets,
+            };
+            let found = super::preview_release_check("1.0.7-dev.8.oldsha".into(), release).unwrap();
+            assert_eq!(found.latest, "1.0.7-dev.12.abc1234");
+            assert_eq!(found.app_win_name.as_deref(), Some(newer.as_str()));
+        }
     }
 
     /// Write an executable shell script standing in for a candidate binary.

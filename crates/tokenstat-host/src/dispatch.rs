@@ -123,6 +123,10 @@ struct AppUpdateCheckParams {
     /// Only clients that understand a paused check may receive retryAt instead
     /// of an error. Older clients must not mistake it for an up-to-date result.
     supports_retry_after: bool,
+    /// Read the rolling GitHub prerelease named `preview`. Preview builds
+    /// send this when `PREVIEW.txt` sits next to the exe. Stable builds omit
+    /// it, so they cannot fetch unsigned -dev. bits.
+    preview: bool,
 }
 
 impl Default for CalendarParams {
@@ -3395,7 +3399,12 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
                     Some(app) => vec![app, host.as_str()],
                     None => vec![host.as_str()],
                 };
-                tokenstat_sync::check_latest_against(&installed)
+                let check = if p.preview {
+                    tokenstat_sync::check_preview_against(&installed)
+                } else {
+                    tokenstat_sync::check_latest_against(&installed)
+                };
+                check
                     .map(|check| {
                         json!({
                             "current": check.current,
@@ -3438,9 +3447,17 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
                 .map_err(|e| e.to_string()),
 
             // Same contract as `app.updateDownload`, for the Windows zip.
-            "app.updateDownloadWin" => tokenstat_sync::download_windows_app_archive()
-                .map(|path| json!({"path": path.display().to_string()}))
-                .map_err(|e| e.to_string()),
+            "app.updateDownloadWin" => {
+                let p: AppUpdateCheckParams = parse(params).unwrap_or_default();
+                let download = if p.preview {
+                    tokenstat_sync::download_windows_preview_archive()
+                } else {
+                    tokenstat_sync::download_windows_app_archive()
+                };
+                download
+                    .map(|path| json!({"path": path.display().to_string()}))
+                    .map_err(|e| e.to_string())
+            }
 
             "sync.scheduleStatus" => sync_schedule_status(),
 

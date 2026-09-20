@@ -298,10 +298,15 @@ internal static class Chrome
             Spacing = 5,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        row.Children.Add(new SymbolIcon
+        row.Children.Add(new Viewbox
         {
-            Symbol = symbol,
-            Foreground = Theme.AccentBrush,
+            Width = 11,
+            Height = 11,
+            Child = new SymbolIcon
+            {
+                Symbol = symbol,
+                Foreground = Theme.AccentBrush,
+            },
         });
         row.Children.Add(new TextBlock
         {
@@ -315,7 +320,7 @@ internal static class Chrome
         var chip = new Border
         {
             Background = Theme.AccentSoftBrush,
-            CornerRadius = new CornerRadius(999),
+            CornerRadius = new CornerRadius(6),
             Padding = new Thickness(Theme.SpaceS, 3, Theme.SpaceS, 3),
             HorizontalAlignment = HorizontalAlignment.Left,
             Child = row,

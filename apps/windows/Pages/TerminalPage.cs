@@ -11,6 +11,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Windows.Foundation;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Tokenstat.Design;
@@ -62,6 +63,8 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
     private bool _released;
     private int _generation;
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
+    private Window? _window;
+    private readonly TypedEventHandler<object, WindowEventArgs> _windowClosed;
     internal string TabTitle => StartingLabel();
 
     public TerminalPage(string workspaceId, string? sessionId)
@@ -139,16 +142,28 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         _terminal.Input = bytes => _session.WriteAsync(bytes);
         _terminal.Resized = (rows, cols) => _loaded ? _session.ResizeAsync(rows, cols) : Task.CompletedTask;
         _terminal.Failed += Banner;
+        _windowClosed = (_, _) => Release();
         Loaded += async (_, _) =>
         {
+            if (_released) return;
+            _terminal.PrepareForReuse();
             var generation = ++_generation;
             _folderName = await FolderNameAsync();
-            if (generation != _generation || !IsLoaded) return;
+            if (generation != _generation || !IsLoaded || _released) return;
             RaiseToolbarChanged();
             await StartAsync(generation);
         };
-        Unloaded += (_, _) => { if (!_released) Stop(); };
-        if (App.CurrentWindow is { } window) window.Closed += (_, _) => Release();
+        Unloaded += (_, _) =>
+        {
+            if (_released) return;
+            Stop();
+            _terminal.Close();
+        };
+        if (App.CurrentWindow is { } window)
+        {
+            _window = window;
+            window.Closed += _windowClosed;
+        }
     }
 
     internal void Release()
@@ -157,6 +172,11 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         _released = true;
         Stop();
         _terminal.Close();
+        if (_window is not null)
+        {
+            _window.Closed -= _windowClosed;
+            _window = null;
+        }
     }
 
     public event Action? ToolbarChanged;
