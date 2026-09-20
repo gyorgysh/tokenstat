@@ -13,13 +13,13 @@ at the end.
 
 ## [Unreleased]
 
-## [1.0.8] - 2026-09-20
+## [1.0.8] - 2026-09-21
 
 Windows chat gains Follow, collapse, and Show/Hide output. Switching
 windows no longer kills a terminal or SSH session, the editor stays
 responsive on large files, and the branded Windows installer ships on
 the GitHub Release. Mac terminals keep a drag selection while Codex
-streams.
+streams. Linux host auto-update restarts only the host service.
 
 ### Added
 
@@ -52,6 +52,9 @@ streams.
   is streaming. The selection used to vanish on every linefeed.
 - A remote machine without workspace permission cannot check for or apply
   host updates.
+- Linux host auto-update asks systemd to restart only `tokenstat-host.service`.
+  It no longer exits the process itself, and it will not stop if it is
+  running inside a login session.
 - Usage money totals cap instead of overflowing or crashing on a huge
   counter.
 - CLI reports strip control characters from session labels before they

@@ -232,7 +232,7 @@ fn check() -> Result<Value, String> {
         "autoApply": tokenstat_sync::auto_apply_enabled(),
         "restartPending": restart_pending().load(Ordering::Acquire),
         "liveWork": live,
-        "canRestart": crate::host_policy::supervisor_would_restart_this_process(),
+        "canRestart": crate::host_policy::this_process_can_self_restart(),
         // True where the desktop application owns this helper, so an update
         // here means staging the application's download rather than replacing
         // a pair of binaries.
@@ -301,7 +301,7 @@ fn apply(params: &str) -> Result<Value, String> {
         "restarting": restarting,
         "restartPending": !restarting,
         "liveWork": live,
-        "canRestart": crate::host_policy::supervisor_would_restart_this_process(),
+        "canRestart": crate::host_policy::this_process_can_self_restart(),
         "appImage": staged,
     }))
 }
@@ -353,16 +353,28 @@ fn stage_app_image() -> Option<String> {
 
 /// Stop, so whatever started this daemon starts the replacement.
 ///
-/// A process cannot exchange its own running image, and nothing else on the
-/// machine is watching this one, so stopping and being started again is the
-/// only way a new binary comes into use. Only where something will actually
-/// start it: exiting under a supervisor that will not is how a machine goes
-/// quiet for good, which is the opposite of what was asked for.
+/// A process cannot exchange its own running image, so the supervisor has to
+/// start the new binary. Only where something will actually start it: exiting
+/// under a supervisor that will not is how a machine goes quiet for good.
+///
+/// On Linux this asks systemd to restart `tokenstat-host.service` and does
+/// not `exit` the process. `exit(0)` under `KillMode=control-group` SIGKILLs
+/// every leftover in the cgroup. If that cgroup is a login session, the
+/// session dies with it. systemd restarting the unit is scoped to the unit.
+/// A process inside `session-*.scope` is refused: that is a login, not the
+/// host service.
 ///
 /// On a thread with a delay, because the answer to this request has not been
 /// written yet and the caller is owed it.
 fn begin_restart() -> bool {
     if !crate::host_policy::supervisor_would_restart_this_process() {
+        return false;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    if crate::host_policy::this_process_is_the_host_unit().is_none() {
+        eprintln!(
+            "tokenstat-hostd: update installed, keeping this process: not running as tokenstat-host.service"
+        );
         return false;
     }
     let _ = std::thread::Builder::new()
@@ -377,12 +389,62 @@ fn begin_restart() -> bool {
                 );
                 return;
             }
-            eprintln!(
-                "tokenstat-hostd: updated on disk, stopping so the supervisor starts the new version"
-            );
-            std::process::exit(0);
+            request_supervisor_restart();
         });
     true
+}
+
+/// Ask the supervisor to start the new binary. Never `reboot`, `isolate`, or
+/// a session teardown: the only unit this may name is `tokenstat-host.service`.
+fn request_supervisor_restart() {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let Some(unit) = crate::host_policy::this_process_is_the_host_unit() else {
+            eprintln!(
+                "tokenstat-hostd: update installed, keeping this process: not running as tokenstat-host.service"
+            );
+            return;
+        };
+        let mut command = std::process::Command::new("systemctl");
+        if unit == crate::host_policy::LinuxHostUnit::User {
+            command.arg("--user");
+        }
+        // `--no-block` so systemctl does not wait for this process to vanish
+        // while this process waits for systemctl. `--no-ask-password` and a
+        // closed stdin so polkit cannot hold this thread on a prompt.
+        command
+            .args([
+                "restart",
+                "--no-block",
+                "--no-ask-password",
+                "tokenstat-host.service",
+            ])
+            .stdin(std::process::Stdio::null());
+        match command.status() {
+            Ok(status) if status.success() => {
+                eprintln!(
+                    "tokenstat-hostd: updated on disk, asked systemd to restart tokenstat-host.service"
+                );
+            }
+            Ok(status) => {
+                eprintln!(
+                    "tokenstat-hostd: systemctl restart failed ({status}), keeping this process"
+                );
+            }
+            Err(error) => {
+                eprintln!(
+                    "tokenstat-hostd: could not ask systemd to restart ({error}), keeping this process"
+                );
+            }
+        }
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        eprintln!(
+            "tokenstat-hostd: updated on disk, stopping so the supervisor starts the new version"
+        );
+        std::process::exit(0);
+    }
 }
 
 /// Look for a release once a day, and finish what a busy machine deferred.
@@ -412,10 +474,10 @@ fn tick() -> Duration {
     // Already installed and waiting for a quiet moment. Do not go looking for
     // another release: the answer is on disk, the restart is what is left.
     if restart_pending().load(Ordering::Acquire) {
-        if live_work() == 0 && begin_restart() {
-            // The process is going away. Sleep long rather than loop.
-            return CHECK_EVERY;
+        if live_work() == 0 {
+            let _ = begin_restart();
         }
+        // Linux asks systemd and may still be here if that call fails.
         return RESTART_RETRY_EVERY;
     }
     let Ok(cli) = cli_path() else {
@@ -429,8 +491,8 @@ fn tick() -> Duration {
             restart_pending().store(true, Ordering::Release);
             record_update(&report.from, &report.to);
             let _ = stage_app_image();
-            if live_work() == 0 && begin_restart() {
-                return CHECK_EVERY;
+            if live_work() == 0 {
+                let _ = begin_restart();
             }
             eprintln!(
                 "tokenstat-hostd: updated to {} on disk, restarting when nothing is running",
@@ -477,6 +539,7 @@ mod tests {
     #[test]
     fn a_restart_is_refused_where_nothing_would_start_this_again() {
         assert!(!crate::host_policy::supervisor_would_restart_this_process());
+        assert!(!crate::host_policy::this_process_can_self_restart());
         assert!(
             !begin_restart(),
             "begin_restart must refuse without a supervisor rather than exit the test runner"

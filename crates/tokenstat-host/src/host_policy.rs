@@ -325,6 +325,25 @@ pub(crate) fn supervisor_would_restart_this_process() -> bool {
     platform_would_restart()
 }
 
+/// Whether this running process may stop expecting to come back.
+///
+/// A unit file that says `Restart=always` is not enough on Linux: a login
+/// session next to that file is still a login. Only the host unit itself
+/// is safe to bounce.
+pub(crate) fn this_process_can_self_restart() -> bool {
+    if !supervisor_would_restart_this_process() {
+        return false;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        this_process_is_the_host_unit().is_some()
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        true
+    }
+}
+
 /// A loaded launch agent with KeepAlive on is the only launchd arrangement
 /// that starts this again by itself. With Always-on off the app owns the
 /// helper's lifetime and starts one when somebody opens it.
@@ -354,6 +373,60 @@ fn platform_would_restart() -> bool {
 #[cfg(not(any(unix, windows)))]
 fn platform_would_restart() -> bool {
     false
+}
+
+/// Which systemd unit, if any, is supervising this process.
+///
+/// A login `session-*.scope` is not a supervisor we may stop from: exiting
+/// there can deactivate the session, and with `KillUserProcesses` that
+/// SIGKILLs everything in it. Only `tokenstat-host.service` under
+/// `system.slice` or a user manager is safe to bounce.
+#[cfg(any(test, all(unix, not(target_os = "macos"))))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LinuxHostUnit {
+    System,
+    User,
+}
+
+/// Parse `/proc/self/cgroup` text. Split out so tests do not need Linux.
+#[cfg(any(test, all(unix, not(target_os = "macos"))))]
+pub(crate) fn linux_host_unit_from_cgroup(groups: &str) -> Option<LinuxHostUnit> {
+    groups.lines().find_map(|line| {
+        let path = line.splitn(3, ':').nth(2)?;
+        let mut in_unit = false;
+        let mut in_session = false;
+        let mut slice: Option<LinuxHostUnit> = None;
+        for part in path.split('/') {
+            if part == "tokenstat-host.service" {
+                in_unit = true;
+            }
+            if part == "system.slice" {
+                slice = Some(LinuxHostUnit::System);
+            }
+            if part == "user.slice" {
+                slice = Some(LinuxHostUnit::User);
+            }
+            if part.starts_with("session-") && part.ends_with(".scope") {
+                in_session = true;
+            }
+        }
+        if in_unit && !in_session { slice } else { None }
+    })
+}
+
+/// Whether this process is the installed host unit, not a login session.
+#[cfg(all(unix, not(target_os = "macos"), not(test)))]
+pub(crate) fn this_process_is_the_host_unit() -> Option<LinuxHostUnit> {
+    fs::read_to_string("/proc/self/cgroup")
+        .ok()
+        .and_then(|text| linux_host_unit_from_cgroup(&text))
+}
+
+/// Tests never look like a host unit, so a restart cannot call `systemctl`
+/// or `exit` inside the runner.
+#[cfg(test)]
+pub(crate) fn this_process_is_the_host_unit() -> Option<LinuxHostUnit> {
+    None
 }
 
 /// Whether an installed unit says systemd will bring this back.
@@ -779,6 +852,38 @@ mod tests {
         // Under test the answer is always no, whatever this machine has
         // installed, because a test binary has no supervisor at all.
         assert!(!supervisor_would_restart_this_process());
+        assert!(!this_process_can_self_restart());
+    }
+
+    #[test]
+    fn a_login_session_cgroup_is_not_a_host_unit() {
+        assert_eq!(
+            linux_host_unit_from_cgroup("0::/system.slice/tokenstat-host.service"),
+            Some(LinuxHostUnit::System)
+        );
+        assert_eq!(
+            linux_host_unit_from_cgroup(
+                "0::/user.slice/user-0.slice/user@0.service/app.slice/tokenstat-host.service"
+            ),
+            Some(LinuxHostUnit::User)
+        );
+        assert_eq!(
+            linux_host_unit_from_cgroup("0::/user.slice/user-0.slice/session-1997.scope"),
+            None,
+            "a login session must not be treated as a supervisor we may stop"
+        );
+        assert_eq!(
+            linux_host_unit_from_cgroup(
+                "0::/user.slice/user-0.slice/session-1997.scope/tokenstat-host.service"
+            ),
+            None
+        );
+        assert_eq!(
+            linux_host_unit_from_cgroup("0::/system.slice/tokenstat-host.service.other"),
+            None
+        );
+        assert_eq!(linux_host_unit_from_cgroup(""), None);
+        assert!(this_process_is_the_host_unit().is_none());
     }
 
     #[test]

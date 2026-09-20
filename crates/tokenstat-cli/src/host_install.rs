@@ -358,7 +358,7 @@ fn linux_unit(binary: &Path, system: bool, run_as: Option<&str>) -> Result<Strin
         None => String::new(),
     };
     Ok(format!(
-        "[Unit]\nDescription=tokenstat remote host\nAfter=network-online.target\n\n[Service]\nExecStart=\"{path}\"\n{account}Restart=always\nRestartSec=2\nSyslogIdentifier=tokenstat-hostd\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectKernelTunables=yes\nProtectControlGroups=yes\nRestrictSUIDSGID=yes\n\n[Install]\nWantedBy={target}\n"
+        "[Unit]\nDescription=tokenstat remote host\nAfter=network-online.target\nStartLimitIntervalSec=60\nStartLimitBurst=5\nFailureAction=none\nSuccessAction=none\n\n[Service]\nExecStart=\"{path}\"\n{account}Restart=always\nRestartSec=2\nKillMode=mixed\nTimeoutStopSec=20\nSyslogIdentifier=tokenstat-hostd\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectKernelTunables=yes\nProtectControlGroups=yes\nRestrictSUIDSGID=yes\n\n[Install]\nWantedBy={target}\n"
     ))
 }
 
@@ -377,6 +377,10 @@ mod tests {
     fn linux_service_survives_logout_without_blocking_workspace_writes() {
         let unit = linux_unit(Path::new("/opt/tokenstat tools/host%$\"d"), false, None).unwrap();
         assert!(unit.contains("Restart=always\nRestartSec=2"));
+        assert!(unit.contains("KillMode=mixed"));
+        assert!(unit.contains("FailureAction=none"));
+        assert!(unit.contains("SuccessAction=none"));
+        assert!(unit.contains("StartLimitBurst=5"));
         assert!(unit.contains("WantedBy=default.target"));
         assert!(unit.contains("host%%$$\\\"d"));
         for setting in [
