@@ -986,7 +986,7 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
             await Self.frameScheduler.acquire(id: sessionID)
             let end = min(start + slice, all.count)
             let began = ContinuousClock.now
-            view.feed(byteArray: all[start..<end])
+            view.feedOutput(all[start..<end])
             Self.frameScheduler.record(ContinuousClock.now - began)
             Self.frameScheduler.finish(id: sessionID)
             start = end

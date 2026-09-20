@@ -38,7 +38,7 @@ import SwiftTerm
 ///
 /// Anything else that carries plain text is inserted as text, which is what a
 /// terminal does with a dragged selection.
-final class TerminalDropView: TerminalView {
+final class TerminalDropView: TerminalSelectionView {
     /// The session that owns this view. Weak because the ownership runs the
     /// other way: the session holds the emulator for its whole life.
     weak var session: TerminalSession?

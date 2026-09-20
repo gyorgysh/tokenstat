@@ -114,7 +114,9 @@ enum TerminalMouseForwarder {
               window.isKeyWindow,
               let view = window.contentView?.hitTest(event.locationInWindow) as? TerminalDropView,
               let terminal = view.terminal,
-              view.allowMouseReporting,
+              // Guest mouse mode is the authority. SwiftTerm's
+              // allowMouseReporting stays false while mode is off so a drag
+              // selection survives feed, and must not gate SGR once mode is on.
               terminal.mouseMode != .off,
               terminal.isCurrentBufferAlternate,
               view.session != nil

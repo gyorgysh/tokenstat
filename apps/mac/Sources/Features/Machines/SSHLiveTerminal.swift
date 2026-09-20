@@ -163,7 +163,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     var view: TerminalView {
         if let terminalView { return terminalView }
         #if os(macOS)
-        let made = TerminalView(frame: .zero)
+        let made = TerminalSelectionView(frame: .zero)
         made.font = AppFonts.terminal(size: 12)
         #else
         let made = TerminalView(frame: .zero)
@@ -206,7 +206,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
                 // one of them comes off.
                 if chunk.dropped {
                     withdrawPredictions()
-                    view.feed(text: "\r\n[tokenstat: older output was dropped]\r\n")
+                    feedView(text: "\r\n[tokenstat: older output was dropped]\r\n")
                 }
                 if !chunk.data.isEmpty {
                     offset = chunk.nextOffset
@@ -217,7 +217,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
                     // twice. Both happen inside one turn on the main actor, so
                     // there is no frame in which the line is missing.
                     let rest = reconcilePredictions(with: chunk.data)
-                    if !rest.isEmpty { view.feed(byteArray: outputFilter.filter(rest)[...]) }
+                    if !rest.isEmpty { feedView(outputFilter.filter(rest)[...]) }
                     // The prompt may have moved down a line, or the shell may
                     // have redrawn it. The palette belongs beside the cursor,
                     // so it follows rather than being left where it was.
@@ -566,7 +566,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
             if lineEchoes {
                 if predicted.isEmpty { predictedSince = Date() }
                 predicted.append(byte)
-                view.feed(byteArray: ArraySlice([byte]))
+                feedView(ArraySlice([byte]))
             } else if !lineSilent {
                 // Sent, not drawn. These are the characters that find out
                 // whether the line echoes at all.
@@ -586,7 +586,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
                 endPredictionLine()
             } else {
                 predicted.removeLast()
-                view.feed(byteArray: ArraySlice(Self.eraseCell))
+                feedView(ArraySlice(Self.eraseCell))
             }
             if !probing.isEmpty { probing.removeLast() }
         default:
@@ -684,7 +684,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         for _ in predicted { undo.append(contentsOf: Self.eraseCell) }
         predicted.removeAll()
         predictedSince = nil
-        view.feed(byteArray: ArraySlice(undo))
+        feedView(ArraySlice(undo))
     }
 
     /// Stop tracking guesses without touching the screen, for the cases where
@@ -793,6 +793,24 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
 
     /// Rub out the cell to the left of the cursor.
     private static let eraseCell: [UInt8] = [0x08, 0x20, 0x08]
+
+    /// Feed the emulator. On Mac this keeps a drag selection unless the guest
+    /// enabled mouse mode; on iOS the phone's scroll toggle owns that flag.
+    private func feedView(_ bytes: ArraySlice<UInt8>) {
+        #if os(macOS)
+        view.feedOutput(bytes)
+        #else
+        view.feed(byteArray: bytes)
+        #endif
+    }
+
+    private func feedView(text: String) {
+        #if os(macOS)
+        view.feedOutput(text)
+        #else
+        view.feed(text: text)
+        #endif
+    }
 
     /// How many characters are typed into an unproven line before the guessing
     /// gives up on it. Small: a line that has echoed nothing by the sixth

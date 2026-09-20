@@ -73,8 +73,7 @@ enum TerminalWheelForwarder {
         // Only when a program is both full screen and listening. In the normal
         // buffer the scrollback is the right answer and the user wants it, so
         // the event goes on to SwiftTerm untouched.
-        guard view.allowMouseReporting,
-              terminal.mouseMode != .off,
+        guard terminal.mouseMode != .off,
               terminal.isCurrentBufferAlternate
         else { return event }
 
