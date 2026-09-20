@@ -157,10 +157,8 @@ const PROFILES: &[Profile] = &[
         bypass_args: &["--auto"],
         harness_id: Some("opencode"),
         symbol: None,
-        install_command: Some(
-            "curl -fsSL https://raw.githubusercontent.com/anomalyco/opencode/v2/install | bash",
-        ),
-        install_command_windows: None,
+        install_command: Some("curl -fsSL https://opencode.ai/v2/install | bash"),
+        install_command_windows: Some("npm install -g @opencode/cli"),
         install_dirs: &[".opencode/bin"],
         open_url: None,
     },
@@ -1585,7 +1583,7 @@ mod tests {
             .filter(|p| p.install_command.is_some() && p.install_command_windows.is_none())
             .map(|p| p.id)
             .collect();
-        assert_eq!(missing, ["opencode2", "cursor_agent"], "{missing:?}");
+        assert_eq!(missing, ["cursor_agent"], "{missing:?}");
     }
 
     /// Muse's Windows installer, pinned by value. Meta publishes the `.ps1`
@@ -1613,9 +1611,10 @@ mod tests {
         assert_eq!(next.command, "opencode2");
         assert_eq!(next.harness_id, Some("opencode"));
         let command = next.install_command.expect("a bundled installer");
-        assert!(
-            command.starts_with("curl -fsSL https://raw.githubusercontent.com/anomalyco/opencode/"),
-            "{command}"
+        assert_eq!(command, "curl -fsSL https://opencode.ai/v2/install | bash");
+        assert_eq!(
+            next.install_command_windows,
+            Some("npm install -g @opencode/cli")
         );
     }
 

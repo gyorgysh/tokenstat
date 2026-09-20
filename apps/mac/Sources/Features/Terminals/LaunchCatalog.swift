@@ -110,7 +110,7 @@ struct LaunchProfile: Identifiable, Sendable {
             bypassArgs: ["--auto"],
             harnessID: "opencode", symbol: nil,
             installDirs: [".opencode/bin"],
-            installCommand: "curl -fsSL https://raw.githubusercontent.com/anomalyco/opencode/v2/install | bash"
+            installCommand: "curl -fsSL https://opencode.ai/v2/install | bash"
         ),
         LaunchProfile(
             id: "grok", name: "Grok Build", command: "grok", args: [],
