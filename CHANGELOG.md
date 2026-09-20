@@ -3,7 +3,7 @@
 Every version of tokenstat: the CLI, desktop and mobile clients, host daemon,
 and MCP server. They develop together under one version number. A stable
 release carries every CLI target and the macOS desktop app. The Windows
-desktop and Android builds are still previews. Newest first.
+desktop is a review build. Android is in review on Google Play. Newest first.
 
 The Unreleased section is always the complete, person-facing delta from the
 latest `v<version>` tag to `main`. Work that has not appeared in a shipped app
@@ -17,18 +17,17 @@ at the end.
 
 Windows chat gains Follow, collapse, and Show/Hide output. Switching
 windows no longer kills a terminal or SSH session, the editor stays
-responsive on large files, and Preview builds install with a branded
-setup that updates on that channel. Mac terminals keep a drag selection
-while Codex streams.
+responsive on large files, and the branded Windows installer ships on
+the GitHub Release. Mac terminals keep a drag selection while Codex
+streams.
 
 ### Added
 
 - Follow, Jump to latest, and Show/Hide output on Windows chat, matching
   the Mac. Long tool output starts collapsed.
 - A branded Windows installer, `tokenstat-<ver>-windows-x64-setup.exe`,
-  with the tokenstat mark and LICENSE. Preview builds update from the
-  rolling preview tag and stay there. Preview never jumps to a stable
-  release, and a stable install never takes a Preview update.
+  with the tokenstat mark and LICENSE. It ships on the versioned GitHub
+  Release. The website marks the Windows app as a review build.
 
 ### Changed
 
@@ -37,9 +36,16 @@ while Codex streams.
   file no longer stalls the window.
 - Installing OpenCode 2 from the launcher uses the official opencode.ai
   v2 installer. On Windows the tile now offers `npm install -g @opencode/cli`.
+- Unsigned `-dev` artifacts stay in GitHub Actions. Preview no longer
+  publishes a GitHub Release.
 
 ### Fixed
 
+- Several windows of the same harness in one folder each show their own
+  usage. They used to share one log's totals, including when two windows
+  started close together.
+- Collapsing the Windows left sidebar no longer leaves GLOBAL on screen
+  or hangs the window.
 - Switching windows, terminals, or SSH sessions on Windows no longer
   closes the process or leaves a blank pane.
 - Drag-selecting text in a Mac terminal keeps the highlight while Codex

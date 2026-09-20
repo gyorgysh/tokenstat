@@ -53,6 +53,10 @@ public sealed partial class MainWindow : Window
     private readonly SolidColorBrush _chromeBackground = new(Theme.Background);
     private readonly SolidColorBrush _chromeSidebar = new(Theme.Sidebar);
     private readonly SolidColorBrush _chromeBorder = new(Theme.Border);
+    private readonly NavigationViewItemHeader _globalHeader = new()
+    {
+        Content = "GLOBAL",
+    };
     private readonly NavigationViewItemHeader _workspacesHeader = new()
     {
         Content = "WORKSPACES",
@@ -92,12 +96,19 @@ public sealed partial class MainWindow : Window
     {
         if (!_changingPanePreview) _hoverExpanded = false;
         _paneHoverTimer?.Stop();
+        SyncPaneChrome();
+        // Do not mutate IsExpanded inside the IsPaneOpen callback.
+        DispatcherQueue.TryEnqueue(ApplyCompactExpansion);
+    }
+
+    private void ApplyCompactExpansion()
+    {
         if (!_nav.IsPaneOpen)
         {
             foreach (var row in NavItems(_nav.MenuItems))
             {
                 if (row.IsExpanded && row.Tag is string tag) _compactExpanded.Add(tag);
-                row.IsExpanded = false;
+                if (row.Tag is string) row.IsExpanded = false;
             }
         }
         else
@@ -166,9 +177,8 @@ public sealed partial class MainWindow : Window
         }
         _nav.PaneCustomContent = pinned;
         _nav.MenuItems.Add(new NavigationViewItemSeparator());
-        var global = new NavigationViewItem { Content = "GLOBAL", SelectsOnInvoked = false, IsExpanded = true };
-        foreach (var section in Sections.Everywhere) global.MenuItems.Add(Item(section));
-        _nav.MenuItems.Add(global);
+        _nav.MenuItems.Add(_globalHeader);
+        foreach (var section in Sections.Everywhere) _nav.MenuItems.Add(Item(section));
         _nav.MenuItems.Add(new NavigationViewItemSeparator());
         _nav.MenuItems.Add(SshGroup());
         _nav.MenuItems.Add(new NavigationViewItemSeparator());
@@ -1751,7 +1761,7 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// Keep the pane chrome on the pane state: the titlebar split follows the
     /// pane edge, and group headers hide while the pane collapses to icons,
-    /// where they would otherwise render as clipped stubs like "WOR".
+    /// where they would otherwise render as clipped stubs like "GLO" or "WOR".
     /// </summary>
     private void SyncPaneChrome()
     {

@@ -123,10 +123,6 @@ struct AppUpdateCheckParams {
     /// Only clients that understand a paused check may receive retryAt instead
     /// of an error. Older clients must not mistake it for an up-to-date result.
     supports_retry_after: bool,
-    /// Read the rolling GitHub prerelease named `preview`. Preview builds
-    /// send this when `PREVIEW.txt` sits next to the exe. Stable builds omit
-    /// it, so they cannot fetch unsigned -dev. bits.
-    preview: bool,
 }
 
 impl Default for CalendarParams {
@@ -331,7 +327,7 @@ struct PtySpawnParams {
 /// sampler has not reached yet simply carries no verdict, which a client
 /// reads as "not known" rather than as "idle".
 #[cfg(feature = "local-host")]
-fn add_activity(item: &mut Value) {
+fn add_activity(item: &mut Value, siblings: &[(String, u64)]) {
     // Started here rather than at daemon boot: a host that never lists a
     // terminal never needs a sampling thread, and this is idempotent. The
     // first verdict lands a tick later, which is why an unknown session
@@ -353,7 +349,41 @@ fn add_activity(item: &mut Value) {
             map.insert("attention".into(), json!(attention.as_str()));
         }
     }
-    add_meter(item);
+    add_meter(item, siblings);
+}
+
+/// Other live processes of the same harness in the same folder, keyed by pty id.
+/// Values keep the sibling's id as well as its spawn time so equal timestamps
+/// still claim different logs.
+#[cfg(feature = "local-host")]
+fn meter_sibling_starts(
+    sessions: &[tokenstat_pty::SessionInfo],
+) -> HashMap<String, Vec<(String, u64)>> {
+    let mut groups: HashMap<(String, String), Vec<(String, u64)>> = HashMap::new();
+    for session in sessions {
+        let Some(harness) = crate::session_meter::harness_name(&session.command) else {
+            continue;
+        };
+        if session.cwd.is_empty() || session.started_at_ms == 0 {
+            continue;
+        }
+        groups
+            .entry((harness.to_string(), session.cwd.clone()))
+            .or_default()
+            .push((session.id.clone(), session.started_at_ms));
+    }
+    let mut out = HashMap::new();
+    for members in groups.values() {
+        for (id, _) in members {
+            let others: Vec<(String, u64)> = members
+                .iter()
+                .filter(|(other, _)| other != id)
+                .cloned()
+                .collect();
+            out.insert(id.clone(), others);
+        }
+    }
+    out
 }
 
 /// Fold the live token meter onto the same session object.
@@ -361,8 +391,12 @@ fn add_activity(item: &mut Value) {
 /// Independent of the CPU sampler: a session the sampler has not reached
 /// can still have a log, and a session with no log must not grow fake
 /// zeros. Fields are omitted until there is a real reading.
+///
+/// `siblings` is every other live process of the same harness in the same
+/// folder, as `(id, started_at_ms)`. Empty when this row is the only one,
+/// which is the independent-pick fallback.
 #[cfg(feature = "local-host")]
-fn add_meter(item: &mut Value) {
+fn add_meter(item: &mut Value, siblings: &[(String, u64)]) {
     let command = item
         .get("command")
         .and_then(|v| v.as_str())
@@ -373,6 +407,11 @@ fn add_meter(item: &mut Value) {
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    let session_id = item
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let started_at_ms = item
         .get("startedAtMs")
         .and_then(|v| v.as_u64())
@@ -380,7 +419,13 @@ fn add_meter(item: &mut Value) {
     if command.is_empty() || cwd.is_empty() || started_at_ms == 0 {
         return;
     }
-    let Some(meter) = crate::session_meter::reading(&command, &cwd, started_at_ms) else {
+    let sibling_refs: Vec<(&str, u64)> = siblings
+        .iter()
+        .map(|(id, started)| (id.as_str(), *started))
+        .collect();
+    let Some(meter) =
+        crate::session_meter::reading(&command, &cwd, &session_id, started_at_ms, &sibling_refs)
+    else {
         // A harness we can meter but which has not written a turn yet starts
         // at zero rather than at nothing. The row then counts up from $0.00
         // instead of showing the command and later jumping to a figure.
@@ -3399,11 +3444,7 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
                     Some(app) => vec![app, host.as_str()],
                     None => vec![host.as_str()],
                 };
-                let check = if p.preview {
-                    tokenstat_sync::check_preview_against(&installed)
-                } else {
-                    tokenstat_sync::check_latest_against(&installed)
-                };
+                let check = tokenstat_sync::check_latest_against(&installed);
                 check
                     .map(|check| {
                         json!({
@@ -3415,7 +3456,7 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
                             // rather than the release page it is one click inside.
                             "dmgUrl": check.app_dmg_url,
                             // Windows desktop zip. Distinct from the CLI's
-                            // target-triple zip. Unsigned preview builds skip
+                            // target-triple zip. Unsigned Actions builds skip
                             // Authenticode in the app, the way a local Mac build
                             // skips Developer ID.
                             "winZipUrl": check.app_win_url,
@@ -3447,17 +3488,9 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
                 .map_err(|e| e.to_string()),
 
             // Same contract as `app.updateDownload`, for the Windows zip.
-            "app.updateDownloadWin" => {
-                let p: AppUpdateCheckParams = parse(params).unwrap_or_default();
-                let download = if p.preview {
-                    tokenstat_sync::download_windows_preview_archive()
-                } else {
-                    tokenstat_sync::download_windows_app_archive()
-                };
-                download
-                    .map(|path| json!({"path": path.display().to_string()}))
-                    .map_err(|e| e.to_string())
-            }
+            "app.updateDownloadWin" => tokenstat_sync::download_windows_app_archive()
+                .map(|path| json!({"path": path.display().to_string()}))
+                .map_err(|e| e.to_string()),
 
             "sync.scheduleStatus" => sync_schedule_status(),
 
@@ -3573,14 +3606,21 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
             let include_remote = serde_json::from_str::<PtyListParams>(params.trim())
                 .map(|p| p.include_remote)
                 .unwrap_or(true);
-            let mut items: Vec<Value> = match serde_json::to_value(tokenstat_pty::manager().list())
-            {
+            let sessions = tokenstat_pty::manager().list();
+            let siblings = meter_sibling_starts(&sessions);
+            let mut items: Vec<Value> = match serde_json::to_value(sessions) {
                 Ok(Value::Array(items)) => items,
                 Ok(_) => return Err("pty.list returned a non-array".into()),
                 Err(e) => return Err(e.to_string()),
             };
             for item in &mut items {
-                add_activity(item);
+                let id = item
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let empty: &[(String, u64)] = &[];
+                add_activity(item, siblings.get(&id).map(Vec::as_slice).unwrap_or(empty));
             }
             if include_remote {
                 // One level deep on purpose: each peer is asked with
@@ -3610,9 +3650,14 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                 if let Some(viewer) = p.viewer.as_deref().filter(|v| !v.is_empty()) {
                     let _ = manager.touch_viewer(&p.id, viewer);
                 }
+                let siblings = meter_sibling_starts(&manager.list());
                 let info = manager.info(&p.id).map_err(|e| e.to_string())?;
                 let mut value = serde_json::to_value(info).map_err(|e| e.to_string())?;
-                add_activity(&mut value);
+                let empty: &[(String, u64)] = &[];
+                add_activity(
+                    &mut value,
+                    siblings.get(&p.id).map(Vec::as_slice).unwrap_or(empty),
+                );
                 Ok(value)
             })
         }

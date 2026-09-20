@@ -82,9 +82,11 @@ stack at all. Front ends call one function, `tokenstat-host::dispatch`.
 
 Stable CLI and macOS desktop builds are on
 [GitHub Releases](https://github.com/gyorgysh/tokenstat/releases) and at
-[tokenstat.ai](https://tokenstat.ai). Windows desktop and Android builds stay in
+[tokenstat.ai](https://tokenstat.ai). The Windows installer ships on the
+same Release. The website marks that app as a review build. Android is
+in review on Google Play. Unsigned `-dev` artifacts for testers stay in
 the [Preview workflow](https://github.com/gyorgysh/tokenstat/actions/workflows/preview.yml)
-until those clients are ready for stable releases.
+and are never attached to a GitHub Release.
 
 ### macOS app
 
@@ -93,12 +95,12 @@ that it keeps itself current. It fetches each release, checks the download
 against the release checksums and against the signature macOS itself would
 check, installs it, and then offers a relaunch. It never restarts on its own.
 
-### Windows app preview
+### Windows app
 
-Run the Preview workflow with `windows` selected, download its artifact, unzip
-it, and double-click `Tokenstat.exe`. Preview builds are unsigned development
-artifacts and are deliberately not attached to GitHub Releases yet. Do not put
-the CLI in the same folder as the app. Windows paths are case-insensitive.
+Download `tokenstat-<ver>-windows-x64-setup.exe` from the GitHub Release or
+from [tokenstat.ai](https://tokenstat.ai/download). The website marks it as
+a review build. Do not put the CLI in the same folder as the app. Windows
+paths are case-insensitive.
 
 ### Command line
 

@@ -18,6 +18,7 @@
 //! field in every other record. Nothing from a prompt or response reaches a
 //! [`UsageEvent`].
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -102,6 +103,19 @@ pub fn wires_for_cwd(root: &Path, cwd: &str) -> Vec<PathBuf> {
         .collect();
     files.sort();
     files
+}
+
+/// Wires grouped by session directory under one workspace.
+///
+/// Kimi layout is `sessions/<wd>/<session>/agents/<id>/wire.jsonl`. The live
+/// meter picks a session, then folds every wire in it (main plus subagents).
+pub fn session_wires_for_cwd(root: &Path, cwd: &str) -> Vec<(String, Vec<PathBuf>)> {
+    let mut by_session: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
+    for path in wires_for_cwd(root, cwd) {
+        let (_, session, _) = identity_from_path(&path);
+        by_session.entry(session).or_default().push(path);
+    }
+    by_session.into_iter().collect()
 }
 
 #[derive(Debug, Default)]
@@ -334,5 +348,31 @@ mod tests {
         assert!(key.starts_with("wd_demo-app_"));
         assert_eq!(key.len(), "wd_demo-app_".len() + 12);
         assert_eq!(key, workspace_key("/Users/x/git/Demo App"));
+    }
+
+    #[test]
+    fn session_wires_group_main_and_subagent_under_one_session() {
+        let root = std::env::temp_dir().join(format!(
+            "tokenstat-kimi-wires-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let cwd = "/Users/x/git/demo";
+        let session = root
+            .join("sessions")
+            .join(workspace_key(cwd))
+            .join("sess-a");
+        std::fs::create_dir_all(session.join("agents/main")).unwrap();
+        std::fs::create_dir_all(session.join("agents/worker")).unwrap();
+        std::fs::write(session.join("agents/main/wire.jsonl"), "{}\n").unwrap();
+        std::fs::write(session.join("agents/worker/wire.jsonl"), "{}\n").unwrap();
+        let grouped = session_wires_for_cwd(&root, cwd);
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(grouped.len(), 1);
+        assert_eq!(grouped[0].0, "sess-a");
+        assert_eq!(grouped[0].1.len(), 2);
     }
 }

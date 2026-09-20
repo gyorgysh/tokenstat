@@ -1,10 +1,9 @@
 name: preview
 
 # Unsigned -dev artifacts for testers. Never the `release` environment,
-# never signing secrets. A labeled PR stays artifacts-only (14 days).
-# workflow_dispatch of windows or all also publishes a rolling GitHub
-# prerelease tagged `preview` so an installed Preview build can
-# auto-update. That tag is not a versioned Release.
+# never signing secrets, never a GitHub Release. A labeled PR and a
+# workflow_dispatch stay artifacts-only (14 days). The Windows installer
+# that people download ships on the versioned GitHub Release.
 #
 # Trigger:
 #   Actions → Preview → Run workflow, or add the `preview` label to a PR.
@@ -133,55 +132,6 @@ jobs:
             dist/${{ steps.package.outputs.setup }}.sha256
             dist/SHA256SUMS
           retention-days: 14
-
-  publish-windows-preview:
-    name: publish windows preview
-    needs: [version, windows]
-    if: >
-      github.event_name == 'workflow_dispatch' &&
-      (github.event.inputs.platforms == 'all' ||
-       github.event.inputs.platforms == 'windows')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: preview-windows-${{ github.run_number }}
-          path: dist
-
-      - name: Publish rolling preview prerelease
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          notes="Unsigned Preview ${VERSION}. Auto-update stays on this prerelease and does not promote to a stable Release."
-          files=(
-            dist/tokenstat-${VERSION}-windows-x64.zip
-            dist/tokenstat-${VERSION}-windows-x64-setup.exe
-            dist/SHA256SUMS
-          )
-          for f in "${files[@]}"; do
-            test -f "$f"
-          done
-          if gh release view preview >/dev/null 2>&1; then
-            # Each run names the zip after its -dev. version, so --clobber
-            # would leave the previous payload on the tag. Drop those first.
-            while IFS= read -r name; do
-              case "$name" in
-                tokenstat-*-windows-*.zip|tokenstat-*-windows-*-setup.exe|*.sha256|SHA256SUMS)
-                  gh release delete-asset preview "$name" --yes
-                  ;;
-              esac
-            done < <(gh release view preview --json assets --jq '.assets[].name')
-            gh release upload preview "${files[@]}"
-            gh release edit preview --prerelease --title "tokenstat preview" --notes "$notes"
-          else
-            gh release create preview --prerelease --title "tokenstat preview" --notes "$notes" "${files[@]}"
-          fi
 
   mac:
     name: mac app

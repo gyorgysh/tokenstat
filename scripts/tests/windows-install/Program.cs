@@ -22,9 +22,9 @@ void Reject(string json)
     throw new Exception("Untrusted signature accepted: " + json);
 }
 Check(AppInstaller.ReadVerifiedPublisher("{\"status\":\"NotSigned\"}") is null, "Unsigned local builds remain supported.");
-Check(AppUpdateModel.ChannelAccepts(true, "1.0.7-dev.12.abc1234"), "Preview accepts a -dev. latest.");
-Check(!AppUpdateModel.ChannelAccepts(true, "1.0.7"), "Preview refuses a stable latest.");
-Check(!AppUpdateModel.ChannelAccepts(false, "1.0.7-dev.12.abc1234"), "Stable refuses a Preview latest.");
+Check(!AppUpdateModel.ChannelAccepts(true, "1.0.7-dev.12.abc1234"), "A -dev. zip is never an update.");
+Check(AppUpdateModel.ChannelAccepts(true, "1.0.7"), "An Actions install may take the GitHub Release.");
+Check(!AppUpdateModel.ChannelAccepts(false, "1.0.7-dev.12.abc1234"), "Stable refuses a -dev. latest.");
 Check(AppUpdateModel.ChannelAccepts(false, "1.0.7"), "Stable accepts a stable latest.");
 Check(!AppUpdateModel.ChannelAccepts(true, ""), "Empty latest is not an update.");
 Check(!SelfInstall.IsPreviewChannel, "Test host is not a Preview install.");

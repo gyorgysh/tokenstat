@@ -54,6 +54,11 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
     opencode::parse_db_in_as(path, SourceId::Kilo, directory, since_ms)
 }
 
+/// Conversation start per session in this folder. Same schema as OpenCode.
+pub fn session_births(path: &Path, directory: &str) -> Vec<(i64, String)> {
+    opencode::session_births(path, directory)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

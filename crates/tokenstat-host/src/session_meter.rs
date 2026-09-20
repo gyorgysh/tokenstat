@@ -28,8 +28,11 @@
 //! A harness whose log cannot say which folder it belongs to keeps CPU · RAM
 //! rather than being given somebody else's numbers.
 //!
-//! Two sessions of the same harness in one folder share the newest log: that
-//! is a known limitation, not a guess dressed up as identity.
+//! Several processes of the same harness in one folder share the folder's
+//! logs in spawn order: the first process claims the first log born at or
+//! after it, the second claims the next, and so on. Picking independently
+//! would give every close-started window the same first log. A process
+//! whose own log has not been written yet has no reading, not its sibling's.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -67,25 +70,39 @@ pub(crate) struct MeterReading {
 ///
 /// `started_at_ms` is when the process was spawned. Nothing older than that
 /// belongs to it, and a session with nothing newer gets no reading at all.
-pub(crate) fn reading(command: &str, cwd: &str, started_at_ms: u64) -> Option<MeterReading> {
+/// `session_id` is this pty's id. `siblings` is every other live process of
+/// the same harness in the same folder, as `(id, started_at_ms)`, so two
+/// windows that share a spawn timestamp still claim different logs.
+pub(crate) fn reading(
+    command: &str,
+    cwd: &str,
+    session_id: &str,
+    started_at_ms: u64,
+    siblings: &[(&str, u64)],
+) -> Option<MeterReading> {
     if cwd.is_empty() {
         return None;
     }
     let harness = harness_name(command)?;
+    let spawn = SpawnMatch {
+        id: session_id,
+        started_at_ms,
+        siblings,
+    };
     let events = match harness {
-        "claude" => claude_events(cwd)?,
-        "grok" => grok_events(cwd)?,
-        "codex" => codex_events(cwd)?,
-        "opencode" => opencode_events(cwd, started_at_ms)?,
-        "kilo" => kilo_events(cwd, started_at_ms)?,
-        "hermes" => hermes_events(cwd, started_at_ms)?,
-        "pi" => pi_events(cwd)?,
-        "dsh" => dsh_events(cwd)?,
-        "muse" => muse_events(cwd)?,
-        "devin" => devin_events(cwd, started_at_ms)?,
-        "kimi" => kimi_events(cwd)?,
-        "qwen" => qwen_events(cwd)?,
-        "antigravity" => antigravity_events(cwd)?,
+        "claude" => claude_events(cwd, spawn)?,
+        "grok" => grok_events(cwd, spawn)?,
+        "codex" => codex_events(cwd, spawn)?,
+        "opencode" => opencode_events(cwd, spawn)?,
+        "kilo" => kilo_events(cwd, spawn)?,
+        "hermes" => hermes_events(cwd, spawn)?,
+        "pi" => pi_events(cwd, spawn)?,
+        "dsh" => dsh_events(cwd, spawn)?,
+        "muse" => muse_events(cwd, spawn)?,
+        "devin" => devin_events(cwd, spawn)?,
+        "kimi" => kimi_events(cwd, spawn)?,
+        "qwen" => qwen_events(cwd, spawn)?,
+        "antigravity" => antigravity_events(cwd, spawn)?,
         _ => return None,
     };
     let mine = since(&events, started_at_ms);
@@ -138,6 +155,17 @@ fn grok_billing() -> BillingMode {
 /// can push the same floor down into their own query.
 const GRACE_MS: i64 = 2_000;
 
+/// One live process, plus its siblings in the same folder.
+///
+/// The pty id is the tie-break when two windows share a spawn timestamp,
+/// which Devin's second-resolution `created_at` makes common.
+#[derive(Clone, Copy)]
+struct SpawnMatch<'a> {
+    id: &'a str,
+    started_at_ms: u64,
+    siblings: &'a [(&'a str, u64)],
+}
+
 /// Events this session could have produced.
 ///
 /// Borrowed, not cloned. This runs for every live session on every `pty.list`
@@ -151,6 +179,174 @@ const GRACE_MS: i64 = 2_000;
 fn since(events: &[UsageEvent], started_at_ms: u64) -> Vec<&UsageEvent> {
     let floor = started_at_ms as i64 - GRACE_MS;
     events.iter().filter(|e| e.ts.utc_ms >= floor).collect()
+}
+
+/// The first unmatched log (or session) born at or after this process started.
+///
+/// Live siblings of the same harness and folder are assigned in spawn order,
+/// so two windows started a second apart do not both claim the first file.
+/// Equal spawn times break on pty id, equal births on `T`, so HashMap
+/// iteration cannot hand the same session to two windows. With no siblings
+/// this is the earliest candidate at or after the spawn.
+fn claim_since<T: Ord>(
+    candidates: impl IntoIterator<Item = (i64, T)>,
+    spawn: SpawnMatch<'_>,
+) -> Option<T> {
+    let mut remaining: Vec<(i64, T)> = candidates.into_iter().collect();
+    remaining.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    let mut starts: Vec<(&str, u64, bool)> = spawn
+        .siblings
+        .iter()
+        .map(|(id, started)| (*id, *started, false))
+        .collect();
+    starts.push((spawn.id, spawn.started_at_ms, true));
+    starts.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(b.0)));
+    for (_, start, is_self) in starts {
+        let floor = start as i64 - GRACE_MS;
+        let Some(idx) = remaining.iter().position(|(born, _)| *born >= floor) else {
+            if is_self {
+                return None;
+            }
+            continue;
+        };
+        let item = remaining.remove(idx);
+        if is_self {
+            return Some(item.1);
+        }
+    }
+    None
+}
+
+/// Independent pick, used when this process is the only one in the folder.
+#[cfg(test)]
+fn earliest_since<T: Ord>(
+    candidates: impl IntoIterator<Item = (i64, T)>,
+    started_at_ms: u64,
+) -> Option<T> {
+    claim_since(
+        candidates,
+        SpawnMatch {
+            id: "",
+            started_at_ms,
+            siblings: &[],
+        },
+    )
+}
+
+/// Keep one database session when a folder query returned several.
+///
+/// OpenCode, Kilo, Hermes, Devin and Qwen store every conversation in one
+/// place. Birth must be the conversation start, not the first turn after a
+/// later process's SQL floor, or an older still-writing session looks new
+/// and wins. Empty session ids mean the source does not name conversations,
+/// so the caller keeps the rows it already has. A named session that this
+/// spawn does not own is empty, not the sibling's rows.
+fn pick_session(events: Arc<Vec<UsageEvent>>, spawn: SpawnMatch<'_>) -> Arc<Vec<UsageEvent>> {
+    let births = named_session_births(&events);
+    if births.is_empty() {
+        return events;
+    }
+    pick_named_session(events, births, spawn)
+}
+
+fn named_session_births(events: &[UsageEvent]) -> Vec<(i64, String)> {
+    let mut born: HashMap<&str, i64> = HashMap::new();
+    for event in events {
+        let sid = event.session.as_str();
+        if sid.is_empty() {
+            continue;
+        }
+        let ts = event.ts.utc_ms;
+        born.entry(sid)
+            .and_modify(|existing| *existing = (*existing).min(ts))
+            .or_insert(ts);
+    }
+    born.into_iter()
+        .map(|(id, at)| (at, id.to_string()))
+        .collect()
+}
+
+/// Pick a named session from unfiltered births, then keep that session's rows.
+fn pick_named_session(
+    events: Arc<Vec<UsageEvent>>,
+    births: Vec<(i64, String)>,
+    spawn: SpawnMatch<'_>,
+) -> Arc<Vec<UsageEvent>> {
+    let Some(chosen) = claim_since(births, spawn) else {
+        return Arc::new(Vec::new());
+    };
+    if events.iter().all(|event| event.session == chosen) {
+        return events;
+    }
+    let mine: Vec<UsageEvent> = events
+        .iter()
+        .filter(|event| event.session == chosen)
+        .cloned()
+        .collect();
+    Arc::new(mine)
+}
+
+/// When a log (or session directory) was born, for matching it to a spawn.
+///
+/// The first timestamp in the file is the session start. Creation time is
+/// the fallback when the head has no clock. Modification time is last: a
+/// long-running session is still being written, so mtime is "now" and would
+/// make an hour-old process look like it owns the newest sibling.
+fn file_born_ms(path: &Path, head: Option<&str>) -> i64 {
+    if let Some(head) = head
+        && let Some(ms) = first_timestamp_ms(head)
+    {
+        return ms;
+    }
+    let Ok(meta) = std::fs::metadata(path) else {
+        return 0;
+    };
+    if let Ok(created) = meta.created() {
+        return system_time_ms(created);
+    }
+    meta.modified().ok().map(system_time_ms).unwrap_or(0)
+}
+
+fn system_time_ms(time: SystemTime) -> i64 {
+    time.duration_since(SystemTime::UNIX_EPOCH)
+        .ok()
+        .and_then(|d| i64::try_from(d.as_millis()).ok())
+        .unwrap_or(0)
+}
+
+fn first_timestamp_ms(head: &str) -> Option<i64> {
+    for line in head.lines().take(20) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        for key in ["timestamp", "time", "ts", "recorded_at"] {
+            if let Some(ms) = json_time_ms(&value, key) {
+                return Some(ms);
+            }
+        }
+    }
+    None
+}
+
+fn json_time_ms(value: &serde_json::Value, key: &str) -> Option<i64> {
+    let stamp = value.get(key)?;
+    if let Some(n) = stamp.as_i64() {
+        // Seconds vs milliseconds vs microseconds. Ten billion ms is 1970-04,
+        // so a smaller absolute value is a Unix second. Ten trillion ms is
+        // year 2286, so a larger value is microseconds (Muse `recorded_at`).
+        return Some(if n.abs() < 10_000_000_000 {
+            n.saturating_mul(1_000)
+        } else if n.abs() < 10_000_000_000_000 {
+            n
+        } else {
+            n / 1_000
+        });
+    }
+    stamp
+        .as_str()?
+        .parse::<jiff::Timestamp>()
+        .ok()
+        .map(|t| t.as_millisecond())
 }
 
 /// Sum events into the wire shape. Pure, so tests do not need a home directory.
@@ -390,7 +586,7 @@ pub(crate) fn can_meter(command: &str) -> bool {
     }
 }
 
-fn harness_name(command: &str) -> Option<&'static str> {
+pub(crate) fn harness_name(command: &str) -> Option<&'static str> {
     let name = command.rsplit('/').next().unwrap_or(command).trim();
     match name {
         "claude" => Some("claude"),
@@ -414,29 +610,34 @@ fn harness_name(command: &str) -> Option<&'static str> {
     }
 }
 
-/// The Codex rollout for this folder, if one has been written.
+/// The Codex rollout this process started, if one has been written.
 ///
 /// A rollout says which directory it was recorded in, so the match is the
-/// folder itself rather than a label. Newest first, and only the head of each
-/// candidate is read: the answer is on a rollout's first records and the file
-/// itself can be tens of megabytes.
+/// folder itself rather than a label. Only the head of each candidate is
+/// read: the answer is on a rollout's first records and the file itself can
+/// be tens of megabytes. Among matching files, live processes in the folder
+/// claim logs in spawn order, not the newest file and not independently the
+/// same first file.
 ///
 /// The scan is memoised. This runs from `pty.info`, which a focused session
 /// polls four times a second, and answering it by reading every rollout each
 /// time would be hundreds of megabytes a second on a machine with a year of
-/// them. See `resolve_log`.
-fn codex_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
-    let path = resolve_log("codex", cwd, || {
+/// them. See `resolve_logs`.
+fn codex_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
+    let path = resolve_logs("codex", cwd, spawn, || {
         let home = std::env::var_os("HOME").map(PathBuf::from)?;
         let sessions = codex::discover(&home)?;
-        newest_first(codex::shards(&sessions))
-            .into_iter()
-            .take(SCAN_LIMIT)
-            .find(|path| {
-                read_head(path)
-                    .and_then(|head| codex::session_cwd(&head))
-                    .is_some_and(|dir| dir == cwd)
-            })
+        Some(
+            newest_first(codex::shards(&sessions))
+                .into_iter()
+                .filter_map(|path| {
+                    let head = read_head(&path)?;
+                    let dir = codex::session_cwd(&head)?;
+                    (dir == cwd).then(|| (file_born_ms(&path, Some(&head)), path))
+                })
+                .take(SCAN_LIMIT)
+                .collect(),
+        )
     })?;
     cached_events(&path, |contents| codex::parse_file(&path, contents).events)
 }
@@ -446,34 +647,56 @@ fn codex_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
 /// Both narrowings are SQL, the way OpenCode's and Hermes's are: one database
 /// holds every session the machine has run, and the counters sit inside a JSON
 /// column that SQLite can pick apart without handing the conversation over.
-fn devin_events(cwd: &str, started_at_ms: u64) -> Option<Arc<Vec<UsageEvent>>> {
+fn devin_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
     let db = devin::discover(&home)?;
-    let floor = started_at_ms as i64 - GRACE_MS;
+    let births = devin::session_births(&db, cwd);
+    let floor = spawn.started_at_ms as i64 - GRACE_MS;
     let scope = format!("{cwd}#{floor}");
     let events = cached_db_events(&db, &scope, |path| {
         devin::parse_db_in(path, Some(cwd), Some(floor)).events
     })?;
+    let events = pick_named_session(events, births, spawn);
     (!events.is_empty()).then_some(events)
 }
 
-/// Kimi Code wires for this exact workspace, including every subagent.
-fn kimi_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
+/// Kimi Code wires for this process in this workspace.
+///
+/// One session is a directory with a main agent wire and any subagent wires.
+/// The meter picks that directory, then folds every wire under it. A second
+/// Kimi window in the folder is a later session directory.
+fn kimi_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
     let root = kimi::discover(&home)?;
+    let grouped = kimi::session_wires_for_cwd(&root, cwd);
+    let candidates = grouped.iter().filter_map(|(session, wires)| {
+        let born = wires
+            .iter()
+            .map(|path| {
+                let head = read_head(path);
+                file_born_ms(path, head.as_deref())
+            })
+            .min()?;
+        Some((born, session.clone()))
+    });
+    let session = claim_since(candidates, spawn)?;
+    let wires = grouped
+        .into_iter()
+        .find(|(id, _)| *id == session)
+        .map(|(_, wires)| wires)?;
     let mut all = Vec::new();
-    for path in kimi::wires_for_cwd(&root, cwd) {
+    for path in wires {
         if let Some(events) =
             cached_events(&path, |contents| kimi::parse_file(&path, contents).events)
         {
             all.extend(events.iter().cloned());
         }
     }
-    (!all.is_empty()).then(|| Arc::new(all))
+    (!all.is_empty()).then_some(Arc::new(all))
 }
 
-/// Qwen Code's monthly ledger narrowed to the sessions for this exact folder.
-fn qwen_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
+/// Qwen Code's monthly ledger narrowed to this process's session.
+fn qwen_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
     let root = qwen::discover(&home)?;
     let session_ids: std::collections::HashSet<_> =
@@ -495,39 +718,58 @@ fn qwen_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
             );
         }
     }
-    (!all.is_empty()).then(|| Arc::new(all))
+    if all.is_empty() {
+        return None;
+    }
+    let events = pick_session(Arc::new(all), spawn);
+    (!events.is_empty()).then_some(events)
 }
 
-/// The Muse log for this folder, newest session first.
+/// The Muse session this process started, in this folder.
 ///
 /// Muse files by date and uuid rather than by folder, so the folder has to be
 /// read out of each candidate rather than encoded in a path. Same shape as
 /// Codex above, and same reason for the cap and the memo: this answers a poll
 /// four times a second and a session log runs to tens of megabytes.
 ///
-/// Subagent logs are candidates too, and correctly so: they carry the same
-/// `workspace_root` and their spend is the folder's spend.
-fn muse_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
-    let path = resolve_log("muse", cwd, || {
+/// A session is the parent directory. Subagent logs under it fold into the
+/// same reading. A second Muse window in the folder is a later parent.
+fn muse_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
+    let parent = resolve_logs("muse", cwd, spawn, || {
         let home = std::env::var_os("HOME").map(PathBuf::from)?;
         let sessions = muse::discover(&home)?;
-        newest_first(muse::shards(&sessions))
-            .into_iter()
-            .take(SCAN_LIMIT)
-            .find(|path| {
-                read_head(path)
-                    .and_then(|head| muse::session_workspace(&head))
-                    .is_some_and(|dir| dir == cwd)
-            })
+        Some(
+            newest_first(muse::shards(&sessions))
+                .into_iter()
+                .filter_map(|path| {
+                    let parent = muse::parent_session_dir(&path)?;
+                    if path.parent() != Some(parent) {
+                        return None;
+                    }
+                    let head = read_head(&path)?;
+                    let dir = muse::session_workspace(&head)?;
+                    (dir == cwd).then(|| (file_born_ms(&path, Some(&head)), parent.to_path_buf()))
+                })
+                .take(SCAN_LIMIT)
+                .collect(),
+        )
     })?;
-    cached_events(&path, |contents| muse::parse_file(&path, contents).events)
+    let mut all = Vec::new();
+    for path in muse::shards(&parent) {
+        if let Some(events) =
+            cached_events(&path, |contents| muse::parse_file(&path, contents).events)
+        {
+            all.extend(events.iter().cloned());
+        }
+    }
+    (!all.is_empty()).then_some(Arc::new(all))
 }
 
-/// How many logs a locator will look at before giving up.
+/// How many matching logs a locator will keep for one folder.
 ///
-/// The list is newest first, so a session's own log is at the front in every
-/// realistic case. The cap is what stops a folder with no log at all from
-/// paying for the whole history on the way to saying so.
+/// Matches for this folder are collected first, newest mtime first, then
+/// capped. The cap is what stops a folder with a year of sessions from
+/// handing every one to the spawn-order pick on every poll.
 const SCAN_LIMIT: usize = 40;
 
 /// How long a resolved (or absent) log stays trusted.
@@ -537,47 +779,53 @@ const SCAN_LIMIT: usize = 40;
 /// within a few seconds of it.
 const RESOLVE_TTL: Duration = Duration::from_secs(5);
 
-struct ResolvedLog {
+struct ResolvedLogs {
     at: Instant,
-    path: Option<PathBuf>,
+    paths: Vec<(i64, PathBuf)>,
 }
 
-fn resolve_cache() -> &'static Mutex<HashMap<(&'static str, String), ResolvedLog>> {
-    static CACHE: OnceLock<Mutex<HashMap<(&'static str, String), ResolvedLog>>> = OnceLock::new();
+fn resolve_cache() -> &'static Mutex<HashMap<(&'static str, String), ResolvedLogs>> {
+    static CACHE: OnceLock<Mutex<HashMap<(&'static str, String), ResolvedLogs>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Which log belongs to this folder, scanned at most once per `RESOLVE_TTL`.
+/// Which logs belong to this folder, scanned at most once per `RESOLVE_TTL`.
 ///
-/// A miss is cached too, and deliberately: a folder the harness has never been
-/// used in is the case that would otherwise scan everything on every poll and
-/// find nothing every time.
-fn resolve_log(
+/// The scan itself is per folder. Picking among the results is per spawn, so
+/// three processes in one folder share the scan and still get three files.
+/// A miss is cached too: a folder the harness has never been used in is the
+/// case that would otherwise scan everything on every poll and find nothing
+/// every time.
+fn resolve_logs(
     harness: &'static str,
     cwd: &str,
-    scan: impl FnOnce() -> Option<PathBuf>,
+    spawn: SpawnMatch<'_>,
+    scan: impl FnOnce() -> Option<Vec<(i64, PathBuf)>>,
 ) -> Option<PathBuf> {
     let key = (harness, cwd.to_string());
-    if let Ok(guard) = resolve_cache().lock()
+    let candidates = if let Ok(guard) = resolve_cache().lock()
         && let Some(hit) = guard.get(&key)
         && hit.at.elapsed() < RESOLVE_TTL
     {
-        return hit.path.clone();
-    }
-    let found = scan();
-    // A path that has since been deleted is not an answer. Cheaper to check
-    // here than to let a stale hit send the parser at a missing file.
-    let found = found.filter(|path| path.exists());
-    if let Ok(mut guard) = resolve_cache().lock() {
-        guard.insert(
-            key,
-            ResolvedLog {
-                at: Instant::now(),
-                path: found.clone(),
-            },
-        );
-    }
-    found
+        hit.paths.clone()
+    } else {
+        let found = scan()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(_, path)| path.exists())
+            .collect::<Vec<_>>();
+        if let Ok(mut guard) = resolve_cache().lock() {
+            guard.insert(
+                key,
+                ResolvedLogs {
+                    at: Instant::now(),
+                    paths: found.clone(),
+                },
+            );
+        }
+        found
+    };
+    claim_since(candidates, spawn)
 }
 
 /// Paths sorted by modification time, newest first. Unreadable entries drop.
@@ -620,66 +868,76 @@ fn read_head(path: &Path) -> Option<String> {
 /// ever opened and reaches gigabytes: on a working Mac one folder is 3,700
 /// messages and 12 MB of JSON, all but a handful of it older than the session
 /// asking. Reading it whole four times a second is what this avoids.
-fn opencode_events(cwd: &str, started_at_ms: u64) -> Option<Arc<Vec<UsageEvent>>> {
+fn opencode_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
     let db = opencode::discover(&home)?;
-    let floor = started_at_ms as i64 - GRACE_MS;
+    let births = opencode::session_births(&db, cwd);
+    let floor = spawn.started_at_ms as i64 - GRACE_MS;
     let scope = format!("{cwd}#{floor}");
     let events = cached_db_events(&db, &scope, |path| {
         opencode::parse_db_in(path, Some(cwd), Some(floor)).events
     })?;
+    let events = pick_named_session(events, births, spawn);
     (!events.is_empty()).then_some(events)
 }
 
 /// Kilo Code's database, narrowed the same way OpenCode's is. Same schema,
 /// same reason for the narrowing.
-fn kilo_events(cwd: &str, started_at_ms: u64) -> Option<Arc<Vec<UsageEvent>>> {
+fn kilo_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
     let db = kilo::discover(&home)?;
-    let floor = started_at_ms as i64 - GRACE_MS;
+    let births = kilo::session_births(&db, cwd);
+    let floor = spawn.started_at_ms as i64 - GRACE_MS;
     let scope = format!("{cwd}#{floor}");
     let events = cached_db_events(&db, &scope, |path| {
         kilo::parse_db_in(path, Some(cwd), Some(floor)).events
     })?;
+    let events = pick_named_session(events, births, spawn);
     (!events.is_empty()).then_some(events)
 }
 
 /// Hermes's state database, for this folder since this session started.
 ///
 /// Its rows are running totals rather than per-call records, so a reading here
-/// is the session's total so far rather than a sum of turns. That is the same
-/// number either way while only one session of it is running in a folder,
-/// which is the case the meter is for.
-fn hermes_events(cwd: &str, started_at_ms: u64) -> Option<Arc<Vec<UsageEvent>>> {
+/// is the session's total so far rather than a sum of turns. Two Hermes
+/// windows in one folder are two database sessions, picked by birth time.
+fn hermes_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
     let db = hermes::discover(&home)?;
-    let floor = started_at_ms as i64 - GRACE_MS;
+    let floor = spawn.started_at_ms as i64 - GRACE_MS;
     let scope = format!("{cwd}#{floor}");
     let events = cached_db_events(&db, &scope, |path| {
         hermes::parse_db_in(path, Some(cwd), Some(floor)).events
     })?;
+    let events = pick_session(events, spawn);
     (!events.is_empty()).then_some(events)
 }
 
-/// Pi's newest session log for this folder.
+/// Pi's session log for this process in this folder.
 ///
 /// Pi files sessions under a directory named after the folder, so the folder
 /// is found by name rather than by reading heads: `/Users/x/git/demo` is
 /// `--Users-x-git-demo--`. That encoding is lossy in the other direction, so
 /// this only ever goes forwards, from the folder we already know to the
 /// directory it must be in.
-fn pi_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
+fn pi_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
     let root = pi::discover(&home)?;
     let dir = root.join(pi_dir_name(cwd));
-    let path = resolve_log("pi", cwd, || {
+    let path = resolve_logs("pi", cwd, spawn, || {
         let files = std::fs::read_dir(&dir)
             .ok()?
             .filter_map(Result::ok)
             .map(|e| e.path())
-            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("jsonl"))
-            .collect();
-        newest_first(files).into_iter().next()
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("jsonl"));
+        Some(
+            files
+                .map(|path| {
+                    let head = read_head(&path);
+                    (file_born_ms(&path, head.as_deref()), path)
+                })
+                .collect(),
+        )
     })?;
     let root_for_parse = root.clone();
     cached_events(&path, |contents| {
@@ -687,24 +945,27 @@ fn pi_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
     })
 }
 
-/// The DeepSeek Harness transcript for this folder, newest session first.
+/// The DeepSeek Harness transcript for this process in this folder.
 ///
 /// Its sessions live one folder deeper than Pi's (`<encoded>/session-<uuid>/`)
 /// and the file is compressed, so the parser opens it rather than being handed
 /// text. Small enough to decompress on a poll: a long session is tens of
 /// kilobytes.
-fn dsh_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
+fn dsh_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
     let root = dsh::discover(&home)?;
     let dir = root.join(pi_dir_name(cwd));
-    let path = resolve_log("dsh", cwd, || {
+    let path = resolve_logs("dsh", cwd, spawn, || {
         let files = std::fs::read_dir(&dir)
             .ok()?
             .filter_map(Result::ok)
-            .map(|e| e.path().join("session.jsonl.zstd"))
-            .filter(|p| p.is_file())
-            .collect();
-        newest_first(files).into_iter().next()
+            .map(|e| e.path().join("session.jsonl.zstd"));
+        Some(
+            files
+                .filter(|p| p.is_file())
+                .map(|path| (file_born_ms(&path, None), path))
+                .collect(),
+        )
     })?;
     let root_for_parse = root.clone();
     let events = cached_db_events(&path, cwd, move |p| {
@@ -719,26 +980,28 @@ fn pi_dir_name(cwd: &str) -> String {
     format!("--{}--", cwd.trim_matches('/').replace('/', "-"))
 }
 
-/// The Antigravity conversation whose workspace is this folder.
+/// The Antigravity conversation this process started in this folder.
 ///
 /// One database per conversation, each naming its workspace as a `file://`
-/// URI. Newest first, because a folder can have several and the live one is
-/// the one being written. Memoised like the Codex scan: opening forty SQLite
-/// databases four times a second to answer one question is not a poll, it is
-/// a load test.
-fn antigravity_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
-    let path = resolve_log("antigravity", cwd, || {
+/// URI. Memoised like the Codex scan: opening forty SQLite databases four
+/// times a second to answer one question is not a poll, it is a load test.
+fn antigravity_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
+    let path = resolve_logs("antigravity", cwd, spawn, || {
         let home = std::env::var_os("HOME").map(PathBuf::from)?;
         let root = antigravity_cli::discover(&home)?;
-        newest_first(antigravity_cli::shards(&root))
-            .into_iter()
-            .take(SCAN_LIMIT)
-            .find(|path| antigravity_cli::workspace_path(path).is_some_and(|dir| dir == cwd))
+        Some(
+            newest_first(antigravity_cli::shards(&root))
+                .into_iter()
+                .filter(|path| antigravity_cli::workspace_path(path).is_some_and(|dir| dir == cwd))
+                .take(SCAN_LIMIT)
+                .map(|path| (file_born_ms(&path, None), path))
+                .collect(),
+        )
     })?;
     cached_db_events(&path, "", |path| antigravity_cli::parse_db(path).events)
 }
 
-fn claude_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
+fn claude_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
     let projects = claude_code::discover(&home)?;
     let slug: String = cwd
@@ -746,18 +1009,18 @@ fn claude_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
     let dir = projects.join(slug);
-    let path = newest_jsonl(&dir)?;
+    let path = resolve_logs("claude", cwd, spawn, || Some(jsonl_born(&dir)))?;
     cached_events(&path, |contents| {
         claude_code::parse_file(&path, &projects, contents).events
     })
 }
 
-fn grok_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
+fn grok_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
     let grok_home = grok::discover(&home)?;
     let encoded = grok_encode(cwd);
     let session_dir = grok_home.join("sessions").join(&encoded);
-    let sid = newest_child_dir(&session_dir)?;
+    let sid = claim_since(child_dirs_born(&session_dir), spawn)?;
     let log = grok::log_path(&grok_home)?;
     // Parse with an empty session index so the cached events do not belong
     // to whichever session happened to ask first. Model is joined after
@@ -813,47 +1076,53 @@ fn grok_one_session(home: &Path, encoded_cwd: &str, sid: &str) -> Option<grok::S
     })
 }
 
-/// Newest `.jsonl` directly in `dir`. Does not descend: Claude subagent
-/// transcripts live one level down and belong to a parent we cannot name.
-fn newest_jsonl(dir: &Path) -> Option<PathBuf> {
-    let entries = std::fs::read_dir(dir).ok()?;
-    let mut best: Option<(SystemTime, PathBuf)> = None;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().is_none_or(|ext| ext != "jsonl") {
-            continue;
-        }
-        let Ok(meta) = entry.metadata() else { continue };
-        if !meta.is_file() {
-            continue;
-        }
-        let Ok(mtime) = meta.modified() else { continue };
-        if best.as_ref().is_none_or(|(best_at, _)| mtime >= *best_at) {
-            best = Some((mtime, path));
-        }
-    }
-    best.map(|(_, path)| path)
+/// Claude conversation files in `dir`, with the birth time used to match a
+/// spawn. Does not descend: subagent transcripts belong to a parent we
+/// cannot name.
+fn jsonl_born(dir: &Path) -> Vec<(i64, PathBuf)> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.extension().is_none_or(|ext| ext != "jsonl") {
+                return None;
+            }
+            let Ok(meta) = entry.metadata() else {
+                return None;
+            };
+            if !meta.is_file() {
+                return None;
+            }
+            let head = read_head(&path);
+            Some((file_born_ms(&path, head.as_deref()), path))
+        })
+        .collect()
 }
 
-/// Newest directory under `dir`, by the directory's own mtime.
-fn newest_child_dir(dir: &Path) -> Option<String> {
-    let entries = std::fs::read_dir(dir).ok()?;
-    let mut best: Option<(SystemTime, String)> = None;
-    for entry in entries.flatten() {
-        let Ok(meta) = entry.metadata() else { continue };
-        if !meta.is_dir() {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name.is_empty() || name.starts_with('.') {
-            continue;
-        }
-        let Ok(mtime) = meta.modified() else { continue };
-        if best.as_ref().is_none_or(|(best_at, _)| mtime >= *best_at) {
-            best = Some((mtime, name));
-        }
-    }
-    best.map(|(_, name)| name)
+/// Grok session directories under a folder, with birth times for spawn match.
+fn child_dirs_born(dir: &Path) -> Vec<(i64, String)> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let Ok(meta) = entry.metadata() else {
+                return None;
+            };
+            if !meta.is_dir() {
+                return None;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.is_empty() || name.starts_with('.') {
+                return None;
+            }
+            Some((file_born_ms(&entry.path(), None), name))
+        })
+        .collect()
 }
 
 struct CachedParse {
@@ -1142,6 +1411,176 @@ mod tests {
         assert_eq!(since(&events, 60_000).len(), 1);
     }
 
+    fn spawn(
+        id: &'static str,
+        started_at_ms: u64,
+        siblings: &'static [(&'static str, u64)],
+    ) -> SpawnMatch<'static> {
+        SpawnMatch {
+            id,
+            started_at_ms,
+            siblings,
+        }
+    }
+
+    #[test]
+    fn the_earliest_log_after_spawn_wins_not_the_newest() {
+        let older = (10_000, PathBuf::from("older.jsonl"));
+        let newer = (90_000, PathBuf::from("newer.jsonl"));
+        assert_eq!(
+            earliest_since([newer.clone(), older.clone()], 9_000).as_deref(),
+            Some(Path::new("older.jsonl")),
+            "the process that started first owns the first log, not the latest"
+        );
+        assert_eq!(
+            earliest_since([newer, older], 80_000).as_deref(),
+            Some(Path::new("newer.jsonl"))
+        );
+    }
+
+    #[test]
+    fn two_spawns_that_both_precede_both_logs_split_them() {
+        // Process A starts, process B starts a second later, then both write.
+        // Independent earliest_since would give both the first file.
+        let older = (20_000, PathBuf::from("a.jsonl"));
+        let newer = (30_000, PathBuf::from("b.jsonl"));
+        assert_eq!(
+            claim_since(
+                [older.clone(), newer.clone()],
+                spawn("a", 9_000, &[("b", 10_000)])
+            )
+            .as_deref(),
+            Some(Path::new("a.jsonl"))
+        );
+        assert_eq!(
+            claim_since([older, newer], spawn("b", 10_000, &[("a", 9_000)])).as_deref(),
+            Some(Path::new("b.jsonl"))
+        );
+    }
+
+    #[test]
+    fn equal_spawn_times_and_births_split_by_id() {
+        let older = (20_000, PathBuf::from("a.jsonl"));
+        let newer = (20_000, PathBuf::from("b.jsonl"));
+        assert_eq!(
+            claim_since(
+                [older.clone(), newer.clone()],
+                spawn("a", 9_000, &[("b", 9_000)])
+            )
+            .as_deref(),
+            Some(Path::new("a.jsonl"))
+        );
+        assert_eq!(
+            claim_since([older, newer], spawn("b", 9_000, &[("a", 9_000)])).as_deref(),
+            Some(Path::new("b.jsonl"))
+        );
+        let first = pick_session(
+            Arc::new(vec![
+                {
+                    let mut e = stamped(20_000);
+                    e.session = "sess-a".into();
+                    e
+                },
+                {
+                    let mut e = stamped(20_000);
+                    e.session = "sess-b".into();
+                    e
+                },
+            ]),
+            spawn("a", 9_000, &[("b", 9_000)]),
+        );
+        let second = pick_session(
+            Arc::new(vec![
+                {
+                    let mut e = stamped(20_000);
+                    e.session = "sess-a".into();
+                    e
+                },
+                {
+                    let mut e = stamped(20_000);
+                    e.session = "sess-b".into();
+                    e
+                },
+            ]),
+            spawn("b", 9_000, &[("a", 9_000)]),
+        );
+        assert_eq!(first[0].session, "sess-a");
+        assert_eq!(second[0].session, "sess-b");
+    }
+
+    #[test]
+    fn a_session_does_not_inherit_a_log_from_before_it_started() {
+        let older = (10_000, PathBuf::from("older.jsonl"));
+        assert!(
+            earliest_since([older], 60_000).is_none(),
+            "a later process has no reading until it writes its own log"
+        );
+    }
+
+    #[test]
+    fn database_rows_from_a_later_sibling_are_dropped() {
+        let mut older = stamped(10_000);
+        older.session = "sess-a".into();
+        older.counters.input_fresh = Some(100);
+        older.counters.output = Some(10);
+        let mut newer = stamped(90_000);
+        newer.session = "sess-b".into();
+        newer.counters.input_fresh = Some(99_000);
+        newer.counters.output = Some(9);
+        let picked = pick_session(
+            Arc::new(vec![older.clone(), newer.clone()]),
+            spawn("a", 9_000, &[]),
+        );
+        assert_eq!(picked.len(), 1);
+        assert_eq!(picked[0].session, "sess-a");
+        let later = pick_session(
+            Arc::new(vec![older.clone(), newer.clone()]),
+            spawn("b", 80_000, &[]),
+        );
+        assert_eq!(later.len(), 1);
+        assert_eq!(later[0].session, "sess-b");
+        // The older session is still writing after the later spawn. True birth
+        // stays 10_000, so the later process still gets sess-b. A SQL floor
+        // would have made sess-a look born at 82_000 and steal the pick.
+        let mut older_again = stamped(82_000);
+        older_again.session = "sess-a".into();
+        older_again.counters.input_fresh = Some(200);
+        older_again.counters.output = Some(20);
+        let births = vec![(10_000, "sess-a".into()), (90_000, "sess-b".into())];
+        let floored = Arc::new(vec![older_again, newer.clone()]);
+        let named = pick_named_session(floored, births, spawn("b", 80_000, &[]));
+        assert_eq!(named.len(), 1);
+        assert_eq!(named[0].session, "sess-b");
+        let first = pick_session(
+            Arc::new(vec![older.clone(), newer.clone()]),
+            spawn("a", 9_000, &[("b", 10_000)]),
+        );
+        let second = pick_session(
+            Arc::new(vec![older.clone(), newer]),
+            spawn("b", 10_000, &[("a", 9_000)]),
+        );
+        assert_eq!(first[0].session, "sess-a");
+        assert_eq!(second[0].session, "sess-b");
+        // Only the first session exists. The later sibling must get nothing,
+        // not inherit sess-a because claim_since missed.
+        let only_first = pick_session(
+            Arc::new(vec![older.clone()]),
+            spawn("a", 9_000, &[("b", 10_000)]),
+        );
+        let later_empty = pick_session(Arc::new(vec![older]), spawn("b", 10_000, &[("a", 9_000)]));
+        assert_eq!(only_first[0].session, "sess-a");
+        assert!(
+            later_empty.is_empty(),
+            "a later window does not inherit the only log"
+        );
+    }
+
+    #[test]
+    fn muse_recorded_at_microseconds_are_session_birth() {
+        let head = r#"{"recorded_at":1788257844312475,"payload":{}}"#;
+        assert_eq!(first_timestamp_ms(head), Some(1_788_257_844_312));
+    }
+
     #[test]
     fn sums_tokens_and_list_rate_across_turns() {
         let events = [
@@ -1316,7 +1755,7 @@ mod tests {
     }
 
     #[test]
-    fn newest_jsonl_wins_in_a_folder() {
+    fn jsonl_in_a_folder_is_matched_by_spawn_not_newest() {
         let dir = std::env::temp_dir().join(format!(
             "tokenstat-meter-jsonl-{}-{}",
             std::process::id(),
@@ -1326,16 +1765,18 @@ mod tests {
                 .unwrap_or(0)
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let older = dir.join("older.jsonl");
-        let newer = dir.join("newer.jsonl");
-        std::fs::write(&older, "{}\n").unwrap();
-        std::thread::sleep(Duration::from_millis(20));
-        let mut file = std::fs::File::create(&newer).unwrap();
-        file.write_all(b"{}\n").unwrap();
-        file.sync_all().unwrap();
-        let picked = newest_jsonl(&dir).expect("a jsonl");
+        std::fs::write(dir.join("older.jsonl"), "{\"timestamp\":10}\n").unwrap();
+        std::fs::write(dir.join("newer.jsonl"), "{\"timestamp\":90}\n").unwrap();
+        let first = earliest_since(jsonl_born(&dir), 9_000).expect("first log");
+        let second = earliest_since(jsonl_born(&dir), 80_000).expect("second log");
+        let none = earliest_since(jsonl_born(&dir), 200_000);
         let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!(picked.file_name().unwrap(), "newer.jsonl");
+        assert_eq!(first.file_name().unwrap(), "older.jsonl");
+        assert_eq!(second.file_name().unwrap(), "newer.jsonl");
+        assert!(
+            none.is_none(),
+            "a later process has no log until it writes one"
+        );
     }
 
     #[test]
@@ -1459,9 +1900,9 @@ mod tests {
         };
         // A miss is cached too: a folder the harness was never used in is
         // exactly the case that would otherwise scan everything every poll.
-        assert_eq!(resolve_log("codex", &cwd, scan), None);
-        assert_eq!(resolve_log("codex", &cwd, scan), None);
-        assert_eq!(resolve_log("codex", &cwd, scan), None);
+        assert_eq!(resolve_logs("codex", &cwd, spawn("a", 1, &[]), scan), None);
+        assert_eq!(resolve_logs("codex", &cwd, spawn("a", 1, &[]), scan), None);
+        assert_eq!(resolve_logs("codex", &cwd, spawn("a", 1, &[]), scan), None);
         assert_eq!(SCANS.load(Ordering::Relaxed), 1);
     }
 

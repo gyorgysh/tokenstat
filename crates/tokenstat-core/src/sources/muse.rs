@@ -93,6 +93,19 @@ pub fn discover(home: &Path) -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_dir())
 }
 
+/// Parent session directory for a `session.jsonl`, whether the file is the
+/// parent's or a subagent's. Subagent logs live at
+/// `<session-id>/subagent/<id>/session.jsonl`.
+pub fn parent_session_dir(log: &Path) -> Option<&Path> {
+    let dir = log.parent()?;
+    let parent = dir.parent()?;
+    if parent.file_name().and_then(|n| n.to_str()) == Some("subagent") {
+        parent.parent()
+    } else {
+        Some(dir)
+    }
+}
+
 /// Every session transcript under the root, subagents included.
 pub fn shards(root: &Path) -> Vec<PathBuf> {
     walkdir::WalkDir::new(root)
@@ -466,5 +479,13 @@ mod tests {
         let root = parent.parent().unwrap().parent().unwrap().parent().unwrap();
         let found = shards(root);
         assert_eq!(found.len(), 2);
+        assert_eq!(
+            parent_session_dir(&parent.join("session.jsonl")),
+            Some(parent.as_path())
+        );
+        assert_eq!(
+            parent_session_dir(&sub.join("session.jsonl")),
+            Some(parent.as_path())
+        );
     }
 }

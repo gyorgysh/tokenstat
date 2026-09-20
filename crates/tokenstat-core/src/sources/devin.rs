@@ -336,6 +336,38 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
     out
 }
 
+/// Conversation start per session in one folder, ignoring any live-meter
+/// floor. `created_at` is seconds; the returned birth is milliseconds, the
+/// same unit `pick_session` uses.
+pub fn session_births(path: &Path, directory: &str) -> Vec<(i64, String)> {
+    let Ok(conn) = rusqlite::Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) else {
+        return Vec::new();
+    };
+    if !has_table(&conn, "message_nodes") || !has_table(&conn, "sessions") {
+        return Vec::new();
+    }
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT s.id, MIN(m.created_at)
+         FROM message_nodes m
+         JOIN sessions s ON s.id = m.session_id
+         WHERE COALESCE(s.working_directory, '') = :dir
+         GROUP BY s.id
+         HAVING MIN(m.created_at) IS NOT NULL AND MIN(m.created_at) > 0",
+    ) else {
+        return Vec::new();
+    };
+    let Ok(rows) = stmt.query_map(&[(":dir", directory)], |row| {
+        let secs: i64 = row.get(1)?;
+        Ok((secs.saturating_mul(1000), row.get::<_, String>(0)?))
+    }) else {
+        return Vec::new();
+    };
+    rows.flatten().collect()
+}
+
 fn has_table(conn: &rusqlite::Connection, name: &str) -> bool {
     conn.query_row(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -513,6 +545,44 @@ mod tests {
             assert_eq!(e.counters.cache_write_1h, None);
             assert!(e.counters.has_unknown());
         }
+    }
+
+    #[test]
+    fn session_births_skip_null_and_epoch_created_at() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("tokenstat-devin-births-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sessions.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY, working_directory TEXT);
+             CREATE TABLE message_nodes (session_id TEXT, created_at INTEGER);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, working_directory) VALUES
+                 ('live', '/Users/x/git/demo'),
+                 ('null-only', '/Users/x/git/demo'),
+                 ('epoch', '/Users/x/git/demo')",
+            [],
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO message_nodes (session_id, created_at) VALUES
+                 ('live', NULL),
+                 ('live', 1788260109),
+                 ('null-only', NULL),
+                 ('epoch', 0);",
+        )
+        .unwrap();
+        drop(conn);
+        let births = session_births(&path, "/Users/x/git/demo");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(births, vec![(1_788_260_109_000, "live".into())]);
     }
 
     /// A database from a CLI that predates the forest says nothing rather than

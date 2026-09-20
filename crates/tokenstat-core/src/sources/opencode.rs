@@ -21,7 +21,7 @@
 //! Cache read/write are **disjoint** from input here (unlike Codex/Grok): the
 //! vendor's own `tokens.total` equals the sum of those fields.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -349,6 +349,49 @@ fn read_layout(
     }
 }
 
+/// Earliest message time per session in one folder, ignoring any live-meter
+/// floor. Birth is the conversation start, not the first turn after a later
+/// process spawned. An older session that is still writing would otherwise
+/// look newly born and steal the later window's reading.
+pub fn session_births(path: &Path, directory: &str) -> Vec<(i64, String)> {
+    let Ok(conn) = rusqlite::Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) else {
+        return Vec::new();
+    };
+    let mut born: HashMap<String, i64> = HashMap::new();
+    for layout in [Layout::V2, Layout::V1] {
+        if !has_table(&conn, layout.messages()) {
+            continue;
+        }
+        let sql = format!(
+            "SELECT m.session_id, MIN(m.time_created)
+             FROM {} m
+             LEFT JOIN {} s ON s.id = m.session_id
+             WHERE COALESCE(s.directory, s.path, '') = :dir
+             GROUP BY m.session_id",
+            layout.messages(),
+            layout.sessions(),
+        );
+        let Ok(mut stmt) = conn.prepare(&sql) else {
+            continue;
+        };
+        let Ok(rows) = stmt.query_map(&[(":dir", directory)], |row| {
+            Ok((row.get::<_, i64>(1)?, row.get::<_, String>(0)?))
+        }) else {
+            continue;
+        };
+        for row in rows.flatten() {
+            let (at, id) = row;
+            born.entry(id)
+                .and_modify(|existing| *existing = (*existing).min(at))
+                .or_insert(at);
+        }
+    }
+    born.into_iter().map(|(id, at)| (at, id)).collect()
+}
+
 /// Whether this database has that table, so a one-version install is quiet.
 fn has_table(conn: &rusqlite::Connection, name: &str) -> bool {
     conn.query_row(
@@ -524,6 +567,9 @@ mod tests {
         assert_eq!(mine.events.len(), 1);
         assert_eq!(mine.rows_seen, 1, "the old row is not even parsed");
         assert_eq!(parse_db_in(&path, Some(dir), None).events.len(), 2);
+        let births = session_births(&path, dir);
+        assert_eq!(births.len(), 1);
+        assert_eq!(births[0], (1_000, "ses1".into()));
     }
 
     #[test]

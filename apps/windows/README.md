@@ -48,10 +48,9 @@ The host method `app.updateCheck` reports `winZipUrl`. `app.updateDownloadWin`
 fetches the zip and checks it against `SHA256SUMS`. The app then stages the
 files and offers Relaunch.
 
-A build with `PREVIEW.txt` next to the exe is the Preview channel: it reads
-the rolling GitHub prerelease tagged `preview` and only accepts a `-dev.`
-zip. Stable builds still reject prereleases. Preview never promotes onto a
-stable Release, and stable never fetches Preview bits.
+A build with `PREVIEW.txt` next to the exe is an unsigned Actions artifact.
+Auto-update still reads the latest GitHub Release. A `-dev.` zip is never
+an update, from either kind of install.
 
 Authenticode is required only when the running `Tokenstat.exe` is already
 signed, and the replacement must be the same publisher. Preview builds are
