@@ -409,6 +409,10 @@ pub(crate) fn needs_access(method: &str, stream_kind: Option<&str>) -> bool {
         // What is set up here, and why it is unhappy. Both name this machine's
         // own folders and log lines, so both need the grant.
         "host.provisionStatus" | "host.logs" => true,
+        // Replacing this machine's binaries and restarting its daemon is
+        // host management, not reading. An approved device that was never
+        // let in must not drive it.
+        "host.updateCheck" | "host.updateApply" => true,
         m if m.starts_with("pulls.") => true,
         m if m.starts_with("pty.") => true,
         m if m.starts_with("workflow.") => true,
@@ -1223,6 +1227,8 @@ mod tests {
             "fs.mkdir",
             "host.provisionStatus",
             "host.logs",
+            "host.updateCheck",
+            "host.updateApply",
             "work.search",
             "work.continuity.get",
             "work.continuity.put",

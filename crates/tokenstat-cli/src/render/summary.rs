@@ -209,10 +209,8 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
             "  {DIM}No local price book yet. Run {DIM:#}{a}tokenstat pricing --refresh{a:#}{DIM}.{DIM:#}"
         );
     } else if !missing.is_empty() {
-        println!(
-            "  {DIM}No list price yet for: {}{DIM:#}",
-            missing.join(", ")
-        );
+        let shown: Vec<String> = missing.iter().map(|m| sanitize_label(m)).collect();
+        println!("  {DIM}No list price yet for: {}{DIM:#}", shown.join(", "));
         if prices.catalog().is_none() {
             let a = accent();
             println!(
@@ -461,10 +459,10 @@ pub fn wrapped(
         ui::usd(value.dollars())
     );
     if let Some(label) = top_model_label {
-        println!("  {DIM}top model{DIM:#}    {label}");
+        println!("  {DIM}top model{DIM:#}    {}", sanitize_label(&label));
     }
     if let Some(p) = top_project {
-        println!("  {DIM}top project{DIM:#}  {}", p.key);
+        println!("  {DIM}top project{DIM:#}  {}", sanitize_label(&p.key));
     }
     if let Some((date, tokens)) = busiest_day {
         println!(

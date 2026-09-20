@@ -450,26 +450,26 @@ impl EquivalentValue {
 impl std::ops::Add for Charged {
     type Output = Charged;
     fn add(self, rhs: Charged) -> Charged {
-        Charged(self.0 + rhs.0)
+        Charged(self.0.saturating_add(rhs.0))
     }
 }
 
 impl std::iter::Sum for Charged {
     fn sum<I: Iterator<Item = Charged>>(iter: I) -> Charged {
-        Charged(iter.map(|c| c.0).sum())
+        Charged(iter.map(|c| c.0).fold(0i64, i64::saturating_add))
     }
 }
 
 impl std::ops::Add for EquivalentValue {
     type Output = EquivalentValue;
     fn add(self, rhs: EquivalentValue) -> EquivalentValue {
-        EquivalentValue(self.0 + rhs.0)
+        EquivalentValue(self.0.saturating_add(rhs.0))
     }
 }
 
 impl std::iter::Sum for EquivalentValue {
     fn sum<I: Iterator<Item = EquivalentValue>>(iter: I) -> EquivalentValue {
-        EquivalentValue(iter.map(|c| c.0).sum())
+        EquivalentValue(iter.map(|c| c.0).fold(0i64, i64::saturating_add))
     }
 }
 
@@ -676,6 +676,18 @@ mod tests {
     fn charged_values_sum() {
         let total: Charged = [Charged(1_000_000), Charged(500_000)].into_iter().sum();
         assert_eq!(total.dollars(), 1.5);
+    }
+
+    #[test]
+    fn money_addition_saturates_instead_of_wrapping() {
+        let max = EquivalentValue::from_micros(i64::MAX);
+        assert_eq!((max + max).micros(), i64::MAX);
+        let total: EquivalentValue = [max, max].into_iter().sum();
+        assert_eq!(total.micros(), i64::MAX);
+        let charged = Charged(i64::MAX);
+        assert_eq!((charged + charged).micros(), i64::MAX);
+        let total: Charged = [charged, charged].into_iter().sum();
+        assert_eq!(total.micros(), i64::MAX);
     }
 
     #[test]

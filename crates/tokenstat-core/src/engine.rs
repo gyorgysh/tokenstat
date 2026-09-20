@@ -119,7 +119,7 @@ impl Engine {
             let entry = value_by_key.entry(row.key.as_str()).or_default();
             match EquivalentValue::price(prices, &lookup, &row.counters) {
                 Some(v) => {
-                    entry.0 += v.micros();
+                    entry.0 = entry.0.saturating_add(v.micros());
                     entry.1 |= prices.is_estimate(&lookup);
                 }
                 None => {
@@ -211,7 +211,7 @@ fn fold_priced_source_buckets(rows: Vec<PricedBucket>) -> Vec<PricedBucket> {
             merged[i].counters.accumulate(&row.counters);
             merged[i].events += row.events;
             merged[i].sessions += row.sessions;
-            let micros = merged[i].value.micros() + row.value.micros();
+            let micros = merged[i].value.micros().saturating_add(row.value.micros());
             merged[i].value = EquivalentValue::from_micros(micros);
             merged[i].estimated |= row.estimated;
             for model in row.unpriced_models {
@@ -348,6 +348,40 @@ mod tests {
         assert!((rows[0].value.dollars() - 30.0).abs() < 0.001);
         assert!(rows[0].is_complete());
         assert!(!rows[0].estimated);
+    }
+
+    #[test]
+    fn priced_totals_saturate_on_absurd_counters() {
+        let mut e = engine();
+        let tz = jiff::tz::TimeZone::UTC;
+        let mut a = ev("a", "claude-opus-4-5", "s1");
+        let mut b = ev("b", "claude-sonnet-4-5", "s1");
+        // Saturate on different columns, so the bucket SUMs stay in range
+        // while each split's priced value saturates on its own.
+        a.counters.input_fresh = Some(u64::MAX);
+        a.counters.output = None;
+        b.counters.input_fresh = None;
+        b.counters.output = Some(u64::MAX);
+        e.store_mut().insert_events(&[a, b], &tz).unwrap();
+
+        let prices = PriceTable::parse(
+            r#"{
+      "effective_from": "2026-07-29",
+      "models": [
+        {"match":"claude-opus-4-5","input":5.0,"output":25.0,"cache_read":0.5,"cache_write_5m":6.25,"cache_write_1h":10.0},
+        {"match":"claude-sonnet-4-5","input":3.0,"output":15.0,"cache_read":0.3,"cache_write_5m":3.75,"cache_write_1h":6.0}
+      ]
+    }"#,
+        )
+        .unwrap();
+        let rows = e
+            .priced_report(GroupBy::Day, &Query::default(), &prices)
+            .unwrap();
+
+        // Each split saturates its own bucket; the fold must saturate too
+        // rather than wrap to a negative figure or panic.
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].value.micros(), i64::MAX);
     }
 
     #[test]
