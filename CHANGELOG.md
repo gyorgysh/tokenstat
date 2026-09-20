@@ -13,6 +13,44 @@ at the end.
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-09-20
+
+Windows chat gains Follow, collapse, and Show/Hide output. Switching
+windows no longer kills a terminal or SSH session, the editor stays
+responsive on large files, and Preview builds install with a branded
+setup that updates on that channel. Mac terminals keep a drag selection
+while Codex streams.
+
+### Added
+
+- Follow, Jump to latest, and Show/Hide output on Windows chat, matching
+  the Mac. Long tool output starts collapsed.
+- A branded Windows installer, `tokenstat-<ver>-windows-x64-setup.exe`,
+  with the tokenstat mark and LICENSE. Preview builds update from the
+  rolling preview tag and stay there. Preview never jumps to a stable
+  release, and a stable install never takes a Preview update.
+
+### Changed
+
+- The workbench folder chip on Windows is square.
+- The Windows editor waits before re-highlighting, so typing in a large
+  file no longer stalls the window.
+- Installing OpenCode 2 from the launcher uses the official opencode.ai
+  v2 installer. On Windows the tile now offers `npm install -g @opencode/cli`.
+
+### Fixed
+
+- Switching windows, terminals, or SSH sessions on Windows no longer
+  closes the process or leaves a blank pane.
+- Drag-selecting text in a Mac terminal keeps the highlight while Codex
+  is streaming. The selection used to vanish on every linefeed.
+- A remote machine without workspace permission cannot check for or apply
+  host updates.
+- Usage money totals cap instead of overflowing or crashing on a huge
+  counter.
+- CLI reports strip control characters from session labels before they
+  reach the terminal.
+
 ## [1.0.7] - 2026-09-20
 
 The Windows app arrives as a complete desktop client beside the Mac,

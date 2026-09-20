@@ -4,7 +4,7 @@
 # The wizard extracts to a temp directory and runs Tokenstat.exe --install.
 #
 # Usage:
-#   scripts/pack-windows-installer.ps1 -StageDir dist/tokenstat-1.0.7-windows-x64 -Version 1.0.7 [-Out dist]
+#   scripts/pack-windows-installer.ps1 -StageDir dist/tokenstat-1.0.8-windows-x64 -Version 1.0.8 [-Out dist]
 
 param(
     [Parameter(Mandatory = $true)]
