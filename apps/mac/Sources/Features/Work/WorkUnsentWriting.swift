@@ -157,7 +157,7 @@ struct WorkLegacyDraftsSheet: View {
                 catch { message = "The draft changed or could not be removed. Close and reopen to see its latest copy." }
                 pendingRemoval = nil
             }
-        } message: { Text("Copy any writing you want to keep first. Nothing on a workspace host will be changed.") }
+        } message: { Text("Copy any writing you want to keep first. Nothing on that computer will be changed.") }
     }
 
     @ViewBuilder private func actions(_ draft: ChatLegacyQueueStore.Draft) -> some View {

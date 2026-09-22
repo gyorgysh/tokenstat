@@ -336,7 +336,7 @@ fun ChatSection(
             // The poll retries on its own; the card says so and stays until
             // a poll lands or the person puts it away.
             if (eventsError == null) {
-                eventsError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel.ifBlank { "the host" }) +
+                eventsError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel.ifBlank { "that computer" }) +
                     " Still trying."
             }
         }
@@ -460,7 +460,7 @@ fun ChatSection(
             // A cancelled check is not a failed one. Navigating away mid-send
             // must leave the message where it was, not mark it failed.
             if (it is CancellationException) throw it
-            sendError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel.ifBlank { "the host" })
+            sendError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel.ifBlank { "that computer" })
             return false
         }
         when (receipt?.str("state") ?: "unknown") {
@@ -593,7 +593,7 @@ fun ChatSection(
                 "The computer did not confirm delivery. Your queued copy stays here. Choose Check delivery before " +
                     "doing anything else."
             } else {
-                TunnelCopy.display(failure?.message ?: "The request failed.", hostLabel.ifBlank { "the host" })
+                TunnelCopy.display(failure?.message ?: "The request failed.", hostLabel.ifBlank { "that computer" })
             }
             return false
         } finally {
@@ -639,7 +639,7 @@ fun ChatSection(
             if (uploaded.isFailure || file?.str("id") == null) {
                 attachError = TunnelCopy.display(
                     uploaded.exceptionOrNull()?.message ?: "The attachment could not be sent.",
-                    hostLabel.ifBlank { "the host" },
+                    hostLabel.ifBlank { "that computer" },
                 )
                 return
             }
@@ -1011,7 +1011,7 @@ fun ChatSection(
                                 actionError = null
                                 openId?.let { loadEvents(it) }
                             }.onFailure {
-                                actionError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel.ifBlank { "the host" })
+                                actionError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel.ifBlank { "that computer" })
                             }
                         }
                     },
@@ -1945,7 +1945,7 @@ fun PullsSection(
         )
         if (loading) { CircularProgressIndicator(Modifier, strokeWidth = 2.dp); return }
         if (pulls.isEmpty() && error == null) {
-            EmptyState(Icons.Default.ChatBubbleOutline, "No open pulls", "Connect GitHub on the host to review here.")
+            EmptyState(Icons.Default.ChatBubbleOutline, "No open pulls", "Connect GitHub on that computer to review here.")
             return
         }
         LazyColumn(contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(6.dp)) {

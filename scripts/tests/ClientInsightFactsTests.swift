@@ -30,7 +30,7 @@ import Foundation
         precondition(panels[2].value == "68", "count is plain")
 
         // Every Insights cut keeps the same order; only the third label moves.
-        for label in ["Models", "Harnesses", "Days"] {
+        for label in ["Models", "Coding tools", "Days"] {
             let cut = ClientInsightFacts.panels(
                 tokens: 0, events: 0, count: 0, countLabel: label, formatCompact: { _ in "0" }
             )

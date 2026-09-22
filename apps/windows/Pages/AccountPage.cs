@@ -289,7 +289,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         return Chrome.Card(
             "Plan limits",
             body,
-            "Sign in to track vendor quota windows on this PC and share them with your other devices.");
+            "Sign in to see how much of each tool's subscription is left on this PC, and to share that with your other devices.");
     }
 
     /// <summary>Who you are, at the size a profile deserves.</summary>
@@ -584,9 +584,9 @@ internal sealed class AccountPage : Page, IToolbarItems
         }
         body.Children.Add(new TextBlock
         {
-            Text = "Posts how full each window is, so your other devices can show "
-                + "what is left while this PC is asleep. Percentages and reset "
-                + "times only, never a credential. Turning a vendor off below "
+            Text = "Shows how much of each tool's subscription is left on your other devices, "
+                + "including while this PC is asleep. Percentages and reset "
+                + "times only, never a credential. Turning a tool off below "
                 + "also stops tracking it on this PC.",
             Opacity = 0.7,
             FontSize = 12,
@@ -630,7 +630,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         return Chrome.Card(
             "Plan limits",
             body,
-            "Track vendor quota windows. Off means this PC does not read that vendor and does not show it on Home.");
+            "How much of each tool's subscription is left. Off means this PC does not read that tool and does not show it on Home.");
     }
 
     private UIElement PlanLimitRow(JsonNode provider, string source, bool shared)
@@ -1246,7 +1246,7 @@ internal sealed class AccountPage : Page, IToolbarItems
             {
                 body.Children.Add(new TextBlock
                 {
-                    Text = "This host does not report local traffic yet.",
+                    Text = "This computer does not report local traffic yet.",
                     Opacity = 0.7,
                     TextWrapping = TextWrapping.Wrap,
                 });

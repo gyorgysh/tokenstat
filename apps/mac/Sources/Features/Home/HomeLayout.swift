@@ -42,7 +42,7 @@ enum HomeSection: String, CaseIterable, Identifiable, Codable, Sendable {
         case .machines: "Which of your machines are awake"
         case .usage: "What today and this week came to"
         case .activity: "The year, a square a day"
-        case .limits: "How full each plan window is"
+        case .limits: "How much of each tool's subscription is left"
         }
     }
 

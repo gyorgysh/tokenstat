@@ -39,11 +39,11 @@ struct ClientLimitsCard: View {
             if isLoading {
                 ClientWireframe.Rows(count: 2)
             } else if readable.isEmpty && errorMessage == nil {
-                // Not an error. A host posts readings only when "Share plan
-                // limits with my devices" is on, and only after a limits
+                // Not an error. A computer posts readings only when "Share with
+                // my devices" is on under Plan limits, and only after a limits
                 // refresh or sync. Until then the honest line is empty, not zero.
-                Text("No readings yet. On a Mac, turn on Share plan limits with "
-                    + "my devices in Account, then refresh limits or sync.")
+                Text("No readings yet. On a Mac, open Plan limits in Account and turn on Share with "
+                    + "my devices. Then refresh or sync.")
                     .font(ClientType.label)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)

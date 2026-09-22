@@ -243,7 +243,7 @@ struct HeatmapView: View {
                 Button {
                     onSelect?(item.day)
                 } label: {
-                    Text("\(item.day.date): \(formatSpend(item.day.value)) at list rates")
+                    Text("\(item.day.date): \(formatSpend(item.day.value)) at API list price")
                 }
                 .accessibilityHint("Pins this day in the inspector")
             }

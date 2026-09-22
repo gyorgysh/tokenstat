@@ -145,7 +145,7 @@ fun WorkspaceFileEditorPage(
                 ((it["content"] as? JsonPrimitive) ?: (it["text"] as? JsonPrimitive))?.contentOrNull
             }
             if (host == null) {
-                error = "Could not re-read this file on the host, so the save waits. Your edits are kept."
+                error = "Could not re-read this file on that computer, so the save waits. Your edits are kept."
                 return
             }
             when (EditorSave.decide(host, draft, saved)) {
@@ -316,7 +316,7 @@ fun WorkspaceFileEditorPage(
         AlertDialog(
             onDismissRequest = { confirmDiscard = false },
             title = { Text("Discard changes?") },
-            text = { Text("This file has edits that are not saved on the host.") },
+            text = { Text("This file has edits that are not saved on that computer.") },
             confirmButton = {
                 TextButton(onClick = { confirmDiscard = false; onClose() }) {
                     Text("Discard", color = LocalTsColors.current.danger)
@@ -413,7 +413,7 @@ private fun EditorConflictCard(
         verticalArrangement = Arrangement.spacedBy(Space.s),
     ) {
         Text(
-            "This file changed on the host.",
+            "This file changed on that computer.",
             style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
             color = colors.textPrimary,
         )
@@ -423,7 +423,7 @@ private fun EditorConflictCard(
             color = colors.textSecondary,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            TsSecondaryButton(label = "Reload host", small = true, onClick = onReload)
+            TsSecondaryButton(label = "Reload computer", small = true, onClick = onReload)
             TsAccentButton(label = "Keep my draft", small = true, onClick = onKeep)
         }
     }

@@ -464,7 +464,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             }
             if (chunk["active"] is not null && !Format.Flag(chunk, "active"))
             {
-                var reason = string.IsNullOrEmpty(error) ? "The host stopped sharing." : error;
+                var reason = string.IsNullOrEmpty(error) ? "That computer stopped sharing." : error;
                 if (Actionable(reason))
                 {
                     Banner(reason);
@@ -496,7 +496,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
                 && (DateTime.UtcNow - _connectedSince).TotalSeconds > 8)
             {
                 await CloseViewerAsync();
-                Caption("Connected, but no picture has arrived yet. The host may not have Screen Recording, or tokenstat may not be open on that machine.");
+                Caption("Connected, but no picture has arrived yet. That computer may not have Screen Recording, or tokenstat may not be open on that machine.");
                 Banner("No picture arrived.");
                 return;
             }

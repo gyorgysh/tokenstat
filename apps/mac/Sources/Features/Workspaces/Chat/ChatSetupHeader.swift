@@ -812,7 +812,7 @@ struct ChatAgentAvailabilityNotice: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("\(model.backend(for: chat.backend)?.label ?? chat.backend) isn’t installed on this host.")
+            Text("\(model.backend(for: chat.backend)?.label ?? chat.backend) isn’t installed on this computer.")
                 .font(Theme.caption).foregroundStyle(Theme.warning)
             Button("Set up or choose another agent", .create) { showingOptions = true }
                 .font(Theme.caption)

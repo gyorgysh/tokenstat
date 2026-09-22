@@ -37,7 +37,7 @@ struct LocalTrafficCard: View {
             if let traffic {
                 counters(traffic)
             } else {
-                Text("This host does not report local traffic yet.")
+                Text("This computer does not report local traffic yet.")
                     #if os(macOS)
                     .font(Theme.callout)
                     #else

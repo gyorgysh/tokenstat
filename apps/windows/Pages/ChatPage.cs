@@ -953,8 +953,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             {
                 _transcript.Children.Clear();
                 var waiting = EmptyState.View(
-                    "Waiting for the host",
-                    "The host has not answered yet.",
+                    "Waiting for that computer",
+                    "That computer has not answered yet.",
                     EmptyArtKind.Waiting);
                 waiting.Tag = waitingKey;
                 _transcript.Children.Add(waiting);

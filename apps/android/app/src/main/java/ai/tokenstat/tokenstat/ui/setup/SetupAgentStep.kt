@@ -58,7 +58,7 @@ internal fun JsonObject.setupMachineId(): String? =
 internal fun JsonObject.setupHostLabel(): String =
     get("label")?.jsonPrimitive?.contentOrNull?.ifEmpty { null }
         ?: get("displayName")?.jsonPrimitive?.contentOrNull?.ifEmpty { null }
-        ?: "Host"
+        ?: "Computer"
 
 /// The machines setup can work with: hosts with a connection key. A record
 /// from before the server knew client kinds carries no kind and would

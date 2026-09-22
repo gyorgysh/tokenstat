@@ -348,7 +348,7 @@ class ScreenViewerModel(
                 connectedSince = 0
                 state = State.Failed
                 message = "Connected, but no picture has arrived yet. " +
-                    "The host may not have Screen Recording, or tokenstat may not be open on that computer."
+                    "That computer may not have Screen Recording, or tokenstat may not be open on that computer."
                 return null
             }
             if (chunk["active"]?.jsonPrimitive?.contentOrNull == "false") {

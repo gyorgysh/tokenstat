@@ -982,7 +982,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             var confirm = new StackPanel { Spacing = Theme.SpaceS };
             confirm.Children.Add(new TextBlock
             {
-                Text = $"Delete \"{Format.Text(graph, "name")}\"? This removes the workflow from this host.",
+                Text = $"Delete \"{Format.Text(graph, "name")}\"? This removes the workflow from this computer.",
                 TextWrapping = TextWrapping.Wrap,
             });
             var confirmRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };

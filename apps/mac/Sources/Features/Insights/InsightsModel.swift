@@ -44,7 +44,7 @@ final class InsightsModel {
             case .overview: return "Overview"
             case .models: return "Models"
             case .projects: return "Projects"
-            case .harnesses: return "Harnesses"
+            case .harnesses: return "Coding tools"
             case .sessions: return "Sessions"
             }
         }

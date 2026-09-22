@@ -324,7 +324,7 @@ private struct ChatQueueRow: View {
                     .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
             }
             if item.needsReceipt {
-                Text("The host has not confirmed this message. Check delivery, or copy its text after reviewing the conversation. Removing this copy does not cancel a message already sent.")
+                Text("That computer has not confirmed this message. Check delivery, or copy its text after reviewing the conversation. Removing this copy does not cancel a message already sent.")
                     .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
             } else if item.delivery == .needsReview {
                 Text("Review the live conversation first. Use latest context prepares this message without sending it.")

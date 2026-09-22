@@ -1278,7 +1278,7 @@ final class ChatModel {
             backendRefreshError = nil
         } catch {
             guard context == loadGeneration else { return }
-            backendRefreshError = "Can’t check agents on this host. Reconnect and retry."
+            backendRefreshError = "Can’t check agents on this computer. Reconnect and retry."
         }
     }
 

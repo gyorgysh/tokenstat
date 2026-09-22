@@ -351,7 +351,7 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         }
         if (_session.Paused)
         {
-            Banner("The host paused output because the handoff window is full. It resumes on its own.");
+            Banner("tokenstat paused output because the handoff window is full. It resumes on its own.");
         }
         if (_session.Dropped > 0)
         {

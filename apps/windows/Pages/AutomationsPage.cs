@@ -415,7 +415,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
             {
                 _listHost.Children.Add(EmptyState.View(
                     "No automations yet",
-                    "Scheduled jobs run on this host when Always-on is on.",
+                    "Scheduled jobs run on this computer when Always-on host is on.",
                     EmptyArtKind.Automations,
                     ActionIconGlyph.Button("New automation", ActionIcon.Create, (_, _) => StartCreating())));
             }
@@ -515,7 +515,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         row.Children.Add(save);
         body.Children.Add(row);
-        return Chrome.Card("Scheduler", body, "Host-level queue settings.");
+        return Chrome.Card("Scheduler", body, "Queue settings for this computer.");
     }
 
     private UIElement JobRow(JsonNode job, string id)
@@ -1058,7 +1058,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
             var confirm = new StackPanel { Spacing = Theme.SpaceS };
             confirm.Children.Add(new TextBlock
             {
-                Text = $"Delete \"{draft.Name}\"? This removes the job from this host.",
+                Text = $"Delete \"{draft.Name}\"? This removes the job from this computer.",
                 TextWrapping = TextWrapping.Wrap,
             });
             var confirmRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };

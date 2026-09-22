@@ -1053,7 +1053,7 @@ struct ClientFileEditor: View {
             Button("Discard", role: .destructive) { dismiss() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This file has edits that are not saved on the host.")
+            Text("This file has edits that are not saved on that computer.")
         }
     }
 
@@ -1133,7 +1133,7 @@ struct ClientFileEditor: View {
         do {
             host = try await read(peer, workspace, path)
         } catch {
-            errorMessage = "Could not re-read this file on the host, so the save waits. Your edits are kept."
+            errorMessage = "Could not re-read this file on that computer, so the save waits. Your edits are kept."
             return
         }
         let draft = document.text

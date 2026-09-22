@@ -494,7 +494,7 @@ private fun SessionsSection(
         AlertDialog(
             onDismissRequest = { pendingClose = null },
             title = { Text("Close this session?") },
-            text = { Text("The process on ${hostLabel.ifBlank { "the host" }} stops. This cannot be undone.") },
+            text = { Text("The process on ${hostLabel.ifBlank { "that computer" }} stops. This cannot be undone.") },
             confirmButton = {
                 val scope2 = rememberCoroutineScope()
                 TextButton(onClick = {
@@ -1134,7 +1134,7 @@ private fun AutomationsSection(
                 EmptyState(
                     Icons.Default.Bolt,
                     "No automations yet",
-                    "Scheduled runs configured on the host appear here.",
+                    "Scheduled runs configured on that computer appear here.",
                     art = { EmptyArt(EmptyArtKind.Automations) },
                 )
             }

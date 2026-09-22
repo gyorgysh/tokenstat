@@ -246,7 +246,7 @@ fun YearHeatmap(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        if (value == 0L) "nothing recorded" else "${money(value)} at list rates",
+                        if (value == 0L) "nothing recorded" else "${money(value)} at API list price",
                         style = TextStyle(fontSize = 12.sp, fontFamily = TsType.interfaceFamily),
                         color = colors.textSecondary,
                         maxLines = 1,
@@ -602,7 +602,7 @@ private fun DayDetailHeader(day: JsonObject, detail: JsonObject?) {
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Text(money(value), style = TsType.numeric(34, FontWeight.SemiBold), color = colors.accent)
-        Text("at list rates", style = TsType.caption, color = colors.textSecondary)
+        Text("at API list price", style = TsType.caption, color = colors.textSecondary)
         if (detail != null) {
             val events = detail["events"]?.jsonPrimitive?.longOrNull ?: 0L
             val tokens = detail["tokens"]?.jsonPrimitive?.longOrNull ?: 0L

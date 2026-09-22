@@ -135,7 +135,7 @@ final class ClientEditorStore {
         do {
             host = try await read(tab.id.peer, tab.id.workspace, tab.id.path)
         } catch {
-            tab.errorMessage = "Could not re-read this file on the host, so the save waits. Your edits are kept."
+            tab.errorMessage = "Could not re-read this file on that computer, so the save waits. Your edits are kept."
             return
         }
         let draft = tab.document.text

@@ -98,7 +98,7 @@ struct ClientGettingStarted: View {
             ThemeRule()
             Text("Then there is nothing left to run")
                 .font(ClientType.label.weight(.semibold))
-            Text("The first window of counters arrives on its own and fills this screen.")
+            Text("The first usage update arrives on its own and fills this screen.")
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

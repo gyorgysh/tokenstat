@@ -849,7 +849,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     "No shells in this folder",
                     RemoteWorkspaces.IsRemote(_id)
                         ? "Open a new shell. It runs on that machine through the tunnel."
-                        : "Open a new shell. It runs on this PC through the host.",
+                        : "Open a new shell. It runs on this PC.",
                     EmptyArtKind.Sessions));
                 _summary = "No shells in this folder.";
             }

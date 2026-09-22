@@ -294,7 +294,7 @@ private fun SpendCard(usage: DeviceUsage?, accountTotalMicros: Long) {
                 )
                 Text(
                     if (usage != null) {
-                        "at list rates, ${deviceWindowPhrase(usage.days)}"
+                        "at API list price, ${deviceWindowPhrase(usage.days)}"
                     } else {
                         "This device's share has not been fetched."
                     },
@@ -757,7 +757,7 @@ private fun rememberHostStats(model: AppViewModel, peer: String): Triple<JsonObj
     var failed by remember(peer) { mutableStateOf(false) }
     var route by remember(peer) { mutableStateOf<String?>(null) }
     ForegroundEffect(peer) {
-        runCatching { model.prepareHost(peer, "Host") }
+        runCatching { model.prepareHost(peer, "Computer") }
         while (true) {
             runCatching { model.hostStats(peer) }
                 .onSuccess { stats = it; failed = false }
@@ -936,7 +936,7 @@ private fun SoftwareCard(model: AppViewModel, peer: String) {
         scope.launch {
             phase = UpdatePhase.Checking
             applied = null
-            runCatching { model.prepareHost(peer, "Host") }
+            runCatching { model.prepareHost(peer, "Computer") }
             // A host older than these methods must not be discovered by
             // showing somebody its `unknown method` error.
             val version = probeVersion() ?: run {

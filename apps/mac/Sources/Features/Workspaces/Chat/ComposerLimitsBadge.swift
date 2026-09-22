@@ -89,7 +89,7 @@ struct ComposerLimitsBadge: View {
                         .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
-                    .help("\(harnessName(provider.source)) plan limits. Shows the full windows.")
+                    .help("How much of the \(harnessName(provider.source)) subscription is left.")
                     .accessibilityLabel("\(harnessName(provider.source)) limits: \(summaryText(for: headline))")
                     .popover(isPresented: $showingDetail, arrowEdge: .bottom) {
                         ComposerLimitsDetail(

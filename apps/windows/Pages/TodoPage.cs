@@ -1451,7 +1451,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         {
             body.Children.Add(new TextBlock
             {
-                Text = "The run is not in this host's history yet. Refresh to look again.",
+                Text = "The run is not in this computer's history yet. Refresh to look again.",
                 Opacity = 0.66,
                 TextWrapping = TextWrapping.Wrap,
             });

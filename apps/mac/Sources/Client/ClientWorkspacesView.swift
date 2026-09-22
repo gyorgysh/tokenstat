@@ -133,7 +133,7 @@ struct ClientWorkspacesView: View {
                             art: .connect
                         )
                     } else {
-                        ClientSectionTitle(title: "Hosts on your account", mark: "mark_host")
+                        ClientSectionTitle(title: "Computers on your account", mark: "mark_host")
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 2)
 
@@ -500,7 +500,7 @@ struct ClientWorkspacesView: View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             Text("Your Workspaces are clear")
                 .font(ClientType.label.weight(.medium))
-            Text("Folders, chats and sessions are switched off. Hosts stay above.")
+            Text("Folders, chats and sessions are switched off. Computers stay above.")
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -698,7 +698,7 @@ final class ClientWorkspacesModel {
             let name: String = {
                 if let label = machine.label, !label.isEmpty { return label }
                 if let id = machine.machineID { return id }
-                return "Host"
+                return "Computer"
             }()
             return ClientHost(
                 peerKey: key,

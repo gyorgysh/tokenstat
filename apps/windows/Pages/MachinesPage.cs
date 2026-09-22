@@ -1071,7 +1071,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             var wrap = new StackPanel { Spacing = Theme.SpaceM };
             wrap.Children.Add(card);
             wrap.Children.Add(Chrome.Banner(
-                "No other host to view. Screen share is for another machine on this account.",
+                "No other computer to view. Screen share is for another machine on this account.",
                 Theme.Accent,
                 Symbol.View));
             return wrap;
@@ -1550,7 +1550,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
                 if (string.IsNullOrEmpty(peerKey))
                 {
                     _root.Children.Insert(0, Chrome.Banner(
-                        "No other host to view. Screen share is for another machine on this account.",
+                        "No other computer to view. Screen share is for another machine on this account.",
                         Theme.Accent,
                         Symbol.View));
                     return;

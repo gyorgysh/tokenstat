@@ -102,7 +102,7 @@ struct PhoneHeatmap: View {
                     .font(Theme.font(13, weight: .semibold))
                 Text(focus.day.value == 0
                     ? "nothing recorded"
-                    : "\(formatSpend(focus.day.value)) at list rates")
+                    : "\(formatSpend(focus.day.value)) at API list price")
                     .font(Theme.font(12))
                     .foregroundStyle(.secondary)
             } else {
@@ -167,7 +167,7 @@ struct PhoneHeatmap: View {
     }
 
     private var summary: String {
-        var text = "\(calendar.activeDays) active days, \(formatSpend(calendar.total)) at list rates, "
+        var text = "\(calendar.activeDays) active days, \(formatSpend(calendar.total)) at API list price, "
             + "\(spokenDate(calendar.first)) to \(spokenDate(calendar.last)). "
         if calendar.isHistoryLocked {
             let days = calendar.historyDays ?? 30
@@ -306,7 +306,7 @@ struct PhoneHeatmap: View {
                     // dash zero eight dash eleven" is not a date anybody
                     // hears. The amount is in the label too, so intensity is
                     // never carried by colour alone.
-                    Text("\(spokenDate(day.date)), \(formatSpend(day.value)) at list rates")
+                    Text("\(spokenDate(day.date)), \(formatSpend(day.value)) at API list price")
                 }
             }
         }

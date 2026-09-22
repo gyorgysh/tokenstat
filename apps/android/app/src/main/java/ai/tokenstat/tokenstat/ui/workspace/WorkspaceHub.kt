@@ -354,7 +354,7 @@ fun WorkspaceHub(
             WorkspaceHubMenu(
                 model = model,
                 peer = peer,
-                hostName = host.str("label") ?: "Host",
+                hostName = host.str("label") ?: "Computer",
                 folder = folder,
                 modifier = Modifier.weight(1f),
                 onOpenSection = { openSection = it },
@@ -364,7 +364,7 @@ fun WorkspaceHub(
                 model = model,
                 peer = peer,
                 workspace = workspace,
-                hostLabel = host.str("label") ?: "Host",
+                hostLabel = host.str("label") ?: "Computer",
                 section = section,
                 protocol = HostContracts.protocolOf(host),
                 folderName = folderName,

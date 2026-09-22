@@ -4665,8 +4665,8 @@ private struct ActiveSessionRow: View {
         if session.meter?.costMicros != nil {
             lines.append(
                 session.meter?.isPlan == true
-                    ? "Covered by your plan. List-rate equivalent, not billed."
-                    : "List-rate equivalent, not billed."
+                    ? "Covered by your plan. API list price, not an extra bill."
+                    : "API list price, not an extra bill."
             )
         }
         if session.meter?.contextEstimated == true {

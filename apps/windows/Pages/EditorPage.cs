@@ -755,7 +755,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         {
             _conflict.Children.Add(new TextBlock
             {
-                Text = "This file changed on the host.",
+                Text = "This file changed on that computer.",
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             });
             var summary = new TextBlock { TextWrapping = TextWrapping.Wrap, Opacity = 0.8 };
@@ -763,7 +763,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             _conflict.Children.Add(summary);
             var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
             actions.Children.Add(ActionIconGlyph.Button(
-                "Reload host", ActionIcon.Restore, async (_, _) => await ResolveConflictAsync(keepMine: false)));
+                "Reload computer", ActionIcon.Restore, async (_, _) => await ResolveConflictAsync(keepMine: false)));
             actions.Children.Add(ActionIconGlyph.Button(
                 "Keep my draft", ActionIcon.Edit, async (_, _) => await ResolveConflictAsync(keepMine: true)));
             _conflict.Children.Add(actions);
@@ -993,7 +993,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
                 }
                 catch
                 {
-                    StatusError("Could not re-read this file on the host, so the save waits. Your edits are kept.");
+                    StatusError("Could not re-read this file on that computer, so the save waits. Your edits are kept.");
                     return;
                 }
                 var draft = Norm(_text);
@@ -1116,7 +1116,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             var mineText = Norm(_text);
             var mine = LineCount(mineText);
             var theirs = LineCount(host);
-            var summary = $"Yours has {mine} lines, the host has {theirs}. Saving is off until you choose.";
+            var summary = $"Yours has {mine} lines, that computer has {theirs}. Saving is off until you choose.";
             var first = FirstDifference(mineText, host);
             if (first.HasValue)
             {

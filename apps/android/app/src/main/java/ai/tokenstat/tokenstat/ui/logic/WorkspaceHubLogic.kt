@@ -188,7 +188,7 @@ object EditorConflict {
     }
 
     fun summary(mine: String, host: String): String {
-        var parts = "Yours has ${lineCount(mine)} lines, the host has ${lineCount(host)}. " +
+        var parts = "Yours has ${lineCount(mine)} lines, that computer has ${lineCount(host)}. " +
             "Saving is off until you choose."
         val first = firstDifferenceLine(mine, host)
         if (first != null) parts += " First difference: line $first."

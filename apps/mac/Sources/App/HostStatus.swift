@@ -34,12 +34,12 @@ struct HostStatusCard: View {
                 )
             } else if issue == .silent {
                 status(
-                    title: "Host is quiet",
+                    title: "tokenstat is quiet",
                     subtitle: "The local helper did not answer. Retrying in the background."
                 )
             } else if issue == .down {
                 status(
-                    title: "Host is not answering",
+                    title: "tokenstat is not answering",
                     subtitle: "tokenstat tried to restart it and will keep retrying."
                 )
             }

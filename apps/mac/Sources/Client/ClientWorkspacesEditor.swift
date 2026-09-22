@@ -54,7 +54,7 @@ struct ClientWorkspacesEditor: View {
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 } footer: {
-                    Text("Order of Folders, Recent chats and All sessions on the connected machine. Hosts stay above.")
+                    Text("Order of Folders, Recent chats and All sessions on the connected machine. Computers stay above.")
                 }
 
                 Section {
@@ -88,7 +88,7 @@ struct ClientWorkspacesEditor: View {
                                 Text("All tasks")
                                     .font(ClientType.body)
                                     .foregroundStyle(allTasks ? .primary : .secondary)
-                                Text("Host-wide task board above the sections")
+                                Text("Task board for the whole computer, above the sections")
                                     .font(ClientType.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -299,7 +299,7 @@ private struct WorkspacesLayoutPreview: View {
                 .padding(.bottom, 3)
                 .accessibilityHidden(true)
             if sections.isEmpty {
-                Text("Only hosts will show")
+                Text("Only computers will show")
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 44)

@@ -699,13 +699,13 @@ private fun ScreenOverlay(
                     Readiness("Legend plan", tier.equals("legend", ignoreCase = true))
                     Readiness("Signed in and paired", true)
                     Readiness(
-                        "Host online",
+                        "Computer online",
                         !session.message.contains("offline", ignoreCase = true),
                     )
                     Readiness("Per-device screen permission", !session.needsPermission)
                     Readiness(
                         if (controlling) "Screen Recording and Accessibility"
-                        else "Screen Recording on the host",
+                        else "Screen Recording on that computer",
                         !session.message.contains("recording", ignoreCase = true),
                     )
                 }

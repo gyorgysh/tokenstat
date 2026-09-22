@@ -78,9 +78,9 @@ struct InspectorView: View {
     private var periodFigures: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             Stat(
-                label: "Value at list rates",
+                label: "API list price",
                 value: model.periodValue.formatted,
-                note: "not billed",
+                note: "not an extra bill",
                 tint: Theme.accent,
                 // 26pt reads at full size; below the display fit it stops
                 // shrinking the value and drops a step instead, which keeps
@@ -176,7 +176,7 @@ struct InspectorView: View {
                 let harnesses = model.harnesses(inProject: row.key)
                 if !harnesses.isEmpty {
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                        Text("Harnesses here")
+                        Text("Coding tools here")
                             .font(Theme.caption.weight(.medium))
                         ForEach(harnesses) { h in
                             HStack(spacing: Theme.Space.s) {

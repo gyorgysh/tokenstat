@@ -23,14 +23,14 @@ struct EditorConflictCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("This file changed on the host.")
+            Text("This file changed on that computer.")
                 .font(ClientType.label.weight(.semibold))
             Text(summary)
                 .font(ClientType.caption)
                 .foregroundStyle(Theme.controlGlyph)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: Theme.Space.s) {
-                Button("Reload host", .restore, role: .destructive) { onReload() }
+                Button("Reload computer", .restore, role: .destructive) { onReload() }
                     .buttonStyle(SecondaryButtonStyle(small: true))
                 Button("Keep my draft", .edit) { onKeep() }
                     .buttonStyle(AccentButtonStyle(small: true))
@@ -42,13 +42,13 @@ struct EditorConflictCard: View {
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("This file changed on the host. \(summary)")
+        .accessibilityLabel("This file changed on that computer. \(summary)")
     }
 
     private var summary: String {
         let mine = document.text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).count
         let theirs = hostContent.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).count
-        var parts = "Yours has \(mine) lines, the host has \(theirs). Saving is off until you choose."
+        var parts = "Yours has \(mine) lines, that computer has \(theirs). Saving is off until you choose."
         if let first = firstDifference {
             parts += " First difference: line \(first)."
         }

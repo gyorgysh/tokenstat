@@ -945,7 +945,7 @@ fun WorkspacesEditor(
             WorkspacesLayoutPreview(sections = visible)
         }
         item {
-            SectionLabel("Order of Folders, Recent chats and All sessions on the connected machine. Hosts stay above.")
+            SectionLabel("Order of Folders, Recent chats and All sessions on the connected machine. Computers stay above.")
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
@@ -1036,7 +1036,7 @@ fun WorkspacesLayoutPreview(sections: List<WorkSection>) {
         )
         if (sections.isEmpty()) {
             Text(
-                "Only hosts will show",
+                "Only computers will show",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.textSecondary,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),

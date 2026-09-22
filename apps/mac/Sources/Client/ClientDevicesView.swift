@@ -549,7 +549,7 @@ struct ClientDeviceDetailView: View {
                 .foregroundStyle(Theme.accent)
                 .minimumScaleFactor(0.6)
                 .lineLimit(1)
-            Text(usage.map { "at list rates, \(DeviceHistory.windowPhrase(days: $0.days))" }
+            Text(usage.map { "at API list price, \(DeviceHistory.windowPhrase(days: $0.days))" }
                 ?? "This device's share has not been fetched.")
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
@@ -983,7 +983,7 @@ private enum DeviceCopy {
         parts.append(statusLine(machine, isThisDevice: isThisDevice))
         if let usage {
             parts.append(
-                "\(usage.value.formatted) at list rates, \(DeviceHistory.windowPhrase(days: usage.days))"
+                "\(usage.value.formatted) at API list price, \(DeviceHistory.windowPhrase(days: usage.days))"
             )
         }
         return parts.joined(separator: ", ")
@@ -1041,7 +1041,7 @@ final class ClientDevicesModel {
 
     var windowDescription: String {
         guard let days = rows.first?.days else { return "Across this account" }
-        return "Share of \(DeviceHistory.windowPhrase(days: days)), at list rates"
+        return "Share of \(DeviceHistory.windowPhrase(days: days)), at API list price"
     }
 
     func load(machines: [Machine], days: Int = 30, force: Bool = false) async {

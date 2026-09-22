@@ -271,7 +271,7 @@ enum class HomeSection(val key: String, val label: String, val detail: String) {
     MACHINES("machines", "Machines", "Which of your machines are awake"),
     USAGE("usage", "Today and this week", "What today and this week came to"),
     ACTIVITY("activity", "Activity", "The year, a square a day"),
-    LIMITS("limits", "Plan limits", "How full each plan window is");
+    LIMITS("limits", "Plan limits", "How much of each tool's subscription is left");
 
     companion object {
         fun of(key: String): HomeSection? = entries.find { it.key == key }

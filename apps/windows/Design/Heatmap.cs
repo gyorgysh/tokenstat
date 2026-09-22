@@ -529,7 +529,7 @@ internal sealed class HeatmapView : StackPanel
         Canvas.SetLeft(_hoverRing, _hovered.Column * _stride);
         Canvas.SetTop(_hoverRing, _hovered.Row * _stride);
         _hoverRing.Visibility = Visibility.Visible;
-        string tip = $"{_hovered.Day.Date}: {ListRate(_hovered.Day.Value)} at list rates";
+        string tip = $"{_hovered.Day.Date}: {ListRate(_hovered.Day.Value)} at API list price";
         ToolTipService.SetToolTip(_hitRect, tip);
         AutomationProperties.SetName(_hitRect, tip);
     }

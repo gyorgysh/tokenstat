@@ -160,7 +160,7 @@ struct ClientInsightsView: View {
                 .contentTransition(.numericText())
                 .minimumScaleFactor(0.6)
                 .lineLimit(1)
-            Text("at list rates, across every device")
+            Text("at API list price, across every device")
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
             ClientStatPanels(panels: ClientInsightFacts.panels(
@@ -250,7 +250,7 @@ private struct InsightRow: View {
         .cardSurface()
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(cut.title(for: row.key)), \(row.value.formatted) at list rates, "
+            "\(cut.title(for: row.key)), \(row.value.formatted) at API list price, "
                 + "\(formatTokens(row.counters.total)) tokens"
         )
     }
@@ -276,10 +276,9 @@ final class ClientInsightsModel {
         var label: String {
             switch self {
             case .model: return "Models"
-            // The Mac calls these harnesses and so does the CLI. A phone using
-            // a third word for the same thing makes them look like two
-            // different breakdowns.
-            case .source: return "Harnesses"
+            // Same label as the Mac Insights tab. A different word here
+            // makes the two screens look like different breakdowns.
+            case .source: return "Coding tools"
             case .day: return "Days"
             }
         }

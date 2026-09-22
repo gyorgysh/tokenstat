@@ -71,7 +71,7 @@ struct DayDetailSheet: View {
             Text(formatSpend(day.value))
                 .font(ClientType.figure)
                 .foregroundStyle(Theme.accent)
-            Text("at list rates")
+            Text("at API list price")
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
             if let detail {

@@ -283,7 +283,7 @@ struct ClientSidebarRoot: View {
             }
             Section {
                 if workspaces.hosts.isEmpty {
-                    Text("No host computers yet")
+                    Text("No computers yet")
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                 }

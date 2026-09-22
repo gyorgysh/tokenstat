@@ -93,7 +93,7 @@ struct ClientFileTabs<Files: View>: View {
             }
             Button("Keep editing", role: .cancel) { closing = nil }
         } message: {
-            Text("\(closing?.id.path ?? "This file") has edits that are not saved on the host.")
+            Text("\(closing?.id.path ?? "This file") has edits that are not saved on that computer.")
         }
         // Next/previous match stay discoverable when the bar is hidden: the
         // same chord opens the bar, and navigates once it is open with

@@ -240,7 +240,7 @@ fun ChatAgentSheet(
             onBackends(asObjects(it))
             refreshError = null
         }.onFailure {
-            refreshError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel.ifBlank { "the host" })
+            refreshError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel.ifBlank { "that computer" })
         }
     }
     LaunchedEffect(peer, chatId) { if (backends.isEmpty()) load(refresh = false) }
@@ -269,7 +269,7 @@ fun ChatAgentSheet(
                 refreshError = null
                 onChanged()
             }.onFailure {
-                refreshError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel.ifBlank { "the host" })
+                refreshError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel.ifBlank { "that computer" })
             }
             updating = false
         }
@@ -290,7 +290,7 @@ fun ChatAgentSheet(
                 }
                 load(refresh = true)
             }.onFailure {
-                setupError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel.ifBlank { "the host" })
+                setupError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel.ifBlank { "that computer" })
             }
             installing = null
         }

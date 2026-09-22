@@ -260,7 +260,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
                 default:
                     _root.Children.Add(Chrome.Empty(
                         "Pull requests are unavailable",
-                        "Refresh to ask the workspace host again.",
+                        "Refresh to ask that computer again.",
                         ActionIcon.Merge));
                     break;
             }

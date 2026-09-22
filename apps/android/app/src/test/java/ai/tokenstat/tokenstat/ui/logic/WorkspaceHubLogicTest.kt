@@ -151,7 +151,7 @@ class WorkspaceHubLogicTest {
         assertEquals(3, EditorConflict.firstDifferenceLine("a\nb", "a\nb\nc"))
         assertNull(EditorConflict.firstDifferenceLine("a", "a"))
         assertEquals(
-            "Yours has 2 lines, the host has 2. Saving is off until you choose. First difference: line 2.",
+            "Yours has 2 lines, that computer has 2. Saving is off until you choose. First difference: line 2.",
             EditorConflict.summary("a\nx", "a\ny"),
         )
     }

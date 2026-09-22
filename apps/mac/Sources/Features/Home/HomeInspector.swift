@@ -111,9 +111,9 @@ struct HomeInspector: View {
                 .font(Theme.font(15, weight: .semibold))
 
             Stat(
-                label: "Value at list rates",
+                label: "API list price",
                 value: detail.value.formatted,
-                note: detail.estimated ? "estimated" : "not billed",
+                note: detail.estimated ? "estimated" : "not an extra bill",
                 tint: Theme.accent,
                 size: 22
             )
@@ -128,14 +128,14 @@ struct HomeInspector: View {
 
             groupCard(
                 title: "Models",
-                subtitle: "List-rate value",
+                subtitle: "API list price",
                 rows: pricedModelRows(detail, extra: extra),
                 showsValue: true,
                 isHarness: false
             )
 
             groupCard(
-                title: "Harnesses",
+                title: "Coding tools",
                 subtitle: "Which agent produced the tokens",
                 rows: harnessRows(detail, extra: extra),
                 showsValue: false,
@@ -165,7 +165,7 @@ struct HomeInspector: View {
             if !detail.unpricedModels.isEmpty {
                 groupCard(
                     title: "Unpriced / local models",
-                    subtitle: "No list rate. Tokens still counted.",
+                    subtitle: "No API price. Tokens still counted.",
                     rows: unpricedModelRows(detail, extra: extra),
                     showsValue: false,
                     isHarness: false

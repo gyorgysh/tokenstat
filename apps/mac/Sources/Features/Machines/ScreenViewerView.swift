@@ -438,10 +438,10 @@ struct ScreenViewerView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     readiness("Legend plan", ready: tier?.lowercased() == "legend")
                     readiness("Signed in and paired", ready: true)
-                    readiness("Host online", ready: !model.message.localizedCaseInsensitiveContains("offline"))
+                    readiness("Computer online", ready: !model.message.localizedCaseInsensitiveContains("offline"))
                     readiness("Per-device screen permission", ready: !model.needsPermission)
                     readiness(
-                        controlling ? "Screen Recording and Accessibility" : "Screen Recording on the host",
+                        controlling ? "Screen Recording and Accessibility" : "Screen Recording on that computer",
                         ready: !model.message.localizedCaseInsensitiveContains("recording")
                     )
                 }
@@ -939,7 +939,7 @@ private final class ScreenViewerModel {
                     connectedSince = nil
                     streamingSince = nil
                     state = .failed
-                    message = "Connected, but no picture has arrived yet. The host may not have Screen Recording, or tokenstat may not be open on that Mac."
+                    message = "Connected, but no picture has arrived yet. That computer may not have Screen Recording, or tokenstat may not be open on that Mac."
                     return
                 }
                 if let encoded = read.audio, let data = Data(base64Encoded: encoded) {

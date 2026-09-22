@@ -106,7 +106,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             ("overview", "Overview", null),
             ("models", "Models", null),
             ("projects", "Projects", null),
-            ("harnesses", "Harnesses", null),
+            ("harnesses", "Coding tools", null),
             ("sessions", "Sessions", null),
         };
 
@@ -270,7 +270,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         {
             _tabSlot.Content = TabStrip.View(new List<(string Value, string Label, ActionIcon? Glyph)>
             {
-                ("model", "Models", null), ("source", "Harnesses", null), ("day", "Days", null),
+                ("model", "Models", null), ("source", "Coding tools", null), ("day", "Days", null),
             }, _accountCut, async value => { _accountCut = value; _visible = FirstPage; await LoadAsync(); });
             return;
         }
@@ -606,7 +606,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
 
     private void RenderAccount()
     {
-        _status.Text = _error ?? "Synced usage across all devices · Last 53 weeks · Value at list rates, not billed";
+        _status.Text = _error ?? "Synced usage across all devices · Last 53 weeks · API list price, not an extra bill";
         _accountReports.TryGetValue(_accountCut, out var report);
         if (report is null) return;
         if (Format.Flag(report, "stale"))
@@ -630,7 +630,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 DailyChart(ascending, showsValue: false, showsToggle: false),
                 "Tokens per day · cache included"));
         }
-        var plural = _accountCut switch { "source" => "harnesses", "day" => "days", _ => "models" };
+        var plural = _accountCut switch { "source" => "coding tools", "day" => "days", _ => "models" };
         var box = new TextBox
         {
             PlaceholderText = "Filter " + plural,
@@ -682,7 +682,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         }
         _root.Children.Add(new TextBlock
         {
-            Text = _accountCut switch { "source" => "Harnesses", "day" => "Days", _ => "Models" },
+            Text = _accountCut switch { "source" => "Coding tools", "day" => "Days", _ => "Models" },
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             FontSize = 13,
         });
@@ -866,7 +866,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         {
             "models" => "Models",
             "projects" => "Projects",
-            "harnesses" => "Harnesses",
+            "harnesses" => "Coding tools",
             _ => "Sessions",
         };
         _root.Children.Add(BreakdownTable(title, TabRows(_tab), showsValue, monospaced, isHarness));
@@ -953,7 +953,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 Width = new GridLength(1, GridUnitType.Star),
             });
             var left = RankingCard("Top models", models, isHarness: false, showsValue: true, "models");
-            var right = RankingCard("By harness", sources, isHarness: true, showsValue: false, "harnesses");
+            var right = RankingCard("By coding tool", sources, isHarness: true, showsValue: false, "harnesses");
             Grid.SetColumn(right, 1);
             row.Children.Add(left);
             row.Children.Add(right);
@@ -962,7 +962,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         else
         {
             _root.Children.Add(RankingCard("Top models", models, isHarness: false, showsValue: true, "models"));
-            _root.Children.Add(RankingCard("By harness", sources, isHarness: true, showsValue: false, "harnesses"));
+            _root.Children.Add(RankingCard("By coding tool", sources, isHarness: true, showsValue: false, "harnesses"));
         }
         if (projects.Count > 0)
         {
@@ -984,7 +984,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         var tiles = new List<(string Label, string Value, string Detail)>
         {
             ("Total tokens", Format.Tokens(total), "Including reported cache usage"),
-            ("List-rate value", MoneyTotal(SnapshotRows("byModel", "by_model")), "Token valuation, not billed"),
+            ("API list price", MoneyTotal(SnapshotRows("byModel", "by_model")), "Not an extra bill"),
             ("Sessions", Format.Long(totals, "sessions").ToString("N0", CultureInfo.InvariantCulture),
                 Format.Long(totals, "events").ToString("N0", CultureInfo.InvariantCulture) + " recorded events"),
             ("Active days", days.ToString("N0", CultureInfo.InvariantCulture),
@@ -1076,7 +1076,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             head.Children.Add(new TextBlock
             {
                 Text = showsValue
-                    ? "Daily value at published rates · not billed"
+                    ? "Daily API list price · not an extra bill"
                     : "Daily token volume",
                 FontSize = Fonts.Callout,
                 Opacity = 0.7,
@@ -1086,7 +1086,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 new List<(string, string, ActionIcon?)>
                 {
                     ("tokens", "Tokens", null),
-                    ("value", "List-rate value", null),
+                    ("value", "API list price", null),
                 },
                 showsValue ? "value" : "tokens",
                 value =>
@@ -1323,7 +1323,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             {
                 var value = new TextBlock
                 {
-                    Text = Money(row) + " at list rates",
+                    Text = Money(row) + " at API list price",
                     FontSize = Fonts.Caption,
                     Opacity = 0.7,
                 };
@@ -1498,7 +1498,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                     TextAlignment = TextAlignment.Right,
                     MaxLines = 1,
                 });
-                ToolTipService.SetToolTip(value, "Value at list rates, not billed");
+                ToolTipService.SetToolTip(value, "API list price, not an extra bill");
                 Grid.SetColumn(value, 3 + nameCol);
                 line.Children.Add(value);
             }
@@ -1591,7 +1591,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         outer.Children.Add(panel);
         outer.Children.Add(new TextBlock
         {
-            Text = "List-rate equivalent, not a charge.",
+            Text = "API list price, not an extra bill.",
             FontSize = Fonts.Caption,
             Opacity = 0.7,
         });
@@ -1617,7 +1617,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         {
             _inspectorRoot.Children.Add(Chrome.Card("All devices", new TextBlock
             {
-                Text = "Aggregated model, harness and daily usage synced to your account. Choose This device for local projects, sessions and archive details.",
+                Text = "Aggregated model, coding tool and daily usage synced to your account. Choose This device for local projects, sessions and archive details.",
                 TextWrapping = TextWrapping.Wrap,
             }));
             return;
@@ -1641,7 +1641,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             return Chrome.Card(_focusDay is null ? "This period" : "This day", body);
         }
         body.Children.Add(Chrome.Stat(
-            "Value at list rates", MoneyTotal(SnapshotRows("byModel", "by_model")), "not billed"));
+            "API list price", MoneyTotal(SnapshotRows("byModel", "by_model")), "not an extra bill"));
         body.Children.Add(StatPair(
             "Tokens", Format.Tokens(Format.Long(totals?["counters"], "total")),
             "Sessions", Format.Long(totals, "sessions").ToString("N0", CultureInfo.InvariantCulture)));
@@ -1742,7 +1742,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             {
                 var group = new StackPanel { Spacing = Theme.SpaceXs };
                 group.Children.Add(Fonts.Text(
-                    "Harnesses here", Fonts.Callout, Microsoft.UI.Text.FontWeights.Medium));
+                    "Coding tools here", Fonts.Callout, Microsoft.UI.Text.FontWeights.Medium));
                 foreach (var (split, splitTokens) in harnesses)
                 {
                     var line = new Grid();

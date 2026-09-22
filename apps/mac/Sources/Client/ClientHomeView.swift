@@ -166,7 +166,7 @@ struct ClientHomeView: View {
         case .machines where (account.account?.machines ?? []).isEmpty:
             return "Appears when your account has linked devices."
         case .limits where model.hasLoadedPlanLimits && !model.planLimits.contains(where: \.hasWindows) && model.planErrorMessage == nil:
-            return "Readings appear after a linked computer shares plan limits."
+            return "Readings appear after a linked computer shares how much of each tool's subscription is left."
         default: return nil
         }
     }
@@ -372,7 +372,7 @@ private struct TotalTile: View {
         .padding(Theme.Space.m)
         .cardSurface()
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(label), \(formatSpend(micros)) at list rates")
+        .accessibilityLabel("\(label), \(formatSpend(micros)) at API list price")
     }
 }
 

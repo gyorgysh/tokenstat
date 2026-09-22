@@ -1068,7 +1068,7 @@ private fun HomeScreen(
         HomeSection.PINNED -> if (pins.isEmpty()) "Pin a folder or conversation to keep it here." else null
         HomeSection.MACHINES -> if (machines.isEmpty()) "Appears when your account has linked devices." else null
         HomeSection.LIMITS -> if (state.limits.isEmpty() && state.limitsError == null) {
-            "Readings appear after a linked computer shares plan limits."
+            "Readings appear after a linked computer shares how much of each tool's subscription is left."
         } else null
         else -> null
     }
@@ -1276,7 +1276,7 @@ private fun HomeScreen(
                             // Not an error. Until a host shares readings the
                             // honest line is empty, not zero.
                             Text(
-                                "No readings yet. On a Mac, turn on Share plan limits with my devices in Account, then refresh limits or sync.",
+                                "No readings yet. On a Mac, open Plan limits in Account and turn on Share with my devices. Then refresh or sync.",
                                 style = TsType.subheadline,
                                 color = LocalTsColors.current.textSecondary,
                                 modifier = Modifier.fillMaxWidth(),
@@ -1437,7 +1437,7 @@ private fun InsightsScreen(
     // client draws: the account holds no projects and no sessions.
     var cut by rememberSaveable { mutableStateOf(0) }
     var query by rememberSaveable { mutableStateOf("") }
-    val cutNames = listOf("Models", "Harnesses", "Days")
+    val cutNames = listOf("Models", "Coding tools", "Days")
     val cutKeys = listOf("model", "source", "day")
     // Rows per cut. Null means "not asked yet", which is not the same as an
     // empty account and must not draw like one.
@@ -1645,7 +1645,7 @@ private fun InsightSummary(rows: List<JsonObject>, cutName: String, stale: Boole
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                "at list rates, across every device",
+                "at API list price, across every device",
                 style = TsType.caption,
                 color = colors.textSecondary,
             )
@@ -2954,7 +2954,7 @@ private fun WorkspacesScreen(
             // beside the new host's name is one lie waiting to be clicked.
             session.clearLists()
             runCatching {
-                model.prepareHost(peer, machine.string("label") ?: "Host")
+                model.prepareHost(peer, machine.string("label") ?: "Computer")
                 // Asked before anything is loaded. Being paired is not being let
                 // in: that computer allows each device to open its work
                 // explicitly.
@@ -3129,7 +3129,7 @@ private fun WorkspacesScreen(
         terminalSession = WorkspaceTerminalRequest(
             session.string("id"),
             workspaceId,
-            boundHost?.string("label") ?: "Host",
+            boundHost?.string("label") ?: "Computer",
         )
     }
     fun openChat(chat: JsonObject) {
@@ -3262,7 +3262,7 @@ private fun WorkspacesScreen(
         CloneRepositoryScreen(
             model = model,
             peer = boundHost.string("publicIdentity") ?: "",
-            hostLabel = boundHost.string("label") ?: "Host",
+            hostLabel = boundHost.string("label") ?: "Computer",
             onClose = { cloning = false },
             onCloned = { id ->
                 cloning = false
@@ -3274,7 +3274,7 @@ private fun WorkspacesScreen(
         FolderPickerScreen(
             model = model,
             peer = boundHost.string("publicIdentity") ?: "",
-            hostName = boundHost.string("label") ?: "Host",
+            hostName = boundHost.string("label") ?: "Computer",
             onClose = { picking = false },
             onAdded = { folder ->
                 picking = false
@@ -3308,7 +3308,7 @@ private fun WorkspacesScreen(
                 model, boundHost, boundFolder, Modifier.weight(1f),
                 initialSection = initialSection,
                 onBack = null,
-                onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: "Host") },
+                onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: "Computer") },
                 onOpenBrowser = { url, port -> browser = url to port },
                 onRecordChat = ::recordChatOpened,
                 initialChatId = pendingChatId,
@@ -3320,7 +3320,7 @@ private fun WorkspacesScreen(
             model, boundHost, boundFolder, Modifier.fillMaxSize(),
             initialSection = initialSection,
             onBack = { selectedFolderId = null; initialSection = null; pendingChatId = null; pendingOpenConversation = false },
-            onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: "Host") },
+            onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: "Computer") },
             onOpenBrowser = { url, port -> browser = url to port },
             onRecordChat = ::recordChatOpened,
             initialChatId = pendingChatId,
@@ -3449,7 +3449,7 @@ private fun WorkspaceList(
         }
         item {
             Box(Modifier.fillMaxWidth().padding(horizontal = 2.dp), contentAlignment = Alignment.CenterStart) {
-                SectionTitle("Hosts on your account", "mark_host")
+                SectionTitle("Computers on your account", "mark_host")
             }
         }
         items(hosts) { machine ->
@@ -4086,7 +4086,7 @@ private fun LocalTrafficCard(model: AppViewModel) {
             val snapshot = status?.get("traffic") as? JsonObject
             if (snapshot == null && !loading && error == null) {
                 Text(
-                    "This host does not report local traffic yet.",
+                    "This computer does not report local traffic yet.",
                     color = LocalTsColors.current.textSecondary,
                 )
             } else if (snapshot != null) {

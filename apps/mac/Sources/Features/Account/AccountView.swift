@@ -230,7 +230,7 @@ struct AccountView: View {
         } else if model.account != nil {
             Card(
                 title: "Plan limits",
-                subtitle: "Sign in to track vendor quota windows on this Mac and share them with your other devices.",
+                subtitle: "Sign in to see how much of each tool's subscription is left on this Mac, and to share that with your other devices.",
                 mark: "mark_plan"
             ) {
                 Button("Sign in to tokenstat.ai", .signIn) {
@@ -513,13 +513,13 @@ struct AccountView: View {
     private var planLimitsCard: some View {
         Card(
             title: "Plan limits",
-            subtitle: "Track vendor quota windows. Off means this Mac does not read that vendor and does not show it on Home.",
+            subtitle: "How much of each tool's subscription is left. Off means this Mac does not read that tool and does not show it on Home.",
             mark: "mark_plan"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 toggleRow(
                     "Share with my devices",
-                    detail: "Posts how full each window is, so an iPhone or iPad can show what is left while this Mac is asleep. Percentages and reset times only, never a credential. Turning a vendor off below also stops tracking it on this Mac.",
+                    detail: "Shows how much of each tool's subscription is left on an iPhone or iPad, including while this Mac is asleep. Percentages and reset times only, never a credential. Turning a tool off below also stops tracking it on this Mac.",
                     isOn: Binding(
                         get: { model.limitsSyncEnabled },
                         set: { on in Task { await model.setLimitsSync(on) } }

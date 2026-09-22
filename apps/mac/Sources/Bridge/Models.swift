@@ -849,7 +849,7 @@ enum GroupBy: String, Sendable, CaseIterable, Identifiable {
         case .week: return "Week"
         case .model: return "Model"
         case .project: return "Project"
-        case .source: return "Harness"
+        case .source: return "Coding tool"
         case .session: return "Session"
         }
     }

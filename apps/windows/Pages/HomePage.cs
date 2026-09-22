@@ -878,14 +878,14 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
                     Opacity = 0.7,
                     TextWrapping = TextWrapping.Wrap,
                 },
-                "What each day was worth at list rates");
+                "What each day was worth at API list price");
         }
         var total = Format.ListRate(Format.Long(calendar, "total"));
         var active = Format.Long(calendar, "activeDays");
         var source = _delivered == "account"
             ? ", across every device on your account"
             : ", on this device";
-        var subtitle = $"{total} at list rates over {active} active days" + source;
+        var subtitle = $"{total} at API list price over {active} active days" + source;
         var notice = Format.Text(calendar, "notice");
         if (!string.IsNullOrEmpty(notice) && Format.Text(calendar, "noticeCode") != "auth")
         {
@@ -1373,9 +1373,9 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
         });
         body.Children.Add(new TextBlock
         {
-            Text = "Account has a Plan limits card that posts how full each window is, "
-                + "so they still show what is left while this PC is asleep. "
-                + "Turn a vendor off there if you do not want it shared.",
+            Text = "Account has a Plan limits card for how much of each tool's subscription is left, "
+                + "including while this PC is asleep. "
+                + "Turn a tool off there if you do not want it shared.",
             Opacity = 0.7,
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
@@ -1605,9 +1605,9 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
         var value = (Format.Flag(detail, "estimated") ? "~" : "")
             + Format.ListRate(Format.Long(detail, "valueMicros"));
         children.Add(Chrome.Stat(
-            "Value at list rates",
+            "API list price",
             value,
-            Format.Flag(detail, "estimated") ? "estimated" : "not billed", accent: true));
+            Format.Flag(detail, "estimated") ? "estimated" : "not an extra bill", accent: true));
         var sessions = OptLong(extra?.Totals, "sessions");
         var headline = $"{Format.Tokens(Format.Long(detail, "tokens"))} tokens · "
             + $"{Format.Long(detail, "events").ToString("N0")} requests";
@@ -1629,9 +1629,9 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
             children.Add(split);
         }
         children.Add(GroupCard(
-            "Models", "List-rate value", PricedModelRows(detail, extra), showsValue: true));
+            "Models", "API list price", PricedModelRows(detail, extra), showsValue: true));
         children.Add(GroupCard(
-            "Harnesses",
+            "Coding tools",
             "Which agent produced the tokens",
             HarnessRows(detail, extra),
             showsValue: false));
@@ -1660,7 +1660,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
         {
             children.Add(GroupCard(
                 "Unpriced / local models",
-                "No list rate. Tokens still counted.",
+                "No API price. Tokens still counted.",
                 unpriced,
                 showsValue: false));
         }
@@ -1858,7 +1858,7 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
                 });
             }
         }
-        return Chrome.Card(title, body, subtitle, mark: Chrome.CardMark(title == "Harnesses" ? ActionIcon.Run : ActionIcon.Token));
+        return Chrome.Card(title, body, subtitle, mark: Chrome.CardMark(title == "Coding tools" ? ActionIcon.Run : ActionIcon.Token));
     }
 
     private static List<DayGroupRow> ModelRows(JsonNode detail, DayOverview? extra)

@@ -896,7 +896,7 @@ fun GettingStartedCard(phoneName: String?, onSetup: () -> Unit) {
                 color = colors.textPrimary,
             )
             Text(
-                "The first window of counters arrives on its own and fills this screen.",
+                "The first usage update arrives on its own and fills this screen.",
                 style = TsType.caption,
                 color = colors.textSecondary,
             )

@@ -181,9 +181,9 @@ struct InsightsView: View {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: width >= 760 ? 4 : (width >= 380 ? 2 : 1)), spacing: 12) {
                     InsightMetric(title: "Total tokens", value: formatTokens(totals.counters.total),
                                   detail: "Including reported cache usage", symbol: "chart.bar.fill")
-                    InsightMetric(title: "List-rate value", value: model.periodValue.formatted,
-                                  detail: "Token valuation · not billed", symbol: "dollarsign.circle")
-                        .help("Value at published model rates, not actual spending.")
+                    InsightMetric(title: "API list price", value: model.periodValue.formatted,
+                                  detail: "Not an extra bill", symbol: "dollarsign.circle")
+                        .help("Dollar amounts are the published API price for those tokens. Work your subscription already covered is not an extra bill.")
                     InsightMetric(title: "Sessions", value: totals.sessions.formatted(),
                                   detail: "\(totals.events.formatted()) recorded events", symbol: "bubble.left.and.bubble.right")
                     InsightMetric(title: "Active days", value: totals.days.formatted(),
@@ -206,12 +206,12 @@ struct InsightsView: View {
                 if width >= 680 {
                     HStack(alignment: .top, spacing: Theme.Space.m) {
                         rankingCard(title: "Top models", rows: model.byModel, tab: .models)
-                        rankingCard(title: "By harness", rows: model.bySource, tab: .harnesses)
+                        rankingCard(title: "By coding tool", rows: model.bySource, tab: .harnesses)
                     }.fixedSize(horizontal: false, vertical: true)
                 } else {
                     VStack(spacing: Theme.Space.m) {
                         rankingCard(title: "Top models", rows: model.byModel, tab: .models)
-                        rankingCard(title: "By harness", rows: model.bySource, tab: .harnesses)
+                        rankingCard(title: "By coding tool", rows: model.bySource, tab: .harnesses)
                     }
                 }
             }
@@ -414,7 +414,7 @@ private struct BreakdownRow: View {
                     .font(Theme.numeric(12))
                     .lineLimit(1)
                     .frame(width: 88, alignment: .trailing)
-                    .help("Value at list rates, not billed")
+                    .help("API list price, not an extra bill")
             }
         }
         .padding(.horizontal, Theme.Space.m)
@@ -490,7 +490,7 @@ private struct InsightRanking: View {
                             HStack {
                                 Text("\(row.sessions.formatted()) sessions")
                                 Spacer()
-                                if showsValue { Text("\(row.value.formatted) at list rates") }
+                                if showsValue { Text("\(row.value.formatted) at API list price") }
                             }.font(Theme.caption2).foregroundStyle(.secondary)
                         }
                         .contentShape(Rectangle())
@@ -537,12 +537,12 @@ private struct DailyChart: View {
         } else {
             VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(showsValue ? "Daily value at published rates · not billed" : "Daily token volume")
+                Text(showsValue ? "Daily API list price · not an extra bill" : "Daily token volume")
                     .font(Theme.caption).foregroundStyle(.secondary)
                 Spacer()
                 Picker("Chart metric", selection: $showsValue) {
                     Text("Tokens").tag(false)
-                    Text("List-rate value").tag(true)
+                    Text("API list price").tag(true)
                 }.pickerStyle(.segmented).labelsHidden().frame(width: 210)
             }
             Chart(rows) { row in
@@ -637,7 +637,7 @@ private struct DailyChart: View {
                 .font(Theme.caption2)
                 .foregroundStyle(.secondary)
             Text(row.value.formatted)
-                .help("Value at list rates, not billed")
+                .help("API list price, not an extra bill")
                 .font(Theme.numeric(10, weight: .medium))
                 .foregroundStyle(Theme.accent)
         }
@@ -697,7 +697,7 @@ private struct AccountInsightsContent: View {
                     Task { await model.refresh() }
                 }
             }
-            Text("Synced usage across all devices · Last 53 weeks · Value at list rates, not billed")
+            Text("Synced usage across all devices · Last 53 weeks · API list price, not an extra bill")
                 .font(Theme.caption).foregroundStyle(.secondary)
             if let error = model.errorMessage { ErrorBanner(message: error) }
             if let age = model.ageDescription { Text(age).font(Theme.caption).foregroundStyle(.secondary) }
@@ -738,7 +738,7 @@ struct ScopedInsightsInspector: View {
         } else {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 HStack { Text("All devices").font(Theme.headline); Spacer(); Button("Close", .dismiss, action: onClose) }
-                Text("Aggregated model, harness and daily usage synced to your account. Choose This device for local projects, sessions and archive details.")
+                Text("Aggregated model, coding tool and daily usage synced to your account. Choose This device for local projects, sessions and archive details.")
                     .foregroundStyle(.secondary)
                 Spacer()
             }.padding(Theme.Space.m)

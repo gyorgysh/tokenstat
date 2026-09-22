@@ -263,7 +263,7 @@ private fun ChatQueueRow(
             offline ->
                 "Reconnect to send or check delivery. You can still copy, edit unsent text, or remove the local copy."
             item.needsReceipt ->
-                "The host has not confirmed this message. Check delivery, or copy its text after reviewing the " +
+                "That computer has not confirmed this message. Check delivery, or copy its text after reviewing the " +
                     "conversation. Removing this copy does not cancel a message already sent."
             item.delivery == ChatDelivery.NeedsReview ->
                 "Review the live conversation first. Use latest context prepares this message without sending it."

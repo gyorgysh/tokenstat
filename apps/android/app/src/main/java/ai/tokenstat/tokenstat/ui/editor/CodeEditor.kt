@@ -188,7 +188,7 @@ class EditorStore {
                 }) as JsonObject
             }.getOrNull()?.optStr("content")
             if (host == null) {
-                tab.error = "Could not re-read this file on the host, so the save waits. Your edits are kept."
+                tab.error = "Could not re-read this file on that computer, so the save waits. Your edits are kept."
                 return
             }
             val draft = tab.text
@@ -352,7 +352,7 @@ private fun EditorTabStrip(
         AlertDialog(
             onDismissRequest = { confirming = null },
             title = { Text("Discard changes?") },
-            text = { Text("${closing.key.path} has edits that are not saved on the host.") },
+            text = { Text("${closing.key.path} has edits that are not saved on that computer.") },
             confirmButton = {
                 TextButton(onClick = {
                     onClose(closing)
@@ -693,20 +693,20 @@ private fun EditorConflictCard(
     TsCard {
         Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             Text(
-                "This file changed on the host.",
+                "This file changed on that computer.",
                 style = TsType.body.copy(fontWeight = FontWeight.SemiBold),
                 color = colors.textPrimary,
             )
             Text(
                 buildString {
-                    append("Yours has $mineLines lines, the host has $hostLines. Saving is off until you choose.")
+                    append("Yours has $mineLines lines, that computer has $hostLines. Saving is off until you choose.")
                     if (firstDifference != null) append(" First difference: line $firstDifference.")
                 },
                 style = TsType.caption,
                 color = colors.textSecondary,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                TsSecondaryButton(label = "Reload host", small = true, onClick = onReload)
+                TsSecondaryButton(label = "Reload computer", small = true, onClick = onReload)
                 TsAccentButton(label = "Keep my draft", small = true, onClick = onKeep)
             }
         }

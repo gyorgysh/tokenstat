@@ -381,9 +381,9 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Your other devices cannot see these numbers")
                     .font(Theme.callout.weight(.medium))
-                Text("Account has a Plan limits card that posts how full each window is, "
-                    + "so they still show what is left while this Mac is asleep. "
-                    + "Turn a vendor off there if you do not want it shared.")
+                Text("Account has a Plan limits card for how much of each tool's subscription is left, "
+                    + "including while this Mac is asleep. "
+                    + "Turn a tool off there if you do not want it shared.")
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -602,9 +602,9 @@ struct HomeView: View {
     /// one of the two.
     private var activitySubtitle: String {
         guard let calendar = model.calendar else {
-            return "What each day was worth at list rates"
+            return "What each day was worth at API list price"
         }
-        let base = "\(formatSpend(calendar.total)) at list rates over \(calendar.activeDays) active days"
+        let base = "\(formatSpend(calendar.total)) at API list price over \(calendar.activeDays) active days"
         let source = model.deliveredScope == .allMachines
             ? ", across every device on your account"
             : ", on this device"

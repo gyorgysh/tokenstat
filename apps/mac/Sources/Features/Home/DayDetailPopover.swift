@@ -121,7 +121,7 @@ struct DayDetailPopover: View {
                 Text(detail.value.formatted)
                     .font(Theme.numeric(14, weight: .medium))
                 if !detail.estimated {
-                    Text("at list rates")
+                    Text("at API list price")
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                 }

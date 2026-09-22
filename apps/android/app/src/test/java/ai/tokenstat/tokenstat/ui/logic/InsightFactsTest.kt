@@ -32,7 +32,7 @@ class InsightFactsTest {
 
     @Test
     fun zeroesStayZeroes() {
-        val panels = insightFactPanels(0, 0, 0, "Harnesses", formatCompact = { compactTokens(it) })
+        val panels = insightFactPanels(0, 0, 0, "Coding tools", formatCompact = { compactTokens(it) })
         assertEquals("0", panels[0].value)
         assertEquals("0", panels[1].value)
         assertEquals("0", panels[2].value)
