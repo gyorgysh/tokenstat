@@ -27,86 +27,47 @@ struct AutomationsView: View {
     @State private var creating = false
     @State private var template: AutomationTemplate?
     @State private var search = ""
-    @FocusState private var searchFocused: Bool
-    /// Empty means follow the default: open when there are no jobs yet.
-    @AppStorage("automations.examplesExpanded") private var examplesExpandedStored = ""
     @State private var schedulerJustSaved = false
     @State private var schedulerSaving = false
-    @State private var schedulerExpanded = false
+    @State private var showingScheduler = false
+    /// Jobs, or what they produced. One table at a time: the two lists used
+    /// to share a scroll, and the runs at the bottom were found by accident.
+    @State private var showingRuns = false
+    @State private var filter: JobFilter = .all
+    @State private var jobOrder = [KeyPathComparator(\Automation.name)]
+    @State private var runOrder = [KeyPathComparator(\RunRecord.startedAtMs, order: .reverse)]
+    @State private var editingJob: Automation?
+    @State private var historyJob: Automation?
+    @State private var jobPendingDelete: Automation?
+
+    /// The quick cuts through the job list, counted in the menu.
+    enum JobFilter: String, CaseIterable, Identifiable {
+        case all, enabled, paused, failing
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .all: return "All"
+            case .enabled: return "Enabled"
+            case .paused: return "Paused"
+            case .failing: return "Last run failed"
+            }
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             DetailChromeBar(scope: scopeChip) {
-                ToolbarIconButton(
-                    systemImage: "plus",
-                    help: "Schedule a job"
-                ) {
-                    creating = true
-                }
+                EmptyView()
             }
-            ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    if let error = model.errorMessage {
-                        ErrorBanner(message: error) { Task { await model.load() } }
-                    }
-                    intro
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Theme.Space.s), count: 4), spacing: Theme.Space.s) {
-                        ActivitySummaryTile(title: "Enabled jobs", value: model.scoped.filter(\.enabled).count, symbol: "bolt")
-                        ActivitySummaryTile(title: "Running", value: model.scopedRuns.filter { $0.status == "running" }.count, symbol: "play.circle")
-                        ActivitySummaryTile(title: "Queued", value: model.scopedRuns.filter { $0.status == "queued" }.count, symbol: "clock")
-                        ActivitySummaryTile(title: "Paused jobs", value: model.scoped.filter { !$0.enabled }.count, symbol: "pause.circle")
-                    }
-                    schedulerSummary
-                    if schedulerExpanded || model.queueDirty { schedulerCard }
-                    // A search box, not a rounded text field with the icon glued
-                    // on top: the overlay sat on the field's leading edge and
-                    // overlapped the placeholder and the first typed characters.
-                    // The icon lives inside the box now, so the text can never
-                    // collide with it.
-                    HStack(spacing: Theme.Space.s) {
-                        Image(systemName: "magnifyingglass")
-                            .font(Theme.font(12, weight: .medium))
-                            .foregroundStyle(.tertiary)
-                        TextField("Search automations", text: $search)
-                            .textFieldStyle(.plain)
-                            .font(Theme.font(13))
-                            .focused($searchFocused)
-                    }
-                    .padding(.horizontal, Theme.Space.s)
-                    .padding(.vertical, 6)
-                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.Space.s))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.Space.s)
-                            .strokeBorder(
-                                searchFocused ? Theme.accent.opacity(0.7) : Theme.border,
-                                lineWidth: searchFocused ? 1.5 : 1
-                            )
-                    )
-                    .padding(.leading, 4)
-                    if isWarming {
-                        // "Nothing yet" is an answer, and it must not be given
-                        // before the question has been asked. Sharp grey job rows
-                        // say the daemon is being read; real cards replace them.
-                        VStack(alignment: .leading, spacing: Theme.Space.s) {
-                            Skeleton.CardPlaceholder(rows: 2)
-                            Skeleton.CardPlaceholder(rows: 2)
-                        }
-                        .transition(.opacity)
-                    } else if filteredJobs.isEmpty {
-                        if !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            ContentUnavailableView.search(text: search)
-                        } else { nothingYet }
-                    } else {
-                        taskSection("Active", jobs: filteredJobs.filter(\.enabled))
-                        taskSection("Paused", jobs: filteredJobs.filter { !$0.enabled })
-                    }
-                    if !model.scopedRuns.isEmpty {
-                        recentRuns
-                    }
-                    examples
-                }
-                .padding(Theme.Space.m)
+            toolbar
+            ThemeRule()
+            if let error = model.errorMessage {
+                ErrorBanner(message: error) { Task { await model.load() } }
+                    .padding(.horizontal, Theme.Space.m)
+                    .padding(.top, Theme.Space.s)
             }
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .navigationTitle("Automations")
         .background(Theme.background)
@@ -120,6 +81,29 @@ struct AutomationsView: View {
                 onNavigate: onNavigate,
                 template: suggestion
             )
+        }
+        .sheet(item: $editingJob) { job in
+            NewAutomationSheet(model: model, folders: folders, existing: job)
+        }
+        .sheet(item: $historyJob) { job in
+            AutomationHistorySheet(job: job, model: model) { run in
+                showingRuns = true
+                model.selectRun(run)
+            }
+        }
+        .confirmationDialog(
+            "Delete \(jobPendingDelete?.name ?? "this automation")?",
+            isPresented: Binding(
+                get: { jobPendingDelete != nil },
+                set: { if !$0 { jobPendingDelete = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: jobPendingDelete
+        ) { job in
+            Button("Delete", role: .destructive) { Task { await model.remove(job) } }
+            Button("Keep it", role: .cancel) {}
+        } message: { _ in
+            Text("The schedule goes with it. Runs it already produced stay.")
         }
         .overlay(alignment: .bottomTrailing) {
             TransientToast(message: $model.noticeMessage, severity: .success)
@@ -136,6 +120,7 @@ struct AutomationsView: View {
                 guard !Task.isCancelled else { return }
                 if let run = model.runs.first(where: { $0.id == id }) {
                     pendingRunID = nil
+                    showingRuns = true
                     model.selectRun(run)
                     return
                 }
@@ -145,12 +130,416 @@ struct AutomationsView: View {
         }
         // The model outlives this view, and the transcript tail must not.
         .onDisappear { model.disappeared() }
-        .onChange(of: model.hasLoaded) { _, loaded in
-            // Write the first-visit default so a later appear does not
-            // recompute it from an empty in-flight list.
-            guard loaded, examplesExpandedStored.isEmpty else { return }
-            examplesExpandedStored = model.scoped.isEmpty ? "1" : "0"
+        #if DEBUG && os(macOS)
+        .onReceive(NotificationCenter.default.publisher(for: DebugUIHooks.keyRequested)) { note in
+            switch note.object as? String {
+            case "automations.runs": showingRuns.toggle()
+            case "automations.scheduler": showingScheduler.toggle()
+            default: break
+            }
         }
+        #endif
+    }
+
+    /// Search and the cuts on the left, the ways to add on the right.
+    private var toolbar: some View {
+        HStack(spacing: Theme.Space.s) {
+            SearchField(text: $search, prompt: showingRuns ? "Search runs" : "Search automations")
+                .frame(maxWidth: 260)
+            if !showingRuns {
+                filterMenu
+            }
+            Spacer(minLength: Theme.Space.s)
+            SegmentedCapsulePicker(
+                options: [
+                    (value: false, label: "Jobs", symbol: "bolt"),
+                    (value: true, label: "Runs", symbol: ActionIcon.history.symbol),
+                ],
+                selection: $showingRuns
+            )
+            .fixedSize()
+            Button("Scheduler", .settings) { showingScheduler.toggle() }
+                .buttonStyle(SecondaryButtonStyle(small: true))
+                .help("Time limit and how many jobs run at once")
+                .popover(isPresented: $showingScheduler, arrowEdge: .bottom) {
+                    schedulerCard
+                        .frame(width: 380)
+                        .padding(Theme.Space.s)
+                }
+            templatesMenu
+            Button("New automation", .create) { creating = true }
+                .buttonStyle(AccentButtonStyle(small: true))
+                .disabled(folders.isEmpty)
+                .help(folders.isEmpty ? "Add a workspace first. An agent runs somewhere." : "Schedule an agent job")
+        }
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, Theme.Space.s)
+    }
+
+    private var filterMenu: some View {
+        Menu {
+            Picker("Show", selection: $filter) {
+                ForEach(JobFilter.allCases) { option in
+                    Text("\(option.label)  \(jobs(matching: option).count)").tag(option)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label(filter == .all ? "Filter" : filter.label, systemImage: ActionIcon.filter.symbol)
+                .font(Theme.font(12))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Show only some automations")
+    }
+
+    /// Ready-made jobs, one menu away rather than a section of their own.
+    private var templatesMenu: some View {
+        Menu {
+            ForEach(Self.suggestedTemplates) { suggestion in
+                Button(suggestion.title, systemImage: suggestion.symbol) { template = suggestion }
+            }
+        } label: {
+            Label("Templates", systemImage: "square.on.square")
+                .font(Theme.font(12))
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .disabled(folders.isEmpty)
+        .help("Start from a ready-made job")
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if isWarming {
+            // "Nothing yet" is an answer, and it must not be given before the
+            // question has been asked. Grey rows say the daemon is being read.
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                Skeleton.CardPlaceholder(rows: 2)
+                Skeleton.CardPlaceholder(rows: 2)
+            }
+            .padding(Theme.Space.m)
+            .transition(.opacity)
+        } else if showingRuns {
+            if visibleRuns.isEmpty {
+                if isSearching {
+                    ContentUnavailableView.search(text: search)
+                } else {
+                    EmptyState(
+                        symbol: "text.append",
+                        title: "Nothing has run yet",
+                        message: "A run appears here the moment an automation fires, or when you press Run now on one."
+                    )
+                    .padding(Theme.Space.xl)
+                }
+            } else {
+                runsTable
+            }
+        } else if model.scoped.isEmpty {
+            ScrollView { nothingYet.padding(Theme.Space.m) }
+        } else if visibleJobs.isEmpty {
+            if isSearching {
+                ContentUnavailableView.search(text: search)
+            } else {
+                EmptyState(
+                    symbol: ActionIcon.filter.symbol,
+                    title: "No automations match",
+                    message: "Nothing here is \(filter.label.lowercased()) right now."
+                ) {
+                    Button("Show all", .filter) { filter = .all }
+                        .buttonStyle(SecondaryButtonStyle())
+                }
+                .padding(Theme.Space.xl)
+            }
+        } else {
+            jobsTable
+        }
+    }
+
+    // MARK: - Jobs
+
+    /// One row per job, with the facts people compare across jobs in columns:
+    /// when it runs, where, when it next fires and how it went last time.
+    /// Columns resize and the sortable ones sort, because that is what a
+    /// table is for.
+    private var jobsTable: some View {
+        Table(visibleJobs, selection: jobSelection, sortOrder: $jobOrder) {
+            TableColumn("Name", value: \.name) { job in
+                HStack(spacing: Theme.Space.s) {
+                    CadenceGlyph(
+                        schedule: job.schedule,
+                        enabled: job.enabled,
+                        size: 16,
+                        summary: model.scheduleSummary(job.schedule)
+                    )
+                    Text(job.name)
+                        .font(Theme.font(13, weight: .medium))
+                        .foregroundStyle(job.enabled ? Color.primary : Color.secondary)
+                        .lineLimit(1)
+                }
+                .help(job.prompt)
+            }
+            .width(min: 140, ideal: 210)
+            TableColumn("Schedule") { job in
+                cell(model.scheduleSummary(job.schedule))
+            }
+            .width(min: 100, ideal: 150)
+            TableColumn("Project") { job in
+                cell(folderLabel(job.workspaceID))
+            }
+            .width(min: 80, ideal: 120)
+            TableColumn("Next run", value: \.nextRunOrder) { job in
+                nextRunCell(job)
+            }
+            .width(min: 90, ideal: 140)
+            TableColumn("Last run", value: \.lastRunOrder) { job in
+                lastRunCell(job)
+            }
+            .width(min: 90, ideal: 130)
+            TableColumn("Status", value: \.enabledOrder) { job in
+                statusCell(job)
+            }
+            .width(min: 84, ideal: 96)
+            TableColumn("Agent") { job in
+                HarnessMark(id: job.backend, size: 18)
+                    .help(backendLabel(job.backend))
+                    .accessibilityLabel(backendLabel(job.backend))
+            }
+            .width(min: 40, ideal: 52)
+            TableColumn("") { job in
+                actionsCell(job)
+            }
+            .width(min: 66, ideal: 72)
+        }
+        .quietTableStyle()
+        .scrollContentBackground(.hidden)
+        .contextMenu(forSelectionType: String.self) { ids in
+            if let job = ids.first.flatMap(job(withID:)) {
+                jobMenu(job)
+            }
+        } primaryAction: { ids in
+            if let job = ids.first.flatMap(job(withID:)) { editingJob = job }
+        }
+    }
+
+    private var jobSelection: Binding<String?> {
+        Binding(
+            get: { model.selectedJobID },
+            set: { id in if let id { model.selectJob(id) } }
+        )
+    }
+
+    private func cell(_ text: String) -> some View {
+        Text(text)
+            .font(Theme.font(12))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .help(text)
+    }
+
+    @ViewBuilder
+    private func nextRunCell(_ job: Automation) -> some View {
+        if !job.enabled {
+            cell("Paused")
+        } else if let next = job.nextRun {
+            cell(HostScheduleClock.wallClock(next, timezone: model.schedulerTimezone)
+                ?? next.formatted(date: .abbreviated, time: .shortened))
+        } else {
+            cell("When you run it")
+        }
+    }
+
+    @ViewBuilder
+    private func lastRunCell(_ job: Automation) -> some View {
+        if let last = model.lastRun(for: job) {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(Self.statusTint(last.status))
+                    .frame(width: 6, height: 6)
+                Text(last.isRunning ? last.endedLabel : "\(last.endedLabel) \(CompactAge.ago(last.startedAt))")
+                    .font(Theme.font(12))
+                    .foregroundStyle(last.isRunning ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
+                    .lineLimit(1)
+            }
+            .help(last.startedAt.formatted(date: .abbreviated, time: .shortened))
+        } else {
+            cell("Never")
+        }
+    }
+
+    /// On or off, and a press flips it. The words say what it is, not what
+    /// the switch would do.
+    private func statusCell(_ job: Automation) -> some View {
+        Button {
+            Task { await model.toggle(job) }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: job.enabled ? "circle.fill" : "pause.circle")
+                    .font(Theme.font(job.enabled ? 6 : 11, weight: .semibold))
+                Text(job.enabled ? "Enabled" : "Paused")
+                    .font(Theme.font(12, weight: .medium))
+            }
+            .foregroundStyle(job.enabled ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                (job.enabled ? Theme.accentSoft : Theme.controlSeat),
+                in: Capsule()
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(job.enabled ? "Running on its schedule. Click to pause." : "Paused. It will not fire. Click to enable.")
+    }
+
+    private func actionsCell(_ job: Automation) -> some View {
+        HStack(spacing: 0) {
+            if let last = model.lastRun(for: job), last.isRunning {
+                ToolbarIconButton(systemImage: ActionIcon.stop.symbol, help: "Stop this run") {
+                    Task { await model.stop(last) }
+                }
+            } else {
+                ToolbarIconButton(systemImage: ActionIcon.run.symbol, help: "Run now") {
+                    Task { await model.run(job) }
+                }
+            }
+            ToolbarMenuButton(help: "Actions for \(job.name)") {
+                jobMenu(job)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func jobMenu(_ job: Automation) -> some View {
+        Button("Run now", .run) { Task { await model.run(job) } }
+        Button(job.enabled ? "Pause" : "Enable", job.enabled ? .stop : .run) {
+            Task { await model.toggle(job) }
+        }
+        Button("Run history", .history) { historyJob = job }
+        Button("Edit automation", .edit) { editingJob = job }
+        Divider()
+        Button("Delete automation", .delete, role: .destructive) { jobPendingDelete = job }
+    }
+
+    // MARK: - Runs
+
+    /// Every run in scope, newest first by default. Selecting one reads its
+    /// output in the inspector.
+    private var runsTable: some View {
+        Table(visibleRuns, selection: runSelection, sortOrder: $runOrder) {
+            TableColumn("Automation", value: \.name) { run in
+                HStack(spacing: Theme.Space.s) {
+                    Circle()
+                        .fill(Self.statusTint(run.status))
+                        .frame(width: 7, height: 7)
+                    Text(run.name)
+                        .font(Theme.font(13, weight: .medium))
+                        .lineLimit(1)
+                }
+            }
+            .width(min: 140, ideal: 210)
+            TableColumn("Agent") { run in
+                HStack(spacing: 6) {
+                    HarnessMark(id: run.backend, size: 16)
+                    cell(backendLabel(run.backend))
+                }
+            }
+            .width(min: 90, ideal: 130)
+            TableColumn("Project") { run in
+                cell(folderLabel(run.workspaceID))
+            }
+            .width(min: 80, ideal: 120)
+            TableColumn("Started", value: \.startedAtMs) { run in
+                cell(run.startedAt.formatted(date: .abbreviated, time: .shortened))
+            }
+            .width(min: 110, ideal: 150)
+            TableColumn("Duration") { run in
+                cell(durationLabel(run))
+            }
+            .width(min: 70, ideal: 90)
+            TableColumn("Result", value: \.status) { run in
+                StatusPill(status: run.status, text: run.endedLabel)
+            }
+            .width(min: 80, ideal: 100)
+        }
+        .quietTableStyle()
+        .scrollContentBackground(.hidden)
+        .contextMenu(forSelectionType: String.self) { ids in
+            if let run = ids.first.flatMap({ id in model.runs.first { $0.id == id } }), run.isRunning {
+                Button("Stop", .stop) { Task { await model.stop(run) } }
+            }
+        }
+    }
+
+    private var runSelection: Binding<String?> {
+        Binding(
+            get: { model.selectedRunID },
+            set: { id in
+                if let id, let run = model.runs.first(where: { $0.id == id }) { model.selectRun(run) }
+            }
+        )
+    }
+
+    private func durationLabel(_ run: RunRecord) -> String {
+        guard run.endedAtMs != nil else { return run.isRunning ? "Running" : "" }
+        let total = Int(seconds(of: run).rounded())
+        if total < 60 { return "\(total)s" }
+        if total < 3600 { return "\(total / 60)m \(total % 60)s" }
+        return "\(total / 3600)h \((total % 3600) / 60)m"
+    }
+
+    // MARK: - Data
+
+    private var isSearching: Bool {
+        !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func jobs(matching option: JobFilter) -> [Automation] {
+        switch option {
+        case .all: return model.scoped
+        case .enabled: return model.scoped.filter(\.enabled)
+        case .paused: return model.scoped.filter { !$0.enabled }
+        case .failing:
+            return model.scoped.filter { job in
+                model.lastRun(for: job)?.status == "error"
+            }
+        }
+    }
+
+    private var visibleJobs: [Automation] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cut = jobs(matching: filter)
+        let found = query.isEmpty ? cut : cut.filter {
+            $0.name.localizedCaseInsensitiveContains(query)
+                || $0.prompt.localizedCaseInsensitiveContains(query)
+                || backendLabel($0.backend).localizedCaseInsensitiveContains(query)
+                || folderLabel($0.workspaceID).localizedCaseInsensitiveContains(query)
+        }
+        return found.sorted(using: jobOrder)
+    }
+
+    private var visibleRuns: [RunRecord] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let found = query.isEmpty ? model.scopedRuns : model.scopedRuns.filter {
+            $0.name.localizedCaseInsensitiveContains(query)
+                || backendLabel($0.backend).localizedCaseInsensitiveContains(query)
+                || folderLabel($0.workspaceID).localizedCaseInsensitiveContains(query)
+        }
+        return found.sorted(using: runOrder)
+    }
+
+    private func job(withID id: String) -> Automation? {
+        model.scoped.first { $0.id == id }
+    }
+
+    private func backendLabel(_ id: String) -> String {
+        model.backends.first { $0.id == id }?.label ?? id
+    }
+
+    private func folderLabel(_ id: String) -> String {
+        guard let folder = folders.first(where: { $0.id == id }) else { return "—" }
+        return folder.isRemote ? "\(folder.machineLabel ?? "Remote") / \(folder.name)" : folder.name
     }
 
     /// The folder this board is scoped to, named on the chrome bar.
@@ -168,42 +557,6 @@ struct AutomationsView: View {
     /// Waiting on the first read of the daemon's job list.
     private var isWarming: Bool {
         !model.hasLoaded && model.errorMessage == nil
-    }
-
-    private var intro: some View {
-        HStack(alignment: .top) {
-            FeatureMark(name: "mark_automation", tint: Theme.accent, size: 28)
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                Text("Automations")
-                    .font(Theme.font(24, weight: .semibold))
-                Text("Scheduled agent jobs, execution status, and recent activity.")
-                    .font(Theme.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer()
-            Button("Schedule a job", .create) { creating = true }
-            .buttonStyle(AccentButtonStyle())
-        }
-    }
-
-    private var schedulerSummary: some View {
-        HStack(spacing: Theme.Space.s) {
-            FeatureMark(name: "mark_scheduler", tint: Theme.accent, size: 26)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Scheduler defaults").font(Theme.callout.weight(.semibold))
-                Text("\(model.queueNoLimit ? "No time limit" : model.queueBudgetMinutes + " min per job") · \(model.queueMaxConcurrent == "0" ? "Unlimited concurrent jobs" : model.queueMaxConcurrent + " concurrent jobs")")
-                    .font(Theme.caption).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 8)
-            Button(schedulerExpanded ? "Done" : "Configure", systemImage: "slider.horizontal.3") {
-                withAnimation(.easeInOut(duration: 0.2)) { schedulerExpanded.toggle() }
-            }
-            .buttonStyle(SecondaryButtonStyle())
-        }
-        .padding(Theme.Space.m)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
     }
 
     private var schedulerCard: some View {
@@ -294,101 +647,6 @@ struct AutomationsView: View {
         model.runs.filter { $0.status == "running" }.count
     }
 
-    /// Suggested setups sit under the user's own jobs. Open by default only
-    /// when the list is empty, so first visit still teaches the screen.
-    ///
-    /// The stored value is the last tap. Until that exists, wait for the
-    /// jobs list to load: treating an unloaded list as empty flashed the
-    /// section open and forgot a collapse on the next appear.
-    private var examplesExpanded: Bool {
-        switch examplesExpandedStored {
-        case "1": return true
-        case "0": return false
-        default: return model.hasLoaded && model.scoped.isEmpty
-        }
-    }
-
-    /// Ready-made jobs, collapsed the same way Devices hides its keys.
-    private var examples: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    examplesExpandedStored = examplesExpanded ? "0" : "1"
-                }
-            } label: {
-                HStack(alignment: .center, spacing: Theme.Space.s) {
-                    FeatureMark(name: "mark_examples", tint: Theme.accent, size: 22)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Examples")
-                            .font(Theme.fit(13, weight: .semibold))
-                        Text(examplesExpanded
-                            ? "Create one, then press Run now"
-                            : "Ready-made jobs you can create and run yourself")
-                            .font(Theme.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: Theme.Space.s)
-                    Image(systemName: examplesExpanded ? "chevron.up" : "chevron.down")
-                        .font(Theme.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint(examplesExpanded
-                ? "Hides the example jobs"
-                : "Shows the example jobs")
-
-            if examplesExpanded {
-                templatesGrid
-            }
-        }
-        .padding(Theme.Space.m)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.cardRadius)
-                .strokeBorder(Theme.border, lineWidth: 1)
-        )
-    }
-
-    private var templatesGrid: some View {
-        LazyVGrid(
-            columns: [GridItem(.flexible(), spacing: Theme.Space.s), GridItem(.flexible(), spacing: Theme.Space.s)],
-            spacing: Theme.Space.s
-        ) {
-            ForEach(Self.suggestedTemplates) { suggestion in
-                Button {
-                    template = suggestion
-                } label: {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Image(systemName: suggestion.symbol)
-                            .font(Theme.font(16, weight: .medium))
-                            .foregroundStyle(Theme.accent)
-                        Text(suggestion.title)
-                            .font(Theme.font(13, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Text(suggestion.subtitle)
-                            .font(Theme.caption)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .padding(Theme.Space.m)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.cardRadius)
-                            .strokeBorder(Theme.border, lineWidth: 1)
-                    )
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
     private static let suggestedTemplates: [AutomationTemplate] = [
         AutomationTemplate(
             title: "Daily brief",
@@ -445,71 +703,21 @@ struct AutomationsView: View {
         ),
     ]
 
-    private var filteredJobs: [Automation] {
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return model.scoped }
-        return model.scoped.filter {
-            $0.name.localizedCaseInsensitiveContains(query)
-                || $0.prompt.localizedCaseInsensitiveContains(query)
-                || $0.backend.localizedCaseInsensitiveContains(query)
-        }
-    }
-
-    private func taskSection(_ title: String, jobs: [Automation]) -> AnyView {
-        guard !jobs.isEmpty else { return AnyView(EmptyView()) }
-        return AnyView(VStack(alignment: .leading, spacing: 0) {
-            Text(title.uppercased())
-                .font(Theme.sectionHeader)
-                .foregroundStyle(.tertiary)
-                .padding(.bottom, Theme.Space.xs)
-            WidthReader { width in
-            VStack(spacing: Theme.Space.s) {
-                ForEach(jobs) { job in
-                    AutomationRow(job: job, model: model,
-                                  folders: folders,
-                                  folder: folders.first { $0.id == job.workspaceID },
-                                  compact: width > 0 && width < .rowDetailWidth,
-                                  isSelected: model.selectedJobID == job.id,
-                                  onSelect: { model.selectJob(job.id) },
-                                  onViewRun: { model.selectRun($0) })
-                    .padding(Theme.Space.s)
-                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
-                }
-            }
-            }
-        })
-    }
-
-    private var recentRuns: some View {
-        Card(
-            title: "Recent runs",
-            subtitle: "The five most recent executions in this scope.",
-            mark: "mark_automation"
-        ) {
-            VStack(spacing: 0) {
-                ForEach(Array(model.scopedRuns.prefix(5))) { run in
-                    runRow(run)
-                    if run.id != model.scopedRuns.prefix(5).last?.id { ThemeRule() }
-                }
-            }
-        }
-    }
-
     // MARK: - Nothing set up yet
 
     /// The first thing somebody sees, and the only chance to say what this
     /// screen is for. An automation is not a familiar object, so the empty
-    /// state describes the thing rather than announcing its absence.
+    /// state describes the thing rather than announcing its absence, and the
+    /// ready-made jobs sit right under it.
     private var nothingYet: some View {
-        Card(title: "Automations", subtitle: nil, mark: "mark_automation") {
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
             EmptyState(
                 symbol: "clock.arrow.trianglehead.counterclockwise.rotate.90",
                 title: "Nothing scheduled yet",
                 message: """
-                Schedule an agent a job: a prompt, a folder and a time. \
-                The host helper runs it, and stops it at your time limit. \
-                On a laptop that helper stops when you quit tokenstat unless Always-on host is on.
+                An automation is a prompt, a folder and a time. The host helper \
+                runs it and stops it at your time limit. On a laptop that helper \
+                stops when you quit tokenstat unless Always-on host is on.
                 """
             ) {
                 if folders.isEmpty {
@@ -517,106 +725,57 @@ struct AutomationsView: View {
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                 } else {
-                    Button("Schedule a job", .create) { creating = true }
-                    .buttonStyle(AccentButtonStyle())
+                    Button("New automation", .create) { creating = true }
+                        .buttonStyle(AccentButtonStyle())
                 }
             }
+            if !folders.isEmpty {
+                Text("Or start from one of these")
+                    .font(Theme.sectionHeader)
+                    .foregroundStyle(.tertiary)
+                templatesGrid
+            }
         }
+        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity)
     }
 
-    // MARK: - The automations
-
-    private var automationsCard: some View {
-        Card(
-            title: "Automations",
-            subtitle: "Owned by the host helper. They run after you quit only if Always-on host is on.",
-            mark: "mark_automation",
-            accessory: AnyView(
-                Button("New", .create) { creating = true }
-                .buttonStyle(AccentButtonStyle(small: true))
-            )
+    private var templatesGrid: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 220), spacing: Theme.Space.s)],
+            spacing: Theme.Space.s
         ) {
-            VStack(spacing: Theme.Space.s) {
-                if model.jobs.isEmpty {
-                    Text("""
-                    Every automation has been deleted. The runs below are what \
-                    they left behind.
-                    """)
-                    .font(Theme.callout)
-                    .foregroundStyle(.secondary)
+            ForEach(Self.suggestedTemplates) { suggestion in
+                Button {
+                    template = suggestion
+                } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Image(systemName: suggestion.symbol)
+                            .font(Theme.font(16, weight: .medium))
+                            .foregroundStyle(Theme.accent)
+                        Text(suggestion.title)
+                            .font(Theme.font(13, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(suggestion.subtitle)
+                            .font(Theme.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(Theme.Space.m)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    ForEach(model.jobs) { job in
-                        AutomationRow(
-                            job: job,
-                            model: model,
-                            folders: folders,
-                            folder: folders.first { $0.id == job.workspaceID },
-                            isSelected: model.selectedJobID == job.id,
-                            onSelect: { model.selectJob(job.id) },
-                            onViewRun: { model.selectRun($0) }
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Runs
-
-    private var runsCard: some View {
-        Card(
-            title: "Runs",
-            subtitle: "Select a run to read its output in the inspector.",
-            mark: "mark_automation"
-        ) {
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                if model.runs.isEmpty {
-                    EmptyState(
-                        symbol: "text.append",
-                        title: "Nothing has run yet",
-                        message: """
-                        A run appears here the moment an automation fires, or as \
-                        soon as you press Run now on one.
-                        """
+                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.cardRadius)
+                            .strokeBorder(Theme.border, lineWidth: 1)
                     )
-                } else {
-                    ForEach(Array(model.runs.prefix(6))) { run in
-                        runRow(run)
-                    }
+                    .contentShape(.rect)
                 }
+                .buttonStyle(.plain)
             }
         }
     }
-
-    private func runRow(_ run: RunRecord) -> some View {
-        HStack(spacing: Theme.Space.s) {
-            Circle()
-                .fill(Self.statusTint(run.status))
-                .frame(width: 8, height: 8)
-            Text(run.name)
-                .font(Theme.font(15, weight: .semibold))
-            Text(model.backends.first { $0.id == run.backend }?.label ?? run.backend)
-                .font(Theme.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            DurationBar(seconds: seconds(of: run), longest: longestRunSeconds)
-            Text(run.startedAt.formatted(date: .omitted, time: .shortened))
-                .font(Theme.caption)
-                .foregroundStyle(.tertiary)
-            StatusPill(status: run.status, text: run.endedLabel)
-        }
-        .padding(.horizontal, Theme.Space.s)
-        .padding(.vertical, Theme.Space.xs)
-        .background(model.selectedRunID == run.id ? Theme.accentSoft : .clear,
-                    in: RoundedRectangle(cornerRadius: Theme.Space.xs))
-        .contentShape(.rect)
-        .onTapGesture {
-            model.selectRun(run)
-        }
-    }
-
-
 
     /// Seconds a run took, or has taken so far.
     private func seconds(of run: RunRecord) -> Double {
@@ -624,197 +783,30 @@ struct AutomationsView: View {
         return max(0, Double(ended - run.startedAtMs) / 1000)
     }
 
-    /// Scale for the duration bars, from the runs actually on screen.
-    private var longestRunSeconds: Double {
-        model.runs.prefix(6).map { seconds(of: $0) }.max() ?? 0
-    }
-
     static func statusTint(_ status: String) -> Color {
         RunOutcome.tint(status)
     }
 }
 
-// MARK: - One automation
-
-/// A row that answers the two questions somebody has about a job: when does it
-/// run, and how did it go last time.
-///
-/// Both used to be somewhere else. The schedule was a caption and the result
-/// was in the run list, so checking a nightly job meant reading a history and
-/// working out which entry belonged to it.
-private struct AutomationRow: View {
-    var job: Automation
-    @Bindable var model: AutomationsModel
-    var folders: [WorkspaceFolder]
-    var folder: WorkspaceFolder?
-    /// A narrow window. The name, the rhythm and the buttons stay, the facts
-    /// beside them go: they are worth a glance on a wide window and worth
-    /// nothing when they squeeze the row's own name into an ellipsis.
-    var compact: Bool = false
-    var isSelected: Bool = false
-    var onSelect: () -> Void = {}
-    /// Opens the selected run in the inspector.
-    var onViewRun: (RunRecord) -> Void
-
-    @State private var confirmingDelete = false
-    @State private var showingHistory = false
-    @State private var editing = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            header
-            Text(job.prompt)
-                .font(Theme.caption)
-                .foregroundStyle(.secondary)
-                // Reserved space keeps every row the same height whatever the
-                // prompt length, the same matched-rows rule the cards use.
-                .lineLimit(2, reservesSpace: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            facts
-        }
-        .padding(.vertical, Theme.Space.s)
-        .padding(.horizontal, Theme.Space.xs)
-        .background(isSelected ? Theme.rowSelected : Color.clear, in: RoundedRectangle(cornerRadius: Theme.Space.s))
-        .contentShape(.rect)
-        .onTapGesture { onSelect() }
-        .opacity(job.enabled ? 1 : 0.6)
-        .confirmationDialog(
-            "Delete \(job.name)?",
-            isPresented: $confirmingDelete,
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) { Task { await model.remove(job) } }
-            Button("Keep it", role: .cancel) {}
-        } message: {
-            Text("The schedule goes with it. Runs it already produced stay.")
-        }
+extension View {
+    /// Plain rows on the Mac: no zebra stripes, which on a dark surface read
+    /// as a second grid laid over the first. Other platforms keep their own.
+    @ViewBuilder
+    func quietTableStyle() -> some View {
+        #if os(macOS)
+        tableStyle(.inset(alternatesRowBackgrounds: false))
+        #else
+        tableStyle(.automatic)
+        #endif
     }
+}
 
-    private var header: some View {
-        HStack(spacing: Theme.Space.s) {
-            // The rhythm, not the feature mark. Every row on this screen is an
-            // automation, so a mark saying so on all of them says nothing,
-            // while the week ring says which day this one fires.
-            CadenceGlyph(
-                schedule: job.schedule,
-                enabled: job.enabled,
-                size: 20,
-                summary: model.scheduleSummary(job.schedule)
-            )
-            Text(job.name)
-                .font(Theme.callout.weight(.medium))
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Text(model.backends.first { $0.id == job.backend }?.label ?? job.backend)
-                .font(Theme.caption2.weight(.medium))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Theme.accent.opacity(0.12), in: Capsule())
-                .foregroundStyle(Theme.accent)
-            if let last = model.lastRun(for: job) {
-                StatusPill(status: last.status, text: last.endedLabel)
-            }
-            Spacer()
-            BrandToggleChip(
-                title: job.enabled ? "On" : "Off",
-                isOn: Binding(
-                    get: { job.enabled },
-                    set: { _ in Task { await model.toggle(job) } }
-                )
-            )
-            .accessibilityLabel("Enabled")
-            .help(job.enabled ? "Running on its schedule" : "Paused. It will not fire.")
-        }
-    }
-
-    /// When it runs, where it runs, and how it went. One line, because these
-    /// three facts are read together or not at all.
-    private var facts: some View {
-        HStack(spacing: Theme.Space.m) {
-            if !compact {
-                Label(model.scheduleSummary(job.schedule), systemImage: "clock")
-                    .font(Theme.caption)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-            }
-            if !compact, job.enabled, let next = job.nextRun {
-                // A ring closing on the next fire, rather than a date the
-                // reader has to subtract today from.
-                NextRunBadge(start: model.lastRun(for: job)?.startedAt, end: next)
-                if let wall = HostScheduleClock.wallClock(next, timezone: model.schedulerTimezone) {
-                    Text(wall)
-                        .font(Theme.caption)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-            }
-            // How the last dozen went, beside the job rather than in a shared
-            // list at the bottom of the screen. Three red ticks in a row is the
-            // fact this page most needs to carry.
-            RunHistoryStrip(ticks: ticks, height: 12)
-            if !compact {
-                if let last = model.lastRun(for: job) {
-                    // The time is the useful half. The outcome is already a
-                    // pill up in the header, so repeating the word here would
-                    // say it twice.
-                    Text("Last ran \(last.startedAt.formatted(date: .abbreviated, time: .shortened))")
-                        .font(Theme.caption)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                } else {
-                    Text("Never run")
-                        .font(Theme.caption)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-                if let folder {
-                    Label(folder.name, systemImage: "folder")
-                        .font(Theme.caption)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-            }
-            Spacer()
-            if let last = model.lastRun(for: job), last.isRunning {
-                Button("Stop", .stop) { Task { await model.stop(last) } }
-                    .buttonStyle(AccentButtonStyle(small: true))
-                    .help("Kill this run now")
-            } else {
-                Button("Run now", .run) { Task { await model.run(job) } }
-                    .buttonStyle(AccentButtonStyle(small: true))
-            }
-            Menu {
-                Button("Run history", .history) { showingHistory = true }
-                Button("Edit automation", .edit) { editing = true }
-                Divider()
-                Button("Delete automation", .delete, role: .destructive) { confirmingDelete = true }
-            } label: {
-                Image(systemName: "ellipsis").frame(width: 24, height: 24)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .accessibilityLabel("Actions for \(job.name)")
-        }
-        .sheet(isPresented: $showingHistory) {
-            AutomationHistorySheet(job: job, model: model, onView: onViewRun)
-        }
-        .sheet(isPresented: $editing) {
-            NewAutomationSheet(model: model, folders: folders, existing: job)
-        }
-    }
-
-    /// Oldest first, which is the direction the strip reads. The model keeps
-    /// them newest first.
-    private var ticks: [RunHistoryStrip.Tick] {
-        model.runs(of: job).reversed().map { run in
-            RunHistoryStrip.Tick(
-                id: run.id,
-                status: run.status,
-                label: "\(run.endedLabel) · \(run.startedAt.formatted(date: .abbreviated, time: .shortened))"
-            )
-        }
-    }
+/// Sort keys for the job table. A job that never fires sorts after every
+/// dated one, and a job that never ran before every one that has.
+extension Automation {
+    var nextRunOrder: Int64 { enabled ? (nextRunAtMs ?? .max) : .max }
+    var lastRunOrder: Int64 { lastRunAtMs ?? 0 }
+    var enabledOrder: Int { enabled ? 0 : 1 }
 }
 
 /// The outcome of a run, in the one shape it takes everywhere on this screen.

@@ -87,51 +87,35 @@ struct WorkflowsView: View {
     private var library: some View {
         VStack(spacing: 0) {
             DetailChromeBar(scope: scopeChip) {
-                ToolbarIconButton(
-                    systemImage: "plus",
-                    help: "Start a blank draft"
-                ) {
-                    model.startBlank(
-                        scope: defaultScope,
-                        workspaceID: defaultWorkspaceID
-                    )
-                }
+                EmptyView()
             }
+            // Search on the left, a blank canvas on the right: the same row
+            // Automations and Tasks have. The intro and the count tiles that
+            // used to stand here said what the tab already says.
+            HStack(spacing: Theme.Space.s) {
+                SearchField(text: $search, prompt: "Search workflows")
+                    .frame(maxWidth: 260)
+                    .focused($searchFocused)
+                Spacer(minLength: Theme.Space.s)
+                Button("Blank draft", .create) {
+                    model.startBlank(scope: defaultScope, workspaceID: defaultWorkspaceID)
+                }
+                .buttonStyle(AccentButtonStyle(small: true))
+                .disabled(!model.canStartNewDraft)
+                .help("Arrange the steps yourself on a canvas")
+            }
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.vertical, Theme.Space.s)
+            ThemeRule()
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     if let error = model.errorMessage {
                         ErrorBanner(message: error) { Task { await model.load() } }
                     }
-                    intro
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Theme.Space.s), count: 3), spacing: Theme.Space.s) {
-                        ActivitySummaryTile(title: "Saved workflows", value: model.scoped.count, symbol: "point.3.connected.trianglepath.dotted")
-                        ActivitySummaryTile(title: "Total steps", value: model.scoped.reduce(0) { $0 + $1.nodes.count }, symbol: "square.stack.3d.up")
-                        ActivitySummaryTile(title: "Running", value: model.scopedRuns.filter { $0.status == "running" }.count, symbol: "play.circle")
-                    }
                     builderCard
                     if let draft = model.draft, draft.id.isEmpty {
                         draftCard(draft)
                     }
-                    HStack(spacing: Theme.Space.s) {
-                        Image(systemName: "magnifyingglass")
-                            .font(Theme.font(12, weight: .medium))
-                            .foregroundStyle(.tertiary)
-                        TextField("Search workflows", text: $search)
-                            .textFieldStyle(.plain)
-                            .font(Theme.font(13))
-                            .focused($searchFocused)
-                    }
-                    .padding(.horizontal, Theme.Space.s)
-                    .padding(.vertical, 6)
-                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.Space.s))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.Space.s)
-                            .strokeBorder(
-                                searchFocused ? Theme.accent.opacity(0.7) : Theme.border,
-                                lineWidth: searchFocused ? 1.5 : 1
-                            )
-                    )
-                    .padding(.leading, 4)
                     if isWarming {
                         VStack(alignment: .leading, spacing: Theme.Space.s) {
                             Skeleton.CardPlaceholder(rows: 2)
@@ -189,26 +173,6 @@ struct WorkflowsView: View {
                 : folder.name,
             symbol: folder.isRemote ? "network" : "folder.fill"
         )
-    }
-
-    private var intro: some View {
-        HStack(alignment: .top) {
-            FeatureMark(name: "mark_workflow", tint: Theme.accent, size: 28)
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                Text("Workflows")
-                    .font(Theme.font(24, weight: .semibold))
-                Text("Connect agents, commands, and automations into reusable runs.")
-                    .font(Theme.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer()
-            Button("Blank draft", .create) {
-                model.startBlank(scope: defaultScope, workspaceID: defaultWorkspaceID)
-            }
-            .buttonStyle(SecondaryButtonStyle())
-            .disabled(!model.canStartNewDraft)
-        }
     }
 
     /// Whether the examples are open.

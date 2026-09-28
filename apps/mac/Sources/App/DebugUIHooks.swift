@@ -26,7 +26,8 @@ import AppKit
 /// - `ai.tokenstat.debug.window`: the content size, as `1440x900`.
 /// - `ai.tokenstat.debug.appearance`: `dark`, `light` or `system`.
 /// - `ai.tokenstat.debug.key`: a named action, such as `sidebar` or
-///   `inspector`, for the toggles the menu would otherwise post.
+///   `inspector`, for the toggles the menu would otherwise post. Any other
+///   name is relayed in process for the screen on show to act on.
 ///
 /// Release builds compile none of it.
 enum DebugUIHooks {
@@ -38,6 +39,8 @@ enum DebugUIHooks {
     /// The route hook, relayed in process. The shell owns navigation, so it
     /// is the one that listens.
     static let routeRequested = Notification.Name("ai.tokenstat.debug.routeRequested")
+    /// Any other key, relayed in process for a screen to act on.
+    static let keyRequested = Notification.Name("ai.tokenstat.debug.keyRequested")
 
     @MainActor
     static func install() {
@@ -68,6 +71,7 @@ enum DebugUIHooks {
             switch note.object as? String {
             case "sidebar": NotificationCenter.default.post(name: .toggleLeftSidebar, object: nil)
             case "inspector": NotificationCenter.default.post(name: .toggleRightSidebar, object: nil)
+            case let other?: NotificationCenter.default.post(name: keyRequested, object: other)
             default: break
             }
         }

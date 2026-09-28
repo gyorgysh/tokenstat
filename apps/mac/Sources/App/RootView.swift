@@ -866,8 +866,20 @@ struct RootView: View {
                 ? AnyView(rightInspectorToolbarButton)
                 : nil,
             search: nil,
-            sectionTabs: sectionTabs
+            sectionTabs: sectionTabs,
+            title: pageTitle
         )
+    }
+
+    /// The bar's title on a machine-wide screen. Home greets by name and
+    /// carries its own device picker, so it goes without.
+    private var pageTitle: String? {
+        switch route {
+        case .global(.home), .global(.insights), .global(.automations), .global(.workflows): return nil
+        case let .global(section): return section.label
+        case .workspacesOverview: return "All workspaces"
+        default: return nil
+        }
     }
 
     /// Tabs for the place on screen, when it has sections of its own.
@@ -878,7 +890,7 @@ struct RootView: View {
             // One place on the rail, two kinds of unattended work.
             return AnyView(ChromeTabStrip(
                 tabs: [
-                    ChromeTab(id: GlobalSection.automations.rawValue, label: "Scheduled", symbol: "bolt"),
+                    ChromeTab(id: GlobalSection.automations.rawValue, label: "Automations", symbol: "bolt"),
                     ChromeTab(id: GlobalSection.workflows.rawValue, label: "Workflows",
                               symbol: GlobalSection.workflows.symbol),
                 ],
@@ -4246,26 +4258,10 @@ extension ChatSidebarConversationRow {
             .fixedSize()
             .accessibilityLabel("Working")
         } else {
-            Text(SidebarAge.compact(ms: conversation.lastMessageAtMs ?? conversation.updatedAtMs))
+            Text(CompactAge.text(ms: conversation.lastMessageAtMs ?? conversation.updatedAtMs))
                 .font(Theme.numeric(11))
                 .foregroundStyle(.tertiary)
                 .fixedSize()
-        }
-    }
-}
-
-/// "now", "5m", "3h", "2d", "6w": an age a sidebar can afford.
-enum SidebarAge {
-    static func compact(ms: Int64, now: Date = Date()) -> String {
-        guard ms > 0 else { return "" }
-        let seconds = now.timeIntervalSince(Date(timeIntervalSince1970: TimeInterval(ms) / 1000))
-        switch seconds {
-        case ..<60: return "now"
-        case ..<3600: return "\(Int(seconds / 60))m"
-        case ..<86_400: return "\(Int(seconds / 3600))h"
-        case ..<(86_400 * 14): return "\(Int(seconds / 86_400))d"
-        case ..<(86_400 * 365): return "\(Int(seconds / (86_400 * 7)))w"
-        default: return "\(Int(seconds / (86_400 * 365)))y"
         }
     }
 }

@@ -66,57 +66,11 @@ struct TodoView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // The bar names the place. Everything the board does sits on the
+            // one row under it, filters on the left and actions on the right,
+            // the way Automations reads.
             DetailChromeBar(scope: scopeChip) {
-                if model.scope == nil {
-                    // Only the global board gets a selector. A folder's board
-                    // is that folder's, and a filter on top of it would be two
-                    // answers to one question.
-                    AppMenuPicker(
-                        options: [
-                            (value: "", label: "All workspaces"),
-                            (
-                                value: Self.unfiledValue,
-                                label: "Uncategorized"
-                                    + (model.unfiledCount > 0 ? " (\(model.unfiledCount))" : "")
-                            ),
-                        ] + folders.map { (value: $0.id, label: $0.name) },
-                        selection: Binding(
-                            get: { Self.value(of: model.filter) },
-                            set: { model.filter = Self.filter(from: $0) }
-                        )
-                    )
-                    .frame(maxWidth: 200)
-                }
-                ToolbarIconButton(
-                    systemImage: "plus",
-                    help: "Add a card to To Do"
-                ) {
-                    addingIn = "backlog"
-                }
-                SegmentedCapsulePicker(
-                    options: [
-                        (true, "Newest", ""),
-                        (false, "Your order", ""),
-                    ],
-                    selection: $newestFirst
-                )
-                .frame(maxWidth: 220)
-                .onChange(of: newestFirst) { _, on in
-                    model.sortNewestFirst = on
-                }
-                ToolbarIconButton(
-                    systemImage: model.showingArchive ? "archivebox.fill" : "archivebox",
-                    help: model.showingArchive
-                        ? "Show Done"
-                        : (model.archivedCount == 0
-                            ? "No archived cards"
-                            : "Show \(model.archivedCount) archived card\(model.archivedCount == 1 ? "" : "s")"),
-                    isAccent: model.showingArchive,
-                    showsBadge: model.archivedCount > 0 && !model.showingArchive
-                ) {
-                    model.showingArchive.toggle()
-                }
-                .disabled(model.archivedCount == 0 && !model.showingArchive)
+                EmptyView()
             }
             filterBar
             if let error = model.errorMessage {
@@ -200,30 +154,80 @@ struct TodoView: View {
 
     private var filterBar: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: Theme.Space.m) { searchField; filterControls }
-            VStack(alignment: .leading, spacing: Theme.Space.s) { searchField; filterControls }
-        }
-        .padding(.horizontal, Theme.Space.m).padding(.vertical, Theme.Space.s)
-        .overlay(alignment: .bottom) { ThemeRule().opacity(0.5) }
-    }
-
-    private var searchField: some View {
-        HStack(spacing: Theme.Space.s) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Search tasks", text: $search).textFieldStyle(.plain)
-            if !search.isEmpty {
-                Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
-                    .buttonStyle(.plain).foregroundStyle(.secondary).help("Clear search")
+            HStack(spacing: Theme.Space.s) {
+                filterControls
+                Spacer(minLength: Theme.Space.s)
+                boardActions
+            }
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                HStack(spacing: Theme.Space.s) { filterControls }
+                HStack(spacing: Theme.Space.s) {
+                    Spacer(minLength: 0)
+                    boardActions
+                }
             }
         }
-        .font(Theme.callout).padding(8)
-        .frame(minWidth: 160, maxWidth: 340)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
+        .padding(.horizontal, Theme.Space.m).padding(.vertical, Theme.Space.s)
+        .overlay(alignment: .bottom) { ThemeRule() }
+    }
+
+    /// Order, the archive and a new card: what changes the board rather
+    /// than what narrows it.
+    private var boardActions: some View {
+        HStack(spacing: Theme.Space.s) {
+            SegmentedCapsulePicker(
+                options: [
+                    (true, "Newest", ""),
+                    (false, "Your order", ""),
+                ],
+                selection: $newestFirst
+            )
+            .fixedSize()
+            .onChange(of: newestFirst) { _, on in
+                model.sortNewestFirst = on
+            }
+            Button(
+                model.showingArchive
+                    ? "Back to the board"
+                    : (model.archivedCount == 0 ? "Archive" : "Archive \(model.archivedCount)"),
+                model.showingArchive ? .back : .archive
+            ) {
+                model.showingArchive.toggle()
+            }
+            .buttonStyle(SecondaryButtonStyle(small: true))
+            .disabled(model.archivedCount == 0 && !model.showingArchive)
+            .help(model.showingArchive ? "Show the board" : "Cards you archived from Done")
+            Button("New task", .create) { addingIn = "backlog" }
+                .buttonStyle(AccentButtonStyle(small: true))
+                .help("Add a card to To Do")
+        }
+        .fixedSize()
     }
 
     private var filterControls: some View {
-        HStack(spacing: Theme.Space.m) {
+        HStack(spacing: Theme.Space.s) {
+            SearchField(text: $search, prompt: "Search tasks")
+                .frame(minWidth: 160, maxWidth: 260)
+            if model.scope == nil {
+                // Only the global board gets a selector. A folder's board is
+                // that folder's, and a filter on top of it would be two
+                // answers to one question.
+                AppMenuPicker(
+                    options: [
+                        (value: "", label: "All workspaces"),
+                        (
+                            value: Self.unfiledValue,
+                            label: "Uncategorized"
+                                + (model.unfiledCount > 0 ? " (\(model.unfiledCount))" : "")
+                        ),
+                    ] + folders.map { (value: $0.id, label: $0.name) },
+                    selection: Binding(
+                        get: { Self.value(of: model.filter) },
+                        set: { model.filter = Self.filter(from: $0) }
+                    )
+                )
+                .frame(width: 160)
+            }
             AppMenuPicker(options: [(value: "", label: "All agents")]
                 + model.pickerBackends(keeping: agentFilter).map { (value: $0.id, label: $0.label) }, selection: $agentFilter)
                 .frame(width: 150)
@@ -234,8 +238,8 @@ struct TodoView: View {
                 Button("Clear", .dismiss) { search = ""; agentFilter = ""; attentionOnly = false }
                     .buttonStyle(.plain).foregroundStyle(Theme.accent).font(Theme.caption)
             }
-            Spacer(minLength: 0)
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     /// Waiting on the first read of the board.

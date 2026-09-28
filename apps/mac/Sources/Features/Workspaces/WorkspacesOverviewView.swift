@@ -66,50 +66,43 @@ struct WorkspacesOverviewView: View {
     var body: some View {
         VStack(spacing: 0) {
         DetailChromeBar {
-            ToolbarIconButton(systemImage: "plus", help: "Add folder") { onAdd() }
+            EmptyView()
         }
+        // One row: find a folder, pick a machine, order, add. The summary
+        // tiles that stood here counted what the grid below already shows.
+        HStack(spacing: Theme.Space.s) {
+            SearchField(text: $search, prompt: "Search folders, paths, or machines")
+                .frame(maxWidth: 300)
+            if scopes.count > 2 {
+                Picker("Machine", selection: $scope) {
+                    ForEach(scopes, id: \.id) { scope in
+                        Text(scope.label).tag(scope.id as String?)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .fixedSize()
+            }
+            Picker("Sort", selection: $alphabetical) {
+                Text("Your order").tag(false)
+                Text("Name A–Z").tag(true)
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .fixedSize()
+            Spacer(minLength: Theme.Space.s)
+            Text(summaryLine)
+                .font(Theme.caption)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+            Button("Add folder", .create) { onAdd() }
+                .buttonStyle(AccentButtonStyle(small: true))
+        }
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, Theme.Space.s)
+        ThemeRule()
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                HStack(alignment: .center, spacing: Theme.Space.m) {
-                    FeatureMark(name: "mark_archive", tint: Theme.accent, size: 28)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("All folders")
-                            .font(Theme.font(24, weight: .semibold))
-                        Text(summaryLine)
-                            .font(Theme.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                    if scopes.count > 2 {
-                        Picker("Machine", selection: $scope) {
-                            ForEach(scopes, id: \.id) { scope in
-                                Text(scope.label).tag(scope.id as String?)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .fixedSize()
-                    }
-                    Button("Add folder", .create) { onAdd() }
-                        .buttonStyle(AccentButtonStyle(small: true))
-                }
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Theme.Space.s), count: 3), spacing: Theme.Space.s) {
-                    ActivitySummaryTile(title: "Workspaces", value: folders.count, symbol: "folder")
-                    ActivitySummaryTile(title: "Local folders", value: folders.filter { !$0.isRemote }.count, symbol: "laptopcomputer")
-                    ActivitySummaryTile(title: "Remote folders", value: folders.filter(\.isRemote).count, symbol: "network")
-                }
-                HStack(spacing: Theme.Space.s) {
-                    HStack(spacing: Theme.Space.s) {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("Search folders, paths, or machines", text: $search).textFieldStyle(.plain)
-                    }
-                    .padding(Theme.Space.s)
-                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.Space.s))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.Space.s).strokeBorder(Theme.border))
-                    Picker("Sort", selection: $alphabetical) {
-                        Text("Your order").tag(false)
-                        Text("Name A–Z").tag(true)
-                    }.labelsHidden().frame(width: 135)
-                }
                 if folders.isEmpty {
                     emptyState
                 } else if shown.isEmpty {

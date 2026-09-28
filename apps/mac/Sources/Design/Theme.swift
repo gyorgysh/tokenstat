@@ -704,6 +704,10 @@ struct DetailChromeToggles {
     /// Drawn in place of the screen's own scope chip and accessory, which
     /// said less, less usefully.
     var sectionTabs: AnyView? = nil
+    /// The place's name, for a screen with no tabs and no scope of its own to
+    /// put in the bar. Without it the bar over Tasks or Notes was a row of
+    /// empty chrome.
+    var title: String? = nil
 }
 
 private struct DetailChromeTogglesKey: EnvironmentKey {
@@ -782,6 +786,11 @@ struct DetailChromeBar<Leading: View, Accessory: View, Trailing: View>: View {
                 } else {
                     if let scope {
                         scope
+                    } else if let title = toggles?.title {
+                        Text(title)
+                            .font(Theme.fit(14, weight: .semibold))
+                            .lineLimit(1)
+                            .padding(.leading, 2)
                     }
                     accessory()
                 }
