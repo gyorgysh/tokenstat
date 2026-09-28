@@ -184,9 +184,14 @@ struct RootView: View {
     @State private var placeSettled = false
 
     var body: some View {
+        #if DEBUG
+        // `TOKENSTAT_PRINT_CHANGES=1` prints what made the shell draw again,
+        // for measuring how often a background poll rebuilds the window.
+        if DebugUIHooks.printsChanges { Self._printChanges() }
+        #endif
         // Split the modifier chain. A single expression here is too much
         // for the Release type checker (it times out and fails the build).
-        liveSession
+        return liveSession
             // View menu shortcuts post here so a focused editor cannot swallow ⌘B
             // as "bold". Each destination owns its chrome buttons.
             .onReceive(NotificationCenter.default.publisher(for: .toggleLeftSidebar)) { _ in

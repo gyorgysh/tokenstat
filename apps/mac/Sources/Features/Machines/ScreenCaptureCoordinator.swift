@@ -48,6 +48,12 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
     /// loop stays on the slow beat.
     private static let controlPoll = Duration.milliseconds(8)
     private static let idlePoll = Duration.milliseconds(100)
+    /// Nobody is watching this screen, which is nearly all of the time. The
+    /// session list is then the only thing to look at, and asking for it ten
+    /// times a second kept this app and the host helper waking up ten times a
+    /// second for nothing. A viewer who connects waits at most this long for
+    /// capture to start, which is inside the tunnel's own handshake.
+    private static let emptyPoll = Duration.milliseconds(750)
     /// The session list and the pasteboard change count keep the slow beat
     /// whatever the input loop is doing. Neither changes at pointer rate, and
     /// both cost a round trip through the host.
@@ -83,7 +89,10 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
                 sessions = []
             }
             let controlling = sessions.contains(where: \.control)
-            try? await Task.sleep(for: controlling ? Self.controlPoll : Self.idlePoll)
+            let pause = sessions.isEmpty
+                ? Self.emptyPoll
+                : (controlling ? Self.controlPoll : Self.idlePoll)
+            try? await Task.sleep(for: pause)
         }
     }
 

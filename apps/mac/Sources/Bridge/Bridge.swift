@@ -730,7 +730,16 @@ enum Bridge {
         method == "pty.read" || method == "ssh.session.read" || method == "chat.events"
     }
 
+    #if DEBUG
+    /// `TOKENSTAT_LOG_ALL_CALLS=1` logs every call with its time, for counting
+    /// what a screen or a file save actually costs.
+    private static let logsAllCalls = ProcessInfo.processInfo.environment["TOKENSTAT_LOG_ALL_CALLS"] != nil
+    #endif
+
     private static func slowCallThreshold(method: String) -> UInt64 {
+        #if DEBUG
+        if logsAllCalls { return 0 }
+        #endif
         switch method {
         case "scan", "fetch", "sync", "usage.limits": return 2_000
         case "activity.calendar", "account.report", "account.machineUsage": return 750
@@ -1813,6 +1822,12 @@ extension Bridge {
             folder.machineLabel = peer.label
             return folder
         }
+    }
+
+    /// One folder with its git state, read fresh. For the file watcher: a
+    /// save in one project should not re-read git in every other one.
+    static func workspaceStatus(id: String) async throws -> WorkspaceFolder {
+        try await background("workspace.status", ["id": id], as: WorkspaceFolder.self)
     }
 
     /// Counts for every registered folder, in one call.

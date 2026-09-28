@@ -795,7 +795,12 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
         // Not while somebody is typing: an info call is a second round
         // trip inside the loop that the echo is waiting on. It resumes a
         // fraction of a second after the typing stops.
-        if sinceInfo >= 250, Date() >= hotUntil {
+        // A few times a second while output moves; every couple of seconds
+        // once the read loop has backed off to its ceiling. An idle shell in
+        // a folder nobody is looking at was answering four info calls a
+        // second, forever, and the answer never changed.
+        let infoInterval = pollDelay >= Self.maxPollDelay ? 2_000 : 250
+        if sinceInfo >= infoInterval, Date() >= hotUntil {
             sinceInfo = 0
             if let info = try? await Bridge.ptyInfo(id: hostID) {
                 // Guarded. These are observed, this runs several times a

@@ -796,8 +796,8 @@ final class WorkspacesModel {
 
     /// Re-read the diffs of files that are open. Called after the working tree
     /// changed, so a diff on screen is never stale.
-    func refreshOpenDiffs() async {
-        for workspaceID in tabs.keys {
+    func refreshOpenDiffs(in only: Set<String>? = nil) async {
+        for workspaceID in tabs.keys where only?.contains(workspaceID) ?? true {
             for path in openFiles(in: workspaceID)
             where diffs[Self.treeKey(workspaceID, path)] != nil {
                 await loadDiff(path, in: workspaceID)
@@ -811,8 +811,9 @@ final class WorkspacesModel {
     /// the app is that a session is editing the same repository. A document
     /// with unsaved changes is left alone, because `loadText` refuses to
     /// overwrite one, and the two edits are a conflict only a person can settle.
-    func refreshOpenDocuments() async {
-        for document in documents.values where !document.isDirty {
+    func refreshOpenDocuments(in only: Set<String>? = nil) async {
+        for document in documents.values
+        where !document.isDirty && (only?.contains(document.workspaceID) ?? true) {
             await loadText(document.path, in: document.workspaceID)
         }
     }
@@ -1235,13 +1236,59 @@ final class WorkspacesModel {
     /// the refresh runs when the stream settles rather than once per event.
     /// Without the debounce a `cargo build` would turn into a git status a
     /// second.
-    func scheduleRefresh() {
+    ///
+    /// `roots` names the watched folders that changed. Nil means the events
+    /// could not be placed and every local folder is read again.
+    func scheduleRefresh(roots: Set<String>? = nil) {
+        if let roots {
+            pendingRefreshRoots.formUnion(roots)
+        } else {
+            pendingRefreshAll = true
+        }
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(600))
-            guard !Task.isCancelled else { return }
-            await self?.refresh()
+            guard !Task.isCancelled, let self else { return }
+            let roots = self.pendingRefreshRoots
+            let all = self.pendingRefreshAll
+            self.pendingRefreshRoots = []
+            self.pendingRefreshAll = false
+            if all {
+                await self.refresh()
+            } else {
+                await self.refresh(roots: roots)
+            }
         }
+    }
+
+    /// Folders the watcher saw change since the last refresh ran.
+    private var pendingRefreshRoots: Set<String> = []
+    private var pendingRefreshAll = false
+
+    /// Re-read only the folders that changed.
+    ///
+    /// A save in one project used to run `git status` in every project, and
+    /// in a large repository that is seconds of host time per save. One
+    /// folder's status is one call. Past a handful of folders the full list
+    /// is the cheaper round trip, so that is what runs.
+    func refresh(roots: Set<String>) async {
+        let ids = localFolders.filter { roots.contains($0.path) }.map(\.id)
+        guard !ids.isEmpty, ids.count <= 3 else {
+            await refresh()
+            return
+        }
+        for id in ids {
+            guard let fresh = try? await Bridge.workspaceStatus(id: id),
+                  let index = localFolders.firstIndex(where: { $0.id == id }) else { continue }
+            localFolders[index] = fresh
+        }
+        publishFolders()
+        let changed = Set(ids)
+        for id in history.keys where changed.contains(id) {
+            await loadHistory(for: id)
+        }
+        await refreshOpenDiffs(in: changed)
+        await refreshOpenDocuments(in: changed)
     }
     #endif
 

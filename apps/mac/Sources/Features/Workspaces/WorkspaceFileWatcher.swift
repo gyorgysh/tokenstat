@@ -62,7 +62,9 @@ final class WorkspaceFileWatcher {
             existing as CFArray,
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
             0.5,
-            FSEventStreamCreateFlags(kFSEventStreamCreateFlagNoDefer)
+            // Paths as CFStrings, so the callback can tell which folder
+            // changed and whether it was only build output.
+            FSEventStreamCreateFlags(kFSEventStreamCreateFlagNoDefer | kFSEventStreamCreateFlagUseCFTypes)
         ) else {
             // A failed create must not leave `paths` claiming this list is
             // watched: the next `watch` with the same folders would skip the
@@ -87,13 +89,24 @@ final class WorkspaceFileWatcher {
 
     /// FSEvents' own callback. The context pointer is this watcher, which the
     /// model owns, so the pointer stays valid for the stream's whole life.
-    private static let eventCallback: FSEventStreamCallback = { _, info, _, _, _, _ in
+    private static let eventCallback: FSEventStreamCallback = { _, info, _, eventPaths, _, _ in
         guard let info else { return }
         let watcher = Unmanaged<WorkspaceFileWatcher>.fromOpaque(info).takeUnretainedValue()
+        let paths = (Unmanaged<CFArray>.fromOpaque(eventPaths).takeUnretainedValue() as NSArray)
+            as? [String] ?? []
         // The stream's dispatch queue is the main queue, so this runs on the
         // main thread, which is where the actor lives.
         MainActor.assumeIsolated {
-            watcher.model?.scheduleRefresh()
+            switch WorkspaceChangeFilter.classify(paths, among: watcher.paths) {
+            case .none:
+                // A build writing into target/, git packing objects: nothing
+                // that shows in a folder's status.
+                break
+            case let .roots(roots):
+                watcher.model?.scheduleRefresh(roots: roots)
+            case .unknown:
+                watcher.model?.scheduleRefresh()
+            }
         }
     }
 }

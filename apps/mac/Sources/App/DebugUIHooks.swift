@@ -42,8 +42,15 @@ enum DebugUIHooks {
     /// Any other key, relayed in process for a screen to act on.
     static let keyRequested = Notification.Name("ai.tokenstat.debug.keyRequested")
 
+    /// Set by `TOKENSTAT_PRINT_CHANGES`: views that opt in print what made
+    /// their body run again.
+    static let printsChanges = ProcessInfo.processInfo.environment["TOKENSTAT_PRINT_CHANGES"] != nil
+
     @MainActor
     static func install() {
+        // Redirected to a file, stdout is block-buffered and the lines only
+        // arrive when the app quits. Line by line is what a measurement wants.
+        if printsChanges { setvbuf(stdout, nil, _IOLBF, 0) }
         let center = DistributedNotificationCenter.default()
         center.addObserver(forName: snapshot, object: nil, queue: .main) { note in
             guard let path = note.object as? String else { return }
