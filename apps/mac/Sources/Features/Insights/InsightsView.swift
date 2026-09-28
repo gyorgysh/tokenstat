@@ -28,10 +28,9 @@ struct InsightsView: View {
             // right. Tabs are a full-width strip under that row.
             DetailChromeBar(
                 leading: {
-                    SegmentedCapsulePicker(
-                        options: ActivityScope.allCases.map { (value: $0, label: $0.label, symbol: $0.symbol) },
-                        selection: $scope
-                    ).frame(width: 280)
+                    // Back first, where a hand goes to leave. The device
+                    // picker sits after the sidebar toggle, the way Home
+                    // draws the same picker.
                     if model.focusedDay != nil && scope == .thisMachine {
                         ToolbarIconButton(
                             systemImage: "chevron.left",
@@ -40,6 +39,12 @@ struct InsightsView: View {
                             onBackToHome?()
                         }
                     }
+                },
+                accessory: {
+                    SegmentedCapsulePicker(
+                        options: ActivityScope.allCases.map { (value: $0, label: $0.label, symbol: $0.symbol) },
+                        selection: $scope
+                    ).frame(width: 280)
                 },
                 trailing: {
                     if scope == .thisMachine {
