@@ -8,6 +8,11 @@
 #if os(macOS)
 import CoreServices
 import Foundation
+import OSLog
+
+#if DEBUG
+private let watchLog = Logger(subsystem: "ai.tokenstat.tokenstat", category: "Performance")
+#endif
 
 
 /// Watches workspace folders so git state can refresh itself.
@@ -96,6 +101,11 @@ final class WorkspaceFileWatcher {
             as? [String] ?? []
         // The stream's dispatch queue is the main queue, so this runs on the
         // main thread, which is where the actor lives.
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["TOKENSTAT_LOG_ALL_CALLS"] != nil {
+            watchLog.debug("fs events \(paths.joined(separator: " | "), privacy: .public)")
+        }
+        #endif
         MainActor.assumeIsolated {
             switch WorkspaceChangeFilter.classify(paths, among: watcher.paths) {
             case .none:

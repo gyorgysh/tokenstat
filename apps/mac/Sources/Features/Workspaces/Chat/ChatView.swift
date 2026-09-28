@@ -871,7 +871,13 @@ struct ChatView: View {
     /// stops once the conversation has arrived and the end has been steady
     /// for a moment, so this is the ceiling on a slow host and not what an
     /// open costs.
-    private static let settleFrames = 40
+    ///
+    /// A long transcript of tool rows rarely holds still for three frames
+    /// while its lazy rows measure, so in practice it rode the ceiling: two
+    /// seconds of wireframe over a page that had arrived in a tenth of that.
+    /// Following the end carries on after the reveal, so a shorter hold hides
+    /// the first build-up and not the whole of it.
+    private static let settleFrames = 24
 
     /// Rows the transcript builds this pass. A fixed-width slice, never a
     /// growing suffix: appending below the viewport shifts nothing, earlier
