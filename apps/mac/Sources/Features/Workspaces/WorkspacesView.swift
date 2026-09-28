@@ -39,13 +39,13 @@ struct WorkspacesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Same leading toggles as every other destination; trailing empty
-            // because workspace actions sit in the folder header and terminal.
+            // Same leading toggles as every other destination, and the
+            // project's name, branch and sections from the shell. Trailing
+            // is empty because session actions sit on the terminal's row.
             DetailChromeBar {
                 EmptyView()
             }
             if let folder = model.selected {
-                header(folder)
                 #if os(macOS)
                 // What that computer is doing, where you are working in its
                 // folders. This block only existed on Devices, so somebody who
@@ -53,9 +53,11 @@ struct WorkspacesView: View {
                 // whether it was awake or what it was busy with.
                 if folder.isRemote, let peer = folder.machineID, !peer.isEmpty {
                     remoteMachine(folder, peer: peer)
+                    ThemeRule()
                 }
-                #endif
+                #else
                 ThemeRule()
+                #endif
                 // Remote workspaces run the same terminal surface as local
                 // ones: the host forwards every pty call to the machine that
                 // owns the folder, so sessions spawn, stream and close there
@@ -85,46 +87,6 @@ struct WorkspacesView: View {
             await chat.warmWorkspacePreviews(id)
         }
         #endif
-    }
-
-    private func header(_ folder: WorkspaceFolder) -> some View {
-        HStack(spacing: Theme.Space.m) {
-            Image(systemName: "folder.fill")
-                .foregroundStyle(Theme.accent)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(folder.name)
-                    .font(Theme.fit(13, weight: .semibold))
-                Text(folder.isRemote
-                     ? "\(folder.machineLabel ?? "Remote machine") · \(folder.path)"
-                     : folder.path)
-                    .font(Theme.mono(11))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    // Head truncation hid the start of the path, which is the
-                    // part that identifies the project. Middle keeps both ends
-                    // visible, and the full path is one hover away.
-                    .truncationMode(.middle)
-                    .minimumScaleFactor(0.75)
-                    .help(folder.path)
-            }
-            // The path is the identifying line; the branch chip must never
-            // squeeze it out of existence.
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .layoutPriority(1)
-            Spacer()
-            if let git = folder.git, git.isRepo {
-                BranchChip(workspaceID: folder.id, git: git, model: model) {
-                    await model.refresh()
-                }
-                    // The chip keeps its whole shape whatever the path does:
-                    // without this, a long path with layout priority squeezes
-                    // the branch text and the chip starts to look broken.
-                    .fixedSize()
-                    .layoutPriority(2)
-            }
-        }
-        .padding(.horizontal, Theme.Space.m)
-        .padding(.vertical, Theme.Space.s)
     }
 
     #if os(macOS)

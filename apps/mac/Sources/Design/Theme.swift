@@ -699,6 +699,11 @@ struct DetailChromeToggles {
     var leftSidebar: AnyView
     var rightInspector: AnyView?
     var search: AnyView? = nil
+    /// The tabs of the place the screen belongs to: a project's name, branch
+    /// and sections, the SSH library's sections, Automations and Workflows.
+    /// Drawn in place of the screen's own scope chip and accessory, which
+    /// said less, less usefully.
+    var sectionTabs: AnyView? = nil
 }
 
 private struct DetailChromeTogglesKey: EnvironmentKey {
@@ -772,10 +777,14 @@ struct DetailChromeBar<Leading: View, Accessory: View, Trailing: View>: View {
                 // back from it is still the first control in the row.
                 leading()
                 toggles?.leftSidebar
-                if let scope {
-                    scope
+                if let tabs = toggles?.sectionTabs {
+                    tabs
+                } else {
+                    if let scope {
+                        scope
+                    }
+                    accessory()
                 }
-                accessory()
             }
             Spacer(minLength: 0)
             HStack(spacing: Theme.Space.s) {
@@ -1303,16 +1312,18 @@ func quantised(_ length: CGFloat, step: CGFloat = 1) -> CGFloat {
     (length / step).rounded() * step
 }
 
-/// Circular icon mark for the window toolbar.
+/// Icon mark for the content bar.
 ///
 /// Sidebar toggle, refresh, scan and fetch all share this seat so neighbouring
-/// marks use the same diameter and border rather than mixing a custom view
-/// with the system's bordered toolbar style (those read as different radii).
+/// marks use the same size rather than mixing a custom view with the system's
+/// bordered toolbar style.
+///
+/// Quiet at rest: a glyph and nothing around it, a soft seat under the pointer.
+/// Every mark used to sit in its own bordered circle, and a bar of eight of
+/// them read as a row of buttons asking to be pressed rather than as chrome.
 struct ToolbarIconButton: View {
-    /// Outer diameter of the circular seat. Fixed so every toolbar mark matches.
-    /// 36pt is still under the 44pt HIG floor but matches dense chrome; the
-    /// content shape is expanded where the control sits alone.
-    static let diameter: CGFloat = 36
+    /// The seat's side. The hit area is the whole seat, drawn or not.
+    static let diameter: CGFloat = 30
 
     let systemImage: String
     var help: String = ""
@@ -1337,19 +1348,14 @@ struct ToolbarIconButton: View {
                             .controlSize(.small)
                     } else {
                         Image(systemName: systemImage)
-                            .font(.system(size: 14, weight: .medium))
+                            .font(.system(size: 14, weight: .regular))
                             .foregroundStyle(glyphColor)
                     }
                 }
                 .frame(width: Self.diameter, height: Self.diameter)
                 .background(
-                    Circle().fill(isHovering ? Theme.rowHighlight : Theme.controlSeat)
-                )
-                .overlay(
-                    Circle().strokeBorder(
-                        Theme.border.opacity(isHovering ? 0.9 : 0.55),
-                        lineWidth: 1
-                    )
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(seatColor)
                 )
                 if showsBadge {
                     Circle()
@@ -1361,13 +1367,22 @@ struct ToolbarIconButton: View {
                         )
                 }
             }
-            .contentShape(Circle())
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled || isBusy)
+        .opacity(isEnabled || isBusy ? 1 : 0.4)
         .onHover { isHovering = $0 }
         .help(help)
         .accessibilityLabel(help)
+    }
+
+    /// Nothing at rest. The accent's soft wash when the mark is on, so an open
+    /// panel or a pinned item still reads as on without a border to say so.
+    private var seatColor: Color {
+        if isHovering { return Theme.rowHighlight }
+        if isAccent { return Theme.accentSoft.opacity(0.8) }
+        return .clear
     }
 
     private var glyphColor: Color {
@@ -1376,11 +1391,46 @@ struct ToolbarIconButton: View {
     }
 }
 
+/// A "more" menu in the content bar, the same size and quiet seat as the
+/// marks beside it.
+///
+/// For actions that belong to the screen but are not reached for every
+/// minute. A bar that shows every action at once has no room left for the
+/// thing it is a bar of.
+struct ToolbarMenuButton<Content: View>: View {
+    var systemImage: String = "ellipsis"
+    var help: String = "More"
+    @ViewBuilder var content: () -> Content
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Menu {
+            content()
+        } label: {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .regular))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .tint(Theme.controlGlyph)
+        .fixedSize()
+        .frame(width: ToolbarIconButton.diameter, height: ToolbarIconButton.diameter)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isHovering ? Theme.rowHighlight : .clear)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .onHover { isHovering = $0 }
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
 /// Left or right chrome toggle for toolbars and in-content chips.
 ///
 /// Built from the system `sidebar.left` / `sidebar.right` symbols so the mark
-/// always paints in a macOS toolbar. Open = accent tint. Closed = quiet glyph
-/// + accent dot (the "panel is hidden" cue). Same circular seat as refresh.
+/// always paints in a macOS toolbar. Same quiet seat as refresh.
 struct SidebarToggleButton: View {
     enum Edge {
         case leading
@@ -1395,12 +1445,12 @@ struct SidebarToggleButton: View {
     var help: String = ""
 
     var body: some View {
+        // Plain in both states. An accent wash on every open panel and a dot
+        // on every closed one put two signals on a control whose glyph
+        // already shows the panel, and the dot read as a notification.
         ToolbarIconButton(
             systemImage: edge == .leading ? "sidebar.left" : "sidebar.right",
             help: help,
-            isAccent: isOpen,
-            showsBadge: !isOpen,
-            badgeAlignment: edge == .leading ? .topLeading : .topTrailing,
             action: action
         )
         .accessibilityAddTraits(isOpen ? .isSelected : [])

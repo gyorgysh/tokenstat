@@ -80,6 +80,13 @@ struct RootView: View {
     @State private var workspaceBrowserURLs: [String: String] = [:]
     /// Explicit sidebar preference, preserved when a narrow window uses a peek.
     @State private var columnVisibilityChoice: NavigationSplitViewVisibility = .all
+    /// The sidebar's width, dragged by the person and remembered. The live
+    /// value only exists while a drag is in flight; see `ColumnResizeHandle`.
+    @AppStorage("shell.sidebarWidth") private var sidebarWidth = ShellMetrics.sidebarDefault
+    @State private var sidebarLiveWidth: Double?
+    /// The inspector's width, same treatment.
+    @AppStorage("shell.inspectorWidth") private var inspectorWidth = ShellMetrics.inspectorDefault
+    @State private var inspectorLiveWidth: Double?
     /// Whether the window is wide enough to carry the inspector at all.
     ///
     /// Separate from `isInspectorPresented`, which is what the user asked for.
@@ -146,10 +153,6 @@ struct RootView: View {
     /// the title bar. Keep the longer list opt-in so a busy workspace does
     /// not turn the sidebar into a transcript index.
     @State private var expandedChatHistories: Set<String> = []
-    /// Folders whose chat history is minimized to its section row. The list
-    /// is always open otherwise, and a busy folder leaves no way to get it
-    /// out of the way.
-    @State private var collapsedChatHistories: Set<String> = []
     /// The section each folder was last left on, so returning to a folder
     /// returns to what you were doing in it.
     @State private var lastSection: [String: WorkspaceSection] = [:]
@@ -159,18 +162,6 @@ struct RootView: View {
     @State private var savedWorkCatalog = DesktopSavedWorkCatalog()
     @State private var savedConversation: DesktopSavedConversation.Destination?
     @State private var savedFolder: WorkFolderCacheSettings.Destination?
-    /// The every-folder group. Shut by default, and remembered: it answers a
-    /// question people ask about once a week.
-    @AppStorage("sidebar.globalGroupExpanded") private var isGlobalGroupExpanded = false
-    /// The SSH group. Same treatment as the global one: shut by default,
-    /// remembered, because servers are a place people go to deliberately.
-    @AppStorage("sidebar.sshGroupExpanded") private var isSSHGroupExpanded = false
-    /// Whether the folders and live sessions under the Hosts row show.
-    /// Expanded by default and remembered: collapsing is for a library that
-    /// grew folders, and a fresh library has nothing to hide.
-    @AppStorage("sidebar.sshHostsExpanded") private var isSSHHostsExpanded = true
-    /// SSH folders whose hosts are listed under the Hosts row.
-    @State private var expandedSSHFolders: Set<String> = []
     #if os(macOS)
     /// Servers whose session rows are showing.
     @State private var expandedSSHHosts: Set<String> = []
@@ -201,6 +192,12 @@ struct RootView: View {
             .onReceive(NotificationCenter.default.publisher(for: .toggleLeftSidebar)) { _ in
                 guard launch.hostReady else { return }
                 toggleLeftSidebar()
+            }
+            // ⌘K lives in the Edit menu, so it works whatever has focus and
+            // whichever panes are showing.
+            .onReceive(NotificationCenter.default.publisher(for: .searchWorkRequested)) { _ in
+                guard launch.hostReady else { return }
+                showWorkSearch = true
             }
             .onReceive(NotificationCenter.default.publisher(for: .toggleRightSidebar)) { _ in
                 guard launch.hostReady, route.hasInspector else { return }
@@ -303,7 +300,40 @@ struct RootView: View {
             // read the same account as the desktop shell. Supply it above all
             // presenters so both retained panes and modal content inherit it.
             .environment(account)
+            #if DEBUG
+            .onReceive(NotificationCenter.default.publisher(for: DebugUIHooks.routeRequested)) { note in
+                guard let target = note.object as? String else { return }
+                debugNavigate(target)
+            }
+            #endif
     }
+
+    #if DEBUG
+    /// `DebugUIHooks`' route strings, resolved against this window's folders.
+    private func debugNavigate(_ target: String) {
+        let parts = target.split(separator: ":", maxSplits: 2).map(String.init)
+        switch parts.first {
+        case "overview":
+            navigate(to: .workspacesOverview)
+        case "ssh":
+            openSSH(lastSSHSection)
+        case "workspace":
+            let key = parts.count > 1 ? parts[1] : "0"
+            let folder = Int(key).flatMap { workspaces.folders.indices.contains($0) ? workspaces.folders[$0] : nil }
+                ?? workspaces.folders.first { $0.name == key }
+            guard let folder else { return }
+            if parts.count > 2, let section = WorkspaceSection(rawValue: parts[2]) {
+                openSection(section, in: folder.id)
+            } else {
+                selectWorkspace(folder.id)
+            }
+        default:
+            if let section = parts.first.flatMap(GlobalSection.init(rawValue:)) {
+                navigate(to: .global(section))
+            }
+        }
+    }
+    #endif
 
     /// Splash or chrome, plus window geometry and the pointer peeks.
     private var sizedWindow: some View {
@@ -355,6 +385,11 @@ struct RootView: View {
         .onChange(of: windowContentWidth) { _, width in
             applyWidth(for: width)
         }
+        // The inspector's fit edge is made of the column widths, so a resize
+        // that ends or a sidebar that hides can bring the column back.
+        .onChange(of: sidebarWidth) { _, _ in applyWidth(for: windowContentWidth) }
+        .onChange(of: inspectorWidth) { _, _ in applyWidth(for: windowContentWidth) }
+        .onChange(of: columnVisibilityChoice) { _, _ in applyWidth(for: windowContentWidth) }
         // Where the pointer is decides both peeks, and it is asked rather
         // than waited for. See `watchPointer`.
         .task { await watchPointer() }
@@ -662,11 +697,7 @@ struct RootView: View {
     /// during resize, and gives both header bars the same vertical origin.
     private var mainChrome: some View {
         HStack(spacing: 0) {
-            if showsSidebar {
-                sidebar
-                    .frame(width: Self.sidebarMinimumWidth)
-                Rectangle().fill(Theme.border).frame(width: 1)
-            }
+            leftChrome
             detailColumn
                 .environment(\.detailChromeToggles, detailChromeToggles)
         }
@@ -682,6 +713,151 @@ struct RootView: View {
         })
     }
 
+    /// The rail and the sidebar, on one surface.
+    ///
+    /// Glass on macOS 26 and later, where the panel floats inside the window
+    /// edges with the traffic lights inside it, the way the system's own
+    /// sidebars do. Runs up through the titlebar band on every system, because
+    /// that band is where the lights are and they belong to this surface.
+    private var leftChrome: some View {
+        HStack(spacing: 0) {
+            rail
+            if showsSidebar {
+                sidebar
+                    .frame(width: currentSidebarWidth)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            }
+        }
+        .frame(maxHeight: .infinity)
+        .leftChromeSurface()
+        .padding(.trailing, ShellMetrics.panelInset)
+        .overlay(alignment: .trailing) {
+            if showsSidebar {
+                // In the gutter beside the glass, or straddling the hairline
+                // where the surface is flat.
+                ColumnResizeHandle(
+                    side: .leading,
+                    width: $sidebarWidth,
+                    liveWidth: $sidebarLiveWidth,
+                    range: ShellMetrics.sidebarRange,
+                    showsLine: !ShellMetrics.usesGlass,
+                    help: "Drag to resize the sidebar. Double-click to reset."
+                )
+                .offset(x: ShellMetrics.usesGlass ? 0 : 3)
+            } else if !ShellMetrics.usesGlass {
+                Rectangle().fill(Theme.border).frame(width: 1)
+            }
+        }
+        .ignoresSafeArea(.container, edges: .top)
+    }
+
+    /// The sidebar's width right now: the drag in flight, else the stored one.
+    private var currentSidebarWidth: CGFloat {
+        CGFloat(sidebarLiveWidth ?? sidebarWidth)
+    }
+
+    /// Everything left of the detail column: the rail, the sidebar when it is
+    /// a column, and the glass insets.
+    private var leftChromeWidth: CGFloat {
+        let rail = ShellMetrics.railWidth + (ShellMetrics.usesGlass ? ShellMetrics.panelInset * 2 : 6)
+        return rail + (showsSidebar ? currentSidebarWidth : 0)
+    }
+
+    /// The inspector's width right now.
+    private var currentInspectorWidth: CGFloat {
+        CGFloat(inspectorLiveWidth ?? inspectorWidth)
+    }
+
+    /// The machine-wide places, and the account at the foot.
+    ///
+    /// Always on screen, whatever the sidebar is doing, so Home is never more
+    /// than one click away and hiding the sidebar costs nothing but the list
+    /// of projects.
+    private var rail: some View {
+        VStack(spacing: 4) {
+            ForEach(RailPlace.allCases) { place in
+                RailButton(
+                    place: place,
+                    isSelected: RailPlace.of(route) == place,
+                    badge: railBadge(place)
+                ) { openRail(place) }
+            }
+            Spacer(minLength: Theme.Space.s)
+            railAccount
+        }
+        // The first mark sits level with the first row of the sidebar and the
+        // content bar, below the traffic lights.
+        .padding(.top, ShellMetrics.titleBand - ShellMetrics.panelInset + 2)
+        .padding(.bottom, Theme.Space.m)
+        .frame(width: ShellMetrics.railWidth + (ShellMetrics.usesGlass ? 0 : 6))
+    }
+
+    /// A dot on a rail mark when that place has something live in it.
+    private func railBadge(_ place: RailPlace) -> Bool {
+        switch place {
+        case .automations:
+            return automations.runs.contains(where: \.isRunning) || workflows.runs.contains(where: \.isLive)
+        #if os(macOS)
+        case .ssh:
+            return !sshSessions.sessions.isEmpty && RailPlace.of(route) != .ssh
+        case .devices:
+            return deviceRequests.asking != nil
+        #endif
+        default:
+            return false
+        }
+    }
+
+    /// Go to a rail place. Projects opens the all-projects overview; a
+    /// project itself is picked in the sidebar.
+    private func openRail(_ place: RailPlace) {
+        switch place {
+        case .home: navigate(to: .global(.home))
+        case .projects: navigate(to: .workspacesOverview)
+        case .tasks: navigate(to: .global(.todo))
+        case .notes: navigate(to: .global(.notes))
+        case .automations:
+            // Workflows share the place. Coming back lands where it was left.
+            if !route.isGlobal(.workflows) { navigate(to: .global(.automations)) }
+        case .insights: navigate(to: .global(.insights))
+        case .devices: navigate(to: .global(.machines))
+        case .ssh:
+            #if os(macOS)
+            openSSH(lastSSHSection)
+            #endif
+        }
+    }
+
+    /// The account picture, with the account menu behind it.
+    ///
+    /// A real `NSMenu` over an ordinary view. A macOS `Menu` does not host a
+    /// custom label, it rebuilds it: the picture was lifted out and repainted
+    /// across the whole control, and the name slid under it. An ordinary view
+    /// with `NativeMenuTrigger` over it stays exactly as drawn.
+    private var railAccount: some View {
+        ZStack {
+            Avatar(
+                url: account.account?.avatar,
+                name: account.account?.title,
+                handle: account.account?.handle,
+                size: 28
+            )
+            .overlay(alignment: .bottomTrailing) {
+                if account.isSyncing {
+                    Circle().fill(Theme.accent)
+                        .frame(width: 8, height: 8)
+                        .overlay(Circle().strokeBorder(Theme.sidebar, lineWidth: 1.5))
+                }
+            }
+            #if os(macOS)
+            NativeMenuTrigger(items: { accountMenuItems })
+            #endif
+        }
+        .frame(width: 40, height: 40)
+        .help(account.account?.title ?? "Account")
+        .accessibilityLabel("Account")
+    }
+
     /// Leading toggles injected into every destination's chrome bar.
     private var detailChromeToggles: DetailChromeToggles {
         DetailChromeToggles(
@@ -689,10 +865,72 @@ struct RootView: View {
             rightInspector: route.hasInspector
                 ? AnyView(rightInspectorToolbarButton)
                 : nil,
-            search: AnyView(ToolbarIconButton(systemImage: ActionIcon.search.symbol, help: "Search work (⌘K)") {
-                showWorkSearch = true
-            }.keyboardShortcut("k", modifiers: .command))
+            search: nil,
+            sectionTabs: sectionTabs
         )
+    }
+
+    /// Tabs for the place on screen, when it has sections of its own.
+    private var sectionTabs: AnyView? {
+        if let projectHeader { return AnyView(projectHeader) }
+        switch route {
+        case .global(.automations), .global(.workflows):
+            // One place on the rail, two kinds of unattended work.
+            return AnyView(ChromeTabStrip(
+                tabs: [
+                    ChromeTab(id: GlobalSection.automations.rawValue, label: "Scheduled", symbol: "bolt"),
+                    ChromeTab(id: GlobalSection.workflows.rawValue, label: "Workflows",
+                              symbol: GlobalSection.workflows.symbol),
+                ],
+                selected: route.globalSection?.rawValue
+            ) { id in
+                if let section = GlobalSection(rawValue: id) { navigate(to: .global(section)) }
+            })
+        #if os(macOS)
+        case .ssh, .sshTerminals:
+            // The library's four sections, which used to be sidebar rows.
+            return AnyView(ChromeTabStrip(
+                tabs: SSHSection.rows.map { ChromeTab(id: $0.id, label: $0.label, symbol: $0.symbol) },
+                selected: route.sshSection?.row.id,
+                primary: 4
+            ) { id in
+                if let section = SSHSection.rows.first(where: { $0.id == id }) { openSSH(section) }
+            })
+        #endif
+        default:
+            return nil
+        }
+    }
+
+    /// The project bar for a screen that belongs to one folder.
+    private var projectHeader: ProjectHeader? {
+        guard let id = route.workspaceID,
+              let folder = workspaces.folders.first(where: { $0.id == id }) else { return nil }
+        var branch: AnyView?
+        if let git = folder.git, git.isRepo {
+            branch = AnyView(BranchChip(workspaceID: folder.id, git: git, model: workspaces) {
+                await workspaces.refresh()
+            })
+        }
+        return ProjectHeader(
+            folder: folder,
+            selected: route.workspaceSection,
+            branch: branch,
+            // Numbers only where they ask for attention: what is running,
+            // what is uncommitted, what is waiting for review or to be done.
+            count: { section in
+                switch section {
+                case .sessions, .changes, .pulls, .todo: return count(of: section, in: folder)
+                default: return nil
+                }
+            }
+        ) { section in
+            // Chat opens on its conversation, not on the list of them: the
+            // sidebar is the list now.
+            openSection(section, in: folder.id) {
+                if section == .chat { showingChatOverview = false }
+            }
+        }
     }
 
     /// Leading sidebar mark for toolbars (sidebar column and detail column).
@@ -838,31 +1076,18 @@ struct RootView: View {
     /// both columns overflows a tiled half-screen.
     static var detailMinimumWidth: CGFloat { DisplayFit.box(480) }
 
-    /// A comfortable fixed width for nested workspace rows and account controls.
-    /// Keep a readable floor on compact displays; narrow windows use the peek.
-    static var sidebarMinimumWidth: CGFloat { max(240, DisplayFit.box(260)) }
-
     /// The narrowest the window may get.
     ///
     /// Detail only. A content minimum larger than the window does not shrink
     /// the window, it overflows it: the layout is built at the minimum and the
     /// trailing edge is cut off. Half-screen tile on a 1440-wide display is
     /// about 720, which is less than sidebar + detail (760 at factor 1).
-    static var minimumContentWidth: CGFloat { detailMinimumWidth }
+    static var minimumContentWidth: CGFloat {
+        detailMinimumWidth + ShellMetrics.railWidth + ShellMetrics.panelInset * 2
+    }
 
     /// The narrowest the window may get vertically.
     static var minimumContentHeight: CGFloat { DisplayFit.box(620) }
-
-    /// The narrowest window that can hold all three columns.
-    ///
-    /// Deliberately more than the columns' bare minimums (which sum to 1160 at
-    /// full factor): the Overview only stops looking cramped when the detail
-    /// column keeps about 800 points, and below that the inspector is not
-    /// worth the room it costs the sidebar. So the fit edge is 1450 — below
-    /// it the pane stops being a column and floats instead (see the overlay
-    /// below), with no band where the sidebar gets pushed for its sake.
-    /// The fixed pane switches to an overlay before the detail becomes cramped.
-    private static var widthForThreeColumns: CGFloat { DisplayFit.box(1450) }
 
     /// Below this the sidebar collapses instead of being squeezed. Above it,
     /// the user's choice stands; below it the collapse is the default, but an
@@ -873,15 +1098,29 @@ struct RootView: View {
     /// it rather than being pushed.
     private static var widthForSidebar: CGFloat { DisplayFit.box(1000) }
 
-    /// Whether the inspector fits.
+    /// Whether the inspector docks as a column at this window width, given
+    /// the columns as they are sized now.
     ///
-    /// A single edge, no hysteresis: the width arrives quantised to 4 points,
-    /// which is the dead band that stops a drag parked on the boundary from
-    /// adding and removing the column on alternating frames. The old explicit
-    /// gap existed to keep the inspector open a little past the edge; that is
-    /// exactly the band in which the sidebar lost its column, so it is gone.
-    private static func fits(_ width: CGFloat) -> Bool {
-        width >= widthForThreeColumns
+    /// The left chrome and the inspector are both the person's own widths
+    /// now, so the edge follows them: narrowing the sidebar or the inspector
+    /// is a way to make room for the column, and hiding the sidebar is too.
+    /// Stored widths only, never a drag in flight, so the mode flips when a
+    /// drag ends rather than under the pointer.
+    private func inspectorFits(at width: CGFloat) -> Bool {
+        let rail = ShellMetrics.railWidth + (ShellMetrics.usesGlass ? ShellMetrics.panelInset * 2 : 6)
+        let sidebar = showsSidebarColumn(at: width) ? CGFloat(sidebarWidth) : 0
+        return width >= rail + sidebar + DisplayFit.box(Self.comfortDetail) + CGFloat(inspectorWidth)
+    }
+
+    /// The detail column's comfortable width beside a docked inspector.
+    private static let comfortDetail: CGFloat = 720
+
+    /// `showsSidebar` for a width that has not been stored yet.
+    private func showsSidebarColumn(at width: CGFloat) -> Bool {
+        columnVisibilityChoice != .detailOnly
+            && (width <= 0 || Self.sidebarColumnFits(
+                width: width, browserOpen: showsWorkspaceBrowser, persistedBrowser: browserPaneWidth
+            ))
     }
 
     /// Whether the sidebar keeps its column at this width.
@@ -934,7 +1173,7 @@ struct RootView: View {
             isSidebarPinned = false
             isSidebarOverlayVisible = false
         }
-        let next = Self.fits(width)
+        let next = inspectorFits(at: width)
         guard next != inspectorFits else { return }
         Task { @MainActor in
             if inspectorFits != next {
@@ -1178,10 +1417,19 @@ struct RootView: View {
                 .frame(width: fittedBrowserWidth)
                 .frame(maxHeight: .infinity)
             } else if showsInspector && !showsWorkspaceBrowser {
-                Rectangle().fill(Theme.border).frame(width: 1)
                 boundedInspector { inspectorContent }
-                    .frame(width: DisplayFit.box(400))
+                    .frame(width: currentInspectorWidth)
                     .background(Theme.sidebar)
+                    .overlay(alignment: .leading) {
+                        ColumnResizeHandle(
+                            side: .trailing,
+                            width: $inspectorWidth,
+                            liveWidth: $inspectorLiveWidth,
+                            range: ShellMetrics.inspectorRange,
+                            help: "Drag to resize the inspector. Double-click to reset."
+                        )
+                        .offset(x: -3)
+                    }
             }
         }
             // Below the fit edge the inspector stops being a column and floats
@@ -1256,7 +1504,7 @@ struct RootView: View {
     }
 
     private var fittedBrowserWidth: CGFloat {
-        let available = windowContentWidth - (showsSidebar ? Self.sidebarMinimumWidth : 0)
+        let available = windowContentWidth - leftChromeWidth
         let cap = browserFitsBesideWorkspace
             ? ChromeFit.besideMax(available: available)
             : ChromeFit.overlayMax(width: windowContentWidth)
@@ -1278,7 +1526,7 @@ struct RootView: View {
             }
             .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global).onChanged { value in
                 if browserResizeStart == nil { browserResizeStart = fittedBrowserWidth }
-                let available = windowContentWidth - (showsSidebar ? Self.sidebarMinimumWidth : 0)
+                let available = windowContentWidth - leftChromeWidth
                 let cap = browserFitsBesideWorkspace
                     ? ChromeFit.besideMax(available: available)
                     : ChromeFit.overlayMax(width: windowContentWidth)
@@ -1309,14 +1557,9 @@ struct RootView: View {
         if showsSidebarOverlay {
             HStack(spacing: 0) {
                 sidebar
-                    .frame(width: Self.sidebarMinimumWidth)
+                    .frame(width: currentSidebarWidth)
                     .frame(maxHeight: .infinity)
-                    .background(Theme.sidebar)
-                    .overlay(alignment: .trailing) {
-                        Rectangle()
-                            .fill(Theme.border)
-                            .frame(width: 1)
-                    }
+                    .modifier(FloatingSidebarSurface())
                     .shadow(color: Theme.shadow(0.20), radius: 12, x: 5, y: 0)
 
                 Color.clear
@@ -1341,7 +1584,7 @@ struct RootView: View {
 
                 // Same reason as the column. See there.
                 boundedInspector { inspectorContent }
-                    .frame(width: DisplayFit.box(400))
+                    .frame(width: currentInspectorWidth)
                     .frame(maxHeight: .infinity)
                     .background(Theme.sidebar)
                     .overlay(alignment: .leading) {
@@ -1385,7 +1628,7 @@ struct RootView: View {
 
         while !Task.isCancelled {
             if usesOverlayInspector {
-                let width = showsOverlayInspector ? DisplayFit.box(400) : Self.edgeStrip
+                let width = showsOverlayInspector ? currentInspectorWidth : Self.edgeStrip
                 let inside = Self.pointerIsNear(.trailing, within: width)
                 if inside {
                     trailingLeftAt = nil
@@ -1424,20 +1667,17 @@ struct RootView: View {
             }
 
             if usesOverlaySidebar {
-                let width = showsSidebarOverlay ? Self.sidebarMinimumWidth : Self.edgeStrip
+                let width = showsSidebarOverlay
+                    ? ShellMetrics.railWidth + currentSidebarWidth + ShellMetrics.panelInset * 2
+                    : ShellMetrics.railWidth + Self.edgeStrip
                 let inside = Self.pointerIsNear(.leading, within: width)
                 if inside {
+                    // No dwell-to-open on this edge. The rail lives there and
+                    // is always on screen, so resting on it means reaching for
+                    // a place, not asking for the list of projects. ⌘B and the
+                    // toggle float the sidebar when the window is too narrow.
                     leadingLeftAt = nil
-                    if showsSidebarOverlay {
-                        leadingSince = nil
-                    } else {
-                        let since = leadingSince ?? now()
-                        leadingSince = since
-                        if now().timeIntervalSince(since) >= Self.edgeDwell {
-                            isSidebarOverlayVisible = true
-                            leadingSince = nil
-                        }
-                    }
+                    leadingSince = nil
                 } else {
                     leadingSince = nil
                     if isSidebarOverlayVisible, !isSidebarPinned, !isSidebarModalVisible {
@@ -1514,88 +1754,7 @@ struct RootView: View {
 
     // MARK: - Sidebar
 
-    /// One SSH folder in the sidebar, with its depth in the tree.
-    ///
-    /// Flattened rather than nested, for the reason the library screen already
-    /// flattens: a view that contains itself cannot be typed, and an indent
-    /// reads the same to a person.
     #if os(macOS)
-    private struct SSHFolderRow: Identifiable {
-        let folder: SSHFolder
-        let depth: Int
-        /// Whether anything is inside it to disclose. A chevron on a leaf is a
-        /// control that does nothing.
-        let hasChildren: Bool
-        var id: String { folder.id }
-    }
-
-    /// The folder tree, visible rows only, honouring what is expanded.
-    ///
-    /// Read from `ssh.folders` rather than `ssh.folders(in:)`: that helper
-    /// hides folders while a search is running, and the search belongs to the
-    /// content column. A sidebar that empties itself while somebody types in
-    /// another column is a sidebar that moved for no reason.
-    private var sshFolderRows: [SSHFolderRow] {
-        func children(of parent: String?) -> [SSHFolder] {
-            ssh.folders
-                .filter { $0.parentID == parent }
-                .sorted { left, right in
-                    if left.sort != right.sort { return left.sort < right.sort }
-                    return left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending
-                }
-        }
-        var out: [SSHFolderRow] = []
-        func walk(_ parent: String?, depth: Int) {
-            for folder in children(of: parent) {
-                let kids = children(of: folder.id)
-                out.append(SSHFolderRow(folder: folder, depth: depth, hasChildren: !kids.isEmpty))
-                guard expandedSSHFolders.contains(folder.id) else { continue }
-                walk(folder.id, depth: depth + 1)
-            }
-        }
-        walk(nil, depth: 0)
-        return out
-    }
-
-    /// A folder row: chevron beside the row rather than inside it, the way the
-    /// workspace rows do it. A button inside a button is one target that
-    /// swallows the other.
-    private func sshFolderRow(_ row: SSHFolderRow) -> some View {
-        let isExpanded = expandedSSHFolders.contains(row.folder.id)
-        return HStack(spacing: 0) {
-            if row.hasChildren {
-                Button {
-                    if isExpanded {
-                        expandedSSHFolders.remove(row.folder.id)
-                    } else {
-                        expandedSSHFolders.insert(row.folder.id)
-                    }
-                } label: {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(Theme.font(8, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 18, height: 24)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .help(isExpanded ? "Collapse folder" : "Expand folder")
-                .padding(.leading, CGFloat(row.depth) * 14)
-            } else {
-                Spacer(minLength: 0).frame(width: 18 + CGFloat(row.depth) * 14)
-            }
-
-            SidebarRow(
-                label: row.folder.name,
-                symbol: "folder",
-                trailing: "\(ssh.hosts.filter { $0.folderID == row.folder.id }.count)",
-                isSelected: route.sshSection?.folderID == row.folder.id,
-                indent: 1
-            ) { openSSH(.hosts(folder: row.folder.id)) }
-        }
-    }
-
-    /// The number beside a section row. Trusted servers carries one too: the
-    /// list is the point of that screen.
     /// Servers with at least one session this app is holding.
     ///
     /// Only hosts with something live: a sidebar that lists forty servers
@@ -1676,435 +1835,26 @@ struct RootView: View {
         }
     }
 
-    private func sshCount(of section: SSHSection) -> String? {
-        switch section {
-        case .hosts: return "\(ssh.hosts.count)"
-        case .keys: return "\(ssh.keys.count)"
-        case .snippets: return "\(ssh.snippets.count)"
-        case .knownHosts: return "\(ssh.knownHosts.count)"
-        }
-    }
-
-    /// Whether the Hosts row earns a chevron. Folders and live sessions sit
-    /// under it; with neither, a chevron would be a control that does
-    /// nothing.
-    private var sshHostsCollapsible: Bool {
-        !ssh.folders.isEmpty || !sshLiveHosts.isEmpty
-    }
     #endif
 
+    /// The projects, and what is live inside each one.
+    ///
+    /// The machine-wide places moved to the rail, and a project's sections
+    /// moved to the tab strip over its content, so this column answers one
+    /// question: which project, and which chat or session in it.
     private var sidebar: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                // Tasks, workflows and automations belong to a folder, and the
-                // rows for them here are the every-folder view. That is the
-                // weekly question rather than the daily one, so it is one
-                // collapsed group instead of three rows competing with the
-                // folders below.
-                SidebarGroupHeader(
-                    title: "Global",
-                    isExpanded: isGlobalGroupExpanded
-                ) { isGlobalGroupExpanded.toggle() }
-                if isGlobalGroupExpanded {
-                    ForEach(GlobalSection.everywhere) { item in
-                        SidebarRow(
-                            label: item.label,
-                            symbol: item.symbol,
-                            isSelected: route.isGlobal(item)
-                        ) { navigate(to: .global(item)) }
-                    }
-                }
-
+                projectsSection
                 #if os(macOS)
-                // Servers are a place, not a panel that opens over Devices.
-                // Same shape as a workspace: one heading, a fixed set of
-                // sections, folders nesting under the section that owns them.
-                SidebarGroupHeader(
-                    title: "SSH",
-                    count: ssh.hosts.count,
-                    isExpanded: isSSHGroupExpanded
-                ) { isSSHGroupExpanded.toggle() }
-                if isSSHGroupExpanded {
-                    ForEach(SSHSection.rows) { section in
-                        HStack(spacing: 0) {
-                            // The folders hide behind Hosts once there are
-                            // any. A chevron beside the row rather than inside
-                            // it, the way the folder rows do it: a button
-                            // inside a button is one target that swallows the
-                            // other.
-                            if case .hosts = section, sshHostsCollapsible {
-                                Button {
-                                    isSSHHostsExpanded.toggle()
-                                } label: {
-                                    Image(systemName: isSSHHostsExpanded ? "chevron.down" : "chevron.right")
-                                        .font(Theme.font(8, weight: .semibold))
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 18, height: 24)
-                                        .contentShape(.rect)
-                                }
-                                .buttonStyle(.plain)
-                                .help(isSSHHostsExpanded ? "Collapse hosts" : "Expand hosts")
-                            }
-                            SidebarRow(
-                                label: section.label,
-                                symbol: section.symbol,
-                                trailing: sshCount(of: section),
-                                isSelected: route.sshSection?.row == section
-                            ) { openSSH(section) }
-                        }
-
-                        // Folders live under Hosts, because that is what they
-                        // hold. A folder row is the Hosts screen filtered, the
-                        // same way a workspace row opens that folder.
-                        if case .hosts = section, isSSHHostsExpanded {
-                            ForEach(sshFolderRows) { row in
-                                sshFolderRow(row)
-                            }
-                            // Servers with a shell open, and the shells
-                            // themselves. The same shape the workspace rows
-                            // use: a live thing sits under the section that
-                            // owns it, so a running session is found where
-                            // servers are rather than nowhere at all.
-                            ForEach(sshLiveHosts) { host in
-                                sshLiveHostRow(host)
-                            }
-                        }
-                    }
-                }
-                #endif
-
-                // Folders the user chose. Nothing to do with the archive:
-                // its `project` is a lossy label recovered from a slug and
-                // cannot name a directory, and a folder an agent touched once
-                // is not somewhere anyone wants a terminal.
-                SidebarGroupHeader(
-                    title: "Workspaces",
-                    count: workspaces.folders.count,
-                    isExpanded: nil
-                ) {} trailing: {
-                    #if os(macOS)
-                    Button {
-                        workspaces.requestAdd()
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(Theme.font(9, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            // A 9pt glyph is a 9pt target. The frame and the
-                            // shape are what make it clickable rather than
-                            // merely visible.
-                            .frame(width: 20, height: 20)
-                            .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Add a project folder")
-                    .accessibilityLabel("Add a project folder")
-                    #endif
-                }
-
-                // The dashboard first, above folders that grow past it. An empty
-                // list still shows it: with nothing registered it is the
-                // screen that offers the add menu.
-                SidebarRow(
-                    label: "All folders",
-                    symbol: "square.grid.2x2",
-                    trailing: "\(workspaces.folders.count)",
-                    isSelected: route == .workspacesOverview
-                ) {
-                    navigate(to: .workspacesOverview)
-                }
-
-                if workspaces.folders.isEmpty {
-                    Text("No folders yet.")
-                        .font(Theme.caption)
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, Theme.Space.m)
-                        .padding(.vertical, Theme.Space.xs)
-                } else {
-                    ForEach(workspaces.folders) { folder in
-                        #if os(macOS)
-                        if workspaceDropBeforeID == folder.id {
-                            workspaceInsertionLine
-                        }
-                        let activeSessions = terminals.sessions(in: folder.id).filter(\.alive)
-                        // The open workspace, and whether a terminal inside it
-                        // is what the centre pane is actually showing. Only one
-                        // of the two rows lights up: the folder when you are
-                        // looking at the folder, the session when you are
-                        // looking at a shell.
-                        let isCurrent = route.workspaceID == folder.id
-                        // The launcher is its own surface, so a folder sitting
-                        // on the launch grid is not showing a terminal and no
-                        // session row may claim to be what you are looking at.
-                        let showingLauncher = isCurrent
-                            && workspaces.isShowingLauncher(in: folder.id)
-                        let showingTerminal = isCurrent
-                            && workspaces.isShowingTerminal(in: folder.id)
-                            && terminals.active(in: folder.id) != nil
-                        let isExpanded = expandedWorkspaces.contains(folder.id)
-                        HStack(spacing: 0) {
-                            Button {
-                                if isExpanded {
-                                    expandedWorkspaces.remove(folder.id)
-                                } else {
-                                    expandedWorkspaces.insert(folder.id)
-                                }
-                            } label: {
-                                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                                    .font(Theme.font(8, weight: .semibold))
-                                    .foregroundStyle(isCurrent ? Theme.accent : Color.secondary)
-                                    .frame(width: 18, height: 24)
-                                    .contentShape(.rect)
-                            }
-                            .buttonStyle(.plain)
-                            .help(isExpanded ? "Collapse workspace" : "Expand workspace")
-
-                            WorkspaceRow(
-                                folder: folder,
-                                // Collapsed, the card carries the lit state of
-                                // whatever is inside it, because none of it is
-                                // on screen to carry its own. Expanded, the
-                                // section (or session) row is lit — except on
-                                // Launch, which is the folder's own surface and
-                                // has no section row of its own.
-                                isSelected: isCurrent && (!isExpanded || showingLauncher),
-                                isCurrent: isCurrent
-                            ) { selectWorkspace(folder.id) }
-                        }
-                        .contextMenu {
-                            if let reference = pinReference(for: folder) {
-                                Button("Saved work on this device", .archive) {
-                                    savedFolder = .init(reference: reference, name: folder.name)
-                                }
-                                let pinned = pins.isPinned(reference)
-                                Button(pinned ? "Unpin" : "Pin", pinned ? .pinned : .pin) {
-                                    Task {
-                                        if pinned {
-                                            await PinnedWorkActions.unpin(reference)
-                                        } else {
-                                            await PinnedWorkActions.pin(
-                                                reference, label: folder.name, folderName: folder.name
-                                            )
-                                        }
-                                    }
-                                }
-                                .disabled(!pinned && pins.pins(in: reference.scope).count >= PinnedWorkStore.capacity)
-                                if !pinned && pins.pins(in: reference.scope).count >= PinnedWorkStore.capacity {
-                                    Text("Home holds eight pins. Unpin one to make room.")
-                                }
-                                ThemeRule()
-                            }
-                            if !folder.isRemote {
-                                Button("Reveal in Finder", .reveal) { workspaces.revealInFinder(folder) }
-                            } else if let peer = folder.machineID, !peer.isEmpty {
-                                // A remote folder is where its machine is used,
-                                // so the way back belongs here too. Disconnect
-                                // drops the peer's folders from the sidebar;
-                                // Remove below forgets just this folder on
-                                // the machine that owns it.
-                                Button("Disconnect from \(folder.machineLabel ?? "this computer")", .disconnect) {
-                                    NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: peer)
-                                }
-                            }
-                            ThemeRule()
-                            // "Remove" and not "Delete": the folder stays.
-                            Button("Remove from tokenstat", .delete, role: .destructive) {
-                                workspacePendingRemove = folder
-                            }
-                        }
-                        .modifier(WorkspaceReorder(id: folder.id, enabled: workspaces.folders.count > 1) {
-                            workspaces.moveWorkspace($0, before: folder.id)
-                            workspaceDropBeforeID = nil
-                        } onTargeted: { on in
-                            if on {
-                                workspaceDropBeforeID = folder.id
-                            } else if workspaceDropBeforeID == folder.id {
-                                workspaceDropBeforeID = nil
-                            }
-                        })
-                        #else
-                        SidebarRow(
-                            label: folder.name,
-                            symbol: folder.exists ? "folder" : "questionmark.folder",
-                            trailing: folder.diffStat,
-                            isSelected: route.workspaceID == folder.id
-                        ) { selectWorkspace(folder.id) }
-                        .help(folder.path)
-                        .contextMenu {
-                            ThemeRule()
-                            // "Remove" and not "Delete": the folder stays.
-                            Button("Remove from tokenstat", .delete, role: .destructive) {
-                                workspacePendingRemove = folder
-                            }
-                        }
-                        #endif
-
-                        #if os(macOS)
-                        if isExpanded {
-                            // The same rows, in the same order, for every
-                            // folder. Live things sit directly under the
-                            // section that owns them, so a running workflow is
-                            // found where workflows are and not in a pile at
-                            // the bottom of the folder.
-                            // History is an inspector tab on Mac, not a
-                            // centre-pane section. iPhone and iPad have no
-                            // inspector column, so they list it with Changes.
-                            ForEach(WorkspaceSection.allCases.filter { $0 != .history }) { section in
-                                if section == .chat {
-                                    // Chevron beside the row rather than
-                                    // inside it, the way the folder rows do
-                                    // it. A button inside a button is one
-                                    // target that swallows the other.
-                                    HStack(spacing: 0) {
-                                        let minimized = collapsedChatHistories.contains(folder.id)
-                                        Button {
-                                            if minimized {
-                                                collapsedChatHistories.remove(folder.id)
-                                            } else {
-                                                collapsedChatHistories.insert(folder.id)
-                                            }
-                                        } label: {
-                                            Image(systemName: minimized ? "chevron.right" : "chevron.down")
-                                                .font(Theme.font(8, weight: .semibold))
-                                                .foregroundStyle(.secondary)
-                                                .frame(width: 18, height: 24)
-                                                .contentShape(.rect)
-                                        }
-                                        .buttonStyle(.plain)
-                                        .help(minimized ? "Expand chats" : "Minimize chats")
-                                        workspaceSectionRow(.chat, in: folder, showingLauncher: showingLauncher)
-                                    }
-                                    if !collapsedChatHistories.contains(folder.id) {
-                                        chatHistoryRows(for: folder)
-                                    }
-                                } else {
-                                    workspaceSectionRow(section, in: folder, showingLauncher: showingLauncher)
-                                }
-                                if section == .automations {
-                                    ForEach(automations.liveJobs(in: folder.id)) { job in
-                                        let run = automations.lastRun(for: job)
-                                        ActiveAutomationRow(
-                                            job: job,
-                                            backendLabel: automations.backends
-                                                .first { $0.id == job.backend }?.label ?? job.backend,
-                                            isSelected: automations.selectedJobID == job.id
-                                                && (route.isGlobal(.automations)
-                                                    || route == .workspace(id: folder.id, section: .automations))
-                                        ) {
-                                            openAutomation(jobID: job.id, runID: run?.id, in: folder.id)
-                                        }
-                                    }
-                                }
-                                if section == .workflows {
-                                    ForEach(workflows.liveRuns(in: folder.id)) { run in
-                                        ActiveWorkflowRow(
-                                            run: run,
-                                            isSelected: workflows.selectedRunID == run.id
-                                                && (route.isGlobal(.workflows)
-                                                    || route == .workspace(id: folder.id, section: .workflows))
-                                        ) {
-                                            openWorkflow(graphID: run.workflowID, runID: run.id, in: folder.id)
-                                        }
-                                    }
-                                }
-                                if section == .sessions {
-                                    sessionRows(activeSessions, in: folder, showingTerminal: showingTerminal)
-                                }
-                            }
-                        }
-                        #endif
-                    }
-                    #if os(macOS)
-                    if workspaceDropBeforeID == WorkspaceDrag.end {
-                        workspaceInsertionLine
-                    }
-                    #endif
-                }
-
-                #if os(macOS)
-                // A row, always there, under whatever folders exist.
-                //
-                // The centre pane has a prominent Add Workspace button, but it
-                // is only reachable with no folders at all: the first folder
-                // added selects itself and the empty state is never seen again.
-                // That left one 9pt `+` in a section header as the only way to
-                // add a second folder, which is not somewhere anyone looks.
-                Button {
-                    workspaces.requestAdd()
-                } label: {
-                    HStack(spacing: Theme.Space.xs) {
-                        Image(systemName: "plus.circle")
-                            .font(Theme.font(11, weight: .semibold))
-                        Text("Add workspace…")
-                            .font(Theme.callout)
-                        Spacer(minLength: 0)
-                    }
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, Theme.Space.m)
-                    .padding(.vertical, Theme.Space.xs)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .padding(.top, workspaces.folders.isEmpty ? 0 : Theme.Space.xs)
-                .modifier(WorkspaceReorder(id: WorkspaceDrag.end, canDrag: false, enabled: workspaces.folders.count > 1) {
-                    workspaces.moveWorkspace($0, before: nil)
-                    workspaceDropBeforeID = nil
-                } onTargeted: { on in
-                    if on {
-                        workspaceDropBeforeID = WorkspaceDrag.end
-                    } else if workspaceDropBeforeID == WorkspaceDrag.end {
-                        workspaceDropBeforeID = nil
-                    }
-                })
+                liveServersSection
                 #endif
             }
             .padding(.bottom, Theme.Space.m)
         }
-        // Solid, not the `.bar` material. When the split view re-lays out for a
-        // destination change (the inspector column appearing or leaving), the
-        // material can momentarily resolve against an empty backdrop and paint
-        // the whole left bar light — the white flash seen when clicking
-        // between menus. A flat colour cannot flash, and the ScrollView's own
-        // default background layer is stripped so nothing white can show
-        // through the overscroll area either.
-        //
-        // Ignoring top/leading/bottom safe areas lets the colour meet the
-        // windowed titlebar gap patch and run flush to the screen edges in
-        // full screen. The trailing edge still meets the split divider.
-        .background {
-            Theme.sidebar.ignoresSafeArea(edges: [.top, .leading, .bottom])
-        }
         .scrollContentBackground(.hidden)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            VStack(alignment: .leading, spacing: 0) {
-                // The brand sits where the heading used to. A sidebar's top
-                // left is where an app says what it is, and this one had a
-                // section label there saying "WORKSPACE", which is what it is
-                // not.
-                Wordmark()
-                    .padding(.horizontal, Theme.Space.m)
-                    .padding(.top, Theme.Space.m)
-                    .padding(.bottom, Theme.Space.m)
-
-                // No heading over these three. They are the whole machine,
-                // they are labelled with their own names, and a word above
-                // them was a word that had to be picked and then not read.
-                ForEach(GlobalSection.standalone) { item in
-                    SidebarRow(
-                        label: item.label,
-                        symbol: item.symbol,
-                        isSelected: route.isGlobal(item)
-                    ) { navigate(to: .global(item)) }
-                }
-
-            }
-            .padding(.bottom, Theme.Space.s)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                Theme.sidebar.ignoresSafeArea(edges: .top)
-            }
-        }
-        .safeAreaInset(edge: .bottom) { accountFooter }
+        .safeAreaInset(edge: .top, spacing: 0) { sidebarHeader }
+        .safeAreaInset(edge: .bottom, spacing: 0) { accountFooter }
         // Confirm lives on the sidebar column, not RootView's outer body chain,
         // so the type checker can still finish the main chrome expression.
         .background {
@@ -2142,6 +1892,360 @@ struct RootView: View {
         }
     }
 
+
+    /// The wordmark, level with the content bar, then the two ways in that do
+    /// not start from a project: a new chat and a search.
+    private var sidebarHeader: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: Theme.Space.s) {
+                Wordmark()
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Theme.Space.m)
+            .chromeBarMetrics()
+            SidebarRow(
+                label: "New chat",
+                symbol: "square.and.pencil",
+                isSelected: false
+            ) { startNewChat() }
+            .help("Start a chat in \(newChatFolder?.name ?? "a project")")
+            SidebarRow(
+                label: "Search",
+                symbol: "magnifyingglass",
+                trailing: "⌘K",
+                isSelected: false
+            ) { showWorkSearch = true }
+        }
+        .padding(.top, ShellMetrics.titleBand - ShellMetrics.panelInset)
+        .padding(.bottom, Theme.Space.xs)
+    }
+
+    /// Where New chat starts one: the project on screen, else the last one
+    /// opened, else the first in the list.
+    private var newChatFolder: WorkspaceFolder? {
+        let id = route.workspaceID ?? workspaces.selectedID
+        return workspaces.folders.first { $0.id == id } ?? workspaces.folders.first
+    }
+
+    /// Open the project's chat and start a conversation in it.
+    ///
+    /// The chat model binds to a folder when its pane loads it, and `create`
+    /// makes the conversation in whichever folder is bound, so this waits for
+    /// the pane to take the folder before asking. With no project at all the
+    /// honest first step is adding one.
+    private func startNewChat(in chosen: WorkspaceFolder? = nil) {
+        guard let folder = chosen ?? newChatFolder else {
+            workspaces.requestAdd()
+            return
+        }
+        expandedWorkspaces.insert(folder.id)
+        openSection(.chat, in: folder.id) { showingChatOverview = false }
+        Task {
+            for _ in 0..<60 {
+                if chat.folderID == folder.id, !chat.isLoading { break }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            guard chat.folderID == folder.id, route.workspaceID == folder.id else { return }
+            _ = await chat.create()
+        }
+    }
+
+    /// Every registered folder, each opening onto its chats and sessions.
+    @ViewBuilder
+    private var projectsSection: some View {
+        // Folders the user chose. Nothing to do with the archive: its
+        // `project` is a lossy label recovered from a slug and cannot name a
+        // directory, and a folder an agent touched once is not somewhere
+        // anyone wants a terminal.
+        SidebarGroupHeader(
+            title: "Workspaces",
+            count: workspaces.folders.count,
+            isExpanded: nil
+        ) {} trailing: {
+            #if os(macOS)
+            Button {
+                workspaces.requestAdd()
+            } label: {
+                Image(systemName: "plus")
+                    .font(Theme.font(9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    // A 9pt glyph is a 9pt target. The frame and the shape
+                    // are what make it clickable rather than merely visible.
+                    .frame(width: 20, height: 20)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help("Add a project folder")
+            .accessibilityLabel("Add a project folder")
+            #endif
+        }
+
+        if workspaces.folders.isEmpty {
+            Text("No folders yet.")
+                .font(Theme.caption)
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.vertical, Theme.Space.xs)
+        } else {
+            ForEach(workspaces.folders) { folder in
+                projectRow(folder)
+            }
+            #if os(macOS)
+            if workspaceDropBeforeID == WorkspaceDrag.end {
+                workspaceInsertionLine
+            }
+            #endif
+        }
+        #if os(macOS)
+        // A row, always there, under whatever folders exist.
+        //
+        // The centre pane has a prominent Add Workspace button, but it
+        // is only reachable with no folders at all: the first folder
+        // added selects itself and the empty state is never seen again.
+        // That left one 9pt `+` in a section header as the only way to
+        // add a second folder, which is not somewhere anyone looks.
+        Button {
+            workspaces.requestAdd()
+        } label: {
+            HStack(spacing: Theme.Space.xs) {
+                Image(systemName: "plus.circle")
+                    .font(Theme.font(11, weight: .semibold))
+                Text("Add workspace…")
+                    .font(Theme.callout)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.vertical, Theme.Space.xs)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, workspaces.folders.isEmpty ? 0 : Theme.Space.xs)
+        .modifier(WorkspaceReorder(id: WorkspaceDrag.end, canDrag: false, enabled: workspaces.folders.count > 1) {
+            workspaces.moveWorkspace($0, before: nil)
+            workspaceDropBeforeID = nil
+        } onTargeted: { on in
+            if on {
+                workspaceDropBeforeID = WorkspaceDrag.end
+            } else if workspaceDropBeforeID == WorkspaceDrag.end {
+                workspaceDropBeforeID = nil
+            }
+        })
+        #endif
+    }
+
+    /// One project: its row, and when open, what lives in it.
+    @ViewBuilder
+    private func projectRow(_ folder: WorkspaceFolder) -> some View {
+        #if os(macOS)
+        if workspaceDropBeforeID == folder.id {
+            workspaceInsertionLine
+        }
+        let activeSessions = terminals.sessions(in: folder.id).filter(\.alive)
+        // The open workspace, and whether a terminal inside it
+        // is what the centre pane is actually showing. Only one
+        // of the two rows lights up: the folder when you are
+        // looking at the folder, the session when you are
+        // looking at a shell.
+        let isCurrent = route.workspaceID == folder.id
+        // The launcher is its own surface, so a folder sitting
+        // on the launch grid is not showing a terminal and no
+        // session row may claim to be what you are looking at.
+        let showingLauncher = isCurrent
+            && workspaces.isShowingLauncher(in: folder.id)
+        // The surface remembers its terminal while another section is in
+        // front, so the route has to agree before a session row may light.
+        let showingTerminal = isCurrent
+            && route.workspaceSection == .sessions
+            && workspaces.isShowingTerminal(in: folder.id)
+            && terminals.active(in: folder.id) != nil
+        let isExpanded = expandedWorkspaces.contains(folder.id)
+        // A chat row under this folder is the lit one while that chat is in
+        // front, the same test the conversation row itself makes.
+        let showingChat = isCurrent
+            && route.workspaceSection == .chat
+            && !showingChatOverview
+            && chat.folderID == folder.id
+            && chat.selected != nil
+        HStack(spacing: 0) {
+            Button {
+                if isExpanded {
+                    expandedWorkspaces.remove(folder.id)
+                } else {
+                    expandedWorkspaces.insert(folder.id)
+                }
+            } label: {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(Theme.font(8, weight: .semibold))
+                    .foregroundStyle(isCurrent ? Theme.accent : Color.secondary)
+                    .frame(width: 18, height: 24)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help(isExpanded ? "Collapse workspace" : "Expand workspace")
+
+            WorkspaceRow(
+                folder: folder,
+                // Collapsed, the card carries the lit state of whatever
+                // is inside it, because none of it is on screen to carry
+                // its own. Expanded, a chat or session row lights instead
+                // when one is in front; every other section of the folder
+                // is the folder's own surface and lights the folder.
+                isSelected: isCurrent
+                    && (!isExpanded || showingLauncher || !(showingTerminal || showingChat)),
+                isCurrent: isCurrent
+            ) { selectWorkspace(folder.id) }
+        }
+        .contextMenu {
+            if let reference = pinReference(for: folder) {
+                Button("Saved work on this device", .archive) {
+                    savedFolder = .init(reference: reference, name: folder.name)
+                }
+                let pinned = pins.isPinned(reference)
+                Button(pinned ? "Unpin" : "Pin", pinned ? .pinned : .pin) {
+                    Task {
+                        if pinned {
+                            await PinnedWorkActions.unpin(reference)
+                        } else {
+                            await PinnedWorkActions.pin(
+                                reference, label: folder.name, folderName: folder.name
+                            )
+                        }
+                    }
+                }
+                .disabled(!pinned && pins.pins(in: reference.scope).count >= PinnedWorkStore.capacity)
+                if !pinned && pins.pins(in: reference.scope).count >= PinnedWorkStore.capacity {
+                    Text("Home holds eight pins. Unpin one to make room.")
+                }
+                ThemeRule()
+            }
+            if !folder.isRemote {
+                Button("Reveal in Finder", .reveal) { workspaces.revealInFinder(folder) }
+            } else if let peer = folder.machineID, !peer.isEmpty {
+                // A remote folder is where its machine is used,
+                // so the way back belongs here too. Disconnect
+                // drops the peer's folders from the sidebar;
+                // Remove below forgets just this folder on
+                // the machine that owns it.
+                Button("Disconnect from \(folder.machineLabel ?? "this computer")", .disconnect) {
+                    NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: peer)
+                }
+            }
+            ThemeRule()
+            Button("New chat", .create) { startNewChat(in: folder) }
+            Button("Delete all chats…", .delete, role: .destructive) {
+                workspacePendingChatRemoval = folder
+            }
+            ThemeRule()
+            // "Remove" and not "Delete": the folder stays.
+            Button("Remove from tokenstat", .delete, role: .destructive) {
+                workspacePendingRemove = folder
+            }
+        }
+        .modifier(WorkspaceReorder(id: folder.id, enabled: workspaces.folders.count > 1) {
+            workspaces.moveWorkspace($0, before: folder.id)
+            workspaceDropBeforeID = nil
+        } onTargeted: { on in
+            if on {
+                workspaceDropBeforeID = folder.id
+            } else if workspaceDropBeforeID == folder.id {
+                workspaceDropBeforeID = nil
+            }
+        })
+        #else
+        SidebarRow(
+            label: folder.name,
+            symbol: folder.exists ? "folder" : "questionmark.folder",
+            trailing: folder.diffStat,
+            isSelected: route.workspaceID == folder.id
+        ) { selectWorkspace(folder.id) }
+        .help(folder.path)
+        .contextMenu {
+            ThemeRule()
+            // "Remove" and not "Delete": the folder stays.
+            Button("Remove from tokenstat", .delete, role: .destructive) {
+                workspacePendingRemove = folder
+            }
+        }
+        #endif
+
+        #if os(macOS)
+        if isExpanded {
+            projectChildren(folder, sessions: activeSessions, showingTerminal: showingTerminal)
+        }
+        #endif
+    }
+
+    #if os(macOS)
+    /// A project's chats, its live sessions, and whatever is running for it.
+    ///
+    /// Live things sit directly under the project that owns them. The
+    /// sections themselves are the tab strip over the content, so the list
+    /// here is only ever things a person can open.
+    private func projectChildren(
+        _ folder: WorkspaceFolder,
+        sessions: [TerminalSession],
+        showingTerminal: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            chatHistoryRows(for: folder)
+            sessionRows(sessions, in: folder, showingTerminal: showingTerminal)
+            ForEach(automations.liveJobs(in: folder.id)) { job in
+                let run = automations.lastRun(for: job)
+                ActiveAutomationRow(
+                    job: job,
+                    backendLabel: automations.backends
+                        .first { $0.id == job.backend }?.label ?? job.backend,
+                    isSelected: automations.selectedJobID == job.id
+                        && (route.isGlobal(.automations)
+                            || route == .workspace(id: folder.id, section: .automations))
+                ) {
+                    openAutomation(jobID: job.id, runID: run?.id, in: folder.id)
+                }
+            }
+            ForEach(workflows.liveRuns(in: folder.id)) { run in
+                ActiveWorkflowRow(
+                    run: run,
+                    isSelected: workflows.selectedRunID == run.id
+                        && (route.isGlobal(.workflows)
+                            || route == .workspace(id: folder.id, section: .workflows))
+                ) {
+                    openWorkflow(graphID: run.workflowID, runID: run.id, in: folder.id)
+                }
+            }
+            if chat.sidebarChats(in: folder.id).isEmpty, sessions.isEmpty {
+                Text("No chats yet")
+                    .font(Theme.fit(12))
+                    .foregroundStyle(.tertiary)
+                    .padding(.leading, Theme.Space.xl + Theme.Space.s)
+                    .padding(.vertical, 5)
+            }
+        }
+        // A folder that has not been opened this session has no chat list
+        // in the model yet. Opening it in the sidebar is the moment to read
+        // one, the same read opening its sessions already does.
+        .task(id: folder.id) {
+            guard chat.sidebarChats(in: folder.id).isEmpty, chat.folderID != folder.id else { return }
+            await BridgeLaunch.wait()
+            await chat.warmWorkspacePreviews(folder.id)
+        }
+    }
+
+    /// Servers with a shell open, and the shells. Only live ones: the whole
+    /// library is one click away on the rail.
+    @ViewBuilder
+    private var liveServersSection: some View {
+        let hosts = sshLiveHosts
+        if !hosts.isEmpty {
+            SidebarGroupHeader(title: "Servers", count: hosts.count, isExpanded: nil) {}
+            ForEach(hosts) { host in
+                sshLiveHostRow(host)
+            }
+        }
+    }
+    #endif
+
     /// Who is signed in, pinned to the bottom of the sidebar with a menu.
     ///
     /// The archive line that used to live here moved into the inspector, which
@@ -2165,48 +2269,7 @@ struct RootView: View {
             DeviceAccessCard(model: deviceRequests)
             #endif
             UpdateCard(update: appUpdate)
-            Rectangle().fill(Theme.border).frame(height: 1)
-            accountRow
-                .padding(.horizontal, Theme.Space.s)
-                .padding(.vertical, Theme.Space.s)
         }
-        .background(Theme.sidebar)
-    }
-
-    /// Who is signed in: the row as drawn, with a real menu over it.
-    ///
-    /// The row is deliberately **not** a `Menu`'s label. A macOS `Menu` does
-    /// not host a custom label so much as rebuild it: artwork is lifted out
-    /// and repainted as the control's own image across the whole button, which
-    /// is how a 22 point circle became a full-width photograph of the account
-    /// holder; a placeholder view left in its place is dropped, so the name
-    /// slid under the picture; and the label is measured with no width to work
-    /// with, so the row shrink-wrapped to the name and floated in the middle
-    /// of the sidebar. Fixed frames, a clear host, `.clipped()`,
-    /// `.fixedSize()`, a measured width and dropping `AsyncImage` all failed
-    /// for one reason: each constrains a view the menu had already stopped
-    /// laying out.
-    ///
-    /// So the row is an ordinary view, laid out by the ordinary rules, and the
-    /// menu is a real `NSMenu` popped from the row itself. The whole row stays
-    /// one click target, and the picture is a picture.
-    private var accountRow: some View {
-        #if os(macOS)
-        ZStack(alignment: .leading) {
-            accountLabel
-            NativeMenuTrigger(items: { accountMenuItems })
-        }
-        .frame(height: accountRowHeight)
-        #else
-        Menu {
-            accountMenuContent
-        } label: {
-            accountLabel
-        }
-        .menuStyle(.borderlessButton)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        #endif
     }
 
     #if os(macOS)
@@ -2245,94 +2308,7 @@ struct RootView: View {
             NativeMenuItem("Account settings") { navigate(to: .global(.account)) },
         ]
     }
-    #else
-    @ViewBuilder
-    private var accountMenuContent: some View {
-        if account.signedIn {
-            Button("Sync now", .refresh) { Task { await account.sync() } }
-                .disabled(account.isSyncing || account.syncCooldownUntil != nil)
-            ThemeRule()
-            updateItem
-            ThemeRule()
-            Button("Sign out", .signOut) { Task { await account.signOut() } }
-            Button("Account settings", .settings) { navigate(to: .global(.account)) }
-        } else {
-            Button("Sign in to tokenstat.ai", .signIn) {
-                navigate(to: .global(.account))
-                account.signIn()
-            }
-            ThemeRule()
-            Button("Account", .account) { navigate(to: .global(.account)) }
-            ThemeRule()
-            updateItem
-        }
-    }
-
-    /// Check for an update, because somebody asked.
-    ///
-    /// The app already checks on launch, off the main actor and without saying
-    /// anything, and installs what it finds. That is the right default and it
-    /// is also invisible, so there is no way to answer "am I on the latest
-    /// version" without one of these. The launch check stays exactly as it was.
-    private var updateItem: some View {
-        Button(appUpdate.isChecking ? "Checking for updates…" : "Check for updates", .refresh) {
-            Task { await appUpdate.checkNow() }
-        }
-        .disabled(appUpdate.isChecking)
-    }
     #endif
-
-    /// Avatar, handle, plan, chevron.
-    ///
-    /// The plan sits beside the handle rather than as a badge on the avatar.
-    /// "Patron" is six characters and overflowed a 24pt circle, landing on top
-    /// of the name.
-    private var accountLabel: some View {
-        HStack(spacing: Theme.Space.s) {
-            Avatar(
-                url: account.account?.avatar,
-                name: account.account?.title,
-                handle: account.account?.handle,
-                size: Self.accountAvatarSize
-            )
-
-            if account.isSyncing {
-                Text("Syncing…")
-                    .font(Theme.font(13))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            } else {
-                Text(account.account?.title ?? "Not signed in")
-                    .font(Theme.font(13, weight: .medium))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-
-            Spacer(minLength: Theme.Space.xs)
-
-            // The tier sits against the trailing edge rather than beside the
-            // name. As a middle dot and a coloured word it read as part of the
-            // name; as a badge in the corner it reads as a badge.
-            if !account.isSyncing, let tier = account.account?.tier, !tier.isEmpty {
-                TierBadge(tier: tier, size: 9)
-            }
-            Image(systemName: "chevron.up.chevron.down")
-                .font(Theme.font(8))
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.horizontal, Theme.Space.s)
-        .padding(.vertical, Theme.Space.xs)
-        .frame(maxWidth: .infinity, maxHeight: accountRowHeight, alignment: .leading)
-    }
-
-    /// One footer row. Fixed so nothing drawn inside can grow the sidebar's
-    /// bottom inset, and shared by the menu and the picture drawn over it so
-    /// the two cannot drift apart.
-    private var accountRowHeight: CGFloat { 36 }
-
-    /// The footer picture's diameter, and the width of the seat the label
-    /// leaves for it.
-    private static let accountAvatarSize: CGFloat = 22
 
     // MARK: - Detail
 
@@ -2819,33 +2795,6 @@ struct RootView: View {
     }
     #endif
 
-    /// The chats live with their workspace section, for every folder opened
-    /// in this session. The model holds one folder's live list and caches the
-    /// rest, so opening a chat in one project no longer clears the rows just
-    /// left in another. A folder never opened keeps its compact Chat row and
-    /// its host-provided count until it is opened.
-    /// One section row, shared by the plain sections and the chat row that
-    /// carries its minimize chevron beside it.
-    @ViewBuilder
-    private func workspaceSectionRow(_ section: WorkspaceSection, in folder: WorkspaceFolder, showingLauncher: Bool) -> some View {
-        WorkspaceSectionRow(
-            section: section,
-            count: count(of: section, in: folder),
-            // Sessions is the route for both the terminal and Launch. Only
-            // light it when a terminal is actually in front; Launch lights
-            // the folder card instead.
-            isSelected: route == .workspace(id: folder.id, section: section)
-                && (section != .sessions || !showingLauncher),
-            removeAllChats: section == .chat ? {
-                workspacePendingChatRemoval = folder
-            } : nil
-        ) {
-            openSection(section, in: folder.id) {
-                if section == .chat { showingChatOverview = true }
-            }
-        }
-    }
-
     @ViewBuilder
     private func chatHistoryRows(for folder: WorkspaceFolder) -> some View {
         let list = chat.sidebarChats(in: folder.id)
@@ -3008,30 +2957,9 @@ struct RootView: View {
             // is the one case that keeps it.
             if route.sshSection?.row != section.row { ssh.selection = nil }
             lastSSHSection = section
-            isSSHGroupExpanded = true
-            // A folder cannot be selected while its parent chain is shut, so
-            // opening one opens the way to it, Hosts row included.
-            if let folderID = section.folderID {
-                isSSHHostsExpanded = true
-                for ancestor in sshAncestors(of: folderID) { expandedSSHFolders.insert(ancestor) }
-            }
         }
     }
 
-    /// Every folder between this one and the root, itself excluded.
-    private func sshAncestors(of folderID: String) -> [String] {
-        var out: [String] = []
-        var current = ssh.folders.first { $0.id == folderID }?.parentID
-        // Bounded by the folder count, so a parent chain that somehow points
-        // at itself cannot spin here.
-        var guardRail = ssh.folders.count
-        while let id = current, guardRail > 0 {
-            out.append(id)
-            current = ssh.folders.first { $0.id == id }?.parentID
-            guardRail -= 1
-        }
-        return out
-    }
     #endif
 
     /// Open one of a folder's sections, and put the centre pane on it.
@@ -3683,7 +3611,7 @@ struct NativeMenuItem {
 /// Pops a real `NSMenu` under whatever it is laid over.
 ///
 /// For rows that must look exactly as designed. SwiftUI's `Menu` rebuilds a
-/// custom label rather than hosting it (see `RootView.accountRow`), so a row
+/// custom label rather than hosting it (see `RootView.railAccount`), so a row
 /// with a picture, a badge and a trailing chevron in it cannot survive being
 /// that label. Here the row is drawn as an ordinary view and this sits on top
 /// of it as the control: the menu is the system's own, with its keyboard
@@ -4055,51 +3983,50 @@ private struct WorkspaceRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: Theme.Space.s) {
-                leadingMark
-                VStack(alignment: .leading, spacing: RowMetrics.lineGap) {
-                    Text(label)
-                        .font(Theme.fit(RowMetrics.title, weight: isCurrent ? .semibold : .regular))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    gitLine
-                }
-                Spacer(minLength: 0)
+                Image(
+                    systemName: folder.isRemote
+                        ? "network"
+                        : (folder.exists ? "folder" : "questionmark.folder")
+                )
+                .symbolVariant(isCurrent ? .fill : .none)
+                .font(Theme.fit(13, weight: .medium))
+                .foregroundStyle(isCurrent ? Theme.accent : Theme.controlGlyph)
+                .frame(width: 18)
+                Text(label)
+                    .font(Theme.fit(RowMetrics.title, weight: isCurrent ? .semibold : .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: Theme.Space.xs)
+                changeCounts
             }
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.vertical, RowMetrics.rowPadding)
+            .padding(.horizontal, Theme.Space.s)
+            .frame(height: DisplayFit.dp(30))
             .background(background)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
-        .help(folder.path)
+        .help(helpText)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(label). \(folder.subtitle ?? "No branch")")
     }
 
-    /// Line two, in pieces rather than as one string.
+    /// Path and branch on hover. The row itself keeps to the name and what
+    /// has changed, and the branch is in the project bar once it is open.
+    private var helpText: String {
+        guard let git = folder.git, git.isRepo else { return folder.path }
+        return "\(folder.path)\n\(git.branch.map { $0.isEmpty ? "detached" : $0 } ?? "detached")"
+    }
+
+    /// What is uncommitted, and what is not pushed, at the row's end.
     ///
-    /// The counts carry the diff colours, which is the whole reason this is
-    /// not a `Text`. As one grey line, `main ⇡2 +535 −46` reads as a serial
-    /// number: nothing in it says which number is which without being read
-    /// word by word. Numeric face throughout, so a count ticking over does
-    /// not shift the line sideways.
+    /// Nothing at all when the tree is clean and level with its upstream:
+    /// a quiet row says there is nothing to look at.
     @ViewBuilder
-    private var gitLine: some View {
-        let font = Theme.numeric(RowMetrics.meta)
+    private var changeCounts: some View {
+        let font = Theme.numeric(11)
         if let git = folder.git, git.isRepo {
-            HStack(spacing: 5) {
-                // The same glyph the session rows use. Without it the branch
-                // is a bare word in a line of numbers, and `main +562 −46`
-                // reads as though `main` were another count.
-                Image(systemName: "arrow.triangle.branch")
-                    .font(Theme.fit(RowMetrics.meta - 1, weight: .medium))
-                    .foregroundStyle(.tertiary)
-                Text(git.branch.map { $0.isEmpty ? "detached" : $0 } ?? "detached")
-                    .font(font)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+            HStack(spacing: 4) {
                 if git.ahead > 0 {
                     Text("⇡\(git.ahead)").font(font).foregroundStyle(Theme.accent)
                 }
@@ -4107,43 +4034,15 @@ private struct WorkspaceRow: View {
                     Text("⇣\(git.behind)").font(font).foregroundStyle(Theme.accent)
                 }
                 if !git.files.isEmpty {
-                    Text("+\(git.added)").font(font).foregroundStyle(Theme.diffAdded)
+                    Text("+\(git.added)\(git.partial ? "+" : "")").font(font).foregroundStyle(Theme.diffAdded)
                     if git.removed > 0 {
                         Text("−\(git.removed)").font(font).foregroundStyle(Theme.diffRemoved)
                     }
-                    // The counts are a floor when some file could not be
-                    // counted, and a trailing `+` is how the rest of the app
-                    // already says so.
-                    if git.partial {
-                        Text("+").font(font).foregroundStyle(.tertiary)
-                    }
                 }
-                Spacer(minLength: 0)
             }
             .lineLimit(1)
-        } else {
-            Text(folder.subtitle ?? "No branch")
-                .font(font)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            .fixedSize()
         }
-    }
-
-    @ViewBuilder
-    private var leadingMark: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: RowMetrics.mark * 0.28, style: .continuous)
-                .fill(isCurrent ? Theme.accent.opacity(0.18) : Theme.accent.opacity(0.09))
-            Image(
-                systemName: folder.isRemote
-                    ? "network"
-                    : (folder.exists ? "folder.fill" : "questionmark.folder.fill")
-            )
-            .font(Theme.fit(RowMetrics.mark * 0.5, weight: .medium))
-            .foregroundStyle(isCurrent ? Theme.accent : Theme.accent.opacity(0.6))
-        }
-        .frame(width: DisplayFit.dp(RowMetrics.mark), height: DisplayFit.dp(RowMetrics.mark))
     }
 
     /// Same selection treatment as the destination rows: tinted fill plus a
@@ -4254,75 +4153,49 @@ private struct ChatSidebarConversationRow: View {
         HStack(spacing: Theme.Space.xs) {
             Button(action: select) {
                 HStack(spacing: Theme.Space.s) {
-                    HarnessMark(id: conversation.backend, size: DisplayFit.dp(26))
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(conversation.title.isEmpty ? "Untitled conversation" : conversation.title)
-                            .font(Theme.fit(12, weight: isSelected ? .semibold : .medium))
-                            .foregroundStyle(isSelected ? Color.primary : Theme.controlGlyph)
-                            .lineLimit(1)
-                        HStack(spacing: 4) {
-                            Text(harnessName(conversation.backend))
-                                .lineLimit(1)
-                            if conversation.running {
-                                Text("·")
-                                    .foregroundStyle(Theme.accent)
-                                    .fixedSize()
-                                Group {
-                                    if let since = runningSince {
-                                        TurnElapsedText(since: since)
-                                    } else {
-                                        Text("Working")
-                                            .accessibilityLabel("Working")
-                                    }
-                                }
-                                .foregroundStyle(Theme.accent)
-                                .fixedSize()
-                            }
-                        }
-                        .font(Theme.fit(10))
-                        .foregroundStyle(.secondary)
-                    }
+                    HarnessMark(id: conversation.backend, size: DisplayFit.dp(16))
+                    Text(conversation.title.isEmpty ? "Untitled conversation" : conversation.title)
+                        .font(Theme.fit(13, weight: isSelected ? .medium : .regular))
+                        .foregroundStyle(isSelected ? Color.primary : Theme.controlGlyph)
+                        .lineLimit(1)
                     Spacer(minLength: 0)
                     ChatDraftMark(reference: draft)
-                    if conversation.running {
-                        Circle().fill(Theme.accent).frame(width: 5, height: 5)
-                    }
                 }
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
 
-            // Always in the layout, and only sometimes visible. Inserting it
-            // on hover made the row taller and narrower at the moment the
-            // pointer arrived, so every row under it jumped and the title
-            // re-truncated. The seat is reserved instead: hovering changes
-            // colour and nothing else.
-            Button {
-                confirmsRemoval = true
-            } label: {
-                Image(systemName: "trash")
-                    .font(Theme.fit(10, weight: .medium))
-                    .foregroundStyle(isTrashHovering ? Theme.accent : Color.secondary)
-                    .frame(width: 20, height: 20)
-                    .background(
-                        isTrashHovering ? Theme.accentSoft : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    )
-                    .contentShape(.rect)
+            // One seat for two things: how long ago, or while the pointer is
+            // on the row, the way to remove it. Both always laid out, so the
+            // title never re-truncates when the pointer arrives.
+            ZStack(alignment: .trailing) {
+                trailingState
+                    .opacity(isHovering && !conversation.running ? 0 : 1)
+                Button {
+                    confirmsRemoval = true
+                } label: {
+                    Image(systemName: "trash")
+                        .font(Theme.fit(10, weight: .medium))
+                        .foregroundStyle(isTrashHovering ? Theme.accent : Color.secondary)
+                        .frame(width: 20, height: 20)
+                        .background(
+                            isTrashHovering ? Theme.accentSoft : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        )
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .onHover { isTrashHovering = $0 }
+                .help("Remove chat")
+                .opacity(isHovering && !conversation.running ? 1 : 0)
+                // A control nobody can see is a control nobody can press.
+                .allowsHitTesting(isHovering && !conversation.running)
             }
-            .buttonStyle(.plain)
-            .onHover { isTrashHovering = $0 }
-            .help("Remove chat")
-            .opacity(isHovering ? 1 : 0)
-            // A control nobody can see is a control nobody can press.
-            .allowsHitTesting(isHovering)
+            .frame(minWidth: 26, alignment: .trailing)
         }
-        .padding(.leading, Theme.Space.xl + Theme.Space.s)
-        .padding(.trailing, Theme.Space.s)
-        .padding(.vertical, 6)
-        // The height the row has when the trash is showing, held at all
-        // times, so the list cannot move under the pointer.
-        .frame(minHeight: DisplayFit.dp(48))
+        .padding(.leading, Theme.Space.xl + 2)
+        .padding(.trailing, Theme.Space.s + 2)
+        .frame(height: DisplayFit.dp(30))
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(
@@ -4330,7 +4203,7 @@ private struct ChatSidebarConversationRow: View {
                         ? Theme.rowSelectedNested
                         : (isHovering ? Theme.rowHighlight.opacity(0.45) : .clear)
                 )
-                .padding(.leading, Theme.Space.xl)
+                .padding(.leading, Theme.Space.l + 2)
                 .padding(.trailing, Theme.Space.xs)
         )
         .contentShape(.rect)
@@ -4354,82 +4227,45 @@ private struct ChatSidebarConversationRow: View {
     }
 }
 
-/// One of a workspace's sections, indented under its folder card.
-///
-/// Deliberately lighter than everything around it. The folder card above is a
-/// 26pt mark and three lines, and the live rows below are cards of their own,
-/// so a section has to read as the label between them rather than as a third
-/// kind of object: one line, one small glyph, one count.
-///
-/// The rail is what says "inside". Each row draws its own segment, so the run
-/// of them looks continuous, and the selected row's segment is the accent.
-/// That is the selection mark here: a 3pt bar beside a 1pt rail is two edges
-/// arguing, and the folder card already owns the bar when it is collapsed.
-private struct WorkspaceSectionRow: View {
-    let section: WorkspaceSection
-    /// Nil draws nothing. A zero is not news, and greyed zeroes under
-    /// every folder is a wall of them.
-    let count: Int?
-    let isSelected: Bool
-    let removeAllChats: (() -> Void)?
-    let action: () -> Void
-
-    @State private var isHovering = false
-
-    /// Where the rail sits, and where the content starts after it.
-    private static let railInset: CGFloat = Theme.Space.l
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: Theme.Space.s) {
-                Image(systemName: section.symbol)
-                    .font(Theme.fit(12))
-                    .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
-                    .frame(width: 18)
-                Text(section.label)
-                    .font(Theme.fit(13.5, weight: isSelected ? .medium : .regular))
-                    .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-                    .lineLimit(1)
-                Spacer(minLength: Theme.Space.xs)
-                if let count {
-                    Text("\(count)")
-                        .font(Theme.numeric(11))
-                        .foregroundStyle(isSelected ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.tertiary))
-                        .monospacedDigit()
+extension ChatSidebarConversationRow {
+    /// Working and its clock while a turn runs, otherwise how long since the
+    /// last message, in the fewest characters that still read.
+    @ViewBuilder
+    fileprivate var trailingState: some View {
+        if conversation.running {
+            HStack(spacing: 4) {
+                Circle().fill(Theme.accent).frame(width: 5, height: 5)
+                if let since = runningSince {
+                    TurnElapsedText(since: since)
+                } else {
+                    Text("Working")
                 }
             }
-            .padding(.leading, Self.railInset + Theme.Space.s)
-            .padding(.trailing, Theme.Space.m)
-            .padding(.vertical, 6)
-            .background(background)
-            .contentShape(.rect)
+            .font(Theme.numeric(11))
+            .foregroundStyle(Theme.accent)
+            .fixedSize()
+            .accessibilityLabel("Working")
+        } else {
+            Text(SidebarAge.compact(ms: conversation.lastMessageAtMs ?? conversation.updatedAtMs))
+                .font(Theme.numeric(11))
+                .foregroundStyle(.tertiary)
+                .fixedSize()
         }
-        .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .contextMenu {
-            if let removeAllChats {
-                Button("Remove all chats", .delete, role: .destructive, action: removeAllChats)
-            }
-        }
-        .help(section.label)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(count.map { "\(section.label), \($0)" } ?? section.label)
     }
+}
 
-    private var background: some View {
-        ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(
-                    isSelected
-                        ? Theme.rowSelectedNested
-                        : (isHovering ? Theme.rowHighlight.opacity(0.6) : .clear)
-                )
-                .padding(.leading, Self.railInset)
-                .padding(.trailing, Theme.Space.xs)
-            Rectangle()
-                .fill(isSelected ? Theme.accent : Theme.border)
-                .frame(width: 1)
-                .padding(.leading, Self.railInset)
+/// "now", "5m", "3h", "2d", "6w": an age a sidebar can afford.
+enum SidebarAge {
+    static func compact(ms: Int64, now: Date = Date()) -> String {
+        guard ms > 0 else { return "" }
+        let seconds = now.timeIntervalSince(Date(timeIntervalSince1970: TimeInterval(ms) / 1000))
+        switch seconds {
+        case ..<60: return "now"
+        case ..<3600: return "\(Int(seconds / 60))m"
+        case ..<86_400: return "\(Int(seconds / 3600))h"
+        case ..<(86_400 * 14): return "\(Int(seconds / 86_400))d"
+        case ..<(86_400 * 365): return "\(Int(seconds / (86_400 * 7)))w"
+        default: return "\(Int(seconds / (86_400 * 365)))y"
         }
     }
 }
@@ -4659,6 +4495,7 @@ private struct ActiveSessionRow: View {
 
     private var helpText: String {
         var lines = [session.cwd]
+        if let stats { lines.append(stats) }
         if session.meter != nil, let resources = resourceStats {
             lines.append(resources)
         }
@@ -4692,33 +4529,22 @@ private struct ActiveSessionRow: View {
 
     var body: some View {
         Button(action: action) {
+            // One line, like the chats beside it. The meter, the context
+            // window and the resources are one hover away, and the terminal
+            // itself carries them while it is in front.
             HStack(spacing: Theme.Space.s) {
                 leadingMark
-                VStack(alignment: .leading, spacing: RowMetrics.lineGap) {
-                    Text(title)
-                        .font(Theme.fit(RowMetrics.title, weight: isSelected ? .semibold : .regular))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    if let used = session.meter?.contextUsed,
-                       let window = session.meter?.contextWindow
-                    {
-                        SessionContextBar(used: used, window: window)
-                    }
-                    // The live numbers, or the harness's own title until the
-                    // first reading lands. Never both: this is one line and
-                    // the numbers are what change.
-                    Text(stats ?? dynamicTitle ?? session.command)
-                        .font(Theme.numeric(RowMetrics.meta))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    StateBadge(state: session.state, since: session.lastOutputAt)
-                }
+                Text(dynamicTitle.map { "\(title) · \($0)" } ?? title)
+                    .font(Theme.fit(13, weight: isSelected ? .medium : .regular))
+                    .foregroundStyle(isSelected ? Color.primary : Theme.controlGlyph)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Spacer(minLength: 0)
+                StateBadge(state: session.state, since: session.lastOutputAt)
             }
-            .padding(.leading, Theme.Space.m)
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.vertical, RowMetrics.rowPadding)
+            .padding(.leading, Theme.Space.xl + 2)
+            .padding(.trailing, Theme.Space.s + 2)
+            .frame(height: DisplayFit.dp(30))
             .background(background)
             .contentShape(.rect)
         }
@@ -4737,78 +4563,26 @@ private struct ActiveSessionRow: View {
     @ViewBuilder
     private var leadingMark: some View {
         if let harnessID = session.harnessID {
-            HarnessMark(id: harnessID, size: DisplayFit.dp(RowMetrics.mark))
+            HarnessMark(id: harnessID, size: DisplayFit.dp(16))
         } else {
-            ZStack {
-                RoundedRectangle(cornerRadius: RowMetrics.mark * 0.28, style: .continuous)
-                    .fill(Theme.accent.opacity(0.09))
-                Image(systemName: "terminal")
-                    .font(Theme.fit(RowMetrics.mark * 0.46, weight: .medium))
-                    .foregroundStyle(Theme.accent.opacity(0.75))
-            }
-            .frame(width: DisplayFit.dp(RowMetrics.mark), height: DisplayFit.dp(RowMetrics.mark))
+            Image(systemName: "terminal")
+                .font(Theme.fit(11, weight: .medium))
+                .foregroundStyle(Theme.accent.opacity(0.8))
+                .frame(width: DisplayFit.dp(16), height: DisplayFit.dp(16))
         }
     }
 
-    /// The session, not its folder, carries the selection.
-    ///
-    /// What is on screen when a session is picked is that shell, so the tint
-    /// and the accent bar belong here. The folder above it steps back to a
-    /// tinted mark and a heavier name, which says "you are in this workspace"
-    /// without claiming to be the thing being looked at. Both of them lit was
-    /// two selections for one choice.
+    /// The same nested treatment as a chat row: these are the two things
+    /// that live inside a project, and they should look like siblings.
     private var background: some View {
-        ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(
-                    isSelected
-                        ? Theme.rowSelected
-                        : (isHovering ? Theme.rowHighlight.opacity(0.6) : .clear)
-                )
-            if isSelected {
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Theme.accent)
-                    .frame(width: 3)
-                    .padding(.vertical, 5)
-            }
-        }
-        .padding(.leading, Theme.Space.l)
-        .padding(.trailing, Theme.Space.xs)
-        .padding(.vertical, 1)
-    }
-}
-
-/// How full this session's context window is, when we know both sides.
-///
-/// Heat, not green. Near the window the fill turns warning, because that
-/// is the moment a person should start a new session. Missing data draws
-/// nothing: the caller already gated on both numbers.
-private struct SessionContextBar: View {
-    let used: UInt64
-    let window: UInt64
-
-    private var ratio: Double {
-        guard window > 0 else { return 0 }
-        return min(1, Double(used) / Double(window))
-    }
-
-    private var fill: Color {
-        if ratio >= 0.85 { return Theme.warning }
-        let idx = min(Theme.heat.count - 1, max(1, Int((ratio * 4).rounded(.up))))
-        return Theme.heat[idx]
-    }
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Theme.border)
-                Capsule()
-                    .fill(fill)
-                    .frame(width: max(2, geo.size.width * ratio))
-            }
-        }
-        .frame(height: 3)
-        .accessibilityHidden(true)
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(
+                isSelected
+                    ? Theme.rowSelectedNested
+                    : (isHovering ? Theme.rowHighlight.opacity(0.45) : .clear)
+            )
+            .padding(.leading, Theme.Space.l + 2)
+            .padding(.trailing, Theme.Space.xs)
     }
 }
 #endif

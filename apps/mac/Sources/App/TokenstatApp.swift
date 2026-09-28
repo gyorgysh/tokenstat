@@ -22,6 +22,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    #if DEBUG
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated { DebugUIHooks.install() }
+    }
+    #endif
+
     func applicationWillTerminate(_ notification: Notification) {
         // Stop hostd before dropping the lock, so launchd does not win a
         // race with the helper's own watch thread.
@@ -88,6 +94,10 @@ extension Notification.Name {
     static let addWorkspaceRequested = Notification.Name("ai.tokenstat.addWorkspaceRequested")
     /// View menu / ⌘B: toggle the leading sidebar. RootView acts.
     static let toggleLeftSidebar = Notification.Name("ai.tokenstat.toggleLeftSidebar")
+    /// The Edit menu's Search Work. The sheet belongs to the window.
+    static let searchWorkRequested = Notification.Name("ai.tokenstat.searchWorkRequested")
+    /// Previous or next conversation from the View menu. The object is -1 or 1.
+    static let chatStepRequested = Notification.Name("ai.tokenstat.chatStepRequested")
     /// View menu / ⌥⌘B: toggle the trailing inspector. RootView acts.
     static let toggleRightSidebar = Notification.Name("ai.tokenstat.toggleRightSidebar")
     #endif
@@ -272,6 +282,15 @@ struct TokenstatApp: App {
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
             }
+            // Search across the work in every project. In the menu rather
+            // than on each screen's bar, so the shortcut is always there and
+            // the bars carry only what belongs to their screen.
+            CommandGroup(after: .textEditing) {
+                Button("Search Work…") {
+                    NotificationCenter.default.post(name: .searchWorkRequested, object: nil)
+                }
+                .keyboardShortcut("k", modifiers: [.command])
+            }
             // Sidebar toggles live on RootView. The menu posts and the window
             // acts, same shape as Add Workspace, so the shortcut works when a
             // text field would otherwise claim ⌘B for bold.
@@ -284,6 +303,14 @@ struct TokenstatApp: App {
                     NotificationCenter.default.post(name: .toggleRightSidebar, object: nil)
                 }
                 .keyboardShortcut("b", modifiers: [.command, .option])
+                Button("Previous Conversation") {
+                    NotificationCenter.default.post(name: .chatStepRequested, object: -1)
+                }
+                .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+                Button("Next Conversation") {
+                    NotificationCenter.default.post(name: .chatStepRequested, object: 1)
+                }
+                .keyboardShortcut(.downArrow, modifiers: [.command, .option])
             }
             // Note: help strings on the toolbar marks also carry ⌘B / ⌥⌘B so
             // the hover tooltip teaches the shortcut without opening the menu.

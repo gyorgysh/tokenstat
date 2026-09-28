@@ -234,49 +234,39 @@ struct ChatView: View {
                     }
                 }
             ) {
-                ToolbarIconButton(systemImage: "rectangle.grid.1x2", help: "All conversations", isAccent: showingOverview) {
-                    showingOverview.toggle()
-                }
-                if !showingOverview, model.selected != nil, let reference = model.currentReference {
-                    let pinned = pins.isPinned(reference)
-                    let full = pins.pins(in: reference.scope).count >= PinnedWorkStore.capacity
-                    ToolbarIconButton(
-                        systemImage: pinned ? ActionIcon.pinned.symbol : ActionIcon.pin.symbol,
-                        help: pinned ? "Unpin this conversation"
-                            : full ? "Home holds eight pins. Unpin one to make room."
-                            : "Pin this conversation to Home",
-                        isAccent: pinned,
-                        isEnabled: pinned || !full
-                    ) {
-                        Task {
-                            if pinned {
-                                await PinnedWorkActions.unpin(reference)
-                            } else {
-                                await PinnedWorkActions.pin(
-                                    reference,
-                                    label: model.selected?.title ?? "Chat",
-                                    folderName: workspaceName ?? "Workspace"
-                                )
+                // New chat stays a button: it is the one thing people reach
+                // for here. The rest is one menu, so the bar has room for the
+                // project's own tabs.
+                ToolbarMenuButton(help: "More for this conversation") {
+                    Button(showingOverview ? "Back to the conversation" : "All conversations", .layout) {
+                        showingOverview.toggle()
+                    }
+                    if !showingOverview, model.selected != nil, let reference = model.currentReference {
+                        let pinned = pins.isPinned(reference)
+                        let full = pins.pins(in: reference.scope).count >= PinnedWorkStore.capacity
+                        Button(pinned ? "Unpin from Home" : "Pin to Home", pinned ? .pinned : .pin) {
+                            Task {
+                                if pinned {
+                                    await PinnedWorkActions.unpin(reference)
+                                } else {
+                                    await PinnedWorkActions.pin(
+                                        reference,
+                                        label: model.selected?.title ?? "Chat",
+                                        folderName: workspaceName ?? "Workspace"
+                                    )
+                                }
                             }
                         }
+                        .disabled(!pinned && full)
+                        if !pinned && full {
+                            Text("Home holds eight pins. Unpin one to make room.")
+                        }
                     }
-                }
-                if !showingOverview, model.currentReference != nil, model.savedCopy == nil {
-                    ToolbarIconButton(systemImage: ActionIcon.device.symbol, help: "Continue on another device") {
-                        showingHandoff = true
+                    if !showingOverview, model.currentReference != nil, model.savedCopy == nil {
+                        Button("Continue on another device", .device) {
+                            showingHandoff = true
+                        }
                     }
-                }
-                ForEach([-1, 1], id: \.self) { step in
-                    let target = model.adjacentConversation(step)
-                    ToolbarIconButton(
-                        systemImage: step < 0 ? "chevron.up" : "chevron.down",
-                        help: step < 0 ? "Previous conversation (↑ or ⌥⌘↑)" : "Next conversation (↓ or ⌥⌘↓)",
-                        isEnabled: isActive && !showingOverview && target != nil
-                    ) {
-                        guard let target else { return }
-                        Task { await model.select(target) }
-                    }
-                    .keyboardShortcut(step < 0 ? .upArrow : .downArrow, modifiers: [.command, .option])
                 }
                 ToolbarIconButton(
                     systemImage: "plus",
@@ -480,6 +470,13 @@ struct ChatView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .chatAttachmentCachePurged)) { _ in
             model.clearCachedAttachmentMemory()
+        }
+        // ⌥⌘↑ and ⌥⌘↓ from the View menu. Every chat pane that was ever
+        // opened stays mounted, so only the one in front answers.
+        .onReceive(NotificationCenter.default.publisher(for: .chatStepRequested)) { note in
+            guard isActive, !showingOverview, let step = note.object as? Int,
+                  let target = model.adjacentConversation(step) else { return }
+            Task { await model.select(target) }
         }
         .onDisappear {
             UserPresence.shared.chatSurface(showing: nil)
