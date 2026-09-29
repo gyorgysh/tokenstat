@@ -259,7 +259,7 @@ internal static class ProjectWorktreeDialog
         if (remote)
         {
             var protocol = await RemoteFeatureGate.PeerProtocolAsync(peer);
-            if (protocol is null || protocol < RemoteFeatureGate.WorktreesMinProtocol)
+            if (protocol is not null && protocol < RemoteFeatureGate.WorktreesMinProtocol)
             {
                 await Chrome.ShowDialog(owner, new ContentDialog { Title = "Worktrees need an updated computer",
                     Content = "Connect to this project's computer and update tokenstat there to manage worktrees.", CloseButtonText = "Close" });
