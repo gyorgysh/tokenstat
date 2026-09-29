@@ -536,7 +536,7 @@ struct AutomationsView: View {
     }
 
     private func folderLabel(_ id: String) -> String {
-        guard let folder = folders.first(where: { $0.id == id }) else { return "—" }
+        guard let folder = folders.first(where: { $0.id == id }) else { return "Unknown" }
         return folder.isRemote ? "\(folder.machineLabel ?? "Remote") / \(folder.name)" : folder.name
     }
 
