@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
   <assemblyIdentity version="1.0.0.0" name="ai.tokenstat.tokenstat"/>
+  <!-- This app runs without MSIX. Register the Win2D factories used by the
+       persona's curved clips against the DLL shipped by its NuGet package. -->
+  <file name="Microsoft.Graphics.Canvas.dll">
+    <activatableClass name="Microsoft.Graphics.Canvas.CanvasDevice" threadingModel="both" xmlns="urn:schemas-microsoft-com:winrt.v1" />
+    <activatableClass name="Microsoft.Graphics.Canvas.Geometry.CanvasGeometry" threadingModel="both" xmlns="urn:schemas-microsoft-com:winrt.v1" />
+    <activatableClass name="Microsoft.Graphics.Canvas.Geometry.CanvasPathBuilder" threadingModel="both" xmlns="urn:schemas-microsoft-com:winrt.v1" />
+  </file>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">

@@ -15,6 +15,8 @@ namespace Tokenstat.Design.Persona;
 internal sealed class PersonaScene(Canvas canvas)
 {
     private readonly List<ShapesPath> _paths = new();
+    private readonly List<PersonaClip?> _clips = new();
+    private readonly PersonaClipper _clipper = new();
     public int Count { get; private set; }
     public ShapesPath this[int index] => _paths[index];
 
@@ -22,15 +24,17 @@ internal sealed class PersonaScene(Canvas canvas)
 
     public ShapesPath Paint(PathGeometry data, Brush? fill = null, Brush? stroke = null,
         double thickness = 1, PenLineCap cap = PenLineCap.Flat,
-        PenLineJoin join = PenLineJoin.Miter, Geometry? clip = null)
+        PenLineJoin join = PenLineJoin.Miter, Geometry? clip = null, Geometry? mask = null)
     {
         if (Count == _paths.Count)
         {
             var added = new ShapesPath { IsHitTestVisible = false };
             _paths.Add(added);
+            _clips.Add(null);
             canvas.Children.Add(added);
         }
         var path = _paths[Count++];
+        _clips[Count - 1] = clip is null ? null : new PersonaClip(clip, mask);
         // A slot can hold an eye in one frame and a prop in the next. Reset all
         // per-mark state, including transforms and fading applied after Paint.
         path.Visibility = Visibility.Visible;
@@ -43,16 +47,16 @@ internal sealed class PersonaScene(Canvas canvas)
         path.StrokeLineJoin = join;
         path.RenderTransform = null;
         path.Opacity = 1;
-        // WinUI's XAML Clip is rectangular. Preserve the existing bounds clip
-        // until the renderer gains a native curved composition clip.
-        path.Clip = clip is null ? null : clip as RectangleGeometry ?? new RectangleGeometry { Rect = clip.Bounds };
+        path.Clip = null;
         return path;
     }
 
     public void End()
     {
+        _clipper.Update(_paths, _clips, Count);
         for (int i = Count; i < _paths.Count; i++)
         {
+            _clips[i] = null;
             var path = _paths[i];
             if (path.Visibility == Visibility.Collapsed) continue;
             path.Visibility = Visibility.Collapsed;
@@ -63,4 +67,6 @@ internal sealed class PersonaScene(Canvas canvas)
             path.RenderTransform = null;
         }
     }
+
+    public void ReleaseClips() => _clipper.Clear();
 }

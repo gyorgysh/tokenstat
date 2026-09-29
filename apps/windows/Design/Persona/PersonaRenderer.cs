@@ -429,16 +429,9 @@ internal static class PersonaRenderer
         var tip = place(0, baseY + curve * unit * 0.142 + open * 2 * (1 - reach * 0.55));
         double tw = half * 0.86;
         var tongue = new PathGeometry();
-        // WinUI has no intersect combine. The mouth sits inside the body, so
-        // the union of the two clips is the body, which keeps the stated
-        // promise: the tongue never escapes the face. Nonzero, not the
-        // default even-odd, which would cut the mouth out of the body.
-        var both = new GeometryGroup { FillRule = FillRule.Nonzero };
-        both.Children.Add(clip);
-        both.Children.Add(geometry);
         PersonaDraw.Ellipse(tongue, tip.X, tip.Y + open * 0.15 + unit * 0.01, tw / 2, open * 0.75 + unit * 0.01);
         canvas.Paint(
-            tongue, PersonaDraw.Solid(Theme.Danger, 0.62), clip: both);
+            tongue, PersonaDraw.Solid(Theme.Danger, 0.62), clip: clip, mask: geometry);
     }
 
     private static void DrawMotes(

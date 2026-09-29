@@ -39,3 +39,16 @@ namespace Microsoft.UI.Xaml.Shapes
         public Media.RectangleGeometry? Clip { get; set; }
     }
 }
+
+// The portable executable checks visual-slot ownership, not Direct2D. Native
+// clipping and activation are exercised by PersonaSceneSmoke on Windows.
+namespace Tokenstat.Design.Persona
+{
+    internal readonly record struct PersonaClip(Microsoft.UI.Xaml.Media.Geometry Body,
+        Microsoft.UI.Xaml.Media.Geometry? Mask = null);
+    internal sealed class PersonaClipper
+    {
+        public void Update(IReadOnlyList<Microsoft.UI.Xaml.Shapes.Path> paths, IReadOnlyList<PersonaClip?> clips, int count) { }
+        public void Clear() { }
+    }
+}

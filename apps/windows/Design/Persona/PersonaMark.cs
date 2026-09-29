@@ -63,7 +63,12 @@ internal sealed class PersonaMark : Canvas
             _inViewport = visible;
             _engine.SuspendClock();
             if (visible && IsLoaded) Start();
-            else _timer.Stop();
+            else
+            {
+                _timer.Stop();
+                _scene.ReleaseClips();
+                _needsRedraw = true;
+            }
         };
     }
 
@@ -132,6 +137,8 @@ internal sealed class PersonaMark : Canvas
     {
         _timer.Stop();
         _engine.SuspendClock();
+        _scene.ReleaseClips();
+        _needsRedraw = true;
     }
 
     private void Tick()
