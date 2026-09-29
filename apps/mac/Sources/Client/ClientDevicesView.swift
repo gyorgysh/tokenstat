@@ -31,7 +31,15 @@ struct ClientDevicesView: View {
     @State private var search = ""
 
     private var machines: [Machine] { account.account?.machines ?? [] }
-    private var shownMachines: [Machine] { sorted.filter { search.isEmpty || ($0.label ?? "").localizedCaseInsensitiveContains(search) || ($0.platform ?? "").localizedCaseInsensitiveContains(search) } }
+    private var shownMachines: [Machine] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        return sorted.filter { machine in
+            query.isEmpty || [DeviceCopy.name(machine), machine.platform ?? "", machine.machineID ?? "",
+                              machine.isHost ? "Computer" : "Phone tablet",
+                              DeviceCopy.caption(machine, isThisDevice: isThisDevice(machine))]
+                .contains { $0.localizedStandardContains(query) }
+        }
+    }
 
     var body: some View {
         ScrollView {

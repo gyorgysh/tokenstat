@@ -1890,15 +1890,25 @@ private fun DevicesScreen(
     // the limit is ten and people run more than one account's worth of
     // machines, so the list is one the eye has to hunt through without it.
     var deviceQuery by rememberSaveable { mutableStateOf("") }
-    val shownMachines = remember(machines, deviceQuery) {
+    val shownMachines = remember(machines, deviceQuery, thisId) {
         val q = deviceQuery.trim()
         if (q.isEmpty()) {
             machines
         } else {
-            machines.filter {
-                (it.string("label") ?: "").contains(q, ignoreCase = true) ||
-                    (it.string("platform") ?: "").contains(q, ignoreCase = true) ||
-                    (it.string("id") ?: "").contains(q, ignoreCase = true)
+            machines.filter { machine ->
+                val isHost = machine.string("kind") != "client"
+                listOf(
+                    DeviceCopy.displayName(machine.string("label"), machine.string("platform"), isHost),
+                    machine.string("platform").orEmpty(), machine.string("id").orEmpty(),
+                    if (isHost) "Computer" else "Phone tablet",
+                    DeviceCopy.statusLine(
+                        isThisDevice = thisId != null && machine.string("id") == thisId,
+                        online = machine["online"]?.jsonPrimitive?.booleanOrNull,
+                        isHost = isHost,
+                        hasKey = !machine.string("publicIdentity").isNullOrEmpty(),
+                        lastSeenText = formatRelativeDate(machine.string("lastSeenAt")),
+                    ),
+                ).any { it.contains(q, ignoreCase = true) }
             }
         }
     }

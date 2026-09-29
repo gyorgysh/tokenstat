@@ -651,21 +651,30 @@ struct MachinesView: View {
     }
 
     private var filteredAccountMachines: [Machine] {
-        model.listedAccountMachines.filter {
-            deviceSearch.isEmpty || deviceTitle(resolved: model.resolvedName(for: $0), machine: $0)
-                .localizedStandardContains(deviceSearch)
+        let query = deviceSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return model.listedAccountMachines.filter { machine in
+            let isSelf = machine.machineID == model.account?.thisMachineID
+                || machine.publicIdentity == model.identity?.key
+            return query.isEmpty || [
+                deviceTitle(resolved: model.resolvedName(for: machine), machine: machine),
+                machine.platform ?? "", machine.machineID ?? "",
+                machine.isHost ? "Computer" : "Phone tablet",
+                statusLine(for: machine, isSelf: isSelf),
+            ].contains { $0.localizedStandardContains(query) }
         }
     }
 
     private var filteredKnownMachines: [Peer] {
-        unlistedKnown.filter {
-            deviceSearch.isEmpty || $0.label.localizedStandardContains(deviceSearch)
-                || (model.accountName(for: $0)?.localizedStandardContains(deviceSearch) ?? false)
+        let query = deviceSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return unlistedKnown.filter { peer in
+            query.isEmpty || [peer.label, model.accountName(for: peer) ?? "", peer.words ?? "",
+                              peer.trust == .approved ? "Access allowed" : "Access removed"]
+                .contains { $0.localizedStandardContains(query) }
         }
     }
 
     private var knownMachines: some View {
-        Card(title: "Other approved devices", subtitle: "Devices that are paired with this Mac but not on the account.", mark: "mark_device", fillsHeight: true) {
+        Card(title: "Other devices", subtitle: "Devices known to this Mac outside your account. Manage their access here.", mark: "mark_device", fillsHeight: true) {
             VStack(spacing: Theme.Space.s) {
                 ForEach(filteredKnownMachines) { peer in
                     PeerRow(
@@ -1025,7 +1034,7 @@ struct MachinesView: View {
             }
             return "Offline"
         }
-        if model.isConnected(machine) { return "Connected · workspaces in sidebar" }
+        if model.isConnected(machine) { return "Connected · projects in sidebar" }
         if let seen = formatRelativeDate(machine.lastSeenAt) { return "Seen \(seen)" }
         if let sync = formatRelativeDate(machine.lastSyncAt) { return "Last synced \(sync)" }
         return "No sync recorded"
@@ -1581,7 +1590,7 @@ private struct PeerRow<Actions: View>: View {
                 // exists to be compared with another screen by a person, and
                 // that is the form they will read whole. They derive from a
                 // public key, so there is nothing to hide.
-                Text(peer.words ?? "Approved device")
+                Text(peer.words ?? "Paired device")
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
@@ -1626,9 +1635,9 @@ private struct TrustBadge: View {
 
     private var label: String {
         switch trust {
-        case .approved: return "approved"
-        case .pending: return "waiting"
-        case .revoked: return "revoked"
+        case .approved: return "Access allowed"
+        case .pending: return "Waiting for approval"
+        case .revoked: return "Access removed"
         }
     }
 

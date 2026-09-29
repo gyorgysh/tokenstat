@@ -53,6 +53,8 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
     private bool _refreshing;
     private enum DevicePage { Devices, Access, Settings }
     private DevicePage _devicePage;
+    private readonly TextBox _deviceSearch = new() { PlaceholderText = "Search devices", MinHeight = 36 };
+    private readonly StackPanel _deviceInventory = new() { Spacing = Theme.SpaceM };
     private ScrollViewer? _scroll;
 
     /// <summary>
@@ -66,6 +68,8 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
     public MachinesPage(string? selectedId = null)
     {
         _selectedId = selectedId;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_deviceSearch, "Search devices");
+        _deviceSearch.TextChanged += (_, _) => RenderDeviceInventory();
         _scroll = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceM),
@@ -390,8 +394,18 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
         // across the rebuild so the list does not jump back to the top.
         var offsetX = _scroll?.HorizontalOffset ?? 0;
         var offsetY = _scroll?.VerticalOffset ?? 0;
-        void Restore() => DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low,
-            () => _scroll?.ChangeView(offsetX, offsetY, null, true));
+        var searchFocus = _deviceSearch.FocusState;
+        var searchStart = _deviceSearch.SelectionStart;
+        var searchLength = _deviceSearch.SelectionLength;
+        void Restore() => DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            if (searchFocus != FocusState.Unfocused && _devicePage == DevicePage.Devices && _deviceSearch.IsLoaded)
+            {
+                _deviceSearch.Focus(searchFocus);
+                _deviceSearch.Select(searchStart, searchLength);
+            }
+            _scroll?.ChangeView(offsetX, offsetY, null, true);
+        });
         _root.Children.Clear();
         if (!string.IsNullOrEmpty(_notice))
         {
@@ -451,15 +465,9 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             switch (_devicePage)
             {
                 case DevicePage.Devices:
-                    var machines = account["machines"] as JsonArray;
-                    if (machines is not null && machines.Count > 0)
-                        _root.Children.Add(AccountDevicesCard(account, machines));
-                    var unlisted = UnlistedKnown(account);
-                    if (unlisted.Count > 0)
-                        _root.Children.Add(OtherApprovedCard(unlisted));
-                    if ((machines is null || machines.Count == 0) && unlisted.Count == 0)
-                        _root.Children.Add(EmptyState.View("No devices yet",
-                            "Add a device to connect to its projects and terminals.", EmptyArtKind.Devices));
+                    _root.Children.Add(_deviceSearch);
+                    _root.Children.Add(_deviceInventory);
+                    RenderDeviceInventory();
                     break;
                 case DevicePage.Access:
                     _root.Children.Add(new TextBlock { Text = "Choose what connected devices can do on this PC.",
@@ -490,6 +498,39 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             _root.Children.Add(EncryptionNote());
         }
         Restore();
+    }
+
+    /// Search rebuilds only inventory rows, preserving the native editor,
+    /// caret and top-level management actions while the person types.
+    private void RenderDeviceInventory()
+    {
+        _deviceInventory.Children.Clear();
+        if (_account is not { } account || _devicePage != DevicePage.Devices) return;
+        var machines = (account["machines"] as JsonArray)?.OfType<JsonNode>().ToList() ?? new();
+        var peers = UnlistedKnown(account);
+        var query = (_deviceSearch.Text ?? "").Trim();
+        bool Matches(params string[] fields) => query.Length == 0
+            || fields.Any(field => field.Contains(query, StringComparison.OrdinalIgnoreCase));
+        var shownMachines = machines.Where(machine => Matches(DeviceTitle(machine), MachineId(machine),
+            Format.Text(machine, "platform"), Format.Text(machine, "kind") == "client" ? "Phone tablet" : "Computer",
+            StatusLine(machine, IsSelf(machine)))).ToList();
+        var shownPeers = peers.Where(peer => Matches(Format.Text(peer, "label"), Format.Text(peer, "words"),
+            Format.Text(peer, "platform"), Format.Text(peer, "trust"),
+            Format.Text(peer, "trust") == "approved" ? "Access allowed" : "Access removed")).ToList();
+        var total = machines.Count + peers.Count;
+        var shown = shownMachines.Count + shownPeers.Count;
+        if (query.Length > 0)
+            _deviceInventory.Children.Add(new TextBlock { Text = $"{shown} of {total} devices", Opacity = 0.7 });
+        if (shownMachines.Count > 0)
+            _deviceInventory.Children.Add(AccountDevicesCard(account, shownMachines, showScreenHint: query.Length == 0));
+        if (shownPeers.Count > 0)
+            _deviceInventory.Children.Add(OtherApprovedCard(shownPeers));
+        if (shown == 0)
+            _deviceInventory.Children.Add(EmptyState.View(
+                total == 0 ? "No devices yet" : "No matching devices",
+                total == 0 ? "Add a device to connect to its projects and terminals."
+                    : "Search by device name, platform, status or code. Clear the search to see every device.",
+                EmptyArtKind.Devices));
     }
 
     /// <summary>
@@ -1033,6 +1074,11 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 TextWrapping = TextWrapping.Wrap,
             });
+            row.Children.Add(new TextBlock
+            {
+                Text = Format.Text(peer, "trust") == "approved" ? "Access allowed" : "Access removed",
+                Opacity = 0.7, FontSize = 12,
+            });
             var words = Format.Text(peer, "words");
             if (!string.IsNullOrEmpty(words))
             {
@@ -1073,12 +1119,12 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             body.Children.Add(row);
         }
         return Chrome.Card(
-            "Other approved devices",
+            "Other devices",
             body,
-            "Devices that are paired with this PC but not on the account.");
+            "Devices known to this PC outside your account. Manage their access here.");
     }
 
-    private UIElement AccountDevicesCard(JsonNode account, JsonArray machines)
+    private UIElement AccountDevicesCard(JsonNode account, IEnumerable<JsonNode> machines, bool showScreenHint = true)
     {
         var tier = Format.Text(account, "tier");
         var list = new StackPanel { Spacing = Theme.SpaceS };
@@ -1096,7 +1142,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             "Your devices",
             list,
             "Select a device for connection details. Phones and tablets connect to this PC.");
-        if (viewable == 0)
+        if (viewable == 0 && showScreenHint)
         {
             var wrap = new StackPanel { Spacing = Theme.SpaceM };
             wrap.Children.Add(card);
