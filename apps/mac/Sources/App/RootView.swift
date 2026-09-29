@@ -1912,18 +1912,23 @@ struct RootView: View {
     /// moved to the tab strip over its content, so this column answers one
     /// question: which project, and which chat or session in it.
     private var sidebar: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                projectsSection
-                #if os(macOS)
-                liveServersSection
-                #endif
+        // Header, list and footer stacked rather than inset: over the glass
+        // an inset header has nothing behind it to hide the rows, so they
+        // scrolled up through the wordmark and the search row.
+        VStack(spacing: 0) {
+            sidebarHeader
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    projectsSection
+                    #if os(macOS)
+                    liveServersSection
+                    #endif
+                }
+                .padding(.bottom, Theme.Space.m)
             }
-            .padding(.bottom, Theme.Space.m)
+            .scrollContentBackground(.hidden)
+            accountFooter
         }
-        .scrollContentBackground(.hidden)
-        .safeAreaInset(edge: .top, spacing: 0) { sidebarHeader }
-        .safeAreaInset(edge: .bottom, spacing: 0) { accountFooter }
         // Confirm lives on the sidebar column, not RootView's outer body chain,
         // so the type checker can still finish the main chrome expression.
         .background {
@@ -1972,26 +1977,22 @@ struct RootView: View {
             }
             .padding(.horizontal, Theme.Space.m)
             .chromeBarMetrics()
-            Menu {
+            SidebarMenuRow(
+                label: "New chat",
+                symbol: "square.and.pencil",
+                help: "Choose which project the new chat belongs to"
+            ) {
                 if workspaces.folders.isEmpty {
                     Button("Add project…", .create) { workspaces.requestAdd() }
                 } else {
-                    Section("Choose a project") {
+                    Section("Start a chat in") {
                         ForEach(workspaces.folders) { folder in
                             Button("\(folder.name) · \(folder.machineLabel ?? "This Mac")", .create) { startNewChat(in: folder) }
                                 .help(folder.path)
                         }
                     }
                 }
-            } label: {
-                Label("New chat…", systemImage: "square.and.pencil")
-                    .font(Theme.callout)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Theme.Space.m).padding(.vertical, Theme.Space.s)
-                    .contentShape(.rect)
             }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden)
-            .help("Choose which project the new chat belongs to")
             SidebarRow(
                 label: "Search",
                 symbol: "magnifyingglass",
@@ -2217,6 +2218,7 @@ struct RootView: View {
             }
             ThemeRule()
             Button("New chat", .create) { startNewChat(in: folder) }
+            Button("New terminal", .create) { openSection(.sessions, in: folder.id) }
             if folder.git?.isRepo == true {
                 Button("Worktrees…", .source) { worktreeProject = folder }
             }
@@ -2275,12 +2277,11 @@ struct RootView: View {
         showingTerminal: Bool
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            SidebarRow(label: "Terminals", symbol: "terminal", trailing: sessions.isEmpty ? nil : "\(sessions.count)",
-                       isSelected: showingTerminal) { openSection(.sessions, in: folder.id) }
+            // Running terminals, then chats, each a row of its own directly
+            // under the project. Headings over them repeated themselves under
+            // every project; a terminal carries a small terminal badge on its
+            // mark instead, and the Terminals tab in the bar opens the rest.
             sessionRows(sessions, in: folder, showingTerminal: showingTerminal)
-            // Chats sit directly under the project, beside Terminals. A
-            // "Chats" heading over them repeated itself under every project
-            // and said nothing the rows' own marks do not.
             chatHistoryRows(for: folder)
             ForEach(automations.liveJobs(in: folder.id)) { job in
                 let run = automations.lastRun(for: job)
@@ -3833,33 +3834,51 @@ private struct SidebarRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: Theme.Space.s) {
-                if indent > 0 {
-                    Spacer(minLength: 0).frame(width: CGFloat(indent) * 14)
-                }
-                Image(systemName: symbol)
-                    .font(Theme.fit(symbolSize))
-                    .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
-                    .frame(width: 18)
-                Text(label)
-                    .font(Theme.fit(14, weight: isSelected ? .medium : .regular))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer(minLength: Theme.Space.xs)
-                // Hide a zero count. Zero is not news.
-                if let trailing, trailing != "0" {
-                    Text(trailing)
-                        .font(Theme.numeric(11))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.vertical, 7)
-            .background(background)
-            .contentShape(.rect)
+            SidebarRowLabel(label: label, symbol: symbol, symbolSize: symbolSize, trailing: trailing,
+                            isSelected: isSelected, indent: indent, isHovering: isHovering)
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
+    }
+}
+
+/// What a sidebar row looks like, apart from what pressing it does, so a
+/// row that opens a menu (New chat) is drawn exactly like one that acts.
+private struct SidebarRowLabel: View {
+    var label: String
+    var symbol: String
+    var symbolSize: CGFloat = 13
+    var trailing: String?
+    var isSelected: Bool
+    var indent: Int = 0
+    var isHovering: Bool
+
+    var body: some View {
+        HStack(spacing: Theme.Space.s) {
+            if indent > 0 {
+                Spacer(minLength: 0).frame(width: CGFloat(indent) * 14)
+            }
+            Image(systemName: symbol)
+                .font(Theme.fit(symbolSize))
+                .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
+                .frame(width: 18)
+            Text(label)
+                .font(Theme.fit(14, weight: isSelected ? .medium : .regular))
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: Theme.Space.xs)
+            // Hide a zero count. Zero is not news.
+            if let trailing, trailing != "0" {
+                Text(trailing)
+                    .font(Theme.numeric(11))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, 7)
+        .background(background)
+        .contentShape(.rect)
     }
 
     /// Selection is tinted and carries a bar down its leading edge. Hover is a
@@ -3877,6 +3896,30 @@ private struct SidebarRow: View {
             }
         }
         .padding(.horizontal, Theme.Space.xs)
+    }
+}
+
+/// New chat, drawn as the plain sidebar row it always was, opening the list
+/// of projects to start it in.
+private struct SidebarMenuRow<Items: View>: View {
+    var label: String
+    var symbol: String
+    var help: String
+    @ViewBuilder var items: () -> Items
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Menu {
+            items()
+        } label: {
+            SidebarRowLabel(label: label, symbol: symbol, isSelected: false, isHovering: isHovering)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .onHover { isHovering = $0 }
+        .help(help)
     }
 }
 
@@ -4650,7 +4693,7 @@ private struct ActiveSessionRow: View {
                 Spacer(minLength: 0)
                 StateBadge(state: session.state, since: session.lastOutputAt)
             }
-            .padding(.leading, Theme.Space.xl + 2)
+            .padding(.leading, ChatSidebarConversationRow.markInset)
             .padding(.trailing, Theme.Space.s + 2)
             .frame(height: DisplayFit.dp(30))
             .background(background)
@@ -4668,10 +4711,21 @@ private struct ActiveSessionRow: View {
         .accessibilityLabel(spokenLabel)
     }
 
+    /// The agent's mark with a small terminal badge, so a terminal running
+    /// Claude Code does not read as a chat with Claude Code beside it.
     @ViewBuilder
     private var leadingMark: some View {
         if let harnessID = session.harnessID {
             HarnessMark(id: harnessID, size: DisplayFit.dp(16))
+                .overlay(alignment: .bottomTrailing) {
+                    Image(systemName: "apple.terminal.fill")
+                        .font(Theme.font(DisplayFit.dp(7), weight: .bold))
+                        .foregroundStyle(Theme.accent)
+                        .padding(1)
+                        .background(Theme.background, in: RoundedRectangle(cornerRadius: 2, style: .continuous))
+                        .offset(x: 3, y: 3)
+                        .accessibilityHidden(true)
+                }
         } else {
             Image(systemName: "terminal")
                 .font(Theme.fit(11, weight: .medium))
@@ -4689,8 +4743,7 @@ private struct ActiveSessionRow: View {
                     ? Theme.rowSelectedNested
                     : (isHovering ? Theme.rowHighlight.opacity(0.45) : .clear)
             )
-            .padding(.leading, Theme.Space.l + 2)
-            .padding(.trailing, Theme.Space.xs)
+            .padding(.horizontal, Theme.Space.xs)
     }
 }
 #endif
