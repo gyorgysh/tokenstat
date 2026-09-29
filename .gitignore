@@ -132,3 +132,7 @@ xcuserdata/
 # Standalone Windows UI regression executable.
 /scripts/tests/windows-ui/bin/
 /scripts/tests/windows-ui/obj/
+/scripts/tests/windows-board/bin/
+/scripts/tests/windows-board/obj/
+/scripts/tests/windows-devices/bin/
+/scripts/tests/windows-devices/obj/

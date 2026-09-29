@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 
 @Composable
-fun ProjectWorktrees(model: AppViewModel, peer: String, folder: JsonObject, onOpen: (JsonObject) -> Unit) {
+fun ProjectWorktrees(model: AppViewModel, peer: String, folder: JsonObject, onBusyChanged: (Boolean) -> Unit = {}, onOpen: (JsonObject) -> Unit) {
     val workspace = folder["id"]?.jsonPrimitive?.content.orEmpty()
     val path = folder["path"]?.jsonPrimitive?.content.orEmpty()
     var name by rememberSaveable(peer, workspace) { mutableStateOf("") }
@@ -34,6 +34,8 @@ fun ProjectWorktrees(model: AppViewModel, peer: String, folder: JsonObject, onOp
     var error by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
+    LaunchedEffect(working) { onBusyChanged(working) }
+    DisposableEffect(Unit) { onDispose { onBusyChanged(false) } }
     BackHandler(enabled = working) { /* Keep a submitted creation visible until its result arrives. */ }
     LaunchedEffect(peer, workspace, attempt) {
         reading = true

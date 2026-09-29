@@ -89,20 +89,17 @@ struct HeatmapView: View {
 
             footer
         }
-        // Day actions depend on the calendar, not on pixel packing. Keeping
-        // them outside GeometryReader avoids rebuilding a year's accessibility
-        // buttons and currency labels for every step of a window resize.
+        #if !os(macOS)
         .accessibilityElement(children: .contain)
         .accessibilityChildren {
             ForEach(accessibleDays, id: \.day.date) { item in
-                Button {
-                    onSelect?(item.day)
-                } label: {
+                Button { onSelect?(item.day) } label: {
                     Text("\(item.day.date): \(formatSpend(item.day.value)) at API list price")
                 }
                 .accessibilityHint("Pins this day in the inspector")
             }
         }
+        #endif
     }
 
     /// The largest a square is allowed to get.
@@ -241,6 +238,12 @@ struct HeatmapView: View {
                 )
         }
         .frame(width: layout.contentWidth, height: layout.contentHeight, alignment: .topLeading)
+        #if os(macOS)
+        .background {
+            HeatmapAccessibilityView(rows: calendar.rows, cell: layout.cell, gap: layout.gap, onSelect: onSelect)
+                .allowsHitTesting(false)
+        }
+        #endif
         // One GeometryReader for the whole grid reports the hovered cell's
         // window frame. Per-cell readers were the other half of the scroll lag.
         .background {

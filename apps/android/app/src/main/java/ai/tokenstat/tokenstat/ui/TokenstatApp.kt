@@ -3114,6 +3114,14 @@ private fun WorkspacesScreen(
             folder.string("name") ?: "Project", RecentPlaces.Kind.CHAT, chatId,
         )
     }
+    fun openRegisteredProject(folder: JsonObject) {
+        val id = folder.string("id") ?: return
+        session.setLists(JsonArray(folders.filter { (it as? JsonObject)?.string("id") != id } + folder), sessions, chats)
+        selectedFolderId = id
+        initialSection = null
+        pendingChatId = null
+        pendingOpenConversation = false
+    }
     fun recordTerminalOpened(sessionId: String) {
         if (sessionId.startsWith("pending-")) return
         val peer = boundHost?.string("publicIdentity") ?: return
@@ -3316,6 +3324,7 @@ private fun WorkspacesScreen(
                 onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: "Computer") },
                 onOpenBrowser = { url, port -> browser = url to port },
                 onRecordChat = ::recordChatOpened,
+            onOpenProject = ::openRegisteredProject,
                 initialChatId = pendingChatId,
                 openConversationOnAppear = pendingOpenConversation,
             )
@@ -3328,6 +3337,7 @@ private fun WorkspacesScreen(
             onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: "Computer") },
             onOpenBrowser = { url, port -> browser = url to port },
             onRecordChat = ::recordChatOpened,
+            onOpenProject = ::openRegisteredProject,
             initialChatId = pendingChatId,
             openConversationOnAppear = pendingOpenConversation,
         )
@@ -3337,7 +3347,7 @@ private fun WorkspacesScreen(
     if (customizing) {
         AlertDialog(
             onDismissRequest = { customizing = false },
-            title = { Text("Customize Workspaces") },
+            title = { Text("Customize Projects") },
             text = {
                 WorkspacesEditor(
                     order = layoutOrder,
@@ -3667,7 +3677,7 @@ private fun WorkspaceList(
             item {
                 TsCard {
                     Column {
-                        Text("Your Workspaces are clear", fontWeight = FontWeight.Medium, color = colors.textPrimary)
+                        Text("Your Projects are clear", fontWeight = FontWeight.Medium, color = colors.textPrimary)
                         Text(
                             "Folders, chats and sessions are switched off.",
                             style = MaterialTheme.typography.bodySmall,
@@ -3681,7 +3691,7 @@ private fun WorkspaceList(
             TextButton(onClick = onCustomize, modifier = Modifier.fillMaxWidth()) {
                 Icon(ActionIcon.Layout.vector, null, tint = colors.accent, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(Space.xs))
-                Text("Customize Workspaces", color = colors.accent)
+                Text("Customize Projects", color = colors.accent)
             }
         }
     }
@@ -3695,6 +3705,7 @@ private fun WorkspaceDetail(
     onOpenTerminal: (String?) -> Unit = {},
     onOpenBrowser: (String, Int) -> Unit = { _, _ -> },
     onRecordChat: (String) -> Unit = {},
+    onOpenProject: (JsonObject) -> Unit = {},
     initialChatId: String? = null,
     openConversationOnAppear: Boolean = false,
 ) {
@@ -3708,6 +3719,7 @@ private fun WorkspaceDetail(
         onOpenTerminal = onOpenTerminal,
         onOpenBrowser = onOpenBrowser,
         onRecordChat = onRecordChat,
+        onOpenProject = onOpenProject,
         initialChatId = initialChatId,
         openConversationOnAppear = openConversationOnAppear,
     )

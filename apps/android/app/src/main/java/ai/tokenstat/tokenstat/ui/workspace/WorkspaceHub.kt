@@ -296,15 +296,11 @@ fun WorkspaceHub(
     onOpenTerminal: (String?) -> Unit = {},
     onOpenBrowser: (String, Int) -> Unit = { _, _ -> },
     onRecordChat: (String) -> Unit = {},
+    onOpenProject: (JsonObject) -> Unit = {},
     initialChatId: String? = null,
     openConversationOnAppear: Boolean = false,
 ) {
-    var openedWorktree by remember(folder.str("id")) { mutableStateOf<JsonObject?>(null) }
-    openedWorktree?.let { current ->
-        WorkspaceHub(model, host, current, modifier, onBack = { openedWorktree = null },
-            onOpenTerminal = onOpenTerminal, onOpenBrowser = onOpenBrowser, onRecordChat = onRecordChat)
-        return
-    }
+    var worktreeBusy by remember { mutableStateOf(false) }
     val colors = ai.tokenstat.tokenstat.ui.theme.LocalTsColors.current
     val space = ai.tokenstat.tokenstat.ui.theme.Space
     val peer = host.str("publicIdentity") ?: ""
@@ -333,11 +329,11 @@ fun WorkspaceHub(
         ) {
             if (presence.sectionHeaderHidden) return@Row
             if (section != null) {
-                IconButton(onClick = { openSection = null }) {
+                IconButton(enabled = !worktreeBusy, onClick = { openSection = null }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to $folderName")
                 }
             } else if (onBack != null) {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+                IconButton(enabled = !worktreeBusy, onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
             }
             Column(Modifier.weight(1f)) {
                 Text(
@@ -367,7 +363,7 @@ fun WorkspaceHub(
                 onOpenSection = { openSection = it },
             )
         } else if (section == "Worktrees") {
-            ProjectWorktrees(model, peer, folder) { openedWorktree = it }
+            ProjectWorktrees(model, peer, folder, onBusyChanged = { worktreeBusy = it }, onOpen = onOpenProject)
         } else {
             WorkspaceSection(
                 model = model,
