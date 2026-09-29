@@ -584,6 +584,7 @@ final class ChatModel {
         let key = WorkReferenceKey.folder(scope: owner.scope, hostIdentity: owner.host,
             workspaceID: owner.workspace) + WorkReferenceKey.encode(conversation.id)
         guard recentMessages.messages(for: key).isEmpty,
+              previewReads.count < 2,
               previewReads.insert(key).inserted else { return }
         defer { previewReads.remove(key) }
         let route = WorkDestinationResolver.route(folderID: folder,
@@ -603,7 +604,7 @@ final class ChatModel {
 
     /// Opening a project's sessions also prepares its recent chat previews,
     /// without changing the active conversation or starting an agent.
-    func warmWorkspacePreviews(_ folder: String) async {
+    func warmWorkspacePreviews(_ folder: String, includeMessages: Bool = true) async {
         #if os(macOS)
         let scope = WorkSessionContext.shared.scope
         let route = Bridge.chatRoute(workspaceID: folder, peer: nil)
@@ -616,6 +617,9 @@ final class ChatModel {
             if continuityScope == nil { continuityScope = scope }
             guard continuityScope == scope else { return }
             storeChatListCache(Self.uniqued(list), folderID: folder)
+            // Expanded sidebar projects need titles, not every transcript.
+            // Leave message warming to hover or explicitly opening a project.
+            guard includeMessages else { return }
             let prefix = WorkReferenceKey.folder(scope: scope, hostIdentity: host, workspaceID: route.workspaceID)
             for chat in list.prefix(5) {
                 guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }

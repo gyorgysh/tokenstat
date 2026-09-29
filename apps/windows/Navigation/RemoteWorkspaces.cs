@@ -132,17 +132,35 @@ internal static class RemoteWorkspaces
     /// routes every workspace read. The params object is copied, never
     /// mutated, so a retry cannot forward an already rewritten id.
     /// </summary>
-    public static Task<JsonNode> CallWorkspaceAsync(string id, string method, JsonNode? parameters = null)
+    public static Task<JsonNode> CallWorkspaceAsync(string id, string method, JsonNode? parameters = null, TimeSpan? patience = null)
     {
         if (!TrySplit(id, out var peer, out var inner))
         {
-            return AppServices.Host.CallAsync(method, parameters);
+            return AppServices.Host.CallAsync(method, parameters, patience);
         }
         var forwarded = parameters is null
             ? new JsonObject()
             : (JsonObject)JsonNode.Parse(parameters.ToJsonString())!;
         forwarded["id"] = inner;
-        return CallOnPeerAsync(peer, method, forwarded);
+        return CallOnPeerAsync(peer, method, forwarded, patience);
+    }
+
+    /// Publish the confirmed response without waiting for the next quiet sweep.
+    public static void RememberRegisteredProject(string peer, string hostName, JsonNode folder)
+    {
+        var inner = Format.Text(folder, "id");
+        if (string.IsNullOrEmpty(inner)) return;
+        var remote = new RemoteFolder(Join(peer, inner), inner, Format.Text(folder, "name"),
+            Format.Text(folder, "path"), peer, hostName, folder["git"]?.DeepClone());
+        lock (Gate)
+        {
+            if (!FoldersByPeer.TryGetValue(peer, out var folders))
+                FoldersByPeer[peer] = folders = new List<RemoteFolder>();
+            folders.RemoveAll(existing => existing.Id == remote.Id);
+            folders.Add(remote);
+            NextDial.Remove(peer);
+        }
+        Changed?.Invoke();
     }
 
     /// <summary>Whether the row offers Disconnect instead of Connect.</summary>

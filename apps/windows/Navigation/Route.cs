@@ -103,8 +103,8 @@ internal static class Sections
     public static string Label(this WorkspaceSection section) => section switch
     {
         WorkspaceSection.Launcher => "Launcher",
-        WorkspaceSection.Sessions => "Sessions",
-        WorkspaceSection.Chat => "Chat",
+        WorkspaceSection.Sessions => "Terminals",
+        WorkspaceSection.Chat => "Chats",
         WorkspaceSection.Changes => "Changes",
         WorkspaceSection.History => "History",
         WorkspaceSection.Pulls => "Pull requests",

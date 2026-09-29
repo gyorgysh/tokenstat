@@ -51,7 +51,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     private ulong _defaultBudgetSeconds = 10_800;
     private string _query = "";
     private bool _showArchive;
-    private bool _newestFirst = true;
+    private bool _newestFirst;
     private bool _working;
     private string? _selectedId;
     private string? _pendingCreateOp;
@@ -194,7 +194,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             new List<(string Value, string Label, ActionIcon? Glyph)>
             {
                 ("newest", "Newest", null),
-                ("board", "Your order", null),
+                ("board", "Board order", null),
             },
             _newestFirst ? "newest" : "board",
             value =>

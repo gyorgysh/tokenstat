@@ -197,7 +197,7 @@ struct ClientWorkspacesView: View {
             .fullScreenCover(isPresented: $showSetup) {
                 ClientSetupWizard()
             }
-            .navigationTitle("Workspaces")
+            .navigationTitle("Projects")
             .navigationBarTitleDisplayMode(.inline)
             .refreshable {
                 await ClientRefresh.pull("workspaces") {

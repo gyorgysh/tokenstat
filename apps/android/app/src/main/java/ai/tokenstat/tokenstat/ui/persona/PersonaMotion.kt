@@ -85,7 +85,7 @@ class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val fir
         moodAge += STEP
         val playful = mood == PersonaMood.Bouncing || mood == PersonaMood.Dancing || mood == PersonaMood.Pacing
         val quiet = mood == PersonaMood.Sleeping || mood == PersonaMood.Waiting || mood == PersonaMood.Failed
-        morphAmount += ((if (quiet) 0.06 else if (playful) 0.24 else 0.16) - morphAmount) * STEP * 2
+        morphAmount += ((if (quiet) 0.10 else if (playful) 0.68 else 0.46) - morphAmount) * STEP * 2
         if (mood == PersonaMood.Bouncing || mood == PersonaMood.Dancing) {
             rollVelocity += (1.25 - rollVelocity) * STEP * 4
         } else {
@@ -147,7 +147,7 @@ class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val fir
             fx[i] += ny * push; fy[i] -= nx * push
             fx[next] += ny * push; fy[next] -= nx * push
         }
-        val phase = lifetime * 0.22 + seedPhase
+        val phase = lifetime * 0.38 + seedPhase
         val shape = floor(phase).toInt() % 5
         val fraction = phase - floor(phase)
         val blend = fraction * fraction * fraction * (fraction * (fraction * 6 - 15) + 10)

@@ -33,9 +33,9 @@ struct MachinesView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var addingDevice = false
     @State private var encryptionExpanded = false
-    @State private var connectionSettingsExpanded = false
-    @State private var permissionsExpanded = false
-    @State private var otherDevicesExpanded = false
+    private enum DevicePage: String, CaseIterable { case devices = "Devices", access = "Access", settings = "Settings" }
+    @State private var devicePage: DevicePage = .devices
+    @State private var deviceSearch = ""
     /// The account machine waiting on a Remove confirmation. Destructive on
     /// the server, so it never happens from a single click.
     @State private var pendingUnlink: Machine?
@@ -54,14 +54,20 @@ struct MachinesView: View {
         VStack(spacing: 0) {
             DetailChromeBar {
                 sshAccess
-                if model.remoteReachAllowed {
-                    ToolbarIconButton(
-                        systemImage: "plus",
-                        help: "Paste a key from another device to pair it"
-                    ) {
-                        addingDevice = true
+            }
+            if model.remoteReachAllowed {
+                HStack(spacing: Theme.Space.m) {
+                    Picker("Device management", selection: $devicePage) {
+                        ForEach(DevicePage.allCases, id: \.self) { page in Text(page.rawValue).tag(page) }
                     }
+                    .pickerStyle(.segmented).labelsHidden()
+                    .frame(maxWidth: 360)
+                    Spacer(minLength: 0)
+                    Button("Add device", .create) { addingDevice = true }
+                        .buttonStyle(AccentButtonStyle(small: true))
                 }
+                .padding(Theme.Space.m)
+                ThemeRule()
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -108,9 +114,6 @@ struct MachinesView: View {
         }
         .task {
             if model.identity == nil { await model.load() }
-            if model.accountMachines.isEmpty && model.known.isEmpty {
-                connectionSettingsExpanded = true
-            }
             await model.ensureHelper()
             // The sleep is where cancellation lands when this screen goes away,
             // and it throws rather than returning, so the check afterwards is
@@ -191,45 +194,29 @@ struct MachinesView: View {
         if !model.pending.isEmpty {
             waitingForApproval
         }
-        // Names and connection status answer the first question. Configuration
-        // stays available without pushing the devices below a screen of cards.
-        if !model.accountMachines.isEmpty { accountDevices }
-        if !unlistedKnown.isEmpty {
-            if model.accountMachines.isEmpty {
-                knownMachines
-            } else {
-                DisclosureGroup("Other paired devices (\(unlistedKnown.count))", isExpanded: $otherDevicesExpanded) {
-                    knownMachines.padding(.top, Theme.Space.s)
-                }
-                .font(Theme.callout.weight(.medium))
+        switch devicePage {
+        case .devices:
+            SearchField(text: $deviceSearch, prompt: "Find a device")
+            if !filteredAccountMachines.isEmpty { accountDevices }
+            if !filteredKnownMachines.isEmpty { knownMachines }
+            if !deviceSearch.isEmpty && filteredAccountMachines.isEmpty && filteredKnownMachines.isEmpty {
+                Text("No devices match “\(deviceSearch)”.")
+                    .font(Theme.callout).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 100)
             }
+            if model.accountMachines.isEmpty && unlistedKnown.isEmpty { addDeviceAction }
+        case .access:
+            Text("Choose what connected devices can do on this computer.")
+                .font(Theme.callout).foregroundStyle(.secondary)
+            DevicePermissionCard(peers: model.known.filter { $0.trust == .approved })
+            DevicePermissionCard(peers: [], localOnly: true)
+            encryptionNote
+        case .settings:
+            thisMachine()
+            #if os(macOS)
+            alwaysOnHost
+            #endif
         }
-        DisclosureGroup("Connection settings for this device", isExpanded: $connectionSettingsExpanded) {
-            VStack(spacing: Theme.Space.m) {
-                thisMachine()
-                #if os(macOS)
-                alwaysOnHost
-                #endif
-            }
-            .padding(.top, Theme.Space.s)
-        }
-        .font(Theme.callout.weight(.medium))
-        DisclosureGroup("Permissions", isExpanded: $permissionsExpanded) {
-            VStack(spacing: Theme.Space.m) {
-                DevicePermissionCard(peers: model.known.filter { $0.trust == .approved })
-                DevicePermissionCard(peers: [], localOnly: true)
-            }
-            .padding(.top, Theme.Space.s)
-        }
-        .font(Theme.callout.weight(.medium))
-        // Account-linked machines already appear above. Pairing is only
-        // needed for a machine that is not on the account yet, so the
-        // paste card stays off the first screenful once a list exists.
-        // The toolbar plus still opens the same sheet.
-        if model.accountMachines.isEmpty {
-            addDeviceAction
-        }
-        encryptionNote
     }
 
     /// Free and Supporter already share usage. The pairing chrome, the
@@ -400,7 +387,7 @@ struct MachinesView: View {
                 Text(
                     model.accountMachines.isEmpty
                         ? "Machines connect through the tokenstat tunnel, so they work from any network. Add a device once with its key and approve the connection on both sides."
-                        : "Machines on this account are listed above. Use + only to pair a computer that is not signed in yet."
+                        : "Open Devices to see your computers and phones. Choose Add device to pair a computer that is not signed in yet."
                 )
                 .font(Theme.caption)
                 .foregroundStyle(.tertiary)
@@ -658,10 +645,24 @@ struct MachinesView: View {
         }
     }
 
+    private var filteredAccountMachines: [Machine] {
+        model.listedAccountMachines.filter {
+            deviceSearch.isEmpty || deviceTitle(resolved: model.resolvedName(for: $0), machine: $0)
+                .localizedStandardContains(deviceSearch)
+        }
+    }
+
+    private var filteredKnownMachines: [Peer] {
+        unlistedKnown.filter {
+            deviceSearch.isEmpty || $0.label.localizedStandardContains(deviceSearch)
+                || (model.accountName(for: $0)?.localizedStandardContains(deviceSearch) ?? false)
+        }
+    }
+
     private var knownMachines: some View {
         Card(title: "Other approved devices", subtitle: "Devices that are paired with this Mac but not on the account.", mark: "mark_device", fillsHeight: true) {
             VStack(spacing: Theme.Space.s) {
-                ForEach(unlistedKnown) { peer in
+                ForEach(filteredKnownMachines) { peer in
                     PeerRow(
                         peer: peer,
                         resolvedName: model.accountName(for: peer),
@@ -785,7 +786,7 @@ struct MachinesView: View {
     private var accountDevices: some View {
         Card(title: "Your devices", subtitle: "Select a device for connection details. Phones and tablets connect to this Mac.", mark: "mark_device") {
             LazyVStack(spacing: Theme.Space.s) {
-                ForEach(model.listedAccountMachines) { machine in
+                ForEach(filteredAccountMachines) { machine in
                     // Phones are shown but never dialled: a client reaches a
                     // host, not the reverse (P5). Hiding them made a device
                     // somebody had signed in on look like it was not there.
@@ -1217,7 +1218,7 @@ private struct DevicePermissionCard: View {
             if !compact {
                 HStack {
                     Text("DEVICE").frame(maxWidth: .infinity, alignment: .leading)
-                    ForEach(["WORKSPACES", "VIEW", "CONTROL"], id: \.self) { title in
+                    ForEach(["PROJECTS", "VIEW", "CONTROL"], id: \.self) { title in
                         Text(title).frame(width: 105)
                     }
                 }
@@ -1251,7 +1252,7 @@ private struct DevicePermissionCard: View {
 
     private func permissionSwitches(_ peer: Peer, compact: Bool) -> some View {
         HStack(spacing: 0) {
-            permissionSwitch("Workspaces", peer: peer, value: workspaceBinding(peer), compact: compact)
+            permissionSwitch("Projects", peer: peer, value: workspaceBinding(peer), compact: compact)
             permissionSwitch("View", peer: peer, value: binding(peer, control: false), compact: compact)
             permissionSwitch("Control", peer: peer, value: binding(peer, control: true), compact: compact)
                 .disabled(permissions[peer.key]?.view != true)

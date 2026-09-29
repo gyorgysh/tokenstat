@@ -89,7 +89,11 @@ enum Route: Hashable {
     /// could be written and then never read again on a wide window while a
     /// task one list over had a whole pane for the same thing.
     var hasInspector: Bool {
+        #if os(macOS)
+        globalSection != .account && globalSection != .notes && workspaceSection != .notes
+        #else
         globalSection != .account
+        #endif
     }
 }
 
@@ -172,8 +176,8 @@ enum WorkspaceSection: String, CaseIterable, Identifiable, Hashable {
 
     var label: String {
         switch self {
-        case .sessions: return "Sessions"
-        case .chat: return "Chat"
+        case .sessions: return "Terminals"
+        case .chat: return "Chats"
         case .changes: return "Changes"
         case .history: return "History"
         case .pulls: return "Pull requests"

@@ -51,9 +51,8 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
         new(StringComparer.Ordinal);
     private DispatcherQueueTimer? _poll;
     private bool _refreshing;
-    private bool _connectionSettingsExpanded;
-    private bool _otherDevicesExpanded;
-    private bool _permissionsExpanded;
+    private enum DevicePage { Devices, Access, Settings }
+    private DevicePage _devicePage;
     private ScrollViewer? _scroll;
 
     /// <summary>
@@ -418,60 +417,55 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             {
                 _root.Children.Add(ApprovalCard(pending));
             }
-            var reach = new FlowPanel { MinimumItemWidth = 340, Spacing = Theme.SpaceS };
-            reach.Children.Add(ThisMachineCard(account, allowed, TunnelOn()));
-            reach.Children.Add(AlwaysOnHostCard());
-            var machines = account["machines"] as JsonArray;
-            if (machines is not null && machines.Count > 0)
+            var navigation = new Grid { ColumnSpacing = Theme.SpaceM };
+            navigation.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            navigation.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var sections = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+            foreach (var section in Enum.GetValues<DevicePage>())
             {
-                _root.Children.Add(AccountDevicesCard(account, machines));
-            }
-            else
-            {
-                _root.Children.Add(EmptyState.View(
-                    "No devices yet",
-                    "This account has no linked machines.",
-                    EmptyArtKind.Devices));
-            }
-            var unlisted = UnlistedKnown(account);
-            if (unlisted.Count > 0)
-            {
-                var others = new Expander
+                var tab = new Microsoft.UI.Xaml.Controls.Primitives.ToggleButton
                 {
-                    Header = $"Other paired devices ({unlisted.Count})",
-                    Content = OtherApprovedCard(unlisted),
-                    IsExpanded = _otherDevicesExpanded || machines is null || machines.Count == 0,
-                    HorizontalAlignment = HorizontalAlignment.Stretch,
-                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    Content = section.ToString(), IsChecked = _devicePage == section,
+                    MinHeight = 36, MinWidth = 88,
                 };
-                others.RegisterPropertyChangedCallback(Expander.IsExpandedProperty,
-                    (sender, _) => _otherDevicesExpanded = ((Expander)sender).IsExpanded);
-                _root.Children.Add(others);
+                tab.Click += (_, _) => { _devicePage = section; Render(); };
+                sections.Children.Add(tab);
             }
-            var approved = ApprovedPeers();
-            if (approved.Count > 0)
+            navigation.Children.Add(sections);
+            var add = Buttons.Primary("Add device", ActionIcon.Create, async (_, _) => await PairAsync());
+            Grid.SetColumn(add, 1);
+            navigation.Children.Add(add);
+            _root.Children.Add(navigation);
+
+            switch (_devicePage)
             {
-                var permissions = new Expander { Header = "Permissions", Content = DevicePermissionsCard(approved),
-                    IsExpanded = _permissionsExpanded, HorizontalAlignment = HorizontalAlignment.Stretch,
-                    HorizontalContentAlignment = HorizontalAlignment.Stretch };
-                permissions.RegisterPropertyChangedCallback(Expander.IsExpandedProperty,
-                    (sender, _) => _permissionsExpanded = ((Expander)sender).IsExpanded);
-                _root.Children.Add(permissions);
+                case DevicePage.Devices:
+                    var machines = account["machines"] as JsonArray;
+                    if (machines is not null && machines.Count > 0)
+                        _root.Children.Add(AccountDevicesCard(account, machines));
+                    var unlisted = UnlistedKnown(account);
+                    if (unlisted.Count > 0)
+                        _root.Children.Add(OtherApprovedCard(unlisted));
+                    if ((machines is null || machines.Count == 0) && unlisted.Count == 0)
+                        _root.Children.Add(EmptyState.View("No devices yet",
+                            "Add a device to connect to its projects and terminals.", EmptyArtKind.Devices));
+                    break;
+                case DevicePage.Access:
+                    _root.Children.Add(new TextBlock { Text = "Choose what connected devices can do on this PC.",
+                        TextWrapping = TextWrapping.Wrap, Opacity = 0.7 });
+                    var approved = ApprovedPeers();
+                    if (approved.Count > 0)
+                        _root.Children.Add(DevicePermissionsCard(approved));
+                    else
+                        _root.Children.Add(EmptyState.View("No access granted",
+                            "Pair a device first. Its access controls will appear here.", EmptyArtKind.Devices));
+                    _root.Children.Add(EncryptionNote());
+                    break;
+                case DevicePage.Settings:
+                    _root.Children.Add(ThisMachineCard(account, allowed, TunnelOn()));
+                    _root.Children.Add(AlwaysOnHostCard());
+                    break;
             }
-            var settings = new Expander { Header = "Connection settings", Content = reach,
-                IsExpanded = _connectionSettingsExpanded || machines is null || machines.Count == 0,
-                HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
-            settings.RegisterPropertyChangedCallback(Expander.IsExpandedProperty,
-                (sender, _) => _connectionSettingsExpanded = ((Expander)sender).IsExpanded);
-            _root.Children.Add(settings);
-            // Pairing is only needed for a machine that is not on the account
-            // yet, so the paste card stays off the first screenful once a list
-            // exists. The toolbar plus opens the same dialog.
-            if (machines is null || machines.Count == 0)
-            {
-                _root.Children.Add(AddDeviceCard());
-            }
-            _root.Children.Add(EncryptionNote());
         }
         else
         {
@@ -924,7 +918,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             var screen = _screenPermissions.TryGetValue(key, out var held)
                 ? held : (View: false, Control: false);
             switches.Children.Add(PermissionSwitch(
-                "Workspaces", _workspaceAllowed.Contains(key), async on =>
+                "Projects", _workspaceAllowed.Contains(key), async on =>
                 {
                     await AppServices.Host.CallAsync(
                         "workspace.access.set",

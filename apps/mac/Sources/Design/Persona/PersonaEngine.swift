@@ -204,10 +204,10 @@ final class PersonaEngine {
 
         let playful = mood == .bouncing || mood == .dancing || mood == .pacing
         let quiet = mood == .sleeping || mood == .failed || mood == .waiting
-        let desiredMorph: CGFloat = quiet ? 0.06 : playful ? 0.24 : 0.16
+        let desiredMorph: CGFloat = quiet ? 0.10 : playful ? 0.68 : 0.46
         morphAmount += (desiredMorph - morphAmount) * Self.fixedStep * 2
         drive.morphAmount = morphAmount
-        drive.morphPhase = lifetime * 0.22 + CGFloat(seed % 997) * 0.01
+        drive.morphPhase = lifetime * 0.38 + CGFloat(seed % 997) * 0.01
         // A full somersault during play; a small settling lean otherwise.
         // Integrate the angle so switching moods never jumps to a new pose.
         if mood == .bouncing || mood == .dancing {

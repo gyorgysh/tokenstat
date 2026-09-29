@@ -92,7 +92,7 @@ fun FloatingTabBar(
     // floating capsule was the margin around it, not the corner radius.
     // The margin is what makes this read as a floating capsule rather than a
     // strip, and on a narrow phone it is also the only width left to give the
-    // tabs. A 320dp display had "Workspaces" clipped to "Workspac" with both
+    // tabs. A 320dp display had "Projects" clipped to "Workspac" with both
     // ends cut, so below that the inset gives some of itself back.
     val inset = if (LocalConfiguration.current.screenWidthDp < 400) 14.dp else 22.dp
     BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = inset).padding(bottom = 14.dp)) {

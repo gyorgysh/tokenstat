@@ -184,7 +184,7 @@ public sealed partial class MainWindow : Window
         _nav.Resources["NavigationViewContentGridBorderBrush"] = _chromeBorder;
 
         var pinned = new StackPanel { Spacing = 2, Margin = new Thickness(4, 0, 4, 8) };
-        var togglePane = Buttons.ToolbarIcon(ActionIcon.Layout, "Show or hide workspaces", (_, _) => _nav.IsPaneOpen = !_nav.IsPaneOpen);
+        var togglePane = Buttons.ToolbarIcon(ActionIcon.Layout, "Show or hide projects", (_, _) => _nav.IsPaneOpen = !_nav.IsPaneOpen);
         pinned.Children.Add(togglePane);
         foreach (var section in Sections.Standalone.Concat(Sections.Everywhere))
         {
@@ -220,13 +220,13 @@ public sealed partial class MainWindow : Window
         _nav.MenuItems.Add(_workspacesHeader);
         _nav.MenuItems.Add(new NavigationViewItem
         {
-            Content = "All folders",
+            Content = "All projects",
             Tag = "workspaces:all",
             Icon = new SymbolIcon { Symbol = Symbol.Folder },
         });
         _nav.MenuItems.Add(new NavigationViewItem
         {
-            Content = "Add workspace",
+            Content = "Add project",
             Tag = "workspaces:add",
             Icon = new SymbolIcon { Symbol = Symbol.Add },
         });
@@ -243,7 +243,7 @@ public sealed partial class MainWindow : Window
         _paneResize.Width = 6;
         _paneResize.HorizontalAlignment = HorizontalAlignment.Left;
         _paneResize.Background = new SolidColorBrush(Colors.Transparent);
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_paneResize, "Resize workspaces panel");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_paneResize, "Resize projects panel");
         _paneResize.DragDelta += (_, drag) =>
         {
             _nav.OpenPaneLength = Math.Clamp(_nav.OpenPaneLength + drag.HorizontalChange, 240, 420);
@@ -588,7 +588,7 @@ public sealed partial class MainWindow : Window
         }
         _nav.MenuItems.Add(new NavigationViewItem
         {
-            Content = "Add workspace",
+            Content = "Add project",
             Tag = "workspaces:add",
             Icon = new SymbolIcon { Symbol = Symbol.Add },
         });
@@ -616,6 +616,7 @@ public sealed partial class MainWindow : Window
             Content = FolderLabel(name, git),
             Tag = "ws:" + id + ":Launcher",
             Icon = new SymbolIcon { Symbol = remote ? Symbol.Globe : Symbol.Folder },
+            IsExpanded = _nav.IsPaneOpen,
         };
         if (!string.IsNullOrEmpty(path))
         {
@@ -633,6 +634,15 @@ public sealed partial class MainWindow : Window
         var menu = ContextMenus.Menu(parent);
         ContextMenus.Add(menu, "Open folder", () => NavigateTo("ws:" + id + ":Launcher"));
         ContextMenus.Copy(menu, "Copy path", () => path);
+        if (Format.Flag(git, "isRepo"))
+            ContextMenus.AddAsync(menu, "Worktrees…", async () =>
+            {
+                var created = await ProjectWorktreeDialog.ShowAsync(parent, id, name, path);
+                if (created is null) return;
+                if (remote) await RemoteWorkspaces.SweepAsync();
+                await TryLoadFoldersAsync(refresh: true);
+                NavigateTo("ws:" + created + ":Launcher");
+            });
         if (!remote && !string.IsNullOrEmpty(path))
             ContextMenus.AddAsync(menu, "Reveal in File Explorer", async () =>
             {
@@ -1630,7 +1640,7 @@ public sealed partial class MainWindow : Window
                 }
                 NavigationRows.Reconcile(chatSection.MenuItems, desiredChats, "wschat", 0);
                 var chatTag = "ws:" + folderId + ":Chat";
-                chatSection.IsExpanded = _chatGroupExpansion.GetValueOrDefault(chatTag)
+                chatSection.IsExpanded = _chatGroupExpansion.GetValueOrDefault(chatTag, true)
                     || (selectedTag is not null && LiveRoute.TrySplit(selectedTag, SidebarLive.ChatPrefix, out var selectedFolderId, out _) && selectedFolderId == folderId);
             }
             else if (parent.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(row => Equals(row.Tag, "ws:" + folderId + ":Chat")) is { } emptyChats)

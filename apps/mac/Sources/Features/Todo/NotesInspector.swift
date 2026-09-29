@@ -17,6 +17,7 @@ import SwiftUI
 struct NotesInspector: View {
     @Bindable var model: TodoModel
     var folders: [WorkspaceFolder]
+    var embedded = false
     var onClose: () -> Void
 
     @State private var titleDraft = ""
@@ -29,6 +30,7 @@ struct NotesInspector: View {
     @State private var applyingPlace = false
     @State private var converting = false
     @State private var confirmingDelete = false
+    @State private var preview = false
     @FocusState private var focused: Field?
 
     private enum Field: Hashable { case title, notes }
@@ -43,9 +45,23 @@ struct NotesInspector: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            InspectorChromeBar(onClose: onClose) {
-                InspectorTitle(title: "Note", symbol: "note.text", tint: Theme.secondary)
-                Spacer(minLength: 0)
+            if embedded {
+                HStack {
+                    Button("All notes", .back, action: onClose).buttonStyle(SecondaryButtonStyle(small: true))
+                    Spacer()
+                    if note != nil {
+                        Picker("Note view", selection: $preview) {
+                            Text("Write").tag(false)
+                            Text("Preview").tag(true)
+                        }.pickerStyle(.segmented).labelsHidden().frame(width: 160)
+                    }
+                }.padding(Theme.Space.m)
+                ThemeRule()
+            } else {
+                InspectorChromeBar(onClose: onClose) {
+                    InspectorTitle(title: "Note", symbol: "note.text", tint: Theme.secondary)
+                    Spacer(minLength: 0)
+                }
             }
             Group {
                 if let note {
@@ -113,7 +129,21 @@ struct NotesInspector: View {
                     .onSubmit { Task { await persistDrafts() } }
                     .onAppear { syncDrafts() }
 
-                notesEditor
+                if !embedded {
+                    Picker("Note view", selection: $preview) {
+                        Text("Write").tag(false)
+                        Text("Preview").tag(true)
+                    }.pickerStyle(.segmented).labelsHidden()
+                }
+                if preview {
+                    MarkdownText(notesDraft.isEmpty ? "Nothing written yet." : notesDraft)
+                        .textSelection(.enabled)
+                        .frame(minHeight: embedded ? 300 : 120, alignment: .topLeading)
+                } else {
+                    notesEditor
+                    Text("Markdown supported: headings, lists, links and code.")
+                        .font(Theme.caption).foregroundStyle(.tertiary)
+                }
 
                 FieldSaveBar(
                     state: saveState,
@@ -129,7 +159,7 @@ struct NotesInspector: View {
                 // A note belongs somewhere, and until now the only way to
                 // change where was to write it again in the right place.
                 AppMenuPicker(
-                    title: "Folder",
+                    title: "Project",
                     options: [(value: "", label: "Unassigned")]
                         + folders.map { (value: $0.id, label: $0.name) },
                     selection: $placeID
@@ -152,7 +182,7 @@ struct NotesInspector: View {
         TextEditor(text: $notesDraft)
             .font(Theme.callout)
             .scrollContentBackground(.hidden)
-            .frame(minHeight: 120, maxHeight: 260)
+            .frame(minHeight: embedded ? 360 : 180, maxHeight: embedded ? 700 : 360)
             .padding(Theme.Space.xs)
             .background(Theme.panel, in: RoundedRectangle(cornerRadius: 5))
             .overlay(

@@ -15,11 +15,13 @@ class WorkspaceHubLogicTest {
     fun hubSectionsFollowMacOrder() {
         assertEquals(
             listOf(
-                "Sessions", "Chat", "Changes", "History", "Pull requests",
+                "Terminals", "Chats", "Changes", "History", "Pull requests",
                 "Tasks", "Notes", "Workflows", "Automations", "Files", "Browser",
             ),
             HubSection.entries.map { it.label },
         )
+        assertEquals("Sessions", HubSection.SESSIONS.key)
+        assertEquals("Chat", HubSection.CHAT.key)
         assertEquals("Pulls", HubSection.PULLS.key)
         assertEquals("Tasks", HubSection.TASKS.key)
     }

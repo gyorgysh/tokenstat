@@ -266,6 +266,7 @@ fun WorkspaceHubMenu(
                 onChanged = { scope.launch { reload() } },
                 stats = folderGitStats(folder),
             )
+            if (isRepo) TsSecondaryButton(label = "Worktrees", onClick = { onOpenSection("Worktrees") })
         }
         HubSection.entries.forEach { section ->
             HubSectionRow(
@@ -298,6 +299,12 @@ fun WorkspaceHub(
     initialChatId: String? = null,
     openConversationOnAppear: Boolean = false,
 ) {
+    var openedWorktree by remember(folder.str("id")) { mutableStateOf<JsonObject?>(null) }
+    openedWorktree?.let { current ->
+        WorkspaceHub(model, host, current, modifier, onBack = { openedWorktree = null },
+            onOpenTerminal = onOpenTerminal, onOpenBrowser = onOpenBrowser, onRecordChat = onRecordChat)
+        return
+    }
     val colors = ai.tokenstat.tokenstat.ui.theme.LocalTsColors.current
     val space = ai.tokenstat.tokenstat.ui.theme.Space
     val peer = host.str("publicIdentity") ?: ""
@@ -359,6 +366,8 @@ fun WorkspaceHub(
                 modifier = Modifier.weight(1f),
                 onOpenSection = { openSection = it },
             )
+        } else if (section == "Worktrees") {
+            ProjectWorktrees(model, peer, folder) { openedWorktree = it }
         } else {
             WorkspaceSection(
                 model = model,

@@ -22,8 +22,8 @@ import kotlinx.serialization.json.longOrNull
 /// the Android section name the content renderer already knows; the label is
 /// the iOS row word.
 enum class HubSection(val key: String, val label: String) {
-    SESSIONS("Sessions", "Sessions"),
-    CHAT("Chat", "Chat"),
+    SESSIONS("Sessions", "Terminals"),
+    CHAT("Chat", "Chats"),
     CHANGES("Changes", "Changes"),
     HISTORY("History", "History"),
     PULLS("Pulls", "Pull requests"),

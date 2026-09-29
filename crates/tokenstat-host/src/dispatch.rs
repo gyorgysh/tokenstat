@@ -266,6 +266,19 @@ struct WorkspaceIdParams {
 #[cfg(feature = "local-host")]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct CreateWorktreeParams {
+    id: String,
+    parent: String,
+    folder_name: String,
+    namespace: String,
+    branch: String,
+    #[serde(default)]
+    from: Option<String>,
+}
+
+#[cfg(feature = "local-host")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SelectedCommitParams {
     id: String,
     path: Option<String>,
@@ -2666,6 +2679,8 @@ fn folders(method: &str, params: &str) -> Option<Result<Value, String>> {
         | "workspace.log"
         | "workspace.tree"
         | "workspace.branches"
+        | "workspace.worktrees"
+        | "workspace.createWorktree"
         | "workspace.checkout"
         | "workspace.createBranch"
         | "workspace.show"
@@ -2885,6 +2900,53 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             invalidate_workspace_status(Some(&p.id));
             let ws = crate::workspaces::get(&p.id)?;
             serde_json::to_value(describe(&ws)).map_err(|e| e.to_string())
+        }
+
+        "workspace.worktrees" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let ws = crate::workspaces::folder(&p.id)?;
+            serde_json::to_value(tokenstat_workspace::git::worktrees(&ws.path)?)
+                .map_err(|e| e.to_string())
+        }
+        "workspace.createWorktree" => {
+            let p: CreateWorktreeParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let ws = crate::workspaces::folder(&p.id)?;
+            let parent = crate::fs_browse::resolve_root(std::path::Path::new(&p.parent))?;
+            let name = &p.folder_name;
+            if name.is_empty()
+                || name.len() > 128
+                || name == "."
+                || name == ".."
+                || name.starts_with('-')
+                || name.contains(['/', '\\', ':'])
+                || name.chars().any(char::is_control)
+                || name.trim() != name
+            {
+                return Err("Choose a simple name for the new folder.".into());
+            }
+            let destination = parent.join(name);
+            let outcome = tokenstat_workspace::gitwrite::worktree::create(
+                &ws.path,
+                &destination,
+                &p.namespace,
+                &p.branch,
+                p.from.as_deref().unwrap_or("HEAD"),
+            );
+            if !outcome.ok {
+                return Err(outcome.message);
+            }
+            let registered = {
+                let mut registry = crate::workspaces::write();
+                let registered = registry.add(&destination, now_ms()).map_err(|e| format!(
+                    "Worktree created, but it could not be added to Projects: {e}. Add the folder manually."))?;
+                crate::workspaces::save(&registry).map_err(|e| format!(
+                    "Worktree created at {}, but the project list could not be saved: {e}. Add this folder manually after resolving the error.", destination.display()))?;
+                registered
+            };
+            invalidate_workspace_status(Some(&p.id));
+            serde_json::to_value(describe(&registered)).map_err(|e| e.to_string())
         }
 
         "workspace.branches" => {
@@ -5236,6 +5298,78 @@ mod tests {
         assert_eq!(v["ok"], true, "an unknown file type is not a failure");
         assert!(v["result"]["language"].is_null());
         assert!(v["result"]["note"].is_string(), "{unknown}");
+    }
+
+    #[cfg(feature = "local-host")]
+    #[test]
+    fn worktree_creation_registers_a_project_and_enforces_destination_roots() {
+        let mut s = session();
+        let root = tempfile::tempdir().expect("fixture root");
+        let repo = root.path().join("source");
+        std::fs::create_dir(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(args)
+                .output()
+                .expect("git");
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["init", "-q"]);
+        git(&[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "Initial fixture",
+        ]);
+        let invoke = |session: &mut Session, method: &str, params: Value| -> Value {
+            serde_json::from_str(&call(session, method, &params.to_string())).unwrap()
+        };
+        let container = invoke(&mut s, "workspace.add", json!({"path": root.path()}));
+        assert_eq!(container["ok"], true, "{container}");
+        let source = invoke(&mut s, "workspace.add", json!({"path": repo}));
+        let id = source["result"]["id"].as_str().expect("registered source");
+        let params = json!({"id": id, "parent": root.path(), "folderName": "isolated",
+            "namespace": "feature/team", "branch": "search", "from": "HEAD"});
+        let created = invoke(&mut s, "workspace.createWorktree", params.clone());
+        assert_eq!(created["ok"], true, "{created}");
+        assert!(created["result"]["id"].is_string());
+        assert_eq!(created["result"]["git"]["branch"], "feature/team/search");
+        let listed = invoke(&mut s, "workspace.worktrees", json!({"id": id}));
+        assert_eq!(listed["result"].as_array().unwrap().len(), 2);
+        let duplicate = invoke(&mut s, "workspace.createWorktree", params.clone());
+        assert_eq!(duplicate["ok"], false);
+        let mut traversal = params;
+        traversal["folderName"] = json!("../escape");
+        assert_eq!(
+            invoke(&mut s, "workspace.createWorktree", traversal.clone())["ok"],
+            false
+        );
+        let outside = tempfile::tempdir().unwrap();
+        traversal["folderName"] = json!("unregistered");
+        traversal["parent"] = json!(outside.path());
+        assert_eq!(
+            invoke(&mut s, "workspace.createWorktree", traversal)["ok"],
+            false
+        );
+        assert!(!outside.path().join("unregistered").exists());
+        for project in [&created, &source, &container] {
+            let removed = invoke(
+                &mut s,
+                "workspace.remove",
+                json!({"id": project["result"]["id"]}),
+            );
+            assert_eq!(removed["ok"], true, "{removed}");
+        }
     }
 
     #[cfg(feature = "local-host")]

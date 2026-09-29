@@ -25,6 +25,8 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -250,6 +252,7 @@ fun DrawScope.drawPersonaFace(traits: PersonaTraits, hue: Color, motion: Persona
                             minX, maxX, minY, maxY, centroid, crown, unit,
                             blink = (motion?.blink ?: 0.0).toFloat(), mood = motion?.mood ?: PersonaMood.Idle,
                             previousMood = motion?.previousMood ?: PersonaMood.Idle,
+                            gaze = sin((motion?.lifetime ?: 0.0) * 0.61).toFloat() * 0.65f,
                             expressionProgress = ((motion?.moodAge ?: 1.0) / 0.4).toFloat().coerceIn(0f, 1f))
                     }
                 }
@@ -281,6 +284,7 @@ private fun DrawScope.drawPersonaIdleFace(
     mood: PersonaMood = PersonaMood.Idle,
     previousMood: PersonaMood = mood,
     expressionProgress: Float = 1f,
+    gaze: Float = 0f,
 ) {
     val w = size.width
     val h = size.height
@@ -309,13 +313,24 @@ private fun DrawScope.drawPersonaIdleFace(
         val centre = place(offset * spread, -anchorHeight)
         val frame = Size(radius * 2f, max(radius * 0.10f, radius * 2f * openness))
         val topLeft = Offset(centre.x - radius, centre.y - radius * openness)
-        when (traits.eyeShape) {
-            PersonaTraits.EyeShape.PIXEL ->
-                drawRoundRect(ink, topLeft, frame, CornerRadius(radius * 0.32f, radius * 0.32f))
-            PersonaTraits.EyeShape.OVAL ->
-                drawOval(ink, Offset(topLeft.x + radius * 0.22f, topLeft.y), Size(frame.width - radius * 0.44f, frame.height))
-            PersonaTraits.EyeShape.ROUND -> drawOval(ink, topLeft, frame)
+        val eye = Path().apply {
+            val bounds = Rect(topLeft, frame)
+            when (traits.eyeShape) {
+                PersonaTraits.EyeShape.PIXEL -> addRoundRect(RoundRect(bounds, CornerRadius(radius * 0.32f)))
+                PersonaTraits.EyeShape.OVAL -> addOval(Rect(topLeft + Offset(radius * 0.16f, 0f), Size(frame.width - radius * 0.32f, frame.height)))
+                PersonaTraits.EyeShape.ROUND -> addOval(bounds)
+            }
         }
+        if (unit / density >= 24f) {
+            drawPath(eye, Color.White.copy(alpha = ink.alpha * 0.92f))
+            clipPath(eye) {
+                val pupilRadius = radius * 0.53f
+                val pupil = centre + Offset(gaze * radius * 0.48f, 0f)
+                drawCircle(ink, pupilRadius, pupil)
+                drawCircle(Color.White.copy(alpha = ink.alpha), radius * 0.18f,
+                    pupil + Offset(-pupilRadius * 0.3f, -pupilRadius * 0.35f))
+            }
+        } else drawPath(eye, ink)
     }
 
     if (unit < 21f) return

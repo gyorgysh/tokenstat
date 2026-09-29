@@ -77,6 +77,7 @@ fun FolderPickerScreen(
     hostName: String,
     onClose: () -> Unit,
     onAdded: (JsonObject) -> Unit,
+    onPickedPath: ((String) -> Unit)? = null,
 ) {
     // Its own header and its own way out, so the app chrome steps aside.
     HideTopBar()
@@ -130,6 +131,7 @@ fun FolderPickerScreen(
     }
 
     suspend fun add(path: String) {
+        if (onPickedPath != null) { onPickedPath(path); return }
         loading = true
         runCatching {
             model.workspaceSection(peer, "workspace.add", buildJsonObject { put("path", path) }) as JsonObject

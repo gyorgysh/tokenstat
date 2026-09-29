@@ -1195,6 +1195,21 @@ final class WorkspacesModel {
         Task { await loadRemote() }
     }
 
+    /// Publish a confirmed registration immediately; the normal peer sweep
+    /// may still be in its quiet interval when a new worktree is created.
+    func acceptRegisteredRemoteProject(_ folder: WorkspaceFolder, peer: String, label: String?) {
+        var remote = folder
+        remote.id = "remote:\(peer):\(folder.id)"
+        remote.machineID = peer
+        remote.machineLabel = label
+        var existing = remoteFolders[peer] ?? []
+        existing.removeAll { $0.id == remote.id }
+        existing.append(remote)
+        remoteFolders[peer] = existing
+        publishFolders()
+        refreshRemotePeer(peer)
+    }
+
     /// Put local and remote folders together and keep the selection valid.
     private func publishFolders() {
         let merged = localFolders + remoteFolders.values.flatMap { $0 }
@@ -1458,7 +1473,7 @@ final class WorkspacesModel {
     /// gives a new user no idea what they are being asked to pick or why.
     var isAddSheetPresented = false
 
-    /// Open the onboarding sheet. Every "Add workspace" affordance funnels
+    /// Open the onboarding sheet. Every "Add project" affordance funnels
     /// through here so the explanation is never skipped.
     func requestAdd() {
         isAddSheetPresented = true

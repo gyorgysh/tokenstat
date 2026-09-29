@@ -37,6 +37,8 @@ struct ClientWorkspaceDetailView: View {
     @State private var pullCounts = PullCountStore.shared
     @State private var errorMessage: String?
     @State private var showPort = false
+    @State private var showingWorktrees = false
+    @Environment(ClientNavigationModel.self) private var navigation
     @AppStorage("browser.lastPort") private var portText = "5173"
     @State private var forwardedPort: Int?
     @State private var browserURL: String?
@@ -53,6 +55,14 @@ struct ClientWorkspaceDetailView: View {
         merged.machineID = folder.machineID
         merged.machineLabel = folder.machineLabel
         return merged
+    }
+
+    private var worktreeFolder: WorkspaceFolder {
+        var remote = current
+        remote.id = "remote:\(peer):\(workspaceID)"
+        remote.machineID = peer
+        remote.machineLabel = hostName
+        return remote
     }
 
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -72,12 +82,29 @@ struct ClientWorkspaceDetailView: View {
             }
         }
         .rememberWorkspace(peer: peer, folder: folder)
+        .sheet(isPresented: $showingWorktrees) {
+            RemoteHostFeatureGate(feature: .worktrees, peer: peer, hostName: hostName) {
+                ProjectWorktreeSheet(folder: worktreeFolder) { created in
+                    showingWorktrees = false
+                    var remote = created
+                    remote.id = "remote:\(peer):\(created.id)"
+                    remote.machineID = peer
+                    remote.machineLabel = hostName
+                    navigation.pushFolder(peerKey: peer, hostName: hostName, folder: remote, section: .sessions)
+                }
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: GitCommitTarget.didChange)) { note in
             guard !usesWorkspaceLayout,
                   note.object as? GitCommitTarget == GitCommitTarget(peer: peer, workspaceID: workspaceID) else { return }
             Task { await reload() }
         }
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                if current.git?.isRepo == true {
+                    Button("Worktrees", systemImage: "arrow.triangle.branch") { showingWorktrees = true }
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 WorkFolderCacheButton(folderID: workspaceID, peer: peer, name: folder.name)
             }

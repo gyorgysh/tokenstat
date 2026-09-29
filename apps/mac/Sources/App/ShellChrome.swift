@@ -206,7 +206,7 @@ enum RailPlace: String, CaseIterable, Identifiable, Hashable {
     var label: String {
         switch self {
         case .home: return "Home"
-        case .projects: return "Workspaces"
+        case .projects: return "Projects"
         case .tasks: return "Tasks"
         case .notes: return "Notes"
         case .automations: return "Automations"

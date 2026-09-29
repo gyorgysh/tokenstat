@@ -830,6 +830,59 @@ fn parse_branch(record: &str) -> Option<Branch> {
     })
 }
 
+/// A working folder sharing this repository's object database.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Worktree {
+    pub path: String,
+    pub head: String,
+    pub branch: Option<String>,
+    pub locked: bool,
+    pub prunable: bool,
+    pub bare: bool,
+}
+
+/// NUL-delimited output preserves spaces and newlines in folder names.
+pub fn worktrees(dir: &Path) -> Result<Vec<Worktree>, String> {
+    let output = git(dir, &["worktree", "list", "--porcelain", "-z"])
+        .ok_or("Could not read this repository's worktrees.")?;
+    let mut result = Vec::new();
+    for record in output.split("\0\0") {
+        let mut tree = Worktree {
+            path: String::new(),
+            head: String::new(),
+            branch: None,
+            locked: false,
+            prunable: false,
+            bare: false,
+        };
+        for field in record.split('\0') {
+            if let Some(path) = field.strip_prefix("worktree ") {
+                tree.path = path.to_owned();
+            } else if let Some(head) = field.strip_prefix("HEAD ") {
+                tree.head = head.to_owned();
+            } else if let Some(branch) = field.strip_prefix("branch ") {
+                tree.branch = Some(
+                    branch
+                        .strip_prefix("refs/heads/")
+                        .unwrap_or(branch)
+                        .to_owned(),
+                );
+            } else if field == "locked" || field.starts_with("locked ") {
+                tree.locked = true;
+            } else if field == "prunable" || field.starts_with("prunable ") {
+                tree.prunable = true;
+            } else if field == "bare" {
+                tree.bare = true;
+            }
+        }
+        if !tree.path.is_empty() {
+            result.push(tree);
+        }
+    }
+    Ok(result)
+}
+
 fn inside_work_tree(dir: &Path) -> bool {
     git(dir, &["rev-parse", "--is-inside-work-tree"])
         .map(|s| s.trim() == "true")

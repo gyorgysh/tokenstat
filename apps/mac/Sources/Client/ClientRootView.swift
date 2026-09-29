@@ -448,7 +448,7 @@ enum ClientTab: String, CaseIterable, Identifiable, Hashable {
     var label: String {
         switch self {
         case .home: return "Home"
-        case .workspaces: return "Workspaces"
+        case .workspaces: return "Projects"
         case .insights: return "Insights"
         case .machines: return "Devices"
         case .ssh: return "SSH"

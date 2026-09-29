@@ -230,13 +230,28 @@ enum PersonaRenderer {
             case .contentArc:
                 drawArcEye(in: &context, frame: frame, unit: unit, ink: ink, flipped: true)
             case .normal:
+                let eye: Path
                 switch traits.eyeShape {
-                case .pixel:
-                    context.fill(Path(roundedRect: frame, cornerRadius: radius * 0.32), with: .color(ink))
-                case .oval:
-                    context.fill(Path(ellipseIn: frame.insetBy(dx: radius * 0.22, dy: 0)), with: .color(ink))
-                case .round:
-                    context.fill(Path(ellipseIn: frame), with: .color(ink))
+                case .pixel: eye = Path(roundedRect: frame, cornerRadius: radius * 0.32)
+                case .oval: eye = Path(ellipseIn: frame.insetBy(dx: radius * 0.16, dy: 0))
+                case .round: eye = Path(ellipseIn: frame)
+                }
+                if unit >= 24 {
+                    context.fill(eye, with: .color(.white.opacity(0.92)))
+                    context.drawLayer { iris in
+                        iris.clip(to: eye)
+                        let pupilRadius = radius * 0.53
+                        let pupil = CGPoint(x: centre.x + face.gaze.x * radius * 0.48,
+                                            y: centre.y + face.gaze.y * radius * 0.38)
+                        iris.fill(Path(ellipseIn: CGRect(x: pupil.x - pupilRadius, y: pupil.y - pupilRadius,
+                                                        width: pupilRadius * 2, height: pupilRadius * 2)),
+                                  with: .color(ink.opacity(0.96)))
+                        let glint = radius * 0.18
+                        iris.fill(Path(ellipseIn: CGRect(x: pupil.x - pupilRadius * 0.5, y: pupil.y - pupilRadius * 0.65,
+                                                        width: glint * 2, height: glint * 2)), with: .color(.white))
+                    }
+                } else {
+                    context.fill(eye, with: .color(ink))
                 }
             }
 

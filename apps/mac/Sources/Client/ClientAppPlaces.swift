@@ -121,7 +121,7 @@ enum ClientAppPlaces {
             .init(id: "home:editor", title: "Customize Home", detail: "Home",
                   icon: .layout,
                   keywords: ["cards", "arrange", "sections", "customise", "edit", "rearrange", "hide"]),
-            .init(id: "workspaces:editor", title: "Customize Workspaces", detail: "Workspaces",
+            .init(id: "workspaces:editor", title: "Customize Workspaces", detail: "Projects",
                   icon: .layout,
                   keywords: ["folders", "chats", "sessions", "arrange", "sections", "customise",
                              "edit", "rearrange", "hide", "order"]),

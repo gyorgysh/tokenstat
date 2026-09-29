@@ -221,4 +221,4 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 23 repairs vault identity registration and persists Windows host
 /// diagnostics. Desktop clients replace older helpers so these fixes also
 /// reach an already-running always-on host.
-pub const PROTOCOL_VERSION: &str = "23";
+pub const PROTOCOL_VERSION: &str = "24";

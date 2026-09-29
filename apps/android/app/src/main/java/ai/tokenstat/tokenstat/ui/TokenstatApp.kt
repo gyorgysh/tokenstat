@@ -235,7 +235,7 @@ private fun tsAccent(): Color = LocalTsColors.current.accent
 
 private enum class Destination(val id: String, val label: String, val icon: ImageVector, val detail: String) {
     Home("home", "Home", Icons.Default.GridView, "Spend, activity and limits"),
-    Workspaces("workspaces", "Workspaces", Icons.Default.Folder, "Folders and sessions on your machines"),
+    Workspaces("workspaces", "Projects", Icons.Default.Folder, "Folders and sessions on your machines"),
     Insights("insights", "Insights", Icons.Default.BarChart, "Breakdowns by model and project"),
     // The id is `machines`, like the iOS raw value, so the two tab stores
     // stay comparable. SSH stays last: entries order is the default bar.

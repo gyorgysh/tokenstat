@@ -264,7 +264,21 @@ internal static class PersonaRenderer
                             PersonaDraw.Ellipse(eye, ex + ew / 2, ey + eh / 2, ew / 2, eh / 2);
                             break;
                     }
-                    canvas.Children.Add(PersonaDraw.Shape(eye, PersonaDraw.Solid(ink), clip: clip));
+                    canvas.Children.Add(PersonaDraw.Shape(eye,
+                        PersonaDraw.Solid(unit >= 24 ? PersonaDraw.White : ink, unit >= 24 ? 0.92 : 1), clip: clip));
+                    if (unit >= 24 && eh > radius * 0.3)
+                    {
+                        double pupilRadius = Math.Min(radius * 0.53, eh * 0.38);
+                        double px = centre.X + face.Gaze.X * radius * 0.35;
+                        double py = ey + eh / 2 + face.Gaze.Y * Math.Max(0, eh / 2 - pupilRadius) * 0.4;
+                        var pupil = new PathGeometry();
+                        PersonaDraw.Ellipse(pupil, px, py, pupilRadius, pupilRadius);
+                        canvas.Children.Add(PersonaDraw.Shape(pupil, PersonaDraw.Solid(ink, 0.96), clip: clip));
+                        var glint = new PathGeometry();
+                        PersonaDraw.Ellipse(glint, px - pupilRadius * 0.3, py - pupilRadius * 0.35,
+                            pupilRadius * 0.28, pupilRadius * 0.28);
+                        canvas.Children.Add(PersonaDraw.Shape(glint, PersonaDraw.Solid(PersonaDraw.White), clip: clip));
+                    }
                     break;
             }
 

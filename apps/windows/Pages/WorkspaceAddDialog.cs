@@ -10,13 +10,14 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Tokenstat.Design;
+using Tokenstat.Navigation;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
 
 namespace Tokenstat.Pages;
 
 /// <summary>
-/// The dialog behind "Add workspace". The decision is which folder.
+/// The dialog behind "Add project". The decision is which folder.
 /// Everything else is two facts about that choice: agents work there, and
 /// adding it does not upload it. Mirrors the desktop Mac sheet.
 /// </summary>
@@ -89,9 +90,9 @@ internal static class WorkspaceAddDialog
 
         var dialog = new ContentDialog
         {
-            Title = "Add a workspace",
+            Title = "Add a project",
             Content = form,
-            PrimaryButtonText = "Add workspace",
+            PrimaryButtonText = "Add project",
             SecondaryButtonText = "On another machine…",
             CloseButtonText = "Not now",
             DefaultButton = ContentDialogButton.Primary,
@@ -130,7 +131,7 @@ internal static class WorkspaceAddDialog
             {
                 dialog.IsPrimaryButtonEnabled = true;
                 dialog.IsSecondaryButtonEnabled = true;
-                dialog.PrimaryButtonText = "Add workspace";
+                dialog.PrimaryButtonText = "Add project";
             }
         };
         var result = await Chrome.ShowDialog(owner, dialog);
@@ -225,5 +226,88 @@ internal static class WorkspaceAddDialog
         {
             return null;
         }
+    }
+}
+
+/// Separate branch folders share Git history while preserving each session's files.
+internal static class ProjectWorktreeDialog
+{
+    private static string _namespace = "work";
+
+    public static async Task<string?> ShowAsync(UIElement owner, string id, string projectName, string projectPath)
+    {
+        var remote = RemoteWorkspaces.TrySplit(id, out var peer, out _);
+        if (remote)
+        {
+            var protocol = await RemoteFeatureGate.PeerProtocolAsync(peer);
+            if (protocol is null || protocol < RemoteFeatureGate.WorktreesMinProtocol)
+            {
+                await Chrome.ShowDialog(owner, new ContentDialog { Title = "Worktrees need an updated computer",
+                    Content = "Connect to this project's computer and update tokenstat there to manage worktrees.", CloseButtonText = "Close" });
+                return null;
+            }
+        }
+        var separator = Math.Max(projectPath.LastIndexOf('/'), projectPath.LastIndexOf('\\'));
+        var name = new TextBox { Header = "Name", PlaceholderText = "improved-search" };
+        var prefix = new TextBox { Header = "Branch prefix (optional)", Text = _namespace };
+        var from = new TextBox { Header = "Start from", Text = "HEAD" };
+        var parent = new TextBox { Header = "Parent folder", Text = separator >= 0 ? projectPath[..(separator + 1)] : "" };
+        var form = new StackPanel { Spacing = Theme.SpaceM, MinWidth = 340 };
+        form.Children.Add(new TextBlock { Text = "Work on another branch without interrupting this project's chats or terminals.", TextWrapping = TextWrapping.Wrap });
+        try
+        {
+            var trees = Format.Items(await RemoteWorkspaces.CallWorkspaceAsync(id, "workspace.worktrees", new JsonObject { ["id"] = id }));
+            foreach (var tree in trees ?? new JsonArray())
+                form.Children.Add(new TextBlock { Text = Format.Text(tree, "branch", "Detached commit") + "\n" + Format.Text(tree, "path"),
+                    TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, Opacity = 0.7 });
+        }
+        catch (Exception ex)
+        {
+            await Chrome.ShowDialog(owner, new ContentDialog { Title = "Could not read worktrees", Content = ex.Message, CloseButtonText = "Close" });
+            return null;
+        }
+        form.Children.Add(name); form.Children.Add(prefix); form.Children.Add(from); form.Children.Add(parent);
+        var preview = new TextBlock { TextWrapping = TextWrapping.Wrap, Opacity = 0.7 };
+        void UpdatePreview() => preview.Text = "Branch: " + (prefix.Text.Length == 0 ? "" : prefix.Text + "/") + name.Text;
+        name.TextChanged += (_, _) => UpdatePreview();
+        prefix.TextChanged += (_, _) => UpdatePreview();
+        form.Children.Add(preview);
+        var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = Theme.Brush(static () => Theme.Danger) };
+        form.Children.Add(error);
+        var dialog = new ContentDialog { Title = "Worktrees · " + projectName,
+            Content = new ScrollViewer { Content = form, MaxHeight = 550 },
+            PrimaryButtonText = "Create worktree", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary };
+        var working = false;
+        string? created = null;
+        dialog.Closing += (_, args) => args.Cancel = working;
+        dialog.PrimaryButtonClick += async (_, args) =>
+        {
+            args.Cancel = true;
+            if (string.IsNullOrWhiteSpace(name.Text) || string.IsNullOrWhiteSpace(parent.Text) || string.IsNullOrWhiteSpace(from.Text))
+            { error.Text = "Enter a name, starting branch and parent folder."; return; }
+            working = true;
+            name.IsEnabled = prefix.IsEnabled = from.IsEnabled = parent.IsEnabled = false;
+            dialog.IsPrimaryButtonEnabled = false;
+            dialog.PrimaryButtonText = "Creating…";
+            error.Text = "";
+            try
+            {
+                var parameters = new JsonObject { ["id"] = id, ["parent"] = parent.Text, ["folderName"] = name.Text,
+                    ["namespace"] = prefix.Text, ["branch"] = name.Text, ["from"] = from.Text };
+                var result = await RemoteWorkspaces.CallWorkspaceAsync(id, "workspace.createWorktree", parameters, TimeSpan.FromMinutes(5));
+                var inner = Format.Text(result, "id");
+                if (string.IsNullOrEmpty(inner)) throw new InvalidOperationException("The worktree was created but could not be opened. Refresh Projects.");
+                if (remote)
+                    RemoteWorkspaces.RememberRegisteredProject(peer, RemoteWorkspaces.CachedFolder(id)?.MachineLabel ?? "Computer", result);
+                created = remote ? RemoteWorkspaces.Join(peer, inner) : inner;
+                _namespace = prefix.Text;
+                working = false;
+                dialog.Hide();
+            }
+            catch (Exception ex) { error.Text = ex.Message; }
+            finally { working = false; name.IsEnabled = prefix.IsEnabled = from.IsEnabled = parent.IsEnabled = true; dialog.IsPrimaryButtonEnabled = true; dialog.PrimaryButtonText = "Create worktree"; }
+        };
+        await Chrome.ShowDialog(owner, dialog);
+        return created;
     }
 }

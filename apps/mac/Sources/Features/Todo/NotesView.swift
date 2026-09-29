@@ -72,7 +72,26 @@ struct NotesView: View {
             libraryBar
             if workspaceID == nil { scopeBar }
             #endif
+            #if os(macOS)
+            GeometryReader { proxy in
+                let wide = proxy.size.width >= 640
+                let selected = model.selectedCard?.isNote == true
+                let showList = wide || !selected
+                HStack(spacing: 0) {
+                    list
+                        .frame(width: showList ? (wide ? min(320, proxy.size.width * 0.36) : proxy.size.width) : 0)
+                        .clipped().opacity(showList ? 1 : 0)
+                        .allowsHitTesting(showList).accessibilityHidden(!showList)
+                    if wide { ThemeRule.vertical }
+                    NotesInspector(model: model, folders: folders, embedded: true) { model.selectedCardID = nil }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped().opacity(wide || selected ? 1 : 0)
+                        .allowsHitTesting(wide || selected).accessibilityHidden(!wide && !selected)
+                }
+            }
+            #else
             list
+            #endif
         }
         .background(Theme.background)
         .navigationTitle("Notes")
@@ -116,7 +135,7 @@ struct NotesView: View {
                 .frame(minWidth: 160, maxWidth: 260)
             if workspaceID == nil {
                 AppMenuPicker(options: [
-                    (value: "", label: "All workspaces"),
+                    (value: "", label: "All projects"),
                     (value: "__unassigned__", label: "Unassigned")
                 ] + folders.map { (value: $0.id, label: $0.name) }, selection: Binding(
                     get: {
@@ -131,7 +150,7 @@ struct NotesView: View {
                     }
                 ))
                 .frame(width: 160)
-                .help("Filter notes by workspace")
+                .help("Filter notes by project")
             }
         }
     }
@@ -338,7 +357,7 @@ struct NotesView: View {
             ScrollView {
                 WidthReader { width in
                     let columns = gridLayout ? min(shown.count, max(1, min(3, Int(width / 340)))) : 1
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Theme.Space.m, alignment: .top), count: columns), spacing: Theme.Space.m) {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Theme.Space.m, alignment: .top), count: columns), spacing: gridLayout ? Theme.Space.m : 0) {
                         ForEach(shown) { note in
                             if gridLayout { row(note) } else { compactRow(note) }
                         }
@@ -376,8 +395,8 @@ struct NotesView: View {
             }
             .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(model.selectedCardID == note.id ? Theme.accentSoft : Theme.panel,
-                        in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .background(model.selectedCardID == note.id ? Theme.accentSoft : Color.clear)
+            .overlay(alignment: .bottom) { ThemeRule() }
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

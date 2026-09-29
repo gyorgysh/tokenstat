@@ -23,6 +23,7 @@ enum RemoteHostFeature: Hashable {
     case workSearch
     case hostUpdate
     case selectedCommit
+    case worktrees
     case reviewedPush
     case taskEditing
     case taskDeletion
@@ -46,6 +47,7 @@ enum RemoteHostFeature: Hashable {
         case .workSearch: "Search work"
         case .hostUpdate: "Updating this computer"
         case .selectedCommit: "Committing selected files"
+        case .worktrees: "Project worktrees"
         case .reviewedPush: "Pushing a branch"
         case .taskEditing: "Editing tasks"
         case .taskDeletion: "Deleting tasks"
@@ -81,6 +83,7 @@ enum RemoteHostFeature: Hashable {
     /// Version 22 adds revision-checked workflow edits.
     var minimumProtocol: Int {
         switch self {
+        case .worktrees: 24
         case .chat: 4
         case .pulls: 3
         case .modelRefresh: 6
@@ -122,6 +125,7 @@ enum RemoteHostFeature: Hashable {
         case .workSearch: "magnifyingglass"
         case .hostUpdate: "arrow.down.circle"
         case .selectedCommit: "checkmark.circle"
+        case .worktrees: "arrow.triangle.branch"
         case .reviewedPush: "arrow.up.circle"
         case .taskEditing: "pencil"
         case .taskDeletion: "trash"

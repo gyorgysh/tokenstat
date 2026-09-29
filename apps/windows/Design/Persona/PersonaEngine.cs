@@ -239,10 +239,10 @@ internal sealed class PersonaEngine
 
         bool playful = Mood is PersonaMood.Bouncing or PersonaMood.Dancing or PersonaMood.Pacing;
         bool quiet = Mood is PersonaMood.Sleeping or PersonaMood.Failed or PersonaMood.Waiting;
-        double desiredMorph = quiet ? 0.06 : playful ? 0.24 : 0.16;
+        double desiredMorph = quiet ? 0.10 : playful ? 0.68 : 0.46;
         _morphAmount += (desiredMorph - _morphAmount) * FixedStep * 2;
         drive.MorphAmount = _morphAmount;
-        drive.MorphPhase = _lifetime * 0.22 + (Seed % 997) * 0.01;
+        drive.MorphPhase = _lifetime * 0.38 + (Seed % 997) * 0.01;
         if (Mood is PersonaMood.Bouncing or PersonaMood.Dancing)
         {
             _rollVelocity += (1.25 - _rollVelocity) * FixedStep * 4;

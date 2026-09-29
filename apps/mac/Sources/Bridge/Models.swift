@@ -4662,3 +4662,13 @@ struct HostPolicy: Codable, Sendable {
     var hasInternalBattery: Bool
     var hostingActive: Bool
 }
+
+struct ProjectWorktree: Codable, Sendable, Identifiable {
+    var path: String
+    var head: String
+    var branch: String?
+    var locked: Bool
+    var prunable: Bool
+    var bare: Bool
+    var id: String { path }
+}

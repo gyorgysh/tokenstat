@@ -18,7 +18,7 @@ struct TodoView: View {
     private static let columns: [(String, String)] = [
         ("backlog", "To Do"), ("doing", "In progress"), ("done", "Done"),
     ]
-    @AppStorage("todo.sortNewestFirst") private var newestFirst = true
+    @AppStorage("todo.sortNewestFirst") private var newestFirst = false
     @State private var search = ""
     @State private var agentFilter = ""
     @State private var attentionOnly = false
@@ -166,7 +166,7 @@ struct TodoView: View {
     private var boardActions: some View {
         HStack(spacing: Theme.Space.s) {
             Picker("Sort tasks", selection: $newestFirst) {
-                Text("Your order").tag(false)
+                Text("Board order").tag(false)
                 Text("Newest first").tag(true)
             }
             .pickerStyle(.menu).labelsHidden().fixedSize()
@@ -192,7 +192,7 @@ struct TodoView: View {
                 // answers to one question.
                 AppMenuPicker(
                     options: [
-                        (value: "", label: "All workspaces"),
+                        (value: "", label: "All projects"),
                         (
                             value: Self.unfiledValue,
                             label: "Uncategorized"
@@ -247,7 +247,7 @@ struct TodoView: View {
                 if !(id == "done" && model.showingArchive) {
                     Button { addingIn = addingIn == id ? nil : id } label: {
                         Image(systemName: addingIn == id ? "xmark" : "plus")
-                            .font(Theme.font(12, weight: .medium)).frame(width: 26, height: 26)
+                            .font(Theme.font(12, weight: .medium)).frame(width: 32, height: 32)
                     }.buttonStyle(.plain).foregroundStyle(Theme.accent)
                         .help("Add a task to \(label)")
                 }
@@ -271,6 +271,7 @@ struct TodoView: View {
                             onRunInFront: onRunInFront,
                             onDropBefore: { dragged in
                                 guard dragged.id != card.id else { return }
+                                model.sortNewestFirst = false
                                 let list = model.cards(in: id).filter { $0.id != dragged.id }
                                 let order = Int64(list.firstIndex(where: { $0.id == card.id }) ?? list.count)
                                 clearDropChrome()
@@ -399,6 +400,7 @@ struct TodoView: View {
     private func dropOnColumn(_ ids: [String], column: String) -> Bool {
         guard let cardID = ids.first,
               let card = model.cards.first(where: { $0.id == cardID }) else { return false }
+        model.sortNewestFirst = false
         let others = model.cards(in: column).filter { $0.id != card.id }.count
         Task { await model.reorder(card, to: model.storageColumn(column), order: Int64(others)) }
         clearDropChrome()

@@ -17,6 +17,7 @@ use serde::Serialize;
 mod lease;
 pub mod reviewed_push;
 pub mod selected;
+pub mod worktree;
 
 /// What a mutating command reported.
 #[derive(Debug, Clone, Serialize)]

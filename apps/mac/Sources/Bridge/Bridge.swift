@@ -2157,6 +2157,26 @@ extension Bridge {
         )
     }
 
+    static func worktrees(id: String) async throws -> [ProjectWorktree] {
+        let params = ["id": remoteWorkspace(id)?.workspace ?? id]
+        if let target = remoteWorkspace(id) {
+            return try await onPeer(target.peer, "workspace.worktrees", params, as: [ProjectWorktree].self)
+        }
+        return try await background("workspace.worktrees", params, as: [ProjectWorktree].self)
+    }
+
+    static func createWorktree(id: String, parent: String, folderName: String,
+                               namespace: String, branch: String, from: String) async throws -> WorkspaceFolder {
+        let params = ["id": remoteWorkspace(id)?.workspace ?? id, "parent": parent,
+                      "folderName": folderName, "namespace": namespace, "branch": branch, "from": from]
+        if let target = remoteWorkspace(id) {
+            return try await onPeer(target.peer, "workspace.createWorktree", params,
+                                    patience: Patience.interactive, as: WorkspaceFolder.self)
+        }
+        return try await background("workspace.createWorktree", params,
+                                    patience: Patience.interactive, as: WorkspaceFolder.self)
+    }
+
     static func branches(id: String) async throws -> [GitBranch] {
         if let target = remoteWorkspace(id) {
             return try await onPeer(

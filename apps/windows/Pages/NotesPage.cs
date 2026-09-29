@@ -25,6 +25,10 @@ namespace Tokenstat.Pages;
 internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string? _workspaceId;
+    private readonly Grid _split = new();
+    private readonly ScrollViewer _listScroll = new();
+    private readonly ScrollViewer _detailScroll = new();
+    private readonly Dictionary<string, (string Title, string Notes)> _noteDrafts = new();
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _bannerHost = new() { Spacing = Theme.SpaceS };
     private readonly StackPanel _composerHost = new() { Spacing = Theme.SpaceS };
@@ -70,13 +74,24 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         _root.Children.Add(_bannerHost);
         _root.Children.Add(_composerHost);
         _root.Children.Add(_libraryHost);
-        _root.Children.Add(_listHost);
         _listHost.Children.Add(Motion.SkeletonCard());
-        Content = new ScrollViewer
-        {
-            Padding = new Thickness(Theme.SpaceM),
-            Content = _root,
-        };
+        _root.Padding = new Thickness(Theme.SpaceM);
+        _split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(300) });
+        _split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        _listScroll.Content = _listHost;
+        _listScroll.Padding = new Thickness(Theme.SpaceM);
+        _detailScroll.Content = _detailHost;
+        Grid.SetColumn(_detailScroll, 1);
+        _split.Children.Add(_listScroll);
+        _split.Children.Add(_detailScroll);
+        var page = new Grid();
+        page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        page.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        page.Children.Add(_root);
+        Grid.SetRow(_split, 1);
+        page.Children.Add(_split);
+        Content = page;
+        SizeChanged += (_, _) => UpdateNoteLayout();
         RenderDetail();
         Loaded += async (_, _) => await LoadAsync();
     }
@@ -104,7 +119,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
     /// The inspector column content. Selection and reloads replace its
     /// children, so the column stays live without the shell asking again.
     /// </summary>
-    public UIElement? Inspector => _detailHost;
+    public UIElement? Inspector => null;
 
     public IList<UIElement> ToolbarActions()
     {
@@ -507,7 +522,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
     {
         _scopeHost.Children.Clear();
         if (_workspaceId is not null) return;
-        var choices = new List<(string Id, string Name)> { ("", "All workspaces"), (UnassignedPick, "Unassigned") };
+        var choices = new List<(string Id, string Name)> { ("", "All projects"), (UnassignedPick, "Unassigned") };
         choices.AddRange(_folders);
         var picker = new ComboBox { MinWidth = 160, MaxWidth = 240,
             ItemsSource = choices.Select(choice => choice.Name).ToList(),
@@ -719,8 +734,22 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         return null;
     }
 
+    private void UpdateNoteLayout()
+    {
+        var wide = ActualWidth >= 640;
+        var showList = wide || _selectedId is null;
+        _split.ColumnDefinitions[0].Width = showList
+            ? (wide ? new GridLength(Math.Min(320, ActualWidth * 0.36)) : new GridLength(1, GridUnitType.Star))
+            : new GridLength(0);
+        _split.ColumnDefinitions[1].Width = wide || _selectedId is not null
+            ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        _listScroll.Visibility = showList ? Visibility.Visible : Visibility.Collapsed;
+        _detailScroll.Visibility = wide || _selectedId is not null ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     private void RenderDetail()
     {
+        UpdateNoteLayout();
         _detailHost.Children.Clear();
         var note = SelectedNote();
         if (note is null)
@@ -738,6 +767,9 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
             });
             return;
         }
+        _detailHost.Children.Add(Buttons.Secondary("All notes", ActionIcon.Back, (_, _) => {
+            _selectedId = null; RenderList(); RenderDetail();
+        }, small: true));
         _detailHost.Children.Add(DetailCard(note));
     }
 
@@ -751,17 +783,17 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
             FontSize = 12,
             Opacity = 0.66,
         });
-        var text = new TextBox
-        {
-            Text = Format.Text(note, "title"),
-            AcceptsReturn = true,
-            TextWrapping = TextWrapping.Wrap,
-            MinHeight = 120,
-        };
+        var draft = _noteDrafts.GetValueOrDefault(id, (Title: Format.Text(note, "title"), Notes: Format.Text(note, "notes")));
+        var text = new TextBox { Header = "Title", Text = draft.Title };
+        var content = new TextBox { Header = "Note", Text = draft.Notes, AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap, MinHeight = 320 };
+        text.TextChanged += (_, _) => _noteDrafts[id] = (text.Text, content.Text);
+        content.TextChanged += (_, _) => _noteDrafts[id] = (text.Text, content.Text);
         body.Children.Add(text);
+        body.Children.Add(content);
         body.Children.Add(new TextBlock
         {
-            Text = "A note is its text, so this is the whole of it.",
+            Text = "Your draft stays here while you switch between notes. Save to keep your changes.",
             FontSize = 12,
             Opacity = 0.55,
             TextWrapping = TextWrapping.Wrap,
@@ -779,7 +811,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         var saveRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         saveRow.Children.Add(Buttons.Primary(
             "Save", ActionIcon.Save,
-            async (_, _) => await RenameAsync(id, text.Text)));
+            async (_, _) => await SaveNoteAsync(id, text.Text, content.Text)));
         body.Children.Add(saveRow);
 
         var archived = Format.Text(note, "column") == "archive";
@@ -902,18 +934,20 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         await LoadAsync();
     }
 
-    private async Task RenameAsync(string id, string text)
+    private async Task SaveNoteAsync(string id, string text, string notes)
     {
         var clean = text.Trim();
         if (clean.Length == 0)
         {
-            Banner("A note needs its text. Delete it instead of emptying it.");
+            Banner("Give this note a title before saving.");
             return;
         }
         try
         {
             await CallTodoAsync(
-                "todo.update", new JsonObject { ["id"] = id, ["title"] = clean });
+                "todo.update", new JsonObject { ["id"] = id, ["title"] = clean, ["notes"] = notes });
+            if (_noteDrafts.TryGetValue(id, out var current) && current.Title == text && current.Notes == notes)
+                _noteDrafts.Remove(id);
         }
         catch (Exception ex)
         {

@@ -139,6 +139,7 @@ struct RootView: View {
     #if os(macOS)
     @State private var terminals = TerminalsModel()
     @State private var workspacePendingRemove: WorkspaceFolder?
+    @State private var worktreeProject: WorkspaceFolder?
     /// A section-level destructive action. Kept separate from removing the
     /// workspace itself because this deletes transcripts, not the folder row.
     @State private var workspacePendingChatRemoval: WorkspaceFolder?
@@ -148,6 +149,7 @@ struct RootView: View {
     /// sidebar of six folders each listing every section is a wall, and the
     /// question it should answer first is which folder, not which section.
     @State private var expandedWorkspaces: Set<String> = []
+    @State private var knownSidebarProjects: Set<String> = []
     /// Chat transcripts are children of Chat, not a second global picker in
     /// the title bar. Keep the longer list opt-in so a busy workspace does
     /// not turn the sidebar into a transcript index.
@@ -212,7 +214,11 @@ struct RootView: View {
             // route must not keep naming it, or the sidebar lights no row while
             // the pane shows a different folder, and a scoped board keeps a scope
             // no `onChange(of: route)` will ever clear.
-            .onChange(of: workspaces.folders.map(\.id)) { _, ids in
+            .onChange(of: workspaces.folders.map(\.id), initial: true) { _, ids in
+                let incoming = Set(ids)
+                expandedWorkspaces.formUnion(incoming.subtracting(knownSidebarProjects))
+                expandedWorkspaces.formIntersection(incoming)
+                knownSidebarProjects = incoming
                 guard let id = route.workspaceID, !ids.contains(id) else { return }
                 lastSection[id] = nil
                 expandedWorkspaces.remove(id)
@@ -231,7 +237,7 @@ struct RootView: View {
                 }
             }
             .onChange(of: todo.selectionGeneration) { _, _ in
-                guard todo.selectedCardID != nil else { return }
+                guard route.hasInspector, todo.selectedCardID != nil else { return }
                 isInspectorPresented = true
                 if !inspectorFits {
                     isOverlayVisible = true
@@ -447,6 +453,22 @@ struct RootView: View {
             browserWorkspaceID = nil
             await BridgeLaunch.wait()
             await savedWorkCatalog.observe(scope: WorkSessionContext.shared.scope)
+        }
+        .sheet(item: $worktreeProject) { folder in
+            RemoteHostFeatureGate(feature: .worktrees, peer: folder.machineID, hostName: folder.machineLabel) {
+                ProjectWorktreeSheet(folder: folder) { created in
+                    worktreeProject = nil
+                    Task {
+                        if let peer = folder.machineID {
+                            workspaces.acceptRegisteredRemoteProject(created, peer: peer, label: folder.machineLabel)
+                            selectWorkspace("remote:\(peer):\(created.id)")
+                        } else {
+                            await workspaces.loadLocal()
+                            selectWorkspace(created.id)
+                        }
+                    }
+                }
+            }.modalFrame(width: 580, height: 610)
         }
         .sheet(item: $savedConversation) { DesktopSavedConversation(destination: $0) }
         .sheet(item: $savedFolder) { destination in
@@ -873,7 +895,7 @@ struct RootView: View {
         switch route {
         case .global(.home), .global(.insights), .global(.automations), .global(.workflows): return nil
         case let .global(section): return section.label
-        case .workspacesOverview: return "All workspaces"
+        case .workspacesOverview: return "All projects"
         default: return nil
         }
     }
@@ -916,8 +938,15 @@ struct RootView: View {
               let folder = workspaces.folders.first(where: { $0.id == id }) else { return nil }
         var branch: AnyView?
         if let git = folder.git, git.isRepo {
-            branch = AnyView(BranchChip(workspaceID: folder.id, git: git, model: workspaces) {
-                await workspaces.refresh()
+            branch = AnyView(HStack(spacing: Theme.Space.xs) {
+                BranchChip(workspaceID: folder.id, git: git, model: workspaces) {
+                    await workspaces.refresh()
+                }
+                #if os(macOS)
+                Button("Worktrees", .source) { worktreeProject = folder }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+                    .help("Open a separate working folder for another branch")
+                #endif
             })
         }
         return ProjectHeader(
@@ -1902,12 +1931,26 @@ struct RootView: View {
             }
             .padding(.horizontal, Theme.Space.m)
             .chromeBarMetrics()
-            SidebarRow(
-                label: "New chat",
-                symbol: "square.and.pencil",
-                isSelected: false
-            ) { startNewChat() }
-            .help("Start a chat in \(newChatFolder?.name ?? "a project")")
+            Menu {
+                if workspaces.folders.isEmpty {
+                    Button("Add project…", .create) { workspaces.requestAdd() }
+                } else {
+                    Section("Choose a project") {
+                        ForEach(workspaces.folders) { folder in
+                            Button("\(folder.name) · \(folder.machineLabel ?? "This Mac")", .create) { startNewChat(in: folder) }
+                                .help(folder.path)
+                        }
+                    }
+                }
+            } label: {
+                Label("New chat…", systemImage: "square.and.pencil")
+                    .font(Theme.callout)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Theme.Space.m).padding(.vertical, Theme.Space.s)
+                    .contentShape(.rect)
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden)
+            .help("Choose which project the new chat belongs to")
             SidebarRow(
                 label: "Search",
                 symbol: "magnifyingglass",
@@ -1957,7 +2000,7 @@ struct RootView: View {
         // directory, and a folder an agent touched once is not somewhere
         // anyone wants a terminal.
         SidebarGroupHeader(
-            title: "Workspaces",
+            title: "Projects",
             count: workspaces.folders.count,
             isExpanded: nil
         ) {} trailing: {
@@ -2009,7 +2052,7 @@ struct RootView: View {
             HStack(spacing: Theme.Space.xs) {
                 Image(systemName: "plus.circle")
                     .font(Theme.font(11, weight: .semibold))
-                Text("Add workspace…")
+                Text("Add project…")
                     .font(Theme.callout)
                 Spacer(minLength: 0)
             }
@@ -2082,7 +2125,7 @@ struct RootView: View {
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .help(isExpanded ? "Collapse workspace" : "Expand workspace")
+            .help(isExpanded ? "Collapse project" : "Expand project")
 
             WorkspaceRow(
                 folder: folder,
@@ -2133,6 +2176,9 @@ struct RootView: View {
             }
             ThemeRule()
             Button("New chat", .create) { startNewChat(in: folder) }
+            if folder.git?.isRepo == true {
+                Button("Worktrees…", .source) { worktreeProject = folder }
+            }
             Button("Delete all chats…", .delete, role: .destructive) {
                 workspacePendingChatRemoval = folder
             }
@@ -2188,8 +2234,13 @@ struct RootView: View {
         showingTerminal: Bool
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            chatHistoryRows(for: folder)
+            SidebarRow(label: "Terminals", symbol: "terminal", trailing: sessions.isEmpty ? nil : "\(sessions.count)",
+                       isSelected: showingTerminal) { openSection(.sessions, in: folder.id) }
             sessionRows(sessions, in: folder, showingTerminal: showingTerminal)
+            SidebarRow(label: "Chats", symbol: "bubble.left.and.bubble.right", isSelected: false) {
+                openSection(.chat, in: folder.id) { showingChatOverview = true }
+            }
+            chatHistoryRows(for: folder)
             ForEach(automations.liveJobs(in: folder.id)) { job in
                 let run = automations.lastRun(for: job)
                 ActiveAutomationRow(
@@ -2227,7 +2278,7 @@ struct RootView: View {
         .task(id: folder.id) {
             guard chat.sidebarChats(in: folder.id).isEmpty, chat.folderID != folder.id else { return }
             await BridgeLaunch.wait()
-            await chat.warmWorkspacePreviews(folder.id)
+            await chat.warmWorkspacePreviews(folder.id, includeMessages: false)
         }
     }
 

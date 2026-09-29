@@ -53,7 +53,7 @@ object SearchPlaces {
             listOf("dashboard", "spend", "today", "week", "activity", "limits", "start"),
         ),
         SearchPlace(
-            "tab:workspaces", "Workspaces", "Tab",
+            "tab:workspaces", "Projects", "Tab",
             ActionIcon.Reveal,
             listOf("folders", "projects", "chat", "sessions", "repos", "git", "terminal"),
         ),
@@ -94,7 +94,7 @@ object SearchPlaces {
             listOf("cards", "arrange", "sections", "customise", "edit", "rearrange", "hide"),
         ),
         SearchPlace(
-            "workspaces:editor", "Customize Workspaces", "Workspaces",
+            "workspaces:editor", "Customize Workspaces", "Projects",
             ActionIcon.Layout,
             listOf("folders", "chats", "sessions", "arrange", "sections", "customise", "edit", "rearrange", "hide", "order"),
         ),
