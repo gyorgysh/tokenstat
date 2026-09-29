@@ -1603,6 +1603,25 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return row;
     }
 
+    /// <summary>
+    /// The agent, then a model or an effort only when one was chosen.
+    /// The panel this opens is where the defaults are named.
+    /// </summary>
+    private static string ComposerSummary(JsonNode? backend, string backendId, string model, string effort)
+    {
+        var parts = new List<string> { Format.Text(backend, "label", backendId) };
+        if (!string.IsNullOrEmpty(model))
+        {
+            parts.Add(model);
+        }
+        var efforts = backend?["efforts"] as JsonArray;
+        if (efforts is { Count: > 0 } && !string.IsNullOrEmpty(effort))
+        {
+            parts.Add(effort + " effort");
+        }
+        return string.Join(" · ", parts);
+    }
+
     private UIElement CompactAgentMenu(bool locked)
     {
         var chat = _openChat ?? new JsonObject();
@@ -1610,9 +1629,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var backend = Backend(backendId);
         var model = Format.Text(chat, "model");
         var effort = Format.Text(chat, "effort");
-        var label = Format.Text(backend, "label", backendId);
-        label += string.IsNullOrEmpty(model) ? " · Default" : " · " + model;
-        if (!string.IsNullOrEmpty(effort)) label += " · " + effort;
+        var label = ComposerSummary(backend, backendId, model, effort);
 
         var flyout = new Flyout();
         var panel = new StackPanel { Spacing = Theme.SpaceS, Width = 360 };

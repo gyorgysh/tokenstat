@@ -177,14 +177,10 @@ internal fun chatAgentField(choice: ChatAgentChoice): Pair<String, String> = whe
 internal fun chatAgentForcesBypass(backends: List<JsonObject>, id: String): Boolean =
     backendOf(backends, id)?.str("gateTier") == "bypassOnly"
 
-/// What this conversation is answered by, in one line: agent, model, and the
-/// effort only when the agent has one. Port of `ChatAgentChoices.summary`.
-///
-/// Named rather than left blank, the way the iPhone composer reads
-/// "OpenCode · Default · Effort: Default". A gap where the model should be
-/// looks like something failed to load. Effort is left out entirely for an
-/// agent that does not offer one, rather than reading "Effort: Default" about
-/// a control that does not exist.
+/// The agent, then only what somebody chose. Naming a default says the
+/// setting was changed when it was not. The panel this opens shows every
+/// setting, defaults included. Effort appears only when this agent offers
+/// one and the conversation has picked one.
 internal fun chatAgentSummary(backends: List<JsonObject>, chat: JsonObject?): String {
     val id = chat?.str("backend").orEmpty()
     val backend = backendOf(backends, id)
@@ -192,9 +188,10 @@ internal fun chatAgentSummary(backends: List<JsonObject>, chat: JsonObject?): St
         ?: id.ifBlank { null }?.let { ai.tokenstat.tokenstat.ui.logic.harnessName(it) }
         ?: "Agent"
     val parts = mutableListOf(agent)
-    parts.add(chat?.str("model")?.ifBlank { null } ?: "Default")
-    if (stringList(backend, "efforts").isNotEmpty()) {
-        parts.add("Effort: ${chat?.str("effort")?.ifBlank { null } ?: "Default"}")
+    chat?.str("model")?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
+    val effort = chat?.str("effort")?.takeIf { it.isNotBlank() }
+    if (stringList(backend, "efforts").isNotEmpty() && effort != null) {
+        parts.add("$effort effort")
     }
     return parts.joinToString(" · ")
 }

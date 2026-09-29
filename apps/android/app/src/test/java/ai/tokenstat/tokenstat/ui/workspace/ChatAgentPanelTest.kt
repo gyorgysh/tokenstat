@@ -122,12 +122,16 @@ class ChatAgentPanelTest {
     }
 
     @Test
-    fun `the summary names the agent and model, and effort only when offered`() {
+    fun `the summary names only the settings that were changed`() {
         assertEquals(
-            "Muse · opus · Effort: max",
+            "Muse · opus · max effort",
             chatAgentSummary(backends, chat("muse", model = "opus", effort = "max")),
         )
-        assertEquals("Muse · Default · Effort: Default", chatAgentSummary(backends, chat("muse")))
-        assertEquals("Agent · Default", chatAgentSummary(backends, null))
+        assertEquals("Muse", chatAgentSummary(backends, chat("muse")))
+        assertEquals("Agent", chatAgentSummary(backends, null))
+        assertEquals(
+            "Codex · gpt-5.4",
+            chatAgentSummary(backends, chat("codex", model = "gpt-5.4", effort = "max")),
+        )
     }
 }
