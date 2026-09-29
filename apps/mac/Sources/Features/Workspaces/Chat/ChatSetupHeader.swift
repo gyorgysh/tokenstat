@@ -101,7 +101,7 @@ struct ChatSetupHeader: View {
                 chip(modelName)
             }
             chip(chat.autonomy == "bypass"
-                ? "Bypass"
+                ? "Don't ask"
                 : ChatGateCopy.chip(backend?.gateTier))
             Spacer(minLength: 0)
             if let onOpenInspector {
@@ -322,15 +322,15 @@ struct ChatComposerControls: View {
             // with its choice made by the backend. Never enabled: there is
             // nothing to switch to, like the setup form's locked toggle.
             ChatCompactPills(
-                options: [(value: "bypass", label: "Bypass")],
+                options: [(value: "bypass", label: "Don't ask")],
                 selection: autonomyBinding
             )
             .disabled(true)
         } else {
             ChatCompactPills(
                 options: [
-                    (value: "standard", label: "Ask"),
-                    (value: "bypass", label: "Bypass"),
+                    (value: "standard", label: "Ask first"),
+                    (value: "bypass", label: "Don't ask"),
                 ],
                 selection: autonomyBinding
             )
@@ -487,16 +487,17 @@ struct ChatAgentChoices {
         return favs + rest
     }
 
+    /// The agent, then only what somebody chose. "Codex · Default · Effort:
+    /// Default" said three times that nothing was changed; the panel this
+    /// opens shows every setting, defaults included.
     var summary: String {
         let agent = backend?.label ?? chat.backend
         var parts = [agent]
         if let name = chat.model, !name.isEmpty {
             parts.append(name)
-        } else {
-            parts.append("Default")
         }
-        if backend?.efforts.isEmpty == false {
-            parts.append("Effort: \(chat.effort.flatMap { $0.isEmpty ? nil : $0 } ?? "Default")")
+        if backend?.efforts.isEmpty == false, let effort = chat.effort, !effort.isEmpty {
+            parts.append("\(effort) effort")
         }
         return parts.joined(separator: " · ")
     }

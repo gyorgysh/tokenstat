@@ -1589,7 +1589,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var bypassOnly = gate == "bypassOnly";
         if (bypassOnly)
         {
-            row.Children.Add(Chip("Bypass"));
+            row.Children.Add(Chip("Don't ask"));
         }
         else
         {
@@ -1695,8 +1695,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private UIElement AutonomyPills(string current, bool enabled)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        row.Children.Add(AutonomyPill("Ask", "standard", current, enabled));
-        row.Children.Add(AutonomyPill("Bypass", "bypass", current, enabled));
+        row.Children.Add(AutonomyPill("Ask first", "standard", current, enabled));
+        row.Children.Add(AutonomyPill("Don't ask", "bypass", current, enabled));
         return row;
     }
 

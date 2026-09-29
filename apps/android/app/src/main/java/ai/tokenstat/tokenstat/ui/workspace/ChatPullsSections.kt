@@ -1701,7 +1701,7 @@ private fun ChatSetupDialog(
                     )
                     if (chatAgentForcesBypass(backends, chat?.str("backend").orEmpty())) {
                         ChatSegmented(
-                            options = listOf("bypass" to "Bypass"),
+                            options = listOf("bypass" to "Don't ask"),
                             selected = "bypass",
                             enabled = false,
                             onSelect = {},
@@ -1709,7 +1709,7 @@ private fun ChatSetupDialog(
                         )
                     } else {
                         ChatSegmented(
-                            options = listOf("standard" to "Ask", "bypass" to "Bypass"),
+                            options = listOf("standard" to "Ask first", "bypass" to "Don't ask"),
                             selected = if (chat?.str("autonomy") == "bypass") "bypass" else "standard",
                             enabled = chat?.bol("running") != true,
                             onSelect = { updateChat("autonomy", it) },
@@ -2229,7 +2229,7 @@ private fun ChatComposer(
                     // same control with its choice made by the agent. Never
                     // enabled: there is nothing to switch to.
                     ChatSegmented(
-                        options = listOf("bypass" to "Bypass"),
+                        options = listOf("bypass" to "Don't ask"),
                         selected = "bypass",
                         enabled = false,
                         onSelect = {},
@@ -2237,7 +2237,7 @@ private fun ChatComposer(
                     )
                 } else {
                     ChatSegmented(
-                        options = listOf("standard" to "Ask", "bypass" to "Bypass"),
+                        options = listOf("standard" to "Ask first", "bypass" to "Don't ask"),
                         selected = autonomy,
                         enabled = !locked,
                         onSelect = { onChange("autonomy", it) },

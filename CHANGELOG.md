@@ -40,7 +40,10 @@ one list, and the characters are plush toys that keep their shape.
 - Workspaces are called Projects everywhere a person reads it. New chat
   asks which project the chat belongs to.
 - Chats that were opened and never used no longer fill the lists, and
-  Home's Continue shows only work that can still open.
+  Home's Continue shows only work that can still open. On Android a chat
+  row is its title and one line, so about twice as many fit.
+- The chat composer names only the settings you changed, and its
+  permission switch reads Ask first or Don't ask instead of Ask or Bypass.
 - Automations are a table that fits a normal window: name, schedule,
   project, next run and last run, sortable, with Run now at the row's
   end. Templates and scheduler settings are one click away.
