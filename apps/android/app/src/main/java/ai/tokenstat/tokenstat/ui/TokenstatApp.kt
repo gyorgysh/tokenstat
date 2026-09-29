@@ -1926,6 +1926,14 @@ private fun DevicesScreen(
                 contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + TabBarChrome.contentBottomInset),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                        TsSecondaryButton(label = "Add device", icon = ActionIcon.Create.vector,
+                            small = true, onClick = onSetupWizard)
+                        TsSecondaryButton(label = "SSH hosts", icon = Icons.Default.Terminal,
+                            small = true, onClick = { sshOpen = true })
+                    }
+                }
             item {
                     TsSearchField(
                         prompt = "Search devices",
@@ -2022,14 +2030,6 @@ private fun DevicesScreen(
                             }
                             Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary)
                         }
-                    }
-                }
-                item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                        TsSecondaryButton(label = "Add device", icon = ActionIcon.Create.vector,
-                            small = true, onClick = onSetupWizard)
-                        TsSecondaryButton(label = "SSH hosts", icon = Icons.Default.Terminal,
-                            small = true, onClick = { sshOpen = true })
                     }
                 }
                 if (state.account == null) {

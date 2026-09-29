@@ -620,7 +620,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         for (var i = 0; i < Columns.Length; i++)
         {
             var stage = Column(Columns[i], ColumnTitles[i]);
-            stage.Width = Math.Max(280, (_boardHost.ActualWidth - Theme.SpaceM * 2) / 3);
+            stage.Width = Math.Max(226, (_boardHost.ActualWidth - Theme.SpaceM * 2) / 3);
             stages.Children.Add(stage);
         }
         var board = new ScrollViewer
@@ -633,7 +633,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         };
         board.SizeChanged += (_, e) =>
         {
-            var width = Math.Max(280, (e.NewSize.Width - Theme.SpaceM * 2) / 3);
+            var width = Math.Max(226, (e.NewSize.Width - Theme.SpaceM * 2) / 3);
             foreach (FrameworkElement stage in stages.Children)
                 if (Math.Abs(stage.Width - width) > 0.5) stage.Width = width;
         };

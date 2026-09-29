@@ -36,6 +36,16 @@ struct ClientDevicesView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
+                HStack(spacing: Theme.Space.m) {
+                    Button("Add device", .create) { showSetup = true }
+                    NavigationLink {
+                        SSHLibraryView(vaultTier: account.account?.vaultTierForSsh)
+                    } label: {
+                        Label("SSH hosts", systemImage: "terminal")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .font(ClientType.label)
                 if !machines.contains(where: \.isHost) {
                     if account.isLoading {
                         ClientWireframe.Rows(count: 3)
@@ -88,16 +98,7 @@ struct ClientDevicesView: View {
                             .padding(.horizontal, 2)
                     }
                 }
-                HStack(spacing: Theme.Space.m) {
-                    Button("Add device", .create) { showSetup = true }
-                    NavigationLink {
-                        SSHLibraryView(vaultTier: account.account?.vaultTierForSsh)
-                    } label: {
-                        Label("SSH hosts", systemImage: "terminal")
-                    }
-                }
-                .buttonStyle(.bordered)
-                .font(ClientType.label)
+
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.top, Theme.Space.s)

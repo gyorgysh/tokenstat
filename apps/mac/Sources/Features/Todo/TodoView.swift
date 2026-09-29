@@ -81,8 +81,9 @@ struct TodoView: View {
                 let available = proxy.size.height - Theme.Space.m * 2
                 let gap = Theme.Space.m
                 let usable = proxy.size.width - Theme.Space.m * 2 - Theme.Space.s * 6
-                // Preserve stage order and drag destinations when the window narrows.
-                let columnWidth = max(260, (usable - gap * 2) / 3)
+                // Show all three stages at ordinary desktop widths; smaller
+                // windows can still scroll without changing stage order.
+                let columnWidth = max(210, (usable - gap * 2) / 3)
                 ScrollView(.horizontal) {
                     HStack(alignment: .top, spacing: gap) {
                         ForEach(Self.columns, id: \.0) { id, label in
@@ -219,7 +220,7 @@ struct TodoView: View {
                       systemImage: agentFilter.isEmpty && !attentionOnly ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
             }
             .fixedSize()
-            .labelStyle(.iconOnly)
+            .labelStyle(.titleAndIcon)
             .help("Filter by agent or show high-priority tasks and failed runs")
             if hasFilters {
                 Button("Clear", .dismiss) { search = ""; agentFilter = ""; attentionOnly = false }
