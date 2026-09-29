@@ -11,7 +11,18 @@ private struct WindowLiveResizingKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct PersonaMotionAllowedKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
 extension EnvironmentValues {
+    /// Retained panes can stay mounted while hidden. Appearance callbacks do
+    /// not describe that visibility, so their parent explicitly gates motion.
+    var personaMotionAllowed: Bool {
+        get { self[PersonaMotionAllowedKey.self] }
+        set { self[PersonaMotionAllowedKey.self] = newValue }
+    }
+
     var isWindowLiveResizing: Bool {
         get { self[WindowLiveResizingKey.self] }
         set { self[WindowLiveResizingKey.self] = newValue }
@@ -52,6 +63,7 @@ struct PersonaMark: View {
     /// that selects the row.
     var pokeable = false
 
+    @Environment(\.personaMotionAllowed) private var paneAllowsMotion
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.isWindowLiveResizing) private var isLiveResizing
     @Environment(\.scenePhase) private var scenePhase
@@ -121,7 +133,7 @@ struct PersonaMark: View {
     /// looking. A window that is not key does not need sixty frames a second
     /// of anything, and on a laptop that is battery.
     private var moving: Bool {
-        if reduceMotion || !isVisible { return false }
+        if reduceMotion || !isVisible || !paneAllowsMotion { return false }
         if scenePhase != .active { return false }
         #if os(macOS)
         if controlActiveState != .key { return false }

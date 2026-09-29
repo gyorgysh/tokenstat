@@ -39,6 +39,7 @@ internal sealed class PersonaPastime : Grid
     private readonly PersonaMark _mark = new(pokeable: true);
     private readonly Random _random = new();
     private CancellationTokenSource? _loop;
+    private bool _inViewport = true;
 
     private ulong _seed;
     private double _size = 40;
@@ -55,6 +56,17 @@ internal sealed class PersonaPastime : Grid
         Children.Add(_mark);
         Loaded += (_, _) => Start();
         Unloaded += (_, _) => Stop();
+        EffectiveViewportChanged += (_, args) =>
+        {
+            var viewport = args.EffectiveViewport;
+            bool visible = viewport.Width > 0 && viewport.Height > 0
+                && viewport.Right > 0 && viewport.Bottom > 0
+                && viewport.Left < ActualWidth && viewport.Top < ActualHeight;
+            if (_inViewport == visible) return;
+            _inViewport = visible;
+            if (visible && IsLoaded) Start();
+            else Stop();
+        };
     }
 
     public ulong Seed
@@ -90,6 +102,7 @@ internal sealed class PersonaPastime : Grid
     private void Start()
     {
         Stop();
+        if (!_inViewport) return;
         _loop = new CancellationTokenSource();
         _ = LiveAsync(_loop.Token);
     }
@@ -131,6 +144,10 @@ internal sealed class PersonaPastime : Grid
                     return;
                 }
 
+                // A retained or inactive window must not change poses in the
+                // background, including when system animations are disabled.
+                if (!_mark.MotionAllowed) continue;
+
                 PersonaMood next;
                 if (doing == Repertoire.Leisure && _random.NextDouble() < 0.12)
                 {
@@ -154,7 +171,7 @@ internal sealed class PersonaPastime : Grid
                 {
                     return;
                 }
-                _mark.State = Quiet(doing);
+                if (_mark.MotionAllowed) _mark.State = Quiet(doing);
             }
             catch (TaskCanceledException)
             {

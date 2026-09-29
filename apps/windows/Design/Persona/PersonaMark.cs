@@ -169,6 +169,9 @@ internal sealed class PersonaMark : Canvas
     /// Motion is off when the person asked for it to be. Then the engine
     /// presents the mood's resting pose rather than freezing mid-bounce.
     /// </summary>
+    internal bool MotionAllowed => IsLoaded && _inViewport && Visibility == Visibility.Visible
+        && !MainWindow.MotionSuspended && Moving();
+
     private bool Moving()
     {
         try

@@ -388,6 +388,7 @@ struct ChatView: View {
                 ChatPaneOpening()
             }
             }
+            .transformEnvironment(\.personaMotionAllowed) { $0 = $0 && !showingOverview && isActive }
             .opacity(showingOverview ? 0 : 1)
             .allowsHitTesting(!showingOverview)
             .accessibilityHidden(showingOverview)

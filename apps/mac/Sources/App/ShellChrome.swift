@@ -51,6 +51,7 @@ extension View {
     /// proposal before it becomes visible.
     func retainedPane(isActive: Bool) -> some View {
         RetainedPaneLayout(isActive: isActive) { self }
+            .transformEnvironment(\.personaMotionAllowed) { $0 = $0 && isActive }
     }
 
     /// The left chrome's surface: a native clear glass backdrop on macOS 26

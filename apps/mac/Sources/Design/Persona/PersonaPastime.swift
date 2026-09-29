@@ -116,20 +116,43 @@ struct PersonaPastime: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
-    @State private var mood: PersonaMood = .idle
+    @Environment(\.personaMotionAllowed) private var paneAllowsMotion
+    @Environment(\.isWindowLiveResizing) private var isLiveResizing
+    #if os(macOS)
+    @Environment(\.controlActiveState) private var controlActiveState
+    #endif
+    @State private var mood: PersonaMood
+
+    init(seed: UInt64, size: CGFloat = 96, doing: Repertoire = .leisure, pokeable: Bool = true) {
+        self.seed = seed
+        self.size = size
+        self.doing = doing
+        self.pokeable = pokeable
+        _mood = State(initialValue: doing.quiet)
+    }
+
+    private var canAnimate: Bool {
+        guard !reduceMotion, paneAllowsMotion, !isLiveResizing, scenePhase == .active else { return false }
+        #if os(macOS)
+        guard controlActiveState == .key else { return false }
+        #endif
+        return true
+    }
 
     var body: some View {
         PersonaMark(seed: seed, size: size, state: mood, pokeable: pokeable)
-            .task(id: reduceMotion || scenePhase != .active) { await live() }
+            .task(id: canAnimate) {
+                if canAnimate { await live() }
+                else if reduceMotion { mood = doing.quiet }
+            }
     }
 
     private func live() async {
-        mood = doing.quiet
         // With motion off there is nothing to schedule: the mark draws the
         // resting pose of whatever it is holding, and a timer swapping between
         // resting poses would be the flicker Reduce Motion asks us not to
         // make.
-        guard !reduceMotion, scenePhase == .active else { return }
+        guard canAnimate else { return }
         var last: PersonaMood?
         var first = doing.opensBusy
         while !Task.isCancelled {
