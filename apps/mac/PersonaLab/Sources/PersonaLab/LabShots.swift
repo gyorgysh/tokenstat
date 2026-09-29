@@ -2,6 +2,8 @@
 
 import AppKit
 import SwiftUI
+import ImageIO
+import UniformTypeIdentifiers
 
 /// Render filmstrips to a PNG instead of opening a window.
 ///
@@ -10,6 +12,7 @@ import SwiftUI
 /// something you can look at, diff against the last attempt, and point at.
 ///
 ///   swift run --package-path apps/mac/PersonaLab PersonaLab --shots out.png
+///   swift run --package-path apps/mac/PersonaLab PersonaLab --animation out.gif --span 15
 @MainActor
 enum LabShots {
     struct Plan {
@@ -25,6 +28,18 @@ enum LabShots {
     }
 
     static func run(arguments: [String]) -> Bool {
+        if let path = value(after: "--animation", in: arguments) {
+            let names = (value(after: "--mood", in: arguments) ?? "idle,thinking,bouncing,speaking,dancing").split(separator: ",")
+            let moods = names.compactMap { name in PersonaMood.allCases.first { String(describing: $0) == name } }
+            guard !moods.isEmpty else {
+                FileHandle.standardError.write(Data("--mood must name at least one persona mood\n".utf8))
+                return true
+            }
+            let size = min(512, max(24, value(after: "--size", in: arguments).flatMap(Double.init) ?? 160))
+            let span = min(30, max(1, value(after: "--span", in: arguments).flatMap(Double.init) ?? 12))
+            animation(to: path, size: size, span: span, moods: moods)
+            return true
+        }
         if let pair = value(after: "--shift", in: arguments) {
             let names = pair.split(separator: ",").map(String.init)
             let moods = names.compactMap { name in
@@ -94,6 +109,41 @@ enum LabShots {
             write(strip(plan: plan, moods: PersonaMood.allCases), to: path)
         }
         return true
+    }
+
+    /// A review artifact from the production engine, sampled at25fps. This
+    /// does not measure the app's live UI frame rate or native compositing.
+    private static func animation(to path: String, size: CGFloat, span: Double, moods: [PersonaMood]) {
+        let fps = 25.0
+        let count = Int(span * fps)
+        guard let destination = CGImageDestinationCreateWithURL(URL(fileURLWithPath: path) as CFURL,
+            UTType.gif.identifier as CFString, count, nil) else { return }
+        CGImageDestinationSetProperties(destination, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
+        let engine = PersonaEngine(seed: 0x51ED_2764_A11C_0001, mood: moods[0])
+        engine.advance(to: 0, mood: moods[0], moving: true)
+        let appearance = NSAppearance(named: .darkAqua) ?? NSAppearance.currentDrawing()
+        appearance.performAsCurrentDrawingAppearance {
+            for index in 0..<count {
+                autoreleasepool {
+                    let time = Double(index) / fps
+                    let mood = moods[min(moods.count - 1, Int(time / span * Double(moods.count)))]
+                    advance(engine, to: time, mood: mood)
+                    guard let frame = render(engine: engine, mood: mood, size: size) else { return }
+                    let opaque = NSImage(size: NSSize(width: size, height: size))
+                    opaque.lockFocus()
+                    NSColor(red: 0.09, green: 0.08, blue: 0.12, alpha: 1).setFill()
+                    NSRect(x: 0, y: 0, width: size, height: size).fill()
+                    frame.draw(in: NSRect(x: 0, y: 0, width: size, height: size))
+                    opaque.unlockFocus()
+                    guard let image = opaque.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+                    CGImageDestinationAddImage(destination, image,
+                        [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 1 / fps]] as CFDictionary)
+                }
+            }
+        }
+        if !CGImageDestinationFinalize(destination) {
+            FileHandle.standardError.write(Data("could not encode persona animation\n".utf8))
+        } else { print("Wrote \(count) frames to \(path)") }
     }
 
     private static func value(after flag: String, in arguments: [String]) -> String? {
