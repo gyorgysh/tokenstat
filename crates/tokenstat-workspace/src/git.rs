@@ -858,9 +858,10 @@ pub fn worktrees(dir: &Path) -> Result<Vec<Worktree>, String> {
         };
         for field in record.split('\0') {
             if let Some(path) = field.strip_prefix("worktree ") {
-                // Git on Windows writes `C:/Users/...`. Every other path the
-                // app holds, registered projects included, uses backslashes,
-                // and a worktree has to compare equal to its own project.
+                // Git on Windows writes `C:/Users/...`. A project created from
+                // a worktree or a clone is stored as `C:\...`, with no `\\?\`
+                // prefix, so this slash rewrite is what makes the listed path
+                // compare equal to that project.
                 tree.path = if cfg!(windows) {
                     path.replace('/', "\\")
                 } else {

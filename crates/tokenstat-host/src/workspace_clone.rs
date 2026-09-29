@@ -237,7 +237,7 @@ fn watch(session: String, permit: ClonePermit<'static>, claim: TargetClaim) {
             }
             let registered = {
                 let mut registry = crate::workspaces::write();
-                let folder = registry.add(&path, jiff::Timestamp::now().as_millisecond());
+                let folder = registry.add_plain(&path, jiff::Timestamp::now().as_millisecond());
                 match folder {
                     Ok(folder) => crate::workspaces::save(&registry).map(|()| folder.id),
                     Err(error) => Err(error.to_string()),

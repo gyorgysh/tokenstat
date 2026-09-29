@@ -221,4 +221,5 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 23 repairs vault identity registration and persists Windows host
 /// diagnostics. Desktop clients replace older helpers so these fixes also
 /// reach an already-running always-on host.
+/// Version 24 adds `workspace.worktrees` and `workspace.createWorktree`.
 pub const PROTOCOL_VERSION: &str = "24";

@@ -105,29 +105,11 @@ pub(crate) fn resolve_root(path: &Path) -> Result<PathBuf, String> {
 }
 
 /// A canonical path in the form a person and every tool would write it.
+///
+/// The spelling lives in the registry, because that is what stores the
+/// project and what a later registration has to match.
 fn plain(path: PathBuf) -> PathBuf {
-    if cfg!(windows)
-        && let Some(simpler) = without_verbatim_prefix(&path.to_string_lossy())
-    {
-        return PathBuf::from(simpler);
-    }
-    path
-}
-
-/// `\\?\C:\a` is `C:\a`, and `\\?\UNC\server\share` is
-/// `\\server\share`. Anything else verbatim (a volume GUID, a device) has
-/// no plainer spelling and is left alone. Plain text in, so it is tested on
-/// every platform, not only where it runs.
-fn without_verbatim_prefix(text: &str) -> Option<String> {
-    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
-        return Some(format!(r"\\{rest}"));
-    }
-    let rest = text.strip_prefix(r"\\?\")?;
-    let mut chars = rest.chars();
-    match (chars.next(), chars.next()) {
-        (Some(drive), Some(':')) if drive.is_ascii_alphabetic() => Some(rest.to_owned()),
-        _ => None,
-    }
+    tokenstat_workspace::registry::plain_path(&path)
 }
 
 fn browse(params: &str) -> Result<Value, String> {
@@ -269,18 +251,28 @@ fn mkdir(params: &str) -> Result<Value, String> {
 mod tests {
     #[test]
     fn a_verbatim_drive_or_share_path_loses_its_prefix() {
-        use super::without_verbatim_prefix as plain;
+        use std::path::PathBuf;
+        let plain = super::plain;
         assert_eq!(
-            plain(r"\\?\C:\Users\a\git").as_deref(),
-            Some(r"C:\Users\a\git")
+            plain(PathBuf::from(r"\\?\C:\Users\a\git")),
+            PathBuf::from(r"C:\Users\a\git")
         );
         assert_eq!(
-            plain(r"\\?\UNC\server\share\x").as_deref(),
-            Some(r"\\server\share\x")
+            plain(PathBuf::from(r"\\?\UNC\server\share\x")),
+            PathBuf::from(r"\\server\share\x")
         );
-        assert_eq!(plain(r"\\?\Volume{0000}\x"), None);
-        assert_eq!(plain(r"C:\Users\a"), None);
-        assert_eq!(plain("/Users/a/git"), None);
+        assert_eq!(
+            plain(PathBuf::from(r"\\?\Volume{0000}\x")),
+            PathBuf::from(r"\\?\Volume{0000}\x")
+        );
+        assert_eq!(
+            plain(PathBuf::from(r"C:\Users\a")),
+            PathBuf::from(r"C:\Users\a")
+        );
+        assert_eq!(
+            plain(PathBuf::from("/Users/a/git")),
+            PathBuf::from("/Users/a/git")
+        );
     }
 
     use super::*;

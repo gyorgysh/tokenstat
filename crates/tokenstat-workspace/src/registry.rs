@@ -72,6 +72,41 @@ fn id_for(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+/// A path in the spelling a person and git write.
+///
+/// `canonicalize` on Windows prefixes `\\?\`. Git cannot create a worktree
+/// under that prefix, and a project list should not show it. A volume GUID
+/// has no plainer form and is left as it is. The check is on the text, so it
+/// is the same on every platform.
+pub fn plain_path(path: &Path) -> PathBuf {
+    match without_verbatim_prefix(&path.to_string_lossy()) {
+        Some(simpler) => PathBuf::from(simpler),
+        None => path.to_path_buf(),
+    }
+}
+
+/// `\\?\C:\a` is `C:\a`, and `\\?\UNC\server\share` is `\\server\share`.
+fn without_verbatim_prefix(text: &str) -> Option<String> {
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return Some(format!(r"\\{rest}"));
+    }
+    let rest = text.strip_prefix(r"\\?\")?;
+    let mut chars = rest.chars();
+    match (chars.next(), chars.next()) {
+        (Some(drive), Some(':')) if drive.is_ascii_alphabetic() => Some(rest.to_owned()),
+        _ => None,
+    }
+}
+
+/// Whether two spellings name one folder.
+///
+/// A row stored before the prefix was stripped, or by an ordinary add, can
+/// still carry `\\?\`. A later registration of the plain spelling has to
+/// find that row rather than insert a second one beside it.
+fn same_folder(stored: &Path, canonical: &Path) -> bool {
+    stored == canonical || plain_path(stored) == plain_path(canonical)
+}
+
 /// The registered set, persisted as JSON.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Registry {
@@ -144,12 +179,37 @@ impl Registry {
             source,
         })?;
 
-        if let Some(existing) = self.workspaces.iter().find(|w| w.path == path) {
+        if let Some(existing) = self.workspaces.iter().find(|w| same_folder(&w.path, &path)) {
             return Ok(existing.clone());
         }
         let ws = Workspace::new(path, now_ms);
         self.workspaces.push(ws.clone());
         Ok(ws)
+    }
+
+    /// Register a folder and store a new row without a Windows verbatim prefix.
+    ///
+    /// For a worktree or a clone the path was already checked and stripped,
+    /// then `add` canonicalizes and Windows puts `\\?\` back. A new row is
+    /// rewritten to the plain spelling before anything is keyed to that id.
+    /// An existing row is returned as stored: its id is the path, and
+    /// changing it would orphan chats, terminals and automations.
+    pub fn add_plain(&mut self, path: &Path, now_ms: i64) -> Result<Workspace, RegistryError> {
+        let before = self.workspaces.len();
+        let added = self.add(path, now_ms)?;
+        if self.workspaces.len() == before {
+            return Ok(added);
+        }
+        let plain = plain_path(&added.path);
+        if plain == added.path {
+            return Ok(added);
+        }
+        let Some(row) = self.workspaces.iter_mut().find(|w| w.id == added.id) else {
+            return Ok(added);
+        };
+        row.path = plain.clone();
+        row.id = id_for(&plain);
+        Ok(row.clone())
     }
 
     /// Forget a folder. Removes nothing from disk, ever.
@@ -285,5 +345,76 @@ mod tests {
         assert_eq!(r.get(&ws.id).unwrap().name, "My Project");
         assert_eq!(r.get(&ws.id).unwrap().path, dir);
         assert!(!r.rename(&ws.id, "   "), "an empty name is not a rename");
+    }
+
+    #[test]
+    fn a_verbatim_drive_or_share_path_loses_its_prefix() {
+        assert_eq!(
+            plain_path(Path::new(r"\\?\C:\Users\a\git")),
+            PathBuf::from(r"C:\Users\a\git")
+        );
+        assert_eq!(
+            plain_path(Path::new(r"\\?\UNC\server\share\x")),
+            PathBuf::from(r"\\server\share\x")
+        );
+        assert_eq!(
+            plain_path(Path::new(r"\\?\Volume{0000}\x")),
+            PathBuf::from(r"\\?\Volume{0000}\x")
+        );
+        assert_eq!(
+            plain_path(Path::new(r"C:\Users\a")),
+            PathBuf::from(r"C:\Users\a")
+        );
+        assert_eq!(
+            plain_path(Path::new("/Users/a/git")),
+            PathBuf::from("/Users/a/git")
+        );
+        assert!(same_folder(
+            Path::new(r"C:\Users\a\proj"),
+            Path::new(r"\\?\C:\Users\a\proj")
+        ));
+        assert!(!same_folder(
+            Path::new(r"C:\Users\a\other"),
+            Path::new(r"\\?\C:\Users\a\proj")
+        ));
+    }
+
+    #[test]
+    fn a_newly_listed_folder_is_stored_without_a_verbatim_prefix() {
+        let dir = temp_dir("listed");
+        let mut r = Registry::default();
+        let ws = r.add_plain(&dir, 1).unwrap();
+        let path = ws.path.to_string_lossy();
+        assert!(
+            !path.starts_with(r"\\?\"),
+            "a new worktree or clone must not be stored as {path}"
+        );
+        assert_eq!(ws.id, path);
+        let again = r.add_plain(&dir, 2).unwrap();
+        assert_eq!(r.workspaces.len(), 1);
+        assert_eq!(again.id, ws.id);
+        assert_eq!(again.path, ws.path);
+        // An ordinary add of the same folder must not insert a second row
+        // beside the plain one.
+        r.add(&dir, 3).unwrap();
+        assert_eq!(r.workspaces.len(), 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_existing_verbatim_row_keeps_its_id() {
+        let dir = temp_dir("keep-verbatim");
+        let text = dir.to_string_lossy();
+        assert!(
+            text.starts_with(r"\\?\"),
+            "this test needs a canonical Windows path, got {text}"
+        );
+        let mut r = Registry::default();
+        r.workspaces.push(Workspace::new(dir.clone(), 1));
+        let id = r.workspaces[0].id.clone();
+        let again = r.add_plain(&plain_path(&dir), 2).unwrap();
+        assert_eq!(r.workspaces.len(), 1);
+        assert_eq!(again.id, id);
+        assert_eq!(again.path, dir);
     }
 }

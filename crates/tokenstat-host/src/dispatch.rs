@@ -2939,7 +2939,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             }
             let registered = {
                 let mut registry = crate::workspaces::write();
-                let registered = registry.add(&destination, now_ms()).map_err(|e| format!(
+                let registered = registry.add_plain(&destination, now_ms()).map_err(|e| format!(
                     "Worktree created, but it could not be added to Projects: {e}. Add the folder manually."))?;
                 crate::workspaces::save(&registry).map_err(|e| format!(
                     "Worktree created at {}, but the project list could not be saved: {e}. Add this folder manually after resolving the error.", destination.display()))?;
@@ -5346,6 +5346,22 @@ mod tests {
         assert_eq!(created["result"]["git"]["branch"], "feature/team/search");
         let listed = invoke(&mut s, "workspace.worktrees", json!({"id": id}));
         assert_eq!(listed["result"].as_array().unwrap().len(), 2);
+        let created_path = created["result"]["path"].as_str().expect("created path");
+        let listed_path = listed["result"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tree| tree["branch"].as_str() == Some("feature/team/search"))
+            .and_then(|tree| tree["path"].as_str())
+            .expect("listed worktree");
+        assert!(
+            !created_path.starts_with(r"\\?\"),
+            "registered path must not carry a verbatim prefix: {created_path}"
+        );
+        assert_eq!(
+            created_path, listed_path,
+            "the registered project path must equal the listed worktree path"
+        );
         let duplicate = invoke(&mut s, "workspace.createWorktree", params.clone());
         assert_eq!(duplicate["ok"], false);
         let mut traversal = params;
