@@ -6,6 +6,7 @@ import ai.tokenstat.tokenstat.ui.chrome.HideTopBar
 import ai.tokenstat.tokenstat.ui.chrome.LocalTabBarPresence
 
 import ai.tokenstat.tokenstat.AppViewModel
+import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
@@ -266,7 +267,17 @@ fun WorkspaceHubMenu(
                 onChanged = { scope.launch { reload() } },
                 stats = folderGitStats(folder),
             )
-            if (isRepo) TsSecondaryButton(label = "Worktrees", onClick = { onOpenSection("Worktrees") })
+            // Small and glyphed like the rest of the card's controls. A
+            // worktree is a branch with its own folder, so it sits under the
+            // branch row rather than as a heavy button of its own.
+            if (isRepo) {
+                TsSecondaryButton(
+                    label = "Worktrees",
+                    icon = ActionIcon.Source.vector,
+                    small = true,
+                    onClick = { onOpenSection("Worktrees") },
+                )
+            }
         }
         HubSection.entries.forEach { section ->
             HubSectionRow(

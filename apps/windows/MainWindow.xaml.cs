@@ -1252,7 +1252,7 @@ public sealed partial class MainWindow : Window
         var filters = new Grid { ColumnSpacing = Theme.SpaceM };
         filters.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         filters.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var search = new TextBox { PlaceholderText = "Search folders, paths, or machines", MinWidth = 120 };
+        var search = new TextBox { PlaceholderText = "Search projects", MinWidth = 120 };
         var machine = new ComboBox { MinWidth = 160 };
         machine.Items.Add("All machines"); machine.Items.Add("This PC");
         foreach (var label in remote.Select(folder => folder.MachineLabel).Distinct()) machine.Items.Add(label);

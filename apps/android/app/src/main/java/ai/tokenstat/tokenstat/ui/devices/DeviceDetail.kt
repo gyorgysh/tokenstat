@@ -583,7 +583,7 @@ private fun DetailLine(label: String, value: String, modifier: Modifier = Modifi
 @Composable
 private fun FoldersCard(onChoose: () -> Unit, onClone: () -> Unit) {
     TsCard {
-        SectionTitle(title = "Folders", mark = "mark_folder")
+        SectionTitle(title = "Projects", mark = "mark_folder")
         DeviceActionRow(
             title = "Choose a folder",
             subtitle = "Register a folder already on this computer.",

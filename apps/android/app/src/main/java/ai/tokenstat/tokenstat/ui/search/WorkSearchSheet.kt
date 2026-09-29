@@ -198,7 +198,7 @@ fun WorkSearchSheet(
                     (it.path?.contains(query, ignoreCase = true) == true)
             }.take(8)
             if (folderMatches.isNotEmpty()) {
-                SectionLabel("Folders")
+                SectionLabel("Projects")
                 folderMatches.forEach { folder ->
                     SearchFolderRow(folder) {
                         onOpen(SearchOpen.Folder(folder.hostId, folder.folderId))

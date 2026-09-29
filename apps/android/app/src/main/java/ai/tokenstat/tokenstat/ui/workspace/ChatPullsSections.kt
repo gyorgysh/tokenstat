@@ -1427,21 +1427,20 @@ private fun ChatAgentMenuItem(label: String, checked: Boolean, onClick: () -> Un
     )
 }
 
-/// One conversation row like the iOS list: harness mark, running dot,
-/// two-line title, agent and Plan/Execute in accent, relative time, chevron.
+/// One conversation row: harness mark, running dot, the title, and one quiet
+/// line with the agent and how long ago. Plan or Execute is the chat's own
+/// setting and shows inside it; on the list it was a third line to read past.
 @Composable
 private fun ChatRow(chat: JsonObject) {
     val colors = LocalTsColors.current
-    val mode = if (chat.str("mode") == "plan") "Plan" else "Execute"
     val atMs = chat["lastMessageAtMs"]?.jsonPrimitive?.longOrNull
         ?: chat["updatedAtMs"]?.jsonPrimitive?.longOrNull
     Row(
-        Modifier.padding(12.dp),
         horizontalArrangement = Arrangement.spacedBy(Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        HarnessMark(chat.str("backend") ?: "?", size = 28.dp)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        HarnessMark(chat.str("backend") ?: "?", size = 24.dp)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (chat.bol("running")) {
                     Canvas(Modifier.size(7.dp)) { drawCircle(colors.accent) }
@@ -1453,15 +1452,18 @@ private fun ChatRow(chat: JsonObject) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Text(
-                "${harnessName(chat.str("backend") ?: "?")} · $mode",
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.accent,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (atMs != null) {
-                RelativeTimeText(atMs, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, compact = true)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    harnessName(chat.str("backend") ?: "?"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (atMs != null) {
+                    Text("·", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                    RelativeTimeText(atMs, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, compact = true)
+                }
             }
         }
         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = colors.controlGlyph)

@@ -242,7 +242,7 @@ struct ClientHostWorkspacesView: View {
         }
         .background(Theme.background)
         .navigationTitle(hostName)
-        .searchable(text: $search, prompt: "Search folders or paths")
+        .searchable(text: $search, prompt: "Search projects")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
             await ClientRefresh.pull("host-\(peerKey)") {
@@ -300,14 +300,14 @@ struct ClientHostWorkspacesView: View {
     private var hostFoldersSection: some View {
         if !model.folders.isEmpty {
             HStack(alignment: .center) {
-                ClientSectionTitle(title: "Folders", mark: "mark_archive")
+                ClientSectionTitle(title: "Projects", mark: "mark_archive")
                 Spacer(minLength: Theme.Space.s)
                 NavigationLink {
                     ClientFolderPicker(peer: peerKey, hostName: hostName) { _ in
                         Task { await model.connect(peerKey: peerKey, name: hostName) }
                     }
                 } label: {
-                    Text("Choose")
+                    Text("Add")
                         .font(ClientType.caption.weight(.semibold))
                 }
                 .tint(Theme.accent)

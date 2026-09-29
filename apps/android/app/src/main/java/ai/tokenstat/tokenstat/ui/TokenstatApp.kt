@@ -3581,7 +3581,7 @@ private fun WorkspaceList(
             // with a floating label was the odd control out on a screen made
             // of cards.
             TsSearchField(
-                prompt = "Search folders or paths",
+                prompt = "Search projects",
                 query = search,
                 onQueryChange = onSearch,
                 modifier = Modifier.fillMaxWidth(),
@@ -3596,10 +3596,10 @@ private fun WorkspaceList(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp).padding(top = Space.s),
                         ) {
                             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                                SectionTitle("Folders", "mark_archive")
+                                SectionTitle("Projects", "mark_archive")
                             }
                             TextButton(onClick = onChooseFolder) {
-                                Text("Choose", style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.accent)
+                                Text("Add", style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.accent)
                             }
                             TextButton(onClick = onClone) {
                                 Text("Clone", style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.accent)

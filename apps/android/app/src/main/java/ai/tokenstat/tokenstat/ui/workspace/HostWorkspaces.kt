@@ -112,7 +112,7 @@ import kotlinx.serialization.json.longOrNull
 /// this list: they are how you get here, not cards to rearrange. Port of
 /// `WorkspacesSection` in `WorkspacesLayout.swift`.
 enum class WorkSection(val key: String, val label: String, val detail: String) {
-    FOLDERS("folders", "Folders", "Projects on the connected computer"),
+    FOLDERS("folders", "Projects", "Projects on the connected computer"),
     RECENT_CHATS("recent_chats", "Recent chats", "Chats opened recently"),
     SESSIONS("sessions", "All sessions", "Terminals and agents running now"),
 }
