@@ -97,7 +97,7 @@ struct ClientSetupMacDoor: View {
                 number: 3,
                 title: "Let this device in",
                 body: "Folders and terminals are only open to devices that computer has "
-                    + "allowed. Ask from Workspaces, and say yes on the computer.",
+                    + "allowed. Ask from Projects, and say yes on the computer.",
                 state: arrived == nil ? .next : .now
             ),
         ]

@@ -131,7 +131,7 @@ struct MachinesInspector: View {
                 }
                 labeled("Trust", Self.trustLabel(peer.trust))
                 if model.connectedPeerKeys.contains(peer.key) {
-                    Text("Workspaces from this device are in the sidebar.")
+                    Text("Projects from this device are in the sidebar.")
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                     HostStatsBar(peer: peer.key, online: true)

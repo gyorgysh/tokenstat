@@ -2360,7 +2360,7 @@ struct PullForgeConnection: Codable, Sendable, Hashable {
 /// One entry in a workspace's file tree.
 struct TreeEntry: Codable, Sendable, Hashable, Identifiable {
     var name: String
-    /// Path relative to the workspace root, with `/` separators.
+    /// Path relative to the project root, with `/` separators.
     var path: String
     var isDir: Bool
     /// True when git would ignore this. Shown dimmed rather than hidden:
@@ -3830,7 +3830,7 @@ enum WorkflowScope: String, Codable, Sendable, Hashable, CaseIterable {
     var label: String {
         switch self {
         case .global: return "Global"
-        case .workspace: return "This workspace"
+        case .workspace: return "This project"
         }
     }
 }

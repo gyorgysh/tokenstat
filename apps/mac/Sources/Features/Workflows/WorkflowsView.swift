@@ -682,13 +682,13 @@ struct RunWorkflowSheet: View {
                     .textFieldStyle(.themed)
                     .lineLimit(3...8)
                 if folders.isEmpty {
-                    Text("Add a workspace first. Agents run in a folder.")
+                    Text("Add a project first. Agents run in a folder.")
                         .font(Theme.caption)
                         .foregroundStyle(Theme.controlGlyph)
                 } else {
                     AppMenuPicker(
                         title: "Project",
-                        options: [(value: "", label: "Choose a workspace")]
+                        options: [(value: "", label: "Choose a project")]
                             + folders.map { (value: $0.id, label: $0.name) },
                         selection: $workspaceID
                     )

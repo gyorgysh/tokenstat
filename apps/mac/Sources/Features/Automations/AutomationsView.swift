@@ -170,7 +170,7 @@ struct AutomationsView: View {
             Button("New automation", .create) { creating = true }
                 .buttonStyle(AccentButtonStyle(small: true))
                 .disabled(folders.isEmpty)
-                .help(folders.isEmpty ? "Add a workspace first. An agent runs somewhere." : "Schedule an agent job")
+                .help(folders.isEmpty ? "Add a project first. An agent runs somewhere." : "Schedule an agent job")
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.vertical, Theme.Space.s)
@@ -721,7 +721,7 @@ struct AutomationsView: View {
                 """
             ) {
                 if folders.isEmpty {
-                    Text("Add a folder on the Workspaces screen first. An agent runs somewhere.")
+                    Text("Add a folder on the Projects screen first. An agent runs somewhere.")
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                 } else {
@@ -1212,12 +1212,12 @@ struct NewAutomationSheet: View {
                         Task { await model.load() }
                     }
                 } else if model.pickerBackends(keeping: backendID).isEmpty {
-                    setupHint("Every installed agent is hidden on Workspaces. Show one there to pick it here.", action: "Go to Workspaces") {
+                    setupHint("Every installed agent is hidden on Projects. Show one there to pick it here.", action: "Go to Projects") {
                         dismiss()
                         onNavigate?(.launcher)
                     }
                 } else if folders.isEmpty {
-                    setupHint("Add a workspace before choosing where this task should run.", action: "Go to Workspaces") {
+                    setupHint("Add a project before choosing where this task should run.", action: "Go to Projects") {
                         dismiss()
                         onNavigate?(.workspaces)
                     }
@@ -1229,7 +1229,7 @@ struct NewAutomationSheet: View {
                 )
                 AppMenuPicker(
                     title: "Project",
-                    options: [(value: "", label: "Choose a workspace")]
+                    options: [(value: "", label: "Choose a project")]
                         + folders.map { (value: $0.id, label: $0.name) },
                     selection: $workspaceID
                 )

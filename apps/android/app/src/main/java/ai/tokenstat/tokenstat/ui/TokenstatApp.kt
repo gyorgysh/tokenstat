@@ -3916,7 +3916,7 @@ private fun AccountDialog(
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                                 Text("See a sample", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
                                 Text(
-                                    "Explore a workspace with invented data, right on this device.",
+                                    "Explore a project with invented data, right on this device.",
                                     style = TextStyle(fontSize = 12.sp),
                                     color = colors.textSecondary,
                                 )

@@ -195,7 +195,7 @@ struct WorkspacesView: View {
             .multilineTextAlignment(.center)
             .frame(maxWidth: 360)
             #if os(macOS)
-            Button("Add Workspace", .create) {
+            Button("Add Project", .create) {
                 model.requestAdd()
             }
             .buttonStyle(.borderedProminent)

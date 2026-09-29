@@ -128,7 +128,7 @@ struct ChatInspector: View {
     private var folderCard: some View {
         group("Folder") {
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                Text(folder?.name ?? "This workspace")
+                Text(folder?.name ?? "This project")
                     .font(Theme.callout.weight(.medium))
                 if let path = folder?.path, !path.isEmpty {
                     Text(path)

@@ -561,7 +561,7 @@ struct ClientTerminalScreen: View {
                 if session.workspaceID != nil {
                     Button("Project", .source) { showingWorkspace = true }
                         .font(ClientType.caption.weight(.semibold))
-                        .accessibilityLabel("Workspace files, changes and history")
+                        .accessibilityLabel("Project files, changes and history")
                 }
                 Button("Close", .dismiss, role: .destructive) {
                     confirmClose = true

@@ -33,7 +33,7 @@ struct ClientSidebarRoot: View {
     /// the screen in the detail column are the same connection, not two.
     @State private var workspaces = ClientWorkspacesModel()
     /// Whether the host-wide task board link shows under a connected host.
-    /// Off unless asked for in Customize Workspaces.
+    /// Off unless asked for in Customize Projects.
     @State private var workspacesLayout = WorkspacesLayout.shared
     @State private var notificationOpen = NotificationOpen.shared
     /// What each folder holds, keyed by workspace id. One call for the whole

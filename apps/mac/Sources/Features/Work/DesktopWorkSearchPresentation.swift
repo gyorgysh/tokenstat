@@ -89,7 +89,7 @@ struct DesktopWorkSearchPresentation: View {
                     && Set(account.account?.machines.compactMap(\.publicIdentity) ?? []) == linked
             })
         model.coverageNotice = allowed.count < machines.count
-            ? "Search covers this Mac and machines with verified workspace access. Open a folder on another machine to verify its access."
+            ? "Search covers this Mac and machines with verified project access. Open a folder on another machine to verify its access."
             : (includesText ? nil : "Saving conversation text is off. Search still includes work stored on this Mac.")
         if savedUnavailable {
             model.coverageNotice = "Saved copies could not be loaded. You can still search work stored on this Mac."

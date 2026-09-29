@@ -214,7 +214,7 @@ struct ClientHostWorkspacesView: View {
                     }
                     if layout.sections.isEmpty {
                         VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                            Text("Your Workspaces are clear")
+                            Text("Your Projects are clear")
                                 .font(ClientType.label.weight(.medium))
                             Text("Folders, chats and sessions are switched off.")
                                 .font(ClientType.caption)
@@ -226,7 +226,7 @@ struct ClientHostWorkspacesView: View {
                         .cardSurface()
                         .padding(.top, Theme.Space.s)
                     }
-                    Button("Customize Workspaces", .layout) { customizing = true }
+                    Button("Customize Projects", .layout) { customizing = true }
                         .buttonStyle(.plain)
                         .font(ClientType.caption.weight(.medium))
                         .foregroundStyle(Theme.accent)

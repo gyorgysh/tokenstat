@@ -1510,7 +1510,7 @@ final class WorkspacesModel {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = true
-        panel.prompt = "Add Workspace"
+        panel.prompt = "Add Project"
         panel.message = "Choose a project folder. tokenstat only reads it."
 
         guard panel.runModal() == .OK else { return }

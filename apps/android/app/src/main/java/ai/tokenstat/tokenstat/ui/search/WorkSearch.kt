@@ -94,7 +94,7 @@ object SearchPlaces {
             listOf("cards", "arrange", "sections", "customise", "edit", "rearrange", "hide"),
         ),
         SearchPlace(
-            "workspaces:editor", "Customize Workspaces", "Projects",
+            "workspaces:editor", "Customize Projects", "Projects",
             ActionIcon.Layout,
             listOf("folders", "chats", "sessions", "arrange", "sections", "customise", "edit", "rearrange", "hide", "order"),
         ),

@@ -199,7 +199,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         }
         chrome.Children.Add(new TextBlock
         {
-            Text = _path.Length == 0 ? "Workspace root" : _path,
+            Text = _path.Length == 0 ? "Project root" : _path,
             VerticalAlignment = VerticalAlignment.Center,
             Opacity = 0.7,
             TextWrapping = TextWrapping.Wrap,
@@ -218,7 +218,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         }
 
         _summary = _path.Length == 0
-            ? $"{array.Count} {(array.Count == 1 ? "entry" : "entries")} at the workspace root."
+            ? $"{array.Count} {(array.Count == 1 ? "entry" : "entries")} at the project root."
             : $"{array.Count} {(array.Count == 1 ? "entry" : "entries")} in {_path}.";
         RenderInspector();
         var list = new StackPanel { Spacing = 4 };

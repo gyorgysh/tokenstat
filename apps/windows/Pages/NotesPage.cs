@@ -530,7 +530,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         var picker = new ComboBox { MinWidth = 160, MaxWidth = 240,
             ItemsSource = choices.Select(choice => choice.Name).ToList(),
             SelectedIndex = Math.Max(0, choices.FindIndex(choice => choice.Id == _picked)) };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picker, "Filter notes by workspace");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picker, "Filter notes by project");
         picker.SelectionChanged += (_, _) =>
         {
             if (picker.SelectedIndex < 0) return;

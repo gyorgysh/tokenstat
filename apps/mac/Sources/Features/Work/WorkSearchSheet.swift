@@ -435,6 +435,6 @@ struct WorkSearchSheet: View {
                 }
             }
         } else if open(reference) { model.rememberOpen(reference); dismiss() }
-        else { openFailure = "This work is not available to open. Check its folder and machine in Workspaces, then try again." }
+        else { openFailure = "This work is not available to open. Check its folder and machine in Projects, then try again." }
     }
 }

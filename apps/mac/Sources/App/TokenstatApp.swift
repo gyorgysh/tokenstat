@@ -277,7 +277,7 @@ struct TokenstatApp: App {
             // the work belongs to the window, so this posts and the window
             // acts, rather than the menu holding a second copy of the state.
             CommandGroup(after: .newItem) {
-                Button("Add Workspace…") {
+                Button("Add Project…") {
                     NotificationCenter.default.post(name: .addWorkspaceRequested, object: nil)
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
@@ -292,7 +292,7 @@ struct TokenstatApp: App {
                 .keyboardShortcut("k", modifiers: [.command])
             }
             // Sidebar toggles live on RootView. The menu posts and the window
-            // acts, same shape as Add Workspace, so the shortcut works when a
+            // acts, same shape as Add Project, so the shortcut works when a
             // text field would otherwise claim ⌘B for bold.
             CommandGroup(after: .sidebar) {
                 Button("Toggle Sidebar") {

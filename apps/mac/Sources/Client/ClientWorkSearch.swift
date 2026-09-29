@@ -147,7 +147,7 @@ struct ClientWorkSearchPresentation: View {
                         && Set(account.account?.machines.compactMap(\.publicIdentity) ?? []) == Set(machines.keys)
                 })
             model.coverageNotice = allowed.count < machines.count
-                ? "Search covers machines with verified workspace access. Open a folder on another machine to verify its access."
+                ? "Search covers machines with verified project access. Open a folder on another machine to verify its access."
                 : (includesText ? nil : "Saved conversation text is off. Search covers folder information kept on this device.")
             self.model = model
             await learn(scope: scope, hosts: allowed, access: access, linked: Set(machines.keys))

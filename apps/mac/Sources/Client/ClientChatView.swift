@@ -611,7 +611,7 @@ struct ClientChatThread: View {
                             folderName: folderName
                         )
                         if toolsIdentity != nil {
-                            Button("Workspace tools", .source) {
+                            Button("Project tools", .source) {
                                 if sizeClass == .regular,
                                    UIDevice.current.userInterfaceIdiom == .pad {
                                     showingToolsPane.toggle()
@@ -619,7 +619,7 @@ struct ClientChatThread: View {
                                     pushingTools = true
                                 }
                             }
-                            .accessibilityLabel("Workspace files, changes and history")
+                            .accessibilityLabel("Project files, changes and history")
                             // The inspector chord, on the real control. Wide
                             // iPad toggles the trailing pane; compact pushes
                             // the same surface and Back returns to the

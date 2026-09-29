@@ -331,7 +331,7 @@ struct ClientRecentChatView: View {
     var body: some View {
         Group {
             if availability == .accessRequired, account.signedIn, accessAllowed == false {
-                ClientEmptyState(kind: .unreachable, title: "Workspace access is required",
+                ClientEmptyState(kind: .unreachable, title: "Project access is required",
                     message: "Allow this device on \(hostName), then check again to return to this conversation.",
                     actionTitle: "Check again", actionIcon: .refresh,
                     action: { retry() })

@@ -20,7 +20,7 @@ struct ClientRestoredRouteView: View {
                 .id(route)
         } else {
             ClientEmptyState(kind: .unreachable, title: "This place is unavailable",
-                message: "Return to your workspaces to choose where to continue.")
+                message: "Return to your projects to choose where to continue.")
                 .padding(Theme.Space.m)
         }
     }

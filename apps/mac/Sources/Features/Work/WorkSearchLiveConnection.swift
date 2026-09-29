@@ -42,7 +42,7 @@ final class WorkSearchLiveConnection {
         guard !parsed.terms.isEmpty else { throw Unavailable(message: "Enter words to search.") }
         let allowed = try await transport.allowed()
         try requireCurrent()
-        guard allowed else { throw Unavailable(message: "Workspace access is no longer available on this computer.") }
+        guard allowed else { throw Unavailable(message: "Project access is no longer available on this computer.") }
         let version = try await transport.version()
         try requireCurrent()
         guard version >= 12 else { throw Unavailable(message: "Update tokenstat on this computer to search its work.") }

@@ -79,7 +79,7 @@ internal static class WorkspaceAddDialog
         form.Children.Add(InfoRow(
             ActionIcon.Security,
             "Nothing is uploaded",
-            "Adding a workspace does not send the folder anywhere. Only usage counters are eligible for sync."));
+            "Adding a project does not send the folder anywhere. Only usage counters are eligible for sync."));
         var error = new TextBlock
         {
             Foreground = Theme.Brush(static () => Theme.Danger),
@@ -232,7 +232,26 @@ internal static class WorkspaceAddDialog
 /// Separate branch folders share Git history while preserving each session's files.
 internal static class ProjectWorktreeDialog
 {
-    private static string _namespace = "work";
+    private static string NamespacePreferencePath => System.IO.Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "worktree-namespace");
+    private static string _namespace = ReadNamespace();
+    private static string ReadNamespace()
+    {
+        try { return File.ReadAllText(NamespacePreferencePath).Trim(); }
+        catch (IOException) { return "work"; }
+        catch (UnauthorizedAccessException) { return "work"; }
+    }
+    private static void RememberNamespace(string value)
+    {
+        _namespace = value.Trim();
+        try
+        {
+            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(NamespacePreferencePath)!);
+            File.WriteAllText(NamespacePreferencePath, _namespace);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
 
     public static async Task<string?> ShowAsync(UIElement owner, string id, string projectName, string projectPath)
     {
@@ -378,7 +397,7 @@ internal static class ProjectWorktreeDialog
                 var parameters = new JsonObject { ["id"] = id, ["parent"] = parent.Text, ["folderName"] = name.Text,
                     ["namespace"] = prefix.Text, ["branch"] = name.Text, ["from"] = from.Text };
                 var result = await RemoteWorkspaces.CallWorkspaceAsync(id, "workspace.createWorktree", parameters, TimeSpan.FromMinutes(5));
-                _namespace = prefix.Text;
+                RememberNamespace(prefix.Text);
                 OpenResult(result);
             }
             catch (Exception ex) { error.Text = FriendlyError.Display(ex.Message); }

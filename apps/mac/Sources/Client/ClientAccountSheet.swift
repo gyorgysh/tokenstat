@@ -201,7 +201,7 @@ private struct ClientAccountContent: View {
                     Image(systemName: ActionIcon.run.symbol).foregroundStyle(Theme.accent)
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
                         Text("See a sample").font(ClientType.label.weight(.semibold))
-                        Text("Explore a workspace with invented data, right on this device.")
+                        Text("Explore a project with invented data, right on this device.")
                             .font(ClientType.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)

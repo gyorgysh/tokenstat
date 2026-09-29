@@ -44,7 +44,7 @@ private struct ChatConversationOverview: View {
                         .foregroundStyle(Theme.accent).font(Theme.font(22))
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Conversations").font(Theme.font(24, weight: .semibold))
-                        Text("Find and resume work in \(workspaceName ?? "this workspace").")
+                        Text("Find and resume work in \(workspaceName ?? "this project").")
                             .font(Theme.callout).foregroundStyle(.secondary)
                     }
                     Spacer()

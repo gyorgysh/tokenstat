@@ -471,7 +471,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         var body = new StackPanel { Spacing = Theme.SpaceM };
         body.Children.Add(new TextBlock
         {
-            Text = "Read the conversation, inspect the same diff as Changes, follow checks, and review without losing the workspace around it.",
+            Text = "Read the conversation, inspect the same diff as Changes, follow checks, and review without losing the project around it.",
             TextWrapping = TextWrapping.Wrap,
             Opacity = 0.74,
         });

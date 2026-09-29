@@ -1942,7 +1942,7 @@ fun PullsSection(
                     color = LocalTsColors.current.textPrimary,
                 )
                 Text(
-                    "Read the conversation, inspect the same diff as Changes, follow checks, and review without losing the workspace around it.",
+                    "Read the conversation, inspect the same diff as Changes, follow checks, and review without losing the project around it.",
                     style = TextStyle(fontSize = 12.sp),
                     color = LocalTsColors.current.textSecondary,
                 )

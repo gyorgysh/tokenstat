@@ -16,13 +16,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
+import androidx.compose.ui.platform.LocalContext
 
 @Composable
 fun ProjectWorktrees(model: AppViewModel, peer: String, folder: JsonObject, onBusyChanged: (Boolean) -> Unit = {}, onOpen: (JsonObject) -> Unit) {
     val workspace = folder["id"]?.jsonPrimitive?.content.orEmpty()
     val path = folder["path"]?.jsonPrimitive?.content.orEmpty()
+    val context = LocalContext.current.applicationContext
+    val preferences = remember(context) { context.getSharedPreferences("tokenstat.projects.v1", android.content.Context.MODE_PRIVATE) }
     var name by rememberSaveable(peer, workspace) { mutableStateOf("") }
-    var prefix by rememberSaveable(peer, workspace) { mutableStateOf("work") }
+    var prefix by rememberSaveable(peer, workspace) { mutableStateOf(preferences.getString("worktree.namespace", "work") ?: "work") }
     var base by rememberSaveable(peer, workspace) { mutableStateOf("HEAD") }
     var parent by rememberSaveable(peer, workspace) { mutableStateOf(path.substring(0, (path.indexOfLast { it == '/' || it == '\\' } + 1).coerceAtLeast(0))) }
     var trees by remember(peer, workspace) { mutableStateOf<List<JsonObject>>(emptyList()) }
@@ -98,7 +101,10 @@ fun ProjectWorktrees(model: AppViewModel, peer: String, folder: JsonObject, onBu
                         runCatching { model.workspaceSection(peer, "workspace.createWorktree", buildJsonObject {
                             put("id", workspace); put("parent", parent); put("folderName", name)
                             put("namespace", prefix); put("branch", name); put("from", base)
-                        }) as JsonObject }.onSuccess(onOpen).onFailure { error = it.message ?: "Could not create worktree." }
+                        }) as JsonObject }.onSuccess {
+                            preferences.edit().putString("worktree.namespace", prefix.trim()).apply()
+                            onOpen(it)
+                        }.onFailure { error = it.message ?: "Could not create worktree." }
                         working = false
                     }
                 })

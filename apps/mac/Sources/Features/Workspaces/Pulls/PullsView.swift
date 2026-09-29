@@ -253,7 +253,7 @@ struct PullsView: View {
         } else {
             empty(
                 title: "Pull requests are unavailable",
-                message: "Refresh to ask the workspace's computer again."
+                message: "Refresh to ask the project's computer again."
             )
         }
     }
@@ -286,7 +286,7 @@ struct PullsView: View {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 Text("Bring the review into tokenstat")
                     .font(Theme.title3.weight(.semibold))
-                Text("Read the conversation, inspect the same diff as Changes, follow checks, and review without losing the workspace around it.")
+                Text("Read the conversation, inspect the same diff as Changes, follow checks, and review without losing the project around it.")
                     .font(Theme.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -303,7 +303,7 @@ struct PullsView: View {
                 .disabled(model.isConnecting)
             } else {
                 Label(
-                    "Connect Pull Requests on \(connectionHostName ?? "the workspace's computer"), then return here.",
+                    "Connect Pull Requests on \(connectionHostName ?? "the project's computer"), then return here.",
                     systemImage: "laptopcomputer"
                 )
                 .font(Theme.callout)

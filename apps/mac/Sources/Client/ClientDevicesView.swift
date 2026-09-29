@@ -469,7 +469,7 @@ struct ClientDeviceDetailView: View {
                     spend
                 }
                 // Reachability, live readings and the two ways in, as one
-                // header shared with the screen you reach from Workspaces.
+                // header shared with the screen you reach from Projects.
                 if !isThisDevice, let key = machine.publicIdentity, !key.isEmpty, machine.isHost {
                     ClientHostHeader(
                         name: DeviceCopy.name(current),

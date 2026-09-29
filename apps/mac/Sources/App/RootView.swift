@@ -694,7 +694,7 @@ struct RootView: View {
                 // restart.
                 await terminals.watch()
             }
-            // The File menu's Add Workspace. The menu has no model, so it posts and
+            // The File menu's Add Project. The menu has no model, so it posts and
             // this acts.
             .task {
                 for await _ in NotificationCenter.default.notifications(named: .addWorkspaceRequested) {
@@ -986,7 +986,7 @@ struct RootView: View {
     private var rightInspectorToolbarButton: some View {
         HStack(spacing: Theme.Space.xs) {
         if supportsWorkspaceBrowser {
-            ToolbarIconButton(systemImage: "globe", help: "Browser, open a web preview beside this workspace", isAccent: showsWorkspaceBrowser) {
+            ToolbarIconButton(systemImage: "globe", help: "Browser, open a web preview beside this project", isAccent: showsWorkspaceBrowser) {
                 if showsWorkspaceBrowser { browserWorkspaceID = nil }
                 else { browserWorkspaceID = route.workspaceID }
             }
@@ -2041,7 +2041,7 @@ struct RootView: View {
         #if os(macOS)
         // A row, always there, under whatever folders exist.
         //
-        // The centre pane has a prominent Add Workspace button, but it
+        // The centre pane has a prominent Add Project button, but it
         // is only reachable with no folders at all: the first folder
         // added selects itself and the empty state is never seen again.
         // That left one 9pt `+` in a section header as the only way to
@@ -2450,7 +2450,7 @@ struct RootView: View {
                 PullsView(
                     workspaceID: id,
                     connectionHostName: folder?.isRemote == true
-                        ? "the workspace's computer"
+                        ? "the project's computer"
                         : nil,
                     workspaceName: folder.map {
                         $0.isRemote
@@ -2520,7 +2520,7 @@ struct RootView: View {
             PullsView(
                 workspaceID: id,
                 connectionHostName: folder?.isRemote == true
-                    ? "the workspace's computer"
+                    ? "the project's computer"
                     : nil,
                 workspaceName: folder.map {
                     $0.isRemote
@@ -2748,7 +2748,7 @@ struct RootView: View {
     private func launchTaskInFront(_ launch: InteractiveTaskLaunch) {
         #if os(macOS)
         guard let folder = workspaces.folders.first(where: { $0.id == launch.workspaceID }) else {
-            todo.errorMessage = "Choose a workspace first."
+            todo.errorMessage = "Choose a project first."
             return
         }
         Task {
@@ -2800,7 +2800,7 @@ struct RootView: View {
         #if os(macOS)
         guard let workspaceID = info.workspaceID,
               workspaces.folders.contains(where: { $0.id == workspaceID }) else {
-            todo.errorMessage = "This task's workspace is unavailable. The run is still active."
+            todo.errorMessage = "This task's project is unavailable. The run is still active."
             return
         }
         _ = terminals.open(info)
@@ -3172,12 +3172,12 @@ struct RootView: View {
     private func workAvailabilityMessage(_ reference: WorkReference) -> String? {
         switch desktopAvailability(reference) {
         case .live, .savedCopy: nil
-        case .accessRequired: "Verify this account and its workspace access"
+        case .accessRequired: "Verify this account and its project access"
         case .hostRemoved: "This machine is no longer linked"
         case .itemDeleted: "This work is no longer available"
         case .unsupportedHost: "Update the host to open this work"
         case .reconnecting: "Reconnecting to the machine"
-        case .unavailable: "Connect the machine and open its folder in Workspaces"
+        case .unavailable: "Connect the machine and open its folder in Projects"
         }
     }
 
@@ -3564,7 +3564,7 @@ private struct RemoveAllChatsConfirm: View {
                 }
                 Button("Cancel", role: .cancel) { folder = nil }
             } message: {
-                Text("This permanently deletes every chat transcript in \(folder?.name ?? "this workspace").")
+                Text("This permanently deletes every chat transcript in \(folder?.name ?? "this project").")
             }
     }
 }

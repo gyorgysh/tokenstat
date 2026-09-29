@@ -838,7 +838,7 @@ private fun SetupMacDoor(model: AppViewModel, state: ai.tokenstat.tokenstat.Clie
         SetupNumberedStep(
             number = 3,
             title = "Let this device in",
-            body = "Folders and terminals are only open to devices that computer has allowed. Ask from Workspaces, and say yes on the computer.",
+            body = "Folders and terminals are only open to devices that computer has allowed. Ask from Projects, and say yes on the computer.",
             done = false,
             actionTitle = null,
             onAction = {},

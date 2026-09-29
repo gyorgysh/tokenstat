@@ -38,7 +38,7 @@ internal fun JsonObject.optBool(key: String): Boolean? =
 
 enum class WorkflowScope(val label: String) {
     GLOBAL("Global"),
-    WORKSPACE("This workspace"),
+    WORKSPACE("This project"),
     ;
 
     companion object {

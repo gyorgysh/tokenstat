@@ -107,7 +107,7 @@ struct ClientWorkspacesEditor: View {
                 }
 
                 Section {
-                    Button("Reset Workspaces", .refresh) {
+                    Button("Reset Projects", .refresh) {
                         beforeReset = (order, hidden, preset)
                         order = WorkspacesPreset.foldersFirst.order
                         hidden = WorkspacesPreset.foldersFirst.hidden
@@ -136,7 +136,7 @@ struct ClientWorkspacesEditor: View {
             .environment(\.editMode, .constant(.active))
             .scrollContentBackground(.hidden)
             .background(Theme.background)
-            .navigationTitle("Customize Workspaces")
+            .navigationTitle("Customize Projects")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -155,7 +155,7 @@ struct ClientWorkspacesEditor: View {
 
     private var footerText: String {
         if visible.isEmpty {
-            return "Workspaces will only show hosts. Switch a section back on here at any time."
+            return "Projects will only show computers. Switch a section back on here at any time."
         }
         let off = order.filter { hidden.contains($0) }
         guard !off.isEmpty else { return "Every section is on." }

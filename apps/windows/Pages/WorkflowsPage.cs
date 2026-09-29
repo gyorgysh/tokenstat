@@ -828,7 +828,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         body.Children.Add(Labeled("Name", name));
 
         var scope = new ComboBox { MinWidth = 160 };
-        scope.ItemsSource = new[] { "Global", "This workspace" };
+        scope.ItemsSource = new[] { "Global", "This project" };
         scope.SelectedIndex = Format.Text(graph, "scope") == "workspace" ? 1 : 0;
         scope.SelectionChanged += (_, _) =>
         {

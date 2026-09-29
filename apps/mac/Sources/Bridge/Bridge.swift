@@ -1874,7 +1874,7 @@ extension Bridge {
     }
 
     /// One directory of the file tree. Lazy: pass the relative path of the
-    /// folder being opened, or "" for the workspace root.
+    /// folder being opened, or "" for the project root.
     static func workspaceTree(id: String, path: String = "") async throws -> [TreeEntry] {
         if let target = remoteWorkspace(id) {
             return try await onPeer(
