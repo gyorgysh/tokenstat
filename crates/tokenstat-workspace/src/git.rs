@@ -858,7 +858,14 @@ pub fn worktrees(dir: &Path) -> Result<Vec<Worktree>, String> {
         };
         for field in record.split('\0') {
             if let Some(path) = field.strip_prefix("worktree ") {
-                tree.path = path.to_owned();
+                // Git on Windows writes `C:/Users/...`. Every other path the
+                // app holds, registered projects included, uses backslashes,
+                // and a worktree has to compare equal to its own project.
+                tree.path = if cfg!(windows) {
+                    path.replace('/', "\\")
+                } else {
+                    path.to_owned()
+                };
             } else if let Some(head) = field.strip_prefix("HEAD ") {
                 tree.head = head.to_owned();
             } else if let Some(branch) = field.strip_prefix("branch ") {

@@ -146,8 +146,10 @@ mod tests {
             listed
                 .iter()
                 .any(|tree| tree.branch.as_deref() == Some("team/feature/search")
-                    && Path::new(&tree.path)
-                        == destination.canonicalize().expect("canonical destination")
+                    // Canonical on both sides: Windows canonicalizes to a
+                    // verbatim path that no tool prints.
+                    && Path::new(&tree.path).canonicalize().ok()
+                        == destination.canonicalize().ok()
                     && !tree.bare
                     && !tree.locked)
         );
