@@ -97,12 +97,16 @@ struct ClientInsightsView: View {
                         ClientSectionTitle(title: "Daily activity", mark: "mark_activity")
                         Text("Tokens per day · cache included").font(ClientType.caption).foregroundStyle(.secondary)
                         Chart(days) { day in
-                            BarMark(x: .value("Day", day.key), y: .value("Tokens", day.counters.total))
-                                .foregroundStyle(Theme.accent.gradient)
-                                .cornerRadius(3)
-                                .accessibilityLabel(day.key)
-                                .accessibilityValue("\(formatTokens(day.counters.total)) tokens")
+                            if let position = InsightDayAxis.position(day.key) {
+                                RectangleMark(xStart: .value("Day", position - 0.4), xEnd: .value("Day", position + 0.4),
+                                        yStart: .value("Tokens", UInt64(0)), yEnd: .value("Tokens", day.counters.total))
+                                    .foregroundStyle(Theme.accent.gradient)
+                                    .cornerRadius(3)
+                                    .accessibilityLabel(day.key)
+                                    .accessibilityValue("\(formatTokens(day.counters.total)) tokens")
+                            }
                         }
+                        .chartXScale(domain: InsightDayAxis.domain(days.map(\.key)))
                         .chartXAxis(.hidden)
                         .chartYAxis {
                             AxisMarks { value in
@@ -333,11 +337,7 @@ final class ClientInsightsModel {
             case .model: return key
             case .source: return harnessName(key)
             case .day:
-                let parser = DateFormatter()
-                parser.locale = Locale(identifier: "en_US_POSIX")
-                parser.dateFormat = "yyyy-MM-dd"
-                guard let date = parser.date(from: key) else { return key }
-                return date.formatted(date: .abbreviated, time: .omitted)
+                return InsightDayAxis.title(key)
             }
         }
     }

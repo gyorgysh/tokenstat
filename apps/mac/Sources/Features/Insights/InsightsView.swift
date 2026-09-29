@@ -747,11 +747,15 @@ private struct AccountInsightsContent: View {
                 .font(Theme.caption).foregroundStyle(.secondary)
             if daily {
                 Chart(plotted) { row in
-                    BarMark(x: .value("Day", row.key), y: .value("Tokens", row.counters.total))
-                        .foregroundStyle(Theme.accent.gradient)
-                        .accessibilityLabel(model.cut.title(for: row.key))
-                        .accessibilityValue("\(formatTokens(row.counters.total)) tokens")
+                    if let position = InsightDayAxis.position(row.key) {
+                        RectangleMark(xStart: .value("Day", position - 0.4), xEnd: .value("Day", position + 0.4),
+                                yStart: .value("Tokens", UInt64(0)), yEnd: .value("Tokens", row.counters.total))
+                            .foregroundStyle(Theme.accent.gradient)
+                            .accessibilityLabel(model.cut.title(for: row.key))
+                            .accessibilityValue("\(formatTokens(row.counters.total)) tokens")
+                    }
                 }
+                .chartXScale(domain: InsightDayAxis.domain(plotted.map(\.key)))
                 .chartXAxis(.hidden)
                 .chartYAxis {
                     AxisMarks { value in

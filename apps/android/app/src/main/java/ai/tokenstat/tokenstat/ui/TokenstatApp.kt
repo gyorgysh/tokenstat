@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui
 
+import ai.tokenstat.tokenstat.ui.logic.InsightDayAxis
 import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
 import ai.tokenstat.tokenstat.ui.components.TsDangerButton
 
@@ -1666,7 +1667,13 @@ private fun InsightSummary(rows: List<JsonObject>, cutName: String, stale: Boole
 @Composable
 private fun InsightDayChart(rows: List<JsonObject>) {
     val colors = LocalTsColors.current
-    val days = rows.sortedBy { it.string("key") ?: "" }
+    val positioned = remember(rows) {
+        rows.mapNotNull { row -> InsightDayAxis.position(row.string("key") ?: "")?.let { it to row } }
+            .sortedBy { it.first }
+    }
+    val days = positioned.map { it.second }
+    val firstDay = positioned.firstOrNull()?.first ?: 0L
+    val dayCount = ((positioned.lastOrNull()?.first ?: firstDay) - firstDay + 1).coerceAtLeast(1L)
     val peak = days.maxOfOrNull { it["counters"]?.jsonObject?.long("total") ?: 0L } ?: 0L
     TsCard {
         val bars = days.map { it["counters"]?.jsonObject?.long("total") ?: 0L }
@@ -1678,11 +1685,12 @@ private fun InsightDayChart(rows: List<JsonObject>) {
             color = colors.textSecondary,
         )
         Canvas(Modifier.fillMaxWidth().height(180.dp).semantics {
-            contentDescription = "Daily activity across ${days.size} days. Peak ${compactTokens(peak)} tokens. Values listed below."
+            contentDescription = "Daily activity across ${days.size} recorded days. Peak ${compactTokens(peak)} tokens. Values listed below."
         }) {
             if (bars.isEmpty() || peak <= 0) return@Canvas
-            val gap = minOf(2.dp.toPx(), size.width / (bars.size * 3))
-            val width = (size.width - gap * (bars.size - 1).coerceAtLeast(0)) / bars.size
+            val stride = size.width / dayCount.toFloat()
+            val gap = minOf(2.dp.toPx(), stride / 3)
+            val width = stride - gap
             val brush = androidx.compose.ui.graphics.Brush.verticalGradient(
                 listOf(colors.accent, colors.accent.copy(alpha = 0.55f)),
             )
@@ -1690,7 +1698,7 @@ private fun InsightDayChart(rows: List<JsonObject>) {
                 val height = (total.toFloat() / peak) * size.height
                 drawRoundRect(
                     brush = brush,
-                    topLeft = Offset(index * (width + gap), size.height - height),
+                    topLeft = Offset((positioned[index].first - firstDay) * stride + gap / 2, size.height - height),
                     size = Size(width.coerceAtLeast(1f), height.coerceAtLeast(0f)),
                     cornerRadius = CornerRadius(3.dp.toPx()),
                 )

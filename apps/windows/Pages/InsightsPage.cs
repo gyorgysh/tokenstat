@@ -1137,14 +1137,8 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         }
         const double chartHeight = 200;
         var plot = new Grid { Height = chartHeight };
-        foreach (var _ in rows)
-        {
-            plot.ColumnDefinitions.Add(new ColumnDefinition
-            {
-                Width = new GridLength(1, GridUnitType.Star),
-            });
-        }
         int column = 0;
+        int? previousDay = null;
         string peakKey = "";
         double peakValue = -1;
         foreach (var row in rows)
@@ -1152,6 +1146,16 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             double magnitude = ChartMagnitude(row, showsValue);
             double height = magnitude > 0 ? Math.Max(1, chartHeight * magnitude / peak) : 0;
             var key = Format.Text(row, "key");
+            int? day = DateOnly.TryParseExact(key, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out var parsedDay) ? parsedDay.DayNumber : null;
+            if (day is int current && previousDay is int previous && current - previous > 1)
+            {
+                // A weighted spacer preserves missing days without adding fake records.
+                plot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(current - previous - 1, GridUnitType.Star) });
+                column++;
+            }
+            plot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            previousDay = day;
             if (magnitude > peakValue)
             {
                 peakValue = magnitude;
