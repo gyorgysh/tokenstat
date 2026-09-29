@@ -54,3 +54,13 @@ foreach (var link in new[] { "https://example.com", "http://example.com", "mailt
 foreach (var link in new[] { "javascript:alert(1)", "file:///private/document", "data:text/html,hello", "../relative", "tokenstat:delete" })
     Check(NoteMarkdown.Link(link) is null, "A note exposed an executable/local navigation action");
 Console.WriteLine("Windows note Markdown: headings, checklist, quotes, code and link policy passed");
+
+var checklist = NoteFormatting.Apply("first\nsecond\nthird", 2, 11, "- [ ] ", "", "To do", true);
+Check("first\nsecond\nthird".Remove(checklist.Start, checklist.Length).Insert(checklist.Start, checklist.Replacement)
+    == "- [ ] first\n- [ ] second\nthird", "Checklist did not format complete selected lines");
+var formattedUnicode = NoteFormatting.Apply("A 🐈 sleeps", 2, 2, "**", "**", "text", false);
+Check(formattedUnicode.Replacement == "**🐈**" && formattedUnicode.SelectionLength == 2,
+    "Formatting lost Unicode or selection");
+var finalLine = NoteFormatting.Apply("one\n", 4, 0, "- ", "", "List item", true);
+Check(finalLine.Start == 4 && finalLine.Replacement == "- List item", "Empty final line formatting changed preceding text");
+Console.WriteLine("PASS: note formatting preserves paragraphs, Unicode and selected text");

@@ -8,5 +8,5 @@
     <PackageReference Include="Markdig" Version="1.3.2" />
     <Compile Include="../../../apps/windows/Pages/NoteDraftStore.cs" Link="NoteDraftStore.cs" />
     <Compile Include="../../../apps/windows/Pages/NoteMarkdown.cs" Link="NoteMarkdown.cs" />
-  </ItemGroup>
+  <Compile Include="../../../apps/windows/Pages/NoteFormatting.cs" Link="NoteFormatting.cs" /></ItemGroup>
 </Project>

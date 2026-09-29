@@ -194,7 +194,7 @@ struct NotesInspector: View {
     }
 
     private var notesEditor: some View {
-        TextEditor(text: $notesDraft)
+        NoteMarkdownEditor(text: $notesDraft)
             .font(Theme.callout)
             .scrollContentBackground(.hidden)
             .frame(minHeight: embedded ? 360 : 180, maxHeight: embedded ? 700 : 360)
@@ -203,16 +203,6 @@ struct NotesInspector: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.border, lineWidth: 1)
             )
-            .overlay(alignment: .topLeading) {
-                if notesDraft.isEmpty {
-                    Text("Note")
-                        .font(Theme.callout)
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, Theme.Space.s)
-                        .padding(.vertical, Theme.Space.s)
-                        .allowsHitTesting(false)
-                }
-            }
             .focused($focused, equals: .notes)
     }
 

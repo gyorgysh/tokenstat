@@ -268,7 +268,7 @@ struct ClientWorkspaceNotesView: View {
                             .textSelection(.enabled)
                             .frame(minHeight: 280, alignment: .topLeading)
                     } else {
-                        TextEditor(text: $editBody)
+                        ClientNoteTextEditor(text: $editBody, enabled: !editSaving)
                             .frame(minHeight: 280)
                             .disabled(editSaving)
                             .accessibilityLabel("Note body")

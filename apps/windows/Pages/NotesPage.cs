@@ -841,12 +841,11 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
             item.Click += (_, _) =>
             {
                 ShowMode(false);
-                int start = content.SelectionStart;
-                var selected = content.SelectedText;
-                if (selected.Length == 0) selected = placeholder;
-                string prefix = line && start > 0 && content.Text[start - 1] != '\n' && content.Text[start - 1] != '\r' ? "\n" + before : before;
-                content.SelectedText = prefix + selected + after;
-                content.Select(start + prefix.Length, selected.Length);
+                var edit = NoteFormatting.Apply(content.Text, content.SelectionStart, content.SelectionLength,
+                    before, after, placeholder, line);
+                content.Select(edit.Start, edit.Length);
+                content.SelectedText = edit.Replacement;
+                content.Select(edit.SelectionStart, edit.SelectionLength);
                 content.Focus(FocusState.Programmatic);
             };
             formatting.Items.Add(item);

@@ -53,6 +53,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import ai.tokenstat.tokenstat.ui.logic.NoteFormat
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -407,7 +410,8 @@ private fun NoteEditorDialog(
     onSave: suspend (String, String) -> Boolean,
 ) {
     var title by rememberSaveable(note.id) { mutableStateOf(note.title) }
-    var body by rememberSaveable(note.id) { mutableStateOf(note.body) }
+    var body by rememberSaveable(note.id, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(note.body)) }
+    var formatting by remember { mutableStateOf(false) }
     var preview by rememberSaveable(note.id) { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -421,17 +425,32 @@ private fun NoteEditorDialog(
                 Text("Note", style = TsType.chatBody)
                 TextButton(enabled = !saving && title.trim().isNotEmpty(), onClick = {
                     saving = true
-                    scope.launch { try { onSave(title.trim(), body) } finally { saving = false } }
+                    scope.launch { try { onSave(title.trim(), body.text) } finally { saving = false } }
                 }) { Text(if (saving) "Saving…" else "Save") }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 FilterChip(selected = !preview, onClick = { preview = false }, label = { Text("Write") })
                 FilterChip(selected = preview, onClick = { preview = true }, label = { Text("Preview") })
+                if (!preview) Box {
+                    TextButton(enabled = !saving, onClick = { formatting = true }) {
+                        Icon(ActionIcon.Edit.vector, contentDescription = null)
+                        Text("Format")
+                    }
+                    DropdownMenu(expanded = formatting, onDismissRequest = { formatting = false }) {
+                        NoteFormat.entries.forEach { style ->
+                            DropdownMenuItem(text = { Text(style.label) }, onClick = {
+                                val edit = style.apply(body.text, body.selection.start, body.selection.end)
+                                body = TextFieldValue(edit.text, TextRange(edit.start, edit.end))
+                                formatting = false
+                            })
+                        }
+                    }
+                }
             }
             if (error != null) Text(error, color = colors.danger, style = TsType.caption)
             OutlinedTextField(title, { title = it }, enabled = !saving, label = { Text("Title") }, modifier = Modifier.fillMaxWidth())
             if (preview) {
-                MarkdownText(body.ifBlank { "Nothing written yet." }, TsType.chatBody, colors.textPrimary,
+                MarkdownText(body.text.ifBlank { "Nothing written yet." }, TsType.chatBody, colors.textPrimary,
                     Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()))
             } else {
                 OutlinedTextField(body, { body = it }, enabled = !saving, label = { Text("Note") },
