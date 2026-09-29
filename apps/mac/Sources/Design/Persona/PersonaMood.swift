@@ -399,6 +399,14 @@ enum PersonaMood: Hashable, CaseIterable {
             drive.wobble = 0.03
             drive.wobblePhase = clock * 0.12
         }
+        // Plush stuffing yields gently; emotions never melt the character
+        // into a different silhouette. Apply this to resting poses too.
+        drive.stretch.width = min(max(drive.stretch.width, 0.88), 1.12)
+        drive.stretch.height = min(max(drive.stretch.height, 0.88), 1.12)
+        drive.shapeStiffness = max(drive.shapeStiffness, 145 * traits.firmness)
+        drive.damping = max(drive.damping, 3.2 * traits.firmness)
+        drive.pressure = max(drive.pressure, 40 * traits.firmness)
+        drive.support = max(drive.support, 0.9)
         return drive
     }
 

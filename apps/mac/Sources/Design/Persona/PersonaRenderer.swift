@@ -27,7 +27,7 @@ enum PersonaRenderer {
         let body = engine.body
         let bounds = body.bounds
         let hue = traits.hue
-        let ink = engine.mood.tint ?? hue
+        let ink = traits.faceInk
         let outline = Path(body.outline(in: rect))
 
         drawShadow(in: &context, rect: rect, bounds: bounds, unit: unit, hue: hue)
@@ -41,14 +41,14 @@ enum PersonaRenderer {
         context.fill(
             outline,
             with: .linearGradient(
-                Gradient(colors: [hue.opacity(0.20), hue.opacity(0.38)]),
+                Gradient(colors: [traits.bodyHighlight, hue]),
                 startPoint: CGPoint(x: rect.midX, y: top),
                 endPoint: CGPoint(x: rect.midX, y: base)
             )
         )
-        context.stroke(outline, with: .color(hue.opacity(0.92)), lineWidth: max(1, unit * 0.036))
+        context.stroke(outline, with: .color(hue.opacity(0.65)), lineWidth: max(0.5, unit * 0.012))
         if let tint = engine.mood.tint {
-            context.stroke(outline, with: .color(tint), lineWidth: max(1.5, unit * 0.055))
+            context.stroke(outline, with: .color(tint), lineWidth: max(1, unit * 0.020))
         }
 
         // Both clipped to the body, so a heavy squash or a melt pushes them
@@ -172,7 +172,7 @@ enum PersonaRenderer {
 
         // Lean, taken from where the crown sits relative to the middle. The
         // face tilts with the body for free, in every mood.
-        let tilt = atan2(crown.x - centroid.x, max(centroid.y - crown.y, 1e-4)) * 0.75
+        let tilt = clamp(atan2(crown.x - centroid.x, max(centroid.y - crown.y, 1e-4)) * 0.25, -0.12, 0.12)
 
         let heightPoints = bounds.height * rect.height
         let anchorHeight = heightPoints * (0.10 + face.lift)
@@ -203,9 +203,8 @@ enum PersonaRenderer {
         // into two specks. Three fixed steps, not a curve, so the 26pt seat
         // beside a message and the 30pt header look like the same creature.
         let lod: CGFloat = unit < 24 ? 1.35 : unit < 34 ? 1.15 : 1.0
-        let radius = unit * (count == 1 ? 0.115 : count == 2 ? 0.082 : 0.065)
-            * lod * clamp(face.eyeScale, 0.4, 2.2)
-        let spread = radius * (count == 2 ? 2.9 : 2.6) * face.spread / max(sqrt(aspect), 0.6)
+        let radius = unit * 0.047 * lod * clamp(face.eyeScale, 0.8, 1.25)
+        let spread = unit * 0.235 * clamp(face.spread, 0.85, 1.15) / max(sqrt(aspect), 0.6)
         let openness = max(0.02, face.openness * (1 - engine.blink * 0.96) * aspect)
 
         for index in 0..<count {
@@ -236,39 +235,33 @@ enum PersonaRenderer {
                 case .oval: eye = Path(ellipseIn: frame.insetBy(dx: radius * 0.16, dy: 0))
                 case .round: eye = Path(ellipseIn: frame)
                 }
-                if unit >= 24 {
-                    context.fill(eye, with: .color(.white.opacity(0.92)))
-                    context.drawLayer { iris in
-                        iris.clip(to: eye)
-                        let pupilRadius = radius * 0.53
-                        let pupil = CGPoint(x: centre.x + face.gaze.x * radius * 0.48,
-                                            y: centre.y + face.gaze.y * radius * 0.38)
-                        iris.fill(Path(ellipseIn: CGRect(x: pupil.x - pupilRadius, y: pupil.y - pupilRadius,
-                                                        width: pupilRadius * 2, height: pupilRadius * 2)),
-                                  with: .color(ink.opacity(0.96)))
-                        let glint = radius * 0.18
-                        iris.fill(Path(ellipseIn: CGRect(x: pupil.x - pupilRadius * 0.5, y: pupil.y - pupilRadius * 0.65,
-                                                        width: glint * 2, height: glint * 2)), with: .color(.white))
+                context.fill(eye, with: .color(ink))
+                if unit >= 28, openness > 0.35 {
+                    context.drawLayer { highlight in
+                        highlight.clip(to: eye)
+                        let glint = radius * 0.22
+                        highlight.fill(Path(ellipseIn: CGRect(
+                            x: centre.x - radius * 0.42, y: centre.y - radius * 0.48,
+                            width: glint * 2, height: glint * 2)),
+                            with: .color(.white.opacity(0.88)))
                     }
-                } else {
-                    context.fill(eye, with: .color(ink))
                 }
             }
 
-            if unit >= 30, abs(face.brow) > 0.06 {
+            if unit >= 40, abs(face.brow) > 0.45 {
                 drawBrow(
                     in: &context,
                     over: centre,
                     radius: radius,
                     unit: unit,
                     ink: ink,
-                    amount: face.brow,
+                    amount: face.brow * 0.45,
                     side: offset
                 )
             }
         }
 
-        if face.blush > 0.02, unit >= 26 {
+        if unit >= 26 {
             drawBlush(
                 in: &context,
                 place: place,
@@ -276,7 +269,7 @@ enum PersonaRenderer {
                 radius: radius,
                 spread: spread,
                 unit: unit,
-                amount: face.blush
+                amount: max(0.24, face.blush)
             )
         }
 
@@ -315,7 +308,7 @@ enum PersonaRenderer {
                 control: CGPoint(x: frame.midX, y: frame.midY - lift * 1.5)
             )
         }
-        context.stroke(arc, with: .color(ink), lineWidth: max(1, unit * 0.05))
+        context.stroke(arc, with: .color(ink), lineWidth: max(1, unit * 0.023))
     }
 
     /// Two soft patches on the cheeks, drawn under the eyes and outside them.
@@ -373,7 +366,7 @@ enum PersonaRenderer {
             to: b,
             control: CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 - radius * 0.18)
         )
-        context.stroke(path, with: .color(ink.opacity(0.72)), lineWidth: max(1, unit * 0.036))
+        context.stroke(path, with: .color(ink.opacity(0.72)), lineWidth: max(1, unit * 0.018))
     }
 
     private static func drawMouth(
@@ -402,24 +395,24 @@ enum PersonaRenderer {
         let curve = min(max(face.mouthCurve + resting, -1.1), 1.1)
         // An open mouth widens as it opens. Without it a loud syllable is a
         // tall narrow wedge rather than a vowel.
-        let half = unit * 0.078 * face.mouthWidth * traits.mouthWidth
+        let half = unit * 0.060 * min(face.mouthWidth, 1.2) * traits.mouthWidth
             * (1 + min(max(face.mouthOpen, 0), 1.2) * 0.22)
-        let open = max(0, face.mouthOpen) * unit * 0.140
-        let baseY = -anchorHeight + radius * 2.15
+        let open = min(max(0, face.mouthOpen), 0.8) * unit * 0.065
+        let baseY = -anchorHeight + unit * 0.12
 
         let left = place(-half, baseY)
         let right = place(half, baseY)
         // A quadratic reaches half its control offset, so the gap between the
         // two edges is half of `open`. Doubled here rather than in the moods,
         // where "one" should mean a wide open mouth and not half of one.
-        let bow = place(0, baseY + curve * unit * 0.142)
-        let sag = place(0, baseY + curve * unit * 0.142 + open * 2)
+        let bow = place(0, baseY + curve * unit * 0.080)
+        let sag = place(0, baseY + curve * unit * 0.080 + open * 2)
 
         if open < unit * 0.006 {
             var path = Path()
             path.move(to: left)
             path.addQuadCurve(to: right, control: bow)
-            context.stroke(path, with: .color(ink.opacity(0.78)), lineWidth: max(1, unit * 0.038))
+            context.stroke(path, with: .color(ink.opacity(0.78)), lineWidth: max(1, unit * 0.020))
             return
         }
 
@@ -437,7 +430,7 @@ enum PersonaRenderer {
         context.drawLayer { inner in
             inner.clip(to: path)
             let reach = min(max(face.tongue, 0), 1)
-            let tip = place(0, baseY + curve * unit * 0.142 + open * 2 * (1 - reach * 0.55))
+            let tip = place(0, baseY + curve * unit * 0.080 + open * 2 * (1 - reach * 0.55))
             let width = half * 0.86
             inner.fill(
                 Path(ellipseIn: CGRect(

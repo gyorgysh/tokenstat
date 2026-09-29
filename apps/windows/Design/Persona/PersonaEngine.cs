@@ -55,7 +55,6 @@ internal sealed class PersonaEngine
     public double Roll { get; private set; }
     public double Yaw { get; private set; }
     private double _lifetime;
-    private double _morphAmount;
     private double _rollVelocity;
     private double _yawVelocity;
 
@@ -237,12 +236,8 @@ internal sealed class PersonaEngine
             target = arrivingFace;
         }
 
-        bool playful = Mood is PersonaMood.Bouncing or PersonaMood.Dancing or PersonaMood.Pacing;
-        bool quiet = Mood is PersonaMood.Sleeping or PersonaMood.Failed or PersonaMood.Waiting;
-        double desiredMorph = quiet ? 0.10 : playful ? 0.68 : 0.46;
-        _morphAmount += (desiredMorph - _morphAmount) * FixedStep * 2;
-        drive.MorphAmount = _morphAmount;
-        drive.MorphPhase = _lifetime * 0.38 + (Seed % 997) * 0.01;
+        bool quiet = Mood == PersonaMood.Sleeping || Mood == PersonaMood.Failed || Mood == PersonaMood.Waiting;
+        // Shape belongs to the seed; moods animate the same plush character.
         if (Mood is PersonaMood.Bouncing or PersonaMood.Dancing)
         {
             _rollVelocity += (1.25 - _rollVelocity) * FixedStep * 4;
@@ -268,8 +263,8 @@ internal sealed class PersonaEngine
             _jiggle = Math.Max(0, _jiggle - FixedStep / 0.55);
             _jiggleClock += FixedStep;
             double eased = _softening * _softening;
-            drive.ShapeStiffness *= 1 - 0.38 * eased;
-            drive.Pressure *= 1 - 0.20 * eased;
+            drive.ShapeStiffness *= 1 - 0.15 * eased;
+            drive.Pressure *= 1 - 0.10 * eased;
             drive.Damping *= 1 - 0.22 * eased;
             drive.Jiggle += _jiggle * _jiggle * 0.55;
             drive.JigglePhase = _jiggleClock * 5.2;
@@ -453,7 +448,7 @@ internal sealed class PersonaEngine
                 Body.Impulse(new PVector(0.55, 0));
                 break;
             case PersonaMood.Sleeping:
-                Body.Slump(0.55);
+                Body.Slump(0.16);
                 break;
             case PersonaMood.Reading:
                 Body.Pulse(-0.05);
@@ -627,7 +622,7 @@ internal sealed class PersonaEngine
                 }
                 else if (round.Loss > 0.6 && Struck(PersonaMoodTiming.GamePeriod, 0.578, previous, now))
                 {
-                    Body.Slump(0.55);
+                    Body.Slump(0.16);
                 }
                 else if (Crossed(0.26, previous, now))
                 {
@@ -841,7 +836,7 @@ internal sealed class PersonaEngine
         var drive = Mood.Drive(0, Traits);
         var centre = new PPoint(
             drive.AnchorX,
-            PersonaStage.Floor - drive.Radius * drive.Stretch.Height);
+            PersonaStage.Floor - drive.Radius * drive.Stretch.Height * Body.RestBottom);
         Body.Reset(centre, drive.Stretch, drive.Radius);
         Face = Mood.Face(0, Traits);
         _blinkHold = 0;

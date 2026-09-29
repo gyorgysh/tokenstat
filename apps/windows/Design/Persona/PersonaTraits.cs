@@ -16,6 +16,9 @@ namespace Tokenstat.Design.Persona;
 /// </summary>
 internal sealed class PersonaTraits
 {
+    internal enum BodyShape { Ball, Star, Heart, Tortilla }
+    public BodyShape Shape { get; }
+
     internal enum EyeShape
     {
         Round,
@@ -50,8 +53,32 @@ internal sealed class PersonaTraits
     /// <summary>A permanent radial offset per node: this creature's own dents.</summary>
     public double[] Lumps { get; }
 
-    public PersonaTraits(ulong seed, int nodes = 14)
+    private static readonly (double X, double Y)[] HeartOutline = Enumerable.Range(0, 64).Select(i =>
     {
+        double t = i * 2 * Math.PI / 64;
+        return (16 * Math.Pow(Math.Sin(t), 3) / 17,
+            -(13 * Math.Cos(t) - 5 * Math.Cos(2 * t) - 2 * Math.Cos(3 * t) - Math.Cos(4 * t)) / 17);
+    }).ToArray();
+
+    private static double HeartRadius(double angle)
+    {
+        double dx = Math.Cos(angle), dy = Math.Sin(angle), radius = 1;
+        for (int i = 0; i < HeartOutline.Length; i++)
+        {
+            var p = HeartOutline[i]; var q = HeartOutline[(i + 1) % HeartOutline.Length];
+            double ex = q.X - p.X, ey = q.Y - p.Y;
+            double cross = dx * ey - dy * ex;
+            if (Math.Abs(cross) < 1e-8) continue;
+            double u = (p.X * dy - p.Y * dx) / cross;
+            double r = (p.X * ey - p.Y * ex) / cross;
+            if (u >= 0 && u <= 1 && r > 0) radius = Math.Min(radius, r);
+        }
+        return Math.Max(0.42, radius);
+    }
+
+    public PersonaTraits(ulong seed, int nodes = 20)
+    {
+        Shape = (BodyShape)((seed >> 1) % 4);
         ulong bits = seed == 0 ? 0x9E3779B97F4A7C15ul : seed;
         ulong Next(ulong modulo)
         {
@@ -61,40 +88,36 @@ internal sealed class PersonaTraits
             return bits % modulo;
         }
 
-        EyeCount = Next(10) switch
-        {
-            0 or 1 => 1,
-            2 => 3,
-            _ => 2,
-        };
-        Eye = Next(4) switch
-        {
-            0 => EyeShape.Round,
-            1 => EyeShape.Pixel,
-            _ => EyeShape.Oval,
-        };
-        Mouth = Next(5) switch
-        {
-            0 => MouthShape.Smile,
-            1 => MouthShape.Flat,
-            2 => MouthShape.Dot,
-            _ => null,
-        };
-        HasAntenna = Next(3) == 0;
-        MouthWidth = 0.78 + Next(9) * 0.06;
-        Firmness = 0.78 + Next(9) * 0.055;
+        // Preserve random draw order so existing identities keep their hue.
+        _ = Next(10);
+        EyeCount = 2;
+        Eye = Next(4) == 0 ? EyeShape.Round : EyeShape.Oval;
+        _ = Next(5);
+        Mouth = MouthShape.Smile;
+        _ = Next(3);
+        HasAntenna = false;
+        MouthWidth = 0.72 + Next(9) * 0.035;
+        Firmness = 0.95 + Next(9) * 0.03;
         // Two low harmonics rather than per-node noise. Noise reads as a
         // damaged circle, harmonics read as a shape somebody drew.
         double firstPhase = Next(360) * Math.PI / 180;
         double secondPhase = Next(360) * Math.PI / 180;
-        double firstAmount = 0.35 + Next(100) / 100.0 * 0.45;
-        double secondAmount = Next(100) / 100.0 * 0.30;
+        double firstAmount = 0.10 + Next(100) / 100.0 * 0.15;
+        double secondAmount = 0.04 + Next(100) / 100.0 * 0.07;
         Lumps = new double[nodes];
         for (int i = 0; i < nodes; i++)
         {
             double angle = i * 2 * Math.PI / nodes;
-            Lumps[i] = Math.Sin(angle * 2 + firstPhase) * firstAmount
+            double silhouette = Shape switch
+            {
+                BodyShape.Star => -Math.Sin(5 * angle) * 0.24,
+                BodyShape.Heart => HeartRadius(angle) - 1,
+                BodyShape.Tortilla => (0.6 * Math.Cos(2 * angle) + 0.35 * Math.Sin(angle)) * 0.34,
+                _ => 0,
+            };
+            double softness = Math.Sin(angle * 2 + firstPhase) * firstAmount
                 + Math.Sin(angle * 3 + secondPhase) * secondAmount;
+            Lumps[i] = silhouette * 10 + softness * 0.25;
         }
         Hue = Theme.Accent.MixedWith(Theme.Secondary, Next(7) / 6.0);
     }

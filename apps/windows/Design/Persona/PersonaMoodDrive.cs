@@ -372,6 +372,13 @@ internal static class PersonaMoodDrive
                 break;
             }
         }
+        // Gentle plush compression preserves identity in every emotion.
+        drive.Stretch = new PSize(Math.Clamp(drive.Stretch.Width, 0.88, 1.12),
+            Math.Clamp(drive.Stretch.Height, 0.88, 1.12));
+        drive.ShapeStiffness = Math.Max(drive.ShapeStiffness, 145 * traits.Firmness);
+        drive.Damping = Math.Max(drive.Damping, 3.2 * traits.Firmness);
+        drive.Pressure = Math.Max(drive.Pressure, 40 * traits.Firmness);
+        drive.Support = Math.Max(drive.Support, 0.9);
         return drive;
     }
 }

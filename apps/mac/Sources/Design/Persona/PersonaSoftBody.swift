@@ -47,10 +47,7 @@ struct PersonaDrive {
     /// The rest ellipse, as multipliers on `radius`. Squash and stretch.
     var stretch = CGSize(width: 1, height: 1)
     var radius: CGFloat = PersonaStage.restRadius
-    /// Continuous shape goals, applied through springs rather than replacing
-    /// the outline. Phase belongs to the lifetime clock, not the mood clock.
-    var morphPhase: CGFloat = 0
-    var morphAmount: CGFloat = 0
+    /// Rotation carries the fixed silhouette and its face together.
     var roll: CGFloat = 0
     /// How hard the body resists losing volume. This is what makes it read as
     /// a water balloon rather than a rubber band loop.
@@ -107,10 +104,9 @@ struct PersonaDrive {
 /// on one side travels round the rim. That is the difference between a shape
 /// that changes and a creature that reacts.
 ///
-/// The cost is fourteen nodes, fourteen ring springs, seven shape springs and
-/// fourteen pressure edges per step, all scalar arithmetic on reused buffers.
-/// Measured on the lab's stress grid, a hundred and twenty live marks step in
-/// well under a millisecond a frame, and the drawing is what costs.
+/// The cost is twenty nodes, twenty ring springs, twenty shape goals and
+/// twenty pressure edges per step, all scalar arithmetic on reused buffers.
+/// Rest geometry is precomputed; simulation does not allocate per frame.
 struct PersonaSoftBody {
     struct Node {
         var p: CGPoint
@@ -123,16 +119,18 @@ struct PersonaSoftBody {
     /// Fixed per-node phase offsets, so the ripple runs round the rim rather
     /// than pulsing everywhere at once.
     private var ripple: [CGFloat]
-    /// Fixed harmonics; avoid evaluating five trigonometric functions per node
-    /// at 120 simulation steps a second.
-    private var shapeBasis: [(x: CGFloat, y: CGFloat, third: CGFloat, fourth: CGFloat, fifth: CGFloat, cos2: CGFloat)]
+    /// Fixed radial directions avoid per-node trigonometry during simulation.
+    private var shapeBasis: [(x: CGFloat, y: CGFloat)]
     /// How much of the body is resting on the ground, zero to one, eased so
     /// that touching down ramps the support in rather than snapping it on.
     private var grounded: CGFloat = 0
     /// This creature's permanent dents, as a radial offset per node.
     ///
-    /// Built from the second and third harmonics only, so no persona is an
-    /// off-centre circle: the shape is dented rather than displaced.
+    /// Fixed silhouette geometry, centered so shape forces add no momentum.
+    private var restEdges: [CGFloat]
+    private(set) var restBottom: CGFloat = 1
+    private var restOffset: CGPoint = .zero
+    private var restArea: CGFloat
     private var lumps: [CGFloat]
     /// The hardest a node hit the floor since the engine last looked, and
     /// where. Nought when nothing has landed.
@@ -145,7 +143,7 @@ struct PersonaSoftBody {
     private var impactX: CGFloat = PersonaStage.centreX
 
     init(
-        count: Int = 14,
+        count: Int = 20,
         centre: CGPoint = PersonaStage.restCentre,
         radius: CGFloat = PersonaStage.restRadius,
         lumps: [CGFloat] = []
@@ -168,13 +166,32 @@ struct PersonaSoftBody {
         self.ripple = ripple
         shapeBasis = (0..<count).map { index in
             let a = CGFloat(index) * 2 * .pi / CGFloat(count)
-            return (cos(a), sin(a), cos(a * 3), cos(a * 4), cos(a * 5), cos(a * 2))
+            return (cos(a), sin(a))
         }
         if lumps.count == count {
             self.lumps = lumps
         } else {
             self.lumps = Array(repeating: 0, count: count)
         }
+        restEdges = []
+        restArea = 0
+        // Rest lengths follow this character's silhouette, not a circular ring.
+        let rest = (0..<count).map { i in
+            CGPoint(x: shapeBasis[i].x * (1 + self.lumps[i] * 0.10),
+                    y: shapeBasis[i].y * (1 + self.lumps[i] * 0.10))
+        }
+        restOffset = CGPoint(x: rest.reduce(0) { $0 + $1.x } / CGFloat(count),
+                             y: rest.reduce(0) { $0 + $1.y } / CGFloat(count))
+        restBottom = (rest.map(\.y).max() ?? 1) - restOffset.y
+        restEdges = (0..<count).map { i in
+            let next = rest[(i + 1) % count]
+            return hypot(next.x - rest[i].x, next.y - rest[i].y)
+        }
+        restArea = abs((0..<count).reduce(CGFloat(0)) { area, i in
+            let next = rest[(i + 1) % count]
+            return area + rest[i].x * next.y - next.x * rest[i].y
+        }) * 0.5
+
     }
 
     var count: Int { nodes.count }
@@ -299,9 +316,10 @@ struct PersonaSoftBody {
         grounded = 1
         for index in nodes.indices {
             let angle = CGFloat(index) * 2 * .pi / CGFloat(nodes.count)
+            let reach = radius * (1 + lumps[index] * 0.10)
             nodes[index].p = CGPoint(
-                x: centre.x + cos(angle) * radius * stretch.width,
-                y: centre.y + sin(angle) * radius * stretch.height
+                x: centre.x + (cos(angle) * reach - restOffset.x * radius) * stretch.width,
+                y: centre.y + (sin(angle) * reach - restOffset.y * radius) * stretch.height
             )
             nodes[index].v = .zero
         }
@@ -337,12 +355,11 @@ struct PersonaSoftBody {
             doubleArea += a.x * b.y - b.x * a.y
         }
         let area = abs(doubleArea) * 0.5
-        let target = .pi * drive.radius * drive.radius * drive.stretch.width * drive.stretch.height
+        let target = restArea * drive.radius * drive.radius * drive.stretch.width * drive.stretch.height
         // Clamped: an area that has briefly collapsed must not answer with a
         // force big enough to turn the body inside out.
         let pressure = drive.pressure * min(max(target / max(area, 2e-4) - 1, -1.5), 3.0)
 
-        let edgeRest = 2 * drive.radius * sin(.pi / CGFloat(n))
         for index in 0..<n {
             let next = (index + 1) % n
             var dx = nodes[next].p.x - nodes[index].p.x
@@ -351,7 +368,7 @@ struct PersonaSoftBody {
             dx /= length
             dy /= length
 
-            let spring = drive.ringStiffness * (length - edgeRest)
+            let spring = drive.ringStiffness * (length - restEdges[index] * drive.radius)
             forces[index].dx += spring * dx
             forces[index].dy += spring * dy
             forces[next].dx -= spring * dx
@@ -375,39 +392,17 @@ struct PersonaSoftBody {
         // live centroid, they sum to zero and add no momentum: the body is
         // free to fall, bounce and travel, it just is not free to stop being
         // this shape.
-        // A continuous journey through round, pill, triangle, squircle and
-        // petalled silhouettes. Quintic easing has zero velocity/acceleration
-        // at the joins, while the body springs carry their own momentum.
-        let phase = max(0, drive.morphPhase)
-        let shape = Int(phase.rounded(.down)) % 5
-        let fraction = phase - phase.rounded(.down)
-        let blend = fraction * fraction * fraction * (fraction * (fraction * 6 - 15) + 10)
-        func contourWeights(_ index: Int) -> (CGFloat, CGFloat, CGFloat, CGFloat) {
-            switch index % 5 {
-            case 1: return (0.85, 0, 0, 0)
-            case 2: return (0, 1, 0, 0)
-            case 3: return (0, 0, -0.8, 0)
-            case 4: return (0, 0, 0, 0.85)
-            default: return (0, 0, 0, 0)
-            }
-        }
-        let from = contourWeights(shape)
-        let to = contourWeights(shape + 1)
-        let second = from.0 + (to.0 - from.0) * blend
-        let third = from.1 + (to.1 - from.1) * blend
-        let fourth = from.2 + (to.2 - from.2) * blend
-        let fifth = from.3 + (to.3 - from.3) * blend
         let rollSin = sin(drive.roll)
         let rollCos = cos(drive.roll)
+        let offsetX = (restOffset.x * rollCos - restOffset.y * rollSin) * drive.radius
+        let offsetY = (restOffset.y * rollCos + restOffset.x * rollSin) * drive.radius
         for index in 0..<n {
             let basis = shapeBasis[index]
             let x = basis.x * rollCos - basis.y * rollSin
             let y = basis.y * rollCos + basis.x * rollSin
-            let contour = basis.cos2 * second + basis.third * third
-                + basis.fourth * fourth + basis.fifth * fifth
-            let reach = drive.radius * (1 + lumps[index] * 0.10 + contour * drive.morphAmount)
-            let goalX = centreX + x * reach * drive.stretch.width
-            let goalY = centreY + y * reach * drive.stretch.height
+            let reach = drive.radius * (1 + lumps[index] * 0.10)
+            let goalX = centreX + (x * reach - offsetX) * drive.stretch.width
+            let goalY = centreY + (y * reach - offsetY) * drive.stretch.height
             forces[index].dx += (goalX - nodes[index].p.x) * drive.shapeStiffness
             forces[index].dy += (goalY - nodes[index].p.y) * drive.shapeStiffness
         }
@@ -492,10 +487,10 @@ struct PersonaSoftBody {
     /// The silhouette, as one closed path of cubic segments.
     ///
     /// One pass of Laplacian smoothing first, on a copy: the simulation wants
-    /// fourteen distinct masses, the eye wants a curve with no corners in it.
+    /// twenty distinct masses, the eye wants a curve with no corners in it.
     /// Then Catmull-Rom through the smoothed ring, converted to Béziers,
     /// which is what keeps a heavy squash from creasing.
-    func outline(in rect: CGRect, smoothing: CGFloat = 0.34) -> CGPath {
+    func outline(in rect: CGRect, smoothing: CGFloat = 0.18) -> CGPath {
         let n = nodes.count
         let path = CGMutablePath()
         guard n > 3 else { return path }
@@ -573,8 +568,6 @@ extension PersonaDrive {
             height: mix(from.stretch.height, to.stretch.height)
         )
         out.radius = mix(from.radius, to.radius)
-        out.morphPhase = to.morphPhase
-        out.morphAmount = mix(from.morphAmount, to.morphAmount)
         out.roll = mix(from.roll, to.roll)
         out.pressure = mix(from.pressure, to.pressure)
         out.ringStiffness = mix(from.ringStiffness, to.ringStiffness)

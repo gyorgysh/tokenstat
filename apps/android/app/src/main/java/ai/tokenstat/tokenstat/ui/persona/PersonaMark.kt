@@ -151,7 +151,7 @@ fun DrawScope.drawPersonaFace(traits: PersonaTraits, hue: Color, motion: Persona
     }
     // The outline smoothing from `PersonaSoftBody.outline`, then the same
     // Catmull-Rom to Bezier closed curve.
-    val smoothing = 0.34f
+    val smoothing = 0.18f
     val points = (0 until count).map { index ->
         val prev = nodes[(index + count - 1) % count]
         val cur = nodes[index]
@@ -213,13 +213,13 @@ fun DrawScope.drawPersonaFace(traits: PersonaTraits, hue: Color, motion: Persona
     drawPath(
         outline,
         Brush.linearGradient(
-            0.0f to hue.copy(alpha = 0.20f),
-            1.0f to hue.copy(alpha = 0.38f),
+            0.0f to androidx.compose.ui.graphics.lerp(hue, Color.White, 0.34f),
+            1.0f to hue,
             start = Offset(w / 2f, minY * h),
             end = Offset(w / 2f, maxY * h),
         ),
     )
-    drawPath(outline, hue.copy(alpha = 0.92f), style = Stroke(width = max(1f, unit * 0.036f)))
+    drawPath(outline, hue.copy(alpha = 0.65f), style = Stroke(width = max(0.5f, unit * 0.012f)))
 
     clipPath(outline) {
         // The highlight sits off the middle rather than off the bounding box,
@@ -248,7 +248,7 @@ fun DrawScope.drawPersonaFace(traits: PersonaTraits, hue: Color, motion: Persona
             rotate(((motion?.roll ?: 0.0) * 180 / PI).toFloat(), origin) {
                 translate(left = (sin(motion?.yaw ?: 0.0) * (maxX - minX) * w * 0.24).toFloat()) {
                     scale(scaleX = max(0.08f, facing), scaleY = 1f, pivot = origin) {
-                        drawPersonaIdleFace(traits, hue.copy(alpha = min(1f, facing * 4)),
+                        drawPersonaIdleFace(traits, androidx.compose.ui.graphics.lerp(hue, Color.Black, 0.78f).copy(alpha = min(1f, facing * 4)),
                             minX, maxX, minY, maxY, centroid, crown, unit,
                             blink = (motion?.blink ?: 0.0).toFloat(), mood = motion?.mood ?: PersonaMood.Idle,
                             previousMood = motion?.previousMood ?: PersonaMood.Idle,
@@ -292,7 +292,7 @@ private fun DrawScope.drawPersonaIdleFace(
     // further apart, tall and thin means round eyes closer together.
     val aspect = ((maxY - minY) / max(maxX - minX, 1e-4f)).coerceIn(0.45f, 1.7f)
     // Lean, taken from where the crown sits relative to the middle.
-    val tilt = atan2(crown.x - centroid.x, max(centroid.y - crown.y, 1e-4f)) * 0.75f
+    val tilt = (atan2(crown.x - centroid.x, max(centroid.y - crown.y, 1e-4f)) * 0.25f).coerceIn(-0.12f, 0.12f)
     val heightPoints = (maxY - minY) * h
     val anchorHeight = heightPoints * 0.10f
     val origin = Offset(centroid.x * w, centroid.y * h)
@@ -304,9 +304,9 @@ private fun DrawScope.drawPersonaIdleFace(
     val count = traits.eyeCount
     // Small marks need proportionally bigger features or the face turns into
     // two specks. Three fixed steps, not a curve.
-    val lod = if (unit < 24f) 1.35f else if (unit < 34f) 1.15f else 1.0f
-    val radius = unit * (if (count == 1) 0.115f else if (count == 2) 0.082f else 0.065f) * lod
-    val spread = radius * (if (count == 2) 2.9f else 2.6f) / max(sqrt(aspect), 0.6f)
+    val lod = if (unit / density < 24f) 1.35f else if (unit / density < 34f) 1.15f else 1.0f
+    val radius = unit * 0.047f * lod
+    val spread = unit * 0.235f / max(sqrt(aspect), 0.6f)
     val openness = max(0.02f, aspect * (1 - blink * 0.96f))
     for (index in 0 until count) {
         val offset = index.toFloat() - (count - 1).toFloat() / 2f
@@ -321,19 +321,16 @@ private fun DrawScope.drawPersonaIdleFace(
                 PersonaTraits.EyeShape.ROUND -> addOval(bounds)
             }
         }
-        if (unit / density >= 24f) {
-            drawPath(eye, Color.White.copy(alpha = ink.alpha * 0.92f))
+        drawPath(eye, ink)
+        if (unit / density >= 28f && openness > 0.35f) {
             clipPath(eye) {
-                val pupilRadius = radius * 0.53f
-                val pupil = centre + Offset(gaze * radius * 0.48f, 0f)
-                drawCircle(ink, pupilRadius, pupil)
-                drawCircle(Color.White.copy(alpha = ink.alpha), radius * 0.18f,
-                    pupil + Offset(-pupilRadius * 0.3f, -pupilRadius * 0.35f))
+                drawCircle(Color.White.copy(alpha = ink.alpha * 0.88f), radius * 0.22f,
+                    centre + Offset(-radius * 0.20f, -radius * 0.26f))
             }
-        } else drawPath(eye, ink)
+        }
     }
 
-    if (unit < 21f) return
+    if (unit / density < 21f) return
     // The persona's own mouth is a bias on the mood's, not a replacement: a
     // naturally glum character still smiles when it wins, just less widely.
     val resting = when (traits.mouth) {
@@ -351,14 +348,14 @@ private fun DrawScope.drawPersonaIdleFace(
     val ease = expressionProgress * expressionProgress * (3 - 2 * expressionProgress)
     val expression = expressionFor(previousMood) + (expressionFor(mood) - expressionFor(previousMood)) * ease
     val curve = (expression + resting).coerceIn(-1.1f, 1.1f)
-    val half = unit * 0.078f * traits.mouthWidth
-    val baseY = -anchorHeight + radius * 2.15f
+    val half = unit * 0.060f * traits.mouthWidth
+    val baseY = -anchorHeight + unit * 0.12f
     val left = place(-half, baseY)
     val right = place(half, baseY)
-    val bow = place(0f, baseY + curve * unit * 0.142f)
+    val bow = place(0f, baseY + curve * unit * 0.080f)
     val mouth = Path().apply {
         moveTo(left.x, left.y)
         quadraticTo(bow.x, bow.y, right.x, right.y)
     }
-    drawPath(mouth, ink.copy(alpha = 0.78f), style = Stroke(width = max(1f, unit * 0.038f)))
+    drawPath(mouth, ink.copy(alpha = 0.78f), style = Stroke(width = max(1f, unit * 0.020f)))
 }

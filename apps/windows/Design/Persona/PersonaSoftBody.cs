@@ -57,8 +57,6 @@ internal struct PersonaDrive
     public PSize Stretch = new(1, 1);
 
     public double Radius = PersonaStage.RestRadius;
-    public double MorphPhase;
-    public double MorphAmount;
     public double Roll;
 
     /// <summary>
@@ -139,8 +137,6 @@ internal struct PersonaDrive
         out_.Gravity = Mix(from.Gravity, to.Gravity);
         out_.Stretch = new PSize(Mix(from.Stretch.Width, to.Stretch.Width), Mix(from.Stretch.Height, to.Stretch.Height));
         out_.Radius = Mix(from.Radius, to.Radius);
-        out_.MorphPhase = to.MorphPhase;
-        out_.MorphAmount = Mix(from.MorphAmount, to.MorphAmount);
         out_.Roll = Mix(from.Roll, to.Roll);
         out_.Pressure = Mix(from.Pressure, to.Pressure);
         out_.RingStiffness = Mix(from.RingStiffness, to.RingStiffness);
@@ -188,7 +184,11 @@ internal sealed class PersonaSoftBody
     /// than pulsing everywhere at once.
     /// </summary>
     private readonly double[] _ripple;
-    private readonly (double X, double Y, double Second, double Third, double Fourth, double Fifth)[] _shapeBasis;
+    private readonly (double X, double Y)[] _shapeBasis;
+    private readonly double[] _restEdges;
+    private readonly double _restArea;
+    private readonly PPoint _restOffset;
+    public double RestBottom { get; }
 
     /// <summary>
     /// How much of the body is resting on the ground, zero to one, eased so
@@ -208,7 +208,7 @@ internal sealed class PersonaSoftBody
     private double _impactX = PersonaStage.CentreX;
 
     public PersonaSoftBody(
-        int count = 14,
+        int count = 20,
         PPoint? centre = null,
         double radius = PersonaStage.RestRadius,
         double[]? lumps = null)
@@ -217,7 +217,8 @@ internal sealed class PersonaSoftBody
         var at = centre ?? PersonaStage.RestCentre;
         _nodes = new List<Node>(count);
         _ripple = new double[count];
-        _shapeBasis = new (double, double, double, double, double, double)[count];
+        _shapeBasis = new (double, double)[count];
+        _restEdges = new double[count];
         for (int i = 0; i < count; i++)
         {
             double angle = i * 2 * Math.PI / count;
@@ -227,13 +228,27 @@ internal sealed class PersonaSoftBody
                 V = PVector.Zero,
             });
             _ripple[i] = angle * 2;
-            _shapeBasis[i] = (Math.Cos(angle), Math.Sin(angle), Math.Cos(angle * 2),
-                Math.Cos(angle * 3), Math.Cos(angle * 4), Math.Cos(angle * 5));
+            _shapeBasis[i] = (Math.Cos(angle), Math.Sin(angle));
         }
         _forces = new PVector[count];
         _lumps = lumps is { Length: var len } && len == count
             ? (double[])lumps.Clone()
             : new double[count];
+        double area = 0, sumX = 0, sumY = 0;
+        for (int i = 0; i < count; i++)
+        {
+            int next = (i + 1) % count;
+            double x = _shapeBasis[i].X * (1 + _lumps[i] * 0.10);
+            double y = _shapeBasis[i].Y * (1 + _lumps[i] * 0.10);
+            double nx = _shapeBasis[next].X * (1 + _lumps[next] * 0.10);
+            double ny = _shapeBasis[next].Y * (1 + _lumps[next] * 0.10);
+            _restEdges[i] = Math.Sqrt((nx - x) * (nx - x) + (ny - y) * (ny - y));
+            area += x * ny - nx * y;
+            sumX += x; sumY += y;
+        }
+        _restArea = Math.Abs(area) * 0.5;
+        _restOffset = new PPoint(sumX / count, sumY / count);
+        RestBottom = Enumerable.Range(0, count).Max(i => _shapeBasis[i].Y * (1 + _lumps[i] * 0.10)) - _restOffset.Y;
     }
 
     public int Count => _nodes.Count;
@@ -408,11 +423,12 @@ internal sealed class PersonaSoftBody
         for (int i = 0; i < _nodes.Count; i++)
         {
             double angle = i * 2 * Math.PI / _nodes.Count;
+            double reach = radius * (1 + _lumps[i] * 0.10);
             _nodes[i] = new Node
             {
                 P = new PPoint(
-                    at.X + Math.Cos(angle) * radius * st.Width,
-                    at.Y + Math.Sin(angle) * radius * st.Height),
+                    at.X + (Math.Cos(angle) * reach - _restOffset.X * radius) * st.Width,
+                    at.Y + (Math.Sin(angle) * reach - _restOffset.Y * radius) * st.Height),
                 V = PVector.Zero,
             };
         }
@@ -455,12 +471,11 @@ internal sealed class PersonaSoftBody
             doubleArea += a.X * b.Y - b.X * a.Y;
         }
         double area = Math.Abs(doubleArea) * 0.5;
-        double target = Math.PI * drive.Radius * drive.Radius * drive.Stretch.Width * drive.Stretch.Height;
+        double target = _restArea * drive.Radius * drive.Radius * drive.Stretch.Width * drive.Stretch.Height;
         // Clamped: an area that has briefly collapsed must not answer with a
         // force big enough to turn the body inside out.
         double pressure = drive.Pressure * Math.Clamp(target / Math.Max(area, 2e-4) - 1, -1.5, 3.0);
 
-        double edgeRest = 2 * drive.Radius * Math.Sin(Math.PI / n);
         for (int i = 0; i < n; i++)
         {
             int next = (i + 1) % n;
@@ -470,7 +485,7 @@ internal sealed class PersonaSoftBody
             dx /= length;
             dy /= length;
 
-            double spring = drive.RingStiffness * (length - edgeRest);
+            double spring = drive.RingStiffness * (length - _restEdges[i] * drive.Radius);
             _forces[i] += new PVector(spring * dx, spring * dy);
             _forces[next] += new PVector(-spring * dx, -spring * dy);
 
@@ -489,35 +504,17 @@ internal sealed class PersonaSoftBody
         // live centroid, they sum to zero and add no momentum: the body is
         // free to fall, bounce and travel, it just is not free to stop being
         // this shape.
-        double phase = Math.Max(0, drive.MorphPhase);
-        int shape = (int)Math.Floor(phase) % 5;
-        double fraction = phase - Math.Floor(phase);
-        double blend = fraction * fraction * fraction * (fraction * (fraction * 6 - 15) + 10);
-        static (double, double, double, double) Weights(int index) => (index % 5) switch
-        {
-            1 => (0.85, 0, 0, 0),
-            2 => (0, 1, 0, 0),
-            3 => (0, 0, -0.8, 0),
-            4 => (0, 0, 0, 0.85),
-            _ => (0, 0, 0, 0),
-        };
-        var from = Weights(shape);
-        var to = Weights(shape + 1);
-        double second = from.Item1 + (to.Item1 - from.Item1) * blend;
-        double third = from.Item2 + (to.Item2 - from.Item2) * blend;
-        double fourth = from.Item3 + (to.Item3 - from.Item3) * blend;
-        double fifth = from.Item4 + (to.Item4 - from.Item4) * blend;
         double rollSin = Math.Sin(drive.Roll), rollCos = Math.Cos(drive.Roll);
+        double offsetX = (_restOffset.X * rollCos - _restOffset.Y * rollSin) * drive.Radius;
+        double offsetY = (_restOffset.Y * rollCos + _restOffset.X * rollSin) * drive.Radius;
         for (int i = 0; i < n; i++)
         {
             var basis = _shapeBasis[i];
             double x = basis.X * rollCos - basis.Y * rollSin;
             double y = basis.Y * rollCos + basis.X * rollSin;
-            double contour = basis.Second * second + basis.Third * third
-                + basis.Fourth * fourth + basis.Fifth * fifth;
-            double reach = drive.Radius * (1 + _lumps[i] * 0.10 + contour * drive.MorphAmount);
-            double goalX = centreX + x * reach * drive.Stretch.Width;
-            double goalY = centreY + y * reach * drive.Stretch.Height;
+            double reach = drive.Radius * (1 + _lumps[i] * 0.10);
+            double goalX = centreX + (x * reach - offsetX) * drive.Stretch.Width;
+            double goalY = centreY + (y * reach - offsetY) * drive.Stretch.Height;
             _forces[i] += new PVector(
                 (goalX - _nodes[i].P.X) * drive.ShapeStiffness,
                 (goalY - _nodes[i].P.Y) * drive.ShapeStiffness);
@@ -615,11 +612,11 @@ internal sealed class PersonaSoftBody
 
     /// <summary>
     /// The silhouette ring, smoothed and mapped into pixels. One pass of
-    /// Laplacian smoothing first: the simulation wants fourteen distinct
+    /// Laplacian smoothing first: the simulation wants twenty distinct
     /// masses, the eye wants a curve with no corners in it. The renderer draws
     /// Catmull-Rom through these, converted to Beziers.
     /// </summary>
-    public PPoint[] Outline(double width, double height, double smoothing = 0.34)
+    public PPoint[] Outline(double width, double height, double smoothing = 0.18)
     {
         int n = _nodes.Count;
         var points = new PPoint[n];

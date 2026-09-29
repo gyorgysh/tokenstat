@@ -7,11 +7,9 @@ import Foundation
         for variant in 0..<12 {
             var body = PersonaSoftBody()
             var drive = PersonaDrive()
-            drive.morphAmount = 0.68
             drive.shapeStiffness *= 0.7 + CGFloat(variant) * 0.05
             for frame in 0..<7200 {
                 let t = CGFloat(frame) / 120
-                drive.morphPhase = t * 0.38 + CGFloat(variant)
                 drive.roll = t * 1.25
                 if frame % 360 == 0 { body.impulse(CGVector(dx: 0.1, dy: -0.5)) }
                 body.step(dt: 1 / 120, drive: drive)
@@ -24,6 +22,6 @@ import Foundation
                 precondition(body.bounds.width > 0.1 && body.bounds.height > 0.1)
             }
         }
-        print("Persona soft body: 12 stiffness/phase variants, 60 seconds each, bounded while morphing and rolling")
+        print("Persona soft body: 12 stiffness variants, 60 seconds each, bounded while rolling")
     }
 }

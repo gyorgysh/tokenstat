@@ -50,7 +50,6 @@ final class PersonaEngine {
     private var lifetime: CGFloat = 0
     private(set) var roll: CGFloat = 0
     private(set) var yaw: CGFloat = 0
-    private var morphAmount: CGFloat = 0
     private var rollVelocity: CGFloat = 0
     private var yawVelocity: CGFloat = 0
 
@@ -202,12 +201,8 @@ final class PersonaEngine {
             target = arrivingFace
         }
 
-        let playful = mood == .bouncing || mood == .dancing || mood == .pacing
         let quiet = mood == .sleeping || mood == .failed || mood == .waiting
-        let desiredMorph: CGFloat = quiet ? 0.10 : playful ? 0.68 : 0.46
-        morphAmount += (desiredMorph - morphAmount) * Self.fixedStep * 2
-        drive.morphAmount = morphAmount
-        drive.morphPhase = lifetime * 0.38 + CGFloat(seed % 997) * 0.01
+        // Shape belongs to the seed. Emotion moves the same plush character.
         // A full somersault during play; a small settling lean otherwise.
         // Integrate the angle so switching moods never jumps to a new pose.
         if mood == .bouncing || mood == .dancing {
@@ -231,8 +226,8 @@ final class PersonaEngine {
             jiggle = max(0, jiggle - Self.fixedStep / 0.55)
             jiggleClock += Self.fixedStep
             let eased = softening * softening
-            drive.shapeStiffness *= 1 - 0.38 * eased
-            drive.pressure *= 1 - 0.20 * eased
+            drive.shapeStiffness *= 1 - 0.15 * eased
+            drive.pressure *= 1 - 0.10 * eased
             drive.damping *= 1 - 0.22 * eased
             drive.jiggle += jiggle * jiggle * 0.55
             drive.jigglePhase = jiggleClock * 5.2
@@ -385,7 +380,7 @@ final class PersonaEngine {
         case .failed:
             body.impulse(CGVector(dx: 0.55, dy: 0))
         case .sleeping:
-            body.slump(0.55)
+            body.slump(0.16)
         case .reading:
             body.pulse(-0.05)
         case .gaming:
@@ -517,7 +512,7 @@ final class PersonaEngine {
                 body.impulse(CGVector(dx: 0, dy: -0.95))
                 body.pulse(0.13)
             } else if round.loss > 0.6, struck(PersonaMood.gamePeriod, 0.578, previous, now) {
-                body.slump(0.55)
+                body.slump(0.16)
             } else if crossed(0.26, previous, now) {
                 body.poke(at: body.anchors.hands, strength: -0.13, reach: 0.20)
             }
@@ -679,7 +674,7 @@ final class PersonaEngine {
         let drive = mood.drive(clock: 0, traits: traits)
         let centre = CGPoint(
             x: drive.anchorX,
-            y: PersonaStage.floor - drive.radius * drive.stretch.height
+            y: PersonaStage.floor - drive.radius * drive.stretch.height * body.restBottom
         )
         body.reset(centre: centre, stretch: drive.stretch, radius: drive.radius)
         face = mood.face(clock: 0, traits: traits)

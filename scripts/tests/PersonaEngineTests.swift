@@ -12,8 +12,24 @@ enum Theme {
 
 @main enum PersonaEngineTests {
     static func main() {
-        for seed: UInt64 in [0, 1, 997, UInt64.max] {
+        for seed: UInt64 in [0, 1, 3, 5, 7, 997, UInt64.max] {
             let engine = PersonaEngine(seed: seed)
+            precondition(engine.traits.eyeCount == 2 && !engine.traits.hasAntenna)
+            let identity = engine.traits.bodyShape
+            let silhouette = engine.traits.lumps
+            // No external force: the character must retain its own outline
+            // without the asymmetric heart/tortilla manufacturing momentum.
+            var restBody = PersonaSoftBody(lumps: silhouette)
+            restBody.reset(centre: CGPoint(x: 0.5, y: 0.48), radius: 0.28)
+            let restPose = restBody.nodes.map(\.p)
+            var restDrive = PersonaDrive()
+            restDrive.gravity = 0
+            restDrive.radius = 0.28
+            for _ in 0..<2400 { restBody.step(dt: 1 / 120, drive: restDrive) }
+            for (node, original) in zip(restBody.nodes, restPose) {
+                precondition(hypot(node.p.x - original.x, node.p.y - original.y) < 1e-5,
+                             "Fixed silhouettes must not drift or round into another shape")
+            }
             var time = 0.0
             engine.advance(to: time, mood: .idle, moving: true)
             for from in PersonaMood.allCases {
@@ -23,6 +39,7 @@ enum Theme {
                         let before = engine.body.nodes.map(\.p)
                         time += 1.0 / 60
                         engine.advance(to: time, mood: to, moving: true)
+                        precondition(engine.traits.bodyShape == identity && engine.traits.lumps == silhouette)
                         precondition(engine.roll.isFinite && engine.yaw.isFinite)
                         for (node, previous) in zip(engine.body.nodes, before) {
                             precondition(node.p.x.isFinite && node.p.y.isFinite)
@@ -45,6 +62,6 @@ enum Theme {
             engine.advance(to: time + 1, mood: .idle, moving: false)
             precondition(engine.body.nodes.map(\.p) == settled, "Reduce Motion must remain still")
         }
-        print("Persona engine: every mood pair across four seeds, suspension and Reduce Motion pass")
+        print("Persona engine: every mood pair across all four plush shapes, suspension and Reduce Motion pass")
     }
 }

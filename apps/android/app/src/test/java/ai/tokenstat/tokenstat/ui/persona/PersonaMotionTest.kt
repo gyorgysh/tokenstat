@@ -7,8 +7,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PersonaMotionTest {
-    @Test fun everyMoodRemainsBoundedThroughMorphsAndTransitions() {
-        for (seed in listOf(0UL, 1UL, 997UL, ULong.MAX_VALUE)) {
+    @Test fun everyPlushShapeRemainsBoundedThroughRollsAndTransitions() {
+        for (seed in listOf(0UL, 1UL, 3UL, 5UL, 7UL, 997UL, ULong.MAX_VALUE)) {
             val traits = PersonaTraits(seed)
             val motion = PersonaMotion(seed, traits.lumps, traits.firmness.toDouble())
             var time = 0.0
@@ -27,7 +27,7 @@ class PersonaMotionTest {
     }
 
     @Test fun everyMoodPairPreservesPositionOnTransition() {
-        for (seed in listOf(0UL, 1UL, 997UL, ULong.MAX_VALUE)) {
+        for (seed in listOf(0UL, 1UL, 3UL, 5UL, 7UL, 997UL, ULong.MAX_VALUE)) {
             val traits = PersonaTraits(seed)
             val motion = PersonaMotion(seed, traits.lumps, traits.firmness.toDouble())
             var time = 0.0

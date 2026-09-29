@@ -24,10 +24,14 @@ struct PersonaTraits {
     /// deliberately not in here: a persona whose eyes were permanently two
     /// curves could not look up, narrow them, or open them wide, so every mood
     /// landed on the same face. Arcs are an expression, not a feature.
+    enum BodyShape: Int { case ball, star, heart, tortilla }
     enum EyeShape { case round, oval, pixel }
     enum Mouth { case dot, smile, flat, frown }
 
+    let bodyShape: BodyShape
     let hue: Color
+    let faceInk: Color
+    let bodyHighlight: Color
     let eyeCount: Int
     let eyeShape: EyeShape
     let mouth: Mouth?
@@ -39,7 +43,31 @@ struct PersonaTraits {
     /// A permanent radial offset per node: this creature's own dents.
     let lumps: [CGFloat]
 
-    init(seed: UInt64, nodes: Int = 14) {
+    // Sample the familiar heart outline once; ray intersections keep its point
+    // and soft shoulders instead of turning it into a notched ball.
+    private static let heartOutline: [CGPoint] = (0..<64).map { i in
+        let t = CGFloat(i) * 2 * .pi / 64
+        return CGPoint(x: 16 * pow(sin(t), 3) / 17,
+                       y: -(13 * cos(t) - 5 * cos(2 * t) - 2 * cos(3 * t) - cos(4 * t)) / 17)
+    }
+
+    private static func heartRadius(at angle: CGFloat) -> CGFloat {
+        let dx = cos(angle), dy = sin(angle)
+        var radius: CGFloat = 1
+        for i in heartOutline.indices {
+            let p = heartOutline[i], q = heartOutline[(i + 1) % heartOutline.count]
+            let ex = q.x - p.x, ey = q.y - p.y
+            let cross = dx * ey - dy * ex
+            guard abs(cross) > 1e-8 else { continue }
+            let u = (p.x * dy - p.y * dx) / cross
+            let r = (p.x * ey - p.y * ex) / cross
+            if u >= 0, u <= 1, r > 0 { radius = min(radius, r) }
+        }
+        return max(0.42, radius)
+    }
+
+    init(seed: UInt64, nodes: Int = 20) {
+        bodyShape = BodyShape(rawValue: Int((seed >> 1) % 4))!
         var bits = seed == 0 ? 0x9E37_79B9_7F4A_7C15 : seed
         func next(_ modulo: UInt64) -> UInt64 {
             bits ^= bits << 13
@@ -47,42 +75,42 @@ struct PersonaTraits {
             bits ^= bits << 17
             return bits % modulo
         }
-        eyeCount = switch next(10) {
-        case 0, 1: 1
-        case 2: 3
-        default: 2
-        }
-        eyeShape = switch next(4) {
-        case 0: .round
-        case 1: .pixel
-        default: .oval
-        }
-        mouth = switch next(5) {
-        case 0: .smile
-        case 1: .flat
-        case 2: .dot
-        default: nil
-        }
-        hasAntenna = next(3) == 0
-        mouthWidth = 0.78 + CGFloat(next(9)) * 0.06
-        firmness = 0.78 + CGFloat(next(9)) * 0.055
+        // Keep the identity draw order stable: existing chats retain their hue.
+        _ = next(10)
+        eyeCount = 2
+        eyeShape = next(4) == 0 ? .round : .oval
+        _ = next(5)
+        mouth = .smile
+        _ = next(3)
+        hasAntenna = false
+        mouthWidth = 0.72 + CGFloat(next(9)) * 0.035
+        firmness = 0.95 + CGFloat(next(9)) * 0.03
         // Two low harmonics rather than per-node noise. Noise reads as a
         // damaged circle, harmonics read as a shape somebody drew.
         let firstPhase = CGFloat(next(360)) * .pi / 180
         let secondPhase = CGFloat(next(360)) * .pi / 180
-        let firstAmount = 0.35 + CGFloat(next(100)) / 100 * 0.45
-        let secondAmount = CGFloat(next(100)) / 100 * 0.30
+        let firstAmount = 0.10 + CGFloat(next(100)) / 100 * 0.15
+        let secondAmount = 0.04 + CGFloat(next(100)) / 100 * 0.07
         var lumps: [CGFloat] = []
         lumps.reserveCapacity(nodes)
         for index in 0..<nodes {
             let angle = CGFloat(index) * 2 * .pi / CGFloat(nodes)
-            lumps.append(
-                sin(angle * 2 + firstPhase) * firstAmount
-                    + sin(angle * 3 + secondPhase) * secondAmount
-            )
+            let silhouette: CGFloat = switch bodyShape {
+            case .ball: 0
+            case .star: -sin(5 * angle) * 0.24
+            case .heart: Self.heartRadius(at: angle) - 1
+            case .tortilla: (0.6 * cos(2 * angle) + 0.35 * sin(angle)) * 0.34
+            }
+            let softness = sin(angle * 2 + firstPhase) * firstAmount
+                + sin(angle * 3 + secondPhase) * secondAmount
+            lumps.append(silhouette * 10 + softness * 0.25)
         }
         self.lumps = lumps
-        hue = Theme.accent.mixed(with: Theme.secondary, by: Double(next(7)) / 6)
+        let palette = Theme.accent.mixed(with: Theme.secondary, by: Double(next(7)) / 6)
+        hue = palette
+        // Resolve platform colors once per identity, never in the frame loop.
+        faceInk = palette.mixed(with: .black, by: 0.78)
+        bodyHighlight = palette.mixed(with: .white, by: 0.34)
     }
 }
 

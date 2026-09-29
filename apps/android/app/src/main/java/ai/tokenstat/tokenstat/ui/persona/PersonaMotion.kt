@@ -17,7 +17,7 @@ enum class PersonaMood {
     Speaking, Juggling, Reading, Gaming, Typing, Sipping, Sketching, Stargazing, Gardening, Bubbling, Snacking,
 }
 
-/** Fixed-step pressure body, with the same stage and morph harmonics as Apple/Windows.
+/** Fixed-step pressure body, with the same stage and fixed plush silhouettes as Apple/Windows.
  * All simulation buffers are reused. Compose observes only a draw invalidation tick.
  */
 class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val firmness: Double) {
@@ -30,8 +30,22 @@ class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val fir
     private val fy = DoubleArray(count)
     private val basis = Array(count) { i ->
         val a = i * 2 * PI / count
-        doubleArrayOf(cos(a), sin(a), cos(a * 2), cos(a * 3), cos(a * 4), cos(a * 5))
+        doubleArrayOf(cos(a), sin(a))
     }
+    private val restX = DoubleArray(count) { basis[it][0] * (1 + lumps.getOrElse(it) { 0f } * 0.10) }
+    private val restY = DoubleArray(count) { basis[it][1] * (1 + lumps.getOrElse(it) { 0f } * 0.10) }
+    private val restOffsetX = restX.average()
+    private val restOffsetY = restY.average()
+    private val restBottom = restY.max() - restOffsetY
+    private val restEdges = DoubleArray(count) { i ->
+        val next = (i + 1) % count
+        val dx = restX[next] - restX[i]; val dy = restY[next] - restY[i]
+        sqrt(dx * dx + dy * dy)
+    }
+    private val restArea = abs((0 until count).sumOf { i ->
+        val next = (i + 1) % count
+        restX[i] * restY[next] - restX[next] * restY[i]
+    }) * 0.5
     private val seedPhase = (seed % 997UL).toDouble() * 0.01
     private var lastTime: Double? = null
     private var pending = 0.0
@@ -39,7 +53,6 @@ class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val fir
     var moodAge = 0.0; private set
     var previousMood = PersonaMood.Idle; private set
     private var grounded = 0.0
-    private var morphAmount = 0.0
     private var rollVelocity = 0.0
     private var yawVelocity = 0.0
     private var stretchX = 1.0
@@ -57,8 +70,8 @@ class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val fir
     fun settle() {
         for (i in 0 until count) {
             val radius = 0.355 * (1 + lumps.getOrElse(i) { 0f } * 0.10)
-            x[i] = (0.5 + basis[i][0] * radius).coerceIn(0.02, 0.98)
-            y[i] = (0.595 + basis[i][1] * radius).coerceIn(0.02, 0.95)
+            x[i] = (0.5 + (basis[i][0] * radius - restOffsetX * 0.355)).coerceIn(0.02, 0.98)
+            y[i] = (0.95 - restBottom * 0.355 + (basis[i][1] * radius - restOffsetY * 0.355)).coerceIn(0.02, 0.95)
             vx[i] = 0.0; vy[i] = 0.0
         }
         roll = 0.0; yaw = 0.0; rollVelocity = 0.0; yawVelocity = 0.0; blink = 0.0
@@ -85,7 +98,6 @@ class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val fir
         moodAge += STEP
         val playful = mood == PersonaMood.Bouncing || mood == PersonaMood.Dancing || mood == PersonaMood.Pacing
         val quiet = mood == PersonaMood.Sleeping || mood == PersonaMood.Waiting || mood == PersonaMood.Failed
-        morphAmount += ((if (quiet) 0.10 else if (playful) 0.68 else 0.46) - morphAmount) * STEP * 2
         if (mood == PersonaMood.Bouncing || mood == PersonaMood.Dancing) {
             rollVelocity += (1.25 - rollVelocity) * STEP * 4
         } else {
@@ -111,6 +123,8 @@ class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val fir
         }
         stretchX += (1 + breath * 0.032 + pumping - stretchX) * STEP * 8
         stretchY += (1 - breath * 0.030 - pumping - stretchY) * STEP * 8
+        stretchX = stretchX.coerceIn(0.88, 1.12)
+        stretchY = stretchY.coerceIn(0.88, 1.12)
         val desiredAnchor = when (mood) {
             PersonaMood.Pacing -> 0.5 + sin(lifetime * 1.2) * 0.13
             PersonaMood.Juggling -> 0.5 + sin(lifetime * 3.8) * 0.045
@@ -132,41 +146,29 @@ class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val fir
         }
         cx /= count; cy /= count
         val radius = if (playful) 0.355 * 0.90 else 0.355
-        val targetArea = PI * radius * radius * stretchX * stretchY
+        val targetArea = restArea * radius * radius * stretchX * stretchY
         val pressure = 44 * firmness * (targetArea / max(abs(twiceArea) * 0.5, 0.0002) - 1).coerceIn(-1.5, 3.0)
-        val restEdge = 2 * radius * sin(PI / count)
         for (i in 0 until count) {
             val next = (i + 1) % count
             val dx = x[next] - x[i]; val dy = y[next] - y[i]
             val length = max(sqrt(dx * dx + dy * dy), 0.00001)
             val nx = dx / length; val ny = dy / length
-            val spring = 210 * (length - restEdge)
+            val spring = 210 * (length - restEdges[i] * radius)
             fx[i] += spring * nx; fy[i] += spring * ny
             fx[next] -= spring * nx; fy[next] -= spring * ny
             val push = pressure * length * 0.5
             fx[i] += ny * push; fy[i] -= nx * push
             fx[next] += ny * push; fy[next] -= nx * push
         }
-        val phase = lifetime * 0.38 + seedPhase
-        val shape = floor(phase).toInt() % 5
-        val fraction = phase - floor(phase)
-        val blend = fraction * fraction * fraction * (fraction * (fraction * 6 - 15) + 10)
         val rs = sin(roll); val rc = cos(roll)
+        val offsetX = (restOffsetX * rc - restOffsetY * rs) * radius
+        val offsetY = (restOffsetY * rc + restOffsetX * rs) * radius
         var contacts = 0
         for (i in 0 until count) {
             val b = basis[i]
-            fun contour(index: Int): Double = when (index % 5) {
-                1 -> b[2] * 0.85
-                2 -> b[3]
-                3 -> b[4] * -0.8
-                4 -> b[5] * 0.85
-                else -> 0.0
-            }
-            val shapeFrom = contour(shape)
-            val deform = shapeFrom + (contour(shape + 1) - shapeFrom) * blend
-            val reach = radius * (1 + lumps.getOrElse(i) { 0f } * 0.10 + deform * morphAmount)
-            val goalX = cx + (b[0] * rc - b[1] * rs) * reach * stretchX
-            val goalY = cy + (b[1] * rc + b[0] * rs) * reach * stretchY
+            val reach = radius * (1 + lumps.getOrElse(i) { 0f } * 0.10)
+            val goalX = cx + ((b[0] * rc - b[1] * rs) * reach - offsetX) * stretchX
+            val goalY = cy + ((b[1] * rc + b[0] * rs) * reach - offsetY) * stretchY
             fx[i] += (goalX - x[i]) * 150 * firmness + (anchor - cx) * 7
             fy[i] += (goalY - y[i]) * 150 * firmness
             if (mood == PersonaMood.Thinking || mood == PersonaMood.Running) {

@@ -38,7 +38,7 @@ internal static class PersonaRenderer
         var body = engine.Body;
         var bounds = body.Bounds;
         var hue = traits.Hue;
-        var ink = engine.Mood.Tint() ?? hue;
+        var ink = hue.MixedWith(Color.FromArgb(255, 0, 0, 0), 0.78);
         var outline = OutlineGeometry(body, width, height);
 
         DrawShadow(canvas, bounds, width, height, unit, hue);
@@ -52,14 +52,14 @@ internal static class PersonaRenderer
             outline,
             PersonaDraw.Linear(
                 PersonaDraw.Pt(0.5, 0), PersonaDraw.Pt(0.5, 1),
-                (hue.WithOpacity(0.20), 0), (hue.WithOpacity(0.38), 1)));
+                (hue.MixedWith(PersonaDraw.White, 0.34), 0), (hue, 1)));
         canvas.Paint(
-            outline, null, PersonaDraw.Solid(hue, 0.92), Math.Max(1, unit * 0.036));
+            outline, null, PersonaDraw.Solid(hue, 0.65), Math.Max(0.5, unit * 0.012));
         var tint = engine.Mood.Tint();
         if (tint is { } stain)
         {
             canvas.Paint(
-                outline, null, PersonaDraw.Solid(stain), Math.Max(1.5, unit * 0.055));
+                outline, null, PersonaDraw.Solid(stain), Math.Max(1, unit * 0.020));
         }
 
         // Face, highlight and screen light are clipped to the body, so a heavy
@@ -184,7 +184,7 @@ internal static class PersonaRenderer
         double tipY = rootY - unit * 0.15;
         var stalk = new PathGeometry();
         var figure = PersonaDraw.Figure(new PPoint(rootX, rootY + unit * 0.02), false);
-        PersonaDraw.Quad(figure, new PPoint(tipX, tipY), new PPoint(rootX + unit * 0.09 + lean, rootY - unit * 0.05));
+        PersonaDraw.Quad(figure, new PPoint(tipX, tipY), new PPoint(rootX + unit * 0.09 + lean, rootY - unit * 0.023));
         stalk.Figures.Add(figure);
         canvas.Paint(
             stalk, null, PersonaDraw.Solid(tint, 0.75), Math.Max(1, unit * 0.032),
@@ -212,7 +212,7 @@ internal static class PersonaRenderer
 
         // Lean, taken from where the crown sits relative to the middle. The
         // face tilts with the body for free, in every mood.
-        double tilt = Math.Atan2(crown.X - centroid.X, Math.Max(centroid.Y - crown.Y, 1e-4)) * 0.75;
+        double tilt = Math.Clamp(Math.Atan2(crown.X - centroid.X, Math.Max(centroid.Y - crown.Y, 1e-4)) * 0.25, -0.12, 0.12);
 
         double heightPoints = bounds.Height * height;
         double anchorHeight = heightPoints * (0.10 + face.Lift);
@@ -226,9 +226,8 @@ internal static class PersonaRenderer
         // Small marks need proportionally bigger features or the face turns
         // into two specks. Three fixed steps, not a curve.
         double lod = unit < 24 ? 1.35 : unit < 34 ? 1.15 : 1.0;
-        double radius = unit * (count == 1 ? 0.115 : count == 2 ? 0.082 : 0.065)
-            * lod * Math.Clamp(face.EyeScale, 0.4, 2.2);
-        double spread = radius * (count == 2 ? 2.9 : 2.6) * face.Spread / Math.Max(Math.Sqrt(aspect), 0.6);
+        double radius = unit * 0.047 * lod * Math.Clamp(face.EyeScale, 0.8, 1.25);
+        double spread = unit * 0.235 * Math.Clamp(face.Spread, 0.85, 1.15) / Math.Max(Math.Sqrt(aspect), 0.6);
         double openness = Math.Max(0.02, face.Openness * (1 - engine.Blink * 0.96) * aspect);
 
         for (int i = 0; i < count; i++)
@@ -261,39 +260,32 @@ internal static class PersonaRenderer
                             PersonaDraw.RoundedRect(eye, ex, ey, ew, eh, radius * 0.32);
                             break;
                         case PersonaTraits.EyeShape.Oval:
-                            PersonaDraw.Ellipse(eye, ex + ew / 2, ey + eh / 2, ew / 2 - radius * 0.22, eh / 2);
+                            PersonaDraw.Ellipse(eye, ex + ew / 2, ey + eh / 2, ew / 2 - radius * 0.16, eh / 2);
                             break;
                         default:
                             PersonaDraw.Ellipse(eye, ex + ew / 2, ey + eh / 2, ew / 2, eh / 2);
                             break;
                     }
-                    canvas.Paint(eye,
-                        PersonaDraw.Solid(unit >= 24 ? PersonaDraw.White : ink, unit >= 24 ? 0.92 : 1), clip: clip);
-                    if (unit >= 24 && eh > radius * 0.3)
+                    canvas.Paint(eye, PersonaDraw.Solid(ink), clip: clip);
+                    if (unit >= 28 && openness > 0.35)
                     {
-                        double pupilRadius = Math.Min(radius * 0.53, eh * 0.38);
-                        double px = centre.X + face.Gaze.X * radius * 0.35;
-                        double py = ey + eh / 2 + face.Gaze.Y * Math.Max(0, eh / 2 - pupilRadius) * 0.4;
-                        var pupil = new PathGeometry();
-                        PersonaDraw.Ellipse(pupil, px, py, pupilRadius, pupilRadius);
-                        canvas.Paint(pupil, PersonaDraw.Solid(ink, 0.96), clip: clip);
                         var glint = new PathGeometry();
-                        PersonaDraw.Ellipse(glint, px - pupilRadius * 0.3, py - pupilRadius * 0.35,
-                            pupilRadius * 0.28, pupilRadius * 0.28);
-                        canvas.Paint(glint, PersonaDraw.Solid(PersonaDraw.White), clip: clip);
+                        PersonaDraw.Ellipse(glint, centre.X - radius * 0.20, centre.Y - radius * 0.26,
+                            radius * 0.22, radius * 0.22);
+                        canvas.Paint(glint, PersonaDraw.Solid(PersonaDraw.White, 0.88), clip: clip, mask: eye);
                     }
                     break;
             }
 
-            if (unit >= 30 && Math.Abs(face.Brow) > 0.06)
+            if (unit >= 40 && Math.Abs(face.Brow) > 0.45)
             {
-                DrawBrow(canvas, centre, radius, unit, ink, face.Brow, offset, clip);
+                DrawBrow(canvas, centre, radius, unit, ink, face.Brow * 0.45, offset, clip);
             }
         }
 
-        if (face.Blush > 0.02 && unit >= 26)
+        if (unit >= 26)
         {
-            DrawBlush(canvas, Place, anchorHeight, radius, spread, unit, face.Blush, clip);
+            DrawBlush(canvas, Place, anchorHeight, radius, spread, unit, Math.Max(0.24, face.Blush), clip);
         }
 
         if (unit < 21)
@@ -323,7 +315,7 @@ internal static class PersonaRenderer
         }
         geometry.Figures.Add(arc);
         canvas.Paint(
-            geometry, null, PersonaDraw.Solid(ink), Math.Max(1, unit * 0.05),
+            geometry, null, PersonaDraw.Solid(ink), Math.Max(1, unit * 0.023),
             PenLineCap.Round, PenLineJoin.Round, clip);
     }
 
@@ -366,7 +358,7 @@ internal static class PersonaRenderer
         PersonaDraw.Quad(path, b, new PPoint((a.X + b.X) / 2, (a.Y + b.Y) / 2 - radius * 0.18));
         geometry.Figures.Add(path);
         canvas.Paint(
-            geometry, null, PersonaDraw.Solid(ink, 0.72), Math.Max(1, unit * 0.036),
+            geometry, null, PersonaDraw.Solid(ink, 0.72), Math.Max(1, unit * 0.018),
             PenLineCap.Round, PenLineJoin.Round, clip);
     }
 
@@ -388,17 +380,17 @@ internal static class PersonaRenderer
         double curve = Math.Clamp(face.MouthCurve + resting, -1.1, 1.1);
         // An open mouth widens as it opens. Without it a loud syllable is a
         // tall narrow wedge rather than a vowel.
-        double half = unit * 0.078 * face.MouthWidth * traits.MouthWidth
+        double half = unit * 0.060 * Math.Min(face.MouthWidth, 1.2) * traits.MouthWidth
             * (1 + Math.Clamp(face.MouthOpen, 0, 1.2) * 0.22);
-        double open = Math.Max(0, face.MouthOpen) * unit * 0.140;
-        double baseY = -anchorHeight + radius * 2.15;
+        double open = Math.Clamp(face.MouthOpen, 0, 0.8) * unit * 0.065;
+        double baseY = -anchorHeight + unit * 0.12;
 
         var left = place(-half, baseY);
         var right = place(half, baseY);
         // A quadratic reaches half its control offset, so the gap between the
         // two edges is half of open. Doubled here rather than in the moods.
-        var bow = place(0, baseY + curve * unit * 0.142);
-        var sag = place(0, baseY + curve * unit * 0.142 + open * 2);
+        var bow = place(0, baseY + curve * unit * 0.080);
+        var sag = place(0, baseY + curve * unit * 0.080 + open * 2);
 
         if (open < unit * 0.006)
         {
@@ -407,7 +399,7 @@ internal static class PersonaRenderer
             PersonaDraw.Quad(stroke, right, bow);
             line.Figures.Add(stroke);
             canvas.Paint(
-                line, null, PersonaDraw.Solid(ink, 0.78), Math.Max(1, unit * 0.038),
+                line, null, PersonaDraw.Solid(ink, 0.78), Math.Max(1, unit * 0.020),
                 PenLineCap.Round, PenLineJoin.Round, clip);
             return;
         }
@@ -426,7 +418,7 @@ internal static class PersonaRenderer
         // Clipped to the mouth, so a tongue never escapes the face however
         // wide the mood asked for it.
         double reach = Math.Clamp(face.Tongue, 0, 1);
-        var tip = place(0, baseY + curve * unit * 0.142 + open * 2 * (1 - reach * 0.55));
+        var tip = place(0, baseY + curve * unit * 0.080 + open * 2 * (1 - reach * 0.55));
         double tw = half * 0.86;
         var tongue = new PathGeometry();
         PersonaDraw.Ellipse(tongue, tip.X, tip.Y + open * 0.15 + unit * 0.01, tw / 2, open * 0.75 + unit * 0.01);

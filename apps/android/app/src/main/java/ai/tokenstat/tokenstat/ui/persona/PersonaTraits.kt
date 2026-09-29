@@ -5,6 +5,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import kotlin.math.PI
 import kotlin.math.sin
+import kotlin.math.cos
+import kotlin.math.pow
+import kotlin.math.max
+import kotlin.math.abs
+import kotlin.math.min
 
 /// The fixed features of one character, derived from its seed. Port of
 /// `PersonaTraits`.
@@ -16,9 +21,12 @@ import kotlin.math.sin
 /// gradient fill, stroke, clipped highlight, then the face. Colour stays
 /// inside the brand: the hue walks the accent-to-secondary arc, never the
 /// whole wheel.
-class PersonaTraits(seed: ULong, nodes: Int = 14) {
+class PersonaTraits(seed: ULong, nodes: Int = 20) {
     /// How this creature's eyes are drawn when they are open. Curved arcs are
     /// deliberately not in here: arcs are an expression, not a feature.
+    enum class BodyShape { BALL, STAR, HEART, TORTILLA }
+    val bodyShape = BodyShape.entries[((seed shr 1) % 4UL).toInt()]
+
     enum class EyeShape { ROUND, OVAL, PIXEL }
 
     enum class Mouth { DOT, SMILE, FLAT, FROWN }
@@ -41,6 +49,29 @@ class PersonaTraits(seed: ULong, nodes: Int = 14) {
     /** How far along the accent-to-secondary arc this creature sits, 0 to 1. */
     val hueMix: Float
 
+    companion object {
+        private val heartOutline = List(64) { i ->
+            val t = i * 2 * PI / 64
+            Pair(16 * sin(t).pow(3) / 17,
+                -(13 * cos(t) - 5 * cos(2 * t) - 2 * cos(3 * t) - cos(4 * t)) / 17)
+        }
+
+        private fun heartRadius(angle: Double): Double {
+            val dx = cos(angle); val dy = sin(angle)
+            var radius = 1.0
+            for (i in heartOutline.indices) {
+                val p = heartOutline[i]; val q = heartOutline[(i + 1) % heartOutline.size]
+                val ex = q.first - p.first; val ey = q.second - p.second
+                val cross = dx * ey - dy * ex
+                if (abs(cross) < 1e-8) continue
+                val u = (p.first * dy - p.second * dx) / cross
+                val r = (p.first * ey - p.second * ex) / cross
+                if (u in 0.0..1.0 && r > 0) radius = min(radius, r)
+            }
+            return max(0.42, radius)
+        }
+    }
+
     init {
         var bits = if (seed == 0UL) 0x9E3779B97F4A7C15UL else seed
         fun next(modulo: ULong): ULong {
@@ -49,38 +80,34 @@ class PersonaTraits(seed: ULong, nodes: Int = 14) {
             bits = bits xor (bits shl 17)
             return bits % modulo
         }
-        eyeCount = when (next(10UL)) {
-            0UL, 1UL -> 1
-            2UL -> 3
-            else -> 2
-        }
-        eyeShape = when (next(4UL)) {
-            0UL -> EyeShape.ROUND
-            1UL -> EyeShape.PIXEL
-            else -> EyeShape.OVAL
-        }
-        mouth = when (next(5UL)) {
-            0UL -> Mouth.SMILE
-            1UL -> Mouth.FLAT
-            2UL -> Mouth.DOT
-            else -> null
-        }
-        hasAntenna = next(3UL) == 0UL
-        mouthWidth = 0.78f + next(9UL).toFloat() * 0.06f
-        firmness = 0.78f + next(9UL).toFloat() * 0.055f
+        // Preserve draw order: existing personas keep their palette position.
+        next(10UL)
+        eyeCount = 2
+        eyeShape = if (next(4UL) == 0UL) EyeShape.ROUND else EyeShape.OVAL
+        next(5UL)
+        mouth = Mouth.SMILE
+        next(3UL)
+        hasAntenna = false
+        mouthWidth = 0.72f + next(9UL).toFloat() * 0.035f
+        firmness = 0.95f + next(9UL).toFloat() * 0.03f
         // Two low harmonics rather than per-node noise. Noise reads as a
         // damaged circle, harmonics read as a shape somebody drew.
         val firstPhase = next(360UL).toFloat() * PI.toFloat() / 180f
         val secondPhase = next(360UL).toFloat() * PI.toFloat() / 180f
-        val firstAmount = 0.35f + next(100UL).toFloat() / 100f * 0.45f
-        val secondAmount = next(100UL).toFloat() / 100f * 0.30f
+        val firstAmount = 0.10f + next(100UL).toFloat() / 100f * 0.15f
+        val secondAmount = 0.04f + next(100UL).toFloat() / 100f * 0.07f
         val dents = ArrayList<Float>(nodes)
         for (index in 0 until nodes) {
             val angle = index.toFloat() * 2f * PI.toFloat() / nodes.toFloat()
-            dents.add(
-                sin(angle * 2f + firstPhase) * firstAmount +
-                    sin(angle * 3f + secondPhase) * secondAmount,
-            )
+            val silhouette = when (bodyShape) {
+                BodyShape.BALL -> 0f
+                BodyShape.STAR -> -sin(5 * angle) * 0.24f
+                BodyShape.HEART -> heartRadius(angle.toDouble()).toFloat() - 1f
+                BodyShape.TORTILLA -> (0.6f * cos(2 * angle) + 0.35f * sin(angle)) * 0.34f
+            }
+            val softness = sin(angle * 2f + firstPhase) * firstAmount +
+                sin(angle * 3f + secondPhase) * secondAmount
+            dents.add(silhouette * 10f + softness * 0.25f)
         }
         lumps = dents
         hueMix = next(7UL).toFloat() / 6f
