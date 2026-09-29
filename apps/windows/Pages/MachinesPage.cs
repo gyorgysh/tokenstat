@@ -1094,18 +1094,6 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
                 Orientation = Orientation.Horizontal,
                 Spacing = Theme.SpaceS,
             };
-            if (Format.Text(peer, "trust") == "approved")
-            {
-                actions.Children.Add(ActionIconGlyph.Button(
-                    "Revoke", ActionIcon.Revoke, async (_, _) => await ConfirmRevokeAsync(key, name)));
-            }
-            else
-            {
-                actions.Children.Add(ActionIconGlyph.Button(
-                    "Approve", ActionIcon.Approve, async (_, _) => await ApproveAsync(key, name)));
-            }
-            actions.Children.Add(ActionIconGlyph.Button(
-                "Forget", ActionIcon.Delete, async (_, _) => await ConfirmForgetAsync(key, name)));
             actions.Children.Add(ActionIconGlyph.Button("Details", ActionIcon.Reveal, (_, _) =>
             {
                 _selectThis = false;
@@ -1115,6 +1103,18 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
                 RefreshInspector();
                 DetailsRequested?.Invoke();
             }));
+            // Access changes are rarer than a look, so they wait in one menu.
+            var manage = new MenuFlyout();
+            if (Format.Text(peer, "trust") == "approved")
+            {
+                ContextMenus.AddAsync(manage, "Revoke access", () => ConfirmRevokeAsync(key, name));
+            }
+            else
+            {
+                ContextMenus.AddAsync(manage, "Approve", () => ApproveAsync(key, name));
+            }
+            ContextMenus.AddAsync(manage, "Forget", () => ConfirmForgetAsync(key, name));
+            actions.Children.Add(ActionIconGlyph.MoreButton("Manage " + name, manage));
             row.Children.Add(actions);
             body.Children.Add(row);
         }
@@ -1634,17 +1634,6 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
                 VerticalAlignment = VerticalAlignment.Center,
             });
         }
-        actions.Children.Add(ActionIconGlyph.Button("Rename", ActionIcon.Edit, async (_, _) =>
-        {
-            await RenameAsync(id, Format.Text(machine, "label"), isSelf);
-        }));
-        if (!isSelf)
-        {
-            actions.Children.Add(ActionIconGlyph.Button("Unlink", ActionIcon.Disconnect, async (_, _) =>
-            {
-                await UnlinkAsync(id, title);
-            }));
-        }
         actions.Children.Add(ActionIconGlyph.Button("Details", ActionIcon.Reveal, (_, _) =>
         {
             _selectThis = false;
@@ -1654,6 +1643,15 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             RefreshInspector();
             DetailsRequested?.Invoke();
         }));
+        // Rename and Unlink are rare, so they share one menu instead of two
+        // buttons on every row.
+        var manage = new MenuFlyout();
+        ContextMenus.AddAsync(manage, "Rename", () => RenameAsync(id, Format.Text(machine, "label"), isSelf));
+        if (!isSelf)
+        {
+            ContextMenus.AddAsync(manage, "Remove from account", () => UnlinkAsync(id, title));
+        }
+        actions.Children.Add(ActionIconGlyph.MoreButton("Manage " + title, manage));
         var row = new Grid { ColumnSpacing = Theme.SpaceM, RowSpacing = Theme.SpaceS };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });

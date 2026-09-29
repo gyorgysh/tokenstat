@@ -40,6 +40,20 @@ internal static class SidebarLive
     /// <summary>Chat rows drawn when expanded, like the Mac inline limit.</summary>
     public const int InlineChats = 10;
 
+    /// <summary>
+    /// A chat that was opened and never used: the host's default title, no
+    /// message either way and nothing running. The sidebar leaves these out
+    /// so rows of "New chat" do not bury real conversations, except the one
+    /// that is selected. The title test keeps chats from a host too old to
+    /// send lastMessageAtMs, because every host renames a chat from its first
+    /// prompt. Same rule as the Mac's ChatModel.isUntouched.
+    /// </summary>
+    public static bool IsUntouched(JsonNode chat, string? selectedChatId) =>
+        Format.Text(chat, "title") == "New chat"
+        && chat["lastMessageAtMs"] is null
+        && !Format.Flag(chat, "running")
+        && Format.Text(chat, "id") != selectedChatId;
+
     public static bool IsLiveTag(string? tag) =>
         tag is not null
         && (tag.StartsWith(SessionPrefix, StringComparison.Ordinal)

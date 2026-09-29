@@ -166,3 +166,22 @@ object NoteList {
     fun archivedCount(cards: List<NoteCard>): Int =
         cards.count { it.column == ARCHIVE_COLUMN }
 }
+
+/// A chat that was opened and never used: the host's default title, no
+/// message either way and nothing running. Lists leave these out so rows of
+/// "New chat" do not bury real conversations, except the one that is open.
+/// The title test keeps chats from a host too old to send `lastMessageAtMs`,
+/// because every host renames a chat from its first prompt. Port of the
+/// Mac's `ChatModel.isUntouched`.
+object UntouchedChats {
+    const val DEFAULT_TITLE = "New chat"
+
+    fun isUntouched(
+        title: String?,
+        lastMessageAtMs: Long?,
+        running: Boolean,
+        id: String?,
+        openId: String? = null,
+    ): Boolean =
+        title == DEFAULT_TITLE && lastMessageAtMs == null && !running && (openId == null || id != openId)
+}

@@ -1210,7 +1210,7 @@ public sealed partial class MainWindow : Window
         };
         head.Children.Add(new TextBlock
         {
-            Text = "All folders",
+            Text = "All projects",
             FontSize = 28,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             VerticalAlignment = VerticalAlignment.Center,
@@ -1218,7 +1218,7 @@ public sealed partial class MainWindow : Window
         var spacer = new Grid { Width = Theme.SpaceM };
         head.Children.Add(spacer);
         head.Children.Add(Buttons.Primary(
-            "Add folder", ActionIcon.Create, async (_, _) =>
+            "Add project", ActionIcon.Create, async (_, _) =>
             {
                 await AddWorkspaceAsync();
                 if (ReferenceEquals(_frame.Content, page))
@@ -1574,6 +1574,11 @@ public sealed partial class MainWindow : Window
             list.Add(session);
         }
         var chatsByFolder = new Dictionary<string, List<JsonNode>>(StringComparer.Ordinal);
+        string? selectedChatId = null;
+        if (selectedTag is not null && LiveRoute.TrySplit(selectedTag, SidebarLive.ChatPrefix, out _, out var litChat))
+        {
+            selectedChatId = litChat;
+        }
         foreach (var chat in _liveChats)
         {
             if (chat is null)
@@ -1582,7 +1587,8 @@ public sealed partial class MainWindow : Window
             }
             var folder = Format.Text(chat, "workspaceId");
             var id = Format.Text(chat, "id");
-            if (string.IsNullOrEmpty(folder) || string.IsNullOrEmpty(id))
+            if (string.IsNullOrEmpty(folder) || string.IsNullOrEmpty(id)
+                || SidebarLive.IsUntouched(chat, selectedChatId))
             {
                 continue;
             }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.logic.UntouchedChats
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -58,7 +59,16 @@ class WorkspacesConnectionState {
     fun setLists(folders: JsonArray, sessions: JsonArray, chats: JsonArray) {
         mutableFolders.value = folders
         mutableSessions.value = sessions
-        mutableChats.value = chats
+        // Recent chats leave out the ones opened and never used.
+        mutableChats.value = JsonArray(chats.filterNot { element ->
+            val chat = element as? JsonObject ?: return@filterNot false
+            UntouchedChats.isUntouched(
+                title = chat.str("title"),
+                lastMessageAtMs = chat.long("lastMessageAtMs"),
+                running = chat.bol("running"),
+                id = chat.str("id"),
+            )
+        })
     }
 
     fun clearLists() {

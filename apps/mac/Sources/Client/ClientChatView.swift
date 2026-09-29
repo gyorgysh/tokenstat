@@ -29,8 +29,11 @@ struct ClientChatView: View {
 
     private var filteredChats: [ChatConversation] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let folder = model.folderID ?? ""
         return model.chats.filter {
-            (agent.isEmpty || $0.backend == agent) && (!runningOnly || $0.running)
+            // Chats opened and never used stay out, apart from the open one.
+            !model.isUntouched($0, in: folder)
+            && (agent.isEmpty || $0.backend == agent) && (!runningOnly || $0.running)
                 && (query.isEmpty || $0.title.localizedCaseInsensitiveContains(query)
                     || (model.backend(for: $0.backend)?.label ?? $0.backend).localizedCaseInsensitiveContains(query)
                     || ($0.model?.localizedCaseInsensitiveContains(query) ?? false))

@@ -467,7 +467,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
 
     private void RefreshFilterLists()
     {
-        var folderNames = new List<string> { "All folders", "Uncategorized" };
+        var folderNames = new List<string> { "All projects", "Uncategorized" };
         folderNames.AddRange(_folders.Select(f => f.Name));
         _folderFilter.ItemsSource = folderNames;
         if (_scopeWorkspaceId is not null)

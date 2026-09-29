@@ -247,6 +247,28 @@ internal static class ActionIconGlyph
         return btn;
     }
 
+    /// <summary>
+    /// A "…" button that opens a menu of a row's less common actions, so a
+    /// row shows one way in rather than a button for everything it can do.
+    /// Same shape as the Mac's ToolbarMenuButton.
+    /// </summary>
+    public static Button MoreButton(string help, MenuFlyout menu)
+    {
+        var button = new Button
+        {
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(8, 6, 8, 6),
+            Content = new SymbolIcon(FluentSymbol.More),
+            Flyout = menu,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, help);
+        ToolTipService.SetToolTip(button, help);
+        return button;
+    }
+
     public static Button PrimaryButton(string title, ActionIcon icon, RoutedEventHandler click)
     {
         var button = Button(title, icon, click);

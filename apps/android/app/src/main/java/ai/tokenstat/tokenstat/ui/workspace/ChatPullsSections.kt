@@ -136,6 +136,7 @@ import ai.tokenstat.tokenstat.ui.logic.LaunchChoiceStore
 import ai.tokenstat.tokenstat.ui.logic.LaunchDefaults
 import ai.tokenstat.tokenstat.ui.logic.SharedPrefsLaunchChoice
 import ai.tokenstat.tokenstat.ui.logic.TunnelCopy
+import ai.tokenstat.tokenstat.ui.logic.UntouchedChats
 import ai.tokenstat.tokenstat.ui.logic.friendlyError
 import ai.tokenstat.tokenstat.ui.logic.harnessName
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
@@ -884,10 +885,21 @@ fun ChatSection(
                 return
             }
             TsSearchField(prompt = "Titles, agents, or models", query = search, onQueryChange = { search = it }, modifier = Modifier.fillMaxWidth())
-            ChatStatPanels(chats)
+            // Chats opened and never used stay out of the list, apart from
+            // the one that is open. Same rule as the desktop sidebar.
+            val listed = chats.filterNot {
+                UntouchedChats.isUntouched(
+                    title = it.str("title"),
+                    lastMessageAtMs = it.long("lastMessageAtMs"),
+                    running = it.bol("running"),
+                    id = it.str("id"),
+                    openId = openId,
+                )
+            }
+            ChatStatPanels(listed)
             val query = search.trim()
-            val agentIds = chats.mapNotNull { it.str("backend") }.toSortedSet()
-            val filtered = chats.filter {
+            val agentIds = listed.mapNotNull { it.str("backend") }.toSortedSet()
+            val filtered = listed.filter {
                 (query.isEmpty() ||
                     (it.str("title") ?: "").contains(query, ignoreCase = true) ||
                     (it.str("backend") ?: "").contains(query, ignoreCase = true) ||

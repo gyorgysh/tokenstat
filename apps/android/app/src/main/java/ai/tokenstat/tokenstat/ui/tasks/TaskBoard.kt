@@ -379,7 +379,7 @@ fun TaskBoardScreen(
                 Spacer(Modifier.padding(top = Space.s))
                 if (fixedFolder == null) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-                        ChoiceChip("All folders", filter.folder is TaskBoardFolder.All, { filter = filter.copy(folder = TaskBoardFolder.All) })
+                        ChoiceChip("All projects", filter.folder is TaskBoardFolder.All, { filter = filter.copy(folder = TaskBoardFolder.All) })
                         ChoiceChip("Uncategorized", filter.folder is TaskBoardFolder.Uncategorized, { filter = filter.copy(folder = TaskBoardFolder.Uncategorized) })
                         folders.forEach { folder ->
                             ChoiceChip(folder.name.ifBlank { folder.id }, filter.folder == TaskBoardFolder.Folder(folder.id), { filter = filter.copy(folder = TaskBoardFolder.Folder(folder.id)) })
