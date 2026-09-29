@@ -98,6 +98,12 @@ internal sealed class HeatmapView : StackPanel
     private Rectangle? _selectedRing;
     private Button? _hitRect;
     private StackPanel? _footerLeft;
+    private StackPanel? _gridContent;
+    private StackPanel? _gridRow;
+    private StackPanel? _rowLabels;
+    private Canvas? _monthStrip;
+    private Canvas? _dayCanvas;
+    private readonly List<(Rectangle Square, int Row, int Column)> _squares = new();
 
     public HeatmapView(
         JsonNode calendar,
@@ -140,7 +146,39 @@ internal sealed class HeatmapView : StackPanel
             return;
         }
         _builtWidth = width;
-        Rebuild();
+        Relayout();
+    }
+
+    // Keep keyboard focus, accessibility peers and drawing objects alive while
+    // resizing. Only a new calendar payload needs a new visual tree.
+    private void Relayout()
+    {
+        if (_dayCanvas is null || _gridContent is null || _gridRow is null ||
+            _rowLabels is null || _monthStrip is null) return;
+        _cell = CellSizeFor(_builtWidth, _snap.Weeks);
+        _gap = GapSizeFor(_builtWidth, _cell, _snap.Weeks);
+        _stride = _cell + _gap;
+        _gridContent.Spacing = _gridRow.Spacing = _rowLabels.Spacing = _gap;
+        foreach (FrameworkElement label in _rowLabels.Children) label.Height = _cell;
+        for (int i = 0; i < _monthStrip.Children.Count; i++)
+            Canvas.SetLeft(_monthStrip.Children[i], Gutter + _gap + _snap.Months[i].Column * _stride);
+        foreach (var (square, row, column) in _squares)
+        {
+            square.Width = square.Height = _cell;
+            Canvas.SetLeft(square, column * _stride);
+            Canvas.SetTop(square, row * _stride);
+        }
+        _dayCanvas.Width = _snap.Weeks * _cell + Math.Max(_snap.Weeks - 1, 0) * _gap;
+        _dayCanvas.Height = _snap.Rows.Count * _cell + Math.Max(_snap.Rows.Count - 1, 0) * _gap;
+        if (_hitRect is not null)
+        {
+            _hitRect.Width = _dayCanvas.Width;
+            _hitRect.Height = _dayCanvas.Height;
+        }
+        if (_selectedRing is not null) _selectedRing.Width = _selectedRing.Height = _cell;
+        if (_hoverRing is not null) _hoverRing.Width = _hoverRing.Height = _cell;
+        ApplySelection();
+        ApplyHoverVisuals();
     }
 
     private void Rebuild()
@@ -150,6 +188,9 @@ internal sealed class HeatmapView : StackPanel
         _selectedRing = null;
         _hitRect = null;
         _footerLeft = null;
+        _gridContent = _gridRow = _rowLabels = null;
+        _monthStrip = _dayCanvas = null;
+        _squares.Clear();
         if (_snap.Weeks <= 0 || _snap.Rows.Count == 0)
         {
             Children.Add(EmptyState.View(
@@ -168,9 +209,9 @@ internal sealed class HeatmapView : StackPanel
         // ceilings a very wide card has width left over, and all of it
         // collecting on one side reads as the grid having failed to reach
         // the edge.
-        var content = new StackPanel { Spacing = _gap };
+        var content = _gridContent = new StackPanel { Spacing = _gap };
         content.Children.Add(MonthStrip());
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = _gap };
+        var row = _gridRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = _gap };
         row.Children.Add(RowLabels());
         row.Children.Add(GridCanvas());
         content.Children.Add(row);
@@ -188,7 +229,7 @@ internal sealed class HeatmapView : StackPanel
         // Absolute placement rather than a stack of spacers: a month label is
         // wider than the column it belongs to, so laying them out in sequence
         // pushes every later one out of alignment with its week.
-        var strip = new Canvas { Height = MonthStripHeight };
+        var strip = _monthStrip = new Canvas { Height = MonthStripHeight };
         foreach (var month in _snap.Months)
         {
             var label = Fonts.Text(month.Name, 9, opacity: 0.55);
@@ -201,7 +242,7 @@ internal sealed class HeatmapView : StackPanel
 
     private UIElement RowLabels()
     {
-        var gutter = new StackPanel { Spacing = _gap };
+        var gutter = _rowLabels = new StackPanel { Spacing = _gap };
         for (int i = 0; i < _snap.Rows.Count; i++)
         {
             gutter.Children.Add(new TextBlock
@@ -222,7 +263,7 @@ internal sealed class HeatmapView : StackPanel
     {
         double contentWidth = _snap.Weeks * _cell + Math.Max(_snap.Weeks - 1, 0) * _gap;
         double contentHeight = _snap.Rows.Count * _cell + Math.Max(_snap.Rows.Count - 1, 0) * _gap;
-        var canvas = new Canvas { Width = contentWidth, Height = contentHeight };
+        var canvas = _dayCanvas = new Canvas { Width = contentWidth, Height = contentHeight };
         for (int r = 0; r < _snap.Rows.Count; r++)
         {
             for (int c = 0; c < _snap.Weeks; c++)
@@ -244,6 +285,7 @@ internal sealed class HeatmapView : StackPanel
                 Canvas.SetLeft(square, c * _stride);
                 Canvas.SetTop(square, r * _stride);
                 canvas.Children.Add(square);
+                _squares.Add((square, r, c));
             }
         }
 

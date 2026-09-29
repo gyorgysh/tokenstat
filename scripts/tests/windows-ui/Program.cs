@@ -66,6 +66,7 @@ public sealed partial class SmokeApp : Application
             try
             {
                 PersonaSceneSmoke.Run();
+                await HeatmapResizeSmoke.Run(body);
                 var notePreview = NotePreview.Create("# Native note\n\n**Bold** and *italic* &amp; text\n\n- [x] Complete\n- [ ] Next\n\n> Quote\n\n```swift\nlet value = 1\n```\n\n[Link](https://example.com)");
                 body.Children.Add(notePreview);
                 body.UpdateLayout();

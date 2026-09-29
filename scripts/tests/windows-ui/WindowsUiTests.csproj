@@ -41,6 +41,9 @@
     <Compile Include="../../../apps/windows/Design/Persona/PersonaClipper.cs" Link="PersonaClipper.cs" />
     <Compile Include="../../../apps/windows/Design/Persona/PersonaClipGeometry.cs" Link="PersonaClipGeometry.cs" />
     <Compile Include="../../../apps/windows/Design/Persona/PersonaScene.cs" Link="PersonaScene.cs" />
+    <Compile Include="../../../apps/windows/Design/Heatmap.cs" Link="Heatmap.cs" />
+    <Compile Include="../../../apps/windows/Design/Fonts.cs" Link="Fonts.cs" />
+    <Compile Include="../../../apps/windows/Design/EmptyState.cs" Link="EmptyState.cs" />
     <Compile Include="../../../apps/windows/Design/Theme.cs" Link="Theme.cs" />
     <Content Include="../../../apps/windows/Assets/Terminal/*" Link="Assets/Terminal/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../../apps/windows/Assets/Fonts/JetBrainsMono-Variable.ttf" Link="Assets/Fonts/JetBrainsMono-Variable.ttf" CopyToOutputDirectory="PreserveNewest" />

@@ -56,36 +56,37 @@ struct HeatmapView: View {
             // horizontal scroll view anchored trailing, which on a wide window
             // drew a year of squares against the right edge and left half the
             // card empty.
-            GeometryReader { proxy in
-                // Quantised before anything is derived from it. There are 371
-                // squares here, and a live drag otherwise hands this a new
-                // sub-pixel width every frame, each one a new cell size and a
-                // new frame for every square. Rounding to 4 points turns most
-                // frames of a drag into the same grid.
-                let width = quantised(proxy.size.width, step: 4)
-                let cell = cellSize(for: width)
-                let gap = gapSize(for: width, cell: cell)
-                let layout = GridLayout(
-                    cell: cell,
-                    gap: gap,
-                    gutter: gutter,
-                    weeks: calendar.weeks,
-                    rows: calendar.rows.count
-                )
-                VStack(alignment: .leading, spacing: gap) {
-                    months(layout: layout)
-                    HStack(alignment: .top, spacing: gap) {
-                        rowLabels(layout: layout)
-                        grid(layout: layout)
+            HeatmapFittedLayout(heightForWidth: gridHeight(for:)) {
+                GeometryReader { proxy in
+                    // Quantised before anything is derived from it. There are 371
+                    // squares here, and a live drag otherwise hands this a new
+                    // sub-pixel width every frame, each one a new cell size and a
+                    // new frame for every square. Rounding to 4 points turns most
+                    // frames of a drag into the same grid.
+                    let width = quantised(proxy.size.width, step: 4)
+                    let cell = cellSize(for: width)
+                    let gap = gapSize(for: width, cell: cell)
+                    let layout = GridLayout(
+                        cell: cell,
+                        gap: gap,
+                        gutter: gutter,
+                        weeks: calendar.weeks,
+                        rows: calendar.rows.count
+                    )
+                    VStack(alignment: .leading, spacing: gap) {
+                        months(layout: layout)
+                        HStack(alignment: .top, spacing: gap) {
+                            rowLabels(layout: layout)
+                            grid(layout: layout)
+                        }
                     }
+                    // Centred, not leading. Once the cell and the gap are both at
+                    // their ceilings a very wide card has width left over, and all
+                    // of it collecting on one side reads as the grid having failed
+                    // to reach the edge. `.top` is horizontally centred.
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
-                // Centred, not leading. Once the cell and the gap are both at
-                // their ceilings a very wide card has width left over, and all
-                // of it collecting on one side reads as the grid having failed
-                // to reach the edge. `.top` is horizontally centred.
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
-            .frame(height: gridHeight)
 
             footer
         }
@@ -140,15 +141,14 @@ struct HeatmapView: View {
 
     private let maxGapRatio: CGFloat = 0.5
 
-    /// Reserved height: the month strip, then seven rows at their largest.
-    ///
-    /// Computed from the ceilings rather than measured, because the grid is
-    /// inside a `GeometryReader` and a reader that sizes itself from its own
-    /// content has nothing to read. The real grid is never taller than this,
-    /// which is the point: it used to be, and it drew over the legend.
-    private var gridHeight: CGFloat {
-        let gap = maxCell * maxGapRatio
-        return 11 + gap + 7 * (maxCell + gap)
+    /// Use the same width calculation for drawing and reserved height. A
+    /// Layout supplies the height directly, without measuring into @State and
+    /// making a second layout pass during every resize.
+    private func gridHeight(for proposedWidth: CGFloat) -> CGFloat {
+        let width = quantised(proposedWidth, step: 4)
+        let cell = cellSize(for: width)
+        let gap = gapSize(for: width, cell: cell)
+        return 11 + CGFloat(calendar.rows.count) * (cell + gap)
     }
 
     private func months(layout: GridLayout) -> some View {
@@ -451,6 +451,22 @@ struct HeatmapCellsCanvas: View, Equatable {
                 }
             }
 
+        }
+    }
+}
+
+/// The reader gets its real height in the same pass that supplies its width.
+private struct HeatmapFittedLayout: Layout {
+    var heightForWidth: (CGFloat) -> CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? 600
+        return CGSize(width: width, height: heightForWidth(width))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for view in subviews {
+            view.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
         }
     }
 }
