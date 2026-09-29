@@ -33,6 +33,9 @@ struct MachinesView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var addingDevice = false
     @State private var encryptionExpanded = false
+    @State private var connectionSettingsExpanded = false
+    @State private var permissionsExpanded = false
+    @State private var otherDevicesExpanded = false
     /// The account machine waiting on a Remove confirmation. Destructive on
     /// the server, so it never happens from a single click.
     @State private var pendingUnlink: Machine?
@@ -105,6 +108,9 @@ struct MachinesView: View {
         }
         .task {
             if model.identity == nil { await model.load() }
+            if model.accountMachines.isEmpty && model.known.isEmpty {
+                connectionSettingsExpanded = true
+            }
             await model.ensureHelper()
             // The sleep is where cancellation lands when this screen goes away,
             // and it throws rather than returning, so the check afterwards is
@@ -185,30 +191,37 @@ struct MachinesView: View {
         if !model.pending.isEmpty {
             waitingForApproval
         }
-        // Connection and lifetime are one setup flow, visible before the
-        // device list grows long: enable access, then choose whether it survives quit.
-        WidthReader { width in
-            #if os(macOS)
-            if width >= 820 {
-                HStack(alignment: .top, spacing: Theme.Space.m) {
-                    thisMachine(fillsHeight: true).frame(maxWidth: .infinity)
-                    alwaysOnHost.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                }
-                .fixedSize(horizontal: false, vertical: true)
-            } else {
-                VStack(spacing: Theme.Space.m) {
-                    thisMachine()
-                    alwaysOnHost
-                }
-            }
-            #else
-            thisMachine()
-            #endif
-        }
+        // Names and connection status answer the first question. Configuration
+        // stays available without pushing the devices below a screen of cards.
         if !model.accountMachines.isEmpty { accountDevices }
-        if !unlistedKnown.isEmpty { knownMachines }
-        DevicePermissionCard(peers: model.known.filter { $0.trust == .approved })
-        DevicePermissionCard(peers: [], localOnly: true)
+        if !unlistedKnown.isEmpty {
+            if model.accountMachines.isEmpty {
+                knownMachines
+            } else {
+                DisclosureGroup("Other paired devices (\(unlistedKnown.count))", isExpanded: $otherDevicesExpanded) {
+                    knownMachines.padding(.top, Theme.Space.s)
+                }
+                .font(Theme.callout.weight(.medium))
+            }
+        }
+        DisclosureGroup("Connection settings for this device", isExpanded: $connectionSettingsExpanded) {
+            VStack(spacing: Theme.Space.m) {
+                thisMachine()
+                #if os(macOS)
+                alwaysOnHost
+                #endif
+            }
+            .padding(.top, Theme.Space.s)
+        }
+        .font(Theme.callout.weight(.medium))
+        DisclosureGroup("Permissions", isExpanded: $permissionsExpanded) {
+            VStack(spacing: Theme.Space.m) {
+                DevicePermissionCard(peers: model.known.filter { $0.trust == .approved })
+                DevicePermissionCard(peers: [], localOnly: true)
+            }
+            .padding(.top, Theme.Space.s)
+        }
+        .font(Theme.callout.weight(.medium))
         // Account-linked machines already appear above. Pairing is only
         // needed for a machine that is not on the account yet, so the
         // paste card stays off the first screenful once a list exists.
@@ -771,7 +784,7 @@ struct MachinesView: View {
 
     private var accountDevices: some View {
         Card(title: "Your devices", subtitle: "Select a device for connection details. Phones and tablets connect to this Mac.", mark: "mark_device") {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: Theme.Space.m)], spacing: Theme.Space.m) {
+            LazyVStack(spacing: Theme.Space.s) {
                 ForEach(model.listedAccountMachines) { machine in
                     // Phones are shown but never dialled: a client reaches a
                     // host, not the reverse (P5). Hiding them made a device
@@ -788,12 +801,12 @@ struct MachinesView: View {
                     // which machine the row is.
                     let resolved = model.resolvedName(for: machine)
                     let symbol = ClientDeviceIcon.symbol(for: machine)
-                    VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    HStack(alignment: .top, spacing: Theme.Space.s) {
+                    HStack(alignment: .center, spacing: Theme.Space.m) {
+                    HStack(alignment: .center, spacing: Theme.Space.s) {
                         Image(systemName: symbol)
                             .foregroundStyle(isSelf ? Theme.accent : .secondary)
-                            .font(Theme.font(22))
-                            .frame(width: 42, height: 42)
+                            .font(Theme.font(18))
+                            .frame(width: 32, height: 32)
                             .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 10))
                         if isSelf {
                             // This machine's own presence: the accent colour
@@ -840,30 +853,24 @@ struct MachinesView: View {
                             } else {
                                 Text(deviceTitle(resolved: resolved, machine: machine))
                                     .font(Theme.callout.weight(.medium))
-                            }
-                            if let platform = machine.platform, !platform.isEmpty {
-                                Text(platform)
-                                    .font(Theme.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if let words = linkedPeer(for: machine)?.words {
-                                Text(words).font(Theme.caption2).foregroundStyle(.secondary)
                                     .lineLimit(1).truncationMode(.middle)
                             }
-                            // The detail line sits under the name, on its own
-                            // row: the presence light is the quick read, this
-                            // is the answer to "when did I last hear from it".
-                            Text(statusLine(for: machine, isSelf: isSelf))
+                            Text([machine.platform, statusLine(for: machine, isSelf: isSelf)]
+                                .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                                 .font(Theme.caption)
                                 .foregroundStyle(.secondary)
+                                .lineLimit(2)
+
                         }
                         Spacer(minLength: 0)
                     }
-                    Spacer(minLength: 0)
-                    autoConnectRow(machine, isSelf: isSelf)
-                    deviceActions(machine, isSelf: isSelf)
+                    VStack(alignment: .trailing, spacing: Theme.Space.s) {
+                        autoConnectRow(machine, isSelf: isSelf)
+                        deviceActions(machine, isSelf: isSelf)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .fixedSize(horizontal: true, vertical: false)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(Theme.Space.m)
                     .background(
                         model.selectedKind == .account(machine.machineID ?? machine.id)

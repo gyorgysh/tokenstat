@@ -54,6 +54,7 @@ struct ClientTaskBoard: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.scenePhase) private var phase
     @State private var showingFilters = false
+    @State private var selectedStage = "backlog"
     @State private var targetedColumn: String?
     /// Live drop-placement preview: the column and card id the drag would land before, or "__end__".
     @State private var dropColumn: String?
@@ -61,7 +62,7 @@ struct ClientTaskBoard: View {
     @State private var presentedRun: ClientTaskRunPresentation?
     @State private var presentedTerminal: ClientTerminalSession?
 
-    private let columns = [("backlog", "To Do", "mark_todo"), ("doing", "Doing", "mark_running"), ("done", "Done", "mark_done")]
+    private let columns = [("backlog", "To Do", "mark_todo"), ("doing", "In progress", "mark_running"), ("done", "Done", "mark_done")]
     private var peer: String { session.target.peer ?? "" }
 
     var body: some View {
@@ -84,6 +85,15 @@ struct ClientTaskBoard: View {
                             session.filter.newestFirst = false
                         }.buttonStyle(SecondaryButtonStyle(comfortable: true))
                     }.padding(.horizontal, Theme.Space.m).padding(.bottom, Theme.Space.s)
+                }
+                if !wide && !session.filter.archived {
+                    Picker("Stage", selection: $selectedStage) {
+                        ForEach(columns, id: \.0) { column in
+                            Text("\(column.1) (\(session.visible.filter { $0.column == column.0 }.count))").tag(column.0)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, Theme.Space.m).padding(.bottom, Theme.Space.s)
                 }
                 ThemeRule()
                 ScrollView {
@@ -112,7 +122,7 @@ struct ClientTaskBoard: View {
                         } else if !session.visible.isEmpty && session.filter.archived {
                             boardColumn("archive", title: "Archive", mark: "mark_todo", wide: false)
                         } else if !session.visible.isEmpty {
-                            ForEach(columns, id: \.0) { column in
+                            if let column = columns.first(where: { $0.0 == selectedStage }) {
                                 boardColumn(column.0, title: column.1, mark: column.2, wide: false)
                             }
                         }

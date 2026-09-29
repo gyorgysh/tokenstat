@@ -1,14 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.marks
 
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.animation.core.snap
 import androidx.compose.foundation.Canvas
@@ -32,8 +25,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
-import ai.tokenstat.tokenstat.ui.persona.PersonaTraits
-import ai.tokenstat.tokenstat.ui.persona.drawPersonaFace
+import ai.tokenstat.tokenstat.ui.persona.PersonaPastime
 import ai.tokenstat.tokenstat.ui.persona.personaSeed
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.TsColors
@@ -58,10 +50,14 @@ enum class EmptyArtKind {
 /// the frame by construction.
 @Composable
 fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = personaSeed("empty-chat")) {
+    if (kind == EmptyArtKind.Chat) {
+        androidx.compose.foundation.layout.Box(
+            modifier.size(128.dp, 84.dp), contentAlignment = androidx.compose.ui.Alignment.BottomCenter,
+        ) { PersonaPastime(seed = seed, size = 84.dp) }
+        return
+    }
     val colors = LocalTsColors.current
     val reduceMotion = rememberReduceMotion()
-    val chatFace = remember(seed) { PersonaTraits(seed) }
-    val chatHue = chatFace.hue(colors.accent, colors.secondary)
     var entered by remember(kind) { mutableStateOf(reduceMotion) }
     val progress by animateFloatAsState(
         targetValue = if (entered) 1f else 0f,
@@ -69,26 +65,6 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
         label = "emptyArtIn",
     )
     LaunchedEffect(kind) { entered = true }
-    // The character breathes. On Mac and iPhone this scene is a soft body
-    // under gravity, and a still drawing of it beside those reads as a
-    // sticker of the creature rather than the creature. The full engine is
-    // still to come; until then it at least has to look alive, which is a
-    // slow rise and fall and the squash that goes with it.
-    val alive = kind == EmptyArtKind.Chat && !reduceMotion
-    val breath = rememberInfiniteTransition(label = "personaBreath")
-    val lift by if (alive) {
-        breath.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(2600, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Reverse,
-            ),
-            label = "personaLift",
-        )
-    } else {
-        remember { mutableFloatStateOf(0f) }
-    }
     val accent = colors.accent
     val border = colors.border
     Canvas(
@@ -97,11 +73,8 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
             .graphicsLayer {
                 alpha = progress
                 val scale = 0.92f + 0.08f * progress
-                // Volume is kept: what rises also narrows a little, the way
-                // a body does, rather than simply growing.
-                scaleX = scale * (1f - 0.02f * lift)
-                scaleY = scale * (1f + 0.03f * lift)
-                translationY = -2.5f * lift * density
+                scaleX = scale
+                scaleY = scale
                 // Around the feet, so the character lifts off the floor
                 // instead of stretching from its middle.
                 transformOrigin = TransformOrigin(0.5f, 1f)
@@ -285,12 +258,7 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
                 drawLine(accent, Offset(size.width * 0.70f, size.height * 0.63f), Offset(size.width * 0.74f, size.height * 0.59f), strokeWidth = 3.4f, cap = StrokeCap.Round)
                 drawLine(accent, Offset(size.width * 0.67f, size.height * 0.67f), Offset(size.width * 0.71f, size.height * 0.63f), strokeWidth = 3.4f, cap = StrokeCap.Round)
             }
-            // A folder with no chats yet. The Mac draws the persona character
-            // that will carry the next conversation; the phone draws the same
-            // creature's resting pose, from the same seed family.
-            EmptyArtKind.Chat -> {
-                drawPersonaFace(chatFace, chatHue)
-            }
+            EmptyArtKind.Chat -> Unit // Animated above, outside this static illustration canvas.
             EmptyArtKind.NoMachine -> serverScene(ServerArtState.Waiting, stroke, colors)
             EmptyArtKind.Provisioning -> serverScene(ServerArtState.Working, stroke, colors)
             EmptyArtKind.ServerReady -> serverScene(ServerArtState.Ready, stroke, colors)

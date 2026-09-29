@@ -1587,11 +1587,10 @@ private fun InsightsScreen(
                     )
                 }
             }
-            if (cut == 2) {
+            if (shown.isNotEmpty()) {
                 item {
-                    Arrive(reduceMotion) {
-                        InsightDayChart(rows = rows)
-                    }
+                    if (cut == 2) InsightDayChart(rows = shown)
+                    else InsightTokenChart(rows = shown, cut = cut)
                 }
             }
             if (shown.isEmpty()) {
@@ -1678,9 +1677,11 @@ private fun InsightDayChart(rows: List<JsonObject>) {
             style = MaterialTheme.typography.bodySmall,
             color = colors.textSecondary,
         )
-        Canvas(Modifier.fillMaxWidth().height(180.dp)) {
+        Canvas(Modifier.fillMaxWidth().height(180.dp).semantics {
+            contentDescription = "Daily activity across ${days.size} days. Peak ${compactTokens(peak)} tokens. Values listed below."
+        }) {
             if (bars.isEmpty() || peak <= 0) return@Canvas
-            val gap = 2.dp.toPx()
+            val gap = minOf(2.dp.toPx(), size.width / (bars.size * 3))
             val width = (size.width - gap * (bars.size - 1).coerceAtLeast(0)) / bars.size
             val brush = androidx.compose.ui.graphics.Brush.verticalGradient(
                 listOf(colors.accent, colors.accent.copy(alpha = 0.55f)),
@@ -1697,17 +1698,45 @@ private fun InsightDayChart(rows: List<JsonObject>) {
         }
         Row {
             Text(
-                days.firstOrNull()?.string("key") ?: "",
+                days.firstOrNull()?.string("key")?.let(::shortDate) ?: "",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.textSecondary,
             )
             Spacer(Modifier.weight(1f))
             Text(
-                days.lastOrNull()?.string("key") ?: "",
+                days.lastOrNull()?.string("key")?.let(::shortDate) ?: "",
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.textSecondary,
             )
         }
+        }
+    }
+}
+
+/// Ranked token usage complements the detailed cost rows below it.
+@Composable
+private fun InsightTokenChart(rows: List<JsonObject>, cut: Int) {
+    val colors = LocalTsColors.current
+    val ranked = remember(rows) { rows.sortedByDescending { it["counters"]?.jsonObject?.long("total") ?: 0L }.take(8) }
+    val peak = (ranked.maxOfOrNull { it["counters"]?.jsonObject?.long("total") ?: 0L } ?: 0L).coerceAtLeast(1L)
+    TsCard {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+            SectionTitle(if (cut == 1) "Most used coding tools" else "Most used models", "mark_insights")
+            Text("Tokens · including reported cache usage", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+            ranked.forEach { row ->
+                val title = cutTitle(cut, row.string("key") ?: "")
+                val total = row["counters"]?.jsonObject?.long("total") ?: 0L
+                Column(Modifier.semantics(mergeDescendants = true) { contentDescription = "$title: ${compactTokens(total)} tokens" },
+                    verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                        Text(title, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(compactTokens(total), color = colors.textSecondary)
+                    }
+                    LinearProgressIndicator(progress = { (total.toDouble() / peak).toFloat().coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().height(6.dp), color = colors.accent,
+                        trackColor = colors.accent.copy(alpha = 0.12f))
+                }
+            }
         }
     }
 }
@@ -1905,38 +1934,6 @@ private fun DevicesScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                item {
-                    val colors = LocalTsColors.current
-                    TsCard(Modifier.clickable { onSetupWizard() }) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Cloud, null, tint = colors.accent)
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("Set up a machine", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
-                                Text(
-                                    "A cloud server, a Mac you own, or one over SSH",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = colors.textSecondary,
-                                )
-                            }
-                            Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary)
-                        }
-                    }
-                }
-                item {
-                    val colors = LocalTsColors.current
-                    TsCard(Modifier.clickable { sshOpen = true }) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Terminal, null, tint = colors.accent)
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("SSH hosts", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
-                                Text("Connect to a saved server", color = colors.textSecondary)
-                            }
-                            Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary)
-                        }
-                    }
-                }
                 // The count belongs above the list it counts, which is where
                 // the iPhone puts it, rather than above the two rows that add
                 // to it.
@@ -1993,7 +1990,7 @@ private fun DevicesScreen(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 Text(
-                                    DeviceCopy.caption(value.string("label"), value.string("id"), status),
+                                    status,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = colors.textSecondary,
                                 )
@@ -2025,6 +2022,14 @@ private fun DevicesScreen(
                             }
                             Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary)
                         }
+                    }
+                }
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                        TsSecondaryButton(label = "Add device", icon = ActionIcon.Create.vector,
+                            small = true, onClick = onSetupWizard)
+                        TsSecondaryButton(label = "SSH hosts", icon = Icons.Default.Terminal,
+                            small = true, onClick = { sshOpen = true })
                     }
                 }
                 if (state.account == null) {

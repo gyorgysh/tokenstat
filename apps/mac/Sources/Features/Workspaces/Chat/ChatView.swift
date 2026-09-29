@@ -107,7 +107,7 @@ private struct ChatConversationOverview: View {
                                         }.font(Theme.caption).foregroundStyle(.secondary)
                                     }
                                     Spacer(minLength: Theme.Space.s)
-                                    Text(Date(timeIntervalSince1970: Double(conversation.lastMessageAtMs ?? conversation.updatedAtMs) / 1000), style: .relative)
+                                    RelativeTimeText(date: Date(timeIntervalSince1970: Double(conversation.lastMessageAtMs ?? conversation.updatedAtMs) / 1000), unitsStyle: .short)
                                         .font(Theme.caption).foregroundStyle(.secondary)
                                     Image(systemName: "chevron.right").font(Theme.caption).foregroundStyle(.tertiary)
                                 }
@@ -117,6 +117,11 @@ private struct ChatConversationOverview: View {
                                 .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
                                 .contentShape(Rectangle())
                             }.buttonStyle(.plain)
+                            #if os(macOS)
+                            .modifier(ConversationPreviewHover {
+                                await model.warmConversationPreview(conversation, in: workspaceID)
+                            })
+                            #endif
                             .contextMenu {
                                 Button("Remove chat", .delete, role: .destructive) {
                                     pendingRemoval = conversation
@@ -1338,3 +1343,23 @@ struct ChatDropExperience: View {
         .accessibilityHidden(true)
     }
 }
+
+#if os(macOS)
+/// Hover state stays with the row, so moving between names does not rebuild
+/// the conversation list. SwiftUI cancels the dwell when the row disappears.
+private struct ConversationPreviewHover: ViewModifier {
+    let warm: () async -> Void
+    @State private var hovered = false
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { hovered = $0 }
+            .task(id: hovered) {
+                guard hovered else { return }
+                do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
+                guard !Task.isCancelled else { return }
+                await warm()
+            }
+    }
+}
+#endif

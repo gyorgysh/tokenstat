@@ -341,6 +341,7 @@ internal static class SidebarLive
             Tag = LiveRoute.Join(ChatPrefix, folderId, id),
         };
         if (row.Content is FrameworkElement view) view.Tag = (title, detail, backend);
+        ChatPreviewCache.Attach(row, folderId, id);
         AutomationProperties.SetName(row, title + ". " + detail);
         ToolTipService.SetToolTip(row, title + " · " + backend);
         var menu = ContextMenus.Menu(row);

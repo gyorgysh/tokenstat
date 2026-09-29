@@ -63,7 +63,7 @@ enum LabBench {
 
         var perBodyFrame: Double {
             // One simulated second is 120 fixed steps, presented as 60 frames.
-            milliseconds / Double(bodies) / 60
+            milliseconds / Double(max(1, bodies)) / Double(max(1, Int(seconds * 60)))
         }
 
         var summary: String {

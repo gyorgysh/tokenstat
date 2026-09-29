@@ -221,6 +221,8 @@ ALLOWED = [
     ("App/RootView.swift", "Button(action: toggle) {"),
     ("Client/ClientWorkspacesView.swift", "model.openSession(session)"),
     ("Client/ClientWorkspaceNotesView.swift", "startEditing(note)"),
+    # The note title/preview is the full clickable row; no redundant action glyph.
+    ("Features/Todo/NotesView.swift", "model.selectCard(note.id)"),
     # The iPad sidebar's tree. A folder, one of its sections and a session in
     # it are each a whole row: the glyph is inside the label the row draws,
     # and a second one on the button would be the same mark twice.

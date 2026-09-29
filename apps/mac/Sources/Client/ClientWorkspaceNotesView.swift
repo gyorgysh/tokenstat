@@ -33,6 +33,7 @@ struct ClientWorkspaceNotesView: View {
     @State private var errorMessage: String?
     @State private var loaded = false
     @State private var showingArchive = false
+    @State private var showingComposer = false
     @State private var search = ""
     @State private var alphabetical = false
     @State private var pendingDelete: TodoCard?
@@ -64,7 +65,7 @@ struct ClientWorkspaceNotesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !showingArchive {
+            if showingComposer && !showingArchive {
                 composer
             }
             list
@@ -72,6 +73,14 @@ struct ClientWorkspaceNotesView: View {
         .background(Theme.background)
         .searchable(text: $search, prompt: "Search notes")
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("New note", .create) {
+                    showingArchive = false
+                    showingComposer = true
+                    writing = true
+                }
+                .labelStyle(.iconOnly)
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Picker("Sort notes", selection: $alphabetical) {
@@ -87,6 +96,8 @@ struct ClientWorkspaceNotesView: View {
                     showingArchive ? .restore : .archive
                 ) {
                     showingArchive.toggle()
+                    showingComposer = false
+                    writing = false
                 }
                 .labelStyle(.iconOnly)
                 .disabled(archivedCount == 0 && !showingArchive)
@@ -132,12 +143,22 @@ struct ClientWorkspaceNotesView: View {
                     .foregroundStyle(canSave ? Theme.accent : .secondary)
                     .disabled(!canSave)
             }
-            Text(isOffline
-                ? "Offline. Notes are kept on \(hostName.isEmpty ? "the computer" : hostName), so this waits."
-                : "Saves to \(place).")
+            HStack {
+                Text(isOffline
+                    ? "Offline. Notes are kept on \(hostName.isEmpty ? "the computer" : hostName), so this waits."
+                    : "Saves to \(place).")
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: Theme.Space.s)
+                Button("Close", .dismiss) {
+                    showingComposer = false
+                    writing = false
+                }
                 .font(ClientType.caption)
-                .foregroundStyle(.secondary)
+                .accessibilityHint("Your draft stays here")
+            }
         }
+        .task { writing = true }
         .padding(Theme.Space.m)
         .background(Theme.tabStrip)
         .overlay(alignment: .bottom) {
@@ -161,7 +182,7 @@ struct ClientWorkspaceNotesView: View {
             emptyArt: .notes,
             emptyMessage: showingArchive
                 ? "Notes you put away in \(place) show up here."
-                : "Anything worth remembering about \(place). Type above and press return.",
+                : "Keep anything worth remembering about \(place). Choose New note to start.",
             refreshKey: "notes-\(workspaceID)",
             reload: { await load() }
         ) {
@@ -198,9 +219,9 @@ struct ClientWorkspaceNotesView: View {
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .multilineTextAlignment(.leading)
-                    .lineLimit(4)
+                    .lineLimit(2)
                 if !note.notes.isEmpty {
-                    Text(note.notes).font(ClientType.caption).foregroundStyle(.secondary).lineLimit(3)
+                    Text(note.notes).font(ClientType.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
                 RelativeTimeText(
                     date: Date(timeIntervalSince1970: Double(note.createdAtMs) / 1000),

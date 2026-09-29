@@ -36,6 +36,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -94,7 +97,11 @@ fun NotesSection(
 ) {
     val scope = rememberCoroutineScope()
     var cards by remember { mutableStateOf<List<NoteList.NoteCard>>(emptyList()) }
-    var draft by remember { mutableStateOf("") }
+    var draft by rememberSaveable(peer, workspace) { mutableStateOf("") }
+    var showingComposer by rememberSaveable(peer, workspace) { mutableStateOf(false) }
+    var libraryMenu by remember { mutableStateOf(false) }
+    val draftFocus = remember { FocusRequester() }
+    LaunchedEffect(showingComposer) { if (showingComposer) draftFocus.requestFocus() }
     var search by remember { mutableStateOf("") }
     var alphabetical by remember { mutableStateOf(false) }
     var showingArchive by remember { mutableStateOf(false) }
@@ -217,56 +224,50 @@ fun NotesSection(
     }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(cardRadiusDp))
-                .background(LocalTsColors.current.panel)
-                .padding(Space.m),
-            verticalArrangement = Arrangement.spacedBy(Space.xs),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                OutlinedTextField(
-                    draft,
-                    { draft = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Something worth remembering") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { save() }),
-                )
-                TsAccentButton(label = "Add", small = true, enabled = draft.trim().isNotEmpty(), onClick = ::save)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            TsSearchField(prompt = if (showingArchive) "Search archived notes" else "Search notes",
+                query = search, onQueryChange = { search = it }, modifier = Modifier.weight(1f))
+            TsSecondaryButton(label = "New note", icon = ActionIcon.Create.vector, small = true,
+                onClick = { showingArchive = false; showingComposer = true })
+            Box {
+                TsSecondaryButton(label = "View", icon = ActionIcon.More.vector, small = true,
+                    onClick = { libraryMenu = true })
+                DropdownMenu(expanded = libraryMenu, onDismissRequest = { libraryMenu = false }) {
+                    DropdownMenuItem(text = { Text(if (alphabetical) "Sort newest first" else "Sort by title") },
+                        onClick = { alphabetical = !alphabetical; libraryMenu = false })
+                    DropdownMenuItem(text = { Text(if (showingArchive) "Show notes" else "Show archive ($archivedCount)") },
+                        onClick = { showingArchive = !showingArchive; showingComposer = false; libraryMenu = false })
+                }
             }
-            Text(
-                "Saves to $place.",
-                style = TextStyle(fontSize = 11.sp),
-                color = LocalTsColors.current.textSecondary,
-            )
         }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            TsSearchField(prompt = "Search notes", query = search, onQueryChange = { search = it }, modifier = Modifier.weight(1f))
+        if (showingComposer && !showingArchive) {
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(cardRadiusDp))
+                    .background(LocalTsColors.current.panel).padding(Space.m),
+                verticalArrangement = Arrangement.spacedBy(Space.xs),
+            ) {
+                OutlinedTextField(draft, { draft = it },
+                    modifier = Modifier.fillMaxWidth().focusRequester(draftFocus),
+                    placeholder = { Text("Something worth remembering") },
+                    minLines = 2, maxLines = 5)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                    Text("Saves to $place.", modifier = Modifier.weight(1f),
+                        style = TextStyle(fontSize = 11.sp), color = LocalTsColors.current.textSecondary)
+                    TsSecondaryButton(label = "Close", icon = ActionIcon.Dismiss.vector, small = true,
+                        onClick = { showingComposer = false })
+                    TsAccentButton(label = "Add", icon = ActionIcon.Create.vector, small = true,
+                        enabled = draft.trim().isNotEmpty(), onClick = ::save)
+                }
+            }
         }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            SectionLabel(if (showingArchive) "Archived notes" else "Notes", notes.size, Modifier.weight(1f))
-            TsSecondaryButton(
-                label = if (alphabetical) "Title A–Z" else "Newest first",
-                small = true,
-                onClick = { alphabetical = !alphabetical },
-            )
-            TsSecondaryButton(
-                label = if (showingArchive) "Show notes" else "Show archive",
-                small = true,
-                enabled = archivedCount > 0 || showingArchive,
-                onClick = { showingArchive = !showingArchive },
-            )
-        }
+        SectionLabel(if (showingArchive) "Archived notes" else "Notes", notes.size)
         if (error != null) Banner(error!!, BannerSeverity.DANGER)
         if (!loading && notes.isEmpty() && error == null) {
             EmptyState(
                 Icons.AutoMirrored.Filled.Notes,
                 if (search.isNotEmpty()) "No matching notes" else if (showingArchive) "Nothing archived" else "No notes yet",
                 if (showingArchive) "Notes you put away in $place show up here."
-                else "Anything worth remembering about $place. Type above and press return.",
+                else "Keep anything worth remembering about $place. Choose New note to start.",
                 art = { EmptyArt(EmptyArtKind.Notes) },
             )
         }
@@ -286,14 +287,14 @@ fun NotesSection(
                         note.title,
                         style = TextStyle(fontSize = 14.sp),
                         color = LocalTsColors.current.textPrimary,
-                        maxLines = 4,
+                        maxLines = 2,
                     )
                     if (note.body.isNotBlank()) {
                         Text(
                             note.body,
                             style = TextStyle(fontSize = 12.sp),
                             color = LocalTsColors.current.textSecondary,
-                            maxLines = 3,
+                            maxLines = 2,
                         )
                     }
                     if (note.createdAtMs > 0) {

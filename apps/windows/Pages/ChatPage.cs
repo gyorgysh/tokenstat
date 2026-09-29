@@ -79,7 +79,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private string? _pendingReveal;
     /// <summary>Whether the list load finished, so a reveal knows whether to wait for it or re-read it.</summary>
     private bool _listReady;
-    private ulong _offset;
+    private ulong _offset { get => _history.Offset; set => _history.Offset = value; }
     private bool _started;
     private bool _running;
     private bool _setupExpanded;
@@ -87,9 +87,18 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private JsonArray _chats = new();
     private JsonArray _backends = new();
     private JsonArray _personas = new();
-    private JsonArray _events = new();
+    private readonly ChatHistoryBuffer _history = new();
+    private JsonArray _events { get => _history.Events; set => _history.Events = value; }
     private JsonArray _approvals = new();
     private readonly List<StagedFile> _attachments = [];
+    private readonly Dictionary<string, (string Text, StagedFile[] Attachments)> _drafts = new();
+
+    private void RememberDraft()
+    {
+        if (_opening || _openId is null || _outboxKey is not string owner) return;
+        if (_draft.Text.Length == 0 && _attachments.Count == 0) _drafts.Remove(owner);
+        else _drafts[owner] = (_draft.Text, _attachments.ToArray());
+    }
     private JsonNode? _openChat;
 
     /// <param name="chatId">One conversation to reveal on load, from a deep
@@ -107,6 +116,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         PreviewKeyDown += PageOnPreviewKeyDown;
         _titleBox.LostFocus += async (_, _) =>
         {
+            if (_opening) return;
             var next = _titleBox.Text.Trim();
             if (string.IsNullOrEmpty(next) || next == Format.Text(_openChat, "title")) return;
             await UpdateAsync(new JsonObject { ["title"] = next });
@@ -136,10 +146,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         RenderInspector();
         Loaded += async (_, _) =>
         {
-            if (_openId is not null) StartPoll();
+            if (_openId is string id && _opening) await OpenAsync(id);
+            else if (_openId is not null) StartPoll();
             else await ShowListAsync();
         };
-        Unloaded += (_, _) => _poll?.Cancel();
+        Unloaded += (_, _) => { RememberDraft(); _openGeneration++; _poll?.Cancel(); };
     }
 
     /// <summary>
@@ -261,11 +272,17 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             output += Format.Long(ev, "output");
             cost += Format.Number(ev, "costUsd");
         }
+        if (_aggregateUsage is not null)
+        {
+            input = Format.Long(_aggregateUsage, "input");
+            output = Format.Long(_aggregateUsage, "output");
+            cost = Format.Number(_aggregateUsage, "cost");
+        }
         if (input == 0 && output == 0)
         {
             return "Nothing counted yet";
         }
-        var tokens = $"{input:N0} in, {output:N0} out";
+        var tokens = (_aggregateUsage is null && _hasEarlier ? "Loaded messages: " : "") + $"{input:N0} in, {output:N0} out";
         return cost > 0
             ? $"{tokens} · {cost.ToString("C2", CultureInfo.GetCultureInfo("en-US"))}"
             : tokens;
@@ -322,7 +339,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private async Task ShowListAsync()
     {
+        RememberDraft();
         _poll?.Cancel();
+        _openGeneration++;
+        _opening = false;
         _openId = null;
         _listReady = false;
         _openChat = null;
@@ -476,6 +496,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Content = card,
         };
+        ChatPreviewCache.Attach(button, _workspaceId, id);
         button.Click += async (_, _) => await OpenAsync(id);
         var menu = ContextMenus.Menu(button);
         ContextMenus.AddAsync(menu, "Open chat", async () => await OpenAsync(id));
@@ -544,11 +565,28 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return false;
     }
 
+    private int _openGeneration;
+    private bool _opening;
+
     private async Task OpenAsync(string id)
     {
         if (string.IsNullOrEmpty(id)) return;
+        RememberDraft();
         _poll?.Cancel();
+        var generation = ++_openGeneration;
+        _opening = true;
+        // Remove the previous conversation's controls before changing its id.
+        // A pending open must never let a click send or rename the new chat
+        // using controls still showing the previous chat.
+        _composerDock.Child = null;
+        _composerDock.Visibility = Visibility.Collapsed;
+        _root.Children.Clear();
+        _root.Children.Add(ActionIconGlyph.Button("Chats", ActionIcon.Back, async (_, _) => await ShowListAsync()));
+        _root.Children.Add(Motion.SkeletonCard());
+        _openChat = null;
+        _approvals = new JsonArray();
         _openId = id;
+        RenderInspector();
         _offset = 0;
         _events = new JsonArray();
         _attachments.Clear();
@@ -556,32 +594,42 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         ResetTranscriptWindow();
         try
         {
-            await RefreshCatalogAsync();
-            _openChat = FindChat(id);
-            _outboxKey = await OutboxKeyAsync(id);
+            // These reads are independent. Do not serialize transcript reveal
+            // behind backend discovery, outbox identity, and approvals.
+            var catalog = RefreshCatalogAsync(refreshMenus: _backends.Count == 0);
+            var identity = OutboxKeyAsync(id);
+            var preview = ChatPreviewCache.Take(_workspaceId, id);
+            var events = preview is null ? CallChatAsync("chat.eventPage", new JsonObject
+                { ["id"] = id, ["limit"] = 160, ["stablePositions"] = true }) : Task.FromResult(preview);
+            var approvals = CallChatAsync("chat.approvals", new JsonObject { ["id"] = id });
+            await Task.WhenAll(catalog, identity, events, approvals);
+            if (_openId != id || generation != _openGeneration || !IsLoaded) return;
+            _openChat = _chats.FirstOrDefault(chat => Format.Text(chat, "id") == id);
+            if (_openChat is null) { await ShowListAsync(); return; }
+            _outboxKey = identity.Result;
             _authorizedQueue.Clear();
-            if (_openChat is null)
-            {
-                await ShowListAsync();
-                return;
-            }
-            var chunk = await CallChatAsync("chat.events", new JsonObject
-            {
-                ["id"] = id,
-                ["offset"] = 0,
-            });
-            _events = AsArray(chunk, "events");
-            _offset = (ulong)Format.Long(chunk, "nextOffset");
-            _approvals = AsArray(await CallChatAsync(
-                "chat.approvals", new JsonObject { ["id"] = id }));
+            ApplyHistoryPage(events.Result, replace: true);
+            _approvals = AsArray(approvals.Result);
             _started = _events.Count > 0 || !string.IsNullOrEmpty(Format.Text(_openChat, "resumeToken"));
             _running = Format.Flag(_openChat, "running");
+            if (_drafts.TryGetValue(identity.Result, out var draft))
+            {
+                _draft.Text = draft.Text;
+                _attachments.AddRange(draft.Attachments);
+            }
+            _opening = false;
             PaintConversation();
             StartPoll();
         }
         catch (Exception ex)
         {
-            Banner(ex.Message);
+            if (_openId == id && generation == _openGeneration && IsLoaded)
+            {
+                _root.Children.Clear();
+                _root.Children.Add(ActionIconGlyph.Button("Chats", ActionIcon.Back, async (_, _) => await ShowListAsync()));
+                _root.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+                _root.Children.Add(ActionIconGlyph.Button("Try again", ActionIcon.Refresh, async (_, _) => await OpenAsync(id)));
+            }
         }
     }
 
@@ -937,7 +985,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _sliceOlder = SliceClamp(_sliceOlder, items.Count);
         var start = SliceStart(items.Count, _sliceOlder);
         var end = SliceEnd(items.Count, _sliceOlder);
-        var prefix = start > 0 ? 1 : 0;
+        var prefix = start > 0 || _hasEarlier ? 1 : 0;
         var visible = end - start;
         var desiredCount = prefix + visible + (Busy() ? 1 : 0);
 
@@ -966,7 +1014,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
         if (prefix == 1)
         {
-            var earlierKey = "__earlier__:" + start;
+            var earlierKey = "__earlier__:" + start + ":" + _historyLoading;
             var current = _transcript.Children.Count > 0
                 ? _transcript.Children[0] as FrameworkElement
                 : null;
@@ -1392,11 +1440,19 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             cache += Format.Long(ev, "cacheRead") + Format.Long(ev, "cacheWrite");
             cost += Format.Number(ev, "costUsd");
         }
+        if (_aggregateUsage is not null)
+        {
+            input = Format.Long(_aggregateUsage, "input");
+            output = Format.Long(_aggregateUsage, "output");
+            cache = Format.Long(_aggregateUsage, "cacheRead") + Format.Long(_aggregateUsage, "cacheWrite");
+            cost = Format.Number(_aggregateUsage, "cost");
+            any = Format.Long(_aggregateUsage, "turns") > 0;
+        }
         var body = new StackPanel { Spacing = Theme.SpaceS };
         if (!any)
         {
             body.Children.Add(Muted("Tokens and cost show up after a turn."));
-            return Card("This conversation", body);
+            return Card(_aggregateUsage is null && _hasEarlier ? "Loaded messages" : "This conversation", body);
         }
         var track = new Grid { Height = 6 };
         track.Children.Add(new Border
@@ -1430,7 +1486,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         }
         body.Children.Add(legend);
         if (cache > 0) body.Children.Add(Muted($"{cache:N0} cached"));
-        return Card("This conversation", body);
+        return Card(_aggregateUsage is null && _hasEarlier ? "Loaded messages" : "This conversation", body);
     }
 
     private UIElement Composer()
@@ -1738,6 +1794,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private async Task SendAsync(bool sendNext = false)
     {
+        if (_opening) return;
         if (_openId is not string chat || _sending || _queueing) return;
         var text = _draft.Text.Trim();
         if (text.Length == 0 && _attachments.Count == 0) return;
@@ -1828,6 +1885,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private async Task UpdateAsync(JsonObject patch)
     {
+        if (_opening) return;
         if (_openId is null) return;
         patch["id"] = _openId;
         try
@@ -1861,31 +1919,47 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             try
             {
-                await Task.Delay(400, token);
+                await Task.Delay(Busy() ? 400 : 2000, token);
                 var wasBusy = Busy();
+                var historyGeneration = _historyGeneration;
                 var chunk = await CallChatAsync("chat.events", new JsonObject
                 {
                     ["id"] = chatId,
                     ["offset"] = _offset,
+                    ["tailCursor"] = _tailCursor,
+                    ["stablePositions"] = true,
                 });
                 if (token.IsCancellationRequested || _openId != chatId) return;
+                if (historyGeneration != _historyGeneration) continue;
+                if (Format.Flag(chunk, "reset"))
+                {
+                    var reset = await CallChatAsync("chat.eventPage", new JsonObject
+                        { ["id"] = chatId, ["limit"] = 160, ["stablePositions"] = true });
+                    if (token.IsCancellationRequested || _openId != chatId) return;
+                    ApplyHistoryPage(reset, replace: true);
+                    RebuildTranscript(full: true);
+                    RefreshCost();
+                    continue;
+                }
                 var next = AsArray(chunk, "events");
                 // Host calls run on the thread pool via Task.Run; the await
                 // captures the UI SynchronizationContext so the continuation
                 // resumes on the UI thread. Still, guard the UI mutations
                 // explicitly so a future ConfigureAwait(false) or a call from a
                 // non-UI context cannot trigger RPC_E_WRONG_THREAD.
-                void ApplyPoll(JsonArray polled, ulong nextOffset, JsonArray approvals)
+                void ApplyPoll(JsonArray approvals)
                 {
-                    foreach (var row in polled) _events.Add(row?.DeepClone());
-                    _offset = nextOffset;
+                    if (!_history.ApplyTail(chunk, historyGeneration)) return;
                     _approvals = approvals;
                 }
                 var approvals = AsArray(await CallChatAsync(
                     "chat.approvals", new JsonObject { ["id"] = chatId }));
                 if (token.IsCancellationRequested || _openId != chatId) return;
-                await RefreshCatalogAsync();
+                _chats = AsArray(await CallChatAsync("chat.list", new JsonObject { ["workspaceId"] = _workspaceId }));
                 if (token.IsCancellationRequested || _openId != chatId) return;
+
+                if (historyGeneration != _historyGeneration) continue;
+                var transcriptChanged = next.Count > 0 || !JsonNode.DeepEquals(_approvals, approvals);
 
                 // All UI state is mutated on the DispatcherQueue regardless of
                 // which thread the awaits resumed on.
@@ -1894,7 +1968,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     var tcs = new TaskCompletionSource();
                     DispatcherQueue.TryEnqueue(() =>
                     {
-                        ApplyPoll(next, (ulong)Format.Long(chunk, "nextOffset"), approvals);
+                        ApplyPoll(approvals);
                         _openChat = FindChat(chatId);
                         var running = Format.Flag(_openChat, "running");
                         var started = _events.Count > 0 || !string.IsNullOrEmpty(Format.Text(_openChat, "resumeToken"));
@@ -1908,7 +1982,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                         {
                             PaintConversation();
                         }
-                        else
+                        else if (transcriptChanged)
                         {
                             RebuildTranscript();
                             RefreshCost();
@@ -1919,7 +1993,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 }
                 else
                 {
-                    ApplyPoll(next, (ulong)Format.Long(chunk, "nextOffset"), approvals);
+                    ApplyPoll(approvals);
                     _openChat = FindChat(chatId);
                     var running = Format.Flag(_openChat, "running");
                     var started = _events.Count > 0 || !string.IsNullOrEmpty(Format.Text(_openChat, "resumeToken"));
@@ -1933,7 +2007,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     {
                         PaintConversation();
                     }
-                    else
+                    else if (transcriptChanged)
                     {
                         RebuildTranscript();
                         RefreshCost();
@@ -1978,9 +2052,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         }
     }
 
-    private async Task RefreshCatalogAsync()
+    private async Task RefreshCatalogAsync(bool refreshMenus = true)
     {
         var chats = CallChatAsync("chat.list", new JsonObject { ["workspaceId"] = _workspaceId });
+        if (!refreshMenus) { _chats = AsArray(await chats); return; }
         var backends = CallChatAsync("chat.backends");
         var personas = CallChatAsync(
             "chat.personas",

@@ -156,6 +156,7 @@ enum PersonaRenderer {
         unit: CGFloat,
         ink: Color
     ) {
+        var context = context
         let traits = engine.traits
         let face = engine.face
         let body = engine.body
@@ -185,6 +186,17 @@ enum PersonaRenderer {
                 y: origin.y + dx * sin(tilt) + dy * cos(tilt)
             )
         }
+
+        // The face rides the body when rolling and disappears around its
+        // back when turning. Keeping this in a clipped layer avoids layout work.
+        let facing = cos(engine.yaw)
+        guard facing > 0 else { return }
+        context.opacity *= min(1, facing * 4)
+        context.translateBy(x: origin.x, y: origin.y)
+        context.rotate(by: .radians(Double(engine.roll)))
+        context.translateBy(x: sin(engine.yaw) * bounds.width * rect.width * 0.24, y: 0)
+        context.scaleBy(x: max(0.08, facing), y: 1)
+        context.translateBy(x: -origin.x, y: -origin.y)
 
         let count = traits.eyeCount
         // Small marks need proportionally bigger features or the face turns

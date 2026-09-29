@@ -52,6 +52,12 @@ internal sealed class PersonaEngine
     /// mood always starts at its own beginning however long the app has run.
     /// </summary>
     public double Clock { get; private set; }
+    public double Roll { get; private set; }
+    public double Yaw { get; private set; }
+    private double _lifetime;
+    private double _morphAmount;
+    private double _rollVelocity;
+    private double _yawVelocity;
 
     /// <summary>
     /// The mood being left behind, still running on its own clock, and how
@@ -144,6 +150,7 @@ internal sealed class PersonaEngine
             // Motion is off, or nobody is looking. Present the mood's resting
             // pose rather than freezing mid-bounce, which reads as a glitch.
             Settle();
+            Roll = Yaw = _rollVelocity = _yawVelocity = 0;
             _lastTime = null;
             Refresh();
             return;
@@ -176,6 +183,7 @@ internal sealed class PersonaEngine
                 _pending -= FixedStep;
                 double previous = Clock;
                 Clock += FixedStep;
+                _lifetime += FixedStep;
                 Step(previous, Clock);
             }
             Refresh();
@@ -184,6 +192,12 @@ internal sealed class PersonaEngine
         {
             _lastTime = time;
         }
+    }
+
+    public void SuspendClock()
+    {
+        _lastTime = null;
+        _pending = 0;
     }
 
     private void Step(double previous, double now)
@@ -222,6 +236,28 @@ internal sealed class PersonaEngine
             drive = arriving;
             target = arrivingFace;
         }
+
+        bool playful = Mood is PersonaMood.Bouncing or PersonaMood.Dancing or PersonaMood.Pacing;
+        bool quiet = Mood is PersonaMood.Sleeping or PersonaMood.Failed or PersonaMood.Waiting;
+        double desiredMorph = quiet ? 0.06 : playful ? 0.24 : 0.16;
+        _morphAmount += (desiredMorph - _morphAmount) * FixedStep * 2;
+        drive.MorphAmount = _morphAmount;
+        drive.MorphPhase = _lifetime * 0.22 + (Seed % 997) * 0.01;
+        if (Mood is PersonaMood.Bouncing or PersonaMood.Dancing)
+        {
+            _rollVelocity += (1.25 - _rollVelocity) * FixedStep * 4;
+        }
+        else
+        {
+            double resting = Math.Round(Roll / (2 * Math.PI), MidpointRounding.AwayFromZero) * 2 * Math.PI;
+            _rollVelocity += ((resting - Roll) * 10 - _rollVelocity * 6) * FixedStep;
+        }
+        Roll += _rollVelocity * FixedStep;
+        drive.Roll = Roll;
+        double desiredYaw = Mood == PersonaMood.Pacing ? Math.Sin(_lifetime * 0.65) * Math.PI
+            : quiet ? 0 : Math.Sin(_lifetime * 0.42) * 0.35;
+        _yawVelocity += ((desiredYaw - Yaw) * 12 - _yawVelocity * 7) * FixedStep;
+        Yaw += _yawVelocity * FixedStep;
 
         // What a landing left behind. Both decay on their own clock, so the
         // squash always comes back and no mood can leave the body permanently

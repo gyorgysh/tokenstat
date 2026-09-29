@@ -284,7 +284,7 @@ struct AutomationsView: View {
                 cell(model.scheduleSummary(job.schedule))
             }
             .width(min: 100, ideal: 150)
-            TableColumn("Project") { job in
+            TableColumn("Workspace") { job in
                 cell(folderLabel(job.workspaceID))
             }
             .width(min: 80, ideal: 120)
@@ -446,7 +446,7 @@ struct AutomationsView: View {
                 }
             }
             .width(min: 90, ideal: 130)
-            TableColumn("Project") { run in
+            TableColumn("Workspace") { run in
                 cell(folderLabel(run.workspaceID))
             }
             .width(min: 80, ideal: 120)

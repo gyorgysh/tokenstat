@@ -34,6 +34,7 @@ internal sealed class PersonaMark : Canvas
     private Windows.UI.ViewManagement.UISettings? _settings;
     private bool _needsRedraw = true;
     private bool _wasMoving;
+    private bool _inViewport = true;
 
     public PersonaMark(ulong seed = 0, double size = 28, PersonaMood state = PersonaMood.Idle, bool pokeable = false)
     {
@@ -50,6 +51,18 @@ internal sealed class PersonaMark : Canvas
         Loaded += (_, _) => Start();
         Unloaded += (_, _) => Stop();
         ActualThemeChanged += (_, _) => _needsRedraw = true;
+        EffectiveViewportChanged += (_, args) =>
+        {
+            var viewport = args.EffectiveViewport;
+            bool visible = viewport.Width > 0 && viewport.Height > 0
+                && viewport.Right > 0 && viewport.Bottom > 0
+                && viewport.Left < ActualWidth && viewport.Top < ActualHeight;
+            if (_inViewport == visible) return;
+            _inViewport = visible;
+            _engine.SuspendClock();
+            if (visible && IsLoaded) Start();
+            else _timer.Stop();
+        };
     }
 
     /// <summary>Stable per persona. Zero falls back to one settled look rather than an empty frame.</summary>
@@ -87,7 +100,7 @@ internal sealed class PersonaMark : Canvas
         {
             _needsRedraw |= _state != value;
             _state = value;
-            _timer.Interval = TimeSpan.FromSeconds(1 / value.FrameRate());
+            _timer.Interval = FrameInterval;
         }
     }
 
@@ -106,17 +119,29 @@ internal sealed class PersonaMark : Canvas
 
     private void Start()
     {
-        _timer.Interval = TimeSpan.FromSeconds(1 / _state.FrameRate());
+        if (!_inViewport) return;
+        _timer.Interval = FrameInterval;
+        _engine.SuspendClock();
         _timer.Start();
         Tick();
     }
 
-    private void Stop() => _timer.Stop();
+    private void Stop()
+    {
+        _timer.Stop();
+        _engine.SuspendClock();
+    }
 
     private void Tick()
     {
+        if (MainWindow.MotionSuspended || Visibility != Visibility.Visible)
+        {
+            _engine.SuspendClock();
+            _timer.Interval = TimeSpan.FromMilliseconds(250);
+            return;
+        }
         bool moving = Moving();
-        _timer.Interval = moving ? TimeSpan.FromSeconds(1 / _state.FrameRate()) : TimeSpan.FromMilliseconds(250);
+        _timer.Interval = moving ? FrameInterval : TimeSpan.FromMilliseconds(250);
         if (!moving && !_wasMoving && !_needsRedraw)
         {
             return;
@@ -126,6 +151,10 @@ internal sealed class PersonaMark : Canvas
         _needsRedraw = false;
         _wasMoving = moving;
     }
+
+    // Tiny faces need fewer paints than the large, interactive character.
+    private TimeSpan FrameInterval => TimeSpan.FromSeconds(
+        1 / Math.Min(_state.FrameRate(), _size <= 28 ? 30 : 60));
 
     /// <summary>
     /// Motion is off when the person asked for it to be. Then the engine

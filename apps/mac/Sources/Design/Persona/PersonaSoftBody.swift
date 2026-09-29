@@ -47,6 +47,11 @@ struct PersonaDrive {
     /// The rest ellipse, as multipliers on `radius`. Squash and stretch.
     var stretch = CGSize(width: 1, height: 1)
     var radius: CGFloat = PersonaStage.restRadius
+    /// Continuous shape goals, applied through springs rather than replacing
+    /// the outline. Phase belongs to the lifetime clock, not the mood clock.
+    var morphPhase: CGFloat = 0
+    var morphAmount: CGFloat = 0
+    var roll: CGFloat = 0
     /// How hard the body resists losing volume. This is what makes it read as
     /// a water balloon rather than a rubber band loop.
     var pressure: CGFloat = 44
@@ -118,6 +123,9 @@ struct PersonaSoftBody {
     /// Fixed per-node phase offsets, so the ripple runs round the rim rather
     /// than pulsing everywhere at once.
     private var ripple: [CGFloat]
+    /// Fixed harmonics; avoid evaluating five trigonometric functions per node
+    /// at 120 simulation steps a second.
+    private var shapeBasis: [(x: CGFloat, y: CGFloat, third: CGFloat, fourth: CGFloat, fifth: CGFloat, cos2: CGFloat)]
     /// How much of the body is resting on the ground, zero to one, eased so
     /// that touching down ramps the support in rather than snapping it on.
     private var grounded: CGFloat = 0
@@ -158,6 +166,10 @@ struct PersonaSoftBody {
         self.nodes = nodes
         forces = Array(repeating: .zero, count: count)
         self.ripple = ripple
+        shapeBasis = (0..<count).map { index in
+            let a = CGFloat(index) * 2 * .pi / CGFloat(count)
+            return (cos(a), sin(a), cos(a * 3), cos(a * 4), cos(a * 5), cos(a * 2))
+        }
         if lumps.count == count {
             self.lumps = lumps
         } else {
@@ -363,11 +375,39 @@ struct PersonaSoftBody {
         // live centroid, they sum to zero and add no momentum: the body is
         // free to fall, bounce and travel, it just is not free to stop being
         // this shape.
+        // A continuous journey through round, pill, triangle, squircle and
+        // petalled silhouettes. Quintic easing has zero velocity/acceleration
+        // at the joins, while the body springs carry their own momentum.
+        let phase = max(0, drive.morphPhase)
+        let shape = Int(phase.rounded(.down)) % 5
+        let fraction = phase - phase.rounded(.down)
+        let blend = fraction * fraction * fraction * (fraction * (fraction * 6 - 15) + 10)
+        func contourWeights(_ index: Int) -> (CGFloat, CGFloat, CGFloat, CGFloat) {
+            switch index % 5 {
+            case 1: return (0.85, 0, 0, 0)
+            case 2: return (0, 1, 0, 0)
+            case 3: return (0, 0, -0.8, 0)
+            case 4: return (0, 0, 0, 0.85)
+            default: return (0, 0, 0, 0)
+            }
+        }
+        let from = contourWeights(shape)
+        let to = contourWeights(shape + 1)
+        let second = from.0 + (to.0 - from.0) * blend
+        let third = from.1 + (to.1 - from.1) * blend
+        let fourth = from.2 + (to.2 - from.2) * blend
+        let fifth = from.3 + (to.3 - from.3) * blend
+        let rollSin = sin(drive.roll)
+        let rollCos = cos(drive.roll)
         for index in 0..<n {
-            let angle = CGFloat(index) * 2 * .pi / CGFloat(n)
-            let reach = drive.radius * (1 + lumps[index] * 0.10)
-            let goalX = centreX + cos(angle) * reach * drive.stretch.width
-            let goalY = centreY + sin(angle) * reach * drive.stretch.height
+            let basis = shapeBasis[index]
+            let x = basis.x * rollCos - basis.y * rollSin
+            let y = basis.y * rollCos + basis.x * rollSin
+            let contour = basis.cos2 * second + basis.third * third
+                + basis.fourth * fourth + basis.fifth * fifth
+            let reach = drive.radius * (1 + lumps[index] * 0.10 + contour * drive.morphAmount)
+            let goalX = centreX + x * reach * drive.stretch.width
+            let goalY = centreY + y * reach * drive.stretch.height
             forces[index].dx += (goalX - nodes[index].p.x) * drive.shapeStiffness
             forces[index].dy += (goalY - nodes[index].p.y) * drive.shapeStiffness
         }
@@ -533,6 +573,9 @@ extension PersonaDrive {
             height: mix(from.stretch.height, to.stretch.height)
         )
         out.radius = mix(from.radius, to.radius)
+        out.morphPhase = to.morphPhase
+        out.morphAmount = mix(from.morphAmount, to.morphAmount)
+        out.roll = mix(from.roll, to.roll)
         out.pressure = mix(from.pressure, to.pressure)
         out.ringStiffness = mix(from.ringStiffness, to.ringStiffness)
         out.shapeStiffness = mix(from.shapeStiffness, to.shapeStiffness)

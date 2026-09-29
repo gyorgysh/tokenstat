@@ -61,7 +61,34 @@ internal static class PersonaRenderer
         // squash pushes them around inside the creature rather than letting an
         // eye escape it.
         DrawHighlight(canvas, bounds, width, height, outline);
-        DrawFace(engine, canvas, width, height, unit, ink, outline);
+        double facing = Math.Cos(engine.Yaw);
+        if (facing > 0)
+        {
+            int firstFaceElement = canvas.Children.Count;
+            DrawFace(engine, canvas, width, height, unit, ink, outline);
+            var origin = body.Centroid;
+            var transform = new TransformGroup();
+            transform.Children.Add(new ScaleTransform
+            {
+                CenterX = origin.X * width, CenterY = origin.Y * height,
+                ScaleX = Math.Max(0.08, facing), ScaleY = 1,
+            });
+            transform.Children.Add(new TranslateTransform { X = Math.Sin(engine.Yaw) * bounds.Width * width * 0.24 });
+            transform.Children.Add(new RotateTransform
+            {
+                CenterX = origin.X * width, CenterY = origin.Y * height,
+                Angle = engine.Roll * 180 / Math.PI,
+            });
+            for (int i = firstFaceElement; i < canvas.Children.Count; i++)
+            {
+                if (canvas.Children[i] is Microsoft.UI.Xaml.Shapes.Path path)
+                {
+                    // Transform the face geometry, keeping its body clip fixed.
+                    path.Data.Transform = transform;
+                    path.Opacity *= Math.Min(1, facing * 4);
+                }
+            }
+        }
         foreach (var mote in engine.Motes)
         {
             if (mote.MoteKind == PersonaMote.Kind.Glow)

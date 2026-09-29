@@ -710,8 +710,11 @@ private struct AccountInsightsContent: View {
                 LazyVStack(spacing: Theme.Space.s) {
                     if model.isLoading { ProgressView() }
                     if let rows = model.rows(for: model.cut) {
-                        ForEach(rows.filter { search.isEmpty || $0.key.localizedCaseInsensitiveContains(search) }
-                            .sorted { $0.valueMicros > $1.valueMicros }) { row in
+                        let filtered = rows.filter {
+                            search.isEmpty || model.cut.title(for: $0.key).localizedStandardContains(search)
+                        }
+                        if !filtered.isEmpty { usageChart(filtered) }
+                        ForEach(filtered.sorted { model.cut == .day ? $0.key > $1.key : $0.valueMicros > $1.valueMicros }) { row in
                             HStack {
                                 if model.cut == .source {
                                     HarnessMark(id: row.key, size: 26)
@@ -725,12 +728,74 @@ private struct AccountInsightsContent: View {
                             }.padding(Theme.Space.m).background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                         }
                         if rows.isEmpty { Text("No synced usage in this period.").foregroundStyle(.secondary) }
+                        else if filtered.isEmpty { Text("No matching usage.").foregroundStyle(.secondary) }
                     }
                 }
             }
         }.padding(Theme.Space.m)
             .task(id: model.cut) { await model.load() }
     }
+
+    private func usageChart(_ rows: [Bucket]) -> some View {
+        let daily = model.cut == .day
+        let plotted = daily ? rows.sorted { $0.key < $1.key }
+            : Array(rows.sorted { $0.counters.total > $1.counters.total }.prefix(8))
+        return VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text(daily ? "Daily activity" : "Most used \(model.cut.plural)")
+                .font(Theme.headline)
+            Text("Tokens · including reported cache usage")
+                .font(Theme.caption).foregroundStyle(.secondary)
+            if daily {
+                Chart(plotted) { row in
+                    BarMark(x: .value("Day", row.key), y: .value("Tokens", row.counters.total))
+                        .foregroundStyle(Theme.accent.gradient)
+                        .accessibilityLabel(model.cut.title(for: row.key))
+                        .accessibilityValue("\(formatTokens(row.counters.total)) tokens")
+                }
+                .chartXAxis(.hidden)
+                .chartYAxis {
+                    AxisMarks { value in
+                        AxisGridLine().foregroundStyle(Theme.border)
+                        AxisValueLabel {
+                            if let tokens = value.as(Double.self) {
+                                Text(formatTokens(UInt64(max(0, tokens)))).font(Theme.caption2)
+                            }
+                        }
+                    }
+                }
+                .frame(height: 170)
+                HStack {
+                    Text(plotted.first?.key ?? "")
+                    Spacer()
+                    Text(plotted.last?.key ?? "")
+                }.font(Theme.caption).foregroundStyle(.secondary)
+            } else {
+                Chart(plotted) { row in
+                    BarMark(x: .value("Tokens", row.counters.total),
+                        y: .value(model.cut.label, model.cut.title(for: row.key)))
+                        .foregroundStyle(Theme.accent.gradient)
+                        .cornerRadius(3)
+                        .accessibilityLabel(model.cut.title(for: row.key))
+                        .accessibilityValue("\(formatTokens(row.counters.total)) tokens")
+                }
+                .chartXAxis {
+                    AxisMarks { value in
+                        AxisGridLine().foregroundStyle(Theme.border)
+                        AxisValueLabel {
+                            if let tokens = value.as(Double.self) {
+                                Text(formatTokens(UInt64(max(0, tokens)))).font(Theme.caption2)
+                            }
+                        }
+                    }
+                }
+                .chartYScale(domain: plotted.map { model.cut.title(for: $0.key) })
+                .frame(height: CGFloat(max(1, plotted.count)) * 28 + 24)
+            }
+        }
+        .padding(Theme.Space.m)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+    }
+
 }
 
 struct ScopedInsightsInspector: View {

@@ -5,6 +5,24 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import kotlinx.coroutines.delay
+import kotlin.random.Random
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.MotionDurationScale
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.isActive
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -33,25 +51,86 @@ import kotlin.math.sqrt
 /// number, so a new persona has a face the moment it is named and there is no
 /// asset to ship, scale, or theme.
 ///
-/// Static for now: the resting idle pose, which is what Reduce Motion shows on
-/// the client too. The full soft-body motion (springs, moods, motes) is a
-/// follow-up; nothing here precludes it, the engine would feed the same draw
-/// pass its body each frame.
+/// Simulation runs only while resumed; frame ticks invalidate the Canvas draw
+/// pass without recomposing or relaying out its conversation row.
 @Composable
-fun PersonaMark(seed: ULong, size: Dp = 28.dp, modifier: Modifier = Modifier) {
+fun PersonaMark(seed: ULong, modifier: Modifier = Modifier, size: Dp = 28.dp, mood: PersonaMood = PersonaMood.Idle) {
     val colors = LocalTsColors.current
     val traits = remember(seed) { PersonaTraits(seed) }
+    val motion = remember(seed) { PersonaMotion(seed, traits.lumps, traits.firmness.toDouble()) }
+    val tick = remember { mutableLongStateOf(0L) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
     val hue = traits.hue(colors.accent, colors.secondary)
-    Canvas(modifier.size(size)) {
-        drawPersonaFace(traits, hue)
+    LaunchedEffect(motion, mood, lifecycle) {
+        val durationScale = currentCoroutineContext()[MotionDurationScale]
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            snapshotFlow { durationScale?.scaleFactor ?: 1f }.collectLatest { scale ->
+                motion.suspendClock()
+                if (scale <= 0f) {
+                    motion.advance(0.0, mood, moving = false)
+                    tick.longValue++
+                } else {
+                    var lastDraw = 0L
+                    try {
+                        while (currentCoroutineContext().isActive) {
+                            withFrameNanos { frame ->
+                                val interval = if (size.value >= 48) 16_000_000L else 32_000_000L
+                                if (frame - lastDraw >= interval) {
+                                    motion.advance(frame / 1_000_000_000.0 / scale, mood)
+                                    lastDraw = frame
+                                    tick.longValue++
+                                }
+                            }
+                        }
+                    } finally { motion.suspendClock() }
+                }
+            }
+        }
     }
+    Canvas(modifier.size(size)) {
+        tick.longValue // Read only in draw: no frame-driven recomposition.
+        drawPersonaFace(traits, hue, motion)
+    }
+}
+
+/** A chat with nothing to do alternates quiet moments with short playful activity. */
+@Composable
+fun PersonaPastime(seed: ULong, modifier: Modifier = Modifier, size: Dp = 84.dp) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var mood by remember(seed) { mutableStateOf(PersonaMood.Idle) }
+    LaunchedEffect(seed, lifecycle) {
+        val durationScale = currentCoroutineContext()[MotionDurationScale]
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            snapshotFlow { durationScale?.scaleFactor ?: 1f }.collectLatest { scale ->
+                mood = PersonaMood.Idle
+                if (scale > 0f) {
+                    val activities = listOf(PersonaMood.Bouncing, PersonaMood.Dancing, PersonaMood.Pacing,
+                        PersonaMood.Juggling, PersonaMood.Reading, PersonaMood.Gaming, PersonaMood.Typing,
+                        PersonaMood.Sipping, PersonaMood.Sketching, PersonaMood.Stargazing,
+                        PersonaMood.Gardening, PersonaMood.Bubbling, PersonaMood.Snacking)
+                    var previous: PersonaMood? = null
+                    delay(700)
+                    while (currentCoroutineContext().isActive) {
+                        val choices = activities.filter { it != previous }
+                        val next = if (Random.nextFloat() < 0.12f) PersonaMood.Sleeping else choices.random()
+                        mood = next
+                        previous = next
+                        delay(Random.nextLong(5_500, 11_001))
+                        mood = PersonaMood.Idle
+                        delay(Random.nextLong(2_600, 5_401))
+                    }
+                }
+            }
+        }
+    }
+    PersonaMark(seed = seed, modifier = modifier, size = size, mood = mood)
 }
 
 /// Everything a resting persona looks like, drawn in one pass. Port of the
 /// `PersonaRenderer` body, shadow, antenna, highlight and idle face, over the
 /// resting body the soft body settles into. Shared with the chat empty art so
 /// the placeholder and the mark are the same creature.
-fun DrawScope.drawPersonaFace(traits: PersonaTraits, hue: Color) {
+fun DrawScope.drawPersonaFace(traits: PersonaTraits, hue: Color, motion: PersonaMotion? = null) {
     val unit = min(size.width, size.height)
     if (unit <= 1f) return
     val w = size.width
@@ -65,7 +144,8 @@ fun DrawScope.drawPersonaFace(traits: PersonaTraits, hue: Color) {
     val nodes = (0 until count).map { index ->
         val angle = index.toFloat() * 2f * PI.toFloat() / count.toFloat()
         val reach = 0.355f * (1f + traits.lumps[index] * 0.10f)
-        Offset(cx + cos(angle) * reach, cy + sin(angle) * reach)
+        if (motion == null) Offset(cx + cos(angle) * reach, cy + sin(angle) * reach)
+        else Offset(motion.x[index].toFloat(), motion.y[index].toFloat())
     }
     // The outline smoothing from `PersonaSoftBody.outline`, then the same
     // Catmull-Rom to Bezier closed curve.
@@ -160,7 +240,27 @@ fun DrawScope.drawPersonaFace(traits: PersonaTraits, hue: Color) {
                 Size(hlW, hlH),
             )
         }
-        drawPersonaIdleFace(traits, hue, minX, maxX, minY, maxY, centroid, crown, unit)
+        val facing = cos(motion?.yaw ?: 0.0).toFloat()
+        if (facing > 0f) {
+            val origin = Offset(centroid.x * w, centroid.y * h)
+            rotate(((motion?.roll ?: 0.0) * 180 / PI).toFloat(), origin) {
+                translate(left = (sin(motion?.yaw ?: 0.0) * (maxX - minX) * w * 0.24).toFloat()) {
+                    scale(scaleX = max(0.08f, facing), scaleY = 1f, pivot = origin) {
+                        drawPersonaIdleFace(traits, hue.copy(alpha = min(1f, facing * 4)),
+                            minX, maxX, minY, maxY, centroid, crown, unit,
+                            blink = (motion?.blink ?: 0.0).toFloat(), mood = motion?.mood ?: PersonaMood.Idle,
+                            previousMood = motion?.previousMood ?: PersonaMood.Idle,
+                            expressionProgress = ((motion?.moodAge ?: 1.0) / 0.4).toFloat().coerceIn(0f, 1f))
+                    }
+                }
+            }
+        }
+    }
+    if (motion != null && unit / density >= 40f) {
+        val entering = ((motion.moodAge - 0.18) / 0.35).coerceIn(0.0, 1.0).toFloat()
+        val leaving = (1 - motion.moodAge / 0.18).coerceIn(0.0, 1.0).toFloat()
+        if (leaving > 0f) drawPersonaProps(motion.previousMood, motion.lifetime, hue, leaving)
+        if (entering > 0f) drawPersonaProps(motion.mood, motion.lifetime, hue, entering)
     }
 }
 
@@ -177,6 +277,10 @@ private fun DrawScope.drawPersonaIdleFace(
     centroid: Offset,
     crown: Offset,
     unit: Float,
+    blink: Float = 0f,
+    mood: PersonaMood = PersonaMood.Idle,
+    previousMood: PersonaMood = mood,
+    expressionProgress: Float = 1f,
 ) {
     val w = size.width
     val h = size.height
@@ -199,7 +303,7 @@ private fun DrawScope.drawPersonaIdleFace(
     val lod = if (unit < 24f) 1.35f else if (unit < 34f) 1.15f else 1.0f
     val radius = unit * (if (count == 1) 0.115f else if (count == 2) 0.082f else 0.065f) * lod
     val spread = radius * (if (count == 2) 2.9f else 2.6f) / max(sqrt(aspect), 0.6f)
-    val openness = max(0.02f, aspect)
+    val openness = max(0.02f, aspect * (1 - blink * 0.96f))
     for (index in 0 until count) {
         val offset = index.toFloat() - (count - 1).toFloat() / 2f
         val centre = place(offset * spread, -anchorHeight)
@@ -223,7 +327,15 @@ private fun DrawScope.drawPersonaIdleFace(
         PersonaTraits.Mouth.FLAT -> -0.10f
         PersonaTraits.Mouth.DOT, null -> 0f
     }
-    val curve = (0.45f + resting).coerceIn(-1.1f, 1.1f)
+    fun expressionFor(state: PersonaMood) = when (state) {
+        PersonaMood.Failed -> -0.65f
+        PersonaMood.Waiting, PersonaMood.Thinking, PersonaMood.Running, PersonaMood.Reading, PersonaMood.Typing, PersonaMood.Sketching -> 0.05f
+        PersonaMood.Complete, PersonaMood.Dancing, PersonaMood.Bouncing -> 0.8f
+        else -> 0.45f
+    }
+    val ease = expressionProgress * expressionProgress * (3 - 2 * expressionProgress)
+    val expression = expressionFor(previousMood) + (expressionFor(mood) - expressionFor(previousMood)) * ease
+    val curve = (expression + resting).coerceIn(-1.1f, 1.1f)
     val half = unit * 0.078f * traits.mouthWidth
     val baseY = -anchorHeight + radius * 2.15f
     val left = place(-half, baseY)

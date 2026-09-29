@@ -76,12 +76,47 @@ enum DebugUIHooks {
         }
         center.addObserver(forName: key, object: nil, queue: .main) { note in
             switch note.object as? String {
+            case "performance-start": MainActor.assumeIsolated { TranscriptProbe.shared.startRecording() }
+            case "performance-stop": MainActor.assumeIsolated { TranscriptProbe.shared.finishRecording() }
+            case "backdrop": MainActor.assumeIsolated { toggleBackdropProbe() }
             case "sidebar": NotificationCenter.default.post(name: .toggleLeftSidebar, object: nil)
             case "inspector": NotificationCenter.default.post(name: .toggleRightSidebar, object: nil)
             case let other?: NotificationCenter.default.post(name: keyRequested, object: other)
             default: break
             }
         }
+    }
+
+    @MainActor private static var backdropProbe: NSWindow?
+
+    /// A controlled background makes desktop sampling measurable even on a
+    /// plain wallpaper. Toggle off after capture; never participates in Release.
+    @MainActor private static func toggleBackdropProbe() {
+        if let probe = backdropProbe {
+            probe.parent?.removeChildWindow(probe)
+            probe.close()
+            backdropProbe = nil
+            return
+        }
+        guard let shell = shellWindow else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        shell.makeKeyAndOrderFront(nil)
+        let probe = NSWindow(contentRect: shell.frame, styleMask: .borderless,
+            backing: .buffered, defer: false)
+        probe.isReleasedWhenClosed = false
+        probe.ignoresMouseEvents = true
+        let surface = NSView(frame: NSRect(origin: .zero, size: shell.frame.size))
+        surface.wantsLayer = true
+        let gradient = CAGradientLayer()
+        gradient.frame = surface.bounds
+        gradient.colors = [NSColor.systemPink.cgColor, NSColor.systemBlue.cgColor]
+        gradient.startPoint = CGPoint(x: 0, y: 0)
+        gradient.endPoint = CGPoint(x: 0, y: 1)
+        surface.layer = gradient
+        probe.contentView = surface
+        shell.addChildWindow(probe, ordered: .below)
+        probe.order(.below, relativeTo: shell.windowNumber)
+        backdropProbe = probe
     }
 
     /// The shell's window: the largest visible one that can be main. The
@@ -120,6 +155,7 @@ enum DebugUIHooks {
     private static func resize(to spec: String) {
         let parts = spec.lowercased().split(separator: "x").compactMap { Double($0) }
         guard parts.count == 2, let window = shellWindow else { return }
+        TranscriptProbe.shared.noteResize()
         var frame = window.frame
         let content = window.contentRect(forFrameRect: frame)
         let chrome = frame.height - content.height

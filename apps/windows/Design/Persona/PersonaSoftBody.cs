@@ -57,6 +57,9 @@ internal struct PersonaDrive
     public PSize Stretch = new(1, 1);
 
     public double Radius = PersonaStage.RestRadius;
+    public double MorphPhase;
+    public double MorphAmount;
+    public double Roll;
 
     /// <summary>
     /// How hard the body resists losing volume. This is what makes it read as
@@ -136,6 +139,9 @@ internal struct PersonaDrive
         out_.Gravity = Mix(from.Gravity, to.Gravity);
         out_.Stretch = new PSize(Mix(from.Stretch.Width, to.Stretch.Width), Mix(from.Stretch.Height, to.Stretch.Height));
         out_.Radius = Mix(from.Radius, to.Radius);
+        out_.MorphPhase = to.MorphPhase;
+        out_.MorphAmount = Mix(from.MorphAmount, to.MorphAmount);
+        out_.Roll = Mix(from.Roll, to.Roll);
         out_.Pressure = Mix(from.Pressure, to.Pressure);
         out_.RingStiffness = Mix(from.RingStiffness, to.RingStiffness);
         out_.ShapeStiffness = Mix(from.ShapeStiffness, to.ShapeStiffness);
@@ -182,6 +188,7 @@ internal sealed class PersonaSoftBody
     /// than pulsing everywhere at once.
     /// </summary>
     private readonly double[] _ripple;
+    private readonly (double X, double Y, double Second, double Third, double Fourth, double Fifth)[] _shapeBasis;
 
     /// <summary>
     /// How much of the body is resting on the ground, zero to one, eased so
@@ -210,6 +217,7 @@ internal sealed class PersonaSoftBody
         var at = centre ?? PersonaStage.RestCentre;
         _nodes = new List<Node>(count);
         _ripple = new double[count];
+        _shapeBasis = new (double, double, double, double, double, double)[count];
         for (int i = 0; i < count; i++)
         {
             double angle = i * 2 * Math.PI / count;
@@ -219,6 +227,8 @@ internal sealed class PersonaSoftBody
                 V = PVector.Zero,
             });
             _ripple[i] = angle * 2;
+            _shapeBasis[i] = (Math.Cos(angle), Math.Sin(angle), Math.Cos(angle * 2),
+                Math.Cos(angle * 3), Math.Cos(angle * 4), Math.Cos(angle * 5));
         }
         _forces = new PVector[count];
         _lumps = lumps is { Length: var len } && len == count
@@ -479,12 +489,35 @@ internal sealed class PersonaSoftBody
         // live centroid, they sum to zero and add no momentum: the body is
         // free to fall, bounce and travel, it just is not free to stop being
         // this shape.
+        double phase = Math.Max(0, drive.MorphPhase);
+        int shape = (int)Math.Floor(phase) % 5;
+        double fraction = phase - Math.Floor(phase);
+        double blend = fraction * fraction * fraction * (fraction * (fraction * 6 - 15) + 10);
+        static (double, double, double, double) Weights(int index) => (index % 5) switch
+        {
+            1 => (0.85, 0, 0, 0),
+            2 => (0, 1, 0, 0),
+            3 => (0, 0, -0.8, 0),
+            4 => (0, 0, 0, 0.85),
+            _ => (0, 0, 0, 0),
+        };
+        var from = Weights(shape);
+        var to = Weights(shape + 1);
+        double second = from.Item1 + (to.Item1 - from.Item1) * blend;
+        double third = from.Item2 + (to.Item2 - from.Item2) * blend;
+        double fourth = from.Item3 + (to.Item3 - from.Item3) * blend;
+        double fifth = from.Item4 + (to.Item4 - from.Item4) * blend;
+        double rollSin = Math.Sin(drive.Roll), rollCos = Math.Cos(drive.Roll);
         for (int i = 0; i < n; i++)
         {
-            double angle = i * 2 * Math.PI / n;
-            double reach = drive.Radius * (1 + _lumps[i] * 0.10);
-            double goalX = centreX + Math.Cos(angle) * reach * drive.Stretch.Width;
-            double goalY = centreY + Math.Sin(angle) * reach * drive.Stretch.Height;
+            var basis = _shapeBasis[i];
+            double x = basis.X * rollCos - basis.Y * rollSin;
+            double y = basis.Y * rollCos + basis.X * rollSin;
+            double contour = basis.Second * second + basis.Third * third
+                + basis.Fourth * fourth + basis.Fifth * fifth;
+            double reach = drive.Radius * (1 + _lumps[i] * 0.10 + contour * drive.MorphAmount);
+            double goalX = centreX + x * reach * drive.Stretch.Width;
+            double goalY = centreY + y * reach * drive.Stretch.Height;
             _forces[i] += new PVector(
                 (goalX - _nodes[i].P.X) * drive.ShapeStiffness,
                 (goalY - _nodes[i].P.Y) * drive.ShapeStiffness);

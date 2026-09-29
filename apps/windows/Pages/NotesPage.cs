@@ -46,8 +46,9 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
     private List<(string Id, string Name)> _folders = new();
     private string _search = "";
     private bool _sortByTitle;
-    private bool _gridLayout = true;
+    private bool _gridLayout = false;
     private bool _showingArchive;
+    private bool _showingComposer;
     private string _picked = "";
     private string? _selectedId;
     private bool _confirmDelete;
@@ -69,7 +70,6 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         _root.Children.Add(_bannerHost);
         _root.Children.Add(_composerHost);
         _root.Children.Add(_libraryHost);
-        _root.Children.Add(_scopeHost);
         _root.Children.Add(_listHost);
         _listHost.Children.Add(Motion.SkeletonCard());
         Content = new ScrollViewer
@@ -136,6 +136,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
                 (_, _) =>
                 {
                     _showingArchive = false;
+                    _showingComposer = true;
                     RenderAll();
                     _draft.Focus(FocusState.Programmatic);
                 }),
@@ -416,13 +417,13 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
     }
 
     /// <summary>
-    /// One line, always at the top, always ready. The plus in the bar focuses
-    /// it, and Save is always visible so the field is not the only way in.
+    /// Opened from the toolbar. Closing it retains the draft for next time.
     /// </summary>
     private void RenderComposer()
     {
+        if (_draft.Parent is Panel draftParent) draftParent.Children.Remove(_draft);
         _composerHost.Children.Clear();
-        if (_showingArchive)
+        if (_showingArchive || !_showingComposer)
         {
             return;
         }
@@ -444,6 +445,14 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         };
         Grid.SetColumn(destination, 1);
         head.Children.Add(destination);
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var close = Buttons.ToolbarIcon(ActionIcon.Dismiss, "Close composer; your draft stays here", (_, _) =>
+        {
+            _showingComposer = false;
+            RenderComposer();
+        });
+        Grid.SetColumn(close, 2);
+        head.Children.Add(close);
         body.Children.Add(head);
         var row = new Grid { ColumnSpacing = Theme.SpaceS };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -465,50 +474,20 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
 
     private void RenderLibrary()
     {
+        if (_scopeHost.Parent is Panel scopeParent) scopeParent.Children.Remove(_scopeHost);
         _libraryHost.Children.Clear();
-        var shown = ShownNotes();
-        var bar = new Grid { ColumnSpacing = Theme.SpaceM };
-        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var title = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = Theme.SpaceS,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        title.Children.Add(new TextBlock
-        {
-            Text = _showingArchive ? "Archived notes" : "Your notes",
-            FontSize = Fonts.Title3,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            VerticalAlignment = VerticalAlignment.Center,
-        });
-        _countText = new TextBlock
-        {
-            Text = shown.Count.ToString(),
-            FontSize = 12,
-            Opacity = 0.66,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        title.Children.Add(_countText);
-        bar.Children.Add(title);
+        var bar = new FlowPanel { Spacing = Theme.SpaceS };
         var search = Chrome.SearchField("Search notes", text =>
         {
             _search = text ?? "";
-            if (_countText is not null)
-            {
-                _countText.Text = ShownNotes().Count.ToString();
-            }
+            if (_countText is not null) _countText.Text = ShownNotes().Count.ToString();
             RenderList();
         });
         search.Text = _search;
-        search.MinWidth = 160;
-        search.MaxWidth = 300;
-        search.HorizontalAlignment = HorizontalAlignment.Right;
+        search.Width = 260;
         search.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumn(search, 1);
         bar.Children.Add(search);
+        bar.Children.Add(_scopeHost);
         var sort = new ComboBox { MinWidth = 130, VerticalAlignment = VerticalAlignment.Center };
         sort.ItemsSource = new[] { "Newest first", "Title A–Z" };
         sort.SelectedIndex = _sortByTitle ? 1 : 0;
@@ -517,56 +496,31 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
             _sortByTitle = sort.SelectedIndex == 1;
             RenderList();
         };
-        Grid.SetColumn(sort, 2);
         bar.Children.Add(sort);
+        _countText = new TextBlock { Text = ShownNotes().Count.ToString(), Opacity = 0.66,
+            VerticalAlignment = VerticalAlignment.Center };
+        bar.Children.Add(_countText);
         _libraryHost.Children.Add(bar);
     }
 
     private void RenderScopes()
     {
         _scopeHost.Children.Clear();
-        if (_workspaceId is not null)
+        if (_workspaceId is not null) return;
+        var choices = new List<(string Id, string Name)> { ("", "All workspaces"), (UnassignedPick, "Unassigned") };
+        choices.AddRange(_folders);
+        var picker = new ComboBox { MinWidth = 160, MaxWidth = 240,
+            ItemsSource = choices.Select(choice => choice.Name).ToList(),
+            SelectedIndex = Math.Max(0, choices.FindIndex(choice => choice.Id == _picked)) };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picker, "Filter notes by workspace");
+        picker.SelectionChanged += (_, _) =>
         {
-            return;
-        }
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        row.Children.Add(Chrome.ChoiceChip(
-            $"All · {CountIn("", _showingArchive)}", _picked == "",
-            () =>
-            {
-                _picked = "";
-                _selectedId = null;
-                RenderAll();
-                return Task.CompletedTask;
-            }));
-        row.Children.Add(Chrome.ChoiceChip(
-            $"Unassigned · {CountIn(UnassignedPick, _showingArchive)}", _picked == UnassignedPick,
-            () =>
-            {
-                _picked = UnassignedPick;
-                _selectedId = null;
-                RenderAll();
-                return Task.CompletedTask;
-            }));
-        foreach (var folder in _folders)
-        {
-            var id = folder.Id;
-            row.Children.Add(Chrome.ChoiceChip(
-                $"{folder.Name} · {CountIn(id, _showingArchive)}", _picked == id,
-                () =>
-                {
-                    _picked = id;
-                    _selectedId = null;
-                    RenderAll();
-                    return Task.CompletedTask;
-                }));
-        }
-        _scopeHost.Children.Add(new ScrollViewer
-        {
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Content = row,
-        });
+            if (picker.SelectedIndex < 0) return;
+            _picked = choices[picker.SelectedIndex].Id;
+            _selectedId = null;
+            RenderAll();
+        };
+        _scopeHost.Children.Add(picker);
     }
 
     private void RenderList()
@@ -704,7 +658,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
                 "Make a task", ActionIcon.Move,
                 async (_, _) => await ConvertAsync(id, DestinationId()), small: true));
         }
-        body.Children.Add(foot);
+        if (_gridLayout) body.Children.Add(foot);
         var frame = new Border
         {
             Background = selected ? Theme.AccentSoftBrush : Theme.PanelBrush,

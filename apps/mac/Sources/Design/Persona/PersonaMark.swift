@@ -7,6 +7,17 @@
 
 import SwiftUI
 
+private struct WindowLiveResizingKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var isWindowLiveResizing: Bool {
+        get { self[WindowLiveResizingKey.self] }
+        set { self[WindowLiveResizingKey.self] = newValue }
+    }
+}
+
 /// The face of a conversation.
 ///
 /// Drawn, not drawn-by-someone: every persona gets a character built from one
@@ -42,10 +53,12 @@ struct PersonaMark: View {
     var pokeable = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isWindowLiveResizing) private var isLiveResizing
     @Environment(\.scenePhase) private var scenePhase
     #if os(macOS)
     @Environment(\.controlActiveState) private var controlActiveState
     #endif
+    @State private var isVisible = false
     @State private var engine: PersonaEngine
 
     init(seed: UInt64, size: CGFloat = 28, state: PersonaMood = .idle, pokeable: Bool = false) {
@@ -57,7 +70,7 @@ struct PersonaMark: View {
     }
 
     var body: some View {
-        let mark = TimelineView(.animation(minimumInterval: 1 / state.frameRate, paused: !moving)) { context in
+        let mark = TimelineView(.animation(minimumInterval: 1 / state.frameRate, paused: !moving || isLiveResizing)) { context in
             Canvas(opaque: false, rendersAsynchronously: false) { canvas, canvasSize in
                 // Stepped here rather than in a task: the view is already
                 // being redrawn, and the alternative is invalidating SwiftUI
@@ -65,11 +78,15 @@ struct PersonaMark: View {
                 if engine.seed != seed {
                     engine.reseed(seed)
                 }
-                engine.advance(
-                    to: context.date.timeIntervalSinceReferenceDate,
-                    mood: state,
-                    moving: moving
-                )
+                if isLiveResizing {
+                    engine.suspendClock()
+                } else {
+                    engine.advance(
+                        to: context.date.timeIntervalSinceReferenceDate,
+                        mood: state,
+                        moving: moving
+                    )
+                }
                 var canvas = canvas
                 PersonaRenderer.draw(
                     engine,
@@ -80,6 +97,8 @@ struct PersonaMark: View {
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
+        .onAppear { isVisible = true; engine.suspendClock() }
+        .onDisappear { isVisible = false; engine.suspendClock() }
 
         if pokeable {
             mark
@@ -102,7 +121,7 @@ struct PersonaMark: View {
     /// looking. A window that is not key does not need sixty frames a second
     /// of anything, and on a laptop that is battery.
     private var moving: Bool {
-        if reduceMotion { return false }
+        if reduceMotion || !isVisible { return false }
         if scenePhase != .active { return false }
         #if os(macOS)
         if controlActiveState != .key { return false }

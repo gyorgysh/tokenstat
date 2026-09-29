@@ -97,13 +97,15 @@ internal sealed class InspectorHost : Grid
     public const double InspectorWidth = 280;
 
     /// <summary>
-    /// Windows narrower than this hide the inspector rather than squeezing the
+    /// Content areas narrower than this hide the inspector rather than squeezing the
     /// content for its sake. The user's open choice stands, so widening brings
     /// the column back.
     /// </summary>
-    public const double FitEdge = 900;
+    public const double FitEdge = 700;
 
     private readonly Border _rule;
+    private readonly ResizeHandle _resizeHandle;
+    private double _inspectorWidth = InspectorWidth;
     private readonly Border _pane;
     private readonly ScrollViewer _scroller;
 
@@ -124,15 +126,37 @@ internal sealed class InspectorHost : Grid
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0) });
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0) });
-        _rule = new Border { Background = Theme.BorderBrush };
+        _rule = new Border { Background = Theme.BorderBrush, Width = 1, HorizontalAlignment = HorizontalAlignment.Center };
         Grid.SetColumn(_rule, 1);
         Children.Add(_rule);
+        _resizeHandle = new ResizeHandle
+        {
+            Width = 6, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_resizeHandle, "Resize details panel");
+        _resizeHandle.DragDelta += (_, drag) =>
+        {
+            _inspectorWidth = Math.Clamp(_inspectorWidth - drag.HorizontalChange, 240, Math.Min(480, Math.Max(240, ActualWidth - 420)));
+            Refresh();
+        };
+        _resizeHandle.DoubleTapped += (_, _) => { _inspectorWidth = InspectorWidth; Refresh(); };
+        _resizeHandle.KeyDown += (_, key) =>
+        {
+            if (key.Key is not (Windows.System.VirtualKey.Left or Windows.System.VirtualKey.Right)) return;
+            _inspectorWidth = Math.Clamp(_inspectorWidth + (key.Key == Windows.System.VirtualKey.Left ? 16 : -16), 240, 480);
+            Refresh();
+            key.Handled = true;
+        };
+        Grid.SetColumn(_resizeHandle, 1);
+        Children.Add(_resizeHandle);
         _scroller = new ScrollViewer
         {
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         };
         _pane = new Border { Background = Theme.BackgroundBrush, Child = _scroller };
+        SizeChanged += (_, _) => Refresh();
         Grid.SetColumn(_pane, 2);
         Children.Add(_pane);
         Refresh();
@@ -180,8 +204,10 @@ internal sealed class InspectorHost : Grid
     {
         bool show = IsOpen && RouteAllowsInspector && FitsWidth && _scroller.Content is not null;
         IsInspectorVisible = show;
-        ColumnDefinitions[1].Width = new GridLength(show ? 1 : 0);
-        ColumnDefinitions[2].Width = new GridLength(show ? InspectorWidth : 0);
+        ColumnDefinitions[1].Width = new GridLength(show ? 6 : 0);
+        var fittedWidth = ActualWidth > 0 ? Math.Min(_inspectorWidth, Math.Max(240, ActualWidth - 426)) : _inspectorWidth;
+        ColumnDefinitions[2].Width = new GridLength(show ? fittedWidth : 0);
+        _resizeHandle.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         _rule.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         _pane.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
     }

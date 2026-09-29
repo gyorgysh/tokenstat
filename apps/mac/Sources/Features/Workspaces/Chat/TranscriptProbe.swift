@@ -32,6 +32,58 @@ final class TranscriptProbe {
     private var observer: CFRunLoopObserver?
     private var turnStart: CFAbsoluteTime = 0
     private var metricsThisTurn = 0
+    private var recording = false
+    private var recordedTurns: [Double] = []
+    private var recordedOpens: [[String: Any]] = []
+    private var recordingStarted: TimeInterval = 0
+    private var resizeCount = 0
+
+    /// Opt-in, bounded diagnostics. No conversation identifiers or text leave
+    /// the model. Run-loop work is responsiveness evidence, not rendered FPS.
+    func startRecording() {
+        install()
+        recordedTurns.removeAll(keepingCapacity: true)
+        recordedOpens.removeAll(keepingCapacity: true)
+        recordingStarted = ProcessInfo.processInfo.systemUptime
+        resizeCount = 0
+        recording = true
+    }
+
+    func noteResize() { if recording { resizeCount += 1 } }
+
+    func noteOpen(milliseconds: Double, preview: Bool, phase: String) {
+        guard recording, recordedOpens.count < 200 else { return }
+        recordedOpens.append(["milliseconds": milliseconds, "preview": preview, "phase": phase])
+    }
+
+    func finishRecording() {
+        guard recording else { return }
+        let stopped = ProcessInfo.processInfo.systemUptime
+        if recording, turnStart > 0, recordedTurns.count < 60_000 {
+            recordedTurns.append(max(0, stopped - max(turnStart, recordingStarted)) * 1000)
+        }
+        recording = false
+        let sorted = recordedTurns.sorted()
+        func percentile(_ fraction: Double) -> Double {
+            guard !sorted.isEmpty else { return 0 }
+            return sorted[min(sorted.count - 1, Int(Double(sorted.count - 1) * fraction))]
+        }
+        let report: [String: Any] = [
+            "measurement": "Main run-loop work duration; not rendered frame latency",
+            "turns": sorted.count, "p50_ms": percentile(0.5),
+            "elapsed_ms": (stopped - recordingStarted) * 1000,
+            "total_work_ms": sorted.reduce(0, +), "resize_requests": resizeCount,
+            "p95_ms": percentile(0.95), "p99_ms": percentile(0.99),
+            "max_ms": sorted.last ?? 0,
+            "over_16_7_ms": sorted.filter { $0 > 16.7 }.count,
+            "over_33_3_ms": sorted.filter { $0 > 33.3 }.count,
+            "over_100_ms": sorted.filter { $0 > 100 }.count,
+            "chat_opens": recordedOpens,
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: FileManager.default.temporaryDirectory.appendingPathComponent("tokenstat-ui-performance.json"), options: .atomic)
+        }
+    }
 
     /// What the transcript is holding. Written on change, not per frame.
     var rows = 0
@@ -65,7 +117,7 @@ final class TranscriptProbe {
 
     func noteScroll(_ what: String) {
         lastScroll = what
-        lastScrollAt = CFAbsoluteTimeGetCurrent()
+        lastScrollAt = ProcessInfo.processInfo.systemUptime
     }
 
     /// One scroll-geometry callback. Counted per turn, because a turn holding
@@ -76,16 +128,20 @@ final class TranscriptProbe {
 
     private func turn(_ activity: CFRunLoopActivity) {
         if activity.contains(.afterWaiting) {
-            turnStart = CFAbsoluteTimeGetCurrent()
+            turnStart = ProcessInfo.processInfo.systemUptime
             metricsThisTurn = 0
             return
         }
         guard turnStart > 0 else { return }
-        let spent = CFAbsoluteTimeGetCurrent() - turnStart
+        let ended = ProcessInfo.processInfo.systemUptime
+        let spent = ended - turnStart
+        if recording, recordedTurns.count < 60_000 {
+            recordedTurns.append(max(0, ended - max(turnStart, recordingStarted)) * 1000)
+        }
         turnStart = 0
         guard spent >= Self.slowTurn else { return }
         let sinceScroll = lastScrollAt > 0
-            ? Int((CFAbsoluteTimeGetCurrent() - lastScrollAt) * 1000)
+            ? Int((ProcessInfo.processInfo.systemUptime - lastScrollAt) * 1000)
             : -1
         log.warning(
             """

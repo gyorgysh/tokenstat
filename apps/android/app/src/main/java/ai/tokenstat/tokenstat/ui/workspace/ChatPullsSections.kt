@@ -173,8 +173,11 @@ fun ChatSection(
     var openId by remember(workspace) { mutableStateOf<String?>(null) }
     var creating by remember(workspace) { mutableStateOf(false) }
     var didOpenConversation by remember(workspace, openConversationOnAppear, conversationNonce) { mutableStateOf(false) }
-    var events by remember(workspace) { mutableStateOf<List<JsonObject>>(emptyList()) }
-    var approvals by remember(workspace) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var events by remember(peer, workspace, openId) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    val history = remember(peer, workspace, openId) { ChatHistoryWindow() }
+    var hasEarlier by remember(peer, workspace, openId) { mutableStateOf(false) }
+    var loadingEarlier by remember(peer, workspace, openId) { mutableStateOf(false) }
+    var approvals by remember(peer, workspace, openId) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var error by remember(workspace) { mutableStateOf<String?>(null) }
     var loading by remember(workspace) { mutableStateOf(true) }
     var draft by remember(workspace) { mutableStateOf("") }
@@ -185,7 +188,7 @@ fun ChatSection(
     val sending = openId?.let { it in sendingIds } == true
     var sendError by remember(workspace) { mutableStateOf<String?>(null) }
     var actionError by remember(workspace) { mutableStateOf<String?>(null) }
-    var eventsError by remember(workspace) { mutableStateOf<String?>(null) }
+    var eventsError by remember(peer, workspace, openId) { mutableStateOf<String?>(null) }
     var search by remember { mutableStateOf("") }
     var agentFilter by remember { mutableStateOf("") }
     var runningOnly by remember { mutableStateOf(false) }
@@ -322,29 +325,60 @@ fun ChatSection(
             hostReachable = false
         }
     }
+    suspend fun newestPage(id: String): JsonObject = model.workspaceSection(peer, "chat.eventPage", buildJsonObject {
+        put("id", id); put("limit", 160); put("stablePositions", true)
+    }) as JsonObject
+
     suspend fun loadEvents(id: String) {
-        runCatching {
-            model.workspaceSection(peer, "chat.events", buildJsonObject {
-                put("id", id); put("offset", 0L)
-            })
-        }.onSuccess {
-            val arr = (it as? JsonObject)?.get("events") as? JsonArray
-                ?: (it as? JsonArray)
-            events = arr?.filterIsInstance<JsonObject>() ?: emptyList()
-            eventsError = null
-        }.onFailure {
-            // The poll retries on its own; the card says so and stays until
-            // a poll lands or the person puts it away.
-            if (eventsError == null) {
-                eventsError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel.ifBlank { "that computer" }) +
-                    " Still trying."
+        try {
+            val generation = history.generation
+            if (!history.loaded) {
+                val page = newestPage(id)
+                if (openId != id) return
+                history.page(page, replace = true)
+            } else {
+                val chunk = model.workspaceSection(peer, "chat.events", buildJsonObject {
+                    put("id", id); put("offset", history.offset)
+                    history.tailCursor?.let { put("tailCursor", it) }
+                    put("stablePositions", true)
+                }) as JsonObject
+                if (openId != id || history.generation != generation) return
+                if (!history.tail(chunk, generation)) {
+                    val page = newestPage(id)
+                    if (openId != id) return
+                    history.page(page, replace = true)
+                }
             }
+            events = history.events
+            hasEarlier = history.hasEarlier
+            eventsError = null
+            val answer = model.workspaceSection(peer, "chat.approvals", buildJsonObject { put("id", id) })
+            if (openId == id) approvals = (answer as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) {
+            if (openId == id && eventsError == null) eventsError = TunnelCopy.display(
+                failure.message ?: "The request failed.", hostLabel.ifBlank { "that computer" }) + " Still trying."
         }
-        runCatching {
-            model.workspaceSection(peer, "chat.approvals", buildJsonObject { put("id", id) })
-        }.onSuccess {
-            approvals = (it as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()
-        }
+    }
+
+    suspend fun loadEarlier(id: String) {
+        if (loadingEarlier || !history.hasEarlier) return
+        loadingEarlier = true
+        val generation = history.generation
+        follow.pause()
+        try {
+            val page = model.workspaceSection(peer, "chat.eventPage", buildJsonObject {
+                put("id", id); put("cursor", history.cursor); put("limit", 300); put("stablePositions", true)
+            }) as JsonObject
+            if (openId != id || history.generation != generation) return
+            history.page(page)
+            events = history.events
+            hasEarlier = history.hasEarlier
+            eventsError = null
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) {
+            if (openId == id) eventsError = TunnelCopy.display(failure.message ?: "Earlier messages could not be read.", hostLabel)
+        } finally { loadingEarlier = false }
     }
     // Create, then open what was created. A "New chat" button that lands
     // back on the list created the chat and hid it in the same motion.
@@ -1096,6 +1130,13 @@ fun ChatSection(
                         contentPadding = PaddingValues(bottom = Space.s),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
+                        if (hasEarlier) {
+                            item(key = "earlier") {
+                                TsSecondaryButton(label = if (loadingEarlier) "Loading earlier messages…" else "Load earlier messages",
+                                    icon = ActionIcon.History.vector, small = true, enabled = !loadingEarlier,
+                                    onClick = { openId?.let { id -> scope.launch { loadEarlier(id) } } })
+                            }
+                        }
                         items(transcript, key = { it.id }) { item ->
                             TranscriptItemRow(
                                 item = item,
@@ -2057,7 +2098,7 @@ private fun ChatWorkingIndicator(seed: ULong, modifier: Modifier = Modifier) {
             .fillMaxWidth()
             .padding(horizontal = Space.m, vertical = Space.xs),
     ) {
-        PersonaMark(seed = seed, size = 26.dp)
+        PersonaMark(seed = seed, size = 26.dp, mood = ai.tokenstat.tokenstat.ui.persona.PersonaMood.Thinking)
         Text(
             "Thinking…",
             style = TsType.caption,

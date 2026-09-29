@@ -2,6 +2,7 @@
 //
 // Source-available for review, NOT open source. See LICENSE.
 
+using System.Text.Json.Nodes;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -40,8 +41,17 @@ internal sealed partial class ChatPage
     private int _sliceOlder;
     private double _lastScrollable;
 
+    private int _historyGeneration => _history.Generation;
+    private string? _historyCursor => _history.Cursor;
+    private string? _tailCursor => _history.TailCursor;
+    private bool _hasEarlier => _history.HasEarlier;
+    private bool _historyLoading;
+    private JsonObject? _aggregateUsage => _history.Usage;
+
     private void ResetTranscriptWindow()
     {
+        _history.Reset();
+        _historyLoading = false;
         _expandedCards.Clear();
         _sliceOlder = 0;
         _followEnd = true;
@@ -102,9 +112,40 @@ internal sealed partial class ChatPage
         UpdateFollowPill();
     }
 
-    private void RevealEarlier()
+    private void ApplyHistoryPage(JsonNode page, bool replace)
     {
+        if (_history.ApplyPage(page, replace))
+        {
+            _historyLoading = false;
+            _sliceOlder = 0;
+        }
+    }
+
+    private async Task RevealEarlierAsync()
+    {
+        if (_historyLoading || _openId is not string id) return;
+        var generation = _openGeneration;
+        var historyGeneration = _historyGeneration;
         var count = Coalesce(_events).Count;
+        if (SliceStart(count, _sliceOlder) == 0 && _hasEarlier)
+        {
+            _historyLoading = true;
+            RebuildTranscript();
+            try
+            {
+                var page = await CallChatAsync("chat.eventPage", new JsonObject
+                    { ["id"] = id, ["cursor"] = _historyCursor, ["limit"] = 300, ["stablePositions"] = true });
+                if (_openId != id || generation != _openGeneration || historyGeneration != _historyGeneration || !IsLoaded) return;
+                ApplyHistoryPage(page, replace: false);
+                count = Coalesce(_events).Count;
+            }
+            catch (Exception error)
+            {
+                if (_openId == id && generation == _openGeneration) Banner(error.Message);
+            }
+            finally { if (generation == _openGeneration) _historyLoading = false; }
+        }
+        if (_openId != id || generation != _openGeneration) return;
         _sliceOlder = SliceClamp(_sliceOlder + SliceStep, count);
         _followEnd = false;
         _followPaused = false;
@@ -177,10 +218,11 @@ internal sealed partial class ChatPage
     private FrameworkElement ShowEarlierButton(int hidden)
     {
         var button = Buttons.Secondary(
-            "Show " + hidden + " earlier messages",
+            _historyLoading ? "Loading earlier messages…" : hidden > 0 ? "Show " + hidden + " earlier messages" : "Load earlier messages",
             ActionIcon.History,
-            (_, _) => RevealEarlier(),
+            async (_, _) => await RevealEarlierAsync(),
             small: true);
+        button.IsEnabled = !_historyLoading;
         button.HorizontalAlignment = HorizontalAlignment.Center;
         return button;
     }

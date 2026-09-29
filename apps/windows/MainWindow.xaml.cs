@@ -22,7 +22,17 @@ namespace Tokenstat;
 
 public sealed partial class MainWindow : Window
 {
+    private static bool _windowMotionSuspended;
+    internal static bool ColumnsResizing { get; set; }
+    internal static bool MotionSuspended => _windowMotionSuspended || ColumnsResizing;
+    private bool _windowActive = true;
+    private bool _resizing;
+
     private readonly NavigationView _nav = new();
+    private const double RailWidth = 56;
+    private readonly ResizeHandle _paneResize = new();
+    private readonly Border _railFooter = new() { Margin = new Thickness(4, 8, 4, 8) };
+    private bool _nativeBackdrop;
     private readonly Dictionary<string, Button> _pinnedNavigation = new();
     private readonly Dictionary<string, bool> _chatGroupExpansion = new();
     private readonly Frame _frame = new();
@@ -53,6 +63,8 @@ public sealed partial class MainWindow : Window
     private readonly SolidColorBrush _chromeBackground = new(Theme.Background);
     private readonly SolidColorBrush _chromeSidebar = new(Theme.Sidebar);
     private readonly SolidColorBrush _chromeBorder = new(Theme.Border);
+    private Windows.UI.ViewManagement.UISettings? _chromeSettings;
+    private Windows.UI.ViewManagement.AccessibilitySettings? _accessibilitySettings;
     private readonly NavigationViewItemHeader _globalHeader = new()
     {
         Content = "GLOBAL",
@@ -79,23 +91,10 @@ public sealed partial class MainWindow : Window
     private JsonNode? _liveAccount;
     private string _liveFooterKey = "";
 
-    private bool _hoverExpanded;
-    private bool _changingPanePreview;
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _paneHoverTimer;
     private readonly HashSet<string> _compactExpanded = new(StringComparer.Ordinal);
-
-    private void PreviewPane(bool open)
-    {
-        _changingPanePreview = true;
-        _hoverExpanded = open;
-        _nav.IsPaneOpen = open;
-        _changingPanePreview = false;
-    }
 
     private void PaneStateChanged()
     {
-        if (!_changingPanePreview) _hoverExpanded = false;
-        _paneHoverTimer?.Stop();
         SyncPaneChrome();
         // Do not mutate IsExpanded inside the IsPaneOpen callback.
         DispatcherQueue.TryEnqueue(ApplyCompactExpansion);
@@ -127,10 +126,33 @@ public sealed partial class MainWindow : Window
         TryExtendIntoTitleBar();
         TrySize();
         TryIcon();
+        var resizeSettled = DispatcherQueue.CreateTimer();
+        resizeSettled.Interval = TimeSpan.FromMilliseconds(160);
+        resizeSettled.IsRepeating = false;
+        resizeSettled.Tick += (_, _) => { _resizing = false; _windowMotionSuspended = !_windowActive; };
+        AppWindow.Changed += (_, change) =>
+        {
+            if (!change.DidSizeChange) return;
+            _resizing = true;
+            _windowMotionSuspended = true;
+            resizeSettled.Stop();
+            resizeSettled.Start();
+        };
+        Activated += (_, change) =>
+        {
+            _windowActive = change.WindowActivationState != WindowActivationState.Deactivated;
+            _windowMotionSuspended = !_windowActive || _resizing;
+        };
+        Closed += (_, _) => resizeSettled.Stop();
 
-        // Flat theme surfaces, no Mica: the Mac app is flat colors everywhere,
-        // and a translucent backdrop would tint every tone it sits behind.
-        RootGrid.Background = _chromeBackground;
+        // Only the project pane exposes the system frost. Content and the
+        // navigation rail keep an opaque background.
+        try { SystemBackdrop = new DesktopAcrylicBackdrop(); _nativeBackdrop = true; }
+        catch { _nativeBackdrop = false; }
+        RootGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(RailWidth) });
+        RootGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumnSpan(AppTitleBar, 2);
+        RootGrid.Background = _nativeBackdrop ? new SolidColorBrush(Colors.Transparent) : _chromeBackground;
         TitlePaneSide.Background = _chromeSidebar;
         TitleContentSide.Background = _chromeBackground;
         _contentHost.Background = _chromeBackground;
@@ -151,14 +173,20 @@ public sealed partial class MainWindow : Window
         _nav.ActualThemeChanged += (_, _) => StretchNavigationContent();
         _nav.IsSettingsVisible = false;
         _nav.OpenPaneLength = 280;
+        _nav.CompactPaneLength = 0;
+        _nav.IsPaneToggleButtonVisible = false;
         _nav.PaneDisplayMode = NavigationViewPaneDisplayMode.Left;
         _nav.IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed;
-        _nav.Background = _chromeSidebar;
+        _nav.Background = new SolidColorBrush(Colors.Transparent);
+        _nav.Resources["NavigationViewDefaultPaneBackground"] = _chromeSidebar;
+        _nav.Resources["NavigationViewExpandedPaneBackground"] = _chromeSidebar;
         _nav.Resources["NavigationViewContentBackground"] = _chromeBackground;
         _nav.Resources["NavigationViewContentGridBorderBrush"] = _chromeBorder;
 
         var pinned = new StackPanel { Spacing = 2, Margin = new Thickness(4, 0, 4, 8) };
-        foreach (var section in Sections.Standalone)
+        var togglePane = Buttons.ToolbarIcon(ActionIcon.Layout, "Show or hide workspaces", (_, _) => _nav.IsPaneOpen = !_nav.IsPaneOpen);
+        pinned.Children.Add(togglePane);
+        foreach (var section in Sections.Standalone.Concat(Sections.Everywhere))
         {
             var item = Item(section);
             item.Visibility = Visibility.Collapsed;
@@ -166,19 +194,26 @@ public sealed partial class MainWindow : Window
             var tag = "global:" + section;
             var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
             content.Children.Add(GlobalIcon(section));
-            content.Children.Add(new TextBlock { Text = section.Label(), VerticalAlignment = VerticalAlignment.Center });
+
             var button = new Button { Content = content, HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Left, BorderThickness = new Thickness(0), Padding = new Thickness(12),
-                Background = _chromeSidebar, MinWidth = 0 };
+                Background = _chromeBackground, MinWidth = 0 };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, section.Label());
             button.Click += (_, _) => { if (ReferenceEquals(_nav.SelectedItem, item)) Show(tag); else _nav.SelectedItem = item; };
             ToolTipService.SetToolTip(button, section.Label());
             _pinnedNavigation[tag] = button;
             pinned.Children.Add(button);
         }
-        _nav.PaneCustomContent = pinned;
-        _nav.MenuItems.Add(new NavigationViewItemSeparator());
-        _nav.MenuItems.Add(_globalHeader);
-        foreach (var section in Sections.Everywhere) _nav.MenuItems.Add(Item(section));
+        var railBody = new Grid();
+        railBody.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        railBody.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        railBody.Children.Add(new ScrollViewer { Content = pinned,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Hidden });
+        Grid.SetRow(_railFooter, 1);
+        railBody.Children.Add(_railFooter);
+        var rail = new Border { Background = _chromeBackground, Child = railBody };
+        Grid.SetRow(rail, 1);
+        RootGrid.Children.Add(rail);
         _nav.MenuItems.Add(new NavigationViewItemSeparator());
         _nav.MenuItems.Add(SshGroup());
         _nav.MenuItems.Add(new NavigationViewItemSeparator());
@@ -202,36 +237,45 @@ public sealed partial class MainWindow : Window
 
         _nav.Content = _contentHost;
         _nav.SelectionChanged += NavOnSelectionChanged;
-        _paneHoverTimer = DispatcherQueue.CreateTimer();
-        _paneHoverTimer.Interval = TimeSpan.FromMilliseconds(350);
-        _paneHoverTimer.IsRepeating = false;
-        _paneHoverTimer.Tick += (_, _) => { if (!_nav.IsPaneOpen) PreviewPane(true); };
-        _nav.PointerMoved += (_, args) =>
-        {
-            var point = args.GetCurrentPoint(_nav).Position;
-            if (!_nav.IsPaneOpen && point.X < _nav.CompactPaneLength && point.Y > 48)
-            {
-                if (!_paneHoverTimer.IsRunning) _paneHoverTimer.Start();
-            }
-            else
-            {
-                _paneHoverTimer.Stop();
-                if (_hoverExpanded && point.X > _nav.OpenPaneLength) PreviewPane(false);
-            }
-        };
-        _nav.PointerExited += (_, args) =>
-        {
-            var point = args.GetCurrentPoint(_nav).Position;
-            if (point.X >= 0 && point.Y >= 0 && point.X <= _nav.ActualWidth && point.Y <= _nav.ActualHeight) return;
-            _paneHoverTimer.Stop();
-            if (_hoverExpanded) PreviewPane(false);
-        };
-
         Grid.SetRow(_nav, 1);
+        Grid.SetColumn(_nav, 1);
         RootGrid.Children.Add(_nav);
+        _paneResize.Width = 6;
+        _paneResize.HorizontalAlignment = HorizontalAlignment.Left;
+        _paneResize.Background = new SolidColorBrush(Colors.Transparent);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_paneResize, "Resize workspaces panel");
+        _paneResize.DragDelta += (_, drag) =>
+        {
+            _nav.OpenPaneLength = Math.Clamp(_nav.OpenPaneLength + drag.HorizontalChange, 240, 420);
+            SyncPaneChrome();
+        };
+        _paneResize.DoubleTapped += (_, _) => { _nav.OpenPaneLength = 280; SyncPaneChrome(); };
+        _paneResize.KeyDown += (_, key) =>
+        {
+            if (key.Key is not (Windows.System.VirtualKey.Left or Windows.System.VirtualKey.Right)) return;
+            _nav.OpenPaneLength = Math.Clamp(_nav.OpenPaneLength + (key.Key == Windows.System.VirtualKey.Right ? 16 : -16), 240, 420);
+            SyncPaneChrome();
+            key.Handled = true;
+        };
+        Grid.SetRow(_paneResize, 1);
+        Grid.SetColumn(_paneResize, 1);
+        RootGrid.Children.Add(_paneResize);
         ApplyChromeColors();
         RootGrid.ActualThemeChanged += (_, _) => ApplyChromeColors();
-        RootGrid.SizeChanged += (_, _) => SyncInspectorFit();
+        try
+        {
+            _chromeSettings = new Windows.UI.ViewManagement.UISettings();
+            _accessibilitySettings = new Windows.UI.ViewManagement.AccessibilitySettings();
+            _chromeSettings.AdvancedEffectsEnabledChanged += OnAdvancedEffectsChanged;
+            _accessibilitySettings.HighContrastChanged += OnHighContrastChanged;
+            Closed += (_, _) =>
+            {
+                _chromeSettings.AdvancedEffectsEnabledChanged -= OnAdvancedEffectsChanged;
+                _accessibilitySettings.HighContrastChanged -= OnHighContrastChanged;
+            };
+        }
+        catch { /* Older systems keep the opaque fallback. */ }
+        _contentHost.SizeChanged += (_, _) => SyncInspectorFit();
         // Keep the titlebar split on the pane edge when the pane collapses to
         // its compact width. The display mode itself is fixed at Left.
         _nav.RegisterPropertyChangedCallback(
@@ -423,12 +467,6 @@ public sealed partial class MainWindow : Window
                 _hostWake = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 await Task.WhenAny(Task.Delay(250), _hostWake.Task);
             }
-        }
-        // Shortest the splash stays, so a hot helper is not a one-frame flash.
-        var elapsed = DateTime.UtcNow - started;
-        if (elapsed < TimeSpan.FromMilliseconds(560))
-        {
-            await Task.Delay(TimeSpan.FromMilliseconds(560) - elapsed);
         }
         DispatcherQueue.TryEnqueue(() =>
         {
@@ -836,7 +874,7 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void SyncInspectorFit()
     {
-        bool fits = RootGrid.ActualWidth <= 0 || RootGrid.ActualWidth >= InspectorHost.FitEdge;
+        bool fits = _contentHost.ActualWidth <= 0 || _contentHost.ActualWidth >= InspectorHost.FitEdge;
         if (fits == _inspectorHost.FitsWidth)
         {
             return;
@@ -858,7 +896,7 @@ public sealed partial class MainWindow : Window
         }
         // Live rows under the folder parents, like the Mac sidebar.
         foreach (var pair in _pinnedNavigation)
-            pair.Value.Background = pair.Key == tag ? Theme.AccentSoftBrush : _chromeSidebar;
+            pair.Value.Background = pair.Key == tag ? Theme.AccentSoftBrush : _chromeBackground;
         if (tag.StartsWith(SidebarLive.SessionPrefix, StringComparison.Ordinal)
             && SidebarLive.TrySplit(tag, SidebarLive.SessionPrefix, out var termFolder, out var sessionId))
         {
@@ -928,7 +966,7 @@ public sealed partial class MainWindow : Window
     private void Show(string tag)
     {
         foreach (var pair in _pinnedNavigation)
-            pair.Value.Background = pair.Key == tag ? Theme.AccentSoftBrush : _chromeSidebar;
+            pair.Value.Background = pair.Key == tag ? Theme.AccentSoftBrush : _chromeBackground;
         if (tag.StartsWith("sshterm:", StringComparison.Ordinal))
         {
             SetContent(Ssh(SSHSection.Hosts, tag["sshterm:".Length..]));
@@ -1155,18 +1193,6 @@ public sealed partial class MainWindow : Window
                 EmptyArtKind.WorkspaceAccess));
             return;
         }
-        var totals = new FlowPanel { MinimumItemWidth = 200, Spacing = Theme.SpaceM };
-        foreach (var metric in new[] { ("Workspaces", (array?.Count ?? 0) + remote.Count), ("Local folders", array?.Count ?? 0), ("Remote folders", remote.Count) })
-        {
-            var metricBody = new StackPanel { Spacing = Theme.SpaceS };
-            metricBody.Children.Add(new SymbolIcon { Symbol = Symbol.Folder, Foreground = Theme.AccentBrush, HorizontalAlignment = HorizontalAlignment.Left });
-            metricBody.Children.Add(new TextBlock { Text = metric.Item2.ToString(), FontSize = 28 });
-            metricBody.Children.Add(new TextBlock { Text = metric.Item1, Opacity = 0.7 });
-            totals.Children.Add(new Border { Child = metricBody, Background = Theme.PanelBrush,
-                BorderBrush = Theme.BorderBrush, BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(Theme.SpaceL) });
-        }
-        root.Children.Add(totals);
         var filters = new Grid { ColumnSpacing = Theme.SpaceM };
         filters.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         filters.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -1177,24 +1203,16 @@ public sealed partial class MainWindow : Window
         machine.SelectedIndex = 0;
         Grid.SetColumn(machine, 1); filters.Children.Add(search); filters.Children.Add(machine);
         root.Children.Add(filters);
-        var list = new FlowPanel { MinimumItemWidth = 280, Spacing = Theme.SpaceM };
-        var rows = new List<(string Search, string Machine, UIElement View)>();
+        var list = new StackPanel { Spacing = Theme.SpaceS };
+        var rows = new List<(string Search, string Machine, Func<UIElement> Build)>();
         var summaries = new Dictionary<string, JsonNode>(_liveSummaries);
-        foreach (var peer in remote.Select(folder => folder.PeerKey).Distinct())
-        {
-            try
-            {
-                var summaryRows = Format.Items(await RemoteWorkspaces.CallOnPeerAsync(peer, "workspace.summary"));
-                foreach (var summary in summaryRows ?? new JsonArray())
-                    if (summary is not null) summaries[RemoteWorkspaces.Join(peer, Format.Text(summary, "id"))] = summary;
-            }
-            catch { /* A folder remains openable even when counts are unavailable. */ }
-        }
         void AddFolder(string id, string name, string path, string machineLabel, JsonNode? git)
         {
-            summaries.TryGetValue(id, out var summary);
-            var view = OverviewFolderRow(name, path, "ws:" + id + ":Launcher", machineLabel, git, summary);
-            rows.Add((name + " " + path + " " + machineLabel, machineLabel, view));
+            rows.Add((name + " " + path + " " + machineLabel, machineLabel, () =>
+            {
+                summaries.TryGetValue(id, out var summary);
+                return OverviewFolderRow(name, path, "ws:" + id + ":Launcher", machineLabel, git, summary);
+            }));
         }
         foreach (var folder in array ?? new JsonArray())
         {
@@ -1207,39 +1225,57 @@ public sealed partial class MainWindow : Window
             list.Children.Clear();
             foreach (var row in rows)
                 if ((machine.SelectedIndex == 0 || row.Machine == machine.SelectedItem?.ToString()) &&
-                    (string.IsNullOrWhiteSpace(search.Text) || row.Search.Contains(search.Text, StringComparison.OrdinalIgnoreCase))) list.Children.Add(row.View);
+                    (string.IsNullOrWhiteSpace(search.Text) || row.Search.Contains(search.Text, StringComparison.OrdinalIgnoreCase))) list.Children.Add(row.Build());
         }
         search.TextChanged += (_, _) => Filter(); machine.SelectionChanged += (_, _) => Filter();
         Filter(); root.Children.Add(list);
+        // Folders are immediately openable; a sleeping remote must not delay the list.
+        // Bound concurrent reads and reject completion after a reload or navigation.
+        using var summarySlots = new SemaphoreSlim(2);
+        await Task.WhenAll(remote.Select(folder => folder.PeerKey).Distinct().Select(async peer =>
+        {
+            await summarySlots.WaitAsync();
+            try
+            {
+                var summaryRows = Format.Items(await RemoteWorkspaces.CallOnPeerAsync(peer, "workspace.summary"));
+                if (!ReferenceEquals(_frame.Content, page) || !root.Children.Contains(list)) return;
+                foreach (var summary in summaryRows ?? new JsonArray())
+                    if (summary is not null) summaries[RemoteWorkspaces.Join(peer, Format.Text(summary, "id"))] = summary;
+                Filter();
+            }
+            catch { /* Counts are optional; the folder remains openable. */ }
+            finally { summarySlots.Release(); }
+        }));
     }
 
     private UIElement OverviewFolderRow(string title, string subtitle, string tag, string machine, JsonNode? git, JsonNode? summary)
     {
-        var body = new StackPanel { Spacing = Theme.SpaceM };
-        var heading = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        heading.Children.Add(new SymbolIcon { Symbol = Symbol.Folder, Foreground = Theme.AccentBrush });
-        var identity = new StackPanel { Spacing = 2 };
-        identity.Children.Add(new TextBlock { Text = title, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
-        identity.Children.Add(new TextBlock { Text = machine, FontSize = 12, Opacity = 0.7 });
-        heading.Children.Add(identity); body.Children.Add(heading);
-        body.Children.Add(new TextBlock { Text = subtitle.StartsWith(@"\\?\") ? subtitle[4..] : subtitle, Opacity = 0.55, FontSize = 12, TextWrapping = TextWrapping.Wrap });
-        var branch = Format.Text(git, "branch");
-        if (branch.Length > 0) body.Children.Add(new TextBlock { Text = "⑂ " + WorkspaceGit.ShortBranch(branch), Opacity = 0.8 });
+        var body = new Grid { ColumnSpacing = Theme.SpaceM };
+        body.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        body.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        body.Children.Add(new SymbolIcon { Symbol = Symbol.Folder, Foreground = Theme.AccentBrush });
+        var identity = new StackPanel { Spacing = 4 };
+        identity.Children.Add(new TextBlock { Text = title, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 });
+        var path = subtitle.StartsWith(@"\\?\") ? subtitle[4..] : subtitle;
+        identity.Children.Add(new TextBlock { Text = machine + " · " + path, FontSize = 12,
+            Opacity = 0.7, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 });
         if (summary is not null)
-        {
-            body.Children.Add(new TextBlock { Text = $"{Format.Long(summary, "sessions")} sessions · {Format.Long(summary, "chats")} chats", Opacity = 0.8 });
-            body.Children.Add(new TextBlock { Text = $"{Format.Long(summary, "tasks")} tasks · {Format.Long(summary, "notes")} notes", FontSize = 12, Opacity = 0.65 });
-            var changed = Format.Long(summary, "changed");
-            body.Children.Add(new TextBlock { Text = changed == 0 ? "No pending changes" : $"{changed} changed files", Foreground = Theme.AccentBrush, FontSize = 12 });
-        }
-        body.Children.Add(new Border { Height = 1, Background = Theme.BorderBrush });
-        body.Children.Add(new TextBlock { Text = "Open workspace ↗", Foreground = Theme.AccentBrush, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Right });
+            identity.Children.Add(new TextBlock { Text = $"{Format.Long(summary, "chats")} chats · {Format.Long(summary, "tasks")} tasks",
+                FontSize = 12, Opacity = 0.7 });
+        Grid.SetColumn(identity, 1);
+        body.Children.Add(identity);
+        var arrow = new TextBlock { Text = "›", Opacity = 0.5, VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(arrow, 2);
+        body.Children.Add(arrow);
         var open = new Button
         {
             HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush, Content = body,
-            CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(Theme.SpaceL),
+            CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(Theme.SpaceM),
         };
+        ToolTipService.SetToolTip(open, subtitle);
         open.Click += (_, _) =>
         {
             if (FindNavItem(tag) is NavigationViewItem row)
@@ -1652,15 +1688,25 @@ public sealed partial class MainWindow : Window
         _liveFooterKey = key;
         if (!signedIn || account is null)
         {
-            _nav.PaneFooter = AccountMenu(new JsonObject { ["displayName"] = "Sign in" });
+            _railFooter.Child = AccountMenu(new JsonObject { ["displayName"] = "Sign in" });
             return;
         }
-        _nav.PaneFooter = AccountMenu(account);
+        _railFooter.Child = AccountMenu(account);
     }
 
     private UIElement AccountMenu(JsonNode account)
     {
-        var footer = (Button)SidebarLive.AccountFooter(account, () => { });
+        var name = Format.Text(account, "displayName", "Account");
+        var footer = new Button
+        {
+            Content = Marks.Avatar(url: Format.Text(account, "avatar"), name: name,
+                handle: Format.Text(account, "handle"), size: 28),
+            Width = 44, Height = 44, Padding = new Thickness(8),
+            Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0),
+        };
+        var label = AppServices.Update.IsReady || AppServices.Update.IsAvailable ? "Account · Update available" : "Account: " + name;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(footer, label);
+        ToolTipService.SetToolTip(footer, label);
         var menu = new MenuFlyout();
         foreach (var section in new[] { GlobalSection.Account, GlobalSection.About })
         {
@@ -1733,6 +1779,12 @@ public sealed partial class MainWindow : Window
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref uint value, int size);
 
+    private void OnAdvancedEffectsChanged(Windows.UI.ViewManagement.UISettings sender, object args) =>
+        DispatcherQueue.TryEnqueue(ApplyChromeColors);
+
+    private void OnHighContrastChanged(Windows.UI.ViewManagement.AccessibilitySettings sender, object args) =>
+        DispatcherQueue.TryEnqueue(ApplyChromeColors);
+
     /// <summary>
     /// Repaint every flat surface from the theme tokens. Runs once at launch
     /// and again whenever the system theme changes, so the window frame never
@@ -1744,7 +1796,13 @@ public sealed partial class MainWindow : Window
         Theme.WindowTheme = RootGrid.ActualTheme;
         Theme.InstallControlResources();
         _chromeBackground.Color = Theme.Background;
-        _chromeSidebar.Color = Theme.Sidebar;
+        var sidebar = Theme.Sidebar;
+        bool effects = _nativeBackdrop;
+        try { effects &= (_chromeSettings ?? new Windows.UI.ViewManagement.UISettings()).AdvancedEffectsEnabled
+                && !(_accessibilitySettings ?? new Windows.UI.ViewManagement.AccessibilitySettings()).HighContrast; }
+        catch { effects = false; }
+        if (effects) sidebar.A = 190;
+        _chromeSidebar.Color = sidebar;
         _chromeBorder.Color = Theme.Border;
         _inspectorHost.ApplyTheme();
         // The toolbar bakes its brushes at build time, like the pages do at
@@ -1766,6 +1824,8 @@ public sealed partial class MainWindow : Window
     private void SyncPaneChrome()
     {
         SyncTitleBarSplit();
+        _paneResize.Visibility = _nav.IsPaneOpen ? Visibility.Visible : Visibility.Collapsed;
+        _paneResize.Margin = new Thickness(Math.Max(0, _nav.OpenPaneLength - 3), 0, 0, 0);
         _nav.PaneHeader = _nav.IsPaneOpen ? LogoOpen() : LogoClosed();
         var show = _nav.IsPaneOpen ? Visibility.Visible : Visibility.Collapsed;
         foreach (var button in _pinnedNavigation.Values)
@@ -1817,7 +1877,7 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void SyncTitleBarSplit()
     {
-        TitlePaneColumn.Width = new GridLength(_nav.IsPaneOpen ? _nav.OpenPaneLength : _nav.CompactPaneLength);
+        TitlePaneColumn.Width = new GridLength(RailWidth + (_nav.IsPaneOpen ? _nav.OpenPaneLength : _nav.CompactPaneLength));
     }
 
     /// <summary>

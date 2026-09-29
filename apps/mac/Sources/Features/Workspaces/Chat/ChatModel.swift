@@ -572,6 +572,35 @@ final class ChatModel {
     @ObservationIgnored private var previewWarmTask: Task<Void, Never>?
     private(set) var recentMessagePreview: [ChatDisplayItem] = []
 
+    @ObservationIgnored private var previewReads: Set<String> = []
+
+    /// A row's cancellable dwell task calls this without selecting the chat.
+    /// Uses the same bounded preview cache and account/host keys as opening.
+    func warmConversationPreview(_ conversation: ChatConversation, in folder: String) async {
+        #if os(macOS)
+        guard !pagingUnavailable, selected?.id != conversation.id,
+              let owner = continuityOwner(folderID: folder),
+              owner.scope == WorkSessionContext.shared.scope else { return }
+        let key = WorkReferenceKey.folder(scope: owner.scope, hostIdentity: owner.host,
+            workspaceID: owner.workspace) + WorkReferenceKey.encode(conversation.id)
+        guard recentMessages.messages(for: key).isEmpty,
+              previewReads.insert(key).inserted else { return }
+        defer { previewReads.remove(key) }
+        let route = WorkDestinationResolver.route(folderID: folder,
+            explicitPeer: folder == folderID ? peer : nil)
+        do {
+            let page = try await Bridge.chatEventPage(id: conversation.id, cursor: nil,
+                limit: ChatPaging.previewPageEvents, peer: route.peer)
+            guard !Task.isCancelled, WorkSessionContext.shared.scope == owner.scope,
+                  continuityScope == owner.scope, selected?.id != conversation.id else { return }
+            let rows = ChatDisplayItem.coalesce(page.events,
+                defaultBackend: conversation.backend, running: conversation.running)
+            recentMessages.store(rows, for: key) { String(reflecting: $0).utf8.count }
+            Self.warmMarkdown(recentMessages.messages(for: key))
+        } catch { /* Opening still performs its normal fresh read. */ }
+        #endif
+    }
+
     /// Opening a project's sessions also prepares its recent chat previews,
     /// without changing the active conversation or starting an agent.
     func warmWorkspacePreviews(_ folder: String) async {
@@ -592,6 +621,8 @@ final class ChatModel {
                 guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
                 let key = prefix + WorkReferenceKey.encode(chat.id)
                 if !recentMessages.messages(for: key).isEmpty { continue }
+                guard previewReads.insert(key).inserted else { continue }
+                defer { previewReads.remove(key) }
                 let page = try await Bridge.chatEventPage(id: chat.id, cursor: nil,
                     limit: ChatPaging.previewPageEvents, peer: route.peer)
                 guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
@@ -626,7 +657,9 @@ final class ChatModel {
                       self.folderID == folderID, self.continuityScope == owner.scope,
                       WorkSessionContext.shared.scope == owner.scope else { return }
                 let key = prefix + WorkReferenceKey.encode(chat.id)
-                guard self.recentMessages.messages(for: key).isEmpty else { continue }
+                guard self.recentMessages.messages(for: key).isEmpty,
+                      self.previewReads.insert(key).inserted else { continue }
+                defer { self.previewReads.remove(key) }
                 do {
                     let page = try await Bridge.chatEventPage(id: chat.id, cursor: nil,
                         limit: ChatPaging.previewPageEvents, peer: peer)
@@ -1009,6 +1042,9 @@ final class ChatModel {
         rememberRecentMessages()
         selectionGeneration &+= 1
         let generation = selectionGeneration
+        #if DEBUG
+        let openingStarted = ProcessInfo.processInfo.systemUptime
+        #endif
         selected = chat
         contextRevision = savedPage?.sendRevision
         if let chat, let folderID {
@@ -1028,6 +1064,13 @@ final class ChatModel {
         savedCopy = nil
         forgetWindow()
         restoreRecentMessages()
+        #if DEBUG
+        let hadOpeningPreview = !recentMessagePreview.isEmpty
+        if chat != nil {
+            TranscriptProbe.shared.noteOpen(milliseconds: (ProcessInfo.processInfo.systemUptime - openingStarted) * 1000,
+                preview: hadOpeningPreview, phase: "selection-state")
+        }
+        #endif
         loadQueue(for: chat?.id)
         loadDraft(for: chat?.id)
         #if os(macOS)
@@ -1070,6 +1113,12 @@ final class ChatModel {
             return
         }
         let openedLive = await openEvents(id: chat.id, generation: generation)
+        #if DEBUG
+        if openedLive, selectionMatches(id: chat.id, generation: generation) {
+            TranscriptProbe.shared.noteOpen(milliseconds: (ProcessInfo.processInfo.systemUptime - openingStarted) * 1000,
+                preview: hadOpeningPreview, phase: "live-page-ready")
+        }
+        #endif
         if !openedLive, events.isEmpty, selectionMatches(id: chat.id, generation: generation) {
             // The live open failed with nothing on screen. A sealed copy
             // opens instead of an error, when one was kept.

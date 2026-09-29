@@ -51,6 +51,9 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
         new(StringComparer.Ordinal);
     private DispatcherQueueTimer? _poll;
     private bool _refreshing;
+    private bool _connectionSettingsExpanded;
+    private bool _otherDevicesExpanded;
+    private bool _permissionsExpanded;
     private ScrollViewer? _scroll;
 
     /// <summary>
@@ -418,7 +421,6 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             var reach = new FlowPanel { MinimumItemWidth = 340, Spacing = Theme.SpaceS };
             reach.Children.Add(ThisMachineCard(account, allowed, TunnelOn()));
             reach.Children.Add(AlwaysOnHostCard());
-            _root.Children.Add(reach);
             var machines = account["machines"] as JsonArray;
             if (machines is not null && machines.Count > 0)
             {
@@ -434,13 +436,34 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             var unlisted = UnlistedKnown(account);
             if (unlisted.Count > 0)
             {
-                _root.Children.Add(OtherApprovedCard(unlisted));
+                var others = new Expander
+                {
+                    Header = $"Other paired devices ({unlisted.Count})",
+                    Content = OtherApprovedCard(unlisted),
+                    IsExpanded = _otherDevicesExpanded || machines is null || machines.Count == 0,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                };
+                others.RegisterPropertyChangedCallback(Expander.IsExpandedProperty,
+                    (sender, _) => _otherDevicesExpanded = ((Expander)sender).IsExpanded);
+                _root.Children.Add(others);
             }
             var approved = ApprovedPeers();
             if (approved.Count > 0)
             {
-                _root.Children.Add(DevicePermissionsCard(approved));
+                var permissions = new Expander { Header = "Permissions", Content = DevicePermissionsCard(approved),
+                    IsExpanded = _permissionsExpanded, HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch };
+                permissions.RegisterPropertyChangedCallback(Expander.IsExpandedProperty,
+                    (sender, _) => _permissionsExpanded = ((Expander)sender).IsExpanded);
+                _root.Children.Add(permissions);
             }
+            var settings = new Expander { Header = "Connection settings", Content = reach,
+                IsExpanded = _connectionSettingsExpanded || machines is null || machines.Count == 0,
+                HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            settings.RegisterPropertyChangedCallback(Expander.IsExpandedProperty,
+                (sender, _) => _connectionSettingsExpanded = ((Expander)sender).IsExpanded);
+            _root.Children.Add(settings);
             // Pairing is only needed for a machine that is not on the account
             // yet, so the paste card stays off the first screenful once a list
             // exists. The toolbar plus opens the same dialog.
@@ -1051,7 +1074,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
     private UIElement AccountDevicesCard(JsonNode account, JsonArray machines)
     {
         var tier = Format.Text(account, "tier");
-        var list = new FlowPanel { Spacing = Theme.SpaceM, MinimumItemWidth = 280 };
+        var list = new StackPanel { Spacing = Theme.SpaceS };
         var viewable = 0;
         foreach (var machine in machines.OfType<JsonNode>())
         {
@@ -1472,8 +1495,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
     }
 
     /// <summary>
-    /// One account device. The title is never the id: the code sits under it
-    /// in monospace, where an identifier belongs.
+    /// One account device. Technical identifiers and permissions stay in details.
     /// </summary>
     private UIElement DeviceRow(
         JsonNode? machine, string id, string tier, ref int viewable)
@@ -1481,45 +1503,30 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
         var isSelf = IsSelf(machine);
         var title = DeviceTitle(machine);
         var body = new StackPanel { Spacing = Theme.SpaceS };
-        var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+        var head = new Grid { ColumnSpacing = Theme.SpaceS };
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.Children.Add(Marks.Device(Format.Text(machine, "platform"), Format.Text(machine, "kind") == "client"));
-        head.Children.Add(PresenceDot(
-            MachineOnline(machine), isSelf, _status?["tunnelOnline"]?.GetValue<bool>() ?? false));
-        head.Children.Add(new TextBlock
-        {
-            Text = title,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            TextWrapping = TextWrapping.Wrap,
-            VerticalAlignment = VerticalAlignment.Center,
-        });
+        var presence = PresenceDot(MachineOnline(machine), isSelf, _status?["tunnelOnline"]?.GetValue<bool>() ?? false);
+        Grid.SetColumn(presence, 1);
+        head.Children.Add(presence);
+        var label = new TextBlock { Text = title, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1, VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(label, 2);
+        head.Children.Add(label);
         if (isSelf)
         {
-            head.Children.Add(new TextBlock { Text = "THIS PC", Opacity = 0.6, FontSize = 11, VerticalAlignment = VerticalAlignment.Center });
+            var here = new TextBlock { Text = "This PC", Opacity = 0.6, FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(here, 3);
+            head.Children.Add(here);
         }
         body.Children.Add(head);
         var platform = Format.Text(machine, "platform");
         if (!string.IsNullOrEmpty(platform))
         {
             body.Children.Add(new TextBlock { Text = platform, Opacity = 0.7, FontSize = 12 });
-        }
-        var peer = PeerForMachine(machine);
-        var words = Format.Text(peer, "words");
-        if (!string.IsNullOrEmpty(words))
-        {
-            body.Children.Add(new TextBlock { Text = words, Opacity = 0.7, FontSize = 12 });
-        }
-        // Only when the machine has a name, so the id is not printed twice on
-        // a row that is already showing it as its title.
-        if (!string.IsNullOrEmpty(Format.Text(machine, "label")))
-        {
-            body.Children.Add(new TextBlock
-            {
-                Text = id,
-                FontFamily = Fonts.Mono,
-                Opacity = 0.55,
-                FontSize = 11,
-                IsTextSelectionEnabled = true,
-            });
         }
         body.Children.Add(new TextBlock
         {
@@ -1531,10 +1538,6 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
         var key = Format.Text(machine, "publicIdentity");
         var isHost = Format.Text(machine, "kind") != "client";
         var linked = PeerForMachine(machine);
-        if (isHost && !isSelf && linked is not null)
-        {
-            body.Children.Add(AutoConnectRow(linked, machine));
-        }
         var actions = new FlowPanel
         {
             Spacing = Theme.SpaceS,
@@ -1596,12 +1599,28 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             Render();
             RefreshInspector();
         }));
-        body.Children.Add(actions);
+        var row = new Grid { ColumnSpacing = Theme.SpaceM, RowSpacing = Theme.SpaceS };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        body.VerticalAlignment = VerticalAlignment.Center;
+        actions.MaxWidth = 420;
+        actions.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(body);
+        Grid.SetRow(actions, 1);
+        row.Children.Add(actions);
+        row.SizeChanged += (_, e) =>
+        {
+            bool wide = e.NewSize.Width >= 760;
+            Grid.SetColumn(actions, wide ? 1 : 0);
+            Grid.SetRow(actions, wide ? 0 : 1);
+        };
 
         var selected = !_selectThis && _selectedPeer is null && _selectedId == id;
         var card = new Border
         {
-            Child = body,
+            Child = row,
             Padding = new Thickness(Theme.SpaceS),
             CornerRadius = new CornerRadius(8),
             Background = selected ? Theme.AccentSoftBrush : Theme.Brush(Microsoft.UI.Colors.Transparent),

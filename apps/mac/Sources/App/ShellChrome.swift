@@ -36,7 +36,7 @@ enum ShellMetrics {
     static let inspectorRange: ClosedRange<Double> = 300...640
     static let inspectorDefault: Double = 400
 
-    /// Liquid Glass exists from macOS 26. Below that the left chrome keeps the
+    /// Floating translucent chrome starts on macOS 26. Below that it keeps the
     /// flat sidebar colour it has always had: the `.bar` material flashed white
     /// when the columns re-laid out, and a flat colour cannot.
     static var usesGlass: Bool {
@@ -46,32 +46,117 @@ enum ShellMetrics {
 }
 
 extension View {
-    /// The left chrome's surface: a floating Liquid Glass panel on macOS 26
+    /// Preserve a hidden pane's native views without laying them out for every
+    /// resize of the foreground screen. Its next activation adopts the current
+    /// proposal before it becomes visible.
+    func retainedPane(isActive: Bool) -> some View {
+        RetainedPaneLayout(isActive: isActive) { self }
+    }
+
+    /// The left chrome's surface: a native clear glass backdrop on macOS 26
     /// and later, the flat sidebar colour before that.
     ///
     /// Chrome only. `Theme` keeps the rule that content sits on flat colour,
     /// because vibrancy pulls whatever is behind the window into columns of
     /// digits. A list of project names and a rail of glyphs is chrome.
     ///
-    /// The sidebar colour sits inside the glass as well as tinting it. A tint
-    /// alone is dropped when the window is not key, and the panel turned the
-    /// system's neutral grey beside violet content; with the colour laid in,
-    /// an inactive window keeps its palette and an active one gains the rim
-    /// and depth of the glass over it.
+    /// Sample behind the window, rather than tinting an opaque colour plate.
+    /// A translucent black tint keeps the frost close to the dark content surface
+    /// while allowing a restrained amount of the blurred backdrop through.
+    /// Reduce Transparency uses an opaque theme surface.
     @ViewBuilder
     func leftChromeSurface() -> some View {
         if #available(macOS 26, *) {
             self
-                .background(Theme.sidebar.opacity(0.75), in: .rect(cornerRadius: ShellMetrics.panelRadius))
-                .clipShape(.rect(cornerRadius: ShellMetrics.panelRadius))
-                .glassEffect(
-                    .regular.tint(Theme.sidebar.opacity(0.5)),
-                    in: .rect(cornerRadius: ShellMetrics.panelRadius)
-                )
+                .background {
+                    SidebarGlassSurface()
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: ShellMetrics.panelRadius)
+                        .strokeBorder(.white.opacity(0.08), lineWidth: 0.5)
+                        .allowsHitTesting(false)
+                }
                 .padding([.leading, .top, .bottom], ShellMetrics.panelInset)
+                .background {
+                    GeometryReader { proxy in
+                        Path { path in
+                            path.addRect(CGRect(origin: .zero, size: proxy.size))
+                            path.addRoundedRect(in: CGRect(x: ShellMetrics.panelInset,
+                                y: ShellMetrics.panelInset,
+                                width: max(0, proxy.size.width - ShellMetrics.panelInset),
+                                height: max(0, proxy.size.height - ShellMetrics.panelInset * 2)),
+                                cornerSize: CGSize(width: ShellMetrics.panelRadius,
+                                    height: ShellMetrics.panelRadius))
+                        }.fill(Theme.background, style: FillStyle(eoFill: true))
+                    }.allowsHitTesting(false)
+                }
         } else {
             self.background(Theme.sidebar)
         }
+    }
+}
+
+private struct RetainedPaneLayout: Layout {
+    var isActive: Bool
+    struct Cache { var size: CGSize? }
+
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        guard let pane = subviews.first else { return .zero }
+        if isActive || cache.size == nil {
+            cache.size = pane.sizeThatFits(proposal)
+        }
+        return proposal.replacingUnspecifiedDimensions(by: cache.size ?? .zero)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        guard let pane = subviews.first else { return }
+        let size = isActive ? bounds.size : (cache.size ?? bounds.size)
+        if isActive { cache.size = size }
+        pane.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(size))
+    }
+}
+
+@available(macOS 26, *)
+private struct SidebarGlassSurface: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        if reduceTransparency {
+            RoundedRectangle(cornerRadius: ShellMetrics.panelRadius).fill(Theme.sidebar)
+        } else {
+            SidebarBackdrop()
+                .overlay {
+                    RoundedRectangle(cornerRadius: ShellMetrics.panelRadius)
+                        .fill(colorScheme == .dark
+                            ? Color.black.opacity(0.72) : Color.white.opacity(0.72))
+                }
+        }
+    }
+}
+
+/// Native clear glass supplies actual backdrop transmission. Regular sidebar
+/// material became a solid grey plate in this shell; tint is layered separately
+/// so the black frost still lets a restrained amount of background colour show.
+@available(macOS 26, *)
+private struct SidebarBackdrop: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSGlassEffectView {
+        let view = NSGlassEffectView()
+        view.style = .clear
+        view.cornerRadius = ShellMetrics.panelRadius
+        view.tintColor = tint(context)
+        return view
+    }
+
+    func updateNSView(_ view: NSGlassEffectView, context: Context) {
+        view.tintColor = tint(context)
+    }
+
+    private func tint(_ context: Context) -> NSColor {
+        (context.environment.colorScheme == .dark ? NSColor.black : NSColor.white)
+            .withAlphaComponent(0.25)
     }
 }
 
@@ -82,12 +167,14 @@ struct FloatingSidebarSurface: ViewModifier {
     func body(content: Content) -> some View {
         if #available(macOS 26, *) {
             content
-                .background(Theme.sidebar.opacity(0.85), in: .rect(cornerRadius: ShellMetrics.panelRadius))
-                .clipShape(.rect(cornerRadius: ShellMetrics.panelRadius))
-                .glassEffect(
-                    .regular.tint(Theme.sidebar.opacity(0.5)),
-                    in: .rect(cornerRadius: ShellMetrics.panelRadius)
-                )
+                .background {
+                    SidebarGlassSurface()
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: ShellMetrics.panelRadius)
+                        .strokeBorder(.white.opacity(0.08), lineWidth: 0.5)
+                        .allowsHitTesting(false)
+                }
                 .padding(.vertical, ShellMetrics.panelInset)
         } else {
             content

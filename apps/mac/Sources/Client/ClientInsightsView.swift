@@ -90,8 +90,9 @@ struct ClientInsightsView: View {
                 )
             } else {
                 summary(rows)
-                if model.cut == .day {
-                    let days = rows.sorted { $0.key < $1.key }
+                let shown = filtered(rows)
+                if model.cut == .day && !shown.isEmpty {
+                    let days = shown.sorted { $0.key < $1.key }
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
                         ClientSectionTitle(title: "Daily activity", mark: "mark_activity")
                         Text("Tokens per day · cache included").font(ClientType.caption).foregroundStyle(.secondary)
@@ -103,15 +104,25 @@ struct ClientInsightsView: View {
                                 .accessibilityValue("\(formatTokens(day.counters.total)) tokens")
                         }
                         .chartXAxis(.hidden)
+                        .chartYAxis {
+                            AxisMarks { value in
+                                AxisGridLine().foregroundStyle(Theme.border)
+                                AxisValueLabel {
+                                    if let tokens = value.as(Double.self) {
+                                        Text(formatTokens(UInt64(max(0, tokens)))).font(ClientType.caption)
+                                    }
+                                }
+                            }
+                        }
                         .frame(height: 180)
                         HStack {
-                            Text(days.first?.key ?? "")
+                            Text(days.first.map { model.cut.title(for: $0.key) } ?? "")
                             Spacer()
-                            Text(days.last?.key ?? "")
+                            Text(days.last.map { model.cut.title(for: $0.key) } ?? "")
                         }.font(ClientType.caption).foregroundStyle(.secondary)
                     }.padding(Theme.Space.m).cardSurface()
                 }
-                let shown = filtered(rows)
+                if model.cut != .day && !shown.isEmpty { tokenChart(shown) }
                 if shown.isEmpty {
                     Text("Nothing matches \"\(search)\".")
                         .font(ClientType.label)
@@ -184,6 +195,31 @@ struct ClientInsightsView: View {
         .padding(Theme.Space.m)
         .cardSurface()
         .accessibilityElement(children: .combine)
+    }
+
+    private func tokenChart(_ rows: [Bucket]) -> some View {
+        let ranked = Array(rows.sorted { $0.counters.total > $1.counters.total }.prefix(8))
+        let peak = max(1, ranked.map(\.counters.total).max() ?? 1)
+        return VStack(alignment: .leading, spacing: Theme.Space.m) {
+            ClientSectionTitle(title: "Most used \(model.cut.plural)", mark: "mark_insights")
+            Text("Tokens · including reported cache usage")
+                .font(ClientType.caption).foregroundStyle(.secondary)
+            ForEach(ranked) { row in
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    HStack {
+                        Text(model.cut.title(for: row.key)).lineLimit(1)
+                        Spacer(minLength: Theme.Space.s)
+                        Text(formatTokens(row.counters.total)).foregroundStyle(.secondary)
+                    }.font(ClientType.caption)
+                    ProgressView(value: Double(row.counters.total), total: Double(peak))
+                        .tint(Theme.accent)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(model.cut.title(for: row.key))
+                .accessibilityValue("\(formatTokens(row.counters.total)) tokens")
+            }
+        }
+        .padding(Theme.Space.m).cardSurface()
     }
 
     private func filtered(_ rows: [Bucket]) -> [Bucket] {

@@ -16,7 +16,7 @@ struct TodoView: View {
     var onRunInFront: ((InteractiveTaskLaunch) -> Void)? = nil
 
     private static let columns: [(String, String)] = [
-        ("backlog", "To Do"), ("doing", "Doing"), ("done", "Done"),
+        ("backlog", "To Do"), ("doing", "In progress"), ("done", "Done"),
     ]
     @AppStorage("todo.sortNewestFirst") private var newestFirst = true
     @State private var search = ""
@@ -81,23 +81,13 @@ struct TodoView: View {
                 let available = proxy.size.height - Theme.Space.m * 2
                 let gap = Theme.Space.m
                 let usable = proxy.size.width - Theme.Space.m * 2 - Theme.Space.s * 6
-                // Three columns only when they stay readable. A 240 floor
-                // overflowed a tiled half-screen. Below that, stack them.
-                let minCol: CGFloat = 240
-                let sideBySide = usable >= minCol * 3 + gap * 2
-                let columnWidth = sideBySide
-                    ? (usable - gap * 2) / 3
-                    : max(0, proxy.size.width - Theme.Space.m * 2 - Theme.Space.s * 2)
-                ScrollView(sideBySide ? .horizontal : .vertical) {
-                    let columns = ForEach(Self.columns, id: \.0) { id, label in
-                        column(id, label, width: columnWidth)
-                            .frame(height: sideBySide ? max(0, available) : min(650, max(280, CGFloat(visibleCards(in: id).count) * 160 + 110)))
-                    }
-                    Group {
-                        if sideBySide {
-                            HStack(alignment: .top, spacing: gap) { columns }
-                        } else {
-                            VStack(alignment: .leading, spacing: gap) { columns }
+                // Preserve stage order and drag destinations when the window narrows.
+                let columnWidth = max(260, (usable - gap * 2) / 3)
+                ScrollView(.horizontal) {
+                    HStack(alignment: .top, spacing: gap) {
+                        ForEach(Self.columns, id: \.0) { id, label in
+                            column(id, label, width: columnWidth)
+                                .frame(height: max(0, available))
                         }
                     }
                     .padding(Theme.Space.m)
@@ -175,28 +165,16 @@ struct TodoView: View {
     /// than what narrows it.
     private var boardActions: some View {
         HStack(spacing: Theme.Space.s) {
-            SegmentedCapsulePicker(
-                options: [
-                    (true, "Newest", ""),
-                    (false, "Your order", ""),
-                ],
-                selection: $newestFirst
-            )
-            .fixedSize()
-            .onChange(of: newestFirst) { _, on in
-                model.sortNewestFirst = on
+            Picker("Sort tasks", selection: $newestFirst) {
+                Text("Your order").tag(false)
+                Text("Newest first").tag(true)
             }
-            Button(
-                model.showingArchive
-                    ? "Back to the board"
-                    : (model.archivedCount == 0 ? "Archive" : "Archive \(model.archivedCount)"),
-                model.showingArchive ? .back : .archive
-            ) {
-                model.showingArchive.toggle()
-            }
-            .buttonStyle(SecondaryButtonStyle(small: true))
-            .disabled(model.archivedCount == 0 && !model.showingArchive)
-            .help(model.showingArchive ? "Show the board" : "Cards you archived from Done")
+            .pickerStyle(.menu).labelsHidden().fixedSize()
+            .onChange(of: newestFirst) { _, on in model.sortNewestFirst = on }
+            ToolbarIconButton(systemImage: model.showingArchive ? "archivebox.fill" : "archivebox",
+                help: model.showingArchive ? "Back to the board" : "Show archived tasks (\(model.archivedCount))",
+                isAccent: model.showingArchive) { model.showingArchive.toggle() }
+                .disabled(model.archivedCount == 0 && !model.showingArchive)
             Button("New task", .create) { addingIn = "backlog" }
                 .buttonStyle(AccentButtonStyle(small: true))
                 .help("Add a card to To Do")
@@ -207,7 +185,7 @@ struct TodoView: View {
     private var filterControls: some View {
         HStack(spacing: Theme.Space.s) {
             SearchField(text: $search, prompt: "Search tasks")
-                .frame(minWidth: 160, maxWidth: 260)
+                .frame(minWidth: 120, maxWidth: 220)
             if model.scope == nil {
                 // Only the global board gets a selector. A folder's board is
                 // that folder's, and a filter on top of it would be two
@@ -226,14 +204,23 @@ struct TodoView: View {
                         set: { model.filter = Self.filter(from: $0) }
                     )
                 )
-                .frame(width: 160)
+                .frame(width: 140)
             }
-            AppMenuPicker(options: [(value: "", label: "All agents")]
-                + model.pickerBackends(keeping: agentFilter).map { (value: $0.id, label: $0.label) }, selection: $agentFilter)
-                .frame(width: 150)
-            Toggle("Needs attention", isOn: $attentionOnly).toggleStyle(.button)
-                .font(Theme.caption).tint(Theme.accent)
-                .help("High-priority tasks and failed runs")
+            Menu {
+                Picker("Agent", selection: $agentFilter) {
+                    Text("All agents").tag("")
+                    ForEach(model.pickerBackends(keeping: agentFilter), id: \.id) { backend in
+                        Text(backend.label).tag(backend.id)
+                    }
+                }
+                Toggle("Needs attention", isOn: $attentionOnly)
+            } label: {
+                Label(agentFilter.isEmpty && !attentionOnly ? "Filters" : "Filters applied",
+                      systemImage: agentFilter.isEmpty && !attentionOnly ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+            }
+            .fixedSize()
+            .labelStyle(.iconOnly)
+            .help("Filter by agent or show high-priority tasks and failed runs")
             if hasFilters {
                 Button("Clear", .dismiss) { search = ""; agentFilter = ""; attentionOnly = false }
                     .buttonStyle(.plain).foregroundStyle(Theme.accent).font(Theme.caption)
@@ -483,15 +470,6 @@ private struct CardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: Theme.Space.s) {
-                Image(systemName: "line.3.horizontal")
-                    .font(Theme.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .help("Drag to reorder")
-                    .accessibilityLabel("Drag to reorder")
-                    .padding(.top, 2)
-                FeatureMark(name: card.isNote ? "mark_note" : "mark_todo",
-                            tint: card.isNote ? Theme.secondary : Theme.accent,
-                            size: 16)
                 if editingTitle {
                     TextField("Title", text: $titleDraft)
                         .textFieldStyle(.plain)
@@ -606,6 +584,7 @@ private struct CardView: View {
             }
             onSelect()
         })
+        .help("Select to edit. Drag to move or reorder this task.")
         .draggable(card.id)
         .dropDestination(for: String.self) { ids, _ in
             guard let cardID = ids.first,

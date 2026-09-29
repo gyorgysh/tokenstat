@@ -31,49 +31,11 @@ struct ClientDevicesView: View {
     @State private var search = ""
 
     private var machines: [Machine] { account.account?.machines ?? [] }
+    private var shownMachines: [Machine] { sorted.filter { search.isEmpty || ($0.label ?? "").localizedCaseInsensitiveContains(search) || ($0.platform ?? "").localizedCaseInsensitiveContains(search) } }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                // The one place that makes a machine, rather than listing the
-                // ones that already exist. Above the list because somebody with
-                // nothing on the account is exactly who is looking at it.
-                Button { showSetup = true } label: {
-                    HStack(spacing: Theme.Space.m) {
-                        // The machine, not the act of connecting. Most people
-                        // arriving here are renting one rather than plugging in
-                        // something they can see, and a cloud says that where a
-                        // plug says something about cables.
-                        Image(systemName: "cloud.fill").foregroundStyle(Theme.accent)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Set up a machine").font(ClientType.label.weight(.semibold))
-                            Text("A cloud server, a Mac you own, or one over SSH")
-                                .font(ClientType.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right").foregroundStyle(.tertiary)
-                    }
-                    .padding(Theme.Space.m)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .cardSurface()
-                }
-                .buttonStyle(.plain)
-                NavigationLink {
-                    SSHLibraryView(vaultTier: account.account?.vaultTierForSsh)
-                } label: {
-                    HStack(spacing: Theme.Space.m) {
-                        Image(systemName: "terminal.fill").foregroundStyle(Theme.accent)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("SSH hosts").font(ClientType.label.weight(.semibold))
-                            Text("Connect to a saved server").font(ClientType.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right").foregroundStyle(.tertiary)
-                    }
-                    .padding(Theme.Space.m)
-                    .cardSurface()
-                }
-                .buttonStyle(.plain)
                 if !machines.contains(where: \.isHost) {
                     if account.isLoading {
                         ClientWireframe.Rows(count: 3)
@@ -92,8 +54,12 @@ struct ClientDevicesView: View {
                 }
                 if !machines.isEmpty {
                     header
+                    if shownMachines.isEmpty {
+                        Text("No devices match your search.")
+                            .font(ClientType.caption).foregroundStyle(.secondary)
+                    }
                     ClientAdaptiveCards {
-                    ForEach(sorted.filter { search.isEmpty || ($0.label ?? "").localizedCaseInsensitiveContains(search) || ($0.platform ?? "").localizedCaseInsensitiveContains(search) }) { machine in
+                    ForEach(shownMachines) { machine in
                         NavigationLink {
                             ClientDeviceDetailView(
                                 machine: machine,
@@ -122,6 +88,16 @@ struct ClientDevicesView: View {
                             .padding(.horizontal, 2)
                     }
                 }
+                HStack(spacing: Theme.Space.m) {
+                    Button("Add device", .create) { showSetup = true }
+                    NavigationLink {
+                        SSHLibraryView(vaultTier: account.account?.vaultTierForSsh)
+                    } label: {
+                        Label("SSH hosts", systemImage: "terminal")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .font(ClientType.label)
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.top, Theme.Space.s)

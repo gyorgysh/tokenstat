@@ -523,55 +523,34 @@ internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
         var name = Format.Text(job, "name", "Automation");
         var enabled = Format.Flag(job, "enabled");
         var cadence = Format.Cadence(job);
-        var body = new StackPanel { Spacing = Theme.SpaceS };
-        var line = new Grid { ColumnSpacing = Theme.SpaceS };
-        line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var schedule = job?["schedule"] ?? job;
-        var glyph = Chrome.CadenceGlyph(
-            Format.Text(schedule, "kind", "once"),
-            Format.Long(schedule, "weekdays"),
-            (int)Format.Long(schedule, "weekday"),
-            enabled,
-            summary: cadence);
-        glyph.VerticalAlignment = VerticalAlignment.Top;
-        line.Children.Add(glyph);
-        var texts = new StackPanel { Spacing = Theme.SpaceXs };
-        texts.Children.Add(new TextBlock
-        {
-            Text = name,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            TextWrapping = TextWrapping.Wrap,
-        });
-        var status = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceXs };
-        status.Children.Add(new TextBlock
-        {
-            Text = (enabled ? "on" : "off") + " · " + cadence,
-            Opacity = 0.7,
-            TextWrapping = TextWrapping.Wrap,
-            VerticalAlignment = VerticalAlignment.Center,
-        });
-        if (enabled
-            && job?["nextRunAtMs"] is JsonValue next
-            && next.TryGetValue<long>(out var nextMs)
-            && nextMs > 0)
-        {
-            long? lastMs = job?["lastRunAtMs"] is JsonValue last
-                && last.TryGetValue<long>(out var lastValue)
-                ? lastValue
-                : null;
-            var ring = Chrome.CountdownRing(lastMs, nextMs, label: "Next run");
-            ring.VerticalAlignment = VerticalAlignment.Center;
-            status.Children.Add(ring);
-        }
-        texts.Children.Add(status);
-        Grid.SetColumn(texts, 1);
-        line.Children.Add(texts);
-        body.Children.Add(line);
+        var body = new Grid { ColumnSpacing = Theme.SpaceM, RowSpacing = Theme.SpaceS };
+        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) });
+        body.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var title = new StackPanel { Spacing = Theme.SpaceXs, VerticalAlignment = VerticalAlignment.Center };
+        title.Children.Add(new TextBlock { Text = name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 });
+        if (_scopeWorkspaceId is null)
+            title.Children.Add(new TextBlock { Text = FolderLabel(Format.Text(job, "workspaceId")),
+                Opacity = 0.6, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 });
+        body.Children.Add(title);
+        var scheduleCell = new StackPanel { Spacing = Theme.SpaceXs, VerticalAlignment = VerticalAlignment.Center };
+        scheduleCell.Children.Add(new TextBlock { Text = cadence, TextWrapping = TextWrapping.Wrap, Opacity = 0.75 });
+        string nextText = "Paused";
+        if (enabled && job["nextRunAtMs"] is JsonValue next && next.TryGetValue<long>(out var nextMs) && nextMs > 0)
+            nextText = "Next: " + DateTimeOffset.FromUnixTimeMilliseconds(nextMs).ToLocalTime().ToString("g");
+        else if (enabled) nextText = "Scheduled";
+        scheduleCell.Children.Add(new TextBlock { Text = nextText, FontSize = 12, Opacity = 0.6,
+            TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 });
+        Grid.SetColumn(scheduleCell, 1);
+        body.Children.Add(scheduleCell);
         var runningHere = JobRuns(id).Any(r => WorkbenchOps.IsRunning(r));
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         actions.Children.Add(ActionIconGlyph.Button(
-            enabled ? "Disable" : "Enable",
+            enabled ? "Pause" : "Resume",
             enabled ? ActionIcon.Dismiss : ActionIcon.Approve,
             async (_, _) => await SetEnabledAsync(id, !enabled)));
         var runButton = ActionIconGlyph.Button("Run", ActionIcon.Run, async (_, _) =>
@@ -599,7 +578,17 @@ internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
                 break;
             }
         }
+        Grid.SetColumn(actions, 2);
         body.Children.Add(actions);
+        body.SizeChanged += (_, e) =>
+        {
+            bool wide = e.NewSize.Width >= 760;
+            body.ColumnDefinitions[1].Width = wide ? new GridLength(200) : new GridLength(0);
+            Grid.SetRow(scheduleCell, wide ? 0 : 1);
+            Grid.SetColumn(scheduleCell, wide ? 1 : 0);
+            Grid.SetRow(actions, wide ? 0 : 2);
+            Grid.SetColumn(actions, wide ? 2 : 0);
+        };
         var frame = new Border
         {
             Background = _selectedId == id ? Theme.AccentSoftBrush : new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),

@@ -76,7 +76,7 @@ import kotlinx.serialization.json.put
 
 private val BOARD_COLUMNS = listOf(
     Triple("backlog", "To Do", "backlog"),
-    Triple("doing", "Doing", "doing"),
+    Triple("doing", "In progress", "doing"),
     Triple("done", "Done", "done"),
 )
 
@@ -137,6 +137,7 @@ fun TaskBoardScreen(
     val scope = rememberCoroutineScope()
     val canEdit = HostContracts.supportsTaskEditing(protocol)
     val canDelete = HostContracts.supportsTaskDeletion(protocol)
+    var selectedStage by remember(peer, fixedFolder) { mutableStateOf("backlog") }
     var cards by remember { mutableStateOf<List<TaskCard>>(emptyList()) }
     var folders by remember { mutableStateOf<List<FolderRef>>(emptyList()) }
     var backends by remember { mutableStateOf<List<BackendRef>>(emptyList()) }
@@ -454,13 +455,20 @@ fun TaskBoardScreen(
                     art = { EmptyArt(EmptyArtKind.Tasks) },
                 )
             }
+            if (!filter.archived) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+                    BOARD_COLUMNS.forEach { (id, title, _) ->
+                        ChoiceChip("$title (${visible.count { it.column == id }})", selectedStage == id, { selectedStage = id })
+                    }
+                }
+            }
             PullToRefreshBox(isRefreshing = loading && loaded, onRefresh = { scope.launch { load() } }, modifier = Modifier.weight(1f)) {
                 LazyColumn(
                     Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset),
                     verticalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
-                    val columns = if (filter.archived) listOf(Triple("archive", "Archive", "archive")) else BOARD_COLUMNS
+                    val columns = if (filter.archived) listOf(Triple("archive", "Archive", "archive")) else BOARD_COLUMNS.filter { it.first == selectedStage }
                     columns.forEach { (id, title, _) ->
                         item(key = "header-$id") {
                             val count = visible.count { it.column == id }
@@ -469,7 +477,12 @@ fun TaskBoardScreen(
                         val columnCards = visible.filter { it.column == id }
                         if (columnCards.isEmpty()) {
                             item(key = "empty-$id") {
-                                Text("No tasks", style = TsType.caption, color = LocalTsColors.current.textSecondary)
+                                Text(when (id) {
+                                    "backlog" -> "Ready for your next task"
+                                    "doing" -> "Nothing in progress"
+                                    "done" -> "Completed tasks appear here"
+                                    else -> "No archived tasks"
+                                }, style = TsType.caption, color = LocalTsColors.current.textSecondary)
                             }
                         }
                         items(columnCards, key = { "task-${it.id}" }) { card ->

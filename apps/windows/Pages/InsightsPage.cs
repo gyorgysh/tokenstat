@@ -43,7 +43,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
     private readonly Dictionary<string, JsonNode?> _accountReports = new();
     private string _accountCut = "model";
     private string _accountFilter = "";
-    private TextBox? _accountFilterBox;
+    private readonly StackPanel _accountResults = new() { Spacing = Theme.SpaceM };
     private string? _accountIdentity;
     private int _scopeGeneration;
     private void AccountChanged()
@@ -615,21 +615,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             _root.Children.Add(new TextBlock { Text = $"Refresh unavailable. Showing usage fetched {fetched.LocalDateTime:g}.", TextWrapping = TextWrapping.Wrap });
         }
         var rows = Format.Items(report, "rows") ?? new JsonArray();
-        if (_accountCut == "day" && rows.Count > 0)
-        {
-            // The daily shape first, like the phone: bars are read at a
-            // glance, the cards below are the audit trail. Cloned: a node
-            // keeps its parent and the cached report must keep its rows.
-            var ascending = new JsonArray();
-            foreach (var row in rows.OrderBy(row => Format.Text(row, "key")))
-            {
-                ascending.Add(row?.DeepClone());
-            }
-            _root.Children.Add(Chrome.Card(
-                "Daily activity",
-                DailyChart(ascending, showsValue: false, showsToggle: false),
-                "Tokens per day · cache included"));
-        }
         var plural = _accountCut switch { "source" => "coding tools", "day" => "days", _ => "models" };
         var box = new TextBox
         {
@@ -640,38 +625,51 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         {
             _accountFilter = box.Text;
             _visible = FirstPage;
-            Render();
-            // The render rebuilt this box. Hand focus back so the next
-            // keystroke has somewhere to land.
-            if (_accountFilterBox is not null)
-            {
-                _accountFilterBox.Focus(FocusState.Programmatic);
-                _accountFilterBox.SelectionStart = _accountFilterBox.Text.Length;
-            }
+            RenderAccountRows(rows);
         };
-        _accountFilterBox = box;
         _root.Children.Add(box);
+        _root.Children.Add(_accountResults);
+        RenderAccountRows(rows);
+    }
+
+    private void RenderAccountRows(JsonArray rows)
+    {
+        _accountResults.Children.Clear();
         var term = _accountFilter.Trim();
         var filtered = rows
             .Where(row => term.Length == 0
                 || Format.Text(row, "key").Contains(term, StringComparison.OrdinalIgnoreCase)
                 || AccountTitle(Format.Text(row, "key")).Contains(term, StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(row => Format.Long(row, "valueMicros"))
             .ToList();
+        filtered = _accountCut == "day"
+            ? filtered.OrderByDescending(row => Format.Text(row, "key")).ToList()
+            : filtered.OrderByDescending(row => Format.Long(row, "valueMicros")).ToList();
         if (rows.Count == 0)
         {
-            _root.Children.Add(new TextBlock { Text = "No synced usage in this period." });
+            _accountResults.Children.Add(new TextBlock { Text = "No synced usage in this period." });
             return;
         }
         if (filtered.Count == 0)
         {
-            _root.Children.Add(new TextBlock
+            _accountResults.Children.Add(new TextBlock
             {
                 Text = "Nothing matches \"" + term + "\".",
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
             });
             return;
+        }
+        if (_accountCut == "day")
+        {
+            var ascending = new JsonArray();
+            foreach (var row in filtered.OrderBy(row => Format.Text(row, "key")))
+                ascending.Add(row?.DeepClone());
+            _accountResults.Children.Add(Chrome.Card("Daily activity",
+                DailyChart(ascending, showsValue: false, showsToggle: false), "Tokens per day · cache included"));
+        }
+        else
+        {
+            _accountResults.Children.Add(AccountTokenChart(filtered));
         }
         // A share bar needs something to be a share of, and the largest shown
         // row is a steadier reference than the total.
@@ -680,7 +678,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         {
             peak = Math.Max(peak, Format.Long(row, "valueMicros"));
         }
-        _root.Children.Add(new TextBlock
+        _accountResults.Children.Add(new TextBlock
         {
             Text = _accountCut switch { "source" => "Coding tools", "day" => "Days", _ => "Models" },
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
@@ -691,13 +689,41 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         {
             list.Children.Add(AccountRowCard(row, peak));
         }
-        _root.Children.Add(list);
+        _accountResults.Children.Add(list);
         if (filtered.Count > _visible)
         {
             var more = new Button { Content = "Show more" };
-            more.Click += (_, _) => { _visible += PageStep; Render(); };
-            _root.Children.Add(more);
+            more.Click += (_, _) => { _visible += PageStep; RenderAccountRows(rows); };
+            _accountResults.Children.Add(more);
         }
+    }
+
+    private UIElement AccountTokenChart(List<JsonNode?> rows)
+    {
+        var largest = rows.OrderByDescending(row => Format.Long(row?["counters"], "total")).Take(8).ToList();
+        double peak = Math.Max(1, largest.Max(row => Format.Long(row?["counters"], "total")));
+        var chart = new StackPanel { Spacing = Theme.SpaceM };
+        foreach (var row in largest)
+        {
+            long tokens = Format.Long(row?["counters"], "total");
+            string title = AccountTitle(Format.Text(row, "key"));
+            var item = new StackPanel { Spacing = Theme.SpaceS };
+            var labels = new Grid { ColumnSpacing = Theme.SpaceM };
+            labels.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            labels.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            labels.Children.Add(new TextBlock { Text = title, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 });
+            var amount = new TextBlock { Text = Format.Tokens(tokens), Opacity = 0.7 };
+            Grid.SetColumn(amount, 1);
+            labels.Children.Add(amount);
+            item.Children.Add(labels);
+            var bar = new ProgressBar { Minimum = 0, Maximum = peak, Value = tokens, Height = 8,
+                Foreground = Theme.AccentBrush, Background = Theme.AccentSoftBrush };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(bar, $"{title}: {Format.Tokens(tokens)} tokens");
+            item.Children.Add(bar);
+            chart.Children.Add(item);
+        }
+        return Chrome.Card(_accountCut == "source" ? "Most used coding tools" : "Most used models",
+            chart, "Tokens · including reported cache usage");
     }
 
     /// <summary>
@@ -1124,7 +1150,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         foreach (var row in rows)
         {
             double magnitude = ChartMagnitude(row, showsValue);
-            double height = Math.Max(2, chartHeight * magnitude / peak);
+            double height = magnitude > 0 ? Math.Max(1, chartHeight * magnitude / peak) : 0;
             var key = Format.Text(row, "key");
             if (magnitude > peakValue)
             {
@@ -1139,11 +1165,12 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 Height = height,
                 VerticalAlignment = VerticalAlignment.Bottom,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
-                Margin = new Thickness(1, 0, 1, 0),
+                Margin = new Thickness(rows.Count > 90 ? 0 : 1, 0, rows.Count > 90 ? 0 : 1, 0),
             };
             string tip = key + " · " + Format.Tokens(Format.Long(row?["counters"], "total"))
                 + " tokens · " + Money(row);
             ToolTipService.SetToolTip(bar, tip);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(bar, tip);
             Grid.SetColumn(bar, column);
             plot.Children.Add(bar);
             column++;
@@ -1657,8 +1684,8 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 Fill = Theme.BorderBrush,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
             });
-            var open = new StackPanel { Spacing = Theme.SpaceXs };
-            var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceXs };
+            var open = new StackPanel { Spacing = Theme.SpaceS };
+            var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
             head.Children.Add(new Ellipse
             {
                 Fill = Theme.Brush(static () => Theme.Secondary),
@@ -1715,7 +1742,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         body.Children.Add(name);
         body.Children.Add(Chrome.Stat("Value", Money(selected)));
         var counters = selected?["counters"];
-        var splits = new StackPanel { Spacing = Theme.SpaceXs };
+        var splits = new StackPanel { Spacing = Theme.SpaceS };
         splits.Children.Add(CounterRow("Fresh input", OptLong(counters, "inputFresh")));
         splits.Children.Add(CounterRow("Cache read", OptLong(counters, "cacheRead")));
         splits.Children.Add(CounterRow("Cache write 5m", OptLong(counters, "cacheWrite5m")));
@@ -1740,7 +1767,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             var harnesses = HarnessesInProject(key);
             if (harnesses.Count > 0)
             {
-                var group = new StackPanel { Spacing = Theme.SpaceXs };
+                var group = new StackPanel { Spacing = Theme.SpaceS };
                 group.Children.Add(Fonts.Text(
                     "Coding tools here", Fonts.Callout, Microsoft.UI.Text.FontWeights.Medium));
                 foreach (var (split, splitTokens) in harnesses)
@@ -1772,7 +1799,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         }
         if (selected?["unpricedModels"] is JsonArray unpriced && unpriced.Count > 0)
         {
-            var group = new StackPanel { Spacing = Theme.SpaceXs };
+            var group = new StackPanel { Spacing = Theme.SpaceS };
             group.Children.Add(Fonts.Text(
                 "Unpriced models", Fonts.Callout, Microsoft.UI.Text.FontWeights.Medium));
             foreach (var item in unpriced)

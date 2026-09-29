@@ -93,7 +93,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     }
 
     private static readonly string[] Columns = ["backlog", "doing", "done"];
-    private static readonly string[] ColumnTitles = ["To Do", "Doing", "Done"];
+    private static readonly string[] ColumnTitles = ["To Do", "In progress", "Done"];
 
     public TodoPage(string? workspaceId = null)
     {
@@ -616,18 +616,28 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             _boardHost.Children.Add(Column("archive", "Archive"));
             return;
         }
-        var grid = new Grid { ColumnSpacing = Theme.SpaceM };
+        var stages = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceM };
         for (var i = 0; i < Columns.Length; i++)
         {
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var stage = Column(Columns[i], ColumnTitles[i]);
+            stage.Width = Math.Max(280, (_boardHost.ActualWidth - Theme.SpaceM * 2) / 3);
+            stages.Children.Add(stage);
         }
-        for (var i = 0; i < Columns.Length; i++)
+        var board = new ScrollViewer
         {
-            var column = Column(Columns[i], ColumnTitles[i]);
-            Grid.SetColumn(column, i);
-            grid.Children.Add(column);
-        }
-        _boardHost.Children.Add(grid);
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollMode = ScrollMode.Enabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            VerticalScrollMode = ScrollMode.Disabled,
+            Content = stages,
+        };
+        board.SizeChanged += (_, e) =>
+        {
+            var width = Math.Max(280, (e.NewSize.Width - Theme.SpaceM * 2) / 3);
+            foreach (FrameworkElement stage in stages.Children)
+                if (Math.Abs(stage.Width - width) > 0.5) stage.Width = width;
+        };
+        _boardHost.Children.Add(board);
     }
 
     private FrameworkElement Column(string column, string title)
@@ -646,7 +656,15 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         {
             list.Children.Add(new TextBlock
             {
-                Text = _cards.Count == 0 ? "No tasks yet" : "No tasks",
+                Text = !string.IsNullOrWhiteSpace(_query) || _agentFilter.SelectedIndex > 0 || _attentionFilter.SelectedIndex > 0
+                    ? "No matching tasks" : column switch
+                {
+                    "backlog" => "Ready for your next task",
+                    "doing" => "Nothing in progress",
+                    "done" => "Completed tasks appear here",
+                    _ => "No archived tasks",
+                },
+                TextWrapping = TextWrapping.Wrap,
                 Opacity = 0.6,
             });
         }

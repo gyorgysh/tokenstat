@@ -45,6 +45,14 @@ final class PersonaEngine {
     /// Seconds since this mood began. Every mood function reads this, so a
     /// mood always starts at its own beginning however long the app has run.
     private(set) var clock: CGFloat = 0
+    /// These keep moving across mood changes, so the creature never cuts to
+    /// another silhouette or restarts its turn when its work state changes.
+    private var lifetime: CGFloat = 0
+    private(set) var roll: CGFloat = 0
+    private(set) var yaw: CGFloat = 0
+    private var morphAmount: CGFloat = 0
+    private var rollVelocity: CGFloat = 0
+    private var yawVelocity: CGFloat = 0
 
     /// The instant the body has been simulated up to, or zero before the
     /// first frame. Read by the lab when it samples frames off the clock.
@@ -123,6 +131,10 @@ final class PersonaEngine {
             // Motion is off, or nobody is looking. Present the mood's resting
             // pose rather than freezing mid-bounce, which reads as a glitch.
             settle()
+            roll = 0
+            yaw = 0
+            rollVelocity = 0
+            yawVelocity = 0
             lastTime = nil
             refresh()
             return
@@ -150,9 +162,16 @@ final class PersonaEngine {
             pending -= Self.fixedStep
             let previous = clock
             clock += Self.fixedStep
+            lifetime += Self.fixedStep
             step(from: previous, to: clock)
         }
         refresh()
+    }
+
+    /// Freeze in place during interactive layout; resume without catching up.
+    func suspendClock() {
+        lastTime = nil
+        pending = 0
     }
 
     private func step(from previous: CGFloat, to now: CGFloat) {
@@ -182,6 +201,27 @@ final class PersonaEngine {
             drive = arriving
             target = arrivingFace
         }
+
+        let playful = mood == .bouncing || mood == .dancing || mood == .pacing
+        let quiet = mood == .sleeping || mood == .failed || mood == .waiting
+        let desiredMorph: CGFloat = quiet ? 0.06 : playful ? 0.24 : 0.16
+        morphAmount += (desiredMorph - morphAmount) * Self.fixedStep * 2
+        drive.morphAmount = morphAmount
+        drive.morphPhase = lifetime * 0.22 + CGFloat(seed % 997) * 0.01
+        // A full somersault during play; a small settling lean otherwise.
+        // Integrate the angle so switching moods never jumps to a new pose.
+        if mood == .bouncing || mood == .dancing {
+            rollVelocity += (1.25 - rollVelocity) * Self.fixedStep * 4
+        } else {
+            let resting = (roll / (2 * .pi)).rounded() * 2 * .pi
+            rollVelocity += ((resting - roll) * 10 - rollVelocity * 6) * Self.fixedStep
+        }
+        roll += rollVelocity * Self.fixedStep
+        drive.roll = roll
+        let desiredYaw: CGFloat = mood == .pacing ? sin(lifetime * 0.65) * .pi
+            : quiet ? 0 : sin(lifetime * 0.42) * 0.35
+        yawVelocity += ((desiredYaw - yaw) * 12 - yawVelocity * 7) * Self.fixedStep
+        yaw += yawVelocity * Self.fixedStep
 
         // What a landing left behind. Both decay on their own clock, so the
         // squash always comes back and no mood can leave the body permanently

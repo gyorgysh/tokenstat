@@ -126,6 +126,7 @@ struct RootView: View {
     /// Window geometry reported by `WindowScreenObserver`. The shell lets
     /// SwiftUI apply the system safe area in both windowed and full-screen mode.
     @State private var isFullScreen = false
+    @State private var isLiveResizing = false
     /// Retained for the window observer's geometry reporting.
     @State private var titlebarInset: CGFloat = 0
     #endif
@@ -135,8 +136,6 @@ struct RootView: View {
     /// The hovered heatmap cell's window-space frame, fed up from the grid by
     /// preference. Nil means nothing is hovered and the popover hides.
     @State private var heatmapHover = HeatmapHoverState()
-    /// The window's content size, for popover placement.
-    @State private var windowSize: CGSize = .zero
     #if os(macOS)
     @State private var terminals = TerminalsModel()
     @State private var workspacePendingRemove: WorkspaceFolder?
@@ -428,11 +427,20 @@ struct RootView: View {
             WindowScreenObserver(
                 contentWidth: $windowContentWidth,
                 isFullScreen: $isFullScreen,
+                isLiveResizing: $isLiveResizing,
                 titlebarInset: $titlebarInset
             )
         }
         .overlay {
-            HeatmapPopoverOverlay(model: home, hover: heatmapHover, windowSize: windowSize)
+            // Popover placement is local layout data, not shell state. A
+            // resize should not invalidate every mounted destination for it.
+            GeometryReader { proxy in
+                HeatmapPopoverOverlay(model: home, hover: heatmapHover, windowSize: proxy.size)
+            }
+            .allowsHitTesting(false)
+        }
+        .onChange(of: isLiveResizing) { _, resizing in
+            if resizing { heatmapHover.update(nil) }
         }
         .task(id: WorkSessionContext.shared.scope) {
             workspaceBrowserURLs = [:]
@@ -485,29 +493,7 @@ struct RootView: View {
             NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
         ) { _ in Task { await deviceRequests.refresh() } }
         #endif
-        // The window size for the hover popover, which needs to be placed
-        // against the window rather than the pane it floats over.
-        //
-        // `onGeometryChange` would be the tidy way to write this and needs
-        // macOS 15. This app targets 14. Track both axes: width-only resizes
-        // used to leave a stale width and clamp the card against the wrong
-        // edge.
-        .background {
-            GeometryReader { proxy in
-                Color.clear
-                    .onAppear { windowSize = proxy.size }
-                    .onChange(of: quantised(proxy.size.width, step: 4)) { _, width in
-                        publishWindowSize(
-                            CGSize(width: width, height: quantised(proxy.size.height, step: 4))
-                        )
-                    }
-                    .onChange(of: quantised(proxy.size.height, step: 4)) { _, height in
-                        publishWindowSize(
-                            CGSize(width: quantised(proxy.size.width, step: 4), height: height)
-                        )
-                    }
-            }
-        }
+
     }
 
     /// Periodic loads and peer events. Kept off `body` so Release can type-check.
@@ -706,6 +692,8 @@ struct RootView: View {
             detailColumn
                 .environment(\.detailChromeToggles, detailChromeToggles)
         }
+        .environment(\.isWindowLiveResizing, isLiveResizing)
+        .transaction { if isLiveResizing { $0.animation = nil; $0.disablesAnimations = true } }
         .toolbar(removing: .sidebarToggle)
         .toolbarBackground(.hidden, for: .windowToolbar)
         .environment(\.openURL, OpenURLAction { url in
@@ -736,6 +724,9 @@ struct RootView: View {
         .frame(maxHeight: .infinity)
         .leftChromeSurface()
         .padding(.trailing, ShellMetrics.panelInset)
+        .background(alignment: .trailing) {
+            Theme.background.frame(width: ShellMetrics.panelInset)
+        }
         .overlay(alignment: .trailing) {
             if showsSidebar {
                 // In the gutter beside the glass, or straddling the hairline
@@ -1160,15 +1151,6 @@ struct RootView: View {
                 browserOpen: showsWorkspaceBrowser,
                 persistedBrowser: browserPaneWidth
             )
-    }
-
-    /// Publishes the window content size for the day hover card. Deferred so a
-    /// GeometryReader measurement cannot re-enter layout on the same pass.
-    private func publishWindowSize(_ next: CGSize) {
-        guard next != windowSize else { return }
-        Task { @MainActor in
-            if windowSize != next { windowSize = next }
-        }
     }
 
     /// Applies a measured width to the decisions that depend on it: the
@@ -2386,6 +2368,7 @@ struct RootView: View {
                 isActive: showsWorkspaceSurface,
                 tier: account.account?.tier
             )
+            .retainedPane(isActive: showsWorkspaceSurface)
             .opacity(showsWorkspaceSurface ? 1 : 0)
             .allowsHitTesting(showsWorkspaceSurface)
             .accessibilityHidden(!showsWorkspaceSurface)
@@ -2404,6 +2387,7 @@ struct RootView: View {
                     showingOverview: $showingChatOverview,
                     isActive: showsChat
                 )
+                .retainedPane(isActive: showsChat)
                 .opacity(showsChat ? 1 : 0)
                 .allowsHitTesting(showsChat)
                 .accessibilityHidden(!showsChat)
@@ -2428,6 +2412,7 @@ struct RootView: View {
                 // A PR number is only unique inside its repository. Do not
                 // carry selected detail or pending actions into another folder.
                 .id(id)
+                .retainedPane(isActive: showsPulls)
                 .opacity(showsPulls ? 1 : 0)
                 .allowsHitTesting(showsPulls)
                 .accessibilityHidden(!showsPulls)
@@ -2871,7 +2856,8 @@ struct RootView: View {
                     },
                     remove: {
                         Task { await chat.remove(conversation, in: folder.id) }
-                    }
+                    },
+                    warmPreview: { await chat.warmConversationPreview(conversation, in: folder.id) }
                 )
             }
             // One quiet footer row instead of stacked loud ones: the
@@ -4161,6 +4147,7 @@ private struct ChatSidebarConversationRow: View {
     let isSelected: Bool
     let select: () -> Void
     let remove: () -> Void
+    let warmPreview: () async -> Void
 
     @State private var isHovering = false
     @State private var isTrashHovering = false
@@ -4225,6 +4212,12 @@ private struct ChatSidebarConversationRow: View {
         )
         .contentShape(.rect)
         .onHover { isHovering = $0 }
+        .task(id: isHovering && !isSelected) {
+            guard isHovering, !isSelected else { return }
+            do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
+            guard !Task.isCancelled else { return }
+            await warmPreview()
+        }
         .contextMenu {
             Button("Remove chat", .delete, role: .destructive) {
                 confirmsRemoval = true

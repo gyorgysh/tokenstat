@@ -20,22 +20,28 @@ struct NotesView: View {
 
     @State private var draft = ""
     @State private var saving = false
+    @State private var showingComposer = false
     @State private var showingArchive = false
     @State private var picked: TodoModel.NoteScope = .all
     @State private var converting: TodoCard?
     @State private var search = ""
     @State private var sortByTitle = false
-    @AppStorage("notes.gridLayout") private var gridLayout = true
+    @AppStorage("notes.gridLayout") private var gridLayout = false
     @FocusState private var writing: Bool
 
     var body: some View {
         VStack(spacing: 0) {
+            #if os(macOS)
+            DetailChromeBar(scope: nil) { EmptyView() }
+            notesToolbar
+            #else
             DetailChromeBar(scope: nil) {
                 ToolbarIconButton(
                     systemImage: "plus",
                     help: "Write a note"
                 ) {
                     showingArchive = false
+                    showingComposer = true
                     writing = true
                 }
                 ToolbarIconButton(
@@ -56,15 +62,16 @@ struct NotesView: View {
                 }
                 .disabled(archivedCount == 0 && !showingArchive)
             }
+            #endif
             if let error = model.errorMessage {
                 ErrorBanner(message: error) { Task { await model.load() } }
                     .padding(Theme.Space.m)
             }
-            if !showingArchive { composer }
+            if showingComposer && !showingArchive { composer }
+            #if !os(macOS)
             libraryBar
-            if workspaceID == nil {
-                scopeBar
-            }
+            if workspaceID == nil { scopeBar }
+            #endif
             list
         }
         .background(Theme.background)
@@ -84,6 +91,71 @@ struct NotesView: View {
         .task { await model.appeared() }
         .onDisappear { model.disappeared() }
     }
+
+    #if os(macOS)
+    private var notesToolbar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.s) {
+                noteFilters
+                Spacer(minLength: Theme.Space.s)
+                noteActions
+            }
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                HStack { noteFilters }
+                HStack { Spacer(minLength: 0); noteActions }
+            }
+        }
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, Theme.Space.s)
+        .overlay(alignment: .bottom) { ThemeRule() }
+    }
+
+    private var noteFilters: some View {
+        HStack(spacing: Theme.Space.s) {
+            SearchField(text: $search, prompt: "Search notes")
+                .frame(minWidth: 160, maxWidth: 260)
+            if workspaceID == nil {
+                AppMenuPicker(options: [
+                    (value: "", label: "All workspaces"),
+                    (value: "__unassigned__", label: "Unassigned")
+                ] + folders.map { (value: $0.id, label: $0.name) }, selection: Binding(
+                    get: {
+                        switch picked {
+                        case .all: return ""
+                        case .unassigned: return "__unassigned__"
+                        case .workspace(let id): return id
+                        }
+                    },
+                    set: { value in
+                        picked = value.isEmpty ? .all : value == "__unassigned__" ? .unassigned : .workspace(value)
+                    }
+                ))
+                .frame(width: 160)
+                .help("Filter notes by workspace")
+            }
+        }
+    }
+
+    private var noteActions: some View {
+        HStack(spacing: Theme.Space.s) {
+            sortPicker
+            ToolbarIconButton(systemImage: gridLayout ? "list.bullet" : "square.grid.2x2",
+                help: gridLayout ? "Show notes as a list" : "Show notes as cards") { gridLayout.toggle() }
+            Button(showingArchive ? "Current notes" : "Archive", showingArchive ? .back : .archive) {
+                showingArchive.toggle()
+            }
+            .buttonStyle(SecondaryButtonStyle(small: true))
+            .disabled(archivedCount == 0 && !showingArchive)
+            Button("New note", .create) {
+                showingArchive = false
+                showingComposer = true
+                writing = true
+            }
+            .buttonStyle(AccentButtonStyle(small: true))
+        }
+        .fixedSize()
+    }
+    #endif
 
     /// What the list is showing: the folder this screen belongs to, or the
     /// chip you picked on the global one.
@@ -172,14 +244,16 @@ struct NotesView: View {
             .frame(width: 130).help("Sort notes")
     }
 
-    /// One line, always at the top, always ready. The plus in the chrome
-    /// focuses it; Add is always visible so the field is not the only way in.
+    /// Opened from New note; closing it keeps the draft for next time.
     private var composer: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(spacing: Theme.Space.s) {
                 FeatureMark(name: "mark_note", tint: Theme.secondary, size: 22)
                 Text("Quick note").font(Theme.callout.weight(.semibold))
                 Spacer()
+                Button("Close", .dismiss) { showingComposer = false; writing = false }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+                    .help("Close the composer; your draft stays here")
                 Label(destinationName, systemImage: "folder")
                     .font(Theme.caption).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
@@ -253,7 +327,7 @@ struct NotesView: View {
                     Button("Clear search", .dismiss) { search = "" }
                         .buttonStyle(.plain).foregroundStyle(Theme.accent)
                 } else if !showingArchive {
-                    Text("Capture your first note above. You can turn it into a task later.")
+                    Text("Choose New note to capture an idea. You can turn it into a task later.")
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                 }
@@ -266,7 +340,7 @@ struct NotesView: View {
                     let columns = gridLayout ? min(shown.count, max(1, min(3, Int(width / 340)))) : 1
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Theme.Space.m, alignment: .top), count: columns), spacing: Theme.Space.m) {
                         ForEach(shown) { note in
-                            row(note)
+                            if gridLayout { row(note) } else { compactRow(note) }
                         }
                     }
                 }
@@ -281,6 +355,39 @@ struct NotesView: View {
         case .all: return "No notes yet."
         case .unassigned: return "No unassigned notes."
         case .workspace: return "No notes in \(destinationName)."
+        }
+    }
+
+    private func compactRow(_ note: TodoCard) -> some View {
+        Button { model.selectCard(note.id) } label: {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(note.title).font(Theme.callout.weight(.semibold)).lineLimit(1)
+                    Spacer(minLength: Theme.Space.s)
+                    RelativeTimeText(date: Date(timeIntervalSince1970: Double(note.createdAtMs) / 1000), unitsStyle: .abbreviated)
+                        .font(Theme.caption2).foregroundStyle(.secondary)
+                }
+                if !note.notes.isEmpty {
+                    Text(note.notes).font(Theme.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+                if workspaceID == nil {
+                    Text(placeName(for: note)).font(Theme.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                }
+            }
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(model.selectedCardID == note.id ? Theme.accentSoft : Theme.panel,
+                        in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            if showingArchive {
+                Button("Restore", .restore) { Task { await model.archiveNote(note, archived: false) } }
+            } else {
+                Button("Make a task", .move) { converting = note }
+                Button("Archive", .archive) { Task { await model.archiveNote(note, archived: true) } }
+            }
         }
     }
 

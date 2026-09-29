@@ -115,11 +115,12 @@ struct PersonaPastime: View {
     var pokeable = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @State private var mood: PersonaMood = .idle
 
     var body: some View {
         PersonaMark(seed: seed, size: size, state: mood, pokeable: pokeable)
-            .task(id: reduceMotion) { await live() }
+            .task(id: reduceMotion || scenePhase != .active) { await live() }
     }
 
     private func live() async {
@@ -128,7 +129,7 @@ struct PersonaPastime: View {
         // resting pose of whatever it is holding, and a timer swapping between
         // resting poses would be the flicker Reduce Motion asks us not to
         // make.
-        guard !reduceMotion else { return }
+        guard !reduceMotion, scenePhase == .active else { return }
         var last: PersonaMood?
         var first = doing.opensBusy
         while !Task.isCancelled {

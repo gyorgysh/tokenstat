@@ -187,7 +187,10 @@ internal static class PersonaDraw
         }
         if (clip is not null)
         {
-            path.Clip = (RectangleGeometry)clip;
+            // WinUI UIElement.Clip accepts only RectangleGeometry. The body
+            // outline is a PathGeometry, so casting it throws on every face.
+            // Keep clipping in stage coordinates using its live bounds.
+            path.Clip = clip as RectangleGeometry ?? new RectangleGeometry { Rect = clip.Bounds };
         }
         return path;
     }

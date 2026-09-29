@@ -128,10 +128,12 @@ internal sealed partial class ChatPage
             return await done.Task;
         }
         if (!IsLoaded || _openId != chat) return false;
-        await DrainQueueAsync();
+        var before = Busy();
+        var hasAuthorizedQueue = _authorizedQueue.Count > 0;
+        if (hasAuthorizedQueue) await DrainQueueAsync();
         if (!IsLoaded || _openId != chat) return false;
-        PaintConversation();
-        return Busy();
+        if (hasAuthorizedQueue || before != Busy()) PaintConversation();
+        return true;
     }
 
     private async Task DrainQueueAsync()

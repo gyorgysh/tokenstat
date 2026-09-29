@@ -30,6 +30,7 @@ struct WorkspacesOverviewView: View {
     @State private var scope: String?
     @State private var search = ""
     @State private var alphabetical = false
+    @AppStorage("workspaces.gridLayout") private var gridLayout = false
 
     private struct MachineScope: Hashable {
         var id: String?
@@ -91,10 +92,8 @@ struct WorkspacesOverviewView: View {
             .labelsHidden()
             .fixedSize()
             Spacer(minLength: Theme.Space.s)
-            Text(summaryLine)
-                .font(Theme.caption)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
+            ToolbarIconButton(systemImage: gridLayout ? "list.bullet" : "square.grid.2x2",
+                help: gridLayout ? "Show workspaces as a list" : "Show workspaces as cards") { gridLayout.toggle() }
             Button("Add folder", .create) { onAdd() }
                 .buttonStyle(AccentButtonStyle(small: true))
         }
@@ -107,6 +106,13 @@ struct WorkspacesOverviewView: View {
                     emptyState
                 } else if shown.isEmpty {
                     ContentUnavailableView.search(text: search)
+                } else if !gridLayout {
+                    LazyVStack(spacing: 0) {
+                        ForEach(shown) { folder in
+                            folderRow(folder)
+                            ThemeRule()
+                        }
+                    }
                 } else {
                     LazyVGrid(
                         columns: [GridItem(.adaptive(minimum: 300), spacing: Theme.Space.m)],
@@ -151,6 +157,38 @@ struct WorkspacesOverviewView: View {
             Button("Add folder", .create) { onAdd() }
                 .buttonStyle(AccentButtonStyle(small: true))
         }
+    }
+
+    private func folderRow(_ folder: WorkspaceFolder) -> some View {
+        Button { onOpenFolder(folder.id) } label: {
+            HStack(spacing: Theme.Space.m) {
+                Image(systemName: "folder")
+                    .font(Theme.font(20)).foregroundStyle(Theme.accent)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(folder.name).font(Theme.callout.weight(.semibold)).lineLimit(1)
+                    Text("\(machineLine(for: folder) ?? "") · \(folder.path)")
+                        .font(Theme.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                    if !folder.exists {
+                        Text("Folder missing").font(Theme.caption).foregroundStyle(Theme.warning)
+                    } else if let activity = activityLine(for: folder) {
+                        Text(activity).font(Theme.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: Theme.Space.s)
+                if let summary = summaries[folder.id] {
+                    Text("\(summary.tasks) task\(summary.tasks == 1 ? "" : "s")")
+                        .font(Theme.caption).foregroundStyle(.secondary).fixedSize()
+                }
+                Image(systemName: "chevron.right")
+                    .font(Theme.font(11, weight: .medium)).foregroundStyle(.tertiary)
+            }
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(folder.path)
     }
 
     private func folderCard(_ folder: WorkspaceFolder) -> some View {

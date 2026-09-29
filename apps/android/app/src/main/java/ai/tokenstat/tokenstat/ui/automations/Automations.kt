@@ -742,7 +742,7 @@ private fun AutomationJobRow(
             Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onOpen)
-                .padding(Space.m),
+                .padding(vertical = Space.xs),
             verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(Space.s),
         ) {
@@ -761,7 +761,7 @@ private fun AutomationJobRow(
                     color = colors.textPrimary,
                     maxLines = 2,
                 )
-                Text(subtitle, style = TsType.caption, color = colors.textSecondary, maxLines = 1)
+                Text(subtitle, style = TsType.caption, color = colors.textSecondary, maxLines = 2)
             }
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (isLive) {
@@ -866,14 +866,14 @@ private fun AutomationDetailPage(
                             Text(hostLabel, style = TsType.caption, color = LocalTsColors.current.textSecondary)
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                            JobFactRow("Backend", job.backend, Modifier.weight(1f))
+                            JobFactRow("Agent", job.backend, Modifier.weight(1f))
                             JobFactRow("Schedule", job.schedule.summary, Modifier.weight(1f))
                         }
                         if (!job.model.isNullOrEmpty()) {
                             JobFactRow("Model", job.model!!)
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                            JobFactRow("Budget", JobCopy.budget(job.budgetSeconds), Modifier.weight(1f))
+                            JobFactRow("Time limit", JobCopy.budget(job.budgetSeconds), Modifier.weight(1f))
                             val place = HostScheduleClock.place(queueTimezone)
                             if (place != null) {
                                 JobFactRow("Time zone", place, Modifier.weight(1f))
@@ -1101,7 +1101,7 @@ private fun AutomationRunPage(
                                 color = LocalTsColors.current.textSecondary,
                             )
                         }
-                        JobFactRow("Backend", run.backend)
+                        JobFactRow("Agent", run.backend)
                     }
                 }
                 if (liveRunID != null && liveRunID != run.id) {

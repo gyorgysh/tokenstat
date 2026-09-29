@@ -29,6 +29,7 @@ import SwiftUI
 struct WindowScreenObserver: NSViewRepresentable {
     @Binding var contentWidth: CGFloat
     @Binding var isFullScreen: Bool
+    @Binding var isLiveResizing: Bool
     @Binding var titlebarInset: CGFloat
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -41,6 +42,7 @@ struct WindowScreenObserver: NSViewRepresentable {
                     to: window,
                     contentWidth: $contentWidth,
                     isFullScreen: $isFullScreen,
+                    isLiveResizing: $isLiveResizing,
                     titlebarInset: $titlebarInset
                 )
             }
@@ -52,6 +54,7 @@ struct WindowScreenObserver: NSViewRepresentable {
         MainActor.assumeIsolated {
             context.coordinator.contentWidth = $contentWidth
             context.coordinator.isFullScreen = $isFullScreen
+            context.coordinator.isLiveResizing = $isLiveResizing
             context.coordinator.titlebarInset = $titlebarInset
         }
     }
@@ -69,16 +72,19 @@ struct WindowScreenObserver: NSViewRepresentable {
         var attachedWindow: NSWindow? { window }
         var contentWidth: Binding<CGFloat>?
         var isFullScreen: Binding<Bool>?
+        var isLiveResizing: Binding<Bool>?
         var titlebarInset: Binding<CGFloat>?
 
         func attach(
             to window: NSWindow?,
             contentWidth: Binding<CGFloat>,
             isFullScreen: Binding<Bool>,
+            isLiveResizing: Binding<Bool>,
             titlebarInset: Binding<CGFloat>
         ) {
             self.contentWidth = contentWidth
             self.isFullScreen = isFullScreen
+            self.isLiveResizing = isLiveResizing
             self.titlebarInset = titlebarInset
             guard self.window !== window else {
                 schedulePublish()
@@ -87,6 +93,12 @@ struct WindowScreenObserver: NSViewRepresentable {
             detach()
             guard let window else { return }
             self.window = window
+            // The frame paints only its gutters black, leaving the native
+            // sidebar backdrop free of an opaque window-wide backing.
+            if #available(macOS 26, *) {
+                window.isOpaque = false
+                window.backgroundColor = .clear
+            }
             observe(window)
             updateDisplayAndClamp(window)
             stripSystemSidebarToggle(in: window)
@@ -97,6 +109,15 @@ struct WindowScreenObserver: NSViewRepresentable {
 
         private func observe(_ window: NSWindow) {
             let center = NotificationCenter.default
+
+            for name in [NSWindow.willStartLiveResizeNotification, NSWindow.didEndLiveResizeNotification] {
+                observers.append(center.addObserver(forName: name, object: window, queue: .main) { [weak self] note in
+                    let resizing = note.name == NSWindow.willStartLiveResizeNotification
+                    self?.onMain {
+                        self?.isLiveResizing?.wrappedValue = resizing
+                    }
+                })
+            }
 
             // Geometry. Skipped entirely during a full-screen transition: a
             // resize notification in that window is AppKit's animation, and
@@ -265,7 +286,11 @@ struct WindowScreenObserver: NSViewRepresentable {
         /// Publish after the current display cycle, not on `Task.yield()`.
         /// A yield can resume inside the next `NSDisplayCycleFlush`.
         private func schedulePublish() {
-            guard !isFullScreenTransitioning else { return }
+            // AppKit still lays out the content continuously. Keep structural
+            // sidebar/inspector decisions stable while dragging instead of
+            // invalidating the entire SwiftUI shell every four points. The
+            // didEndLiveResize observer publishes the exact settled geometry.
+            guard !isFullScreenTransitioning, window?.inLiveResize != true else { return }
             pendingPublish?.cancel()
             pendingPublish = Task { @MainActor [weak self] in
                 await Self.afterDisplayCycle()
@@ -276,6 +301,7 @@ struct WindowScreenObserver: NSViewRepresentable {
         }
 
         private func publish(from window: NSWindow) {
+            guard !window.inLiveResize else { return }
             let width = quantised(window.contentLayoutRect.width, step: 4)
             if contentWidth?.wrappedValue != width { contentWidth?.wrappedValue = width }
 
