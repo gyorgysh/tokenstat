@@ -96,9 +96,38 @@ fn resolve(path: &Path, roots: &[(PathBuf, String, &'static str)]) -> Result<Pat
 
 /// The same containment rule, for a caller outside this module.
 ///
-/// A clone lands where browsing would have shown it, and nowhere else.
+/// A clone lands where browsing would have shown it, and nowhere else. The
+/// check runs on canonical paths, and the answer drops the Windows verbatim
+/// prefix that canonicalizing adds: git cannot create a worktree under
+/// `\\?\C:\...`, and the project list should not show one either.
 pub(crate) fn resolve_root(path: &Path) -> Result<PathBuf, String> {
-    resolve(path, &roots())
+    resolve(path, &roots()).map(plain)
+}
+
+/// A canonical path in the form a person and every tool would write it.
+fn plain(path: PathBuf) -> PathBuf {
+    if cfg!(windows)
+        && let Some(simpler) = without_verbatim_prefix(&path.to_string_lossy())
+    {
+        return PathBuf::from(simpler);
+    }
+    path
+}
+
+/// `\\?\C:\a` is `C:\a`, and `\\?\UNC\server\share` is
+/// `\\server\share`. Anything else verbatim (a volume GUID, a device) has
+/// no plainer spelling and is left alone. Plain text in, so it is tested on
+/// every platform, not only where it runs.
+fn without_verbatim_prefix(text: &str) -> Option<String> {
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return Some(format!(r"\\{rest}"));
+    }
+    let rest = text.strip_prefix(r"\\?\")?;
+    let mut chars = rest.chars();
+    match (chars.next(), chars.next()) {
+        (Some(drive), Some(':')) if drive.is_ascii_alphabetic() => Some(rest.to_owned()),
+        _ => None,
+    }
 }
 
 fn browse(params: &str) -> Result<Value, String> {
@@ -238,6 +267,22 @@ fn mkdir(params: &str) -> Result<Value, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_verbatim_drive_or_share_path_loses_its_prefix() {
+        use super::without_verbatim_prefix as plain;
+        assert_eq!(
+            plain(r"\\?\C:\Users\a\git").as_deref(),
+            Some(r"C:\Users\a\git")
+        );
+        assert_eq!(
+            plain(r"\\?\UNC\server\share\x").as_deref(),
+            Some(r"\\server\share\x")
+        );
+        assert_eq!(plain(r"\\?\Volume{0000}\x"), None);
+        assert_eq!(plain(r"C:\Users\a"), None);
+        assert_eq!(plain("/Users/a/git"), None);
+    }
+
     use super::*;
 
     #[test]
