@@ -44,11 +44,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private readonly StackPanel _transcript = new() { Spacing = Theme.SpaceM };
     private ScrollViewer? _scroll;
     private bool _followEnd = true;
-    private readonly StackPanel _attachStrip = new()
-    {
-        Orientation = Orientation.Horizontal,
-        Spacing = Theme.SpaceS,
-    };
+    private readonly FlowPanel _attachStrip = new() { Spacing = Theme.SpaceS };
     private readonly TextBox _draft = new()
     {
         AcceptsReturn = true,
@@ -1517,6 +1513,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         RebuildAttachStrip();
         well.Children.Add(_attachStrip);
         var row = new Grid { ColumnSpacing = Theme.SpaceS };
+        row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -1529,6 +1527,22 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         row.Children.Add(attach);
         row.Children.Add(options);
         row.Children.Add(_composerActions);
+        // Keep the same draft, menu and action controls mounted across a
+        // resize. Compact settings get the full width above Attach and Send.
+        bool? compact = null;
+        void FitControls(double width)
+        {
+            var next = width < 640;
+            if (compact == next) return;
+            compact = next;
+            Grid.SetColumn((FrameworkElement)options, next ? 0 : 1);
+            Grid.SetColumnSpan((FrameworkElement)options, next ? 3 : 1);
+            Grid.SetRow(attach, next ? 1 : 0);
+            Grid.SetRow(_composerActions, next ? 1 : 0);
+            row.RowSpacing = next ? Theme.SpaceS : 0;
+        }
+        FitControls(_composerDock.ActualWidth);
+        row.SizeChanged += (_, args) => FitControls(args.NewSize.Width);
         well.Children.Add(row);
         return new Border
         {
@@ -1657,9 +1671,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         flyout.Content = new Border { Background = Theme.PanelBrush, Child = panel };
         flyout.Opened += (_, _) => search.Focus(FocusState.Programmatic);
 
-        return new Button
+        var button = new Button
         {
-            Content = label,
+            Content = new TextBlock
+            {
+                Text = label, TextTrimming = TextTrimming.CharacterEllipsis,
+                MaxWidth = 280,
+            },
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Flyout = flyout,
             IsEnabled = !locked,
             Background = Theme.PanelBrush,
@@ -1668,6 +1687,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(10, 6, 10, 6),
         };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, label);
+        ToolTipService.SetToolTip(button, label);
+        return button;
     }
 
     private UIElement AutonomyPills(string current, bool enabled)
@@ -1707,14 +1729,30 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         foreach (var file in _attachments)
         {
             var chip = Chip(file.Name);
+            var name = (TextBlock)chip.Child;
+            name.TextTrimming = TextTrimming.CharacterEllipsis;
+            name.MaxWidth = 240;
+            chip.Child = null;
+            var content = new Grid { ColumnSpacing = Theme.SpaceS };
+            content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var dismiss = ActionIcon.Dismiss.Icon();
+            dismiss.Width = dismiss.Height = 12;
+            Grid.SetColumn(dismiss, 1);
+            content.Children.Add(name);
+            content.Children.Add(dismiss);
+            chip.Child = content;
             var remove = file;
             var button = new Button
             {
                 Content = chip,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
                 Background = new SolidColorBrush(Colors.Transparent),
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(0),
             };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, "Remove attachment " + file.Name);
+            ToolTipService.SetToolTip(button, "Remove attachment " + file.Name);
             button.Click += (_, _) =>
             {
                 _attachments.Remove(remove);
