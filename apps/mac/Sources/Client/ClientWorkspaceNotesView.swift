@@ -263,15 +263,18 @@ struct ClientWorkspaceNotesView: View {
                         Text("Write").tag(false)
                         Text("Preview").tag(true)
                     }.pickerStyle(.segmented).labelsHidden()
-                    if editPreview {
-                        MarkdownText(editBody.isEmpty ? "Nothing written yet." : editBody)
-                            .textSelection(.enabled)
-                            .frame(minHeight: 280, alignment: .topLeading)
-                    } else {
-                        ClientNoteTextEditor(text: $editBody, enabled: !editSaving)
+                    ZStack(alignment: .topLeading) {
+                        ClientNoteTextEditor(text: $editBody, enabled: !editSaving && !editPreview)
                             .frame(minHeight: 280)
-                            .disabled(editSaving)
-                            .accessibilityLabel("Note body")
+                            .opacity(editPreview ? 0 : 1)
+                            .frame(height: editPreview ? 0 : nil)
+                            .clipped()
+                            .accessibilityHidden(editPreview)
+                        if editPreview {
+                            MarkdownText(editBody.isEmpty ? "Nothing written yet." : editBody)
+                                .textSelection(.enabled)
+                                .frame(minHeight: 280, alignment: .topLeading)
+                        }
                     }
                 } footer: {
                     Text("Markdown supported: headings, lists, links and code.")

@@ -18,6 +18,8 @@ private struct SelectedNoteEditor: View {
     @Binding var text: String
     @State private var selection: TextSelection?
     @FocusState private var writing: Bool
+    @Environment(\.undoManager) private var undoManager
+    @State private var history = NoteFormattingHistory()
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
@@ -41,6 +43,20 @@ private struct SelectedNoteEditor: View {
                     }
                 }
         }
+        .onAppear {
+            let value = $text
+            let selected = $selection
+            history.read = { value.wrappedValue }
+            history.write = { replacement in
+                selected.wrappedValue = nil
+                value.wrappedValue = replacement
+            }
+        }
+        .onDisappear {
+            undoManager?.removeAllActions(withTarget: history)
+            history.read = nil
+            history.write = nil
+        }
     }
 
     private func apply(_ style: NoteFormatting) {
@@ -51,10 +67,26 @@ private struct SelectedNoteEditor: View {
             range = NSRange(location: (text as NSString).length, length: 0)
         }
         let edit = style.edit(text, selection: range)
-        text = (text as NSString).replacingCharacters(in: edit.range, with: edit.replacement)
+        history.replace((text as NSString).replacingCharacters(in: edit.range, with: edit.replacement), manager: undoManager)
+        undoManager?.setActionName("Format Note")
         if let selected = Range(edit.selection, in: text) {
             selection = TextSelection(range: selected)
         }
         writing = true
+    }
+}
+
+/// A stable undo target whose bindings are detached when the note closes.
+@MainActor
+private final class NoteFormattingHistory {
+    var read: (() -> String)?
+    var write: ((String) -> Void)?
+
+    func replace(_ text: String, manager: UndoManager?) {
+        guard let previous = read?(), let write, previous != text else { return }
+        manager?.registerUndo(withTarget: self) { [weak manager] target in
+            target.replace(previous, manager: manager)
+        }
+        write(text)
     }
 }

@@ -150,12 +150,21 @@ struct NotesInspector: View {
                         Text("Preview").tag(true)
                     }.pickerStyle(.segmented).labelsHidden()
                 }
-                if preview {
-                    MarkdownText(notesDraft.isEmpty ? "Nothing written yet." : notesDraft)
-                        .textSelection(.enabled)
-                        .frame(minHeight: embedded ? 300 : 120, alignment: .topLeading)
-                } else {
+                ZStack(alignment: .topLeading) {
+                    // Keep native editing/undo state when switching to Preview.
                     notesEditor
+                        .disabled(preview)
+                        .opacity(preview ? 0 : 1)
+                        .frame(height: preview ? 0 : nil)
+                        .clipped()
+                        .accessibilityHidden(preview)
+                    if preview {
+                        MarkdownText(notesDraft.isEmpty ? "Nothing written yet." : notesDraft)
+                            .textSelection(.enabled)
+                            .frame(minHeight: embedded ? 300 : 120, alignment: .topLeading)
+                    }
+                }
+                if !preview {
                     Text("Markdown supported: headings, lists, links and code.")
                         .font(Theme.caption).foregroundStyle(.tertiary)
                 }
@@ -195,6 +204,7 @@ struct NotesInspector: View {
 
     private var notesEditor: some View {
         NoteMarkdownEditor(text: $notesDraft)
+            .id(loadedID)
             .font(Theme.callout)
             .scrollContentBackground(.hidden)
             .frame(minHeight: embedded ? 360 : 180, maxHeight: embedded ? 700 : 360)
