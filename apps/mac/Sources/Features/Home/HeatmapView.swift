@@ -439,6 +439,10 @@ struct HeatmapCellsCanvas: View, Equatable {
     var body: some View {
         Canvas { context, _ in
             guard !palette.isEmpty else { return }
+            // Cells never overlap. Combine equal shades so a year takes at
+            // most two fills per palette level instead of one fill per day.
+            // Locked days keep their separate opacity bucket.
+            var paths = Array(repeating: Path(), count: palette.count * 2)
             for (rowIndex, row) in rows.enumerated() {
                 for (column, day) in row.enumerated() {
                     guard let day else { continue }
@@ -446,11 +450,15 @@ struct HeatmapCellsCanvas: View, Equatable {
                     let rect = CGRect(x: CGFloat(column) * (cell + gap),
                                       y: CGFloat(rowIndex) * (cell + gap),
                                       width: cell, height: cell)
-                    context.fill(Path(roundedRect: rect, cornerRadius: corner),
-                                 with: .color(palette[level].opacity(day.isLocked ? 0.28 : 1)))
+                    let bucket = level * 2 + (day.isLocked ? 1 : 0)
+                    paths[bucket].addRoundedRect(in: rect,
+                        cornerSize: CGSize(width: corner, height: corner))
                 }
             }
-
+            for (bucket, path) in paths.enumerated() where !path.isEmpty {
+                context.fill(path, with: .color(
+                    palette[bucket / 2].opacity(bucket.isMultiple(of: 2) ? 1 : 0.28)))
+            }
         }
     }
 }
