@@ -13,6 +13,62 @@ at the end.
 
 ## [Unreleased]
 
+A simpler desktop. Machine-wide places move to an icon rail, the sidebar
+lists your projects with their chats and terminals, and each screen has
+one toolbar row. A project can open another branch in a folder of its
+own. Notes gain formatting, Tasks are a three-stage board, Devices fit in
+one list, and the characters are plush toys that keep their shape.
+
+### Added
+
+- Worktrees: work on another branch in its own folder, next to the one
+  you have open. Start one from the foot of the branch picker, choose a
+  branch prefix, and it opens as a project. On the Mac, iOS, Windows and
+  Android, for a computer on this version or later.
+- Formatting in Notes on every client: heading, bold, italic, bulleted
+  list, checklist, quote and code, applied to the selection, with Undo.
+  A note can be read as a preview.
+- Search on the Devices screen.
+
+### Changed
+
+- The Mac and Windows window is an icon rail beside a project sidebar.
+  Each project lists its five latest chats and its running terminals,
+  and its sections are tabs in the bar. On macOS 26 and later the
+  sidebar is dark frosted glass. The sidebar and inspector are resizable
+  and remember their widths.
+- Workspaces are called Projects everywhere a person reads it. New chat
+  asks which project the chat belongs to.
+- Chats that were opened and never used no longer fill the lists, and
+  Home's Continue shows only work that can still open.
+- Automations are a table that fits a normal window: name, schedule,
+  project, next run and last run, sortable, with Run now at the row's
+  end. Templates and scheduler settings are one click away.
+- Tasks are a To Do, In progress and Done board with one New task row
+  per stage. Phones pick the stage at the top.
+- Devices show one row per device with one way into its details, and
+  rarer actions such as rename, revoke and forget sit in one menu. A
+  phone's details explain how to use it instead of offering Connect.
+- Insights draw charts on every client, and daily charts keep a gap for
+  a day without usage instead of closing it up.
+- The characters are soft plush shapes in the same colours: a ball, a
+  star, a heart and a tortilla. Each keeps its shape while it rolls,
+  turns, blinks and shows its mood.
+- Money figures say API list price, and plan limits say how much of each
+  coding tool's subscription is left.
+
+### Fixed
+
+- Resizing the Mac window, most of all on Home, does far less work, and
+  hidden screens stop animating.
+- Opening a chat no longer freezes the Mac while the keychain is slow to
+  answer.
+- A file change in one project refreshes only that project, and an idle
+  computer answers about a quarter as many background requests.
+- A long chat shows its latest turn sooner after opening.
+- In a narrow window the project bar, chat composer and terminal controls
+  stay readable on the Mac, and the chat composer wraps on Windows.
+
 ## [1.0.8] - 2026-09-21
 
 Windows chat gains Follow, collapse, and Show/Hide output. Switching
