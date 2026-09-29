@@ -27,8 +27,18 @@ internal sealed class ResizeHandle : UserControl
         ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeWestEast);
         PointerEntered += (_, _) => Background = Theme.AccentSoftBrush;
         PointerExited += (_, _) => Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        _thumb.DragStarted += (_, _) => MainWindow.ColumnsResizing = true;
-        _thumb.DragCompleted += (_, _) => MainWindow.ColumnsResizing = false;
-        Unloaded += (_, _) => MainWindow.ColumnsResizing = false;
+        _thumb.DragStarted += (_, _) => ColumnResize.InProgress = true;
+        _thumb.DragCompleted += (_, _) => ColumnResize.InProgress = false;
+        Unloaded += (_, _) => ColumnResize.InProgress = false;
     }
+}
+
+/// <summary>
+/// Whether a column divider is being dragged, so motion can pause meanwhile.
+/// Kept beside the handle rather than on the window, so the handle builds on
+/// its own, as the native smoke tests compile it.
+/// </summary>
+internal static class ColumnResize
+{
+    internal static bool InProgress { get; set; }
 }

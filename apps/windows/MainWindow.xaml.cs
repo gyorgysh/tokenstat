@@ -23,8 +23,7 @@ namespace Tokenstat;
 public sealed partial class MainWindow : Window
 {
     private static bool _windowMotionSuspended;
-    internal static bool ColumnsResizing { get; set; }
-    internal static bool MotionSuspended => _windowMotionSuspended || ColumnsResizing;
+    internal static bool MotionSuspended => _windowMotionSuspended || ColumnResize.InProgress;
     private bool _windowActive = true;
     private bool _resizing;
 

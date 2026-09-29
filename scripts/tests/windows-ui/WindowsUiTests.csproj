@@ -37,6 +37,7 @@
     <Compile Include="../../../apps/windows/Design/NativeContentLayout.cs" Link="NativeContentLayout.cs" />
     <Compile Include="../../../apps/windows/Design/ContextMenus.cs" Link="ContextMenus.cs" />
     <Compile Include="../../../apps/windows/Design/InspectorHost.cs" Link="InspectorHost.cs" />
+    <Compile Include="../../../apps/windows/Design/ResizeHandle.cs" Link="ResizeHandle.cs" />
     <Compile Include="../../../apps/windows/Design/FlowPanel.cs" Link="FlowPanel.cs" />
     <Compile Include="../../../apps/windows/Design/Persona/PersonaClipper.cs" Link="PersonaClipper.cs" />
     <Compile Include="../../../apps/windows/Design/Persona/PersonaClipGeometry.cs" Link="PersonaClipGeometry.cs" />
