@@ -83,7 +83,7 @@ struct NotesView: View {
                         .clipped().opacity(showList ? 1 : 0)
                         .allowsHitTesting(showList).accessibilityHidden(!showList)
                     if wide { ThemeRule.vertical }
-                    NotesInspector(model: model, folders: folders, embedded: true) { model.selectedCardID = nil }
+                    NotesInspector(model: model, folders: folders, embedded: true, showsBack: !wide) { model.selectedCardID = nil }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .clipped().opacity(wide || selected ? 1 : 0)
                         .allowsHitTesting(wide || selected).accessibilityHidden(!wide && !selected)

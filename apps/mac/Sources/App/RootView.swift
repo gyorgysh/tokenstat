@@ -968,29 +968,24 @@ struct RootView: View {
               let folder = workspaces.folders.first(where: { $0.id == id }) else { return nil }
         var branch: AnyView?
         if let git = folder.git, git.isRepo {
+            // Worktrees open from the foot of the branch picker, where the
+            // branches are, rather than from a button of their own here.
+            #if os(macOS)
+            let openWorktrees: (() -> Void)? = { worktreeProject = folder }
+            #else
+            let openWorktrees: (() -> Void)? = nil
+            #endif
             branch = AnyView(ViewThatFits(in: .horizontal) {
-                HStack(spacing: Theme.Space.xs) {
-                    BranchChip(workspaceID: folder.id, git: git, model: workspaces) {
-                        await workspaces.refresh()
-                    }
-                    #if os(macOS)
-                    Button("Worktrees", .source) { worktreeProject = folder }
-                        .buttonStyle(SecondaryButtonStyle(small: true))
-                        .help("Open a separate working folder for another branch")
-                    #endif
-                }.fixedSize()
-                HStack(spacing: Theme.Space.xs) {
-                    BranchChip(workspaceID: folder.id, git: git, compact: true, model: workspaces) {
-                        await workspaces.refresh()
-                    }
-                    #if os(macOS)
-                    ToolbarIconButton(systemImage: ActionIcon.source.symbol,
-                                      help: "Worktrees: open a separate working folder for another branch") {
-                        worktreeProject = folder
-                    }
-                    .accessibilityLabel("Worktrees")
-                    #endif
-                }.fixedSize()
+                BranchChip(workspaceID: folder.id, git: git, model: workspaces,
+                           onWorktrees: openWorktrees) {
+                    await workspaces.refresh()
+                }
+                .fixedSize()
+                BranchChip(workspaceID: folder.id, git: git, compact: true, model: workspaces,
+                           onWorktrees: openWorktrees) {
+                    await workspaces.refresh()
+                }
+                .fixedSize()
             })
         }
         return ProjectHeader(
@@ -1538,8 +1533,10 @@ struct RootView: View {
             )
     }
 
+    /// Chats only. Terminals carry their own browser beside the sessions,
+    /// and two globes on one screen opened two different browsers.
     private var supportsWorkspaceBrowser: Bool {
-        route.workspaceSection == .chat || route.workspaceSection == .sessions
+        route.workspaceSection == .chat
     }
 
     private var showsWorkspaceBrowser: Bool {
@@ -2281,9 +2278,9 @@ struct RootView: View {
             SidebarRow(label: "Terminals", symbol: "terminal", trailing: sessions.isEmpty ? nil : "\(sessions.count)",
                        isSelected: showingTerminal) { openSection(.sessions, in: folder.id) }
             sessionRows(sessions, in: folder, showingTerminal: showingTerminal)
-            SidebarRow(label: "Chats", symbol: "bubble.left.and.bubble.right", isSelected: false) {
-                openSection(.chat, in: folder.id) { showingChatOverview = true }
-            }
+            // Chats sit directly under the project, beside Terminals. A
+            // "Chats" heading over them repeated itself under every project
+            // and said nothing the rows' own marks do not.
             chatHistoryRows(for: folder)
             ForEach(automations.liveJobs(in: folder.id)) { job in
                 let run = automations.lastRun(for: job)
@@ -2900,7 +2897,7 @@ struct RootView: View {
 
     @ViewBuilder
     private func chatHistoryRows(for folder: WorkspaceFolder) -> some View {
-        let list = chat.sidebarChats(in: folder.id)
+        let list = chat.sidebarChats(in: folder.id).filter { !chat.isUntouched($0, in: folder.id) }
         if list.isEmpty {
             EmptyView()
         } else {
@@ -2991,7 +2988,7 @@ struct RootView: View {
                         .foregroundStyle(.secondary)
                     }
                 }
-                .padding(.leading, Theme.Space.xl + Theme.Space.s)
+                .padding(.leading, ChatSidebarConversationRow.titleInset)
                 .padding(.trailing, Theme.Space.m)
                 .padding(.vertical, 4)
             }
@@ -3126,15 +3123,24 @@ struct RootView: View {
 
     private var recentHomeWork: [DesktopHomeDestination] {
         guard let scope = WorkSessionContext.shared.scope else { return [] }
-        return WorkContinuityStore.shared.recentConversations(scope: scope).map { reference in
+        return WorkContinuityStore.shared.recentConversations(scope: scope).compactMap { reference in
+            // Work that can never open again is not something to continue.
+            // A machine that is reconnecting or waiting for access stays:
+            // those come back.
+            switch desktopAvailability(reference) {
+            case .hostRemoved, .itemDeleted: return nil
+            default: break
+            }
             let folderID = WorkPlaceRestoration.folderID(
                 for: reference, among: workspaces.folders.map(\.id),
                 localHostIdentity: WorkSessionContext.shared.localHostIdentity
             )
             let folder = workspaces.folders.first { $0.id == folderID }
-            let title = folderID.flatMap { id in
-                chat.sidebarChats(in: id).first { $0.id == reference.itemID }?.title
+            let conversation = folderID.flatMap { id in
+                chat.sidebarChats(in: id).first { $0.id == reference.itemID }
             }
+            if let conversation, let folderID, chat.isUnused(conversation, in: folderID) { return nil }
+            let title = conversation?.title
             let machine = reference.hostIdentity == WorkSessionContext.shared.localHostIdentity
                 ? "This Mac" : folder?.machineLabel ?? "Remote machine"
             return DesktopHomeDestination(
@@ -4238,6 +4244,12 @@ extension SidebarGroupHeader where Trailing == EmptyView {
 /// already is. The confirmation is owned by the row so moving the pointer
 /// away cannot dismiss or retarget it.
 private struct ChatSidebarConversationRow: View {
+    /// Where the mark starts: a `SidebarRow`'s padding plus half the slack
+    /// between its 18 pt glyph frame and the 16 pt mark.
+    static let markInset: CGFloat = Theme.Space.m + 1
+    /// Where the title starts, so the list's footer can line up with it.
+    static var titleInset: CGFloat { markInset + DisplayFit.dp(16) + Theme.Space.s }
+
     let conversation: ChatConversation
     /// How the mark names this conversation to the draft store. Nil while
     /// the folder's owner is unknown, which draws nothing.
@@ -4298,7 +4310,9 @@ private struct ChatSidebarConversationRow: View {
             }
             .frame(minWidth: 26, alignment: .trailing)
         }
-        .padding(.leading, Theme.Space.xl + 2)
+        // Level with the project's Terminals row: the mark sits where that
+        // row's glyph does, because a chat is one of the project's own rows.
+        .padding(.leading, Self.markInset)
         .padding(.trailing, Theme.Space.s + 2)
         .frame(height: DisplayFit.dp(30))
         .background(
@@ -4308,8 +4322,7 @@ private struct ChatSidebarConversationRow: View {
                         ? Theme.rowSelectedNested
                         : (isHovering ? Theme.rowHighlight.opacity(0.45) : .clear)
                 )
-                .padding(.leading, Theme.Space.l + 2)
-                .padding(.trailing, Theme.Space.xs)
+                .padding(.horizontal, Theme.Space.xs)
         )
         .contentShape(.rect)
         .onHover { isHovering = $0 }

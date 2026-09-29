@@ -18,6 +18,9 @@ struct NotesInspector: View {
     @Bindable var model: TodoModel
     var folders: [WorkspaceFolder]
     var embedded = false
+    /// Whether the list is hidden behind this pane, so there has to be a
+    /// way back to it. Beside the list, a back button leads nowhere new.
+    var showsBack = true
     var onClose: () -> Void
 
     @State private var titleDraft = ""
@@ -52,17 +55,21 @@ struct NotesInspector: View {
     var body: some View {
         VStack(spacing: 0) {
             if embedded {
-                HStack {
-                    Button("All notes", .back, action: onClose).buttonStyle(SecondaryButtonStyle(small: true))
-                    Spacer()
-                    if note != nil {
-                        Picker("Note view", selection: $preview) {
-                            Text("Write").tag(false)
-                            Text("Preview").tag(true)
-                        }.pickerStyle(.segmented).labelsHidden().frame(width: 160)
-                    }
-                }.padding(Theme.Space.m)
-                ThemeRule()
+                if showsBack || note != nil {
+                    HStack {
+                        if showsBack {
+                            Button("All notes", .back, action: onClose).buttonStyle(SecondaryButtonStyle(small: true))
+                        }
+                        Spacer()
+                        if note != nil {
+                            Picker("Note view", selection: $preview) {
+                                Text("Write").tag(false)
+                                Text("Preview").tag(true)
+                            }.pickerStyle(.segmented).labelsHidden().frame(width: 160)
+                        }
+                    }.padding(Theme.Space.m)
+                    ThemeRule()
+                }
             } else {
                 InspectorChromeBar(onClose: onClose) {
                     InspectorTitle(title: "Note", symbol: "note.text", tint: Theme.secondary)
@@ -76,7 +83,7 @@ struct NotesInspector: View {
                     InspectorEmptyState(
                         mark: "mark_note",
                         title: "Pick a note",
-                        subtitle: "Its text, where it belongs and what to do with it live here."
+                        subtitle: "Choose one from the list, or start a new one."
                     )
                 }
             }

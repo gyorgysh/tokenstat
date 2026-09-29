@@ -72,7 +72,7 @@ struct WorkspacesOverviewView: View {
         // One row: find a folder, pick a machine, order, add. The summary
         // tiles that stood here counted what the grid below already shows.
         HStack(spacing: Theme.Space.s) {
-            SearchField(text: $search, prompt: "Search folders, paths, or machines")
+            SearchField(text: $search, prompt: "Search projects")
                 .frame(maxWidth: 300)
             if scopes.count > 2 {
                 Picker("Machine", selection: $scope) {
@@ -94,7 +94,7 @@ struct WorkspacesOverviewView: View {
             Spacer(minLength: Theme.Space.s)
             ToolbarIconButton(systemImage: gridLayout ? "list.bullet" : "square.grid.2x2",
                 help: gridLayout ? "Show workspaces as a list" : "Show workspaces as cards") { gridLayout.toggle() }
-            Button("Add folder", .create) { onAdd() }
+            Button("Add project", .create) { onAdd() }
                 .buttonStyle(AccentButtonStyle(small: true))
         }
         .padding(.horizontal, Theme.Space.m)
@@ -150,11 +150,11 @@ struct WorkspacesOverviewView: View {
 
     private var emptyState: some View {
         Card(
-            title: "Give this sidebar something to open.",
-            subtitle: "Register a folder on this Mac or on a paired machine, or clone a repository onto either.",
+            title: "Add your first project",
+            subtitle: "Pick a folder on this Mac or on a paired computer, or clone a repository.",
             mark: "mark_archive"
         ) {
-            Button("Add folder", .create) { onAdd() }
+            Button("Add project", .create) { onAdd() }
                 .buttonStyle(AccentButtonStyle(small: true))
         }
     }

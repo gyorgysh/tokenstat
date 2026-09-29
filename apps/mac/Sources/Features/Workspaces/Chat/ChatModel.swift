@@ -735,6 +735,33 @@ final class ChatModel {
     /// The conversations to draw under this folder in the sidebar. The live
     /// list for the folder on screen, otherwise what its last load read, or
     /// nothing when the folder has not been opened in this session.
+    /// A chat that was opened and never used: still the host's default
+    /// title, no message either way, nothing running and no unsent words.
+    ///
+    /// The sidebar leaves these out, so a row of "New chat" left behind by
+    /// every press of New chat does not bury the conversations that have
+    /// something in them. The one on screen always stays. All four tests
+    /// are needed: a host too old to send `lastMessageAtMs` still renames a
+    /// chat from its first prompt, so the title alone keeps its chats. The
+    /// draft is read without observing, so typing never lays the list out
+    /// again. Leaving the chat changes the selection, and that is when the
+    /// list asks.
+    func isUntouched(_ conversation: ChatConversation, in folderID: String) -> Bool {
+        conversation.id != selected?.id && isUnused(conversation, in: folderID)
+    }
+
+    /// The same test without the exemption for the chat on screen, for
+    /// places that list work to go back to. An empty chat is nothing to
+    /// continue, even while it is still the selection.
+    func isUnused(_ conversation: ChatConversation, in folderID: String) -> Bool {
+        guard conversation.title == "New chat",
+              conversation.lastMessageAtMs == nil,
+              !conversation.running
+        else { return false }
+        guard let reference = draftReference(for: conversation.id, in: folderID) else { return true }
+        return ChatDraftStore.shared.draft(for: reference) == nil
+    }
+
     func sidebarChats(in folderID: String) -> [ChatConversation] {
         guard continuityScope == WorkSessionContext.shared.scope else { return [] }
         if self.folderID == folderID { return chats }

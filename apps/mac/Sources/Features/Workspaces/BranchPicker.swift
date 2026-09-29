@@ -15,6 +15,9 @@ struct BranchPickerPresentation<Label: View>: View {
     /// The model, when the caller has one: a switch has to know about open
     /// editor buffers before it moves the branch under them.
     var model: WorkspacesModel? = nil
+    /// Opens the project's worktrees, from the foot of the picker. Nil where
+    /// the surface has no worktree screen to open.
+    var onWorktrees: (() -> Void)? = nil
     let onChanged: () async -> Void
     @ViewBuilder let label: () -> Label
 
@@ -31,7 +34,8 @@ struct BranchPickerPresentation<Label: View>: View {
                     currentBranch: currentBranch,
                     model: model,
                     onChanged: onChanged,
-                    dismiss: { isPresented = false }
+                    dismiss: { isPresented = false },
+                    onWorktrees: onWorktrees
                 )
                 .frame(width: 390, height: 490)
             }
@@ -69,6 +73,7 @@ struct BranchChip: View {
     /// The model, when the caller has one, so a switch can check for unsaved
     /// editor buffers first.
     var model: WorkspacesModel? = nil
+    var onWorktrees: (() -> Void)? = nil
     let onChanged: () async -> Void
 
     var body: some View {
@@ -76,6 +81,7 @@ struct BranchChip: View {
             workspaceID: workspaceID,
             currentBranch: git.branch,
             model: model,
+            onWorktrees: onWorktrees,
             onChanged: onChanged
         ) {
             HStack(spacing: Theme.Space.xs) {
@@ -123,6 +129,7 @@ private struct BranchPickerContent: View {
     var model: WorkspacesModel?
     let onChanged: () async -> Void
     let dismiss: () -> Void
+    var onWorktrees: (() -> Void)? = nil
 
     @State private var branches: [GitBranch] = []
     @State private var query = ""
@@ -216,6 +223,26 @@ private struct BranchPickerContent: View {
 
             ThemeRule()
             createRow
+            if let onWorktrees {
+                ThemeRule()
+                // Worktrees live here, beside the branches, because a
+                // worktree is a branch with a folder of its own. A toolbar
+                // button of their own put a word most people never need
+                // beside the project name.
+                Button("Work on a branch in its own folder…", .source) {
+                    dismiss()
+                    // The popover has to be gone before a sheet can open.
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(200))
+                        onWorktrees()
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.accent)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(Theme.Space.m)
+                .help("Worktrees: a separate folder for another branch, so two can be open at once")
+            }
         }
         .background(Theme.panel)
         .task { await load() }

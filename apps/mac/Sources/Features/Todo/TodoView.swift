@@ -245,14 +245,10 @@ struct TodoView: View {
                     .padding(.horizontal, 7).padding(.vertical, 3)
                     .background(tint(for: id).opacity(0.12), in: Capsule())
                 Spacer()
-                if !(id == "done" && model.showingArchive) {
-                    Button { addingIn = addingIn == id ? nil : id } label: {
-                        Image(systemName: addingIn == id ? "xmark" : "plus")
-                            .font(Theme.font(12, weight: .medium)).frame(width: 32, height: 32)
-                    }.buttonStyle(.plain).foregroundStyle(Theme.accent)
-                        .help("Add a task to \(label)")
-                }
             }
+            // One way in per column, at the foot of its cards, where a board
+            // puts it. A second "+" in the header was the same button twice.
+            .frame(minHeight: 32)
             .padding(.horizontal, Theme.Space.s)
             .padding(.vertical, Theme.Space.s)
 
@@ -311,7 +307,9 @@ struct TodoView: View {
                         }
                         .frame(maxWidth: .infinity).padding(.vertical, Theme.Space.xl)
                     }
-                    if !(id == "done" && model.showingArchive) {
+                    // Work lands in Done by being finished, not by being
+                    // written there, so that column has no way to add.
+                    if id != "done" {
                         AddCardTrigger(expanded: Binding(
                                 get: { addingIn == id },
                                 set: { open in
@@ -748,8 +746,8 @@ private struct CardView: View {
 
 /// The full-width row that opens New Task.
 ///
-/// One of these sits above the card list and one below it, both driving the
-/// presentation flag, so a long backlog still has a nearby way to add work.
+/// It sits at the foot of a column's cards, the one place a board offers to
+/// add. The toolbar's New task covers a backlog too long to scroll.
 private struct AddCardTrigger: View {
     @Binding var expanded: Bool
 

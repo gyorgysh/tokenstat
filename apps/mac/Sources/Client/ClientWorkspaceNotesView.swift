@@ -257,7 +257,7 @@ struct ClientWorkspaceNotesView: View {
             Form {
                 Section {
                     TextField("Title", text: $editText, axis: .vertical)
-                        .font(.headline)
+                        .font(Theme.headline)
                         .disabled(editSaving)
                     Picker("Note view", selection: $editPreview) {
                         Text("Write").tag(false)

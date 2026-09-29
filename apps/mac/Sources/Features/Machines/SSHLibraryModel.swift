@@ -678,8 +678,13 @@ final class SSHLibraryModel {
     /// The handful somebody actually returns to. Favourites first, then the
     /// most recently used, because a list of forty servers is a list nobody
     /// scans twice.
+    ///
+    /// Empty while every server fits on screen anyway. A short list shown
+    /// twice, once as Recent and once as All servers, reads as two servers
+    /// with the same name.
     var recentHosts: [SSHHost] {
-        hosts
+        guard hosts.count > Self.recentShortcutThreshold else { return [] }
+        return hosts
             .filter { $0.favorite || $0.lastConnectedMs != nil }
             .sorted { left, right in
                 if left.favorite != right.favorite { return left.favorite }
@@ -688,6 +693,9 @@ final class SSHLibraryModel {
             .prefix(5)
             .map { $0 }
     }
+
+    /// How many servers a list holds before a Recent shortcut earns its place.
+    static let recentShortcutThreshold = 8
 
     var searching: Bool { !search.trimmingCharacters(in: .whitespaces).isEmpty }
 

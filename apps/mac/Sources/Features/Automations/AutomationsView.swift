@@ -145,7 +145,7 @@ struct AutomationsView: View {
     private var toolbar: some View {
         HStack(spacing: Theme.Space.s) {
             SearchField(text: $search, prompt: showingRuns ? "Search runs" : "Search automations")
-                .frame(maxWidth: 260)
+                .frame(minWidth: 140, maxWidth: 260)
             if !showingRuns {
                 filterMenu
             }
@@ -158,17 +158,22 @@ struct AutomationsView: View {
                 selection: $showingRuns
             )
             .fixedSize()
-            Button("Scheduler", .settings) { showingScheduler.toggle() }
-                .buttonStyle(SecondaryButtonStyle(small: true))
-                .help("Time limit and how many jobs run at once")
+            templatesMenu
+            // A setting, not a daily action, so it takes a glyph's width and
+            // leaves the words to the things people press every day.
+            ToolbarIconButton(
+                systemImage: ActionIcon.settings.symbol,
+                help: "Scheduler: time limit and how many jobs run at once",
+                isAccent: showingScheduler
+            ) { showingScheduler.toggle() }
                 .popover(isPresented: $showingScheduler, arrowEdge: .bottom) {
                     schedulerCard
                         .frame(width: 380)
                         .padding(Theme.Space.s)
                 }
-            templatesMenu
             Button("New automation", .create) { creating = true }
                 .buttonStyle(AccentButtonStyle(small: true))
+                .fixedSize()
                 .disabled(folders.isEmpty)
                 .help(folders.isEmpty ? "Add a project first. An agent runs somewhere." : "Schedule an agent job")
         }
@@ -264,14 +269,13 @@ struct AutomationsView: View {
     /// table is for.
     private var jobsTable: some View {
         Table(visibleJobs, selection: jobSelection, sortOrder: $jobOrder) {
+            // The agent's mark leads the name: it says who does the job, and
+            // the Schedule column already says when in words.
             TableColumn("Name", value: \.name) { job in
                 HStack(spacing: Theme.Space.s) {
-                    CadenceGlyph(
-                        schedule: job.schedule,
-                        enabled: job.enabled,
-                        size: 16,
-                        summary: model.scheduleSummary(job.schedule)
-                    )
+                    HarnessMark(id: job.backend, size: 16)
+                        .help(backendLabel(job.backend))
+                        .accessibilityLabel(backendLabel(job.backend))
                     Text(job.name)
                         .font(Theme.font(13, weight: .medium))
                         .foregroundStyle(job.enabled ? Color.primary : Color.secondary)
@@ -279,37 +283,31 @@ struct AutomationsView: View {
                 }
                 .help(job.prompt)
             }
-            .width(min: 140, ideal: 210)
+            .width(min: 120, ideal: 160)
+            // Ideal widths add up to what a 1100 pt window leaves beside the
+            // sidebar, so every column is on screen without scrolling sideways.
             TableColumn("Schedule") { job in
                 cell(model.scheduleSummary(job.schedule))
             }
-            .width(min: 100, ideal: 150)
+            .width(min: 90, ideal: 116)
             TableColumn("Project") { job in
                 cell(folderLabel(job.workspaceID))
             }
-            .width(min: 80, ideal: 120)
+            .width(min: 70, ideal: 96)
+            // A paused job has no next run, so its status sits where the
+            // time would: one column answers "when does this go next".
             TableColumn("Next run", value: \.nextRunOrder) { job in
                 nextRunCell(job)
             }
-            .width(min: 90, ideal: 140)
+            .width(min: 90, ideal: 110)
             TableColumn("Last run", value: \.lastRunOrder) { job in
                 lastRunCell(job)
             }
-            .width(min: 90, ideal: 130)
-            TableColumn("Status", value: \.enabledOrder) { job in
-                statusCell(job)
-            }
-            .width(min: 84, ideal: 96)
-            TableColumn("Agent") { job in
-                HarnessMark(id: job.backend, size: 18)
-                    .help(backendLabel(job.backend))
-                    .accessibilityLabel(backendLabel(job.backend))
-            }
-            .width(min: 40, ideal: 52)
+            .width(min: 80, ideal: 110)
             TableColumn("") { job in
                 actionsCell(job)
             }
-            .width(min: 66, ideal: 72)
+            .width(min: 62, ideal: 64)
         }
         .quietTableStyle()
         .scrollContentBackground(.hidden)
@@ -341,7 +339,7 @@ struct AutomationsView: View {
     @ViewBuilder
     private func nextRunCell(_ job: Automation) -> some View {
         if !job.enabled {
-            cell("Paused")
+            statusCell(job)
         } else if let next = job.nextRun {
             cell(HostScheduleClock.wallClock(next, timezone: model.schedulerTimezone)
                 ?? next.formatted(date: .abbreviated, time: .shortened))
@@ -806,7 +804,6 @@ extension View {
 extension Automation {
     var nextRunOrder: Int64 { enabled ? (nextRunAtMs ?? .max) : .max }
     var lastRunOrder: Int64 { lastRunAtMs ?? 0 }
-    var enabledOrder: Int { enabled ? 0 : 1 }
 }
 
 /// The outcome of a run, in the one shape it takes everywhere on this screen.

@@ -630,10 +630,6 @@ struct MachinesView: View {
                         isSelected: model.selectedKind == .peer(peer.key)
                     ) {
                         HStack(spacing: Theme.Space.s) {
-                            Button("Details", .reveal) { inspectPeer(peer) }
-                                .accessibilityIdentifier("device.details.peer.\(peer.key)")
-                                .accessibilityLabel("Details for \(peer.label.isEmpty ? (model.accountName(for: peer) ?? "device") : peer.label)")
-                                .buttonStyle(SecondaryButtonStyle(small: true))
                             Button("Approve", .approve) { Task { await model.approve(peer) } }
                                 .buttonStyle(AccentButtonStyle())
                             Button("Forget", .delete, role: .destructive) { confirmForget = peer }
@@ -641,6 +637,8 @@ struct MachinesView: View {
                         }
                     }
                     .onTapGesture { inspectPeer(peer) }
+                    .accessibilityIdentifier("device.details.peer.\(peer.key)")
+                    .accessibilityAction(named: "Details") { inspectPeer(peer) }
                 }
                 Text("Approve only devices you recognize. You can revoke access later.")
                 .font(Theme.caption)
@@ -684,11 +682,7 @@ struct MachinesView: View {
                         isSelected: model.selectedKind == .peer(peer.key)
                     ) {
                         HStack(spacing: Theme.Space.s) {
-                            Button("Details", .reveal) { inspectPeer(peer) }
-                                .accessibilityIdentifier("device.details.peer.\(peer.key)")
-                                .accessibilityLabel("Details for \(peer.label.isEmpty ? (model.accountName(for: peer) ?? "device") : peer.label)")
-                                .buttonStyle(SecondaryButtonStyle(small: true))
-                            Menu {
+                            ToolbarMenuButton(help: "Manage \(peer.label.isEmpty ? (model.accountName(for: peer) ?? "device") : peer.label)") {
                                 if peer.trust == .approved {
                                     Button("Revoke", .revoke, role: .destructive) { confirmRevoke = peer }
                                         .buttonStyle(SecondaryButtonStyle())
@@ -698,18 +692,13 @@ struct MachinesView: View {
                                 }
                                 Button("Forget", .delete, role: .destructive) { confirmForget = peer }
                                     .buttonStyle(SecondaryButtonStyle())
-                            } label: {
-                                Label("Manage", systemImage: "ellipsis")
-                                    .font(Theme.caption.weight(.medium))
-                                    .foregroundStyle(Theme.accent)
-                                    .padding(.horizontal, 10).padding(.vertical, 6)
-                                    .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 7))
                             }
-                            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                            .help("Manage \(peer.label.isEmpty ? (model.accountName(for: peer) ?? "device") : peer.label)")
+                            DeviceRowDisclosure()
                         }
                     }
                     .onTapGesture { inspectPeer(peer) }
+                    .accessibilityIdentifier("device.details.peer.\(peer.key)")
+                    .accessibilityAction(named: "Details") { inspectPeer(peer) }
                 }
             }
             .transition(.smoothIn(reduceMotion: reduceMotion))
@@ -907,6 +896,11 @@ struct MachinesView: View {
                             ? Theme.accent.opacity(0.5) : Theme.border, lineWidth: 1))
                     .contentShape(.rect)
                     .onTapGesture { inspectAccount(machine) }
+                    // The whole row opens the details, so the keyboard and
+                    // VoiceOver get the same way in without a button for it.
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("device.details.account.\(machine.id)")
+                    .accessibilityAction(named: "Details") { inspectAccount(machine) }
                 }
             }
             .transition(.smoothIn(reduceMotion: reduceMotion))
@@ -926,10 +920,6 @@ struct MachinesView: View {
 
     private func deviceActions(_ machine: Machine, isSelf: Bool) -> some View {
         HStack(spacing: Theme.Space.s) {
-            Button("Details", .reveal) { inspectAccount(machine) }
-                .accessibilityIdentifier("device.details.account.\(machine.id)")
-                .accessibilityLabel("Details for \(model.resolvedName(for: machine) ?? machine.displayName)")
-                .buttonStyle(SecondaryButtonStyle(small: true))
             if machine.isHost, !isSelf {
                 if let peer = model.peer(for: machine) {
                     if model.isConnected(machine) {
@@ -944,7 +934,7 @@ struct MachinesView: View {
                 }
             }
             Spacer(minLength: 0)
-            Menu {
+            ToolbarMenuButton(help: "Manage \(model.resolvedName(for: machine) ?? machine.displayName)") {
                 Button("Rename", .edit) { renamingID = machine.machineID }
                 if !isSelf {
                     if !machine.isHost, let peer = linkedPeer(for: machine) {
@@ -960,16 +950,8 @@ struct MachinesView: View {
                         Button("Remove from account", .delete, role: .destructive) { pendingUnlink = machine }
                     }
                 }
-            } label: {
-                Label("Manage", systemImage: "ellipsis")
-                    .font(Theme.caption.weight(.medium))
-                    .foregroundStyle(Theme.accent)
             }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-            .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.accent.opacity(0.2)))
-            .help("Manage \(model.resolvedName(for: machine) ?? machine.displayName)")
+            DeviceRowDisclosure()
         }
     }
 
@@ -1753,5 +1735,20 @@ private struct PairingForm: View {
             String(trimmed[..<at]),
             String(trimmed[trimmed.index(after: at)...])
         )
+    }
+}
+
+/// The chevron at the end of a device row: the row itself opens the details.
+///
+/// A "Details" button on every row doubled each row's controls and read as
+/// one more thing to decide. A chevron is the familiar sign that a row leads
+/// somewhere, and the row's tap target is already all of it.
+private struct DeviceRowDisclosure: View {
+    var body: some View {
+        Image(systemName: "chevron.right")
+            .font(Theme.font(11, weight: .semibold))
+            .foregroundStyle(.tertiary)
+            .frame(width: 14)
+            .accessibilityHidden(true)
     }
 }
