@@ -119,9 +119,37 @@ struct RootView: View {
     /// Honored until they close it; without the pin the fit would override
     /// the reopen on the next read.
     @State private var isSidebarPinned = false
-    /// The window's content width, published by `WindowScreenObserver` from
-    /// resize notifications rather than measured inside the split view.
-    @State private var windowContentWidth: CGFloat = 0
+    /// Keep exact geometry available to actions without invalidating the whole
+    /// shell for each pixel. Layout still receives AppKit's size proposals;
+    /// only column fit changes need to rebuild the shell's view descriptions.
+    private final class WindowWidthStorage {
+        var value: CGFloat = 0
+    }
+    private struct WindowWidthSignature: Equatable {
+        var isKnown: Bool
+        var sidebarFits: Bool
+        var inspectorFits: Bool
+        // The embedded browser has an explicit width clamp, so it needs every
+        // width update while open rather than just column transitions.
+        var browserWidth: CGFloat?
+    }
+    @State private var windowWidthStorage = WindowWidthStorage()
+    @State private var windowWidthSignature: WindowWidthSignature?
+    private var windowContentWidth: CGFloat { windowWidthStorage.value }
+    private var windowContentWidthBinding: Binding<CGFloat> {
+        Binding(get: { windowContentWidth }, set: { width in
+            windowWidthStorage.value = width
+            let next = WindowWidthSignature(
+                isKnown: width > 0,
+                sidebarFits: Self.sidebarColumnFits(
+                    width: width, browserOpen: showsWorkspaceBrowser, persistedBrowser: browserPaneWidth
+                ),
+                inspectorFits: inspectorFits(at: width),
+                browserWidth: showsWorkspaceBrowser ? width : nil
+            )
+            if windowWidthSignature != next { windowWidthSignature = next }
+        })
+    }
     #if os(macOS)
     /// Window geometry reported by `WindowScreenObserver`. The shell lets
     /// SwiftUI apply the system safe area in both windowed and full-screen mode.
@@ -392,14 +420,16 @@ struct RootView: View {
         // observer from resize notifications. That source is outside any layout
         // pass; a GeometryReader inside the split view is not, and a width
         // driven from it re-entered AppKit's constraint cycle while dragging.
-        .onChange(of: windowContentWidth) { _, width in
-            applyWidth(for: width)
+        .onChange(of: windowWidthSignature) { _, _ in
+            applyWidth(for: windowContentWidth)
         }
         // The inspector's fit edge is made of the column widths, so a resize
         // that ends or a sidebar that hides can bring the column back.
         .onChange(of: sidebarWidth) { _, _ in applyWidth(for: windowContentWidth) }
         .onChange(of: inspectorWidth) { _, _ in applyWidth(for: windowContentWidth) }
         .onChange(of: columnVisibilityChoice) { _, _ in applyWidth(for: windowContentWidth) }
+        .onChange(of: showsWorkspaceBrowser) { _, _ in applyWidth(for: windowContentWidth) }
+        .onChange(of: browserPaneWidth) { _, _ in applyWidth(for: windowContentWidth) }
         // Where the pointer is decides both peeks, and it is asked rather
         // than waited for. See `watchPointer`.
         .task { await watchPointer() }
@@ -431,7 +461,7 @@ struct RootView: View {
         // window frame follow it.
         .background {
             WindowScreenObserver(
-                contentWidth: $windowContentWidth,
+                contentWidth: windowContentWidthBinding,
                 isFullScreen: $isFullScreen,
                 isLiveResizing: $isLiveResizing,
                 titlebarInset: $titlebarInset
