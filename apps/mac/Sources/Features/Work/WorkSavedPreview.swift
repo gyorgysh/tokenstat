@@ -42,7 +42,7 @@ enum WorkSavedPreview {
         let scope = WorkCache.scope(for: reference.scope)
         guard WorkCacheAccess.canRead(reference),
               let id = recordID(reference: reference, attachment: attachment),
-              let key = WorkCacheKey.existingKey(for: scope),
+              let key = await WorkCacheKey.existingKeyInBackground(for: scope),
               let record = try? await Bridge.savedPreview(key: WorkCacheKey.encoded(key), scope: scope, id: id),
               WorkCacheAccess.canRead(reference), !Task.isCancelled,
               record.scope == scope, record.id == id, record.kind == "attachment", record.itemId == attachment,
@@ -58,9 +58,9 @@ enum WorkSavedPreview {
         let scope = WorkCache.scope(for: reference.scope)
         let payload = Payload(reference: reference, attachmentID: attachment.id, title: attachment.name,
                               capturedAt: Date(), data: data)
-        guard let key = WorkCacheKey.key(for: scope), let encoded = try? JSONEncoder().encode(payload),
+        guard let key = await WorkCacheAccess.keyForSaving(reference), let encoded = try? JSONEncoder().encode(payload),
               let object = try? JSONSerialization.jsonObject(with: encoded) as? [String: Any] else { return }
-        _ = try? await Bridge.cachePut(key: WorkCacheKey.encoded(key), scope: scope, id: id,
+        _ = try? await Bridge.cachePut(key: key, scope: scope, id: id,
                                      kind: "attachment", itemId: attachment.id, revision: nil, payload: object)
     }
 }

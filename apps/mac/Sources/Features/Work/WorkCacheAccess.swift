@@ -11,9 +11,10 @@ import Foundation
         reference.scope == WorkSessionContext.shared.scope && canRead(reference)
     }
 
-    static func keyForSaving(_ reference: WorkReference) -> String? {
+    static func keyForSaving(_ reference: WorkReference) async -> String? {
         guard canSave(reference),
-              let key = WorkCacheKey.key(for: WorkCache.scope(for: reference.scope)) else { return nil }
+              let key = await WorkCacheKey.keyForSaving(for: WorkCache.scope(for: reference.scope),
+                                                       canCreate: { canSave(reference) }) else { return nil }
         return WorkCacheKey.encoded(key)
     }
 

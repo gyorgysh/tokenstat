@@ -75,7 +75,8 @@ final class WorkSearchHistory {
         let requestedEpoch = epoch
         await ordered { [self] in
             guard current, enabled, epoch == requestedEpoch else { return }
-            guard let key = WorkCacheKey.existingKey(for: wireScope) else { return }
+            guard let key = await WorkCacheKey.existingKeyInBackground(for: wireScope),
+                  current, enabled, epoch == requestedEpoch, !Task.isCancelled else { return }
             do {
                 let stored = try await Bridge.searchHistory(key: WorkCacheKey.encoded(key), scope: wireScope)
                 guard current, epoch == requestedEpoch, enabled else { payload = Payload(); return }
@@ -116,8 +117,13 @@ final class WorkSearchHistory {
             guard current, enabled, epoch == requestedEpoch else { return }
             let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let parsed = try? WorkSearchQuery(query), !parsed.terms.isEmpty || destination != nil else { return }
-            let availableKey = WorkCacheKey.existingKey(for: wireScope)
-                ?? (WorkSessionContext.shared.scope == scope ? WorkCacheKey.key(for: wireScope) : nil)
+            var availableKey = await WorkCacheKey.existingKeyInBackground(for: wireScope)
+            if availableKey == nil {
+                availableKey = await WorkCacheKey.keyForSaving(for: wireScope) {
+                    current && enabled && epoch == requestedEpoch && WorkSessionContext.shared.scope == scope
+                }
+            }
+            guard current, enabled, epoch == requestedEpoch, !Task.isCancelled else { return }
             guard let key = availableKey else {
                 failure = "Unlock this device to save search history."
                 return

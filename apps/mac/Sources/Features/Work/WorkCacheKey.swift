@@ -13,21 +13,28 @@ import Security
 enum WorkCacheKey {
     private static let service = "ai.tokenstat.work-cache"
 
-    /// The scope's key, creating and storing one on first use. Nil when the
-    /// keychain itself is unavailable: saving is then skipped, never stored
-    /// under a weaker key or written beside the ciphertext.
-    static func key(for scope: String, generate: () -> [UInt8] = randomBytes) -> [UInt8]? {
-        guard !WorkCacheCleanupJournal.blocks(scope) else { return nil }
-        return getOrCreate(load: { load(scope: scope) },
-                           add: { store(scope: scope, key: $0) }, generate: generate)
+    /// Keychain reads may wait for the security service or an unlock prompt.
+    /// Never make the UI executor wait with them. Creation stays on the main
+    /// actor after authorization is checked again, so a sign-out during the
+    /// read cannot recreate the key its cleanup just removed.
+    @MainActor
+    static func keyForSaving(for scope: String, canCreate: () -> Bool) async -> [UInt8]? {
+        await resolveForSaving(
+            read: { await readInBackground(scope: scope) },
+            canCreate: { canCreate() && !WorkCacheCleanupJournal.blocks(scope) },
+            add: { store(scope: scope, key: $0) }, generate: randomBytes
+        )
     }
 
-    /// A failed read is not evidence of absence. Add atomically and reuse the
-    /// winner of a concurrent first save; never replace a key sealing copies.
-    static func getOrCreate(load: () -> (status: OSStatus, key: [UInt8]?),
-                            add: ([UInt8]) -> OSStatus,
-                            generate: () -> [UInt8]) -> [UInt8]? {
-        let existing = load()
+    @MainActor
+    static func resolveForSaving(
+        read: () async -> (status: OSStatus, key: [UInt8]?),
+        canCreate: () -> Bool, add: ([UInt8]) -> OSStatus,
+        generate: () -> [UInt8]
+    ) async -> [UInt8]? {
+        guard canCreate(), !Task.isCancelled else { return nil }
+        let existing = await read()
+        guard canCreate(), !Task.isCancelled else { return nil }
         if existing.status == errSecSuccess { return existing.key }
         guard existing.status == errSecItemNotFound else { return nil }
         let fresh = generate()
@@ -35,10 +42,27 @@ enum WorkCacheKey {
         switch add(fresh) {
         case errSecSuccess: return fresh
         case errSecDuplicateItem:
-            let winner = load()
+            let winner = await read()
+            guard canCreate(), !Task.isCancelled else { return nil }
             return winner.status == errSecSuccess ? winner.key : nil
         default: return nil
         }
+    }
+
+    /// Read-only lookup: opening saved work never creates a keychain entry.
+    static func existingKeyInBackground(for scope: String) async -> [UInt8]? {
+        let result = await readInBackground(scope: scope)
+        guard !Task.isCancelled, !WorkCacheCleanupJournal.blocks(scope) else { return nil }
+        return result.status == errSecSuccess ? result.key : nil
+    }
+
+    private static let reads = WorkCacheKeyReads { scope in
+        guard !WorkCacheCleanupJournal.blocks(scope) else { return (errSecInteractionNotAllowed, nil) }
+        return load(scope: scope)
+    }
+    private static func readInBackground(scope: String) async -> (status: OSStatus, key: [UInt8]?) {
+        guard !Task.isCancelled else { return (errSecUserCanceled, nil) }
+        return await reads.read(scope)
     }
 
     @discardableResult
@@ -49,15 +73,6 @@ enum WorkCacheKey {
             kSecAttrAccount as String: scope,
         ] as CFDictionary)
         return status == errSecSuccess || status == errSecItemNotFound
-    }
-
-    /// The scope's key when one was already stored, creating nothing. Reads
-    /// use this: opening a conversation must not leave a keychain entry
-    /// behind for a scope that keeps nothing.
-    static func existingKey(for scope: String) -> [UInt8]? {
-        guard !WorkCacheCleanupJournal.blocks(scope) else { return nil }
-        let result = load(scope: scope)
-        return result.status == errSecSuccess ? result.key : nil
     }
 
     /// Base64 for the wire, which takes the key as text beside the call.
@@ -96,5 +111,76 @@ enum WorkCacheKey {
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ] as CFDictionary, nil)
         return status
+    }
+}
+
+/// A stalled security service cannot retain an unbounded number of saved pages
+/// or block the UI. Concurrent readers share one lookup per scope. After the
+/// deadline, callers fail closed while that lookup finishes; no replacement
+/// lookup is started until it returns. Successful keys are never memoized.
+final class WorkCacheKeyReads: @unchecked Sendable {
+    typealias Result = (status: OSStatus, key: [UInt8]?)
+    private struct Pending {
+        let id = UUID()
+        var expired = false
+        var waiters: [CheckedContinuation<Result, Never>]
+    }
+    private let lock = NSLock()
+    private var pending: [String: Pending] = [:]
+    private let queue = DispatchQueue(label: "ai.tokenstat.work-cache.keys", qos: .utility, attributes: .concurrent)
+    private let timeout: TimeInterval
+    private let load: @Sendable (String) -> Result
+
+    init(timeout: TimeInterval = 2, load: @escaping @Sendable (String) -> Result) {
+        self.timeout = timeout
+        self.load = load
+    }
+
+    func read(_ scope: String) async -> Result {
+        await withCheckedContinuation { waiter in enqueue(scope, waiter: waiter) }
+    }
+
+    private func enqueue(_ scope: String, waiter: CheckedContinuation<Result, Never>) {
+        lock.lock()
+        if var entry = pending[scope] {
+            guard !entry.expired, entry.waiters.count < 64 else {
+                lock.unlock()
+                waiter.resume(returning: (errSecNotAvailable, nil))
+                return
+            }
+            entry.waiters.append(waiter)
+            pending[scope] = entry
+            lock.unlock()
+            return
+        }
+        guard pending.count < 4 else {
+            lock.unlock()
+            waiter.resume(returning: (errSecNotAvailable, nil))
+            return
+        }
+        let entry = Pending(waiters: [waiter])
+        pending[scope] = entry
+        let id = entry.id
+        lock.unlock()
+        queue.async {
+            self.finish(scope, id: id, result: self.load(scope), completed: true)
+        }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) {
+            self.finish(scope, id: id, result: (errSecNotAvailable, nil), completed: false)
+        }
+    }
+
+    private func finish(_ scope: String, id: UUID, result: Result, completed: Bool) {
+        lock.lock()
+        guard var entry = pending[scope], entry.id == id else { lock.unlock(); return }
+        let waiters = entry.waiters
+        if completed { pending.removeValue(forKey: scope) }
+        else {
+            entry.expired = true
+            entry.waiters.removeAll()
+            pending[scope] = entry
+        }
+        lock.unlock()
+        for waiter in waiters { waiter.resume(returning: result) }
     }
 }

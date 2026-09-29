@@ -130,10 +130,11 @@ struct ClientSavedWorkView: View {
                       reference.itemID == record.itemId else { return false }
                 return owner.hosts[reference.hostIdentity] != nil && WorkCacheAccess.canRead(reference)
             }.sorted { $0.updatedMs > $1.updatedMs }
-            guard records.isEmpty || WorkCacheKey.existingKey(for: scope) != nil else {
+            if !records.isEmpty, await WorkCacheKey.existingKeyInBackground(for: scope) == nil {
                 failure = "Saved work is unavailable on this device. Unlock it and try again, or verify your account when you can connect."
                 return
             }
+            guard stillOwned, generation == SavedWorkAccess.shared.generation, !Task.isCancelled else { return }
             rows = []
             offset = 0
             unavailable = 0
@@ -163,7 +164,7 @@ struct ClientSavedWorkView: View {
             if reference.kind == .conversation {
                 let copy = await WorkCacheStore.shared.savedConversation(for: reference)
                 row = copy.map { SavedRow(reference: reference, title: $0.title, savedAt: $0.savedAt) }
-            } else if WorkCacheAccess.canRead(reference), let key = WorkCacheKey.existingKey(for: record.scope),
+            } else if WorkCacheAccess.canRead(reference), let key = await WorkCacheKey.existingKeyInBackground(for: record.scope),
                       let copy = try? await Bridge.cachedChange(key: WorkCacheKey.encoded(key), scope: record.scope, id: record.id),
                       WorkCacheAccess.canRead(reference), copy.matches(reference) {
                 row = SavedRow(reference: reference, title: copy.payload.title, savedAt: copy.payload.capturedAt)
@@ -206,7 +207,7 @@ private struct ClientSavedChangeDestination: View {
             let scope = WorkCache.scope(for: reference.scope)
             guard SavedWorkAccess.shared.reader == owner, WorkCacheAccess.canRead(reference),
                   let id = WorkCache.recordID(for: reference),
-                  let key = WorkCacheKey.existingKey(for: scope),
+                  let key = await WorkCacheKey.existingKeyInBackground(for: scope),
                   let record = try? await Bridge.cachedChange(key: WorkCacheKey.encoded(key), scope: scope, id: id),
                   SavedWorkAccess.shared.reader == owner, WorkCacheAccess.canRead(reference), !Task.isCancelled, record.matches(reference) else { return }
             change = record.payload

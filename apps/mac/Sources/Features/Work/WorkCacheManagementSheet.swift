@@ -109,7 +109,7 @@ struct WorkCacheManagementSheet: View {
 
     private func loadTitles() async {
         let wireScope = WorkCache.scope(for: scope)
-        guard let key = WorkCacheKey.existingKey(for: wireScope) else { return }
+        guard let key = await WorkCacheKey.existingKeyInBackground(for: wireScope) else { return }
         for record in records.filter(allowed).prefix(limit) where titles[record.id] == nil {
             guard current, !Task.isCancelled else { return }
             guard allowed(record) else { continue }

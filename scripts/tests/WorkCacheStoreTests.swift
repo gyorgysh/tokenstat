@@ -18,6 +18,7 @@ enum WorkCacheAccess {
 }
 enum BridgeError: Error { case core(code: String, message: String) }
 enum WorkCacheKey {
+    static func existingKeyInBackground(for scope: String) async -> [UInt8]? { existingKey(for: scope) }
     static var keys: [String: [UInt8]] = [:]
     static func key(for scope: String) -> [UInt8]? {
         if let key = keys[scope] { return key }

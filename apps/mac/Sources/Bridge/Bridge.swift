@@ -1312,10 +1312,14 @@ extension Bridge {
 
     private static func cachePutOrdered(key: String, scope: String, id: String, kind: String, itemId: String,
                                         revision: String?, payload: [String: Any]) async throws -> CachePutResult {
+        guard let existing = await WorkCacheKey.existingKeyInBackground(for: scope),
+              WorkCacheKey.encoded(existing) == key else { throw CancellationError() }
+        // A scope or permission may change while Keychain is answering. Check
+        // ownership after the read; never carry earlier authorization across it.
         let authorized = await MainActor.run {
             let currentOwner = kind == "searchHistory" ? WorkSessionContext.shared.readingScope : WorkSessionContext.shared.scope
             guard let owner = currentOwner, WorkCache.scope(for: owner) == scope,
-                  let existing = WorkCacheKey.existingKey(for: scope), WorkCacheKey.encoded(existing) == key else { return false }
+                  !WorkCacheCleanupJournal.blocks(scope) else { return false }
             if kind == "searchHistory" {
                 return UserDefaults.standard.bool(forKey: "work.search.history.enabled." + scope)
             }

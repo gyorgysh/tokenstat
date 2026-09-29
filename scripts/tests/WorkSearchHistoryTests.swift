@@ -10,8 +10,8 @@ enum WorkCache { static func scope(for scope: WorkReference.Scope) -> String { s
 enum WorkCacheAccess { static func canRead(_ reference: WorkReference) -> Bool { true } }
 enum WorkCacheError: Error { case encoding }
 enum WorkCacheKey {
-    static func key(for scope: String) -> String? { scope }
-    static func existingKey(for scope: String) -> String? { scope }
+    static func keyForSaving(for scope: String, canCreate: () -> Bool) async -> String? { canCreate() ? scope : nil }
+    static func existingKeyInBackground(for scope: String) async -> String? { scope }
     static func encoded(_ key: String) -> String { key }
 }
 @MainActor enum Bridge {

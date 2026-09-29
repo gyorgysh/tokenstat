@@ -43,7 +43,7 @@ final class WorkSearchModel {
               folders[.init(hostIdentity: reference.hostIdentity, workspaceID: reference.workspaceID)] != nil,
               machines[reference.hostIdentity] != nil,
               let id = WorkCache.recordID(for: reference),
-              let key = WorkCacheKey.existingKey(for: WorkCache.scope(for: scope)) else { return nil }
+              let key = await WorkCacheKey.existingKeyInBackground(for: WorkCache.scope(for: scope)) else { return nil }
         let record = try? await Bridge.cachedChange(key: WorkCacheKey.encoded(key),
                                                    scope: WorkCache.scope(for: scope), id: id)
         guard isCurrent(), !Task.isCancelled, WorkCacheAccess.canRead(reference), let record, record.matches(reference) else { return nil }

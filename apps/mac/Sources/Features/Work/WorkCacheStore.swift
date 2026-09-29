@@ -57,7 +57,7 @@ final class WorkCacheStore {
     func savedConversation(for reference: WorkReference) async -> CachedRecordPayload? {
         guard await WorkCacheAccess.canRead(reference), reference.kind == .conversation, let recordID = WorkCache.recordID(for: reference) else { return nil }
         let scope = WorkCache.scope(for: reference.scope)
-        guard let key = WorkCacheKey.existingKey(for: scope) else { return nil }
+        guard let key = await WorkCacheKey.existingKeyInBackground(for: scope) else { return nil }
         guard let record = try? await Bridge.cacheGet(
             key: WorkCacheKey.encoded(key), scope: scope, id: recordID
         ) else { return nil }

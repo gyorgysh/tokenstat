@@ -232,8 +232,15 @@ struct SavedWorkSettings: View {
             records = stats.records
             pinned = stats.pinned
             cleared = false
-            message = enabled && WorkCacheKey.key(for: WorkCache.scope(for: scope)) == nil
-                ? "Secure storage is unavailable. Unlock this device and try again. Work cannot be saved until its encryption key is available." : nil
+            if enabled {
+                let key = await WorkCacheKey.keyForSaving(for: WorkCache.scope(for: scope)) {
+                    refreshGeneration == generation && self.scope == scope && enabled
+                        && WorkSessionContext.shared.scope == scope
+                }
+                guard refreshGeneration == generation, self.scope == scope, !Task.isCancelled else { return }
+                message = key == nil
+                    ? "Secure storage is unavailable. Unlock this device and try again. Work cannot be saved until its encryption key is available." : nil
+            } else { message = nil }
         } catch {
             guard refreshGeneration == generation, self.scope == scope, !Task.isCancelled else { return }
             if !WorkCacheStore.isUnavailable(error) {

@@ -10,7 +10,7 @@ struct CachedRecord: Sendable {
     let revision: String?; let payload: CachedRecordPayload
 }
 enum WorkCacheKey {
-    static func existingKey(for: String) -> String? { nil }
+    static func existingKeyInBackground(for: String) async -> String? { nil }
     static func encoded(_ value: String) -> String { value }
 }
 struct WorkViewedChange: Sendable {

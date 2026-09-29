@@ -72,10 +72,10 @@ struct WorkViewedChange: Codable, Sendable, Identifiable {
                         capturedAt: Date(), revision: revision, commit: commit, diff: diff)
         let scope = WorkCache.scope(for: owner.scope)
         guard let id = WorkCache.recordID(for: reference),
-              let key = WorkCacheKey.key(for: scope),
+              let key = await WorkCacheAccess.keyForSaving(reference),
               let data = try? encoder.encode(copy), data.count <= 8 * 1024 * 1024,
               let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-        _ = try? await Bridge.cachePut(key: WorkCacheKey.encoded(key), scope: scope,
+        _ = try? await Bridge.cachePut(key: key, scope: scope,
             id: id, kind: "diff", itemId: reference.itemID ?? revision, revision: revision, payload: payload)
     }
 }

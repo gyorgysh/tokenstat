@@ -33,10 +33,10 @@ actor WorkSearchSavedLoader {
          scope: WorkReference.Scope, folders: [WorkSearchIndex.Folder: String],
          machines: [String: String], list: @escaping ListRecords = { try await Bridge.cacheList(scope: $0) },
          read: @escaping ReadRecord = { scope, id in
-             guard let key = WorkCacheKey.existingKey(for: scope) else { throw Failure.locked }
+             guard let key = await WorkCacheKey.existingKeyInBackground(for: scope) else { throw Failure.locked }
              return try await Bridge.cacheGet(key: WorkCacheKey.encoded(key), scope: scope, id: id)
          }, readChange: @escaping ReadChange = { scope, id in
-             guard let key = WorkCacheKey.existingKey(for: scope) else { throw Failure.locked }
+             guard let key = await WorkCacheKey.existingKeyInBackground(for: scope) else { throw Failure.locked }
              return try await Bridge.cachedChange(key: WorkCacheKey.encoded(key), scope: scope, id: id)
          }) {
         self.cache = cache
