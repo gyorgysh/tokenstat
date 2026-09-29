@@ -28,7 +28,9 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
     private readonly Grid _split = new();
     private readonly ScrollViewer _listScroll = new();
     private readonly ScrollViewer _detailScroll = new();
-    private readonly Dictionary<string, (string Title, string Notes)> _noteDrafts = new();
+    private readonly NoteDraftStore _noteDrafts = new();
+    private readonly Dictionary<string, CancellationTokenSource> _saveDelays = new();
+    private Action<string>? _draftStatusChanged;
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _bannerHost = new() { Spacing = Theme.SpaceS };
     private readonly StackPanel _composerHost = new() { Spacing = Theme.SpaceS };
@@ -53,6 +55,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
     private bool _gridLayout = false;
     private bool _showingArchive;
     private bool _showingComposer;
+    private bool _previewNote;
     private string _picked = "";
     private string? _selectedId;
     private bool _confirmDelete;
@@ -750,6 +753,8 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
     private void RenderDetail()
     {
         UpdateNoteLayout();
+        if (_draftStatusChanged is not null) _noteDrafts.Changed -= _draftStatusChanged;
+        _draftStatusChanged = null;
         _detailHost.Children.Clear();
         var note = SelectedNote();
         if (note is null)
@@ -783,21 +788,90 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
             FontSize = 12,
             Opacity = 0.66,
         });
-        var draft = _noteDrafts.GetValueOrDefault(id, (Title: Format.Text(note, "title"), Notes: Format.Text(note, "notes")));
+        var draft = _noteDrafts.Open(id, new(Format.Text(note, "title"), Format.Text(note, "notes")));
         var text = new TextBox { Header = "Title", Text = draft.Title };
         var content = new TextBox { Header = "Note", Text = draft.Notes, AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap, MinHeight = 320 };
-        text.TextChanged += (_, _) => _noteDrafts[id] = (text.Text, content.Text);
-        content.TextChanged += (_, _) => _noteDrafts[id] = (text.Text, content.Text);
-        body.Children.Add(text);
-        body.Children.Add(content);
-        body.Children.Add(new TextBlock
+        var saveState = new TextBlock { FontSize = 12, Opacity = 0.7, TextWrapping = TextWrapping.Wrap };
+        bool applyingSavedTitle = false;
+        void EditDraft()
         {
-            Text = "Your draft stays here while you switch between notes. Save to keep your changes.",
-            FontSize = 12,
-            Opacity = 0.55,
-            TextWrapping = TextWrapping.Wrap,
-        });
+            if (applyingSavedTitle) return;
+            _noteDrafts.Edit(id, new(text.Text, content.Text));
+            QueueNoteSave(id);
+        }
+        text.TextChanged += (_, _) => EditDraft();
+        content.TextChanged += (_, _) => EditDraft();
+        _draftStatusChanged = changedId =>
+        {
+            if (changedId != id || _noteDrafts.Get(id) is not { } entry) return;
+            saveState.Text = entry.Error is not null ? "Not saved: " + entry.Error
+                : entry.Saving ? "Saving…" : entry.Dirty ? "Waiting to save…" : entry.HasSaved ? "Saved" : "Changes save automatically";
+            if (!entry.Dirty && !entry.Saving && text.Text != entry.Value.Title)
+            {
+                int caret = text.SelectionStart;
+                applyingSavedTitle = true;
+                text.Text = entry.Value.Title;
+                text.Select(Math.Min(caret, text.Text.Length), 0);
+                applyingSavedTitle = false;
+            }
+        };
+        _noteDrafts.Changed += _draftStatusChanged;
+        _draftStatusChanged(id);
+        body.Children.Add(text);
+        var preview = new Border { MinHeight = 320, Padding = new Thickness(Theme.SpaceS) };
+        var modeRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+        var writeMode = new Microsoft.UI.Xaml.Controls.Primitives.ToggleButton { Content = "Write" };
+        var previewMode = new Microsoft.UI.Xaml.Controls.Primitives.ToggleButton { Content = "Preview" };
+        void ShowMode(bool read)
+        {
+            _previewNote = read;
+            writeMode.IsChecked = !read; previewMode.IsChecked = read;
+            content.Visibility = read ? Visibility.Collapsed : Visibility.Visible;
+            preview.Visibility = read ? Visibility.Visible : Visibility.Collapsed;
+            preview.Child = read ? NotePreview.Create(content.Text) : null;
+        }
+        writeMode.Click += (_, _) => ShowMode(false);
+        previewMode.Click += (_, _) => ShowMode(true);
+        modeRow.Children.Add(writeMode); modeRow.Children.Add(previewMode);
+        var formatting = new MenuFlyout();
+        void AddFormat(string label, string before, string after, string placeholder, bool line = false)
+        {
+            var item = new MenuFlyoutItem { Text = label };
+            item.Click += (_, _) =>
+            {
+                ShowMode(false);
+                int start = content.SelectionStart;
+                var selected = content.SelectedText;
+                if (selected.Length == 0) selected = placeholder;
+                string prefix = line && start > 0 && content.Text[start - 1] != '\n' && content.Text[start - 1] != '\r' ? "\n" + before : before;
+                content.SelectedText = prefix + selected + after;
+                content.Select(start + prefix.Length, selected.Length);
+                content.Focus(FocusState.Programmatic);
+            };
+            formatting.Items.Add(item);
+        }
+        AddFormat("Heading", "## ", "", "Heading", line: true);
+        AddFormat("Bold", "**", "**", "text");
+        AddFormat("Italic", "*", "*", "text");
+        AddFormat("Bulleted list", "- ", "", "List item", line: true);
+        AddFormat("Checklist", "- [ ] ", "", "To do", line: true);
+        AddFormat("Quote", "> ", "", "Quote", line: true);
+        AddFormat("Code", "`", "`", "code");
+        var format = Buttons.Secondary("Format", ActionIcon.Edit, (_, _) => { }, small: true);
+        format.Flyout = formatting;
+        modeRow.Children.Add(format);
+        var saveShortcut = new Microsoft.UI.Xaml.Input.KeyboardAccelerator
+        {
+            Key = VirtualKey.S, Modifiers = VirtualKeyModifiers.Control,
+        };
+        saveShortcut.Invoked += async (_, args) => { args.Handled = true; await SaveNoteAsync(id); };
+        body.KeyboardAccelerators.Add(saveShortcut);
+        body.Children.Add(modeRow);
+        body.Children.Add(content);
+        body.Children.Add(preview);
+        body.Children.Add(saveState);
+        ShowMode(_previewNote);
         var created = Format.Long(note, "createdAtMs");
         if (created > 0)
         {
@@ -811,7 +885,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         var saveRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         saveRow.Children.Add(Buttons.Primary(
             "Save", ActionIcon.Save,
-            async (_, _) => await SaveNoteAsync(id, text.Text, content.Text)));
+            async (_, _) => await SaveNoteAsync(id)));
         body.Children.Add(saveRow);
 
         var archived = Format.Text(note, "column") == "archive";
@@ -934,27 +1008,39 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         await LoadAsync();
     }
 
-    private async Task SaveNoteAsync(string id, string text, string notes)
+    private async void QueueNoteSave(string id)
     {
-        var clean = text.Trim();
-        if (clean.Length == 0)
-        {
-            Banner("Give this note a title before saving.");
-            return;
-        }
+        if (_saveDelays.Remove(id, out var previous)) previous.Cancel();
+        using var delay = new CancellationTokenSource();
+        _saveDelays[id] = delay;
         try
         {
-            await CallTodoAsync(
-                "todo.update", new JsonObject { ["id"] = id, ["title"] = clean, ["notes"] = notes });
-            if (_noteDrafts.TryGetValue(id, out var current) && current.Title == text && current.Notes == notes)
-                _noteDrafts.Remove(id);
+            await Task.Delay(650, delay.Token);
+            if (_saveDelays.GetValueOrDefault(id) == delay) _saveDelays.Remove(id);
+            await SaveNoteAsync(id);
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) { }
+        finally
         {
-            Banner(ex.Message);
-            return;
+            if (_saveDelays.GetValueOrDefault(id) == delay) _saveDelays.Remove(id);
         }
-        await LoadAsync();
+    }
+
+    private async Task SaveNoteAsync(string id)
+    {
+        if (_saveDelays.Remove(id, out var delay)) delay.Cancel();
+        await _noteDrafts.SaveAsync(id, async value =>
+        {
+            await CallTodoAsync("todo.update", new JsonObject { ["id"] = id, ["title"] = value.Title, ["notes"] = value.Notes });
+            var card = _cards.FirstOrDefault(card => Format.Text(card, "id") == id);
+            if (card is JsonObject saved)
+            {
+                saved["title"] = value.Title;
+                saved["notes"] = value.Notes;
+            }
+        });
+        // Keep the mounted editor and its selection intact during autosave.
+        RenderList();
     }
 
     private async Task SetArchivedAsync(string id, bool archived)
@@ -975,6 +1061,8 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
 
     private async Task ConvertAsync(string id, string folderId)
     {
+        await SaveNoteAsync(id);
+        if (_noteDrafts.Get(id)?.Error is { } saveError) { Banner(saveError); return; }
         var note = SelectedNote();
         string prompt;
         if (note is not null && Format.Text(note, "id") == id)
@@ -1022,6 +1110,8 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
 
     private async Task DeleteAsync(string id)
     {
+        if (_saveDelays.Remove(id, out var delay)) delay.Cancel();
+        if (_noteDrafts.Get(id)?.Pending is Task pending) await pending;
         try
         {
             await CallTodoAsync("todo.remove", new JsonObject { ["id"] = id });

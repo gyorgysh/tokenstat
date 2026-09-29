@@ -19,9 +19,12 @@
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Markdig" Version="1.3.2" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4654" />
     <Compile Include="../../../apps/windows/Pages/WorkspaceTabStrip.cs" Link="WorkspaceTabStrip.cs" />
+    <Compile Include="../../../apps/windows/Pages/NotePreview.cs" Link="NotePreview.cs" />
+    <Compile Include="../../../apps/windows/Pages/NoteMarkdown.cs" Link="NoteMarkdown.cs" />
     <Compile Include="../../../apps/windows/Pages/EditorTree.cs" Link="EditorTree.cs" />
     <Compile Include="../../../apps/windows/Pages/EditorText.cs" Link="EditorText.cs" />
     <Compile Include="../../../apps/windows/Pages/H264Streamer.cs" Link="H264Streamer.cs" />
@@ -34,6 +37,7 @@
     <Compile Include="../../../apps/windows/Design/ContextMenus.cs" Link="ContextMenus.cs" />
     <Compile Include="../../../apps/windows/Design/InspectorHost.cs" Link="InspectorHost.cs" />
     <Compile Include="../../../apps/windows/Design/FlowPanel.cs" Link="FlowPanel.cs" />
+    <Compile Include="../../../apps/windows/Design/Persona/PersonaScene.cs" Link="PersonaScene.cs" />
     <Compile Include="../../../apps/windows/Design/Theme.cs" Link="Theme.cs" />
     <Content Include="../../../apps/windows/Assets/Terminal/*" Link="Assets/Terminal/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../../apps/windows/Assets/Fonts/JetBrainsMono-Variable.ttf" Link="Assets/Fonts/JetBrainsMono-Variable.ttf" CopyToOutputDirectory="PreserveNewest" />

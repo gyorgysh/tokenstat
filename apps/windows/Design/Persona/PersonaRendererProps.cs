@@ -5,7 +5,6 @@
 // your own build of it.
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
-using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI;
 
@@ -25,7 +24,7 @@ internal static class PersonaRendererProps
     /// edge. Column rules on our side would mean he was reading it backwards.
     /// </summary>
     public static void DrawPaper(
-        Canvas canvas, double px, double py, double unit, double tilt, double scale, Color hue)
+        PersonaScene canvas, double px, double py, double unit, double tilt, double scale, Color hue)
     {
         double w = unit * 0.58 * scale;
         double h = unit * 0.32 * scale;
@@ -47,16 +46,16 @@ internal static class PersonaRendererProps
         PersonaDraw.Quad(outline, T(midX, maxY - h * 0.05), T(midX + w * 0.24, maxY + h * 0.03));
         PersonaDraw.Quad(outline, T(minX + w * 0.03, maxY), T(midX - w * 0.24, maxY + h * 0.03));
         sheet.Figures.Add(outline);
-        canvas.Children.Add(PersonaDraw.Shape(sheet, PersonaDraw.Solid(PersonaDraw.White, 0.90)));
+        canvas.Paint(sheet, PersonaDraw.Solid(PersonaDraw.White, 0.90));
 
         // The fold: what turns two flat halves into one sheet with a crease.
         var fold = new PathGeometry();
         var crease = PersonaDraw.Figure(T(midX, minY + h * 0.16), false);
         PersonaDraw.Quad(crease, T(midX, maxY - h * 0.05), T(midX - w * 0.02, (minY + maxY) / 2));
         fold.Figures.Add(crease);
-        canvas.Children.Add(PersonaDraw.Shape(
+        canvas.Paint(
             fold, null, PersonaDraw.Solid(hue, 0.35), Math.Max(1, unit * 0.016),
-            PenLineCap.Round, PenLineJoin.Round, sheet));
+            PenLineCap.Round, PenLineJoin.Round, sheet);
 
         if (unit >= 44)
         {
@@ -73,15 +72,15 @@ internal static class PersonaRendererProps
                 PersonaDraw.Line(row2, T(maxX - w * 0.09, y));
                 bleed.Figures.Add(row2);
             }
-            canvas.Children.Add(PersonaDraw.Shape(
+            canvas.Paint(
                 bleed, null, PersonaDraw.Solid(hue, 0.13), Math.Max(0.5, unit * 0.011),
-                PenLineCap.Round, PenLineJoin.Round, sheet));
+                PenLineCap.Round, PenLineJoin.Round, sheet);
         }
 
         // The outline last, so nothing drawn on the sheet can sit on top of
         // its own edge.
-        canvas.Children.Add(PersonaDraw.Shape(
-            sheet, null, PersonaDraw.Solid(hue, 0.95), Math.Max(1, unit * 0.024)));
+        canvas.Paint(
+            sheet, null, PersonaDraw.Solid(hue, 0.95), Math.Max(1, unit * 0.024));
     }
 
     /// <summary>
@@ -89,20 +88,20 @@ internal static class PersonaRendererProps
     /// how the game is shown: the screen faces the character, so the only
     /// honest way to put it on our side is the glow on his face.
     /// </summary>
-    public static void DrawGlow(Canvas canvas, PersonaMote mote, double width, double height, double unit, Geometry clip)
+    public static void DrawGlow(PersonaScene canvas, PersonaMote mote, double width, double height, double unit, Geometry clip)
     {
         double cx = mote.Position.X * width;
         double cy = mote.Position.Y * height;
         double reach = unit * 0.42 * mote.Scale;
         var geometry = new PathGeometry();
         PersonaDraw.Ellipse(geometry, cx, cy, reach, reach);
-        canvas.Children.Add(PersonaDraw.Shape(
+        canvas.Paint(
             geometry,
             PersonaDraw.Radial(
                 PersonaDraw.Pt(0.5, 0.5), 0.5,
                 (PersonaDraw.White.WithOpacity(0.42 * mote.Opacity), 0),
                 (PersonaDraw.White.WithOpacity(0), 1)),
-            clip: clip));
+            clip: clip);
     }
 
     /// <summary>
@@ -110,7 +109,7 @@ internal static class PersonaRendererProps
     /// they face the character. What we get is the shape, the tilt, and the
     /// fact that it never stops moving.
     /// </summary>
-    public static void DrawConsole(Canvas canvas, double px, double py, double unit, double tilt, Color hue)
+    public static void DrawConsole(PersonaScene canvas, double px, double py, double unit, double tilt, Color hue)
     {
         double w = unit * 0.34;
         double h = unit * 0.20;
@@ -118,14 +117,13 @@ internal static class PersonaRendererProps
         double minY = py - h / 2;
         var shell = new PathGeometry();
         PersonaDraw.RoundedRect(shell, minX, minY, w, h, h * 0.36);
-        var shape = PersonaDraw.Shape(
+        var shape = canvas.Paint(
             shell,
             PersonaDraw.Linear(
                 PersonaDraw.Pt(0.5, 0), PersonaDraw.Pt(0.5, 1),
                 (hue.WithOpacity(0.95), 0), (hue.WithOpacity(0.72), 1)),
             PersonaDraw.Solid(PersonaDraw.White, 0.30), Math.Max(1, unit * 0.014));
         PersonaDraw.Spin(shape, tilt, px, py);
-        canvas.Children.Add(shape);
 
         if (unit < 44)
         {
@@ -137,11 +135,10 @@ internal static class PersonaRendererProps
         var line = PersonaDraw.Figure(new PPoint(minX + w * 0.16, py + h * 0.16), false);
         PersonaDraw.Line(line, minX + w - w * 0.16, py + h * 0.16);
         seam.Figures.Add(line);
-        var seamShape = PersonaDraw.Shape(
+        var seamShape = canvas.Paint(
             seam, null, PersonaDraw.Solid(PersonaDraw.White, 0.22), Math.Max(0.5, unit * 0.012),
             PenLineCap.Round, PenLineJoin.Round);
         PersonaDraw.Spin(seamShape, tilt, px, py);
-        canvas.Children.Add(seamShape);
     }
 
     /// <summary>
@@ -149,7 +146,7 @@ internal static class PersonaRendererProps
     /// Point is the middle of its front edge, and that edge sits exactly on
     /// the floor line. A near edge, a narrower far edge and a front lip.
     /// </summary>
-    public static void DrawKeyboard(Canvas canvas, double px, double py, double unit, Color hue, double opacity)
+    public static void DrawKeyboard(PersonaScene canvas, double px, double py, double unit, Color hue, double opacity)
     {
         double front = unit * 0.46;
         double back = unit * 0.37;
@@ -166,9 +163,9 @@ internal static class PersonaRendererProps
         PersonaDraw.Line(lipFigure, px + front / 2 - unit * 0.008, py);
         PersonaDraw.Line(lipFigure, px - front / 2 + unit * 0.008, py);
         lip.Figures.Add(lipFigure);
-        canvas.Children.Add(PersonaDraw.Shape(
+        canvas.Paint(
             lip, PersonaDraw.Solid(hue, 0.34 * opacity),
-            PersonaDraw.Solid(hue, 0.85 * opacity), Math.Max(1, unit * 0.016)));
+            PersonaDraw.Solid(hue, 0.85 * opacity), Math.Max(1, unit * 0.016));
 
         var top = new PathGeometry();
         var topFigure = PersonaDraw.Figure(new PPoint(px - front / 2, topY));
@@ -176,9 +173,9 @@ internal static class PersonaRendererProps
         PersonaDraw.Line(topFigure, px + back / 2, backY);
         PersonaDraw.Line(topFigure, px + front / 2, topY);
         top.Figures.Add(topFigure);
-        canvas.Children.Add(PersonaDraw.Shape(
+        canvas.Paint(
             top, PersonaDraw.Solid(hue, 0.18 * opacity),
-            PersonaDraw.Solid(hue, 0.85 * opacity), Math.Max(1, unit * 0.016)));
+            PersonaDraw.Solid(hue, 0.85 * opacity), Math.Max(1, unit * 0.016));
 
         if (unit < 32)
         {
@@ -201,7 +198,7 @@ internal static class PersonaRendererProps
                 var key = new PathGeometry();
                 PersonaDraw.RoundedRect(key, x, rowY, keyWidth, keyHeight, keyHeight * 0.34);
                 double lit = (column + row * 2) % 5 == 0 ? 0.62 : 0.30;
-                canvas.Children.Add(PersonaDraw.Shape(key, PersonaDraw.Solid(hue, lit * opacity)));
+                canvas.Paint(key, PersonaDraw.Solid(hue, lit * opacity));
             }
         }
     }
@@ -211,7 +208,7 @@ internal static class PersonaRendererProps
     /// the keyboard: near edge wide and on the floor line, far edge narrower.
     /// </summary>
     public static void DrawSheet(
-        Canvas canvas, double px, double py, double unit, double scale, Color hue, double opacity)
+        PersonaScene canvas, double px, double py, double unit, double scale, Color hue, double opacity)
     {
         double front = unit * 0.44 * scale;
         double back = unit * 0.34 * scale;
@@ -222,13 +219,13 @@ internal static class PersonaRendererProps
         PersonaDraw.Line(figure, px + back / 2, py - depth);
         PersonaDraw.Line(figure, px + front / 2, py);
         sheet.Figures.Add(figure);
-        canvas.Children.Add(PersonaDraw.Shape(
+        canvas.Paint(
             sheet, PersonaDraw.Solid(PersonaDraw.White, 0.82 * opacity),
-            PersonaDraw.Solid(hue, 0.55 * opacity), Math.Max(1, unit * 0.014)));
+            PersonaDraw.Solid(hue, 0.55 * opacity), Math.Max(1, unit * 0.014));
     }
 
     public static void DrawMug(
-        Canvas canvas, double px, double py, double unit, double tilt, Color hue, double opacity)
+        PersonaScene canvas, double px, double py, double unit, double tilt, Color hue, double opacity)
     {
         double w = unit * 0.20;
         double h = unit * 0.23;
@@ -236,22 +233,20 @@ internal static class PersonaRendererProps
         double minY = py - h / 2;
         var cup = new PathGeometry();
         PersonaDraw.RoundedRect(cup, minX, minY, w, h, w * 0.22);
-        var shape = PersonaDraw.Shape(
+        var shape = canvas.Paint(
             cup, PersonaDraw.Solid(hue, 0.82 * opacity),
             PersonaDraw.Solid(PersonaDraw.White, 0.38 * opacity), Math.Max(1, unit * 0.016));
         PersonaDraw.Spin(shape, tilt, px, py);
-        canvas.Children.Add(shape);
 
         var handle = new PathGeometry();
         PersonaDraw.Ellipse(handle, minX + w - w * 0.05 + w * 0.55 / 2, minY + h * 0.25 + h * 0.46 / 2, w * 0.55 / 2, h * 0.46 / 2);
-        var handleShape = PersonaDraw.Shape(
+        var handleShape = canvas.Paint(
             handle, null, PersonaDraw.Solid(hue, opacity), Math.Max(1, unit * 0.036));
         PersonaDraw.Spin(handleShape, tilt, px, py);
-        canvas.Children.Add(handleShape);
     }
 
     public static void DrawSprout(
-        Canvas canvas, double px, double py, double unit, double scale, Color hue, double opacity)
+        PersonaScene canvas, double px, double py, double unit, double scale, Color hue, double opacity)
     {
         double reach = unit * 0.13 * scale;
         // A little mound of soil first. Without it a stem meeting the floor
@@ -263,16 +258,16 @@ internal static class PersonaRendererProps
             figure, new PPoint(px + reach * 0.08, py - reach * 1.45),
             new PPoint(px - reach * 0.12, py - reach * 0.72));
         stem.Figures.Add(figure);
-        canvas.Children.Add(PersonaDraw.Shape(
+        canvas.Paint(
             stem, null, PersonaDraw.Solid(hue, opacity), Math.Max(1, unit * 0.022),
-            PenLineCap.Round, PenLineJoin.Round));
+            PenLineCap.Round, PenLineJoin.Round);
         foreach (double side in new double[] { -1, 1 })
         {
             var leaf = new PathGeometry();
             double lx = px + side * reach * 0.34;
             double ly = py - reach * (side < 0 ? 1.42 : 1.72) + reach * 0.24;
             PersonaDraw.Ellipse(leaf, lx, ly, reach * 0.44, reach * 0.24);
-            canvas.Children.Add(PersonaDraw.Shape(leaf, PersonaDraw.Solid(hue, 0.72 * opacity)));
+            canvas.Paint(leaf, PersonaDraw.Solid(hue, 0.72 * opacity));
         }
     }
 
@@ -283,7 +278,7 @@ internal static class PersonaRendererProps
     /// blob.
     /// </summary>
     public static void DrawPaintBrush(
-        Canvas canvas, double px, double py, double unit, double tilt, Color hue, double opacity)
+        PersonaScene canvas, double px, double py, double unit, double tilt, Color hue, double opacity)
     {
         double handle = unit * 0.30;
         double w = unit * 0.044;
@@ -295,16 +290,14 @@ internal static class PersonaRendererProps
         PersonaDraw.Line(figure, px + handle * 0.24, py + w * 0.26);
         PersonaDraw.Line(figure, px - handle * 0.58, py + w * 0.42);
         shaft.Figures.Add(figure);
-        var shaftShape = PersonaDraw.Shape(shaft, PersonaDraw.Solid(hue, 0.95 * opacity));
+        var shaftShape = canvas.Paint(shaft, PersonaDraw.Solid(hue, 0.95 * opacity));
         PersonaDraw.Spin(shaftShape, tilt, px, py);
-        canvas.Children.Add(shaftShape);
 
         var ferrule = new PathGeometry();
         PersonaDraw.RoundedRect(
             ferrule, px + handle * 0.22, py - w * 0.42, handle * 0.14, w * 0.84, w * 0.16);
-        var ferruleShape = PersonaDraw.Shape(ferrule, PersonaDraw.Solid(PersonaDraw.White, 0.62 * opacity));
+        var ferruleShape = canvas.Paint(ferrule, PersonaDraw.Solid(PersonaDraw.White, 0.62 * opacity));
         PersonaDraw.Spin(ferruleShape, tilt, px, py);
-        canvas.Children.Add(ferruleShape);
 
         // Five hairs, splayed and bent. They fan wider than the ferrule and
         // each comes to a point.
@@ -324,10 +317,10 @@ internal static class PersonaRendererProps
                 strand, new PPoint(px + root, py + start + w * 0.12),
                 new PPoint(px + (root + tip) * 0.5, py + start + (end - start) * 0.8));
             hair.Figures.Add(strand);
-            var hairShape = PersonaDraw.Shape(
+            var hairShape = canvas.Paint(
                 hair, PersonaDraw.Solid(Theme.Secondary, (0.92 - Math.Abs(spread) * 0.18) * opacity));
             PersonaDraw.Spin(hairShape, tilt, px, py);
-            canvas.Children.Add(hairShape);
+
         }
     }
 
@@ -336,7 +329,7 @@ internal static class PersonaRendererProps
     /// as a propeller and six reads as a snowflake.
     /// </summary>
     public static void DrawFlower(
-        Canvas canvas, double px, double py, double unit, double scale, Color hue, double opacity)
+        PersonaScene canvas, double px, double py, double unit, double scale, Color hue, double opacity)
     {
         double reach = unit * 0.105 * scale;
         // The same patch of soil the sprout came out of, and the stalk it kept.
@@ -347,9 +340,9 @@ internal static class PersonaRendererProps
         var figure = PersonaDraw.Figure(new PPoint(rootX, rootY), false);
         PersonaDraw.Quad(figure, new PPoint(px, py), new PPoint(px - reach * 0.30, py + reach));
         stalk.Figures.Add(figure);
-        canvas.Children.Add(PersonaDraw.Shape(
+        canvas.Paint(
             stalk, null, PersonaDraw.Solid(hue, 0.85 * opacity), Math.Max(1, unit * 0.022),
-            PenLineCap.Round, PenLineJoin.Round));
+            PenLineCap.Round, PenLineJoin.Round);
         for (int step = 0; step < 5; step++)
         {
             double angle = -Math.PI / 2 + step * 2 * Math.PI / 5;
@@ -357,17 +350,17 @@ internal static class PersonaRendererProps
             double cy = py + Math.Sin(angle) * reach * 0.72;
             var petal = new PathGeometry();
             PersonaDraw.Ellipse(petal, cx, cy, reach * 0.52, reach * 0.52);
-            canvas.Children.Add(PersonaDraw.Shape(
-                petal, PersonaDraw.Solid(Theme.Secondary, 0.88 * opacity)));
+            canvas.Paint(
+                petal, PersonaDraw.Solid(Theme.Secondary, 0.88 * opacity));
         }
         var middle = new PathGeometry();
         PersonaDraw.Ellipse(middle, px, py, reach * 0.34, reach * 0.34);
-        canvas.Children.Add(PersonaDraw.Shape(middle, PersonaDraw.Solid(Theme.Warning, opacity)));
+        canvas.Paint(middle, PersonaDraw.Solid(Theme.Warning, opacity));
     }
 
     /// <summary>One piece of punctuation, floating. The only text this cast is allowed.</summary>
     public static void DrawMark(
-        Canvas canvas, double px, double py, double unit, double scale,
+        PersonaScene canvas, double px, double py, double unit, double scale,
         bool question, Color ink, double opacity)
     {
         double h = unit * 0.20 * scale;
@@ -380,9 +373,9 @@ internal static class PersonaRendererProps
                 figure, new PPoint(px, py + h * 0.10),
                 new PPoint(px + h * 0.42, py - h * 0.46));
             hook.Figures.Add(figure);
-            canvas.Children.Add(PersonaDraw.Shape(
+            canvas.Paint(
                 hook, null, PersonaDraw.Solid(ink, opacity), w,
-                PenLineCap.Round, PenLineJoin.Round));
+                PenLineCap.Round, PenLineJoin.Round);
         }
         else
         {
@@ -390,13 +383,13 @@ internal static class PersonaRendererProps
             var figure = PersonaDraw.Figure(new PPoint(px, py - h * 0.50), false);
             PersonaDraw.Line(figure, px, py + h * 0.10);
             stem.Figures.Add(figure);
-            canvas.Children.Add(PersonaDraw.Shape(
+            canvas.Paint(
                 stem, null, PersonaDraw.Solid(ink, opacity), w,
-                PenLineCap.Round, PenLineJoin.Round));
+                PenLineCap.Round, PenLineJoin.Round);
         }
         var dot = new PathGeometry();
         PersonaDraw.Ellipse(dot, px, py + h * 0.28 + w * 0.6, w * 0.6, w * 0.6);
-        canvas.Children.Add(PersonaDraw.Shape(dot, PersonaDraw.Solid(ink, opacity)));
+        canvas.Paint(dot, PersonaDraw.Solid(ink, opacity));
     }
 
     /// <summary>
@@ -404,7 +397,7 @@ internal static class PersonaRendererProps
     /// which is the cartoon version and the one that reads at this size.
     /// </summary>
     public static void DrawSweat(
-        Canvas canvas, double px, double py, double unit, double scale, double tilt, double opacity)
+        PersonaScene canvas, double px, double py, double unit, double scale, double tilt, double opacity)
     {
         double s = unit * 0.048 * scale;
         var drop = new PathGeometry();
@@ -413,19 +406,17 @@ internal static class PersonaRendererProps
         PersonaDraw.Arc(figure, new PPoint(px - s, py + s * 0.2), s, s, false, SweepDirection.Clockwise);
         PersonaDraw.Quad(figure, new PPoint(px, py - s * 1.5), new PPoint(px - s * 0.8, py - s * 0.5));
         drop.Figures.Add(figure);
-        var shape = PersonaDraw.Shape(drop, PersonaDraw.Solid(Theme.Secondary, 0.80 * opacity));
+        var shape = canvas.Paint(drop, PersonaDraw.Solid(Theme.Secondary, 0.80 * opacity));
         PersonaDraw.Spin(shape, tilt, px, py);
-        canvas.Children.Add(shape);
 
         var shine = new PathGeometry();
         PersonaDraw.Ellipse(shine, px - s * 0.55 + s * 0.45 / 2, py - s * 0.30 + s * 0.55 / 2, s * 0.45 / 2, s * 0.55 / 2);
-        var shineShape = PersonaDraw.Shape(shine, PersonaDraw.Solid(PersonaDraw.White, 0.55 * opacity));
+        var shineShape = canvas.Paint(shine, PersonaDraw.Solid(PersonaDraw.White, 0.55 * opacity));
         PersonaDraw.Spin(shineShape, tilt, px, py);
-        canvas.Children.Add(shineShape);
     }
 
     public static void DrawHeart(
-        Canvas canvas, double px, double py, double unit, double scale, double tilt, double opacity)
+        PersonaScene canvas, double px, double py, double unit, double scale, double tilt, double opacity)
     {
         double s = unit * 0.060 * scale;
         var heart = new PathGeometry();
@@ -439,9 +430,8 @@ internal static class PersonaRendererProps
             figure, new PPoint(px, py + s * 0.95),
             new PPoint(px + s, py + s * 0.16), new PPoint(px + s * 0.62, py + s * 0.42));
         heart.Figures.Add(figure);
-        var shape = PersonaDraw.Shape(heart, PersonaDraw.Solid(Theme.Danger, 0.80 * opacity));
+        var shape = canvas.Paint(heart, PersonaDraw.Solid(Theme.Danger, 0.80 * opacity));
         PersonaDraw.Spin(shape, tilt, px, py);
-        canvas.Children.Add(shape);
     }
 
     /// <summary>
@@ -449,7 +439,7 @@ internal static class PersonaRendererProps
     /// so the tail always trails rather than pointing wherever it was drawn.
     /// </summary>
     public static void DrawShootingStar(
-        Canvas canvas, double px, double py, double unit, double scale, double tilt, double opacity)
+        PersonaScene canvas, double px, double py, double unit, double scale, double tilt, double opacity)
     {
         double reach = unit * 0.040 * scale;
         double tailX = px - Math.Cos(tilt) * reach * 7;
@@ -463,13 +453,13 @@ internal static class PersonaRendererProps
         double minY = Math.Min(py, tailY);
         double w = Math.Max(Math.Abs(px - tailX), 1e-6);
         double h = Math.Max(Math.Abs(py - tailY), 1e-6);
-        canvas.Children.Add(PersonaDraw.Shape(
+        canvas.Paint(
             tail, null,
             PersonaDraw.Linear(
                 PersonaDraw.Pt((px - minX) / w, (py - minY) / h),
                 PersonaDraw.Pt((tailX - minX) / w, (tailY - minY) / h),
                 (Theme.Warning.WithOpacity(0.85 * opacity), 0), (Theme.Warning.WithOpacity(0), 1)),
-            Math.Max(1, reach * 0.75), PenLineCap.Round, PenLineJoin.Round));
+            Math.Max(1, reach * 0.75), PenLineCap.Round, PenLineJoin.Round);
 
         var star = new PathGeometry();
         PathFigure? points = null;
@@ -491,7 +481,7 @@ internal static class PersonaRendererProps
         {
             star.Figures.Add(points);
         }
-        canvas.Children.Add(PersonaDraw.Shape(star, PersonaDraw.Solid(Theme.Warning, opacity)));
+        canvas.Paint(star, PersonaDraw.Solid(Theme.Warning, opacity));
     }
 
     /// <summary>
@@ -499,7 +489,7 @@ internal static class PersonaRendererProps
     /// party shop, so a celebration still looks like this app celebrating.
     /// </summary>
     public static void DrawConfetti(
-        Canvas canvas, double px, double py, double unit, double scale,
+        PersonaScene canvas, double px, double py, double unit, double scale,
         double tilt, Color hue, double opacity)
     {
         double size = unit * 0.042 * scale;
@@ -507,7 +497,7 @@ internal static class PersonaRendererProps
         var colour = palette[Math.Abs((int)(tilt * 7)) % palette.Length];
         var geometry = new PathGeometry();
         PersonaDraw.RoundedRect(geometry, px - size * 0.5, py - size * 0.85, size, size * 1.7, size * 0.22);
-        var shape = PersonaDraw.Shape(geometry, PersonaDraw.Solid(colour, opacity));
+        var shape = canvas.Paint(geometry, PersonaDraw.Solid(colour, opacity));
         // Squashed by its own spin, so a flat scrap turns edge-on to us
         // halfway round instead of sliding sideways.
         var group = new TransformGroup();
@@ -520,7 +510,6 @@ internal static class PersonaRendererProps
             CenterY = py,
         });
         shape.RenderTransform = group;
-        canvas.Children.Add(shape);
     }
 
     /// <summary>
@@ -528,7 +517,7 @@ internal static class PersonaRendererProps
     /// because that is what a brush pressed and lifted leaves behind.
     /// </summary>
     public static void DrawStroke(
-        Canvas canvas, double px, double py, double unit, double scale,
+        PersonaScene canvas, double px, double py, double unit, double scale,
         double tilt, Color hue, double opacity)
     {
         double length = unit * 0.13 * scale;
@@ -538,9 +527,9 @@ internal static class PersonaRendererProps
         PersonaDraw.Quad(mark, new PPoint(px + length, py), new PPoint(px, py - w * 1.5));
         PersonaDraw.Quad(mark, new PPoint(px - length, py), new PPoint(px, py + w * 1.5));
         geometry.Figures.Add(mark);
-        var shape = PersonaDraw.Shape(geometry, PersonaDraw.Solid(Theme.Secondary, 0.85 * opacity));
+        var shape = canvas.Paint(geometry, PersonaDraw.Solid(Theme.Secondary, 0.85 * opacity));
         PersonaDraw.Spin(shape, tilt, px, py);
-        canvas.Children.Add(shape);
+
         _ = hue;
     }
 
@@ -549,26 +538,26 @@ internal static class PersonaRendererProps
     /// be see-through or it is a ball, and a ball is a different mood entirely.
     /// </summary>
     public static void DrawBubble(
-        Canvas canvas, double px, double py, double unit, double scale, Color hue, double opacity)
+        PersonaScene canvas, double px, double py, double unit, double scale, Color hue, double opacity)
     {
         double reach = unit * 0.10 * scale;
         var geometry = new PathGeometry();
         PersonaDraw.Ellipse(geometry, px, py, reach, reach);
-        canvas.Children.Add(PersonaDraw.Shape(
+        canvas.Paint(
             geometry,
             PersonaDraw.Radial(
                 PersonaDraw.Pt(0.5, 0.5), 0.5,
                 (PersonaDraw.White.WithOpacity(0.02 * opacity), 0),
                 (PersonaDraw.White.WithOpacity(0.02 * opacity), 0.2),
-                (Theme.Secondary.WithOpacity(0.26 * opacity), 1))));
-        canvas.Children.Add(PersonaDraw.Shape(
+                (Theme.Secondary.WithOpacity(0.26 * opacity), 1)));
+        canvas.Paint(
             geometry, null, PersonaDraw.Solid(PersonaDraw.White, 0.62 * opacity),
-            Math.Max(1, unit * 0.014)));
+            Math.Max(1, unit * 0.014));
         var shine = new PathGeometry();
         PersonaDraw.Ellipse(
             shine, px - reach + reach * 0.34 + reach * 0.22, py - reach + reach * 0.28 + reach * 0.16,
             reach * 0.22, reach * 0.16);
-        canvas.Children.Add(PersonaDraw.Shape(shine, PersonaDraw.Solid(PersonaDraw.White, 0.72 * opacity)));
+        canvas.Paint(shine, PersonaDraw.Solid(PersonaDraw.White, 0.72 * opacity));
         _ = hue;
     }
 
@@ -577,7 +566,7 @@ internal static class PersonaRendererProps
     /// same prop covers the whole snack from whole to nearly gone.
     /// </summary>
     public static void DrawCookie(
-        Canvas canvas, double px, double py, double unit, double scale,
+        PersonaScene canvas, double px, double py, double unit, double scale,
         double tilt, Color hue, double opacity)
     {
         double reach = unit * 0.105 * scale;
@@ -594,9 +583,9 @@ internal static class PersonaRendererProps
             PersonaDraw.Ellipse(biscuit, cx, cy, reach * 0.46, reach * 0.46);
         }
         // The persona's own colour, like every other prop it holds.
-        canvas.Children.Add(PersonaDraw.Shape(
+        canvas.Paint(
             biscuit, PersonaDraw.Solid(hue, 0.62 * opacity),
-            PersonaDraw.Solid(hue, 0.95 * opacity), Math.Max(1, unit * 0.014)));
+            PersonaDraw.Solid(hue, 0.95 * opacity), Math.Max(1, unit * 0.014));
         // The chips. Fixed offsets rather than random ones, so a biscuit does
         // not reshuffle itself every frame.
         foreach (var offset in new PPoint[] { new(-0.34, 0.18), new(0.22, 0.36), new(0.05, -0.30) })
@@ -604,7 +593,7 @@ internal static class PersonaRendererProps
             var chip = new PathGeometry();
             PersonaDraw.Ellipse(
                 chip, px + offset.X * reach, py + offset.Y * reach, reach * 0.15, reach * 0.15);
-            canvas.Children.Add(PersonaDraw.Shape(chip, PersonaDraw.Solid(hue, 0.95 * opacity)));
+            canvas.Paint(chip, PersonaDraw.Solid(hue, 0.95 * opacity));
         }
     }
 
@@ -612,13 +601,13 @@ internal static class PersonaRendererProps
     /// The patch of ground a plant is in. Small, dark, and flat on the floor
     /// line, which is all it takes for a stem to read as rooted.
     /// </summary>
-    public static void DrawSoil(Canvas canvas, double px, double py, double unit, double w, double opacity)
+    public static void DrawSoil(PersonaScene canvas, double px, double py, double unit, double w, double opacity)
     {
         var mound = new PathGeometry();
         var figure = PersonaDraw.Figure(new PPoint(px - w, py));
         PersonaDraw.Quad(figure, new PPoint(px + w, py), new PPoint(px, py - w * 0.62));
         mound.Figures.Add(figure);
-        canvas.Children.Add(PersonaDraw.Shape(mound, PersonaDraw.Solid(PersonaDraw.Black, 0.30 * opacity)));
+        canvas.Paint(mound, PersonaDraw.Solid(PersonaDraw.Black, 0.30 * opacity));
         _ = unit;
     }
 
@@ -628,34 +617,31 @@ internal static class PersonaRendererProps
     /// grip. The head is deliberately heavy.
     /// </summary>
     public static void DrawHammer(
-        Canvas canvas, double px, double py, double unit, double tilt, Color hue, double opacity)
+        PersonaScene canvas, double px, double py, double unit, double tilt, Color hue, double opacity)
     {
         double handle = unit * 0.30;
         var shaft = new PathGeometry();
         var figure = PersonaDraw.Figure(new PPoint(px, py), false);
         PersonaDraw.Line(figure, px + handle, py);
         shaft.Figures.Add(figure);
-        var shaftShape = PersonaDraw.Shape(
+        var shaftShape = canvas.Paint(
             shaft, null, PersonaDraw.Solid(hue, 0.95 * opacity), Math.Max(2, unit * 0.042),
             PenLineCap.Round, PenLineJoin.Round);
         PersonaDraw.Spin(shaftShape, tilt, px, py);
-        canvas.Children.Add(shaftShape);
 
         var head = new PathGeometry();
         PersonaDraw.RoundedRect(
             head, px + handle - unit * 0.030, py - unit * 0.075,
             unit * 0.105, unit * 0.15, unit * 0.022);
-        var headShape = PersonaDraw.Shape(head, PersonaDraw.Solid(Theme.Secondary, 0.95 * opacity));
+        var headShape = canvas.Paint(head, PersonaDraw.Solid(Theme.Secondary, 0.95 * opacity));
         PersonaDraw.Spin(headShape, tilt, px, py);
-        canvas.Children.Add(headShape);
 
         var claw = new PathGeometry();
         PersonaDraw.RoundedRect(
             claw, px + handle - unit * 0.030 - unit * 0.045, py - unit * 0.030,
             unit * 0.055, unit * 0.060, unit * 0.014);
-        var clawShape = PersonaDraw.Shape(claw, PersonaDraw.Solid(Theme.Secondary, 0.72 * opacity));
+        var clawShape = canvas.Paint(claw, PersonaDraw.Solid(Theme.Secondary, 0.72 * opacity));
         PersonaDraw.Spin(clawShape, tilt, px, py);
-        canvas.Children.Add(clawShape);
     }
 
     /// <summary>
@@ -663,19 +649,19 @@ internal static class PersonaRendererProps
     /// is how much of the shank is still above the boards.
     /// </summary>
     public static void DrawNail(
-        Canvas canvas, double px, double py, double unit, double showing, Color hue, double opacity)
+        PersonaScene canvas, double px, double py, double unit, double showing, Color hue, double opacity)
     {
         double length = unit * 0.11 * Math.Max(showing, 0.10);
         var shank = new PathGeometry();
         var figure = PersonaDraw.Figure(new PPoint(px, py), false);
         PersonaDraw.Line(figure, px, py - length);
         shank.Figures.Add(figure);
-        canvas.Children.Add(PersonaDraw.Shape(
+        canvas.Paint(
             shank, null, PersonaDraw.Solid(Theme.Secondary, 0.90 * opacity),
-            Math.Max(1.5, unit * 0.026), PenLineCap.Flat, PenLineJoin.Miter));
+            Math.Max(1.5, unit * 0.026), PenLineCap.Flat, PenLineJoin.Miter);
         var head = new PathGeometry();
         PersonaDraw.Ellipse(head, px, py - length - unit * 0.016 + unit * 0.014, unit * 0.032, unit * 0.014);
-        canvas.Children.Add(PersonaDraw.Shape(head, PersonaDraw.Solid(Theme.Secondary, opacity)));
+        canvas.Paint(head, PersonaDraw.Solid(Theme.Secondary, opacity));
         _ = hue;
     }
 }

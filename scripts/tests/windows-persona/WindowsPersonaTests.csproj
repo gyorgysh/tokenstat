@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../../apps/windows/Design/Persona/PersonaScene.cs" Link="PersonaScene.cs" />
     <Compile Include="../../../apps/windows/Design/Persona/PersonaGeom.cs" Link="PersonaGeom.cs" />
     <Compile Include="../../../apps/windows/Design/Persona/PersonaSoftBody.cs" Link="PersonaSoftBody.cs" />
     <Compile Include="../../../apps/windows/Design/Persona/PersonaEngine.cs" Link="PersonaEngine.cs" />

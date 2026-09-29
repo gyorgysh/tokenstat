@@ -65,6 +65,14 @@ public sealed partial class SmokeApp : Application
             H264Streamer? streamer = null;
             try
             {
+                PersonaSceneSmoke.Run();
+                var notePreview = NotePreview.Create("# Native note\n\n**Bold** and *italic* &amp; text\n\n- [x] Complete\n- [ ] Next\n\n> Quote\n\n```swift\nlet value = 1\n```\n\n[Link](https://example.com)");
+                body.Children.Add(notePreview);
+                body.UpdateLayout();
+                if (notePreview is not StackPanel noteBlocks || noteBlocks.Children.Count < 5 || noteBlocks.ActualHeight <= 0)
+                    throw new Exception("Native note preview did not lay out its formatted blocks");
+                body.Children.Remove(notePreview);
+                Program.Log("PASS: native Notes preview renders headings, emphasis, checklist, quote, code and links");
                 var tree = EditorTree.Create();
                 tree.Height = 90;
                 var filename = new TextBlock { Text = "README.md" };

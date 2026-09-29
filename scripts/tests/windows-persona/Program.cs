@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 using Tokenstat.Design.Persona;
 
+SceneTests.Run();
+
 for (int variant = 0; variant < 12; variant++)
 {
     var body = new PersonaSoftBody();

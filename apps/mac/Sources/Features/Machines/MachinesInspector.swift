@@ -179,6 +179,9 @@ struct MachinesInspector: View {
                         .foregroundStyle(.secondary)
                     HostStatsBar(local: true)
                     HostUpdateCard(local: true)
+                } else if !machine.isHost {
+                    Text("This phone or tablet connects to your computers. Open tokenstat on it to choose a computer and project.")
+                        .font(Theme.callout).foregroundStyle(.secondary)
                 } else if let peer = model.peer(for: machine) {
                     if machine.online == true, let key = machine.publicIdentity, !key.isEmpty {
                         HostStatsBar(peer: key, online: true)

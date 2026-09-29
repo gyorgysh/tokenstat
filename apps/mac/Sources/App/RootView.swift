@@ -2580,7 +2580,13 @@ struct RootView: View {
                 workspaceID: route.workspaceID
             )
         case .global(.machines):
-            MachinesView(model: machines) { handle($0) }
+            MachinesView(model: machines, onNavigate: { handle($0) }, onInspect: {
+                isInspectorPresented = true
+                if !inspectorFits {
+                    isOverlayVisible = true
+                    overlayHeldByPress = true
+                }
+            })
         case .global(.account):
             AccountView(model: account)
         case .workspacesOverview:

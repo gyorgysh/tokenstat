@@ -160,42 +160,6 @@ internal static class PersonaDraw
     }
 
     /// <summary>
-    /// One paintable element. Coordinates are absolute in the mark's frame:
-    /// the path sits at the canvas origin, so clips share the space.
-    /// </summary>
-    public static ShapesPath Shape(
-        PathGeometry data,
-        Brush? fill = null,
-        Brush? stroke = null,
-        double thickness = 1,
-        PenLineCap cap = PenLineCap.Flat,
-        PenLineJoin join = PenLineJoin.Miter,
-        Geometry? clip = null)
-    {
-        var path = new ShapesPath { Data = data };
-        if (fill is not null)
-        {
-            path.Fill = fill;
-        }
-        if (stroke is not null)
-        {
-            path.Stroke = stroke;
-            path.StrokeThickness = thickness;
-            path.StrokeStartLineCap = cap;
-            path.StrokeEndLineCap = cap;
-            path.StrokeLineJoin = join;
-        }
-        if (clip is not null)
-        {
-            // WinUI UIElement.Clip accepts only RectangleGeometry. The body
-            // outline is a PathGeometry, so casting it throws on every face.
-            // Keep clipping in stage coordinates using its live bounds.
-            path.Clip = clip as RectangleGeometry ?? new RectangleGeometry { Rect = clip.Bounds };
-        }
-        return path;
-    }
-
-    /// <summary>
     /// Spin an element about a point in the mark's frame. Used for props drawn
     /// in their own straight frame: console, mug, brush, hammer, sweat, heart.
     /// Anything with a clip bakes the rotation into its points instead.

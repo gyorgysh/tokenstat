@@ -193,6 +193,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
     public UIElement? Inspector => _inspectorRoot;
 
     public event Action? ToolbarChanged;
+    public event Action? DetailsRequested;
 
     /// <summary>Global screen: no folder to name.</summary>
     public UIElement? ToolbarScope => null;
@@ -680,6 +681,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
                 _selectedPeer = key;
                 Render();
                 RefreshInspector();
+                DetailsRequested?.Invoke();
             }));
             row.Children.Add(actions);
             body.Children.Add(row);
@@ -1065,6 +1067,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
                 _selectedPeer = key;
                 Render();
                 RefreshInspector();
+                DetailsRequested?.Invoke();
             }));
             row.Children.Add(actions);
             body.Children.Add(row);
@@ -1280,6 +1283,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
                 _selectedPeer = null;
                 Render();
                 RefreshInspector();
+                DetailsRequested?.Invoke();
             }));
         return Chrome.Card(
             "Connection settings",
@@ -1602,6 +1606,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             _selectedId = id;
             Render();
             RefreshInspector();
+            DetailsRequested?.Invoke();
         }));
         var row = new Grid { ColumnSpacing = Theme.SpaceM, RowSpacing = Theme.SpaceS };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1975,7 +1980,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
         {
             body.Children.Add(new TextBlock
             {
-                Text = "Workspaces from this device are in the sidebar.",
+                Text = "Projects from this device are in the sidebar.",
                 Opacity = 0.7,
                 FontSize = 12,
                 TextWrapping = TextWrapping.Wrap,
@@ -2061,6 +2066,14 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             });
             body.Children.Add(HostStatsCard(null));
             body.Children.Add(HostUpdateCard(null, local: true));
+        }
+        else if (!isHost)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = "This phone or tablet connects to your computers. Open tokenstat on it to choose a computer and project.",
+                Opacity = 0.7, TextWrapping = TextWrapping.Wrap,
+            });
         }
         else if (PeerForMachine(machine) is JsonNode linked)
         {

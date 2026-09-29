@@ -136,3 +136,5 @@ xcuserdata/
 /scripts/tests/windows-board/obj/
 /scripts/tests/windows-devices/bin/
 /scripts/tests/windows-devices/obj/
+/scripts/tests/windows-notes/bin/
+/scripts/tests/windows-notes/obj/

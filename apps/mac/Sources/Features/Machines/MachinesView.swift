@@ -30,6 +30,7 @@ struct MachinesView: View {
     /// section they land on, because this card asks for "servers" and has no
     /// business picking between Hosts and Keys.
     var onNavigate: ((NavigationRequest) -> Void)?
+    var onInspect: (() -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var addingDevice = false
     @State private var encryptionExpanded = false
@@ -629,13 +630,17 @@ struct MachinesView: View {
                         isSelected: model.selectedKind == .peer(peer.key)
                     ) {
                         HStack(spacing: Theme.Space.s) {
+                            Button("Details", .reveal) { inspectPeer(peer) }
+                                .accessibilityIdentifier("device.details.peer.\(peer.key)")
+                                .accessibilityLabel("Details for \(peer.label.isEmpty ? (model.accountName(for: peer) ?? "device") : peer.label)")
+                                .buttonStyle(SecondaryButtonStyle(small: true))
                             Button("Approve", .approve) { Task { await model.approve(peer) } }
                                 .buttonStyle(AccentButtonStyle())
                             Button("Forget", .delete, role: .destructive) { confirmForget = peer }
                                 .buttonStyle(SecondaryButtonStyle())
                         }
                     }
-                    .onTapGesture { model.selectPeer(peer) }
+                    .onTapGesture { inspectPeer(peer) }
                 }
                 Text("Approve only devices you recognize. You can revoke access later.")
                 .font(Theme.caption)
@@ -669,23 +674,33 @@ struct MachinesView: View {
                         symbol: model.peerSymbol(for: peer),
                         isSelected: model.selectedKind == .peer(peer.key)
                     ) {
-                        Menu {
-                            if peer.trust == .approved {
-                                Button("Revoke", .revoke, role: .destructive) { confirmRevoke = peer }
+                        HStack(spacing: Theme.Space.s) {
+                            Button("Details", .reveal) { inspectPeer(peer) }
+                                .accessibilityIdentifier("device.details.peer.\(peer.key)")
+                                .accessibilityLabel("Details for \(peer.label.isEmpty ? (model.accountName(for: peer) ?? "device") : peer.label)")
+                                .buttonStyle(SecondaryButtonStyle(small: true))
+                            Menu {
+                                if peer.trust == .approved {
+                                    Button("Revoke", .revoke, role: .destructive) { confirmRevoke = peer }
+                                        .buttonStyle(SecondaryButtonStyle())
+                                } else {
+                                    Button("Approve", .approve) { Task { await model.approve(peer) } }
+                                        .buttonStyle(SecondaryButtonStyle())
+                                }
+                                Button("Forget", .delete, role: .destructive) { confirmForget = peer }
                                     .buttonStyle(SecondaryButtonStyle())
-                            } else {
-                                Button("Approve", .approve) { Task { await model.approve(peer) } }
-                                    .buttonStyle(SecondaryButtonStyle())
+                            } label: {
+                                Label("Manage", systemImage: "ellipsis")
+                                    .font(Theme.caption.weight(.medium))
+                                    .foregroundStyle(Theme.accent)
+                                    .padding(.horizontal, 10).padding(.vertical, 6)
+                                    .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 7))
                             }
-                            Button("Forget", .delete, role: .destructive) { confirmForget = peer }
-                                .buttonStyle(SecondaryButtonStyle())
-                        } label: {
-                            Image(systemName: "ellipsis").foregroundStyle(Theme.accent)
-                                .padding(8).background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 6))
+                            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                            .help("Manage \(peer.label.isEmpty ? (model.accountName(for: peer) ?? "device") : peer.label)")
                         }
-                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                     }
-                    .onTapGesture { model.selectPeer(peer) }
+                    .onTapGesture { inspectPeer(peer) }
                 }
             }
             .transition(.smoothIn(reduceMotion: reduceMotion))
@@ -882,7 +897,7 @@ struct MachinesView: View {
                         .strokeBorder(model.selectedKind == .account(machine.machineID ?? machine.id)
                             ? Theme.accent.opacity(0.5) : Theme.border, lineWidth: 1))
                     .contentShape(.rect)
-                    .onTapGesture { model.selectAccount(machine) }
+                    .onTapGesture { inspectAccount(machine) }
                 }
             }
             .transition(.smoothIn(reduceMotion: reduceMotion))
@@ -890,8 +905,22 @@ struct MachinesView: View {
         .animation(.easeOut(duration: 0.22), value: model.accountMachines.isEmpty)
     }
 
+    private func inspectPeer(_ peer: Peer) {
+        model.selectPeer(peer)
+        onInspect?()
+    }
+
+    private func inspectAccount(_ machine: Machine) {
+        model.selectAccount(machine)
+        onInspect?()
+    }
+
     private func deviceActions(_ machine: Machine, isSelf: Bool) -> some View {
         HStack(spacing: Theme.Space.s) {
+            Button("Details", .reveal) { inspectAccount(machine) }
+                .accessibilityIdentifier("device.details.account.\(machine.id)")
+                .accessibilityLabel("Details for \(model.resolvedName(for: machine) ?? machine.displayName)")
+                .buttonStyle(SecondaryButtonStyle(small: true))
             if machine.isHost, !isSelf {
                 if let peer = model.peer(for: machine) {
                     if model.isConnected(machine) {

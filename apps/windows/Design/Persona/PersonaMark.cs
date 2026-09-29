@@ -25,6 +25,7 @@ namespace Tokenstat.Design.Persona;
 internal sealed class PersonaMark : Canvas
 {
     private readonly PersonaEngine _engine;
+    private readonly PersonaScene _scene;
     private readonly DispatcherTimer _timer = new();
     private readonly Stopwatch _clock = Stopwatch.StartNew();
 
@@ -43,6 +44,7 @@ internal sealed class PersonaMark : Canvas
         _state = state;
         Pokeable = pokeable;
         _engine = new PersonaEngine(seed, state);
+        _scene = new PersonaScene(this);
         Width = size;
         Height = size;
         AutomationProperties.SetAccessibilityView(this, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
@@ -147,7 +149,7 @@ internal sealed class PersonaMark : Canvas
             return;
         }
         _engine.AdvanceTo(_clock.Elapsed.TotalSeconds, _state, moving);
-        PersonaRenderer.Draw(_engine, this, _size, _size);
+        PersonaRenderer.Draw(_engine, _scene, _size, _size);
         _needsRedraw = false;
         _wasMoving = moving;
     }

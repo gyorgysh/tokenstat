@@ -752,14 +752,19 @@ public sealed partial class MainWindow : Window
         {
             _toolbarSource.ToolbarChanged -= OnToolbarChanged;
         }
+        if (_deviceDetailsSource is not null) _deviceDetailsSource.DetailsRequested -= OnDeviceDetailsRequested;
+        _deviceDetailsSource = page as MachinesPage;
+        if (_deviceDetailsSource is not null) _deviceDetailsSource.DetailsRequested += OnDeviceDetailsRequested;
         _toolbarSource = page as IToolbarItems;
         if (_toolbarSource is not null)
         {
             _toolbarSource.ToolbarChanged += OnToolbarChanged;
         }
+        _deviceDetailsPopover?.Hide();
         _frame.Content = page;
         _inspectorHost.RouteAllowsInspector = page is not AccountPage;
-        _inspectorHost.SetInspector((page as IInspectorContent)?.Inspector, page is WorkspaceTabsPage or HomePage);
+        if (!_deviceDetailsInPopover)
+            _inspectorHost.SetInspector((page as IInspectorContent)?.Inspector, page is WorkspaceTabsPage or HomePage);
         if (page is IScopeAware aware)
         {
             aware.ApplyScope(_scope);
@@ -769,12 +774,53 @@ public sealed partial class MainWindow : Window
     }
 
     private IToolbarItems? _toolbarSource;
+    private MachinesPage? _deviceDetailsSource;
+    private bool _deviceDetailsInPopover;
+    private Flyout? _deviceDetailsPopover;
+
+    private void OnDeviceDetailsRequested()
+    {
+        if (_deviceDetailsInPopover || _frame.Content is not MachinesPage page || page.Inspector is not UIElement detail) return;
+        _inspectorHost.IsOpen = true;
+        if (_inspectorHost.FitsWidth)
+        {
+            _inspectorHost.Refresh();
+            RebuildToolbar();
+            return;
+        }
+        // Keep details reachable on narrow windows. A nonmodal native popover
+        // also leaves confirmation dialogs available to the device actions.
+        _deviceDetailsInPopover = true;
+        _inspectorHost.SetInspector(null);
+        var scroll = new ScrollViewer
+        {
+            Content = detail, Width = Math.Min(360, Math.Max(240, _contentHost.ActualWidth - 64)),
+            MaxHeight = Math.Max(160, _contentHost.ActualHeight - 160),
+        };
+        var body = new StackPanel { Spacing = Theme.SpaceM };
+        var popover = new Flyout { Content = body };
+        _deviceDetailsPopover = popover;
+        body.Children.Add(Buttons.Secondary("Close details", ActionIcon.Back, (_, _) => popover.Hide(), small: true));
+        body.Children.Add(scroll);
+        void Restore()
+        {
+            scroll.Content = null;
+            _deviceDetailsInPopover = false;
+            _deviceDetailsPopover = null;
+            _inspectorHost.SetInspector((_frame.Content as IInspectorContent)?.Inspector, _frame.Content is WorkspaceTabsPage or HomePage);
+            RebuildToolbar();
+        }
+        popover.Closed += (_, _) => Restore();
+        try { popover.ShowAt(page, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.Full }); }
+        catch { Restore(); throw; }
+    }
 
     private void OnToolbarChanged()
     {
         DispatcherQueue.TryEnqueue(() =>
         {
-            _inspectorHost.SetInspector((_frame.Content as IInspectorContent)?.Inspector, _frame.Content is WorkspaceTabsPage or HomePage);
+            if (!_deviceDetailsInPopover)
+                _inspectorHost.SetInspector((_frame.Content as IInspectorContent)?.Inspector, _frame.Content is WorkspaceTabsPage or HomePage);
             RebuildToolbar();
         });
     }
