@@ -634,7 +634,15 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             Opacity = 0.65, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 16) });
         body.Children.Add(new TextBlock { Text = "Open", FontSize = 12, Opacity = 0.7 });
         var links = new FlowPanel { MinimumItemWidth = 220, Spacing = Theme.SpaceM };
-        foreach (var section in new[] { WorkspaceSection.Chat, WorkspaceSection.Files, WorkspaceSection.Browser, WorkspaceSection.Changes, WorkspaceSection.Pulls, WorkspaceSection.Todo })
+        // Every section of the project, because the sidebar lists only what
+        // is running and the chats; this page is where the rest open.
+        foreach (var section in new[]
+        {
+            WorkspaceSection.Chat, WorkspaceSection.Files, WorkspaceSection.Browser,
+            WorkspaceSection.Changes, WorkspaceSection.History, WorkspaceSection.Pulls,
+            WorkspaceSection.Todo, WorkspaceSection.Notes, WorkspaceSection.Automations,
+            WorkspaceSection.Workflows,
+        })
         {
             var content = new StackPanel { Spacing = Theme.SpaceS, HorizontalAlignment = HorizontalAlignment.Center };
             var icon = section.Action().Icon();

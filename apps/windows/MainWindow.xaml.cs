@@ -34,7 +34,6 @@ public sealed partial class MainWindow : Window
     private readonly Border _railFooter = new() { Margin = new Thickness(4, 8, 4, 8) };
     private bool _nativeBackdrop;
     private readonly Dictionary<string, Button> _pinnedNavigation = new();
-    private readonly Dictionary<string, bool> _chatGroupExpansion = new();
     private readonly Frame _frame = new();
     /// <summary>
     /// The content area behind the frame. Opaque Background tone, so the
@@ -535,15 +534,14 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Local folders and every reachable peer's, each with all sections. The
-    /// Add workspace row stays last, under whatever folders exist.
+    /// Local folders and every reachable peer's, each opening onto its running
+    /// terminals and chats (the sections are tabs on the project page). The
+    /// Add project row stays last, under whatever folders exist.
     /// </summary>
     private void RebuildFolderItems()
     {
         var selectedTag = (_nav.SelectedItem as NavigationViewItem)?.Tag as string;
         var expanded = NavigationExpansion.Capture(NavItems(_nav.MenuItems));
-        foreach (var pair in expanded.Where(pair => pair.Key.StartsWith("ws:") && pair.Key.EndsWith(":Chat")))
-            _chatGroupExpansion[pair.Key] = pair.Value;
         var keep = new List<object>();
         foreach (var item in _nav.MenuItems)
         {
@@ -621,15 +619,6 @@ public sealed partial class MainWindow : Window
         if (!string.IsNullOrEmpty(path))
         {
             ToolTipService.SetToolTip(parent, path);
-        }
-        foreach (var section in Enum.GetValues<WorkspaceSection>().Where(section => section != WorkspaceSection.Launcher))
-        {
-            parent.MenuItems.Add(new NavigationViewItem
-            {
-                Content = section.Label(),
-                Icon = section.Action().Icon(),
-                Tag = "ws:" + id + ":" + section,
-            });
         }
         var menu = ContextMenus.Menu(parent);
         ContextMenus.Add(menu, "Open folder", () => NavigateTo("ws:" + id + ":Launcher"));
@@ -984,7 +973,7 @@ public sealed partial class MainWindow : Window
             {
                 _nav.SelectedItem = back;
             }
-            else if (FindNavItem("ws:" + folder + ":Chat") is NavigationViewItem chatRow)
+            else if (ProjectRowFor("ws:" + folder + ":Chat") is NavigationViewItem chatRow)
             {
                 _nav.SelectedItem = chatRow;
             }
@@ -995,7 +984,7 @@ public sealed partial class MainWindow : Window
         {
             var folder = tag[SidebarLive.ChatAllPrefix.Length..];
             var chatTag = "ws:" + folder + ":Chat";
-            if (FindNavItem(chatTag) is NavigationViewItem chatRow)
+            if (ProjectRowFor(chatTag) is NavigationViewItem chatRow)
             {
                 _suppressNav = true;
                 _nav.SelectedItem = chatRow;
@@ -1168,8 +1157,19 @@ public sealed partial class MainWindow : Window
     private void RestoreSelection(string? tag)
     {
         _suppressNav = true;
-        _nav.SelectedItem = tag is null ? null : FindNavItem(tag);
+        _nav.SelectedItem = tag is null ? null : FindNavItem(tag) ?? ProjectRowFor(tag);
         _suppressNav = false;
+    }
+
+    /// <summary>
+    /// A project section has no sidebar row of its own, so the project's row
+    /// lights while one of its sections is on screen.
+    /// </summary>
+    private NavigationViewItem? ProjectRowFor(string tag)
+    {
+        if (!tag.StartsWith("ws:", StringComparison.Ordinal)) return null;
+        var cut = tag.LastIndexOf(':');
+        return cut <= "ws:".Length ? null : FindNavItem(tag[..cut] + ":Launcher");
     }
 
     private void NavigateTo(string tag)
@@ -1600,7 +1600,10 @@ public sealed partial class MainWindow : Window
             list.Add(chat);
         }
 
-        foreach (var item in NavItems(_nav.MenuItems).Where(row => row.MenuItems.Count > 0 && (row.Tag as string)?.StartsWith("ws:") == true && (row.Tag as string)?.EndsWith(":Launcher") == true).ToList())
+        // Running terminals, then chats, directly under each project, as on
+        // the Mac. Section rows under every project repeated what the
+        // project page's own tabs already offer.
+        foreach (var item in NavItems(_nav.MenuItems).Where(row => (row.Tag as string)?.StartsWith("ws:") == true && (row.Tag as string)?.EndsWith(":Launcher") == true).ToList())
         {
             if (item is not NavigationViewItem parent)
             {
@@ -1619,30 +1622,6 @@ public sealed partial class MainWindow : Window
             }
             var folderId = rest[..cut];
             var desiredSessions = new List<NavigationViewItem>();
-            _liveSummaries.TryGetValue(folderId, out var summary);
-            foreach (var child in parent.MenuItems)
-            {
-                if (child is not NavigationViewItem section || section.Tag is not string sectionTag)
-                {
-                    continue;
-                }
-                var sectionRest = sectionTag.StartsWith("ws:", StringComparison.Ordinal)
-                    ? sectionTag["ws:".Length..]
-                    : null;
-                var sectionCut = sectionRest?.LastIndexOf(':') ?? -1;
-                if (sectionCut <= 0
-                    || !Enum.TryParse<WorkspaceSection>(sectionRest?[(sectionCut + 1)..], out var sectionKind))
-                {
-                    continue;
-                }
-                var count = SidebarLive.SectionCount(sectionKind, summary);
-                if (sectionKind == WorkspaceSection.Chat)
-                {
-                    if (section.MenuItems.Count > 0) _chatGroupExpansion[sectionTag] = section.IsExpanded;
-                    if (chatsByFolder.TryGetValue(folderId, out var recent)) count = Math.Max(count, recent.Count);
-                }
-                SidebarLive.ApplyCount(section, count);
-            }
             if (sessionsByFolder.TryGetValue(folderId, out var sessions) && sessions.Count > 0)
             {
                 foreach (var session in sessions)
@@ -1650,7 +1629,8 @@ public sealed partial class MainWindow : Window
                     desiredSessions.Add(SidebarLive.SessionItem(folderId, session));
                 }
             }
-            NavigationRows.Reconcile(parent.MenuItems, desiredSessions, SidebarLive.SessionPrefix, ChildIndex(parent, "ws:" + folderId + ":Sessions") + 1);
+            NavigationRows.Reconcile(parent.MenuItems, desiredSessions, SidebarLive.SessionPrefix, 0);
+            var desiredChats = new List<NavigationViewItem>();
             if (chatsByFolder.TryGetValue(folderId, out var chats) && chats.Count > 0)
             {
                 var expanded = _liveChatExpanded.Contains(folderId);
@@ -1671,8 +1651,6 @@ public sealed partial class MainWindow : Window
                 var shown = expanded
                     ? Math.Min(chats.Count, SidebarLive.InlineChats)
                     : Math.Min(chats.Count, SidebarLive.CollapsedChats);
-                var chatSection = (NavigationViewItem)parent.MenuItems[ChildIndex(parent, "ws:" + folderId + ":Chat")];
-                var desiredChats = new List<NavigationViewItem>();
                 for (var i = 0; i < shown; i++)
                 {
                     desiredChats.Add(SidebarLive.ChatItem(folderId, chats[i]));
@@ -1690,13 +1668,10 @@ public sealed partial class MainWindow : Window
                     desiredChats.Add(SidebarLive.ActionItem(
                         SidebarLive.ChatAllPrefix + folderId, "See all chats"));
                 }
-                NavigationRows.Reconcile(chatSection.MenuItems, desiredChats, "wschat", 0);
-                var chatTag = "ws:" + folderId + ":Chat";
-                chatSection.IsExpanded = _chatGroupExpansion.GetValueOrDefault(chatTag, true)
-                    || (selectedTag is not null && LiveRoute.TrySplit(selectedTag, SidebarLive.ChatPrefix, out var selectedFolderId, out _) && selectedFolderId == folderId);
             }
-            else if (parent.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(row => Equals(row.Tag, "ws:" + folderId + ":Chat")) is { } emptyChats)
-                NavigationRows.Reconcile(emptyChats.MenuItems, Array.Empty<NavigationViewItem>(), "wschat", 0);
+            // "wschat" covers the chat rows and their Show more and See all
+            // rows, which share the prefix.
+            NavigationRows.Reconcile(parent.MenuItems, desiredChats, "wschat", desiredSessions.Count);
         }
 
         if (selectedTag is not null

@@ -163,42 +163,6 @@ internal static class SidebarLive
         return (summaries, account);
     }
 
-    /// <summary>What a section badge says. Zero draws nothing, like the Mac.</summary>
-    public static int SectionCount(WorkspaceSection section, JsonNode? summary)
-    {
-        if (summary is null)
-        {
-            return 0;
-        }
-        return section switch
-        {
-            WorkspaceSection.Sessions => (int)Format.Long(summary, "sessions"),
-            WorkspaceSection.Chat => (int)Format.Long(summary, "chats"),
-            WorkspaceSection.Changes => (int)Format.Long(summary, "changed"),
-            WorkspaceSection.History => 0,
-            WorkspaceSection.Pulls => (int)Format.Long(summary, "pulls"),
-            WorkspaceSection.Todo => (int)Format.Long(summary, "tasks"),
-            WorkspaceSection.Notes => (int)Format.Long(summary, "notes"),
-            WorkspaceSection.Workflows => WorkflowsCount(summary),
-            WorkspaceSection.Automations => (int)Format.Long(summary, "automations"),
-            WorkspaceSection.Files => 0,
-            // The Mac counts its own open tabs here, which have no host feed.
-            WorkspaceSection.Browser => 0,
-            _ => 0,
-        };
-    }
-
-    private static int WorkflowsCount(JsonNode summary)
-    {
-        var running = (int)Format.Long(summary, "workflowsRunning");
-        return running > 0 ? running : (int)Format.Long(summary, "workflows");
-    }
-
-    public static void ApplyCount(NavigationViewItem row, int count)
-    {
-        row.InfoBadge = count > 0 ? new InfoBadge { Value = count } : null;
-    }
-
     /// <summary>
     /// One live session row: title, meter line, and state. Tag routes to the
     /// session's terminal through the sidebar selection handler.
