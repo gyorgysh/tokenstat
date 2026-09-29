@@ -102,6 +102,13 @@ private struct RetainedPaneLayout: Layout {
 
     func makeCache(subviews: Subviews) -> Cache { Cache() }
 
+    func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        // A hidden pane's last size must survive parent updates. Layout's
+        // default recreates the cache and would measure the hidden tree again
+        // at each foreground resize. Active panes refresh in sizeThatFits.
+        if subviews.isEmpty { cache.size = nil }
+    }
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
         guard let pane = subviews.first else { return .zero }
         if isActive || cache.size == nil {

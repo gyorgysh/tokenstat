@@ -345,18 +345,11 @@ enum ClientRemote {
         )
     }
 
-    /// Rewrite a note's text.
-    ///
-    /// A note is its title, so this is the whole edit. The Mac cannot do this
-    /// yet: it captures and archives, and changing what you wrote means
-    /// writing it again.
-    static func todoRetitle(peer: String, id: String, title: String) async throws -> TodoCard {
-        try await Bridge.onPeer(
-            peer,
-            "todo.update",
-            ["id": id, "title": title],
-            as: TodoCard.self
-        )
+    /// Save a note's title and body in one host update.
+    static func todoRetitle(peer: String, id: String, title: String, notes: String? = nil) async throws -> TodoCard {
+        var parameters: [String: Any] = ["id": id, "title": title]
+        if let notes { parameters["notes"] = notes }
+        return try await Bridge.onPeer(peer, "todo.update", parameters, as: TodoCard.self)
     }
 
     /// Turn a note into a card on this folder's board.

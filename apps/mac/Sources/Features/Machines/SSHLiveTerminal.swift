@@ -1140,7 +1140,7 @@ struct SSHLiveTerminalScreen: View {
                     .buttonStyle(.plain)
                 }
                 if let onNewSession {
-                    Button("New session", .create, action: onNewSession)
+                    Button("New terminal", .create, action: onNewSession)
                         .buttonStyle(SecondaryButtonStyle(small: true))
                 }
             }

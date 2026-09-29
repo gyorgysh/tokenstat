@@ -307,7 +307,7 @@ struct WorkspacesOverviewPlaceholder: View {
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
-                InspectorTitle(title: "Workspace", symbol: "folder")
+                InspectorTitle(title: "Project", symbol: "folder")
                 Spacer(minLength: 0)
             }
             InspectorEmptyState(mark: "mark_archive", title: "Pick a folder", subtitle: "Open a workspace to see its details and tools here.")

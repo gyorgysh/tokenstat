@@ -700,7 +700,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
                 return;
             }
             var id = await e.DataView.GetTextAsync();
-            await MoveAsync(id, column);
+            await ReorderAsync(id, column);
         };
         return frame;
     }
@@ -744,11 +744,31 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             Padding = new Thickness(Theme.SpaceM),
             Child = body,
             CanDrag = true,
+            AllowDrop = true,
         };
         frame.DragStarting += (_, e) =>
         {
             e.Data.SetText(id);
             e.Data.RequestedOperation = DataPackageOperation.Move;
+        };
+        frame.DragOver += (_, e) =>
+        {
+            if (!e.DataView.Contains(StandardDataFormats.Text)) return;
+            e.Handled = true;
+            e.AcceptedOperation = DataPackageOperation.Move;
+            frame.BorderBrush = Theme.AccentBrush;
+            e.DragUIOverride.Caption = e.GetPosition(frame).Y < frame.ActualHeight / 2
+                ? "Move before this task" : "Move after this task";
+        };
+        frame.DragLeave += (_, _) => frame.BorderBrush = Theme.BorderBrush;
+        frame.Drop += async (_, e) =>
+        {
+            e.Handled = true;
+            frame.BorderBrush = Theme.BorderBrush;
+            if (!e.DataView.Contains(StandardDataFormats.Text)) return;
+            var after = e.GetPosition(frame).Y >= frame.ActualHeight / 2;
+            var dragged = await e.DataView.GetTextAsync();
+            if (dragged != id) await ReorderAsync(dragged, Format.Text(card, "column"), id, after);
         };
         var button = new Button
         {
@@ -872,10 +892,22 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         RenderDetail();
     }
 
-    private async Task MoveAsync(string id, string column)
+    private async Task ReorderAsync(string id, string column, string? anchor = null, bool after = false)
+    {
+        // The host indexes the whole column, including tasks outside the
+        // current project/search filter. Visible row indices would misplace it.
+        var order = TaskBoardOrder.InsertionIndex(_cards, id, column, anchor, after);
+        if (order is null) return;
+        _newestFirst = false;
+        RaiseToolbarChangedIfNeeded();
+        await MoveAsync(id, column, order);
+    }
+
+    private async Task MoveAsync(string id, string column, long? order = null)
     {
         SnapshotDraft();
-        if (string.IsNullOrEmpty(id) || _working)
+        if (string.IsNullOrEmpty(id) || _working
+            || !_cards.Any(card => Format.Text(card, "id") == id && Format.Text(card, "kind") != "note"))
         {
             return;
         }
@@ -885,8 +917,9 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             // Column moves are last-writer-wins like the Mac board. A checked
             // edit would refuse a move whose revision the poller already
             // advanced, so moves stay on the unchecked update.
-            await CallTodoAsync(
-                "todo.update", new JsonObject { ["id"] = id, ["column"] = column });
+            var changes = new JsonObject { ["id"] = id, ["column"] = column };
+            if (order is not null) changes["order"] = order.Value;
+            await CallTodoAsync("todo.update", changes);
         }
         catch (Exception ex)
         {

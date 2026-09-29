@@ -687,7 +687,7 @@ struct RunWorkflowSheet: View {
                         .foregroundStyle(Theme.controlGlyph)
                 } else {
                     AppMenuPicker(
-                        title: "Workspace",
+                        title: "Project",
                         options: [(value: "", label: "Choose a workspace")]
                             + folders.map { (value: $0.id, label: $0.name) },
                         selection: $workspaceID

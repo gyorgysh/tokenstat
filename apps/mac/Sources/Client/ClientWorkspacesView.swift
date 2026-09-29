@@ -344,7 +344,7 @@ struct ClientWorkspacesView: View {
                 scope: scope,
                 peer: peer,
                 workspaceID: chat.workspaceID,
-                folderName: folder?.name ?? "Workspace",
+                folderName: folder?.name ?? "Project",
                 hostName: hostName,
                 chatID: chat.id
             )
@@ -454,7 +454,7 @@ struct ClientWorkspacesView: View {
                     .font(ClientType.sectionTitle)
                 Spacer(minLength: Theme.Space.s)
                 if !model.folders.isEmpty {
-                    Button("New session", .create) { starting = .sessions }
+                    Button("New terminal", .create) { starting = .sessions }
                         .font(ClientType.caption.weight(.semibold))
                 }
             }

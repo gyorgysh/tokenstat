@@ -94,7 +94,7 @@ final class ClientRecentPlaces {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !trimmed.contains("/"), !trimmed.contains("\\"),
               trimmed.rangeOfCharacter(from: .controlCharacters) == nil
-        else { return "Workspace" }
+        else { return "Project" }
         return String(trimmed.prefix(80))
     }
 }

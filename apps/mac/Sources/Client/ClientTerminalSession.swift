@@ -559,7 +559,7 @@ struct ClientTerminalScreen: View {
                         .foregroundStyle(Theme.warning)
                 }
                 if session.workspaceID != nil {
-                    Button("Workspace", .source) { showingWorkspace = true }
+                    Button("Project", .source) { showingWorkspace = true }
                         .font(ClientType.caption.weight(.semibold))
                         .accessibilityLabel("Workspace files, changes and history")
                 }

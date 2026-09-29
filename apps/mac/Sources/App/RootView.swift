@@ -485,7 +485,7 @@ struct RootView: View {
         // sidebar and the tab strip above a running session. Only the first
         // of those is on the SSH list screen, and the sheet used to hang off
         // that screen alone. The route switch draws one destination at a time,
-        // so "New session" from the terminal pane set `connectRequest` on a
+        // so "New terminal" from the terminal pane set `connectRequest` on a
         // model whose presenter was not in the hierarchy: the password prompt
         // was asked for behind a screen nobody was looking at, and opening a
         // second shell on a server looked like a button that did nothing.
@@ -1829,7 +1829,7 @@ struct RootView: View {
             ) { navigate(to: .sshTerminals(host: host.id)) }
         }
         .contextMenu {
-            Button("New session", .create) { ssh.connectRequest = host }
+            Button("New terminal", .create) { ssh.connectRequest = host }
             Button("Close all sessions", .delete, role: .destructive) {
                 sshHostPendingClose = host
             }

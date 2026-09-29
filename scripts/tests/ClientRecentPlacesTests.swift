@@ -43,7 +43,7 @@ import Foundation
         record(40, name: "/Users/private/secret")
         record(41, name: "C:\\Users\\secret")
         record(42, name: "line\nprivate")
-        assert(store.places(in: alice).prefix(3).allSatisfy { $0.workspaceName == "Workspace" })
+        assert(store.places(in: alice).prefix(3).allSatisfy { $0.workspaceName == "Project" })
         let data = defaults.dictionaryRepresentation().filter { $0.key.hasPrefix("client.recentPlaces.v1.") }.values.compactMap { $0 as? Data }.first!
         let json = String(decoding: data, as: UTF8.self)
         assert(!json.contains("secret") && !json.contains("private"))

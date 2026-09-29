@@ -128,6 +128,8 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
         var previousPeers = _peers;
         var previousAccount = _account;
         var previousRequests = _requests;
+        var previousWorkspaceAllowed = _workspaceAllowed;
+        var previousScreenPermissions = _screenPermissions;
         try
         {
             try
@@ -146,19 +148,27 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             }
             try
             {
-                var account = await AppServices.Host.CallAsync("account.status");
-                if (account["signedIn"]?.GetValue<bool>() ?? false)
+                _account = await AppServices.Host.CallAsync("account.status");
+                if (!(_account?["signedIn"]?.GetValue<bool>() ?? false))
                 {
-                    _account = account;
+                    _selectedId = null;
+                    _selectedPeer = null;
+                    _selectThis = false;
                 }
             }
             catch
             {
             }
             await LoadRequestsAsync();
-            var changed = !JsonNode.DeepEquals(previousStatus, _status)
+            await LoadPermissionsAsync();
+            var changed = !JsonNode.DeepEquals(DevicePresentation.ConnectionState(previousStatus),
+                    DevicePresentation.ConnectionState(_status))
                 || !JsonNode.DeepEquals(previousPeers, _peers)
                 || !JsonNode.DeepEquals(previousAccount, _account)
+                || !previousWorkspaceAllowed.SetEquals(_workspaceAllowed)
+                || previousScreenPermissions.Count != _screenPermissions.Count
+                || previousScreenPermissions.Any(pair => !_screenPermissions.TryGetValue(pair.Key, out var current)
+                    || current != pair.Value)
                 || previousRequests.Count != _requests.Count
                 || previousRequests.Where((row, index) => index < _requests.Count
                     && (row.Screen != _requests[index].Screen || !JsonNode.DeepEquals(row.Row, _requests[index].Row))).Any();
@@ -1846,7 +1856,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
             _selectedId ?? "",
             _selectedPeer ?? "",
             _identity?.ToJsonString() ?? "",
-            _status?.ToJsonString() ?? "",
+            DevicePresentation.ConnectionState(_status)?.ToJsonString() ?? "",
             _peers.ToJsonString(),
             _account?.ToJsonString() ?? "",
             connected,

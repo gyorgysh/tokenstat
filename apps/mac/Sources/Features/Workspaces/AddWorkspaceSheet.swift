@@ -138,10 +138,22 @@ struct ProjectWorktreeSheet: View {
                         }
                     } else {
                     Text("New worktree").font(Theme.headline)
-                    TextField("Name, for example improved-search", text: $name).textFieldStyle(.themed)
-                    LabeledContent("Branch prefix") { TextField("Optional", text: $namespace).textFieldStyle(.themed) }
-                    LabeledContent("Start from") { TextField("HEAD", text: $base).textFieldStyle(.themed) }
-                    LabeledContent("Parent folder") { TextField("Absolute path", text: $parent).textFieldStyle(.themed) }
+                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                        Text("Name").font(Theme.caption).foregroundStyle(.secondary)
+                        TextField("For example improved-search", text: $name).textFieldStyle(.themed)
+                    }
+                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                        Text("Branch prefix").font(Theme.caption).foregroundStyle(.secondary)
+                        TextField("Optional", text: $namespace).textFieldStyle(.themed)
+                    }
+                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                        Text("Start from branch or commit").font(Theme.caption).foregroundStyle(.secondary)
+                        TextField("HEAD", text: $base).textFieldStyle(.themed)
+                    }
+                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                        Text("Parent folder").font(Theme.caption).foregroundStyle(.secondary)
+                        TextField("Absolute path", text: $parent).textFieldStyle(.themed)
+                    }
                     if folder.isRemote {
                         Button("Choose parent folder…", .reveal) { pickingParent = true }
                             .buttonStyle(SecondaryButtonStyle(small: true))

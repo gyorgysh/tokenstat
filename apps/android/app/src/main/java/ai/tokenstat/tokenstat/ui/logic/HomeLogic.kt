@@ -120,7 +120,7 @@ object RecentPlaces {
         if (trimmed.isEmpty() || trimmed.contains("/") || trimmed.contains("\\") ||
             trimmed.any { it.isISOControl() }
         ) {
-            return "Workspace"
+            return "Project"
         }
         return trimmed.take(80)
     }

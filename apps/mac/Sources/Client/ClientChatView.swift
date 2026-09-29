@@ -450,7 +450,7 @@ struct ClientChatThread: View {
     private func toolsPane(peer: String, workspaceID: String) -> some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Workspace")
+                Text("Project")
                     .font(ClientType.caption.weight(.semibold))
                     .foregroundStyle(Theme.controlGlyph)
                 Spacer(minLength: 0)

@@ -1855,12 +1855,45 @@ public sealed partial class MainWindow : Window
     /// A static mark, so every LogoRefresh pulse dips the bars once, like the
     /// Mac launch-and-refresh motion. Rebuilt per call: panes and themes move.
     /// </summary>
-    private static UIElement LogoOpen()
+    private UIElement LogoOpen()
     {
+        var content = new StackPanel { Spacing = Theme.SpaceM };
+        content.Children.Add(Marks.Wordmark());
+        var menu = new MenuFlyout();
+        menu.Opening += (_, _) =>
+        {
+            menu.Items.Clear();
+            void AddProject(string id, string name, string machine, string path)
+            {
+                var item = new MenuFlyoutItem { Text = name + " · " + machine };
+                ToolTipService.SetToolTip(item, path);
+                item.Click += async (_, _) =>
+                {
+                    NavigateTo("ws:" + id + ":Chat");
+                    var workbench = WorkspaceTabs(id);
+                    if (workbench.ActivePage is ChatPage page) await page.BeginNewChatAsync();
+                };
+                menu.Items.Add(item);
+            }
+            foreach (var folder in _localFolders)
+            {
+                var id = Format.Text(folder, "id");
+                if (id.Length > 0) AddProject(id, Format.Text(folder, "name"), "This PC", Format.Text(folder, "path"));
+            }
+            foreach (var folder in RemoteWorkspaces.CachedFolders())
+                AddProject(folder.Id, folder.Name, folder.MachineLabel, folder.Path);
+            if (menu.Items.Count == 0)
+                menu.Items.Add(new MenuFlyoutItem { Text = "Add a project first", IsEnabled = false });
+        };
+        var create = Buttons.Secondary("New chat…", ActionIcon.Create, (_, _) => { });
+        create.Flyout = menu;
+        create.HorizontalAlignment = HorizontalAlignment.Stretch;
+        ToolTipService.SetToolTip(create, "Choose which project the new chat belongs to");
+        content.Children.Add(create);
         return new Border
         {
             Padding = new Thickness(Theme.SpaceM, Theme.SpaceM, Theme.SpaceM, Theme.SpaceM),
-            Child = Marks.Wordmark(),
+            Child = content,
         };
     }
 

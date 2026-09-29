@@ -284,7 +284,7 @@ struct AutomationsView: View {
                 cell(model.scheduleSummary(job.schedule))
             }
             .width(min: 100, ideal: 150)
-            TableColumn("Workspace") { job in
+            TableColumn("Project") { job in
                 cell(folderLabel(job.workspaceID))
             }
             .width(min: 80, ideal: 120)
@@ -446,7 +446,7 @@ struct AutomationsView: View {
                 }
             }
             .width(min: 90, ideal: 130)
-            TableColumn("Workspace") { run in
+            TableColumn("Project") { run in
                 cell(folderLabel(run.workspaceID))
             }
             .width(min: 80, ideal: 120)
@@ -1228,7 +1228,7 @@ struct NewAutomationSheet: View {
                     selection: $backendID
                 )
                 AppMenuPicker(
-                    title: "Workspace",
+                    title: "Project",
                     options: [(value: "", label: "Choose a workspace")]
                         + folders.map { (value: $0.id, label: $0.name) },
                     selection: $workspaceID

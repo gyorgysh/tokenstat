@@ -24,7 +24,13 @@ struct NotesInspector: View {
     @State private var notesDraft = ""
     @State private var baselineTitle = ""
     @State private var baselineNotes = ""
-    @State private var saveState: FieldSaveState = .idle
+    private var saveState: FieldSaveState {
+        guard let id = loadedID, let entry = model.noteDrafts.entries[id] else { return .idle }
+        if entry.saving { return .saving }
+        if entry.error != nil { return .failed }
+        return entry.dirty ? .dirty : (entry.hasSaved ? .saved : .idle)
+    }
+    private var draftValue: NoteDraftStore.Text { .init(title: titleDraft, body: notesDraft) }
     @State private var loadedID: String?
     @State private var placeID = ""
     @State private var applyingPlace = false
@@ -80,9 +86,10 @@ struct NotesInspector: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.background)
         .onChange(of: model.selectedCardID) { old, _ in
-            let title = titleDraft
-            let notes = notesDraft
-            Task { await persistDrafts(for: old, title: title, notes: notes) }
+            if let old {
+                retainDraft(for: old)
+                Task { await model.saveNoteDraft(old) }
+            }
             syncDrafts()
         }
         .onChange(of: focused) { _, new in
@@ -90,7 +97,15 @@ struct NotesInspector: View {
         }
         .onChange(of: titleDraft) { _, _ in markDirtyIfNeeded() }
         .onChange(of: notesDraft) { _, _ in markDirtyIfNeeded() }
-        .onDisappear { Task { await persistDrafts() } }
+        .task(id: draftValue) {
+            do { try await Task.sleep(for: .milliseconds(650)) } catch { return }
+            await persistDrafts()
+        }
+        .onDisappear {
+            guard let id = loadedID else { return }
+            retainDraft(for: id)
+            Task { await model.saveNoteDraft(id) }
+        }
         .confirmationDialog(
             "Delete this note?",
             isPresented: $confirmingDelete,
@@ -151,9 +166,9 @@ struct NotesInspector: View {
                 ) {
                     Task { await persistDrafts() }
                 } onCancel: {
-                    titleDraft = baselineTitle
-                    notesDraft = baselineNotes
-                    saveState = .idle
+                    guard let id = loadedID, let saved = model.noteDrafts.discard(id) else { return }
+                    titleDraft = saved.title
+                    notesDraft = saved.body
                 }
 
                 // A note belongs somewhere, and until now the only way to
@@ -244,12 +259,13 @@ struct NotesInspector: View {
     // MARK: - Drafts
 
     private func markDirtyIfNeeded() {
-        guard loadedID != nil else { return }
-        if titleDraft != baselineTitle || notesDraft != baselineNotes {
-            if saveState != .saving { saveState = .dirty }
-        } else if saveState == .dirty || saveState == .failed {
-            saveState = .idle
-        }
+        guard let id = loadedID else { return }
+        retainDraft(for: id)
+    }
+
+    private func retainDraft(for id: String) {
+        model.noteDrafts.edit(id, value: draftValue,
+                             saved: .init(title: baselineTitle, body: baselineNotes))
     }
 
     private func syncDrafts() {
@@ -260,77 +276,32 @@ struct NotesInspector: View {
             baselineTitle = ""
             baselineNotes = ""
             placeID = ""
-            saveState = .idle
             return
         }
         guard loadedID != note.id else { return }
         loadedID = note.id
-        titleDraft = note.title
-        notesDraft = note.notes
+        let value = model.noteDrafts.open(note.id, saved: .init(title: note.title, body: note.notes))
+        titleDraft = value.title
+        notesDraft = value.body
         baselineTitle = note.title
         baselineNotes = note.notes
         applyingPlace = true
         placeID = note.workspaceID
         applyingPlace = false
-        saveState = .idle
     }
 
     private func persistDrafts() async {
-        await persistDrafts(for: loadedID, title: titleDraft, notes: notesDraft)
-    }
-
-    /// Write the drafts back to the card they were typed into.
-    ///
-    /// The id is passed rather than read, because this also runs while the
-    /// selection is moving to another note: by the time it does, `model`
-    /// already points at the new one and saving against that would put one
-    /// note's text into another.
-    ///
-    /// An empty title is not a save that failed, it is a title that was not
-    /// changed. Sending it made the whole write fail, which took the body edit
-    /// typed in the same visit down with it and left Save disabled, because
-    /// Save needs a title: the only way out was Cancel, which threw the body
-    /// away as well. The field goes back to what it was and the body is
-    /// written on its own.
-    ///
-    /// The state at the end belongs to the note on screen. Setting it after
-    /// the selection has moved on is how another note's pane ended up saying
-    /// "Saving" about a write that had already finished somewhere else.
-    private func persistDrafts(for id: String?, title: String, notes: String) async {
-        if saveState == .saving { return }
-        guard let id, let card = model.cards.first(where: { $0.id == id }), card.isNote else { return }
-        var trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            trimmed = card.title
-            if loadedID == id { titleDraft = card.title }
-        }
-        let titleChanged = trimmed != card.title
-        let notesChanged = notes != card.notes
-        guard titleChanged || notesChanged else {
-            if saveState == .dirty { saveState = .idle }
-            return
-        }
-        saveState = .saving
-        var ok = true
-        if titleChanged { ok = await model.updateTitle(card, title: trimmed) && ok }
-        if notesChanged { ok = await model.updateNotes(card, notes: notes) && ok }
-        guard loadedID == id else {
-            // The pane is showing a different note now, and that note's own
-            // drafts decide what its bar says.
-            if saveState == .saving { saveState = .idle }
-            return
-        }
-        if ok {
-            baselineTitle = trimmed
-            baselineNotes = notes
-            titleDraft = trimmed
-            saveState = .saved
-            Task {
-                try? await Task.sleep(for: .seconds(2))
-                if saveState == .saved { saveState = .idle }
-            }
-        } else {
-            saveState = .failed
+        guard let id = loadedID else { return }
+        let submitted = draftValue
+        retainDraft(for: id)
+        guard model.noteDrafts.entries[id]?.dirty == true else { return }
+        await model.saveNoteDraft(id)
+        guard loadedID == id, let entry = model.noteDrafts.entries[id] else { return }
+        baselineTitle = entry.saved.title
+        baselineNotes = entry.saved.body
+        if draftValue == submitted {
+            titleDraft = entry.value.title
+            notesDraft = entry.value.body
         }
     }
 }

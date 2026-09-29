@@ -341,7 +341,7 @@ fun WorkspaceHub(
             }
             Column(Modifier.weight(1f)) {
                 Text(
-                    if (section != null) HubSection.entries.find { it.key == section }?.label ?: section else folderName.ifBlank { "Workspace" },
+                    if (section != null) HubSection.entries.find { it.key == section }?.label ?: section else folderName.ifBlank { "Project" },
                     style = MaterialTheme.typography.headlineSmall,
                     color = colors.textPrimary,
                     maxLines = 1,

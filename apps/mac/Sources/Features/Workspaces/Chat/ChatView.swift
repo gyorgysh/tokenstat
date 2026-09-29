@@ -257,7 +257,7 @@ struct ChatView: View {
                                     await PinnedWorkActions.pin(
                                         reference,
                                         label: model.selected?.title ?? "Chat",
-                                        folderName: workspaceName ?? "Workspace"
+                                        folderName: workspaceName ?? "Project"
                                     )
                                 }
                             }

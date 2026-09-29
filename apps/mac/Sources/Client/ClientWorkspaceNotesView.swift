@@ -39,6 +39,10 @@ struct ClientWorkspaceNotesView: View {
     @State private var pendingDelete: TodoCard?
     @State private var editing: TodoCard?
     @State private var editText = ""
+    @State private var editBody = ""
+    @State private var editPreview = false
+    @State private var editSaving = false
+    @State private var editError: String?
     @FocusState private var writing: Bool
 
     @Environment(ConnectivityModel.self) private var connectivity: ConnectivityModel?
@@ -242,6 +246,9 @@ struct ClientWorkspaceNotesView: View {
 
     private func startEditing(_ note: TodoCard) {
         editText = note.title
+        editBody = note.notes
+        editPreview = false
+        editError = nil
         editing = note
     }
 
@@ -249,29 +256,52 @@ struct ClientWorkspaceNotesView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Note", text: $editText, axis: .vertical)
-                        .lineLimit(3 ... 10)
+                    TextField("Title", text: $editText, axis: .vertical)
+                        .font(.headline)
+                        .disabled(editSaving)
+                    Picker("Note view", selection: $editPreview) {
+                        Text("Write").tag(false)
+                        Text("Preview").tag(true)
+                    }.pickerStyle(.segmented).labelsHidden()
+                    if editPreview {
+                        MarkdownText(editBody.isEmpty ? "Nothing written yet." : editBody)
+                            .textSelection(.enabled)
+                            .frame(minHeight: 280, alignment: .topLeading)
+                    } else {
+                        TextEditor(text: $editBody)
+                            .frame(minHeight: 280)
+                            .disabled(editSaving)
+                            .accessibilityLabel("Note body")
+                    }
                 } footer: {
-                    Text("A note is its text, so this is the whole of it.")
+                    Text("Markdown supported: headings, lists, links and code.")
+                }
+                if let editError {
+                    Section { Text(editError).foregroundStyle(Theme.danger) }
                 }
             }
-            .navigationTitle("Edit note")
+            .navigationTitle("Note")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { editing = nil }
+                    Button("Cancel") { editing = nil }.disabled(editSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
+                    Button(editSaving ? "Saving…" : "Save") {
                         let text = editText.trimmingCharacters(in: .whitespacesAndNewlines)
-                        editing = nil
-                        Task { await rename(note, to: text) }
+                        let body = editBody
+                        editSaving = true
+                        Task {
+                            if await saveEdit(note, title: text, body: body) { editing = nil }
+                            editSaving = false
+                        }
                     }
-                    .disabled(editText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(editSaving || editText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.large])
+        .interactiveDismissDisabled(editSaving || editText != note.title || editBody != note.notes)
     }
 
     // MARK: - Work
@@ -337,14 +367,18 @@ struct ClientWorkspaceNotesView: View {
         }
     }
 
-    private func rename(_ note: TodoCard, to text: String) async {
-        guard !text.isEmpty, text != note.title else { return }
+    private func saveEdit(_ note: TodoCard, title: String, body: String) async -> Bool {
+        guard !title.isEmpty else { return false }
+        guard title != note.title || body != note.notes else { return true }
         do {
-            let updated = try await ClientRemote.todoRetitle(peer: peer, id: note.id, title: text)
+            let updated = try await ClientRemote.todoRetitle(peer: peer, id: note.id, title: title, notes: body)
             replace(updated)
+            editError = nil
             errorMessage = nil
+            return true
         } catch {
-            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
+            editError = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
+            return false
         }
     }
 

@@ -353,17 +353,19 @@ struct TerminalPane: View {
         // are running underneath. Any real navigation (opening a file,
         // browser, terminal) clears the flag.
         if front == .launcher {
-            LaunchSurface(
-                folder: folder,
-                terminals: terminals,
-                workspaces: workspaces,
-                chat: chat,
-                onOpenSection: onOpenSection,
-                grid: spawnGrid,
-                profiles: launcherCatalog,
-                modelPeer: peer
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if isSurfaceActive {
+                LaunchSurface(
+                    folder: folder,
+                    terminals: terminals,
+                    workspaces: workspaces,
+                    chat: chat,
+                    onOpenSection: onOpenSection,
+                    grid: spawnGrid,
+                    profiles: launcherCatalog,
+                    modelPeer: peer
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         } else if front == .changes {
             WorkingTreeReviewView(folder: folder, model: workspaces)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -395,7 +397,7 @@ struct TerminalPane: View {
                 onURLChange: { workspaces.setBrowserURL($0, in: folder.id, tabID: browser.id) }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if sessions.isEmpty {
+        } else if sessions.isEmpty, isSurfaceActive {
             LaunchSurface(
                 folder: folder,
                 terminals: terminals,
@@ -553,7 +555,7 @@ struct TerminalPane: View {
                     }
                 }
             } label: {
-                Label("New session", systemImage: "plus")
+                Label("New terminal", systemImage: "plus")
                     .font(Theme.font(12))
             }
             .menuStyle(.borderlessButton)

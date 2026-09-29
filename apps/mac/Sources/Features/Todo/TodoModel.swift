@@ -21,6 +21,7 @@ enum TodoScope: Hashable, Sendable {
 @MainActor
 @Observable
 final class TodoModel {
+    let noteDrafts = NoteDraftStore()
     private(set) var cards: [TodoCard] = []
     private(set) var backends: [AgentBackend] = []
 
@@ -404,6 +405,18 @@ final class TodoModel {
         } catch {
             errorMessage = error.localizedDescription
             return false
+        }
+    }
+
+    func saveNoteDraft(_ id: String) async {
+        await noteDrafts.save(id) { text in
+            _ = try await Bridge.todoUpdate(id: id, title: text.title, notes: text.body)
+        }
+        if let failure = noteDrafts.entries[id]?.error {
+            errorMessage = failure
+        } else {
+            errorMessage = nil
+            await load()
         }
     }
 

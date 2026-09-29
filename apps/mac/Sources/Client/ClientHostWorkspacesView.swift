@@ -352,7 +352,7 @@ struct ClientHostWorkspacesView: View {
                 ClientSectionTitle(title: "All sessions", mark: "mark_terminal")
                 Spacer(minLength: Theme.Space.s)
                 if !model.folders.isEmpty {
-                    Button("New session", .create) { starting = .sessions }
+                    Button("New terminal", .create) { starting = .sessions }
                         .font(ClientType.caption.weight(.semibold))
                 }
             }

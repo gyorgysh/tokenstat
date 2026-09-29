@@ -206,7 +206,7 @@ struct ClientRecentChatsSection: View {
     private func folderName(for workspaceID: String) -> String {
         folders.first {
             (ClientRemote.rawWorkspaceID(of: $0) ?? $0.id) == workspaceID
-        }?.name ?? "Workspace"
+        }?.name ?? "Project"
     }
 }
 
@@ -517,7 +517,7 @@ struct ClientRecentChatView: View {
 /// Pick one of a host's folders to start something in.
 ///
 /// Chats and sessions live inside folders, so a host-level "New chat" or
-/// "New session" button cannot act until it knows which folder. This sheet is
+/// "New terminal" button cannot act until it knows which folder. This sheet is
 /// that question, shared by both host screens. The caller navigates into the
 /// folder's section, where the launch tiles and the chat composer already are.
 struct ClientFolderChooserSheet: View {

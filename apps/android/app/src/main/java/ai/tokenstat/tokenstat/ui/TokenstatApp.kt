@@ -3081,7 +3081,7 @@ private fun WorkspacesScreen(
             state.account?.string("accountId"),
         )
         val host = state.account?.string("host").orEmpty()
-        record.recordPlace(identity, host, peer, id, folderName ?: "Workspace", RecentPlaces.Kind.WORKSPACE)
+        record.recordPlace(identity, host, peer, id, folderName ?: "Project", RecentPlaces.Kind.WORKSPACE)
     }
     LaunchedEffect(folders, pendingSelectFolderId) {
         val id = pendingSelectFolderId ?: return@LaunchedEffect
@@ -3111,7 +3111,7 @@ private fun WorkspacesScreen(
         val folder = boundFolder ?: return
         stores?.recordPlace(
             placesIdentity, placesHost, peer, folder.string("id"),
-            folder.string("name") ?: "Workspace", RecentPlaces.Kind.CHAT, chatId,
+            folder.string("name") ?: "Project", RecentPlaces.Kind.CHAT, chatId,
         )
     }
     fun recordTerminalOpened(sessionId: String) {
@@ -3119,7 +3119,7 @@ private fun WorkspacesScreen(
         val peer = boundHost?.string("publicIdentity") ?: return
         val folderId = request?.workspaceId ?: return
         val folderName = folders.mapNotNull { it as? JsonObject }
-            .find { it.string("id") == folderId }?.string("name") ?: "Workspace"
+            .find { it.string("id") == folderId }?.string("name") ?: "Project"
         stores?.recordPlace(
             placesIdentity, placesHost, peer, folderId,
             folderName, RecentPlaces.Kind.TERMINAL, sessionId,
@@ -3604,7 +3604,7 @@ private fun WorkspaceList(
                     }
                     val shown = if (chatsExpanded) chatRows else chatRows.take(5)
                     items(shown) { chat ->
-                        val folderName = folderRows.find { it.string("id") == chat.string("workspaceId") }?.string("name") ?: "Workspace"
+                        val folderName = folderRows.find { it.string("id") == chat.string("workspaceId") }?.string("name") ?: "Project"
                         WorkspaceChatRow(chat = chat, folderName = folderName, onOpen = { onChat(chat) })
                     }
                     if (chatRows.size > 5) {
@@ -3642,7 +3642,7 @@ private fun WorkspaceList(
                             )
                             if (folderRows.isNotEmpty()) {
                                 TextButton(onClick = onNewSession) {
-                                    Text("New session", style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.accent)
+                                    Text("New terminal", style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.accent)
                                 }
                             }
                         }

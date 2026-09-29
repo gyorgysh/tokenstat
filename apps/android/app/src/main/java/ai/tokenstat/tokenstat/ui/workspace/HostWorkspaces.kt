@@ -659,7 +659,7 @@ fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit) {
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                folder.str("name") ?: "Workspace",
+                folder.str("name") ?: "Project",
                 style = TsType.subheadline.copy(fontWeight = FontWeight.Medium),
                 color = colors.textPrimary,
                 maxLines = 1,
@@ -899,7 +899,7 @@ fun FolderChooserDialog(
                         Icon(Icons.Default.Folder, null, tint = LocalTsColors.current.accent)
                         Spacer(Modifier.width(Space.m))
                         Column(Modifier.weight(1f)) {
-                            Text(folder.str("name") ?: "Workspace", fontWeight = FontWeight.Medium)
+                            Text(folder.str("name") ?: "Project", fontWeight = FontWeight.Medium)
                             Text(
                                 folder.str("path") ?: "",
                                 style = MaterialTheme.typography.bodySmall,

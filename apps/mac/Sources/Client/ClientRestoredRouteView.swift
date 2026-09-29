@@ -35,7 +35,7 @@ struct ClientRestoredRouteView: View {
         }
         return ClientRecentPlaces.Place(id: .init(peer: reference.hostIdentity,
             workspaceID: reference.workspaceID, kind: kind, itemID: reference.itemID),
-            workspaceName: "Workspace", openedAt: Date())
+            workspaceName: "Project", openedAt: Date())
     }
 }
 /// Only the selected tab owns the push. Inactive stacks cannot dismiss another

@@ -5,6 +5,15 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.FilterChip
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import ai.tokenstat.tokenstat.ui.components.TsType
 
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import androidx.compose.foundation.layout.FlowRow
@@ -179,21 +188,23 @@ fun NotesSection(
         }
     }
 
-    fun rename(note: NoteList.NoteCard, text: String) {
-        if (text.isEmpty() || text == note.title) return
-        scope.launch {
-            runCatching {
-                model.workspaceSection(peer, "todo.update", buildJsonObject {
-                    put("id", note.id)
-                    put("title", text)
-                }) as JsonObject
-            }.onSuccess { updated ->
-                updated.toNoteCard()?.let { fresh ->
-                    cards = cards.map { if (it.id == fresh.id) fresh else it }
-                }
-                error = null
-            }.onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
-        }
+    suspend fun updateNote(note: NoteList.NoteCard, title: String, body: String): Boolean {
+        if (title.isEmpty()) return false
+        if (title == note.title && body == note.body) return true
+        return runCatching {
+            model.workspaceSection(peer, "todo.update", buildJsonObject {
+                put("id", note.id)
+                put("title", title)
+                put("notes", body)
+            }) as JsonObject
+        }.fold(onSuccess = { updated ->
+            updated.toNoteCard()?.let { fresh -> cards = cards.map { if (it.id == fresh.id) fresh else it } }
+            error = null
+            true
+        }, onFailure = {
+            error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+            false
+        })
     }
 
     fun convert(note: NoteList.NoteCard) {
@@ -376,7 +387,12 @@ fun NotesSection(
         NoteEditorDialog(
             note = target,
             onDismiss = { editing = null },
-            onSave = { text -> editing = null; rename(target, text) },
+            error = error,
+            onSave = { title, body ->
+                val saved = updateNote(target, title, body)
+                if (saved) editing = null
+                saved
+            },
         )
     }
 }
@@ -384,20 +400,44 @@ fun NotesSection(
 
 
 @Composable
-private fun NoteEditorDialog(note: NoteList.NoteCard, onDismiss: () -> Unit, onSave: (String) -> Unit) {
-    var text by remember(note.id) { mutableStateOf(note.title) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Edit note") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                OutlinedTextField(text, { text = it }, modifier = Modifier.fillMaxWidth(), minLines = 3)
-                Text("A note is its text, so this is the whole of it.")
+private fun NoteEditorDialog(
+    note: NoteList.NoteCard,
+    onDismiss: () -> Unit,
+    error: String?,
+    onSave: suspend (String, String) -> Boolean,
+) {
+    var title by rememberSaveable(note.id) { mutableStateOf(note.title) }
+    var body by rememberSaveable(note.id) { mutableStateOf(note.body) }
+    var preview by rememberSaveable(note.id) { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val colors = LocalTsColors.current
+    Dialog(onDismissRequest = { if (!saving) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = !saving, dismissOnClickOutside = false)) {
+        Column(Modifier.fillMaxSize().background(colors.background).systemBarsPadding().imePadding().padding(Space.m),
+            verticalArrangement = Arrangement.spacedBy(Space.m)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                TextButton(enabled = !saving, onClick = onDismiss) { Text("Cancel") }
+                Text("Note", style = TsType.chatBody)
+                TextButton(enabled = !saving && title.trim().isNotEmpty(), onClick = {
+                    saving = true
+                    scope.launch { try { onSave(title.trim(), body) } finally { saving = false } }
+                }) { Text(if (saving) "Saving…" else "Save") }
             }
-        },
-        confirmButton = {
-            TextButton(enabled = text.trim().isNotEmpty(), onClick = { onSave(text.trim()) }) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                FilterChip(selected = !preview, onClick = { preview = false }, label = { Text("Write") })
+                FilterChip(selected = preview, onClick = { preview = true }, label = { Text("Preview") })
+            }
+            if (error != null) Text(error, color = colors.danger, style = TsType.caption)
+            OutlinedTextField(title, { title = it }, enabled = !saving, label = { Text("Title") }, modifier = Modifier.fillMaxWidth())
+            if (preview) {
+                MarkdownText(body.ifBlank { "Nothing written yet." }, TsType.chatBody, colors.textPrimary,
+                    Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()))
+            } else {
+                OutlinedTextField(body, { body = it }, enabled = !saving, label = { Text("Note") },
+                    modifier = Modifier.weight(1f).fillMaxWidth())
+                Text("Markdown supported: headings, lists, links and code.", style = TsType.caption, color = colors.textSecondary)
+            }
+        }
+    }
 }

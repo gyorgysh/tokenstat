@@ -138,7 +138,7 @@ fun WorkSearchSheet(
                             for (folder in list.mapNotNull { it as? JsonObject }) {
                                 val folderId = folder.string("id") ?: continue
                                 if (known.any { it.folderId == folderId && it.peer == peer }) continue
-                                live += SearchFolder(peer, id, name, folderId, folder.string("name") ?: "Workspace", folder.string("path"))
+                                live += SearchFolder(peer, id, name, folderId, folder.string("name") ?: "Project", folder.string("path"))
                             }
                         }.onFailure { missed += 1 }
                 }

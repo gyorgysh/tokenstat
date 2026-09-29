@@ -651,7 +651,7 @@ struct ClientSidebarRoot: View {
                     scope: scope,
                     peer: peer,
                     workspaceID: chat.workspaceID,
-                    folderName: "Workspace",
+                    folderName: "Project",
                     hostName: hostName,
                     chatID: chat.id
                 )

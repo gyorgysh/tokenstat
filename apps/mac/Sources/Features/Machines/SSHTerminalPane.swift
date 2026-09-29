@@ -146,7 +146,7 @@ struct SSHTerminalPane: View {
                 }
             }
 
-            Button("New session", .create) { library.connectRequest = host }
+            Button("New terminal", .create) { library.connectRequest = host }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .help("Open another shell on \(host.label)")
 

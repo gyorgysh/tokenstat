@@ -247,66 +247,144 @@ internal static class ProjectWorktreeDialog
                 return null;
             }
         }
-        var separator = Math.Max(projectPath.LastIndexOf('/'), projectPath.LastIndexOf('\\'));
-        var name = new TextBox { Header = "Name", PlaceholderText = "improved-search" };
-        var prefix = new TextBox { Header = "Branch prefix (optional)", Text = _namespace };
-        var from = new TextBox { Header = "Start from", Text = "HEAD" };
-        var parent = new TextBox { Header = "Parent folder", Text = separator >= 0 ? projectPath[..(separator + 1)] : "" };
-        var form = new StackPanel { Spacing = Theme.SpaceM, MinWidth = 340 };
-        form.Children.Add(new TextBlock { Text = "Work on another branch without interrupting this project's chats or terminals.", TextWrapping = TextWrapping.Wrap });
+        Task<JsonNode> Call(string method, JsonObject parameters) => remote
+            ? RemoteWorkspaces.CallOnPeerAsync(peer, method, parameters)
+            : AppServices.Host.CallAsync(method, parameters);
+        JsonArray trees;
         try
         {
-            var trees = Format.Items(await RemoteWorkspaces.CallWorkspaceAsync(id, "workspace.worktrees", new JsonObject { ["id"] = id }));
-            foreach (var tree in trees ?? new JsonArray())
-                form.Children.Add(new TextBlock { Text = Format.Text(tree, "branch", "Detached commit") + "\n" + Format.Text(tree, "path"),
-                    TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, Opacity = 0.7 });
+            trees = Format.Items(await RemoteWorkspaces.CallWorkspaceAsync(id, "workspace.worktrees", new JsonObject { ["id"] = id })) ?? new();
         }
         catch (Exception ex)
         {
-            await Chrome.ShowDialog(owner, new ContentDialog { Title = "Could not read worktrees", Content = ex.Message, CloseButtonText = "Close" });
+            await Chrome.ShowDialog(owner, new ContentDialog { Title = "Could not read worktrees", Content = FriendlyError.Display(ex.Message), CloseButtonText = "Close" });
             return null;
         }
+        var separator = Math.Max(projectPath.LastIndexOf('/'), projectPath.LastIndexOf('\\'));
+        var name = new TextBox { Header = "Name", PlaceholderText = "improved-search" };
+        var prefix = new TextBox { Header = "Branch prefix (optional)", Text = _namespace };
+        var from = new TextBox { Header = "Start from branch or commit", Text = "HEAD" };
+        var parent = new TextBox { Header = "Parent folder", Text = separator >= 0 ? projectPath[..(separator + 1)] : "" };
+        var tabs = new ComboBox { ItemsSource = new[] { "New worktree", $"Working folders ({trees.Count})" }, SelectedIndex = 0,
+            HorizontalAlignment = HorizontalAlignment.Stretch };
+        var body = new StackPanel { Spacing = Theme.SpaceM, MinWidth = 340 };
+        body.Children.Add(new TextBlock { Text = "Work on another branch without interrupting this project's chats or terminals.", TextWrapping = TextWrapping.Wrap });
+        body.Children.Add(tabs);
+        var form = new StackPanel { Spacing = Theme.SpaceM };
         form.Children.Add(name); form.Children.Add(prefix); form.Children.Add(from); form.Children.Add(parent);
-        var preview = new TextBlock { TextWrapping = TextWrapping.Wrap, Opacity = 0.7 };
-        void UpdatePreview() => preview.Text = "Branch: " + (prefix.Text.Length == 0 ? "" : prefix.Text + "/") + name.Text;
-        name.TextChanged += (_, _) => UpdatePreview();
-        prefix.TextChanged += (_, _) => UpdatePreview();
-        form.Children.Add(preview);
+        var browser = new StackPanel { Spacing = Theme.SpaceS, Visibility = Visibility.Collapsed };
+        var existing = new StackPanel { Spacing = Theme.SpaceM, Visibility = Visibility.Collapsed };
+        body.Children.Add(form); body.Children.Add(existing);
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = Theme.Brush(static () => Theme.Danger) };
-        form.Children.Add(error);
+        body.Children.Add(error);
         var dialog = new ContentDialog { Title = "Worktrees · " + projectName,
-            Content = new ScrollViewer { Content = form, MaxHeight = 550 },
+            Content = new ScrollViewer { Content = body, MaxHeight = 550 },
             PrimaryButtonText = "Create worktree", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary };
         var working = false;
+        var browsing = false;
+        var closed = false;
         string? created = null;
+        void UpdateActions()
+        {
+            name.IsEnabled = prefix.IsEnabled = from.IsEnabled = parent.IsEnabled = tabs.IsEnabled = !working;
+            dialog.IsPrimaryButtonEnabled = !working && !browsing && tabs.SelectedIndex == 0
+                && !string.IsNullOrWhiteSpace(name.Text) && !string.IsNullOrWhiteSpace(parent.Text) && !string.IsNullOrWhiteSpace(from.Text);
+        }
+        void OpenResult(JsonNode result)
+        {
+            var inner = Format.Text(result, "id");
+            if (string.IsNullOrEmpty(inner)) throw new InvalidOperationException("The folder could not be opened. Refresh Projects and try again.");
+            if (remote) RemoteWorkspaces.RememberRegisteredProject(peer, RemoteWorkspaces.CachedFolder(id)?.MachineLabel ?? "Computer", result);
+            created = remote ? RemoteWorkspaces.Join(peer, inner) : inner;
+            working = false;
+            dialog.Hide();
+        }
+        async Task Browse(string? path)
+        {
+            if (working || browsing || closed) return;
+            browsing = true; UpdateActions(); browser.Visibility = Visibility.Visible; browser.Children.Clear();
+            browser.Children.Add(new TextBlock { Text = "Loading folders…" });
+            try
+            {
+                var listing = await Call("fs.browse", new JsonObject { ["path"] = path });
+                if (closed) return;
+                browser.Children.Clear();
+                var current = Format.Text(listing, "path");
+                browser.Children.Add(new TextBlock { Text = current, TextWrapping = TextWrapping.Wrap });
+                browser.Children.Add(Buttons.Secondary("Use this folder", ActionIcon.Reveal, (_, _) =>
+                { if (working || browsing) return; parent.Text = current; browser.Visibility = Visibility.Collapsed; }));
+                var directories = new StackPanel { Spacing = Theme.SpaceS };
+                var up = Format.Text(listing, "parent");
+                if (up.Length > 0) directories.Children.Add(Buttons.Secondary("Up one folder", ActionIcon.Back, async (_, _) => await Browse(up)));
+                foreach (var entry in Format.Items(listing, "entries") ?? new JsonArray())
+                {
+                    var destination = Format.Text(entry, "path");
+                    if (Format.Text(entry, "kind") != "directory" || Format.Flag(entry, "hidden") || destination.Length == 0) continue;
+                    directories.Children.Add(Buttons.Secondary(Format.Text(entry, "name"), ActionIcon.Reveal, async (_, _) => await Browse(destination)));
+                }
+                browser.Children.Add(new ScrollViewer { Content = directories, MaxHeight = 180 });
+            }
+            catch (Exception ex)
+            {
+                if (!closed) { browser.Children.Clear(); error.Text = FriendlyError.Display(ex.Message); }
+            }
+            finally { browsing = false; if (!closed) UpdateActions(); }
+        }
+        form.Children.Add(Buttons.Secondary("Choose parent folder…", ActionIcon.Reveal, async (_, _) => await Browse(parent.Text)));
+        form.Children.Add(browser);
+        var preview = new TextBlock { TextWrapping = TextWrapping.Wrap, Opacity = 0.7 };
+        void UpdatePreview()
+        {
+            preview.Text = "Branch: " + (prefix.Text.Length == 0 ? "" : prefix.Text + "/") + name.Text;
+            UpdateActions();
+        }
+        name.TextChanged += (_, _) => UpdatePreview(); prefix.TextChanged += (_, _) => UpdatePreview();
+        parent.TextChanged += (_, _) => UpdateActions(); from.TextChanged += (_, _) => UpdateActions();
+        form.Children.Add(preview);
+        foreach (var tree in trees)
+        {
+            var path = Format.Text(tree, "path");
+            var row = new StackPanel { Spacing = Theme.SpaceS };
+            row.Children.Add(new TextBlock { Text = Format.Text(tree, "branch", "Detached commit"), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+            row.Children.Add(new TextBlock { Text = path, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, Opacity = 0.7 });
+            if (Format.Flag(tree, "locked")) row.Children.Add(new TextBlock { Text = "Locked", Opacity = 0.7 });
+            if (Format.Flag(tree, "prunable")) row.Children.Add(new TextBlock { Text = "Folder no longer available", Opacity = 0.7 });
+            else if (!Format.Flag(tree, "bare")) row.Children.Add(Buttons.Secondary("Open project", ActionIcon.Reveal, async (_, _) =>
+            {
+                if (working) return;
+                working = true; error.Text = ""; UpdateActions();
+                try { OpenResult(await Call("workspace.add", new JsonObject { ["path"] = path })); }
+                catch (Exception ex) { error.Text = FriendlyError.Display(ex.Message); }
+                finally { working = false; UpdateActions(); }
+            }));
+            existing.Children.Add(row);
+        }
+        tabs.SelectionChanged += (_, _) =>
+        {
+            form.Visibility = tabs.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
+            existing.Visibility = tabs.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
+            dialog.PrimaryButtonText = tabs.SelectedIndex == 0 ? "Create worktree" : "";
+            UpdateActions();
+        };
         dialog.Closing += (_, args) => args.Cancel = working;
+        dialog.Closed += (_, _) => closed = true;
         dialog.PrimaryButtonClick += async (_, args) =>
         {
             args.Cancel = true;
-            if (string.IsNullOrWhiteSpace(name.Text) || string.IsNullOrWhiteSpace(parent.Text) || string.IsNullOrWhiteSpace(from.Text))
-            { error.Text = "Enter a name, starting branch and parent folder."; return; }
-            working = true;
-            name.IsEnabled = prefix.IsEnabled = from.IsEnabled = parent.IsEnabled = false;
-            dialog.IsPrimaryButtonEnabled = false;
-            dialog.PrimaryButtonText = "Creating…";
-            error.Text = "";
+            if (working || browsing || tabs.SelectedIndex != 0) return;
+            working = true; UpdateActions(); dialog.PrimaryButtonText = "Creating…"; error.Text = "";
             try
             {
                 var parameters = new JsonObject { ["id"] = id, ["parent"] = parent.Text, ["folderName"] = name.Text,
                     ["namespace"] = prefix.Text, ["branch"] = name.Text, ["from"] = from.Text };
                 var result = await RemoteWorkspaces.CallWorkspaceAsync(id, "workspace.createWorktree", parameters, TimeSpan.FromMinutes(5));
-                var inner = Format.Text(result, "id");
-                if (string.IsNullOrEmpty(inner)) throw new InvalidOperationException("The worktree was created but could not be opened. Refresh Projects.");
-                if (remote)
-                    RemoteWorkspaces.RememberRegisteredProject(peer, RemoteWorkspaces.CachedFolder(id)?.MachineLabel ?? "Computer", result);
-                created = remote ? RemoteWorkspaces.Join(peer, inner) : inner;
                 _namespace = prefix.Text;
-                working = false;
-                dialog.Hide();
+                OpenResult(result);
             }
-            catch (Exception ex) { error.Text = ex.Message; }
-            finally { working = false; name.IsEnabled = prefix.IsEnabled = from.IsEnabled = parent.IsEnabled = true; dialog.IsPrimaryButtonEnabled = true; dialog.PrimaryButtonText = "Create worktree"; }
+            catch (Exception ex) { error.Text = FriendlyError.Display(ex.Message); }
+            finally { working = false; UpdateActions(); dialog.PrimaryButtonText = "Create worktree"; }
         };
+        UpdateActions();
         await Chrome.ShowDialog(owner, dialog);
         return created;
     }

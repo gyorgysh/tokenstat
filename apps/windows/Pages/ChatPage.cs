@@ -146,7 +146,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         RenderInspector();
         Loaded += async (_, _) =>
         {
-            if (_openId is string id && _opening) await OpenAsync(id);
+            if (_newChatRequested) { _newChatRequested = false; await CreateAsync(); }
+            else if (_openId is string id && _opening) await OpenAsync(id);
             else if (_openId is not null) StartPoll();
             else await ShowListAsync();
         };
@@ -341,7 +342,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     {
         RememberDraft();
         _poll?.Cancel();
-        _openGeneration++;
+        var generation = ++_openGeneration;
         _opening = false;
         _openId = null;
         _listReady = false;
@@ -358,11 +359,13 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var skeleton = Motion.SkeletonCard();
         _root.Children.Add(skeleton);
         _folderName = await FolderNameAsync();
+        if (generation != _openGeneration || !IsLoaded) return;
         RaiseToolbarChanged();
         RenderInspector();
         try
         {
             await RefreshCatalogAsync();
+            if (generation != _openGeneration || !IsLoaded) return;
             RenderInspector();
             _root.Children.Remove(skeleton);
             _listReady = true;
@@ -401,6 +404,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         }
         catch (Exception ex)
         {
+            if (generation != _openGeneration || !IsLoaded) return;
             _root.Children.Remove(skeleton);
             _root.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
         }
@@ -512,8 +516,19 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return agent + " · " + mode;
     }
 
+    private bool _newChatRequested;
+    private bool _creatingChat;
+
+    public async Task BeginNewChatAsync()
+    {
+        if (!IsLoaded) { _newChatRequested = true; return; }
+        await CreateAsync();
+    }
+
     private async Task CreateAsync()
     {
+        if (_creatingChat) return;
+        _creatingChat = true;
         try
         {
             await RefreshCatalogAsync();
@@ -532,6 +547,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             Banner(ex.Message);
         }
+        finally { _creatingChat = false; }
     }
 
     /// <summary>

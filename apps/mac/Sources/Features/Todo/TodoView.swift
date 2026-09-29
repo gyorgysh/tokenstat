@@ -272,7 +272,7 @@ struct TodoView: View {
                             onDropBefore: { dragged in
                                 guard dragged.id != card.id else { return }
                                 model.sortNewestFirst = false
-                                let list = model.cards(in: id).filter { $0.id != dragged.id }
+                                let list = model.cards.filter { $0.column == model.storageColumn(id) && $0.id != dragged.id }.sorted { $0.order < $1.order }
                                 let order = Int64(list.firstIndex(where: { $0.id == card.id }) ?? list.count)
                                 clearDropChrome()
                                 Task { await model.reorder(dragged, to: model.storageColumn(id), order: order) }
@@ -401,7 +401,7 @@ struct TodoView: View {
         guard let cardID = ids.first,
               let card = model.cards.first(where: { $0.id == cardID }) else { return false }
         model.sortNewestFirst = false
-        let others = model.cards(in: column).filter { $0.id != card.id }.count
+        let others = model.cards.filter { $0.column == model.storageColumn(column) && $0.id != card.id }.count
         Task { await model.reorder(card, to: model.storageColumn(column), order: Int64(others)) }
         clearDropChrome()
         return true
@@ -808,7 +808,7 @@ struct DelegateSheet: View {
                     selection: $backendID
                 )
                 AppMenuPicker(
-                    title: "Workspace",
+                    title: "Project",
                     options: [(value: "", label: "Choose workspace")]
                         + folders.map { (value: $0.id, label: $0.name) },
                     selection: $workspaceID
