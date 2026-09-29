@@ -134,6 +134,8 @@ struct LocalModelControl: View {
                 Text(buttonLabel)
                     .font(Theme.font(11))
                     .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 160, alignment: .leading)
                 if isLoading {
                     ProgressView().controlSize(.mini)
                 }
@@ -141,7 +143,8 @@ struct LocalModelControl: View {
             .foregroundStyle(selectedKey.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(Theme.accent))
         }
         .menuStyle(.borderlessButton)
-        .fixedSize()
+        .frame(minWidth: 64)
+        .accessibilityLabel(buttonLabel)
         // Rebuild the menu when the choice changes. macOS caches the label
         // of a `Menu` and otherwise keeps showing "Each tool's default"
         // until the view is torn down (Home and back).
@@ -251,10 +254,12 @@ struct BypassPermissionsControl: View {
                     .font(Theme.font(11))
                 Text(isOn ? "Bypass on" : "Bypass off")
                     .font(Theme.font(11))
+                    .lineLimit(1)
             }
             .foregroundStyle(isOn ? AnyShapeStyle(Theme.warning) : AnyShapeStyle(.secondary))
         }
         .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: false)
         .help(
             isOn
                 ? "Launches here skip permission prompts: shells and agents (Codex, Claude, Muse, …). Remembered for this workspace."

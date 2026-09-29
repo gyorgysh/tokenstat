@@ -478,47 +478,66 @@ struct TerminalPane: View {
         .background(Theme.background)
     }
 
+    private var selectedStripID: String {
+        if showsTerminal, let active { return "session:" + active.id }
+        return isLaunchSelected ? "launcher" : front.id
+    }
+
     private var strip: some View {
         HStack(spacing: Theme.Space.s) {
-            LaunchChip(isSelected: isLaunchSelected) {
-                workspaces.showLauncher(in: folder.id)
-            }
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: Theme.Space.s) {
+                        LaunchChip(isSelected: isLaunchSelected) {
+                            workspaces.showLauncher(in: folder.id)
+                        }
+                        .id("launcher")
 
-            ForEach(sessions) { session in
-                SessionChip(
-                    session: session,
-                    isSelected: showsTerminal && session.id == active?.id,
-                    isOtherHalf: showsTerminal
-                        && splitLayout.isSplit
-                        && (session.id == terminals.leadingSession(in: folder.id)?.id
-                            || session.id == terminals.trailingSession(in: folder.id)?.id)
-                        && session.id != active?.id
-                ) {
-                    workspaces.showTerminal(in: folder.id)
-                    if NSEvent.modifierFlags.contains(.option) {
-                        terminals.sendToOtherHalf(session)
-                    } else {
-                        terminals.select(session)
+                        ForEach(sessions) { session in
+                            SessionChip(
+                                session: session,
+                                isSelected: showsTerminal && session.id == active?.id,
+                                isOtherHalf: showsTerminal
+                                    && splitLayout.isSplit
+                                    && (session.id == terminals.leadingSession(in: folder.id)?.id
+                                        || session.id == terminals.trailingSession(in: folder.id)?.id)
+                                    && session.id != active?.id
+                            ) {
+                                workspaces.showTerminal(in: folder.id)
+                                if NSEvent.modifierFlags.contains(.option) {
+                                    terminals.sendToOtherHalf(session)
+                                } else {
+                                    terminals.select(session)
+                                }
+                            } onClose: {
+                                if session.alive {
+                                    closingSession = session
+                                } else {
+                                    Task { await terminals.close(session) }
+                                }
+                            } onSplit: {
+                                workspaces.showTerminal(in: folder.id)
+                                terminals.sendToOtherHalf(session)
+                            }
+                            .id("session:" + session.id)
+                        }
+
+                        // Every open surface is a chip, drawn from one list in the order
+                        // it was opened. A commit and the working tree are as closeable as
+                        // a file, and none of them can claim to be selected while another
+                        // is the one on screen.
+                        ForEach(tabs) { tab in
+                            chip(for: tab)
+                                .id(tab.id)
+                        }
                     }
-                } onClose: {
-                    if session.alive {
-                        closingSession = session
-                    } else {
-                        Task { await terminals.close(session) }
-                    }
-                } onSplit: {
-                    workspaces.showTerminal(in: folder.id)
-                    terminals.sendToOtherHalf(session)
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+                .onChange(of: selectedStripID, initial: true) { _, id in
+                    proxy.scrollTo(id, anchor: .center)
                 }
             }
-
-            // Every open surface is a chip, drawn from one list in the order
-            // it was opened. A commit and the working tree are as closeable as
-            // a file, and none of them can claim to be selected while another
-            // is the one on screen.
-            ForEach(tabs) { tab in
-                chip(for: tab)
-            }
+            .frame(minWidth: 64)
 
             Menu {
                 Button {
@@ -568,8 +587,6 @@ struct TerminalPane: View {
                     .foregroundStyle(Theme.warning)
                     .help("Input cannot reach this session: \(error)")
             }
-
-            Spacer()
 
             ToolbarIconButton(systemImage: "globe", help: "Browser, open a web preview beside sessions", isAccent: showsBrowser) {
                 if showsBrowser { browserWorkspaces.remove(folder.id) }
