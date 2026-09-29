@@ -239,9 +239,8 @@ struct ChatComposerControls: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
     var locked: Bool
-    /// One scrolling row instead of a fitting layout. The phone composer is
-    /// never wide enough for the fitting pass to have a choice to make, and
-    /// giving it one costs a second line the transcript could have had.
+    /// Phones use the two-row arrangement directly; desktops fit the
+    /// horizontal controls first, then use the same compact arrangement.
     var compact = false
 
     @State private var pickingAgent = false
@@ -276,21 +275,24 @@ struct ChatComposerControls: View {
             // was pushing them past the edge of the bar. The field takes the
             // width that is left on its own row and truncates in the middle,
             // where the interesting part of a model id is not.
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                agentField
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                HStack(alignment: .center, spacing: Theme.Space.s) {
-                    pills
-                    Spacer(minLength: 0)
-                }
-            }
+            compactLayout
         } else {
-            // Hug the controls. ViewThatFits cannot choose when the agent
-            // field is willing to fill any width: it takes the first
-            // candidate always, and on macOS 14 that stretched the field
-            // across the well and parked the pills against Send.
-            HStack(alignment: .center, spacing: Theme.Space.s) { content }
-                .fixedSize(horizontal: true, vertical: true)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: Theme.Space.s) { content }
+                    .fixedSize(horizontal: true, vertical: true)
+                compactLayout
+            }
+        }
+    }
+
+    private var compactLayout: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            agentField
+                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(alignment: .center, spacing: Theme.Space.s) {
+                pills
+                Spacer(minLength: 0)
+            }
         }
     }
 

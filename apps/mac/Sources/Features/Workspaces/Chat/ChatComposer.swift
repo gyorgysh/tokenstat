@@ -73,17 +73,18 @@ struct ChatComposer: View {
                 strip
             }
             field
-            HStack(alignment: .center, spacing: Theme.Space.s) {
-                attachControl
-                ChatComposerControls(
-                    model: model,
-                    chat: chat,
-                    locked: running
-                )
-                Spacer(minLength: Theme.Space.m)
-                turnStatus
-                ComposerLimitsBadge(backend: chat.backend)
-                turnActions
+            ViewThatFits(in: .horizontal) {
+                utilityRow
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    ChatComposerControls(model: model, chat: chat, locked: running)
+                    HStack(spacing: Theme.Space.s) {
+                        attachControl
+                        Spacer(minLength: Theme.Space.s)
+                        turnStatus
+                        ComposerLimitsBadge(backend: chat.backend)
+                        turnActions
+                    }
+                }
             }
         }
         #if os(macOS)
@@ -122,6 +123,23 @@ struct ChatComposer: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Message")
+    }
+
+    /// Settings may occupy their own row on narrow windows. Never let their
+    /// intrinsic width push the transcript or Send past the window edge.
+    private var utilityRow: some View {
+        HStack(alignment: .center, spacing: Theme.Space.s) {
+            attachControl
+            ChatComposerControls(
+                model: model,
+                chat: chat,
+                locked: running
+            )
+            Spacer(minLength: Theme.Space.m)
+            turnStatus
+            ComposerLimitsBadge(backend: chat.backend)
+            turnActions
+        }
     }
 
     private var strip: some View {

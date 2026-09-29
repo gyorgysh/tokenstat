@@ -65,6 +65,7 @@ struct BranchPickerPresentation<Label: View>: View {
 struct BranchChip: View {
     let workspaceID: String
     var git: GitStatus
+    var compact = false
     /// The model, when the caller has one, so a switch can check for unsaved
     /// editor buffers first.
     var model: WorkspacesModel? = nil
@@ -80,17 +81,24 @@ struct BranchChip: View {
             HStack(spacing: Theme.Space.xs) {
                 Image(systemName: "arrow.triangle.branch")
                     .font(Theme.font(9))
-                Text(git.branch ?? "detached")
-                    .font(Theme.mono(12))
-                if git.ahead > 0 {
-                    Text("↑\(git.ahead)")
-                        .font(Theme.numeric(11))
-                        .foregroundStyle(Theme.secondary)
-                }
-                if git.behind > 0 {
-                    Text("↓\(git.behind)")
-                        .font(Theme.numeric(11))
-                        .foregroundStyle(Theme.warning)
+                if !compact {
+                    Text(git.branch ?? "detached")
+                        .font(Theme.mono(12))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: 140)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .help(git.branch ?? "detached")
+                    if git.ahead > 0 {
+                        Text("↑\(git.ahead)")
+                            .font(Theme.numeric(11))
+                            .foregroundStyle(Theme.secondary)
+                    }
+                    if git.behind > 0 {
+                        Text("↓\(git.behind)")
+                            .font(Theme.numeric(11))
+                            .foregroundStyle(Theme.warning)
+                    }
                 }
                 Image(systemName: "chevron.down")
                     .font(Theme.font(8, weight: .semibold))
@@ -102,6 +110,7 @@ struct BranchChip: View {
             .background(Theme.panel, in: Capsule())
             .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
             .contentShape(Capsule())
+            .help("Switch branch · \(git.branch ?? "detached")")
         }
     }
 }

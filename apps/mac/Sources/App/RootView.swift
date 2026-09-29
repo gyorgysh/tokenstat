@@ -968,15 +968,29 @@ struct RootView: View {
               let folder = workspaces.folders.first(where: { $0.id == id }) else { return nil }
         var branch: AnyView?
         if let git = folder.git, git.isRepo {
-            branch = AnyView(HStack(spacing: Theme.Space.xs) {
-                BranchChip(workspaceID: folder.id, git: git, model: workspaces) {
-                    await workspaces.refresh()
-                }
-                #if os(macOS)
-                Button("Worktrees", .source) { worktreeProject = folder }
-                    .buttonStyle(SecondaryButtonStyle(small: true))
-                    .help("Open a separate working folder for another branch")
-                #endif
+            branch = AnyView(ViewThatFits(in: .horizontal) {
+                HStack(spacing: Theme.Space.xs) {
+                    BranchChip(workspaceID: folder.id, git: git, model: workspaces) {
+                        await workspaces.refresh()
+                    }
+                    #if os(macOS)
+                    Button("Worktrees", .source) { worktreeProject = folder }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                        .help("Open a separate working folder for another branch")
+                    #endif
+                }.fixedSize()
+                HStack(spacing: Theme.Space.xs) {
+                    BranchChip(workspaceID: folder.id, git: git, compact: true, model: workspaces) {
+                        await workspaces.refresh()
+                    }
+                    #if os(macOS)
+                    ToolbarIconButton(systemImage: ActionIcon.source.symbol,
+                                      help: "Worktrees: open a separate working folder for another branch") {
+                        worktreeProject = folder
+                    }
+                    .accessibilityLabel("Worktrees")
+                    #endif
+                }.fixedSize()
             })
         }
         return ProjectHeader(

@@ -399,7 +399,7 @@ struct ProjectHeader: View {
         HStack(spacing: Theme.Space.s) {
             title
             if let branch {
-                branch.fixedSize()
+                branch
             }
             Rectangle()
                 .fill(Theme.border)
@@ -422,7 +422,7 @@ struct ProjectHeader: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
-        .frame(maxWidth: 220, alignment: .leading)
+        .frame(maxWidth: 160, alignment: .leading)
         .fixedSize(horizontal: true, vertical: false)
         .help(folder.isRemote ? "\(folder.machineLabel ?? "Remote machine") · \(folder.path)" : folder.path)
     }
@@ -445,8 +445,8 @@ struct ChromeTab: Identifiable, Hashable {
 /// The sections of whatever the bar is showing, as tabs.
 ///
 /// Gives way in steps as the bar narrows: counts go first, then the names of
-/// all but the first few, then every name but the one on screen. The tab you
-/// are on always says what it is, and every glyph keeps its name on hover.
+/// all but the first few, then secondary destinations enter a native menu.
+/// The tab you are on always says what it is, even at the narrowest width.
 /// One component for a project's sections, the SSH library's and the
 /// automations place, so they read as the same control wherever they appear.
 struct ChromeTabStrip: View {
@@ -461,8 +461,48 @@ struct ChromeTabStrip: View {
             strip(counts: true) { _, _ in true }
             strip(counts: false) { _, _ in true }
             strip(counts: false) { index, isSelected in isSelected || index < primary }
-            strip(counts: false) { _, isSelected in isSelected }
+            compactStrip
+            sectionMenu(tabs)
+
         }
+    }
+
+    /// Keep the two main destinations named before falling back to one
+    /// native menu. A row of every icon still has a minimum width and can
+    /// otherwise force the entire document beyond the window's trailing edge.
+    private var compactStrip: some View {
+        HStack(spacing: 2) {
+            ForEach(Array(tabs.prefix(2))) { tab in
+                ChromeTabButton(tab: tab, isSelected: tab.id == selected,
+                                showsLabel: true, showsCount: false) { select(tab.id) }
+            }
+            if tabs.count > 2 { sectionMenu(Array(tabs.dropFirst(2))) }
+        }
+        .fixedSize()
+    }
+
+    private func sectionMenu(_ choices: [ChromeTab]) -> some View {
+        let current = choices.first { $0.id == selected }
+        return Menu {
+            ForEach(choices) { tab in
+                Button { select(tab.id) } label: {
+                    Label(tab.count.map { "\(tab.label), \($0)" } ?? tab.label,
+                          systemImage: tab.symbol)
+                }
+                .accessibilityAddTraits(tab.id == selected ? .isSelected : [])
+            }
+        } label: {
+            Label(current?.label ?? "More", systemImage: current?.symbol ?? "ellipsis")
+                .font(Theme.fit(12, weight: .medium))
+                .foregroundStyle(current == nil ? Theme.controlGlyph : Theme.accent)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .padding(.horizontal, 7)
+        .frame(height: 26)
+        .background(Capsule().fill(current == nil ? Color.clear : Theme.rowSelected))
+        .help("Switch section")
+        .accessibilityLabel(current.map { "\($0.label), switch section" } ?? "More sections")
     }
 
     private func strip(counts: Bool, labelled: @escaping (Int, Bool) -> Bool) -> some View {
