@@ -4388,38 +4388,42 @@ private struct ChatSidebarConversationRow: View {
     @State private var confirmsRemoval = false
 
     var body: some View {
-        HStack(spacing: Theme.Space.xs) {
+        ZStack(alignment: .trailing) {
             Button(action: select) {
-                HStack(spacing: Theme.Space.s) {
-                    HarnessMark(id: conversation.backend, size: DisplayFit.dp(16))
-                    Text(conversation.title.isEmpty ? "Untitled conversation" : conversation.title)
-                        .font(Theme.fit(13, weight: isSelected ? .medium : .regular))
-                        .foregroundStyle(isSelected ? Color.primary : Theme.controlGlyph)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    ChatDraftMark(reference: draft)
+                HStack(spacing: Theme.Space.xs) {
+                    HStack(spacing: Theme.Space.s) {
+                        HarnessMark(id: conversation.backend, size: DisplayFit.dp(16))
+                        Text(conversation.title.isEmpty ? "Untitled conversation" : conversation.title)
+                            .font(Theme.fit(13, weight: isSelected ? .medium : .regular))
+                            .foregroundStyle(isSelected ? Color.primary : Theme.controlGlyph)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        ChatDraftMark(reference: draft)
+                    }
+
+                    // Reserve the remove control's seat even before hover, so
+                    // the title keeps its width when the pointer arrives.
+                    trailingState
+                        .opacity(isHovering && !conversation.running ? 0 : 1)
+                        .frame(minWidth: 26, alignment: .trailing)
                 }
+                // Padding belongs to the label: every part of the highlighted
+                // row opens the chat, including its age and right-hand edge.
+                .padding(.leading, Self.markInset)
+                .padding(.trailing, Theme.Space.s + 2)
+                .frame(maxWidth: .infinity)
+                .frame(height: DisplayFit.dp(30))
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-
-            // One seat for two things: how long ago, or while the pointer is
-            // on the row, the way to remove it. Both always laid out, so the
-            // title never re-truncates when the pointer arrives.
-            ZStack(alignment: .trailing) {
-                trailingState
-                    .opacity(isHovering && !conversation.running ? 0 : 1)
-                SidebarRowTrash(help: "Remove chat", visible: isHovering && !conversation.running) {
-                    confirmsRemoval = true
-                }
+            .accessibilityLabel(conversation.title.isEmpty ? "Untitled conversation" : conversation.title)
+            // The remove button sits above selection as a separate sibling.
+            // Only this small control intercepts clicks on the full row.
+            SidebarRowTrash(help: "Remove chat", visible: isHovering && !conversation.running) {
+                confirmsRemoval = true
             }
-            .frame(minWidth: 26, alignment: .trailing)
+            .padding(.trailing, Theme.Space.s + 2)
         }
-        // Level with the project's Terminals row: the mark sits where that
-        // row's glyph does, because a chat is one of the project's own rows.
-        .padding(.leading, Self.markInset)
-        .padding(.trailing, Theme.Space.s + 2)
-        .frame(height: DisplayFit.dp(30))
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(

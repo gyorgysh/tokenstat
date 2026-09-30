@@ -3,6 +3,94 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Repositions one set of controls instead of measuring two complete
+/// composers through `ViewThatFits` on every transcript layout pass.
+/// Child size changes invalidate the cache, including quota badge updates.
+private struct ComposerUtilityLayout: Layout {
+    let spacing: CGFloat
+    let controlsGap: CGFloat
+
+    struct Arrangement {
+        let size: CGSize
+        let origins: [CGPoint]
+        let sizes: [CGSize]
+    }
+
+    struct Cache {
+        var ideal: [CGSize] = []
+        var arrangements: [CGFloat: Arrangement] = [:]
+    }
+
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+    func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        cache = Cache()
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        arrangement(width: proposal.width, subviews: subviews, cache: &cache).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        guard subviews.count == 3 else { return }
+        let plan = arrangement(width: bounds.width, subviews: subviews, cache: &cache)
+        for index in subviews.indices {
+            subviews[index].place(
+                at: CGPoint(x: bounds.minX + plan.origins[index].x, y: bounds.minY + plan.origins[index].y),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(plan.sizes[index])
+            )
+        }
+    }
+
+    func explicitAlignment(of guide: HorizontalAlignment, in bounds: CGRect, proposal: ProposedViewSize,
+                           subviews: Subviews, cache: inout Cache) -> CGFloat? { nil }
+
+    func explicitAlignment(of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize,
+                           subviews: Subviews, cache: inout Cache) -> CGFloat? { nil }
+
+    private func arrangement(width offered: CGFloat?, subviews: Subviews, cache: inout Cache) -> Arrangement {
+        guard subviews.count == 3 else { return Arrangement(size: .zero, origins: [], sizes: []) }
+        if cache.ideal.isEmpty { cache.ideal = subviews.map { $0.sizeThatFits(.unspecified) } }
+        let ideal = cache.ideal
+        let oneRowWidth = ideal.reduce(0) { $0 + $1.width } + spacing + controlsGap
+        let width = offered.flatMap { $0.isFinite ? max(0, $0) : nil } ?? oneRowWidth
+        if let held = cache.arrangements[width] { return held }
+        let plan: Arrangement
+        if width >= oneRowWidth {
+            let height = ideal.map(\.height).max() ?? 0
+            plan = Arrangement(
+                size: CGSize(width: width, height: height),
+                origins: [
+                    CGPoint(x: 0, y: (height - ideal[0].height) / 2),
+                    CGPoint(x: ideal[0].width + spacing, y: (height - ideal[1].height) / 2),
+                    CGPoint(x: width - ideal[2].width, y: (height - ideal[2].height) / 2)
+                ],
+                sizes: ideal
+            )
+        } else {
+            let controls = subviews[1].sizeThatFits(ProposedViewSize(width: width, height: nil))
+            let trailing = subviews[2].sizeThatFits(
+                ProposedViewSize(width: max(0, width - ideal[0].width - spacing), height: nil)
+            )
+            let bottomHeight = max(ideal[0].height, trailing.height)
+            let bottomY = controls.height + spacing
+            plan = Arrangement(
+                size: CGSize(width: width, height: bottomY + bottomHeight),
+                origins: [
+                    CGPoint(x: 0, y: bottomY + (bottomHeight - ideal[0].height) / 2),
+                    .zero,
+                    CGPoint(x: width - trailing.width, y: bottomY + (bottomHeight - trailing.height) / 2)
+                ],
+                sizes: [ideal[0], controls, trailing]
+            )
+        }
+        if cache.arrangements.count >= 16 { cache.arrangements.removeAll(keepingCapacity: true) }
+        cache.arrangements[width] = plan
+        return plan
+    }
+}
+
 /// The bar under the transcript: message first, compact controls underneath.
 ///
 /// The first row is an uninterrupted writing surface. Attach, agent options
@@ -76,22 +164,14 @@ struct ChatComposer: View {
                 strip
             }
             field
-            // Shielded so the stack's alignment question does not rebuild
-            // and measure both rows on every layout pass.
-            AlignmentShieldLayout {
-            ViewThatFits(in: .horizontal) {
-                utilityRow
-                VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    ChatComposerControls(model: model, chat: chat, locked: running)
-                    HStack(spacing: Theme.Space.s) {
-                        attachControl
-                        Spacer(minLength: Theme.Space.s)
-                        turnStatus
-                        ComposerLimitsBadge(backend: chat.backend)
-                        turnActions
-                    }
+            ComposerUtilityLayout(spacing: Theme.Space.s, controlsGap: Theme.Space.m) {
+                attachControl
+                ChatComposerControls(model: model, chat: chat, locked: running)
+                HStack(spacing: Theme.Space.s) {
+                    turnStatus
+                    ComposerLimitsBadge(backend: chat.backend)
+                    turnActions
                 }
-            }
             }
         }
         #if os(macOS)
@@ -130,23 +210,6 @@ struct ChatComposer: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Message")
-    }
-
-    /// Settings may occupy their own row on narrow windows. Never let their
-    /// intrinsic width push the transcript or Send past the window edge.
-    private var utilityRow: some View {
-        HStack(alignment: .center, spacing: Theme.Space.s) {
-            attachControl
-            ChatComposerControls(
-                model: model,
-                chat: chat,
-                locked: running
-            )
-            Spacer(minLength: Theme.Space.m)
-            turnStatus
-            ComposerLimitsBadge(backend: chat.backend)
-            turnActions
-        }
     }
 
     private var strip: some View {
