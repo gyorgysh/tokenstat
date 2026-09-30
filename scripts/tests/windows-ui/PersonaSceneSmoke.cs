@@ -35,7 +35,9 @@ internal static class PersonaSceneSmoke
                 throw new Exception("Native persona slot leaked its fill");
             if (path.Clip is not null)
                 throw new Exception("Native persona slot leaked its clip");
-            if (path.RenderTransform is not null)
+            // The public getter allocates an identity matrix when the property is unset.
+            var localTransform = path.ReadLocalValue(UIElement.RenderTransformProperty);
+            if (localTransform is Microsoft.UI.Xaml.Media.Transform)
                 throw new Exception("Native persona slot leaked its transform");
             if (path.Opacity != 1)
                 throw new Exception("Native persona slot leaked its opacity");
