@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
@@ -86,7 +86,7 @@ struct Record {
     ciphertext: String,
 }
 
-#[derive(Default, Deserialize, Serialize)]
+#[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Store {
     #[serde(default)]
@@ -158,6 +158,52 @@ fn path() -> PathBuf {
         })
 }
 
+/// Which file a parsed store came from. A save replaces the file by rename,
+/// so the inode changes with every write, from this process or another one.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FileSignature {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    #[cfg(unix)]
+    dev: u64,
+    #[cfg(unix)]
+    ino: u64,
+}
+
+impl FileSignature {
+    fn of(metadata: &fs::Metadata) -> Self {
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        Self {
+            len: metadata.len(),
+            modified: metadata.modified().ok(),
+            #[cfg(unix)]
+            dev: metadata.dev(),
+            #[cfg(unix)]
+            ino: metadata.ino(),
+        }
+    }
+}
+
+/// The last store read or written, with the file it matches.
+///
+/// The whole cache is one JSON file of tens of megabytes, and every call
+/// parsed all of it, a quarter of a second per `cache.get`. While the file on
+/// disk is still the one this copy came from, the copy is the answer. Only
+/// touched under `lock()`, like the file itself.
+fn parsed() -> &'static Mutex<Option<(FileSignature, Store)>> {
+    static PARSED: OnceLock<Mutex<Option<(FileSignature, Store)>>> = OnceLock::new();
+    PARSED.get_or_init(|| Mutex::new(None))
+}
+
+fn remember_parsed(signature: FileSignature, store: &Store) {
+    *parsed().lock().unwrap_or_else(PoisonError::into_inner) = Some((signature, store.clone()));
+}
+
+fn forget_parsed() {
+    *parsed().lock().unwrap_or_else(PoisonError::into_inner) = None;
+}
+
 /// Read the store, quarantining a damaged file rather than failing forever.
 ///
 /// A cache is reconstructible by re-opening the work, so a corrupt file is
@@ -181,6 +227,15 @@ fn load() -> Result<(Store, bool), String> {
     if !metadata.is_file() || metadata.len() > MAX_STORE_BYTES {
         return Err("saved work file exceeds supported size or is not a regular file".into());
     }
+    let signature = FileSignature::of(&metadata);
+    if let Some((known, store)) = parsed()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        && *known == signature
+    {
+        return Ok((store.clone(), take_marker()));
+    }
     let mut reader = BufReader::new(file).take(MAX_STORE_BYTES + 1);
     let decoded = serde_json::from_reader::<_, Store>(&mut reader);
     // The descriptor may grow after metadata was checked. Exhausting this
@@ -195,11 +250,13 @@ fn load() -> Result<(Store, bool), String> {
                 || (store.schema_version == 0 && store.scopes.is_empty()) =>
         {
             validate_store(&store)?;
+            remember_parsed(signature, &store);
             Ok((store, take_marker()))
         }
         Ok(_) => Err("unsupported work cache version".into()),
         Err(error) if error.is_io() => Err(error.to_string()),
         Err(_) => {
+            forget_parsed();
             let quarantine = path.with_extension("corrupt.json");
             fs::rename(&path, &quarantine)
                 .map_err(|error| format!("Cannot preserve damaged work cache: {error}"))?;
@@ -266,6 +323,9 @@ fn save_bounded(store: &mut Store, limit: u64) -> Result<(), String> {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&temp, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
     }
+    // Whatever happens next, the copy in memory no longer matches the file
+    // until the rename below has landed and been measured.
+    forget_parsed();
     fs::rename(temp, &path).map_err(|e| e.to_string())?;
     // Persist the replacement directory entry before acknowledging a removal
     // or clear, matching the durable-store convention on Unix platforms.
@@ -274,6 +334,9 @@ fn save_bounded(store: &mut Store, limit: u64) -> Result<(), String> {
         fs::File::open(parent)
             .and_then(|directory| directory.sync_all())
             .map_err(|error| error.to_string())?;
+    }
+    if let Ok(metadata) = fs::metadata(&path) {
+        remember_parsed(FileSignature::of(&metadata), store);
     }
     Ok(())
 }
@@ -968,6 +1031,33 @@ mod tests {
                     );
                 }
             }
+        });
+    }
+
+    /// The parsed copy is an answer only while the file is the one it came
+    /// from. A file replaced by another writer must be read again.
+    #[test]
+    fn a_store_replaced_on_disk_is_read_again() {
+        with_path(fresh_path(), || {
+            put(&params("acc|alice", "c1")).expect("put");
+            let keyed = KeyedParams {
+                key: KEY.into(),
+                scope: "acc|alice".into(),
+                id: "c1".into(),
+            };
+            assert!(get(&keyed).is_ok());
+            let empty = serde_json::to_vec(&Store {
+                schema_version: 1,
+                scopes: HashMap::new(),
+            })
+            .unwrap();
+            let temp = path().with_extension("other");
+            fs::write(&temp, empty).unwrap();
+            fs::rename(&temp, path()).unwrap();
+            assert!(
+                get(&keyed).is_err(),
+                "a replaced file must not be answered from memory"
+            );
         });
     }
 
