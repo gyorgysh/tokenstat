@@ -36,7 +36,12 @@ struct ChatSetupHeader: View {
     /// that expression once the options list grew a second clause.
     private var personaRow: some View {
         HStack(spacing: Theme.Space.s) {
+            // Still, not breathing. This face sits beside a picker for as
+            // long as a chat is open, and every animated frame lays out and
+            // commits the whole window: a 30 point face held more than a
+            // quarter of the main thread with nobody touching the app.
             PersonaMark(seed: model.faceSeed, size: 30)
+                .environment(\.personaMotionAllowed, false)
             AppMenuPicker(
                 title: "Persona",
                 options: personaOptions,

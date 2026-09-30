@@ -599,6 +599,12 @@ final class ChatModel {
     @ObservationIgnored private var previewWarmTask: Task<Void, Never>?
     private(set) var recentMessagePreview: [ChatDisplayItem] = []
 
+    /// The transcript reads the preview, so an empty write to an empty
+    /// preview still redrew it.
+    private func clearRecentMessagePreview() {
+        if !recentMessagePreview.isEmpty { recentMessagePreview = [] }
+    }
+
     @ObservationIgnored private var previewReads: Set<String> = []
 
     /// A row's cancellable dwell task calls this without selecting the chat.
@@ -728,11 +734,12 @@ final class ChatModel {
     }
 
     private func restoreRecentMessages() {
-        recentMessagePreview = []
+        clearRecentMessagePreview()
         guard let reference = currentReference,
               reference.scope == WorkSessionContext.shared.scope,
               let key = WorkReferenceKey.conversation(reference) else { return }
-        recentMessagePreview = recentMessages.messages(for: key)
+        let preview = recentMessages.messages(for: key)
+        if preview != recentMessagePreview { recentMessagePreview = preview }
     }
 
     /// Adjacent conversation in sidebar order, looping inside the warm ten.
@@ -795,7 +802,11 @@ final class ChatModel {
         return chatListCache[folderID] ?? []
     }
 
+    /// Written only when it changed. The cache is observed as one value, so
+    /// any write redraws every folder's rows in the sidebar, and a reload that
+    /// returns the same list is the usual case.
     private func storeChatListCache(_ list: [ChatConversation], folderID: String) {
+        guard chatListCache[folderID] != list else { return }
         chatListCache[folderID] = list
         if chatListCache.count > Self.chatListCacheCap,
            let drop = chatListCache.keys.first(where: { $0 != folderID }) {
@@ -880,7 +891,7 @@ final class ChatModel {
             chatListCache = [:]
             noteRunningChats()
             recentMessages.removeAll()
-            recentMessagePreview = []
+            clearRecentMessagePreview()
             chats = []
             selected = nil
             folderID = nil
@@ -889,7 +900,7 @@ final class ChatModel {
         let draftHost = route.peer ?? WorkSessionContext.shared.localHostIdentity
         if folderID != workspaceID || self.workspaceID != route.workspaceID || self.peer != route.peer {
             rememberRecentMessages()
-            recentMessagePreview = []
+            clearRecentMessagePreview()
             if self.peer != route.peer { pagingUnavailable = false }
             // The folder is changing. Remember which conversation was open
             // before the clear below drops it, or coming back can only ever
@@ -1483,7 +1494,7 @@ final class ChatModel {
         do {
             try await Bridge.removeChat(id: chat.id, peer: targetPeer)
             recentMessages.removeAll()
-            recentMessagePreview = []
+            clearRecentMessagePreview()
             guard context == loadGeneration else { return }
             if let folderID { forgetDraft(chatID: chat.id, folderID: folderID) }
             if let folderID, folderID != self.folderID {
@@ -1517,7 +1528,7 @@ final class ChatModel {
             // itself instead of borrowing the current conversation's peer.
             _ = try await Bridge.removeAllChats(workspaceID: folderID)
             recentMessages.removeAll()
-            recentMessagePreview = []
+            clearRecentMessagePreview()
             guard context == loadGeneration else { return }
             storeChatListCache([], folderID: folderID)
             forgetLastSelected(folderID: folderID)

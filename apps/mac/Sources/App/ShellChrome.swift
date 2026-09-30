@@ -112,11 +112,28 @@ private struct RetainedPaneLayout: Layout {
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
         guard let pane = subviews.first else { return .zero }
+        // A pane fills what it is offered. With both sides offered the answer
+        // is the offer, so measuring the pane first only threw its whole
+        // subtree's layout away. That was half the main thread while a
+        // persona animated, since every frame lays the window out again.
+        if let width = proposal.width, let height = proposal.height {
+            let offered = CGSize(width: width, height: height)
+            if isActive || cache.size == nil { cache.size = offered }
+            return offered
+        }
         if isActive || cache.size == nil {
             cache.size = pane.sizeThatFits(proposal)
         }
         return proposal.replacingUnspecifiedDimensions(by: cache.size ?? .zero)
     }
+
+    // A pane is a whole screen and aligns by its frame. The default asks every
+    // subview for its guides, which measures the pane a second time.
+    func explicitAlignment(of guide: HorizontalAlignment, in bounds: CGRect, proposal: ProposedViewSize,
+                           subviews: Subviews, cache: inout Cache) -> CGFloat? { nil }
+
+    func explicitAlignment(of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize,
+                           subviews: Subviews, cache: inout Cache) -> CGFloat? { nil }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
         guard let pane = subviews.first else { return }
