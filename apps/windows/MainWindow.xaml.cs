@@ -1028,7 +1028,7 @@ public sealed partial class MainWindow : Window
                     GlobalSection.Ssh => Ssh(SSHSection.Hosts),
                     GlobalSection.Search => new WorkSearchPage(),
                     GlobalSection.Todo => new TodoPage(),
-                    GlobalSection.Notes => new NotesPage(),
+                    GlobalSection.Notes => _globalNotesPage ??= new NotesPage(),
                     GlobalSection.Workflows => new WorkflowsPage(),
                     GlobalSection.Automations => new AutomationsPage(),
                     GlobalSection.Account => new AccountPage(),
@@ -1080,6 +1080,9 @@ public sealed partial class MainWindow : Window
     /// like the desktop Mac.
     /// </summary>
     private readonly Dictionary<string, WorkspaceTabsPage> _workbenches = new();
+    // Failed autosaves keep the person's draft in the page. Retain it when
+    // global navigation leaves Notes, as project workbenches already do.
+    private NotesPage? _globalNotesPage;
     private SshPage? _sshPage;
     private SshPage Ssh(SSHSection section, string? sessionId = null)
     {

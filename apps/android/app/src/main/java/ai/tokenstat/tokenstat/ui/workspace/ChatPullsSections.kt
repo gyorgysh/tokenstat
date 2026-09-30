@@ -133,6 +133,7 @@ import ai.tokenstat.tokenstat.ui.logic.ChatHint
 import ai.tokenstat.tokenstat.ui.logic.ChatOutbox
 import ai.tokenstat.tokenstat.ui.logic.ChatSteer
 import ai.tokenstat.tokenstat.ui.logic.SteerHold
+import ai.tokenstat.tokenstat.ui.logic.SteerVersions
 import ai.tokenstat.tokenstat.ui.logic.ChatOutboxFailure
 import ai.tokenstat.tokenstat.ui.logic.ChatOutboxRules
 import ai.tokenstat.tokenstat.ui.logic.FileChatOutbox
@@ -250,18 +251,19 @@ fun ChatSection(
     /// `ChatModel.deliveringFromComposer`: the strip draws `pending` rather
     /// than `queued`, so a healthy send never opens it.
     var deliveringFromComposer by remember(workspace) { mutableStateOf<String?>(null) }
-    /// A note this screen is holding until the host list echoes the same words.
-    var heldSteer by remember(workspace) { mutableStateOf<SteerHold?>(null) }
+    /// Accepted notes remain protected over lists requested before each park.
+    var heldSteers by remember(workspace) { mutableStateOf<Map<String, SteerHold>>(emptyMap()) }
+    val steerVersions = remember(workspace) { SteerVersions() }
     /// Conversations whose note was cleared here. An in-flight list that still
     /// carries the old words must not put them back.
-    var retiredSteers by remember(workspace) { mutableStateOf<Set<String>>(emptySet()) }
+    var retiredSteers by remember(workspace) { mutableStateOf<Map<String, Long>>(emptyMap()) }
     /// Counts `chat.list` requests, so a list asked for after a note was
     /// parked or dropped is trusted over what this screen is holding.
     val listRequests = remember(workspace) { java.util.concurrent.atomic.AtomicLong() }
-    /// The last list request started before the newest drop.
-    var retiredAt by remember(workspace) { mutableStateOf(0L) }
+    var appliedListRequest by remember(workspace) { mutableStateOf(0L) }
     /// One delivery of a parked note is already in flight.
     var deliveringSteer by remember(workspace) { mutableStateOf(false) }
+    var clearingSteer by remember(workspace) { mutableStateOf(false) }
     /// A note is being parked. Send stays Send, and a second tap waits.
     var parkingSteer by remember(workspace) { mutableStateOf(false) }
     /// This computer's helper has no mid-turn note. Remembered with the peer,
@@ -308,22 +310,28 @@ fun ChatSection(
     }
 
     fun retireSteer(id: String) {
-        retiredSteers = retiredSteers + id
-        retiredAt = listRequests.get()
+        steerVersions.changed(id)
+        retiredSteers = retiredSteers + (id to listRequests.get())
     }
 
     fun applyChatRows(rows: List<JsonObject>, listRequest: Long) {
-        val hold = heldSteer?.takeUnless { ChatSteer.answers(listRequest, it.parkedAt) }
-        val retired = if (ChatSteer.answers(listRequest, retiredAt)) emptySet() else retiredSteers
-        val reconciled = ChatSteer.reconcile(rows, hold, retired)
+        if (listRequest < appliedListRequest) return
+        appliedListRequest = listRequest
+        val reconciled = ChatSteer.reconcile(rows, heldSteers, retiredSteers, listRequest)
+        val previous = chats.associateBy { it.str("id") }
+        for (row in reconciled.rows) {
+            val id = row.str("id") ?: continue
+            val old = previous[id] ?: continue
+            if (ChatSteer.noteOf(old) != ChatSteer.noteOf(row)) steerVersions.changed(id)
+        }
         chats = reconciled.rows
-        heldSteer = reconciled.held
+        heldSteers = reconciled.held
         retiredSteers = reconciled.retired
     }
 
     /// Drop the note on this screen. The host copy is a separate call.
     fun clearLocalSteer(id: String) {
-        if (heldSteer?.conversationId == id) heldSteer = null
+        heldSteers = heldSteers - id
         chats = chats.map { row ->
             if (row.str("id") == id) ChatSteer.withNote(row, null) else row
         }
@@ -406,18 +414,19 @@ fun ChatSection(
             val generation = history.generation
             if (!history.loaded) {
                 val page = newestPage(id)
-                if (openId != id) return
+                if (openId != id || history.generation != generation) return
                 history.page(page, replace = true)
             } else {
+                val requestedOffset = history.offset
                 val chunk = model.workspaceSection(peer, "chat.events", buildJsonObject {
-                    put("id", id); put("offset", history.offset)
+                    put("id", id); put("offset", requestedOffset)
                     history.tailCursor?.let { put("tailCursor", it) }
                     put("stablePositions", true)
                 }) as JsonObject
-                if (openId != id || history.generation != generation) return
-                if (!history.tail(chunk, generation)) {
+                if (openId != id || history.generation != generation || history.offset != requestedOffset) return
+                if (!history.tail(chunk, generation, requestedOffset)) {
                     val page = newestPage(id)
-                    if (openId != id) return
+                    if (openId != id || history.generation != generation || history.offset != requestedOffset) return
                     history.page(page, replace = true)
                 }
             }
@@ -618,7 +627,7 @@ fun ChatSection(
                 return false
             }
             if (stopCurrent && chats.firstOrNull { it.str("id") == id }?.bol("running") == true) {
-                clearLocalSteer(id)
+                val noteVersion = steerVersions.version(id)
                 var stopped = false
                 try {
                     model.workspaceSection(peer, "chat.stop", buildJsonObject { put("id", id) })
@@ -627,7 +636,10 @@ fun ChatSection(
                     throw cancelled
                 } catch (_: Exception) {
                 }
-                if (stopped) retireSteer(id)
+                if (stopped && steerVersions.current(id, noteVersion)) {
+                    clearLocalSteer(id)
+                    retireSteer(id)
+                }
                 repeat(80) {
                     if (chats.firstOrNull { it.str("id") == id }?.bol("running") != true) return@repeat
                     refreshChats()
@@ -736,6 +748,7 @@ fun ChatSection(
     /// message. The queue moves only once that note is gone.
     suspend fun deliverParked(id: String) {
         val captured = ChatSteer.noteOf(chats.firstOrNull { it.str("id") == id })
+        val capturedVersion = steerVersions.version(id)
         if (captured.isEmpty()) {
             if (openChatNote().isEmpty()) drainOutbox()
             return
@@ -745,6 +758,7 @@ fun ChatSection(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
+            if (!steerVersions.current(id, capturedVersion)) return
             val raw = failure.message
             if (ChatSteer.isStillInTurn(raw?.trim())) return
             if (ChatSteer.isUnknownMethod((failure as? CoreFailure)?.code, raw)) {
@@ -757,18 +771,20 @@ fun ChatSection(
             refreshChats()
             return
         }
+        if (!steerVersions.current(id, capturedVersion)) return
         val obj = payload as? JsonObject
         if (obj == null) {
             showNoteSentence("The note could not be saved.", id)
             refreshChats()
             return
         }
-        val hold = heldSteer
+        val hold = heldSteers[id]
         val sameHold = hold != null && hold.conversationId == id && hold.note.trim() == captured
         val newerHold = hold != null && hold.conversationId == id && !sameHold
         if (obj.bol("delivered")) {
             if (newerHold) return
-            if (sameHold) heldSteer = null
+            if (sameHold) heldSteers = heldSteers - id
+            retireSteer(id)
             val conversation = obj["conversation"] as? JsonObject
             if (conversation != null) {
                 val stripped = ChatSteer.withNote(conversation, null)
@@ -783,11 +799,11 @@ fun ChatSection(
             }
             return
         }
-        if (sameHold) heldSteer = null
+        if (sameHold) heldSteers = heldSteers - id
         if (newerHold) return
         refreshChats()
         if (chats.none { it.str("id") == id }) {
-            heldSteer = heldSteer?.takeUnless { it.conversationId == id }
+            heldSteers = heldSteers - id
         }
         if (openChatNote().isEmpty()) drainOutbox()
     }
@@ -795,7 +811,7 @@ fun ChatSection(
     /// A parked note goes out before anything waiting in the queue.
     /// `deliverNote` false is the path after the note was just handed off.
     suspend fun drainQueue(deliverNote: Boolean = true) {
-        if (sendingIds.isNotEmpty() || !hostReachable) return
+        if (sendingIds.isNotEmpty() || clearingSteer || !hostReachable) return
         val id = openId ?: return
         val note = ChatSteer.noteOf(chats.firstOrNull { it.str("id") == id })
         if (note.isNotEmpty()) {
@@ -852,9 +868,10 @@ fun ChatSection(
                 showNoteSentence("The note could not be saved.", id)
                 return true
             }
+            steerVersions.changed(id)
             retiredSteers = retiredSteers - id
+            heldSteers = heldSteers + (id to SteerHold(id, trimmed, listRequests.get()))
             if (openId != id) return true
-            heldSteer = SteerHold(id, trimmed, listRequests.get())
             chats = chats.map { row ->
                 if (row.str("id") == id) ChatSteer.withNote(row, trimmed) else row
             }
@@ -866,11 +883,15 @@ fun ChatSection(
         }
     }
 
-    /// Take the note off this screen, then ask the host to drop it.
+    /// Keep the note visible and the queue paused until the host drops it.
     suspend fun clearSteer(id: String) {
-        clearLocalSteer(id)
+        if (clearingSteer) return
+        val noteVersion = steerVersions.version(id)
+        clearingSteer = true
         try {
             model.workspaceSection(peer, "chat.steerClear", buildJsonObject { put("id", id) })
+            if (!steerVersions.current(id, noteVersion)) return
+            clearLocalSteer(id)
             retireSteer(id)
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -881,6 +902,8 @@ fun ChatSection(
                 return
             }
             showNoteFailure(failure, id)
+        } finally {
+            clearingSteer = false
         }
     }
 
@@ -1533,10 +1556,13 @@ fun ChatSection(
                 onStop = {
                     val id = openId ?: return@ChatComposer
                     scope.launch {
-                        clearLocalSteer(id)
+                        val noteVersion = steerVersions.version(id)
                         try {
                             model.workspaceSection(peer, "chat.stop", buildJsonObject { put("id", id) })
-                            retireSteer(id)
+                            if (steerVersions.current(id, noteVersion)) {
+                                clearLocalSteer(id)
+                                retireSteer(id)
+                            }
                         } catch (cancelled: CancellationException) {
                             throw cancelled
                         } catch (_: Exception) {

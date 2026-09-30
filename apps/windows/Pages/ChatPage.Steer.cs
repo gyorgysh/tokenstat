@@ -22,6 +22,7 @@ internal sealed partial class ChatPage
     private readonly Dictionary<string, long> _steerProtocol = [];
     private readonly HashSet<string> _steerUnsupported = [];
     private bool _deliveringSteer;
+    private bool _clearingSteer;
     private int _steerDeliverGeneration;
     private bool _steerProbeInFlight;
     private int _steerProbeTicket;
@@ -157,6 +158,7 @@ internal sealed partial class ChatPage
         try
         {
             await CallChatAsync("chat.steer", new JsonObject { ["id"] = chat, ["text"] = text });
+            _steerOverlay.Remember(chat, text);
             if (!OpenChatIs(chat)) return true;
             ParkLocalSteer(text);
             if (_draft.Text.Trim() == text) _draft.Text = "";
@@ -211,6 +213,8 @@ internal sealed partial class ChatPage
     private async Task DeliverParkedSteerAsync(string chat)
     {
         var ticket = ++_steerDeliverGeneration;
+        var noteRevision = _steerOverlay.Revision(chat);
+        bool Current() => SteerCurrent(ticket, chat) && _steerOverlay.Revision(chat) == noteRevision;
         _deliveringSteer = true;
         try
         {
@@ -221,7 +225,7 @@ internal sealed partial class ChatPage
             }
             catch (Exception ex)
             {
-                if (!SteerCurrent(ticket, chat)) return;
+                if (!Current()) return;
                 if (IsStillInTurn(ex))
                 {
                     _steerError = null;
@@ -234,22 +238,23 @@ internal sealed partial class ChatPage
                     _steerError = null;
                     _deliveringSteer = false;
                     await DrainQueueAsync(deliverNote: false);
-                    if (SteerCurrent(ticket, chat)) PaintConversation();
+                    if (Current()) PaintConversation();
                     return;
                 }
                 var previousNote = PendingSteerText(_openChat);
                 var previousBusy = Busy();
                 BannerSteer(ex.Message);
                 await ReloadOpenChatAsync(chat);
-                if (!SteerCurrent(ticket, chat)) return;
+                if (!Current()) return;
                 PaintIfSteerChromeChanged(previousNote, previousBusy);
                 return;
             }
 
-            if (!SteerCurrent(ticket, chat)) return;
+            if (!Current()) return;
             _steerError = null;
             if (Format.Flag(result, "delivered"))
             {
+                _steerOverlay.Remember(chat, null);
                 if (result["conversation"] is JsonObject conversation)
                     ApplyDeliveredConversation(conversation);
                 else
@@ -259,11 +264,11 @@ internal sealed partial class ChatPage
             }
 
             var reloaded = await ReloadOpenChatAsync(chat);
-            if (!SteerCurrent(ticket, chat)) return;
+            if (!Current()) return;
             if (!reloaded) ClearLocalSteer();
             _deliveringSteer = false;
             await DrainQueueAsync(deliverNote: false);
-            if (SteerCurrent(ticket, chat)) PaintConversation();
+            if (Current()) PaintConversation();
         }
         finally
         {
@@ -324,13 +329,16 @@ internal sealed partial class ChatPage
 
     private async Task ClearSteerAsync()
     {
-        if (_openId is not string chat) return;
-        ClearLocalSteer();
-        PaintConversation();
+        if (_openId is not string chat || _clearingSteer) return;
+        var noteRevision = _steerOverlay.Revision(chat);
+        _clearingSteer = true;
         try
         {
             await CallChatAsync("chat.steerClear", new JsonObject { ["id"] = chat });
+            if (!_steerOverlay.RememberIfCurrent(chat, null, noteRevision)) return;
             if (!OpenChatIs(chat)) return;
+            ClearLocalSteer();
+            PaintConversation();
             _steerError = null;
         }
         catch (Exception ex)
@@ -348,6 +356,7 @@ internal sealed partial class ChatPage
                 Banner(ex.Message);
             }
         }
+        finally { _clearingSteer = false; }
     }
 
     private void BannerSteer(string text)

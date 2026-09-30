@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../../apps/windows/Pages/ChatHistoryBuffer.cs" Link="ChatHistoryBuffer.cs" />
+    <Compile Include="../../../apps/windows/Pages/ChatSteerOverlay.cs" Link="ChatSteerOverlay.cs" />
     <Compile Include="../../../apps/windows/Navigation/ChatPreviewStore.cs" Link="ChatPreviewStore.cs" />
     <Compile Include="../../../apps/windows/Pages/SeatStep.cs" Link="SeatStep.cs" />
   </ItemGroup>

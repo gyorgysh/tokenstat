@@ -6,16 +6,25 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
-/// A note this device is holding until the host list echoes the same words.
+/// A note this device keeps over lists requested before the host took it.
 /// `parkedAt` is the last list request started before the host took it.
 data class SteerHold(val conversationId: String, val note: String, val parkedAt: Long = 0)
 
 /// The list after a local note and a retired one have been applied.
 data class SteerRows(
     val rows: List<JsonObject>,
-    val held: SteerHold?,
-    val retired: Set<String>,
+    val held: Map<String, SteerHold>,
+    val retired: Map<String, Long>,
 )
+
+/** Mutation identity survives list echoes and identical replacement words. */
+class SteerVersions {
+    private val versions = mutableMapOf<String, Long>()
+    private var next = 0L
+    fun version(id: String): Long = versions[id] ?: 0L
+    fun changed(id: String) { versions[id] = ++next }
+    fun current(id: String, expected: Long): Boolean = version(id) == expected
+}
 
 /// Whether a short note can ride the next step, and how a chat list
 /// keeps that note when the host answer arrives a moment later.
@@ -28,38 +37,27 @@ object ChatSteer {
     /// a note a step took before the next list would stay on screen all turn.
     fun answers(listRequest: Long, since: Long): Boolean = listRequest > since
 
-    fun reconcile(rows: List<JsonObject>, held: SteerHold?, retired: Set<String>): SteerRows {
-        val present = HashSet<String>()
-        for (row in rows) {
-            val id = idOf(row) ?: continue
-            present.add(id)
-        }
-        var nextHeld = held?.takeIf { it.conversationId in present }
-        val nextRetired = retired.filterTo(HashSet()) { it in present }
-        val winning = nextHeld
-        if (winning != null) nextRetired.remove(winning.conversationId)
+    fun reconcile(
+        rows: List<JsonObject>,
+        held: Map<String, SteerHold>,
+        retired: Map<String, Long>,
+        listRequest: Long = 0,
+    ): SteerRows {
+        // Remove protection only for a read requested after its mutation.
+        // An echoed or missing row from an older read cannot do that:
+        // other older reads may still return a different snapshot afterward.
+        val nextHeld = held.filterValues { !answers(listRequest, it.parkedAt) }
+        val nextRetired = retired.filterValues { !answers(listRequest, it) } - nextHeld.keys
         val painted = rows.map { row ->
             val id = idOf(row) ?: return@map row
-            val hold = nextHeld
-            if (hold != null && hold.conversationId == id) {
-                if (noteOf(row) == hold.note.trim()) {
-                    nextHeld = null
-                    row
-                } else {
-                    withNote(row, hold.note)
-                }
-            } else if (id in nextRetired) {
-                if (noteOf(row).isEmpty()) {
-                    nextRetired.remove(id)
-                    row
-                } else {
-                    withNote(row, null)
-                }
-            } else {
-                row
+            val hold = nextHeld[id]
+            when {
+                hold != null -> withNote(row, hold.note)
+                id in nextRetired -> withNote(row, null)
+                else -> row
             }
         }
-        return SteerRows(painted, nextHeld, nextRetired.toSet())
+        return SteerRows(painted, nextHeld, nextRetired)
     }
 
     /// The same row when the stored words already match, or when a strip

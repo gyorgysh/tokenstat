@@ -142,7 +142,7 @@ internal sealed partial class ChatPage
         // A parked note does not need the outbox key, and it goes out before
         // any queued message. The flag is set by the delivery itself so a
         // poll tick cannot start a second one.
-        if (_sending || _deliveringSteer || _openId is not string chat || !IsLoaded) return;
+        if (_sending || _deliveringSteer || _clearingSteer || _openId is not string chat || !IsLoaded) return;
         if (PendingSteerText(_openChat).Length > 0)
         {
             if (!deliverNote || Busy()) return;
@@ -177,7 +177,8 @@ internal sealed partial class ChatPage
             });
             ChatOutbox.Shared.Accept(key, attempted, Format.Long(updated, "sendRevision"));
             _authorizedQueue.Remove(attempted.Id);
-            if (IsLoaded && _openId == chat) { _openChat = updated; _running = true; _started = true; }
+            if (IsLoaded && _openId == chat)
+            { _openChat = ChatSteerOverlay.MergeRecord(updated, _openChat); _running = true; _started = true; }
         }
         catch (Exception ex)
         {

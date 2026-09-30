@@ -18,6 +18,16 @@
 
 set -u
 interval="${1:-2}"
+case "$interval" in
+    *[!0-9]*|'')
+        echo 'interval must be a positive whole number of seconds' >&2
+        exit 2
+        ;;
+esac
+if ! [ "$interval" -gt 0 ] 2>/dev/null; then
+    echo 'interval must be a positive whole number of seconds' >&2
+    exit 2
+fi
 dir="$HOME/Library/Logs/tokenstat"
 mkdir -p "$dir"
 find "$dir" -name 'system-*.log' -mtime +5 -delete 2>/dev/null

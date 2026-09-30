@@ -1165,19 +1165,12 @@ struct ChatView: View {
                 follow.jump()
                 followPulse += 1
                 return
-            case .steering:
+            case .steering(let token):
                 showNewest()
                 follow.jump()
                 followPulse += 1
                 Task {
-                    switch await model.finishBusyNote(text) {
-                    case .steered:
-                        model.clearDraft(ifStill: text)
-                    case .queue:
-                        if model.enqueue(text) != nil { model.clearDraft(ifStill: text) }
-                    case .kept:
-                        break
-                    }
+                    await model.finishBusyNote(token)
                 }
                 return
             }

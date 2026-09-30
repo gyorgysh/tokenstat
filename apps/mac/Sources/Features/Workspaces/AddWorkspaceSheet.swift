@@ -187,13 +187,19 @@ struct ProjectWorktreeSheet: View {
             Button(working ? "Creating…" : "Create worktree", .create) {
                 working = true
                 error = nil
+                let scope = WorkSessionContext.shared.scope
                 Task {
                     do {
                         let created = try await Bridge.createWorktree(id: folder.id, parent: parent,
                             folderName: name, namespace: namespace, branch: name, from: base)
+                        guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
                         working = false
                         onCreated(created)
-                    } catch { self.error = error.localizedDescription; working = false }
+                    } catch {
+                        guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
+                        self.error = error.localizedDescription
+                        working = false
+                    }
                 }
             }
             .buttonStyle(AccentButtonStyle())
@@ -222,6 +228,7 @@ struct ProjectWorktreeSheet: View {
     private func openExisting(_ tree: ProjectWorktree) {
         working = true
         error = nil
+        let scope = WorkSessionContext.shared.scope
         Task {
             do {
                 let project: WorkspaceFolder
@@ -230,9 +237,14 @@ struct ProjectWorktreeSheet: View {
                 } else {
                     project = try await Bridge.addWorkspace(path: tree.path)
                 }
+                guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
                 working = false
                 onCreated(project)
-            } catch { self.error = error.localizedDescription; working = false }
+            } catch {
+                guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
+                self.error = error.localizedDescription
+                working = false
+            }
         }
     }
 

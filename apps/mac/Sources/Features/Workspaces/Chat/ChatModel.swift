@@ -460,14 +460,6 @@ final class ChatModel {
         if let reference = draftReference { ChatDraftStore.shared.clear(for: reference) }
     }
 
-    /// Clear only when the composer still holds these words. A note parks
-    /// after a round trip, and anything typed meanwhile is the next draft.
-    func clearDraft(ifStill text: String) {
-        let sent = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard draft.trimmingCharacters(in: .whitespacesAndNewlines) == sent else { return }
-        clearDraft()
-    }
-
     /// The send did not happen. Put the words back where they were typed.
     func returnDraft(_ text: String) {
         guard draft.isEmpty else { return }
@@ -596,6 +588,36 @@ final class ChatModel {
     }
 
     @ObservationIgnored private var recentMessages = ChatRecentMessages<ChatDisplayItem>()
+    @ObservationIgnored private var steerOverlay = ChatSteerOverlay()
+
+    private func beginChatListRead(workspaceID: String, peer: String?, scope: WorkReference.Scope? = nil) -> ChatSteerOverlay.Read? {
+        guard let scope = scope ?? continuityScope,
+              scope == WorkSessionContext.shared.scope,
+              let host = peer ?? WorkSessionContext.shared.localHostIdentity else { return nil }
+        let owner = WorkReferenceKey.folder(scope: scope, hostIdentity: host, workspaceID: workspaceID)
+        return steerOverlay.beginRead(owner: owner)
+    }
+
+    private func applyChatList(_ rows: [ChatConversation], read: ChatSteerOverlay.Read?, current: [ChatConversation]) -> [ChatConversation] {
+        guard let read else { return rows }
+        return steerOverlay.apply(rows, read: read, current: current)
+    }
+
+    private func steerMutationSnapshot(_ reference: WorkReference) -> ChatSteerOverlay.Mutation? {
+        guard reference.scope == WorkSessionContext.shared.scope, let id = reference.itemID else { return nil }
+        let owner = WorkReferenceKey.folder(scope: reference.scope, hostIdentity: reference.hostIdentity,
+                                           workspaceID: reference.workspaceID)
+        return steerOverlay.mutation(owner: owner, conversationID: id)
+    }
+
+    @discardableResult
+    private func rememberSteerMutation(_ reference: WorkReference, note: String?,
+                                       since mutation: ChatSteerOverlay.Mutation? = nil) -> Bool {
+        guard reference.scope == WorkSessionContext.shared.scope, let id = reference.itemID else { return false }
+        let owner = WorkReferenceKey.folder(scope: reference.scope, hostIdentity: reference.hostIdentity,
+                                           workspaceID: reference.workspaceID)
+        return steerOverlay.remember(owner: owner, conversationID: id, note: note, ifUnchangedSince: mutation)
+    }
     @ObservationIgnored private var previewWarmTask: Task<Void, Never>?
     /// Chats waiting to be warmed, for one account, host and project.
     @ObservationIgnored private var warmQueue: [ChatConversation] = []
@@ -663,12 +685,14 @@ final class ChatModel {
         if route.peer == nil { await WorkSessionContext.shared.resolveLocalHostIdentity() }
         guard let scope, let host = route.peer ?? WorkSessionContext.shared.localHostIdentity,
               !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
+        let listRead = beginChatListRead(workspaceID: route.workspaceID, peer: route.peer, scope: scope)
         do {
-            let list = try await Bridge.chats(workspaceID: route.workspaceID, peer: route.peer)
+            let answer = try await Bridge.chats(workspaceID: route.workspaceID, peer: route.peer)
             guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
                   previewCacheEpoch == epoch else { return }
             if continuityScope == nil { continuityScope = scope }
             guard continuityScope == scope else { return }
+            let list = applyChatList(answer, read: listRead, current: sidebarChats(in: folder))
             storeChatListCache(Self.uniqued(list), folderID: folder)
             // Expanded sidebar projects need titles, not every transcript.
             // Leave message warming to hover or explicitly opening a project.
@@ -981,6 +1005,7 @@ final class ChatModel {
                 loadDraft(for: nil, scope: nil, hostIdentity: nil, workspaceID: nil)
             }
             chatListCache = [:]
+            steerOverlay.removeAll()
             noteRunningChats()
             previewCacheEpoch &+= 1
             recentMessages.removeAll()
@@ -1048,12 +1073,14 @@ final class ChatModel {
                 loadDraft(for: nil, scope: nil, hostIdentity: nil, workspaceID: nil)
             }
             selectionGeneration &+= 1
+            discardSteerReservations()
         }
         folderID = workspaceID
         self.workspaceID = route.workspaceID
         adoptPeer(route.peer)
         if events.isEmpty { restoreRecentMessages() }
         loadQueue(for: selected?.id)
+        let listRead = beginChatListRead(workspaceID: route.workspaceID, peer: route.peer, scope: scope)
         do {
             async let loadedBackends = Bridge.chatBackends(peer: route.peer)
             async let loadedPersonas = Bridge.chatPersonas(workspaceID: route.workspaceID, peer: route.peer)
@@ -1073,7 +1100,7 @@ final class ChatModel {
             // Nil here means the same thing, and every reader already handles
             // it, so the empty string never gets past this line.
             defaultPersonaID = loaded.1.defaultId.isEmpty ? nil : loaded.1.defaultId
-            chats = Self.uniqued(loaded.2)
+            chats = Self.uniqued(applyChatList(loaded.2, read: listRead, current: chats))
             storeChatListCache(chats, folderID: workspaceID)
             if let owner = continuityOwner(folderID: workspaceID) {
                 let prefix = WorkReferenceKey.folder(scope: owner.scope, hostIdentity: owner.host, workspaceID: owner.workspace)
@@ -1205,6 +1232,7 @@ final class ChatModel {
         }
         rememberRecentMessages()
         selectionGeneration &+= 1
+        discardSteerReservations()
         let generation = selectionGeneration
         #if DEBUG
         let openingStarted = ProcessInfo.processInfo.systemUptime
@@ -1306,8 +1334,8 @@ final class ChatModel {
         }
         #endif
         if selectionMatches(id: chat.id, generation: generation) {
-            if claimSteerDelivery() {
-                await performSteerDelivery()
+            if let delivery = claimSteerDelivery() {
+                await performSteerDelivery(delivery)
             } else {
                 await drainQueue()
             }
@@ -1358,8 +1386,8 @@ final class ChatModel {
             await loadInstructions(id: id, generation: generation)
         }
         guard selectionMatches(id: id, generation: generation) else { return }
-        if claimSteerDelivery() {
-            await performSteerDelivery()
+        if let delivery = claimSteerDelivery() {
+            await performSteerDelivery(delivery)
         } else {
             await drainQueue()
         }
@@ -1377,6 +1405,7 @@ final class ChatModel {
     func reopenAtLatest() async {
         guard let selected else { return }
         selectionGeneration &+= 1
+        discardSteerReservations()
         let generation = selectionGeneration
         events = []
         outgoing = []
@@ -1602,6 +1631,8 @@ final class ChatModel {
 
     private func publishSidebarConversation(_ conversation: ChatConversation, in folderID: String) {
         var list = sidebarChats(in: folderID)
+        let conversation = ChatSteerOverlay.preservingNote(in: conversation,
+            from: list.first { $0.id == conversation.id })
         if let index = list.firstIndex(where: { $0.id == conversation.id }) {
             list[index] = conversation
         } else {
@@ -1703,11 +1734,14 @@ final class ChatModel {
     @ObservationIgnored private var composerSendToken: UInt64?
     /// The reservation `beginBusyNote` made, released by `finishBusyNote`.
     @ObservationIgnored private var busyNoteToken: UInt64?
+    @ObservationIgnored private var busyNoteSubmission: ChatDraftSubmission?
     /// One probe per busy stretch. A miss stays unknown until the turn ends,
     /// so a dropped packet is not remembered as an older host.
     @ObservationIgnored private var steerProbeStarted = false
     /// Set before any await so a poll and a queue drain cannot both send.
-    @ObservationIgnored private var deliveringSteer = false
+    @ObservationIgnored private var deliveringSteer: ChatSteerContext?
+    @ObservationIgnored private var clearingSteer: ChatSteerContext?
+    @ObservationIgnored private var clearingSteerToken: UInt64?
     /// Messages waiting for the open turn to finish. Kept per conversation so
     /// leaving the thread and coming back still has them.
     private(set) var queued: [ChatQueuedMessage] = []
@@ -1865,7 +1899,7 @@ final class ChatModel {
     func drainQueue() async {
         // A parked note owns the next send. Delivering it and draining the
         // queue in the same breath would start two turns.
-        if deliveringSteer { return }
+        if deliveringSteer != nil || clearingSteer != nil { return }
         if let note = selected?.pendingSteer?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
             return
         }
@@ -1891,7 +1925,7 @@ final class ChatModel {
         defer { ChatOutboxStore.shared.endDelivery(reference); noteSendFinished(token) }
         let targetPeer = peer
         let generation = selectionGeneration
-        func current() -> Bool {
+        @MainActor func current() -> Bool {
             !Task.isCancelled && selectionMatches(id: conversationID, generation: generation)
                 && currentReference == reference && WorkCacheAccess.canSave(reference) && savedCopy == nil
         }
@@ -2145,8 +2179,16 @@ final class ChatModel {
         guard savedCopy == nil else { return }
         guard let selected else { return }
         let generation = selectionGeneration
+        let reference = currentReference
+        let mutation = reference.flatMap { steerMutationSnapshot($0) }
+        var removedNote = false
         do {
             try await Bridge.stopChat(id: selected.id, peer: peer)
+            if let reference, let mutation,
+               currentReference != reference || self.selected?.pendingSteer == nil
+                   || self.selected?.pendingSteer == selected.pendingSteer {
+                removedNote = rememberSteerMutation(reference, note: nil, since: mutation)
+            }
         } catch {
             if selectionMatches(id: selected.id, generation: generation) {
                 self.error = error.localizedDescription
@@ -2154,12 +2196,15 @@ final class ChatModel {
             return
         }
         guard selectionMatches(id: selected.id, generation: generation) else { return }
+        if removedNote { clearLocalSteer() }
         await loadEvents(id: selected.id, reset: false, generation: generation)
         await loadApprovals(id: selected.id, generation: generation)
         guard selectionMatches(id: selected.id, generation: generation) else { return }
+        let listRead = beginChatListRead(workspaceID: selected.workspaceID, peer: peer)
         do {
-            let latest = try await Bridge.chats(workspaceID: selected.workspaceID, peer: peer)
+            let answer = try await Bridge.chats(workspaceID: selected.workspaceID, peer: peer)
             guard selectionMatches(id: selected.id, generation: generation) else { return }
+            let latest = applyChatList(answer, read: listRead, current: chats)
             // Only when it actually moved. Observation notifies on the write,
             // not on the difference, and this runs four hundred milliseconds
             // at a time: an unconditional assignment redraws every open
@@ -2292,9 +2337,11 @@ final class ChatModel {
         guard selectionMatches(id: selected.id, generation: generation) else { return }
         await loadApprovals(id: selected.id, generation: generation, quiet: true)
         guard selectionMatches(id: selected.id, generation: generation) else { return }
+        let listRead = beginChatListRead(workspaceID: selected.workspaceID, peer: peer)
         do {
-            let latest = try await Bridge.chats(workspaceID: selected.workspaceID, peer: peer)
+            let answer = try await Bridge.chats(workspaceID: selected.workspaceID, peer: peer)
             guard selectionMatches(id: selected.id, generation: generation) else { return }
+            let latest = applyChatList(answer, read: listRead, current: chats)
             // A poll that found nothing new must not write anything back.
             // Same rule as the event chunk below: the write is what redraws
             // the transcript, and most polls of a running turn arrive with
@@ -2321,7 +2368,7 @@ final class ChatModel {
         guard !Task.isCancelled, selectionMatches(id: selected.id, generation: generation) else { return }
         let claimed = claimSteerDelivery()
         await noteSteerAvailability()
-        if claimed { await performSteerDelivery() }
+        if let claimed { await performSteerDelivery(claimed) }
     }
 
     var busy: Bool {
@@ -2350,8 +2397,7 @@ final class ChatModel {
         return selected?.autonomy == "standard"
     }
 
-    enum BusyNoteStart { case steering, queue }
-    enum BusySend { case steered, queue, kept }
+    enum BusyNoteStart { case steering(UInt64), queue }
 
     /// Decide before the first await. `.queue` is the path the composer
     /// already had. `.steering` reserves Send so a second tap cannot also
@@ -2364,60 +2410,166 @@ final class ChatModel {
             || remoteSteer == false {
             return .queue
         }
-        busyNoteToken = noteSendStarted()
-        return .steering
+        guard let selected, let reference = currentReference,
+              reference.scope == WorkSessionContext.shared.scope else { return .queue }
+        saveDraftNow()
+        busyNoteSubmission = ChatDraftSubmission(
+            conversationID: selected.id, peer: peer, scope: reference.scope,
+            reference: reference, generation: selectionGeneration,
+            text: trimmed, draftText: draft, attachments: [],
+            messageID: draftMessageID, expectedRevision: contextRevision
+        )
+        let token = noteSendStarted()
+        busyNoteToken = token
+        return .steering(token)
     }
 
     /// Park the note, or hand it back to the queue when this turn cannot
     /// carry one. A refusal that is about the words themselves keeps the draft.
-    func finishBusyNote(_ text: String) async -> BusySend {
-        let token = busyNoteToken
-        busyNoteToken = nil
-        defer { if let token { noteSendFinished(token) } }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let id = selected?.id else { return .kept }
-        let generation = selectionGeneration
-        let asked = peer
-        guard selectionMatches(id: id, generation: generation) else { return .kept }
+    func finishBusyNote(_ token: UInt64) async {
+        guard busyNoteToken == token else { return }
+        defer {
+            if busyNoteToken == token {
+                busyNoteToken = nil
+                busyNoteSubmission = nil
+            }
+            noteSendFinished(token)
+        }
+        guard let submission = busyNoteSubmission, let reference = submission.reference else { return }
+        let context = ChatSteerContext(reference: reference,
+            generation: submission.generation, peer: submission.peer)
+        @MainActor func current() -> Bool {
+            !Task.isCancelled && context.matches(reference: currentReference,
+                generation: selectionGeneration, peer: peer, scope: WorkSessionContext.shared.scope)
+        }
+        guard current() else { return }
+        let id = submission.conversationID
+        let asked = submission.peer
         do {
-            try await Bridge.steerChat(id: id, text: trimmed, peer: asked)
-            guard selectionMatches(id: id, generation: generation) else { return .kept }
-            parkLocalSteer(trimmed)
+            if let asked, !asked.isEmpty, remoteSteer != true {
+                let version = try await Bridge.peerProtocolVersion(asked)
+                guard current() else { return }
+                remoteSteer = version >= RemoteHostFeature.steer.minimumProtocol
+                if remoteSteer == false {
+                    queueBusyNote(submission)
+                    return
+                }
+            }
+            try await Bridge.steerChat(id: id, text: submission.text, peer: asked)
+            rememberSteerMutation(reference, note: submission.text)
+            guard current() else { return }
+            parkLocalSteer(submission.text)
             if let asked, !asked.isEmpty, peer == asked { remoteSteer = true }
-            return .steered
+            if draft == submission.draftText && attachments == submission.attachments {
+                clearDraft()
+            }
         } catch {
-            guard selectionMatches(id: id, generation: generation) else { return .kept }
+            guard current() else { return }
             if isUnknownMethod(error) {
                 if let asked, !asked.isEmpty, peer == asked { remoteSteer = false }
-                return .queue
+                queueBusyNote(submission)
+                return
             }
             let message = hostMessage(error)
-            if Self.steerFallsBack(message) { return .queue }
+            if Self.steerFallsBack(message) {
+                queueBusyNote(submission)
+                return
+            }
             if self.error != message { self.error = message }
-            return .kept
         }
     }
 
-    /// Drop the note on screen immediately. The host drop follows. A later
-    /// list restores the banner if the note is still parked.
+    /// Queue the reserved payload. Words edited during the request become a
+    /// separate draft, with their own delivery identity.
+    private func queueBusyNote(_ submission: ChatDraftSubmission) {
+        guard let reference = submission.reference, let messageID = submission.messageID,
+              submission.owns(reference: currentReference, conversationID: selected?.id,
+                              peer: peer, scope: WorkSessionContext.shared.scope),
+              selectionGeneration == submission.generation, ownsQueue else { return }
+        var item = ChatQueuedMessage(id: messageID, text: submission.text, attachments: submission.attachments)
+        item.sourceDraftText = submission.draftText
+        item.expectedRevision = submission.expectedRevision
+        do {
+            queued = try ChatOutboxStore.shared.update(reference) { items in
+                if let existing = items.first(where: { $0.id == item.id }) {
+                    guard existing.text == item.text, existing.attachments == item.attachments else {
+                        throw ChatOutboxStore.Failure.conflict
+                    }
+                    return
+                }
+                guard items.count < ChatOutboxStore.capacity else { throw ChatOutboxStore.Failure.full }
+                items.append(item)
+            }
+            guard let stored = queued.first(where: { $0.id == messageID }), !stored.needsReceipt else {
+                error = "Check delivery in Pending messages before queuing this draft again."
+                return
+            }
+            authorizedQueueItems.insert(messageID)
+            if draft == submission.draftText && attachments == submission.attachments {
+                clearDraft()
+            } else {
+                ChatDraftStore.shared.save(text: draft, attachments: attachments, for: reference, newMessage: true)
+            }
+            Task { await drainQueue() }
+        } catch {
+            self.error = "This message could not be saved to the queue. Your draft stays here. The queue holds 20 messages."
+        }
+    }
+
+    /// Keep the executable note visible until the host acknowledges removal.
+    /// While that request runs, neither the queue nor a follow-up may start.
     func clearSteer() {
-        guard savedCopy == nil, let id = selected?.id else { return }
-        clearLocalSteer()
-        let generation = selectionGeneration
-        let asked = peer
+        guard savedCopy == nil, !sending, clearingSteer == nil,
+              let selected, let note = selected.pendingSteer,
+              let reference = currentReference,
+              reference.scope == WorkSessionContext.shared.scope,
+              let mutation = steerMutationSnapshot(reference) else { return }
+        let context = ChatSteerContext(reference: reference, generation: selectionGeneration, peer: peer)
+        clearingSteer = context
+        let token = noteSendStarted()
+        clearingSteerToken = token
+        let id = selected.id
+        let asked = context.peer
         Task {
+            defer {
+                if clearingSteer == context {
+                    clearingSteer = nil
+                    clearingSteerToken = nil
+                }
+                noteSendFinished(token)
+            }
+            @MainActor func current() -> Bool {
+                !Task.isCancelled && context.matches(reference: currentReference,
+                    generation: selectionGeneration, peer: peer, scope: WorkSessionContext.shared.scope)
+            }
+            guard current() else { return }
             do {
                 try await Bridge.steerClearChat(id: id, peer: asked)
+                let sameNote = !current() || self.selected?.pendingSteer == nil || self.selected?.pendingSteer == note
+                let removed = sameNote && rememberSteerMutation(reference, note: nil, since: mutation)
+                guard current() else { return }
+                if removed && self.selected?.pendingSteer == note { clearLocalSteer() }
             } catch {
-                guard selectionMatches(id: id, generation: generation) else { return }
+                guard current() else { return }
                 if isUnknownMethod(error) {
                     if let asked, !asked.isEmpty, peer == asked { remoteSteer = false }
-                    return
                 }
                 let message = hostMessage(error)
                 if self.error != message { self.error = message }
             }
         }
+    }
+
+    /// Navigation releases the old selection's reservations immediately.
+    /// Late completions still hold their context and cannot release a newer one.
+    private func discardSteerReservations() {
+        deliveringSteer = nil
+        clearingSteer = nil
+        if let token = clearingSteerToken { noteSendFinished(token) }
+        clearingSteerToken = nil
+        if let token = busyNoteToken { noteSendFinished(token) }
+        busyNoteToken = nil
+        busyNoteSubmission = nil
     }
 
     private func noteSendStarted() -> UInt64 {
@@ -2464,12 +2616,15 @@ final class ChatModel {
     }
 
     /// Claim before any await. While the flag is set, the queue stays put.
-    private func claimSteerDelivery() -> Bool {
-        if deliveringSteer || savedCopy != nil || busy { return false }
+    private func claimSteerDelivery() -> ChatSteerContext? {
+        if deliveringSteer != nil || clearingSteer != nil || sending || sendingNow || savedCopy != nil || busy { return nil }
         let note = selected?.pendingSteer?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !note.isEmpty else { return false }
-        deliveringSteer = true
-        return true
+        guard !note.isEmpty, let reference = currentReference,
+              reference.scope == WorkSessionContext.shared.scope else { return nil }
+        let context = ChatSteerContext(reference: reference,
+            generation: selectionGeneration, peer: peer)
+        deliveringSteer = context
+        return context
     }
 
     /// Learn whether a remote host can carry a note, once per busy stretch.
@@ -2491,52 +2646,48 @@ final class ChatModel {
 
     /// Send a note the turn ended without taking. The queue runs only when
     /// that note is gone and this conversation is still the one on screen.
-    private func performSteerDelivery() async {
-        guard let id = selected?.id else {
-            deliveringSteer = false
-            return
+    private func performSteerDelivery(_ context: ChatSteerContext) async {
+        guard deliveringSteer == context, let id = context.reference.itemID else { return }
+        defer { if deliveringSteer == context { deliveringSteer = nil } }
+        let asked = context.peer
+        @MainActor func current() -> Bool {
+            !Task.isCancelled && context.matches(reference: currentReference,
+                generation: selectionGeneration, peer: peer, scope: WorkSessionContext.shared.scope)
         }
-        let generation = selectionGeneration
-        let asked = peer
+        guard current(), let mutation = steerMutationSnapshot(context.reference) else { return }
+        let note = selected?.pendingSteer
         do {
             let result = try await Bridge.steerDeliverChat(id: id, peer: asked)
-            guard selectionMatches(id: id, generation: generation) else {
-                deliveringSteer = false
-                return
-            }
+            let sameNote = !current() || self.selected?.pendingSteer == nil || self.selected?.pendingSteer == note
+            let removed = sameNote && rememberSteerMutation(context.reference, note: nil, since: mutation)
+            guard current(), removed else { return }
             if result.delivered {
-                deliveringSteer = false
-                if let conversation = result.conversation { replace(conversation) }
+                if let conversation = result.conversation { replace(conversation, preservePendingSteer: false) }
                 else { clearLocalSteer() }
                 return
             }
+            clearLocalSteer()
         } catch {
-            guard selectionMatches(id: id, generation: generation) else {
-                deliveringSteer = false
-                return
-            }
+            guard current() else { return }
             let message = hostMessage(error)
             if message == "This chat is still in the middle of a turn." {
-                deliveringSteer = false
                 return
             }
             if isUnknownMethod(error) {
-                deliveringSteer = false
-                clearLocalSteer()
+                deliveringSteer = nil
                 if let asked, !asked.isEmpty, self.peer == asked { remoteSteer = false }
-                if !busy { await drainQueue() }
+                if await reloadOpenChats(), current(), !busy { await drainQueue() }
                 return
             }
-            deliveringSteer = false
+            deliveringSteer = nil
             if self.error != message { self.error = message }
             _ = await reloadOpenChats()
             return
         }
-        deliveringSteer = false
-        guard selectionMatches(id: id, generation: generation) else { return }
-        let reloaded = await reloadOpenChats()
-        guard selectionMatches(id: id, generation: generation) else { return }
-        if !reloaded { clearLocalSteer() }
+        deliveringSteer = nil
+        guard current() else { return }
+        _ = await reloadOpenChats()
+        guard current() else { return }
         if !busy { await drainQueue() }
     }
 
@@ -2545,9 +2696,11 @@ final class ChatModel {
     private func reloadOpenChats() async -> Bool {
         guard let selected else { return false }
         let generation = selectionGeneration
+        let listRead = beginChatListRead(workspaceID: selected.workspaceID, peer: peer)
         do {
-            let latest = try await Bridge.chats(workspaceID: selected.workspaceID, peer: peer)
+            let answer = try await Bridge.chats(workspaceID: selected.workspaceID, peer: peer)
             guard selectionMatches(id: selected.id, generation: generation) else { return false }
+            let latest = applyChatList(answer, read: listRead, current: chats)
             if chats != latest {
                 chats = latest
                 if let folderID { storeChatListCache(chats, folderID: folderID) }
@@ -3176,13 +3329,15 @@ final class ChatModel {
                     return
                 }
             }
-            let liveChats = try await Bridge.chats(workspaceID: workspaceID, peer: targetPeer)
+            let listRead = beginChatListRead(workspaceID: workspaceID, peer: targetPeer)
+            let answer = try await Bridge.chats(workspaceID: workspaceID, peer: targetPeer)
             guard stillCurrent() else { return }
+            let liveChats = applyChatList(answer, read: listRead, current: chats)
             guard let live = liveChats.first(where: { $0.id == chat.id && $0.workspaceID == workspaceID }) else {
                 error = "This conversation is no longer on the machine. You can still read this saved copy."
                 return
             }
-            replace(live)
+            replace(live, preservePendingSteer: false)
             await select(live)
         } catch {
             guard stillCurrent() else { return }
@@ -3367,7 +3522,10 @@ final class ChatModel {
             && continuityScope == WorkSessionContext.shared.readingScope
     }
 
-    private func replace(_ chat: ChatConversation) {
+    private func replace(_ chat: ChatConversation, preservePendingSteer: Bool = true) {
+        let chat = preservePendingSteer
+            ? ChatSteerOverlay.preservingNote(in: chat, from: chats.first { $0.id == chat.id })
+            : chat
         if selected?.id == chat.id {
             selected = chat
         }

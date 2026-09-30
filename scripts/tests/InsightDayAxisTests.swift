@@ -10,6 +10,13 @@ import Foundation
         let domain = InsightDayAxis.domain(["2026-09-01", "2026-09-04"])
         precondition(domain.upperBound - domain.lowerBound == 4)
         precondition(InsightDayAxis.domain([]) == 0...1)
-        print("PASS: daily chart gaps, leap days and invalid dates")
+        precondition(InsightDayAxis.tokenCount(1.9) == 1)
+        precondition(InsightDayAxis.tokenCount(-1) == 0)
+        precondition(InsightDayAxis.tokenCount(.nan) == 0)
+        precondition(InsightDayAxis.tokenCount(.infinity) == .max)
+        precondition(InsightDayAxis.tokenCount(Double(UInt64.max)) == .max)
+        precondition(InsightDayAxis.tokenCount(Double(UInt64.max).nextUp) == .max)
+        precondition(InsightDayAxis.tokenCount(Double(UInt64.max).nextDown) < .max)
+        print("PASS: daily chart gaps, leap days, invalid dates and large token ticks")
     }
 }

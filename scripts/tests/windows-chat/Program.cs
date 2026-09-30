@@ -40,6 +40,58 @@ previews.Clear();
 Check(!previews.Store("workspace", "late", newest.DeepClone(), oldAccount), "late reads from the previous account cannot repopulate the cache");
 Console.WriteLine("Windows chat previews: size/count bounds, expiry, workspace isolation, consumption and account invalidation pass.");
 
+var overlay = new ChatSteerOverlay();
+static JsonArray Chats(string? note = null) => new(new JsonObject
+    { ["id"] = "chat", ["pendingSteer"] = note });
+var beforePark = overlay.BeginRead();
+overlay.Remember("chat", "accepted note");
+var currentChats = overlay.Apply(Chats(), beforePark, new());
+Check(currentChats[0]!["pendingSteer"]!.GetValue<string>() == "accepted note",
+    "A list already in flight erased an accepted note");
+var afterPark = overlay.BeginRead();
+currentChats = overlay.Apply(Chats(), afterPark, currentChats);
+Check(currentChats[0]!["pendingSteer"] is null, "A consumed note was kept by a fresh list");
+currentChats = overlay.Apply(Chats("old note"), beforePark, currentChats);
+Check(currentChats[0]!["pendingSteer"] is null, "An out-of-order list restored an old note");
+var beforeClear = overlay.BeginRead();
+overlay.Remember("chat", null);
+currentChats = overlay.Apply(Chats("removed note"), beforeClear, currentChats);
+Check(currentChats[0]!["pendingSteer"] is null, "A list already in flight restored a removed note");
+var afterClear = overlay.BeginRead();
+currentChats = overlay.Apply(Chats("note from another device"), afterClear, currentChats);
+Check(currentChats[0]!["pendingSteer"]!.GetValue<string>() == "note from another device",
+    "A fresh note from another device was hidden after a local removal");
+var beforeReplacement = overlay.BeginRead();
+overlay.Remember("chat", "replacement note");
+currentChats = overlay.Apply(Chats("previous note"), beforeReplacement, currentChats);
+Check(currentChats[0]!["pendingSteer"]!.GetValue<string>() == "replacement note",
+    "An in-flight list replaced the newest locally accepted note");
+var matchingRead = overlay.BeginRead();
+var missingRead = overlay.BeginRead();
+overlay.Remember("chat", "replacement note");
+currentChats = overlay.Apply(Chats("replacement note"), matchingRead, currentChats);
+currentChats = overlay.Apply(Chats(), missingRead, currentChats);
+Check(currentChats[0]!["pendingSteer"]!.GetValue<string>() == "replacement note",
+    "A matching old list released protection while other old lists were still in flight");
+var deliveryRevision = overlay.Revision("chat");
+overlay.Remember("chat", "replacement note");
+Check(overlay.Revision("chat") != deliveryRevision,
+    "Replacing a note with identical words did not invalidate an older delivery acknowledgement");
+Check(!overlay.RememberIfCurrent("chat", null, deliveryRevision),
+    "An older clear/stop acknowledgement retired a newer accepted note");
+var latestRevision = overlay.Revision("chat");
+currentChats = overlay.Apply(Chats("replacement note"), overlay.BeginRead(), currentChats);
+Check(overlay.Revision("chat") == latestRevision && overlay.Revision("chat") != deliveryRevision,
+    "A fresh echo forgot mutation identity after releasing local list protection");
+var diskRecord = new JsonObject { ["id"] = "chat", ["title"] = "Renamed", ["sendRevision"] = 4 };
+var withLatest = ChatSteerOverlay.MergeRecord(diskRecord, Chats("latest note")[0]);
+Check(withLatest["pendingSteer"]!.GetValue<string>() == "latest note"
+    && withLatest["title"]!.GetValue<string>() == "Renamed" && diskRecord["pendingSteer"] is null,
+    "A metadata/send record discarded the current note or changed the host reply");
+var clearedRecord = ChatSteerOverlay.MergeRecord(Chats("stale captured note")[0]!, Chats()[0]);
+Check(clearedRecord["pendingSteer"] is null, "A late metadata response restored a cleared note");
+Console.WriteLine("Windows steer: delayed lists preserve accepted changes and trust fresh host state.");
+
 static void Phrase(string? verb, string? target, string expected, string message)
 {
     var got = SeatStep.Phrase(verb, target);

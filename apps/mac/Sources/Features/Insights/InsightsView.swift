@@ -762,7 +762,7 @@ private struct AccountInsightsContent: View {
                         AxisGridLine().foregroundStyle(Theme.border)
                         AxisValueLabel {
                             if let tokens = value.as(Double.self) {
-                                Text(formatTokens(UInt64(max(0, tokens)))).font(Theme.caption2)
+                                Text(formatTokens(InsightDayAxis.tokenCount(tokens))).font(Theme.caption2)
                             }
                         }
                     }
@@ -787,7 +787,7 @@ private struct AccountInsightsContent: View {
                         AxisGridLine().foregroundStyle(Theme.border)
                         AxisValueLabel {
                             if let tokens = value.as(Double.self) {
-                                Text(formatTokens(UInt64(max(0, tokens)))).font(Theme.caption2)
+                                Text(formatTokens(InsightDayAxis.tokenCount(tokens))).font(Theme.caption2)
                             }
                         }
                     }

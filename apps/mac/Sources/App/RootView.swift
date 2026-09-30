@@ -508,6 +508,7 @@ struct RootView: View {
             workspaceBrowserURLs = [:]
             browserWorkspaceID = nil
             terminalWorkspaceID = nil
+            worktreeProject = nil
             await BridgeLaunch.wait()
             await savedWorkCatalog.observe(scope: WorkSessionContext.shared.scope)
         }
@@ -515,12 +516,15 @@ struct RootView: View {
             RemoteHostFeatureGate(feature: .worktrees, peer: folder.machineID, hostName: folder.machineLabel) {
                 ProjectWorktreeSheet(folder: folder) { created in
                     worktreeProject = nil
+                    let scope = WorkSessionContext.shared.scope
                     Task {
+                        guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
                         if let peer = folder.machineID {
                             workspaces.acceptRegisteredRemoteProject(created, peer: peer, label: folder.machineLabel)
                             selectWorkspace("remote:\(peer):\(created.id)")
                         } else {
                             await workspaces.loadLocal()
+                            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
                             selectWorkspace(created.id)
                         }
                     }
@@ -3971,7 +3975,7 @@ struct NativeMenuTrigger: NSViewRepresentable {
         var rightClickOnly = false
 
         override func hitTest(_ point: NSPoint) -> NSView? {
-            if rightClickOnly && NSApp.currentEvent?.type != .rightMouseDown { return nil }
+            if rightClickOnly && !SidebarContextClick.accepts(NSApp.currentEvent) { return nil }
             return super.hitTest(point)
         }
 
@@ -3984,7 +3988,10 @@ struct NativeMenuTrigger: NSViewRepresentable {
         /// the press has to be repeated.
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-        override func mouseDown(with event: NSEvent) { openMenu() }
+        override func mouseDown(with event: NSEvent) {
+            if event.modifierFlags.contains(.control) { rightMouseDown(with: event) }
+            else { openMenu() }
+        }
 
         override func rightMouseDown(with event: NSEvent) {
             guard let menu = coordinator?.menu() else { return }

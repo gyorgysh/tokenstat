@@ -17,7 +17,7 @@ import Darwin
 /// `~/Library/Logs/tokenstat/app-<day>.log`, one line at a time, and forces
 /// every batch to the disk. The last lines before a freeze are the point.
 ///
-/// Lines carry method names, control roles and short control labels, timings,
+/// Lines carry method names, control roles, timings,
 /// and memory figures. Never call parameters, typed text, keystrokes, chat
 /// content or file paths. The file stays on this Mac.
 ///
@@ -171,7 +171,7 @@ enum DiagnosticsLog {
 
     // MARK: Input
 
-    /// A click names the control under it by role and a short label. A key is
+    /// A click names the control under it by role. A key is
     /// logged only as a shortcut, and only by its modifiers, never its letter.
     @MainActor
     private static func noteInput(_ event: NSEvent) {
@@ -203,23 +203,17 @@ enum DiagnosticsLog {
         }
     }
 
-    /// Controls only. A text area's label can be the text itself.
-    private static let labeledRoles: Set<NSAccessibility.Role> = [
-        .button, .checkBox, .radioButton, .popUpButton, .menuButton, .menuItem,
-        .disclosureTriangle, .tabGroup, .link, .incrementor, .slider,
-    ]
-
     @MainActor
-    private static func describe(_ element: Any?) -> String {
+    static func describe(_ element: Any?) -> String {
         guard let element = element as? NSAccessibilityProtocol else { return "role=none" }
-        let role = element.accessibilityRole()
-        var line = "role=\(role?.rawValue ?? "none")"
-        if let role, labeledRoles.contains(role),
-           let label = element.accessibilityLabel(), !label.isEmpty {
-            let clipped = String(label.prefix(40)).replacingOccurrences(of: "\n", with: " ")
-            line += " label=\"\(clipped)\""
-        }
-        return line
+        // Row and menu labels can contain chat titles, file names or text
+        // typed into a note. Even a short prefix must stay out of this log.
+        return "role=\(element.accessibilityRole()?.rawValue ?? "none")"
+    }
+
+    static func exceptionSummary(_ exception: NSException) -> String {
+        // AppKit reasons can quote document contents and local paths.
+        "exception \(exception.name.rawValue)"
     }
 
     // MARK: Sampler
@@ -412,8 +406,7 @@ enum DiagnosticsLog {
             }
         }
         NSSetUncaughtExceptionHandler { exception in
-            let reason = String((exception.reason ?? "").prefix(200)).replacingOccurrences(of: "\n", with: " ")
-            DiagnosticsLog.note("exception \(exception.name.rawValue) \(reason)", force: true)
+            DiagnosticsLog.note(DiagnosticsLog.exceptionSummary(exception), force: true)
         }
     }
 

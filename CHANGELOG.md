@@ -35,20 +35,20 @@ one list, and the characters are plush toys that keep their shape.
 - The Mac and Windows window is an icon rail beside a project sidebar.
   Each project lists its five latest chats and its running terminals,
   and its sections are tabs in the bar. On macOS 26 and later the
-  sidebar is dark frosted glass. The sidebar and inspector are resizable
-  and remember their widths.
-- Workspaces are called Projects everywhere a person reads it. New chat
-  asks which project the chat belongs to.
+  sidebar is dark frosted glass. The sidebar and inspector are resizable.
+  The Mac remembers their widths.
+- Workspaces are called Projects everywhere a person reads it. On desktop,
+  New chat asks which project the chat belongs to.
 - Chats that were opened and never used no longer fill the lists, and
   Home's Continue shows only work that can still open. On Android a chat
   row is its title and one line, so about twice as many fit.
 - The chat composer names only the settings you changed, and its
   permission switch reads Ask first or Don't ask instead of Ask or Bypass.
-- Automations are a table that fits a normal window: name, schedule,
+- On the Mac, Automations are a table that fits a normal window: name, schedule,
   project, next run and last run, sortable, with Run now at the row's
   end. Templates and scheduler settings are one click away.
-- Tasks are a To Do, In progress and Done board with one New task row
-  per stage. Phones pick the stage at the top.
+- Tasks are a To Do, In progress and Done board. On the Mac, each stage
+  has a New task row. Phones pick the stage at the top.
 - Devices show one row per device with one way into its details, and
   rarer actions such as rename, revoke and forget sit in one menu. A
   phone's details explain how to use it instead of offering Connect.

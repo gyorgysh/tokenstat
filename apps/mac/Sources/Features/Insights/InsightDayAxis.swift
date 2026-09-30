@@ -30,4 +30,12 @@ enum InsightDayAxis {
         style.timeZone = TimeZone(secondsFromGMT: 0)!
         return date.formatted(style)
     }
+
+    /// Chart ticks can round above a valid UInt64 total. Clamp before the
+    /// conversion, including the upper bound that Double rounds to 2^64.
+    static func tokenCount(_ value: Double) -> UInt64 {
+        guard !value.isNaN, value > 0 else { return 0 }
+        guard value < Double(UInt64.max) else { return .max }
+        return UInt64(value)
+    }
 }

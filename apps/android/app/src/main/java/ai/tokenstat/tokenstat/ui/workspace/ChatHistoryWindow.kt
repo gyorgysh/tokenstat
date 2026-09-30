@@ -31,8 +31,9 @@ internal class ChatHistoryWindow {
         loaded = true
     }
 
-    fun tail(answer: JsonObject, expectedGeneration: Int): Boolean {
-        if (expectedGeneration != generation || answer["reset"]?.jsonPrimitive?.booleanOrNull == true) return false
+    fun tail(answer: JsonObject, expectedGeneration: Int, expectedOffset: Long): Boolean {
+        if (expectedGeneration != generation || expectedOffset != offset ||
+            answer["reset"]?.jsonPrimitive?.booleanOrNull == true) return false
         val rows = (answer["events"] as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
         if (rows.isNotEmpty()) events = events + rows
         offset = answer["nextOffset"]?.jsonPrimitive?.longOrNull ?: offset

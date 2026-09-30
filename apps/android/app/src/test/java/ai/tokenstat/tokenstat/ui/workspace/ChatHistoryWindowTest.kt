@@ -16,19 +16,32 @@ class ChatHistoryWindowTest {
         val generation = history.generation
         assertEquals(1, history.events.size)
         assertTrue(history.hasEarlier)
-        assertTrue(history.tail(json("""{"events":[{"id":"live"}],"nextOffset":1000,"tailCursor":"tail-b"}"""), generation))
+        assertTrue(history.tail(json("""{"events":[{"id":"live"}],"nextOffset":1000,"tailCursor":"tail-b"}"""), generation, 900))
         history.page(json("""{"events":[{"id":"oldest"}],"nextOffset":500,"cursor":null,"hasEarlier":false}"""))
         assertEquals(listOf("oldest", "recent", "live"), history.events.map { it["id"]!!.jsonPrimitive.content })
         assertEquals(1000L, history.offset)
         assertEquals("tail-b", history.tailCursor)
         assertFalse(history.hasEarlier)
         val unchanged = history.events
-        assertTrue(history.tail(json("""{"events":[],"nextOffset":1000,"tailCursor":"tail-b"}"""), generation))
+        assertTrue(history.tail(json("""{"events":[],"nextOffset":1000,"tailCursor":"tail-b"}"""), generation, 1000))
         assertSame(unchanged, history.events)
         history.page(json("""{"reset":true,"events":[{"id":"replacement"}],"nextOffset":80,"tailCursor":"new"}"""))
-        assertFalse(history.tail(json("""{"events":[{"id":"stale"}],"nextOffset":1100}"""), generation))
+        assertFalse(history.tail(json("""{"events":[{"id":"stale"}],"nextOffset":1100}"""), generation, 1000))
         assertEquals(1, history.events.size)
         assertEquals(80L, history.offset)
-        assertFalse(history.tail(json("""{"reset":true,"events":[],"nextOffset":0}"""), history.generation))
+        assertFalse(history.tail(json("""{"reset":true,"events":[],"nextOffset":0}"""), history.generation, 80))
+    }
+
+    @Test fun concurrentTailReadsAppendAnEventOnlyOnce() {
+        val history = ChatHistoryWindow()
+        history.page(json("""{"events":[{"id":"recent"}],"nextOffset":900}"""), true)
+        val generation = history.generation
+        val requestedOffset = history.offset
+        val answer = json("""{"events":[{"id":"live"}],"nextOffset":1000,"tailCursor":"tail-b"}""")
+        assertTrue(history.tail(answer, generation, requestedOffset))
+        assertFalse(history.tail(answer, generation, requestedOffset))
+        assertEquals(listOf("recent", "live"), history.events.map { it["id"]!!.jsonPrimitive.content })
+        assertEquals(1000L, history.offset)
+        assertEquals("tail-b", history.tailCursor)
     }
 }

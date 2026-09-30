@@ -113,7 +113,7 @@ struct ClientInsightsView: View {
                                 AxisGridLine().foregroundStyle(Theme.border)
                                 AxisValueLabel {
                                     if let tokens = value.as(Double.self) {
-                                        Text(formatTokens(UInt64(max(0, tokens)))).font(ClientType.caption)
+                                        Text(formatTokens(InsightDayAxis.tokenCount(tokens))).font(ClientType.caption)
                                     }
                                 }
                             }

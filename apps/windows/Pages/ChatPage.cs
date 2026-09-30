@@ -84,6 +84,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private bool _setupExpanded;
     private bool _suppress;
     private JsonArray _chats = new();
+    private readonly ChatSteerOverlay _steerOverlay = new();
     private JsonArray _backends = new();
     private JsonArray _personas = new();
     private readonly ChatHistoryBuffer _history = new();
@@ -1837,10 +1838,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             ToolTipService.SetToolTip(queue, tip);
             ContextMenus.AddAsync(ContextMenus.Menu(queue), "Stop and send now", async () =>
             {
-                if (_openId is null) return;
+                if (_openId is not string chat) return;
+                var noteRevision = _steerOverlay.Revision(chat);
                 try
                 {
-                    await CallChatAsync("chat.stop", new JsonObject { ["id"] = _openId });
+                    await CallChatAsync("chat.stop", new JsonObject { ["id"] = chat });
+                    var cleared = _steerOverlay.RememberIfCurrent(chat, null, noteRevision);
+                    if (!OpenChatIs(chat)) return;
+                    if (cleared) ClearLocalSteer();
                     await SendAsync(sendNext: true);
                     StartPoll();
                 }
@@ -1950,10 +1955,15 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private async Task StopAsync()
     {
-        if (_openId is null) return;
+        if (_openId is not string chat) return;
+        var noteRevision = _steerOverlay.Revision(chat);
         try
         {
-            await CallChatAsync("chat.stop", new JsonObject { ["id"] = _openId });
+            await CallChatAsync("chat.stop", new JsonObject { ["id"] = chat });
+            var cleared = _steerOverlay.RememberIfCurrent(chat, null, noteRevision);
+            if (!OpenChatIs(chat)) return;
+            if (cleared) ClearLocalSteer();
+            PaintConversation();
             StartPoll();
         }
         catch (Exception ex)
@@ -2008,21 +2018,17 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private async Task UpdateAsync(JsonObject patch)
     {
         if (_opening) return;
-        if (_openId is null) return;
-        patch["id"] = _openId;
-        var steerNote = PendingSteerText(_openChat);
+        if (_openId is not string chat) return;
+        var generation = _openGeneration;
+        patch["id"] = chat;
         try
         {
             _suppress = true;
-            _openChat = await CallChatAsync("chat.update", patch);
+            var updated = await CallChatAsync("chat.update", patch);
+            if (!OpenChatIs(chat) || generation != _openGeneration) return;
             // chat.update returns the saved record, which has no parked note.
-            // Keep the one the person still sees until the next list read.
-            if (steerNote.Length > 0
-                && _openChat is JsonObject updated
-                && PendingSteerText(updated).Length == 0)
-            {
-                updated["pendingSteer"] = steerNote;
-            }
+            // Preserve the current note, which may have changed while awaiting.
+            _openChat = ChatSteerOverlay.MergeRecord(updated, _openChat);
         }
         catch (Exception ex)
         {
@@ -2086,7 +2092,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 var approvals = AsArray(await CallChatAsync(
                     "chat.approvals", new JsonObject { ["id"] = chatId }));
                 if (token.IsCancellationRequested || _openId != chatId) return;
-                _chats = AsArray(await CallChatAsync("chat.list", new JsonObject { ["workspaceId"] = _workspaceId }));
+                await RefreshCatalogAsync(refreshMenus: false);
                 if (token.IsCancellationRequested || _openId != chatId) return;
 
                 if (historyGeneration != _historyGeneration) continue;
@@ -2151,14 +2157,15 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private async Task RefreshCatalogAsync(bool refreshMenus = true)
     {
+        var request = _steerOverlay.BeginRead();
         var chats = CallChatAsync("chat.list", new JsonObject { ["workspaceId"] = _workspaceId });
-        if (!refreshMenus) { _chats = AsArray(await chats); return; }
+        if (!refreshMenus) { _chats = _steerOverlay.Apply(AsArray(await chats), request, _chats); return; }
         var backends = CallChatAsync("chat.backends");
         var personas = CallChatAsync(
             "chat.personas",
             new JsonObject { ["workspaceId"] = _workspaceId });
         await Task.WhenAll(chats, backends, personas);
-        _chats = AsArray(chats.Result);
+        _chats = _steerOverlay.Apply(AsArray(chats.Result), request, _chats);
         _backends = AsArray(backends.Result);
         _personas = AsArray(personas.Result, "personas");
     }

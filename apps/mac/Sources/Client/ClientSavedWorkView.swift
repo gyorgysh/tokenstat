@@ -130,9 +130,13 @@ struct ClientSavedWorkView: View {
                       reference.itemID == record.itemId else { return false }
                 return owner.hosts[reference.hostIdentity] != nil && WorkCacheAccess.canRead(reference)
             }.sorted { $0.updatedMs > $1.updatedMs }
-            if !records.isEmpty, await WorkCacheKey.existingKeyInBackground(for: scope) == nil {
-                failure = "Saved work is unavailable on this device. Unlock it and try again, or verify your account when you can connect."
-                return
+            if !records.isEmpty {
+                let key = await WorkCacheKey.existingKeyInBackground(for: scope)
+                guard stillOwned, generation == SavedWorkAccess.shared.generation, !Task.isCancelled else { return }
+                if key == nil {
+                    failure = "Saved work is unavailable on this device. Unlock it and try again, or verify your account when you can connect."
+                    return
+                }
             }
             guard stillOwned, generation == SavedWorkAccess.shared.generation, !Task.isCancelled else { return }
             rows = []
