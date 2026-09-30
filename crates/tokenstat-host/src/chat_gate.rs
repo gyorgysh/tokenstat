@@ -160,22 +160,36 @@ fn hooks_document(helper: &Path, flavor: &str) -> Value {
     })
 }
 
-/// A private `CODEX_HOME` holding our hooks, with the person's own credential
-/// linked in so they stay signed in.
+/// A private `CODEX_HOME` retaining this conversation's sessions, with the
+/// person's credential linked in so they stay signed in. Only hooks are
+/// temporary. Removing the home would destroy Codex's resume history.
 ///
 /// Codex gates hooks on a sha256 trust record and *silently skips* an
 /// untrusted one, so `--dangerously-bypass-hook-trust` is mandatory beside
 /// this and is emitted by `chat_agent_command` under the same condition.
 /// Passing the home without the flag is fail-open, which is the bug this whole
 /// module exists to stop.
-pub fn write_codex_home(home: &Path, helper: &Path) -> Result<(), String> {
+pub fn write_codex_home(home: &Path, helper: Option<&Path>) -> Result<(), String> {
     std::fs::create_dir_all(home).map_err(|error| error.to_string())?;
-    std::fs::write(
-        home.join("hooks.json"),
-        hooks_document(helper, "codex").to_string(),
-    )
-    .map_err(|error| error.to_string())?;
+    if let Some(helper) = helper {
+        std::fs::write(
+            home.join("hooks.json"),
+            hooks_document(helper, "codex").to_string(),
+        )
+        .map_err(|error| error.to_string())?;
+    } else {
+        clear_codex_hooks(home)?;
+    }
     link_credential(home, ".codex", "auth.json")
+}
+
+/// Retire the hook configuration without touching Codex's session history.
+pub fn clear_codex_hooks(home: &Path) -> Result<(), String> {
+    match std::fs::remove_file(home.join("hooks.json")) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 /// Agy discovers customizations from every directory it is handed, so the gate
@@ -601,6 +615,26 @@ mod tests {
         std::fs::write(&spaced_helper, b"#!/bin/sh\n").unwrap();
         let spaced_line = hook_command(&spaced_helper, "codex", "post");
         assert!(spaced_line.starts_with('\''), "{spaced_line}");
+    }
+
+    #[test]
+    fn codex_session_history_survives_hook_cleanup_and_autonomy_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("codex-home");
+        let rollout = home.join("sessions").join("rollout.jsonl");
+        std::fs::create_dir_all(rollout.parent().unwrap()).unwrap();
+        std::fs::write(&rollout, b"session history").unwrap();
+        let helper = Path::new("/tmp/tokenstat-hostd");
+        write_codex_home(&home, Some(helper)).unwrap();
+        assert!(home.join("hooks.json").is_file());
+        clear_codex_hooks(&home).unwrap();
+        assert!(!home.join("hooks.json").exists());
+        assert_eq!(std::fs::read(&rollout).unwrap(), b"session history");
+        write_codex_home(&home, Some(helper)).unwrap();
+        write_codex_home(&home, None).unwrap();
+        assert!(!home.join("hooks.json").exists());
+        assert_eq!(std::fs::read(&rollout).unwrap(), b"session history");
+        clear_codex_hooks(&home).unwrap();
     }
 
     #[test]

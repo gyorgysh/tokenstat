@@ -938,6 +938,16 @@ impl Store {
     /// invalid credential is an error so the caller can ignore it without
     /// failing a result that was already recorded.
     pub fn take_steer_for_token(&self, turn_token: &str) -> Result<Option<String>, String> {
+        let id = self
+            .turn_tokens
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(turn_token)
+            .map(|binding| binding.conversation_id.clone())
+            .ok_or("the chat turn credential is invalid or expired")?;
+        let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, &id)?;
+        // A turn may finish while this waits behind a send or Stop. Resolve
+        // the credential again before taking any newer turn's note.
         let binding = self
             .turn_tokens
             .lock()
@@ -948,18 +958,37 @@ impl Store {
         if !note_backend(&binding.backend) {
             return Ok(None);
         }
-        Ok(self
+        let note = self
             .steers
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .remove(&binding.conversation_id))
+            .get(&id)
+            .cloned();
+        let Some(note) = note else { return Ok(None) };
+        // The note becomes a user message when the agent takes it. Keep it
+        // parked if writing fails, and serialize consumption with replacement,
+        // cancellation and idle delivery so it appears exactly once.
+        let at_ms = now_ms();
+        self.append(
+            &id,
+            &StoredEvent::User {
+                text: note.clone(),
+                at_ms,
+            },
+        )?;
+        self.steers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&id);
+        let _ = self.mark_last_message(&id, at_ms, "user");
+        Ok(Some(note))
     }
 
     /// Park one short note on the next step of a turn that is already running.
     ///
-    /// The note is not a chat message. The next step for an agent that can
-    /// carry extra context hands it over, and the turn keeps going. A second
-    /// note replaces the first. Stop drops it.
+    /// A parked note is not yet a chat message. The next step records it and
+    /// hands it over, and the turn keeps going. A second note replaces the
+    /// first. Stop drops it.
     pub fn steer(&self, id: &str, text: &str) -> Result<(), String> {
         validate_record_id(id)?;
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
@@ -2223,7 +2252,7 @@ impl Store {
         } else {
             typed
         };
-        let chat = self.current_send_conversation(id)?;
+        let mut chat = self.current_send_conversation(id)?;
         // Before the running guard, deliberately. The case this exists for is
         // a send whose answer went missing, and the turn it started is
         // usually still going: "this chat is already responding" would be a
@@ -2317,6 +2346,7 @@ impl Store {
         }
         let attachments = self.attachment_paths(id, attachment_ids)?;
         let response_output_dir = self.prepare_response_output_dir(id)?;
+        self.recover_codex_session(&mut chat);
         let resume_token = chat
             .resume_tokens
             .get(&chat.backend)
@@ -2426,19 +2456,16 @@ impl Store {
                 crate::chat_gate::GATE_DEADLINE_SECONDS.to_string(),
             ));
         }
-        let codex_hook_home = if chat.backend == "codex"
-            && let Some(helper) = &helper
-        {
-            let home = safe_join(&self.root, id)?.join("codex-hook");
-            crate::chat_gate::write_codex_home(&home, helper)?;
+        let codex_home = if chat.backend == "codex" {
+            let home = self.codex_home(id);
+            crate::chat_gate::write_codex_home(&home, helper.as_deref())?;
             environment.push(("CODEX_HOME".into(), home.display().to_string()));
             Some(home)
         } else {
             None
         };
-        // Grok is the one home that outlives its turn. Its sessions live under
-        // `$GROK_HOME`, so rebuilding it per turn would take `--resume` with
-        // it and every message would start a new conversation.
+        // Like Codex, Grok keeps its sessions inside its private home, so the
+        // home must outlive the turn for the next message to resume it.
         if chat.backend == "grok"
             && let Some(helper) = &helper
         {
@@ -2664,7 +2691,7 @@ impl Store {
         let raw_path = self.raw_path(id, now_ms());
         let turn_token = turn.as_ref().map(|(token, _)| token.clone());
         let turn_file = turn.as_ref().map(|(_, file)| file.clone());
-        let codex_hook_home = codex_hook_home.clone();
+        let codex_home = codex_home.clone();
         let agy_hook_home = agy_hook_home.clone();
         let opencode_hook_home = opencode_hook_home.clone();
         let response_output_dir = response_output_dir.clone();
@@ -2690,8 +2717,8 @@ impl Store {
                 },
                 || {
                     let _ = fs::remove_dir_all(&response_output_dir);
-                    if let Some(home) = codex_hook_home {
-                        let _ = fs::remove_dir_all(home);
+                    if let Some(home) = codex_home {
+                        let _ = crate::chat_gate::clear_codex_hooks(&home);
                     }
                     if let Some(home) = agy_hook_home {
                         let _ = fs::remove_dir_all(home);
@@ -3158,6 +3185,21 @@ impl Store {
             .join(safe)
             .join("raw")
             .join(format!("{turn_started_at_ms}.ndjson"))
+    }
+
+    fn codex_home(&self, id: &str) -> PathBuf {
+        self.root.join(safe_file_name(id)).join("codex-hook")
+    }
+
+    /// Older turns deleted this home during cleanup. Give a fresh Codex
+    /// session the stored conversation instead of resuming a missing rollout.
+    /// Keep this decision local until the new session reports its own token.
+    fn recover_codex_session(&self, chat: &mut Conversation) {
+        if chat.backend == "codex" && !self.codex_home(&chat.id).join("sessions").is_dir() {
+            chat.resume_tokens.remove("codex");
+            chat.resume_token = None;
+            chat.standing_sent.remove("codex");
+        }
     }
 
     /// The folder this conversation's outputs are staged in.
@@ -4918,6 +4960,144 @@ mod tests {
             parked_note(&store, "chat-test").as_deref(),
             Some("stay put")
         );
+    }
+
+    #[test]
+    fn steer_consumption_persists_one_user_message_for_each_supported_backend() {
+        for backend in ["claude", "codex", "muse"] {
+            if !note_backend(backend) {
+                continue;
+            }
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("chat");
+            let store = Store::at(path.clone());
+            prepare_live_chat(&store, "chat-test");
+            retune_chat(&store, "chat-test", backend, "standard");
+            let rich = "## Result\n\n**Kept** `code`\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n```swift\nlet value = 1\n```";
+            store.record_events(
+                "chat-test",
+                backend,
+                vec![Event::Text { delta: rich.into() }],
+            );
+            let (_, before) = store.events("chat-test", 0).unwrap();
+            store.steer("chat-test", "replaced").unwrap();
+            store.steer("chat-test", "cancelled").unwrap();
+            store.steer_clear("chat-test").unwrap();
+            store
+                .steer("chat-test", "  Keep the table and code.  ")
+                .unwrap();
+            let token = store.register_turn_token("chat-test", backend).unwrap();
+            assert_eq!(
+                store.take_steer_for_token(&token).unwrap().as_deref(),
+                Some("Keep the table and code.")
+            );
+            assert!(store.take_steer_for_token(&token).unwrap().is_none());
+            assert!(parked_note(&store, "chat-test").is_none());
+            let (live, _) = store.events("chat-test", before).unwrap();
+            assert_eq!(live.len(), 1, "{backend}: {live:?}");
+            assert_eq!(live[0]["kind"], "user");
+            assert_eq!(live[0]["text"], "Keep the table and code.");
+            assert_eq!(
+                store
+                    .get("chat-test")
+                    .unwrap()
+                    .last_message_author
+                    .as_deref(),
+                Some("user")
+            );
+            store.set_running("chat-test", false).unwrap();
+            let reopened = Store::load_at(path);
+            let (history, _) = reopened.events("chat-test", 0).unwrap();
+            assert_eq!(history.len(), 2, "{backend}: {history:?}");
+            assert_eq!(history[0]["event"]["delta"], rich);
+            assert_eq!(history[1], live[0]);
+        }
+    }
+
+    #[test]
+    fn codex_missing_session_rebuilds_context_without_forgetting_other_backends() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        prepare_live_chat(&store, "chat-test");
+        retune_chat(&store, "chat-test", "codex", "standard");
+        store
+            .set_resume("chat-test", "claude", "claude-session")
+            .unwrap();
+        store
+            .set_resume("chat-test", "codex", "codex-session")
+            .unwrap();
+        store
+            .mark_standing_sent("chat-test", "codex", "rules")
+            .unwrap();
+        store
+            .append(
+                "chat-test",
+                &StoredEvent::User {
+                    text: "Previous question".into(),
+                    at_ms: now_ms(),
+                },
+            )
+            .unwrap();
+        store.record_events(
+            "chat-test",
+            "codex",
+            vec![Event::Text {
+                delta: "Previous answer".into(),
+            }],
+        );
+        let original = store.get("chat-test").unwrap();
+        let mut missing = original.clone();
+        store.recover_codex_session(&mut missing);
+        assert!(!missing.resume_tokens.contains_key("codex"));
+        assert!(missing.resume_token.is_none());
+        assert!(!missing.standing_sent.contains_key("codex"));
+        assert_eq!(
+            missing.resume_tokens.get("claude").map(String::as_str),
+            Some("claude-session")
+        );
+        let handover = store.handover(&missing).unwrap().unwrap();
+        assert!(handover.brief.contains("Previous answer"));
+        assert!(!handover.announce);
+        assert_eq!(
+            store.get("chat-test").unwrap().resume_token,
+            original.resume_token
+        );
+        fs::create_dir_all(store.codex_home("chat-test").join("sessions")).unwrap();
+        let mut retained = original.clone();
+        store.recover_codex_session(&mut retained);
+        assert_eq!(retained.resume_tokens, original.resume_tokens);
+        assert_eq!(retained.standing_sent, original.standing_sent);
+        assert!(store.handover(&retained).unwrap().is_none());
+        let mut other = original;
+        other.backend = "claude".into();
+        store.recover_codex_session(&mut other);
+        assert!(other.resume_tokens.contains_key("claude"));
+    }
+
+    #[test]
+    fn steer_consumption_keeps_the_note_when_the_transcript_cannot_be_written() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        prepare_live_chat(&store, "chat-test");
+        store.steer("chat-test", "Keep this note.").unwrap();
+        let token = store.register_turn_token("chat-test", "codex").unwrap();
+        let path = store.events_path("chat-test");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(store.take_steer_for_token(&token).is_err());
+        assert_eq!(
+            parked_note(&store, "chat-test").as_deref(),
+            Some("Keep this note.")
+        );
+        fs::remove_dir(&path).unwrap();
+        assert_eq!(
+            store.take_steer_for_token(&token).unwrap().as_deref(),
+            Some("Keep this note.")
+        );
+        assert!(store.take_steer_for_token(&token).unwrap().is_none());
+        let (history, _) = store.events("chat-test", 0).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0]["text"], "Keep this note.");
     }
 
     #[test]
@@ -7494,7 +7674,7 @@ mod tests {
         let _ = fs::remove_file(turn_file);
         let helper = Path::new("/tmp/tokenstat-hostd");
         let codex_home = store.root.join("chat-test").join("codex-hook");
-        crate::chat_gate::write_codex_home(&codex_home, helper).unwrap();
+        crate::chat_gate::write_codex_home(&codex_home, Some(helper)).unwrap();
         let hooks = fs::read_to_string(codex_home.join("hooks.json")).unwrap();
         assert!(hooks.contains("PreToolUse"));
         assert!(hooks.contains("hook codex pre"));

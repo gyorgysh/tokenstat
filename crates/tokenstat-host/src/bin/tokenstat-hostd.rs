@@ -278,24 +278,15 @@ fn deny_word(flavor: &str) -> &'static str {
 /// Extra context for a step that already ran. This is not a refusal.
 ///
 /// `decision: block` would replace the tool output, so it is never set.
-/// Codex reads a top-level `additionalContext` on some builds and the
-/// wrapped field on others, so both carry the same sentence. Muse gets
-/// its own document for a model step. Any other backend gets nothing,
-/// so its post hook must not grow a second document.
+/// Claude and Codex read context inside `hookSpecificOutput`. Codex rejects
+/// unknown top-level fields, so repeating it there discards the entire note.
+/// Muse gets its own document for a model step. Other backends get nothing.
 fn post_note_document(flavor: &str, note: &str) -> String {
     let context = format!(
         "The person added a note while this step was running. Apply it now, then continue: {note}"
     );
     match flavor {
-        "claude" => json!({
-            "hookSpecificOutput": {
-                "hookEventName": "PostToolUse",
-                "additionalContext": context,
-            }
-        })
-        .to_string(),
-        "codex" => json!({
-            "additionalContext": context,
+        "claude" | "codex" => json!({
             "hookSpecificOutput": {
                 "hookEventName": "PostToolUse",
                 "additionalContext": context,
@@ -893,11 +884,14 @@ mod tests {
 
         let codex: Value = serde_json::from_str(&post_note_document("codex", note)).unwrap();
         assert!(codex.get("decision").is_none());
-        assert_eq!(
-            codex["additionalContext"],
-            codex["hookSpecificOutput"]["additionalContext"]
-        );
+        // Codex's strict PostToolUse schema rejects a top-level context,
+        // even when a valid wrapped context is present beside it.
+        assert!(codex.get("additionalContext").is_none());
         assert_eq!(codex["hookSpecificOutput"]["hookEventName"], "PostToolUse");
+        assert_eq!(
+            codex["hookSpecificOutput"]["additionalContext"],
+            claude["hookSpecificOutput"]["additionalContext"]
+        );
 
         let muse: Value = serde_json::from_str(&post_note_document("muse", note)).unwrap();
         assert!(muse.get("additionalContext").is_none());

@@ -236,7 +236,13 @@ final class ChatDraftScrollView: NSScrollView {
 }
 
 final class ChatDraftTextView: NSTextView {
-    var placeholder: String = ""
+    var placeholder: String = "" {
+        didSet {
+            if placeholder != oldValue, string.isEmpty {
+                needsDisplay = true
+            }
+        }
+    }
     var draftSend: (() -> Void)?
     var draftStop: (() -> Void)?
     var pasteAttachments: (() -> Void)?
