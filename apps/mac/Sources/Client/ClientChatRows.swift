@@ -374,9 +374,10 @@ struct ClientChatApprovalCard: View {
                         .monospacedDigit()
                         .accessibilityLabel("\(remaining) left to answer")
                 }
-                Text(approval.verb)
+                Text(SeatStep.approvalWord(verb: approval.verb, pending: isPending))
                     .font(ClientType.caption.weight(.medium))
                     .foregroundStyle(outcome.tint)
+                    .lineLimit(1)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(outcome.tint.opacity(0.12), in: Capsule())
@@ -389,6 +390,12 @@ struct ClientChatApprovalCard: View {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: Theme.Space.s) { actions }
                     VStack(alignment: .leading, spacing: Theme.Space.s) { actions }
+                }
+                if let note = SeatStep.allowAlwaysNote(verb: approval.verb, shellPrefix: approval.shellPrefix) {
+                    Text(note)
+                        .font(ClientType.caption)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
                 Text(outcome.detail)

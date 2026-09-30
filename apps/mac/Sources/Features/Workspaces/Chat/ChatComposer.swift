@@ -16,6 +16,9 @@ struct ChatComposer: View {
     var attachments: [ChatAttachment]
     var previews: [String: Data]
     var running: Bool
+    /// A message typed now is read on the agent's next step, rather than
+    /// waiting until the turn ends.
+    var sendsAsNote: Bool = false
     var placeholder: String
     var onSend: () -> Void
     var onSendNow: () -> Void = {}
@@ -236,7 +239,7 @@ struct ChatComposer: View {
                         .buttonStyle(DestructiveButtonStyle(small: true))
                 }
                 if !cannotSend {
-                    Button(running ? "Send after this turn" : "Send", .send) {}
+                    Button(sendTitle, .send) {}
                         .buttonStyle(AccentButtonStyle(small: true))
                 }
             }
@@ -252,10 +255,10 @@ struct ChatComposer: View {
                         .keyboardShortcut(.cancelAction)
                 }
                 if !cannotSend {
-                    Button(running ? "Send after this turn" : "Send", .send, action: onSend)
+                    Button(sendTitle, .send, action: onSend)
                         .buttonStyle(AccentButtonStyle(small: true))
                         .environment(\.compactActions, true)
-                        .help(running ? "Waits until this turn finishes. Stop and send now is on the queued message." : "Send")
+                        .help(sendsAsNote ? "The agent reads this on its next step." : running ? "Waits until this turn finishes. Stop and send now is on the queued message." : "Send")
                         .contextMenu {
                             if running {
                                 Button("Stop and send now", .send, action: onSendNow)
@@ -319,6 +322,11 @@ struct ChatComposer: View {
 
     private var wellStroke: Color {
         dropTargeted ? Theme.accent : Theme.border
+    }
+
+    private var sendTitle: String {
+        if sendsAsNote { return "Next step" }
+        return running ? "Send after this turn" : "Send"
     }
 
     private var cannotSend: Bool {

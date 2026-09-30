@@ -56,8 +56,9 @@ internal static class RemoteFeatureGate
     /// Workbench gates. Mirrors the Apple minimumProtocol table: 17 adds
     /// revision-checked task editing, 18 adds checked task deletion, 19 adds
     /// create-once tasks, 20 adds checked task runs with launch receipts, 21
-    /// adds revision-checked automation edits with create/run receipts, and 22
-    /// adds revision-checked workflow edits.
+    /// adds revision-checked automation edits with create/run receipts, 22
+    /// adds revision-checked workflow edits, and 25 adds a short note that
+    /// rides the next tool step.
     /// </summary>
     public const int TaskEditingMinProtocol = 17;
     public const int TaskDeletionMinProtocol = 18;
@@ -65,6 +66,7 @@ internal static class RemoteFeatureGate
     public const int TaskExecutionMinProtocol = 20;
     public const int AutomationReceiptsMinProtocol = 21;
     public const int WorkflowEditingMinProtocol = 22;
+    public const int SteerMinProtocol = 25;
 
     public static bool SupportsProtocol(long? protocol, int minimum) =>
         protocol is null || protocol >= minimum;

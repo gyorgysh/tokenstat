@@ -140,6 +140,20 @@ final class ChatModel {
     private(set) var workspaceID: String?
     /// Set when this model is talking to a peer over the tunnel.
     private(set) var peer: String?
+    /// Whether the peer can take a mid-turn note. Nil until a probe or a
+    /// successful steer says so. A failed probe stays nil: an unreachable
+    /// computer is not an older one. Local hosts are always current.
+    private var remoteSteer: Bool?
+
+    /// Remember a peer change. A different computer has its own protocol, so
+    /// a previous answer must not decide the next placeholder.
+    private func adoptPeer(_ next: String?) {
+        if peer != next {
+            remoteSteer = nil
+            steerProbeStarted = false
+        }
+        peer = next
+    }
     /// Async bridge calls may finish after navigation. Only the generation
     /// that started them may mutate the currently displayed workspace/chat.
     private var loadGeneration: UInt64 = 0
@@ -433,7 +447,7 @@ final class ChatModel {
         )
         // Reserve the send before the caller starts its Task or capability
         // discovery suspends, so a second click cannot replace this snapshot.
-        sending = true
+        composerSendToken = noteSendStarted()
         setDraft("")
         return true
     }
@@ -444,6 +458,14 @@ final class ChatModel {
         draftSaveTask = nil
         setDraft("")
         if let reference = draftReference { ChatDraftStore.shared.clear(for: reference) }
+    }
+
+    /// Clear only when the composer still holds these words. A note parks
+    /// after a round trip, and anything typed meanwhile is the next draft.
+    func clearDraft(ifStill text: String) {
+        let sent = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard draft.trimmingCharacters(in: .whitespacesAndNewlines) == sent else { return }
+        clearDraft()
     }
 
     /// The send did not happen. Put the words back where they were typed.
@@ -490,7 +512,12 @@ final class ChatModel {
     /// so rather than a claim in either direction.
     func sendFromComposer() async {
         guard let submission = heldSubmission else { return }
-        defer { heldSubmission = nil; sending = false; deliveringFromComposer = nil }
+        let outer = composerSendToken
+        defer {
+            heldSubmission = nil
+            deliveringFromComposer = nil
+            if let outer { noteSendFinished(outer) }
+        }
         guard let reference = submission.reference, let messageID = submission.messageID,
               submission.owns(reference: currentReference, conversationID: selected?.id,
                               peer: peer, scope: WorkSessionContext.shared.scope) else {
@@ -921,7 +948,7 @@ final class ChatModel {
         }
         folderID = workspaceID
         self.workspaceID = route.workspaceID
-        self.peer = route.peer
+        adoptPeer(route.peer)
         if events.isEmpty { restoreRecentMessages() }
         loadQueue(for: selected?.id)
         do {
@@ -1055,7 +1082,7 @@ final class ChatModel {
             ChatReadingStore.shared.request(.init(eventID: anchor, offset: 0, updatedAt: Date()), for: reference)
         }
         continuityScope = reference.scope
-        peer = reference.hostIdentity == WorkSessionContext.shared.localHostIdentity ? nil : reference.hostIdentity
+        adoptPeer(reference.hostIdentity == WorkSessionContext.shared.localHostIdentity ? nil : reference.hostIdentity)
         workspaceID = reference.workspaceID
         folderID = peer.map { "remote:\($0):\(reference.workspaceID)" } ?? reference.workspaceID
         var chat = ChatConversation(saved: reference, title: copy.title, backend: copy.backend)
@@ -1173,7 +1200,11 @@ final class ChatModel {
         }
         #endif
         if selectionMatches(id: chat.id, generation: generation) {
-            await drainQueue()
+            if claimSteerDelivery() {
+                await performSteerDelivery()
+            } else {
+                await drainQueue()
+            }
         }
     }
 
@@ -1221,7 +1252,11 @@ final class ChatModel {
             await loadInstructions(id: id, generation: generation)
         }
         guard selectionMatches(id: id, generation: generation) else { return }
-        await drainQueue()
+        if claimSteerDelivery() {
+            await performSteerDelivery()
+        } else {
+            await drainQueue()
+        }
     }
 
     /// Reopen the conversation on its newest page, dropping the window that
@@ -1501,6 +1536,17 @@ final class ChatModel {
     /// Send on this; without it a double-tap re-sent the same attachments,
     /// which image-only sends made reachable.
     private(set) var sending = false
+    /// Distinguishes the send that reserved the composer from one a delivery
+    /// started inside it. A newer send must not be cleared by the older one.
+    @ObservationIgnored private var sendToken: UInt64 = 0
+    @ObservationIgnored private var composerSendToken: UInt64?
+    /// The reservation `beginBusyNote` made, released by `finishBusyNote`.
+    @ObservationIgnored private var busyNoteToken: UInt64?
+    /// One probe per busy stretch. A miss stays unknown until the turn ends,
+    /// so a dropped packet is not remembered as an older host.
+    @ObservationIgnored private var steerProbeStarted = false
+    /// Set before any await so a poll and a queue drain cannot both send.
+    @ObservationIgnored private var deliveringSteer = false
     /// Messages waiting for the open turn to finish. Kept per conversation so
     /// leaving the thread and coming back still has them.
     private(set) var queued: [ChatQueuedMessage] = []
@@ -1656,6 +1702,12 @@ final class ChatModel {
     }
 
     func drainQueue() async {
+        // A parked note owns the next send. Delivering it and draining the
+        // queue in the same breath would start two turns.
+        if deliveringSteer { return }
+        if let note = selected?.pendingSteer?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
+            return
+        }
         guard !busy, !sending, !sendingNow, !queuePaused, let item = queued.first else { return }
         if await deliverQueued(item, stopCurrent: false), !busy {
             await drainQueue()
@@ -1674,8 +1726,8 @@ final class ChatModel {
         guard savedCopy == nil, ownsQueue, (!sending || reserved), let reference = queuedReference,
               WorkCacheAccess.canSave(reference), let conversationID = reference.itemID,
               ChatOutboxStore.shared.beginDelivery(reference) else { return false }
-        sending = true
-        defer { ChatOutboxStore.shared.endDelivery(reference); sending = false }
+        let token = noteSendStarted()
+        defer { ChatOutboxStore.shared.endDelivery(reference); noteSendFinished(token) }
         let targetPeer = peer
         let generation = selectionGeneration
         func current() -> Bool {
@@ -2088,10 +2140,254 @@ final class ChatModel {
             }
             settleNotifications()
         } catch {}
+        guard !Task.isCancelled, selectionMatches(id: selected.id, generation: generation) else { return }
+        let claimed = claimSteerDelivery()
+        await noteSteerAvailability()
+        if claimed { await performSteerDelivery() }
     }
 
     var busy: Bool {
         selected?.running == true
+    }
+
+    /// What a message typed during a turn will do.
+    ///
+    /// Local hosts are always current. A remote one only promises a note
+    /// after a probe or a successful steer. Until then the placeholder stays
+    /// the queue, and the send itself may still try.
+    var sendsAsNote: Bool {
+        guard busy, attachments.isEmpty, stagingAttachments == 0, savedCopy == nil else { return false }
+        guard steerAutonomy, steerBackend else { return false }
+        if let peer, !peer.isEmpty { return remoteSteer == true }
+        return true
+    }
+
+    private var steerBackend: Bool {
+        selected?.backend == "claude" || selected?.backend == "codex" || selected?.backend == "muse"
+    }
+
+    /// Muse can take a note on any autonomy. The others only while they ask first.
+    private var steerAutonomy: Bool {
+        if selected?.backend == "muse" { return true }
+        return selected?.autonomy == "standard"
+    }
+
+    enum BusyNoteStart { case steering, queue }
+    enum BusySend { case steered, queue, kept }
+
+    /// Decide before the first await. `.queue` is the path the composer
+    /// already had. `.steering` reserves Send so a second tap cannot also
+    /// enqueue the same words.
+    func beginBusyNote(_ text: String) -> BusyNoteStart {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || !attachments.isEmpty || savedCopy != nil
+            || stagingAttachments > 0 || sending
+            || !steerAutonomy || !steerBackend
+            || remoteSteer == false {
+            return .queue
+        }
+        busyNoteToken = noteSendStarted()
+        return .steering
+    }
+
+    /// Park the note, or hand it back to the queue when this turn cannot
+    /// carry one. A refusal that is about the words themselves keeps the draft.
+    func finishBusyNote(_ text: String) async -> BusySend {
+        let token = busyNoteToken
+        busyNoteToken = nil
+        defer { if let token { noteSendFinished(token) } }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let id = selected?.id else { return .kept }
+        let generation = selectionGeneration
+        let asked = peer
+        guard selectionMatches(id: id, generation: generation) else { return .kept }
+        do {
+            try await Bridge.steerChat(id: id, text: trimmed, peer: asked)
+            guard selectionMatches(id: id, generation: generation) else { return .kept }
+            parkLocalSteer(trimmed)
+            if let asked, !asked.isEmpty, peer == asked { remoteSteer = true }
+            return .steered
+        } catch {
+            guard selectionMatches(id: id, generation: generation) else { return .kept }
+            if isUnknownMethod(error) {
+                if let asked, !asked.isEmpty, peer == asked { remoteSteer = false }
+                return .queue
+            }
+            let message = hostMessage(error)
+            if Self.steerFallsBack(message) { return .queue }
+            if self.error != message { self.error = message }
+            return .kept
+        }
+    }
+
+    /// Drop the note on screen immediately. The host drop follows. A later
+    /// list restores the banner if the note is still parked.
+    func clearSteer() {
+        guard savedCopy == nil, let id = selected?.id else { return }
+        clearLocalSteer()
+        let generation = selectionGeneration
+        let asked = peer
+        Task {
+            do {
+                try await Bridge.steerClearChat(id: id, peer: asked)
+            } catch {
+                guard selectionMatches(id: id, generation: generation) else { return }
+                if isUnknownMethod(error) {
+                    if let asked, !asked.isEmpty, peer == asked { remoteSteer = false }
+                    return
+                }
+                let message = hostMessage(error)
+                if self.error != message { self.error = message }
+            }
+        }
+    }
+
+    private func noteSendStarted() -> UInt64 {
+        sendToken &+= 1
+        sending = true
+        return sendToken
+    }
+
+    private func noteSendFinished(_ token: UInt64) {
+        guard sendToken == token else { return }
+        sending = false
+    }
+
+    private static func steerFallsBack(_ message: String) -> Bool {
+        message == "This agent cannot take a note mid-turn."
+            || message == "This chat is not asking before tools, so a note cannot ride the next step."
+            || message == "This chat is not in the middle of a turn."
+    }
+
+    private func hostMessage(_ error: Error) -> String {
+        if case let BridgeError.core(_, message) = error { return message }
+        return error.localizedDescription
+    }
+
+    /// Reassign the whole value. Writing one field of an optional struct does
+    /// not publish, and writing the same note twice would redraw for nothing.
+    private func parkLocalSteer(_ note: String) {
+        guard let current = selected, current.pendingSteer != note else { return }
+        var chat = current
+        chat.pendingSteer = note
+        selected = chat
+        if let index = chats.firstIndex(where: { $0.id == chat.id }), chats[index].pendingSteer != note {
+            chats[index].pendingSteer = note
+        }
+    }
+
+    private func clearLocalSteer() {
+        guard var chat = selected, chat.pendingSteer != nil else { return }
+        chat.pendingSteer = nil
+        selected = chat
+        if let index = chats.firstIndex(where: { $0.id == chat.id }), chats[index].pendingSteer != nil {
+            chats[index].pendingSteer = nil
+        }
+    }
+
+    /// Claim before any await. While the flag is set, the queue stays put.
+    private func claimSteerDelivery() -> Bool {
+        if deliveringSteer || savedCopy != nil || busy { return false }
+        let note = selected?.pendingSteer?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !note.isEmpty else { return false }
+        deliveringSteer = true
+        return true
+    }
+
+    /// Learn whether a remote host can carry a note, once per busy stretch.
+    /// A thrown probe stays unknown. The next turn may try again.
+    private func noteSteerAvailability() async {
+        if !busy {
+            steerProbeStarted = false
+            return
+        }
+        guard let peer, !peer.isEmpty, remoteSteer == nil, !steerProbeStarted else { return }
+        steerProbeStarted = true
+        let asked = peer
+        let version = try? await Bridge.peerProtocolVersion(asked)
+        guard self.peer == asked else { return }
+        if let version {
+            remoteSteer = version >= RemoteHostFeature.steer.minimumProtocol
+        }
+    }
+
+    /// Send a note the turn ended without taking. The queue runs only when
+    /// that note is gone and this conversation is still the one on screen.
+    private func performSteerDelivery() async {
+        guard let id = selected?.id else {
+            deliveringSteer = false
+            return
+        }
+        let generation = selectionGeneration
+        let asked = peer
+        do {
+            let result = try await Bridge.steerDeliverChat(id: id, peer: asked)
+            guard selectionMatches(id: id, generation: generation) else {
+                deliveringSteer = false
+                return
+            }
+            if result.delivered {
+                deliveringSteer = false
+                if let conversation = result.conversation { replace(conversation) }
+                else { clearLocalSteer() }
+                return
+            }
+        } catch {
+            guard selectionMatches(id: id, generation: generation) else {
+                deliveringSteer = false
+                return
+            }
+            let message = hostMessage(error)
+            if message == "This chat is still in the middle of a turn." {
+                deliveringSteer = false
+                return
+            }
+            if isUnknownMethod(error) {
+                deliveringSteer = false
+                clearLocalSteer()
+                if let asked, !asked.isEmpty, self.peer == asked { remoteSteer = false }
+                if !busy { await drainQueue() }
+                return
+            }
+            deliveringSteer = false
+            if self.error != message { self.error = message }
+            _ = await reloadOpenChats()
+            return
+        }
+        deliveringSteer = false
+        guard selectionMatches(id: id, generation: generation) else { return }
+        let reloaded = await reloadOpenChats()
+        guard selectionMatches(id: id, generation: generation) else { return }
+        if !reloaded { clearLocalSteer() }
+        if !busy { await drainQueue() }
+    }
+
+    /// Refresh the open list without drawing an unchanged one. False when the
+    /// read failed or the reader has moved on.
+    private func reloadOpenChats() async -> Bool {
+        guard let selected else { return false }
+        let generation = selectionGeneration
+        do {
+            let latest = try await Bridge.chats(workspaceID: selected.workspaceID, peer: peer)
+            guard selectionMatches(id: selected.id, generation: generation) else { return false }
+            if chats != latest {
+                chats = latest
+                if let folderID { storeChatListCache(chats, folderID: folderID) }
+            }
+            if let current = latest.first(where: { $0.id == selected.id }),
+               current != self.selected {
+                self.selected = current
+                #if !os(macOS)
+                if !Task.isCancelled {
+                    ClientChatReadState.shared.markRead(peer: peer, chat: current)
+                }
+                #endif
+            }
+            settleNotifications()
+            return true
+        } catch {
+            return false
+        }
     }
 
     var hasRunningTool: Bool {
@@ -3427,7 +3723,8 @@ struct ChatDisplayItem: Identifiable, Equatable {
                 toolStarts[callId] = occurrence
                 let rowID = event.seq != nil ? "tool-\(stamp(event, items.count))"
                     : (occurrence == 1 ? "tool-\(callId)" : "tool-\(callId)#\(occurrence)")
-                let verb = agent.verb ?? "Tool"
+                // Empty when the event named no tool. The row then says Working.
+                let verb = agent.verb ?? ""
                 let target = ChatToolState.clip(agent.target ?? "")
                 noteToolIndex(items.count, callId: callId)
                 if ChatToolState.isFileEditVerb(verb) {
@@ -3520,7 +3817,8 @@ struct ChatDisplayItem: Identifiable, Equatable {
                     )
                 } else {
                     let fallback = callId.isEmpty ? "end-\(stamp(event, items.count))" : callId
-                    let fallbackVerb = agent.verb ?? "Tool"
+                    // Empty when the event named no tool. The row then says Worked.
+                    let fallbackVerb = agent.verb ?? ""
                     items.append(
                         ChatDisplayItem(
                             id: "tool-\(event.seq != nil ? stamp(event, items.count) : fallback)",

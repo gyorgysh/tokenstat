@@ -89,6 +89,7 @@ class WorkspaceHubLogicTest {
         assertEquals("Ask about this folder", ChatHint.hint("   ", false))
         assertEquals("Ask about 'tokenstat'", ChatHint.hint("tokenstat", false))
         assertEquals("Send after this turn", ChatHint.hint("tokenstat", true))
+        assertEquals("Add a note for the next step", ChatHint.hint("tokenstat", true, note = true))
     }
 
     @Test

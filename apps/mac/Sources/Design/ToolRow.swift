@@ -109,10 +109,11 @@ struct ToolRow: View {
                 .foregroundStyle(tint)
                 .frame(width: 16)
 
-                Text(verb)
+                Text(SeatStep.word(verb: verb, running: running))
                     .font(Theme.font(13, weight: .medium))
                     .foregroundStyle(tint)
-                    .fixedSize()
+                    .lineLimit(1)
+                    .layoutPriority(1)
                 if !arg.isEmpty {
                     Text(arg)
                         .font(Theme.mono(11))
@@ -126,12 +127,18 @@ struct ToolRow: View {
                 if hasDiff, !running {
                     DiffStat(added: diffAdded, removed: diffRemoved, font: Self.diffFigure)
                 }
-                if running {
+                if running, !SeatStep.speaks(verb: verb) {
                     Text("Running")
                         .font(Theme.mono(10))
                         .foregroundStyle(Theme.accent)
                         .fixedSize()
-                } else if let time, !time.isEmpty {
+                } else if failed {
+                    Text("Failed")
+                        .font(Theme.mono(10))
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize()
+                }
+                if !running, let time, !time.isEmpty {
                     Text(time)
                         .font(Theme.mono(10))
                         .foregroundStyle(.tertiary)

@@ -6,6 +6,7 @@ import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
 import ai.tokenstat.tokenstat.ui.components.TsType
+import ai.tokenstat.tokenstat.ui.logic.ChatSeat
 import ai.tokenstat.tokenstat.ui.logic.TunnelCopy
 import ai.tokenstat.tokenstat.ui.logic.harnessName
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
@@ -333,7 +334,7 @@ private fun TranscriptToolRow(state: ChatToolState) {
                 }
             }
             Text(
-                state.verb,
+                ChatSeat.word(state.verb, state.running),
                 style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium),
                 color = tint,
                 maxLines = 1,
@@ -354,9 +355,12 @@ private fun TranscriptToolRow(state: ChatToolState) {
             if (hasDiff && !state.running) {
                 DiffStat(added = added, removed = removed)
             }
-            if (state.running) {
+            if (state.running && !ChatSeat.speaks(state.verb)) {
                 Text("Running", style = TsType.mono(10), color = colors.accent, maxLines = 1)
-            } else {
+            } else if (state.failed) {
+                Text("Failed", style = TsType.mono(10), color = colors.danger, maxLines = 1)
+            }
+            if (!state.running) {
                 val time = state.duration
                 if (!time.isNullOrEmpty()) {
                     Text(time, style = TsType.mono(10), color = colors.textTertiary, maxLines = 1)
@@ -515,8 +519,11 @@ private fun TranscriptEditCard(state: ChatEditState) {
                     DiffStat(added = state.added, removed = state.removed)
                 }
                 if (state.running) {
-                    Text("Writing", style = TextStyle(fontSize = 12.sp), color = colors.accent, maxLines = 1)
-                } else {
+                    Text(ChatSeat.word("Edit", true), style = TextStyle(fontSize = 12.sp), color = colors.accent, maxLines = 1)
+                } else if (state.failed) {
+                    Text("Failed", style = TextStyle(fontSize = 12.sp), color = colors.danger, maxLines = 1)
+                }
+                if (!state.running) {
                     val time = state.duration
                     if (!time.isNullOrEmpty()) {
                         Text(time, style = TextStyle(fontSize = 12.sp), color = colors.textTertiary, maxLines = 1)

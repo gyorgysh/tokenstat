@@ -3,6 +3,7 @@ package ai.tokenstat.tokenstat.ui.workspace
 
 import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
 import ai.tokenstat.tokenstat.core.readBounded
+import ai.tokenstat.tokenstat.core.CoreFailure
 import ai.tokenstat.tokenstat.core.InputLimitExceeded
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -86,6 +87,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
@@ -101,6 +104,7 @@ import ai.tokenstat.tokenstat.notifications.VisibleChat
 import ai.tokenstat.tokenstat.ui.marks.HarnessMark
 import ai.tokenstat.tokenstat.ui.persona.ChatPersona
 import ai.tokenstat.tokenstat.ui.persona.PersonaMark
+import ai.tokenstat.tokenstat.ui.persona.PersonaMood
 import ai.tokenstat.tokenstat.ui.persona.PersonaSheet
 import ai.tokenstat.tokenstat.ui.persona.faceSeedFor
 import ai.tokenstat.tokenstat.ui.persona.parseChatPersonaList
@@ -124,7 +128,11 @@ import ai.tokenstat.tokenstat.ui.components.TsSimplePickerSheet
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.components.cardRadiusDp
 import ai.tokenstat.tokenstat.ui.logic.ChatDelivery
+import ai.tokenstat.tokenstat.ui.logic.ChatSeat
+import ai.tokenstat.tokenstat.ui.logic.ChatHint
 import ai.tokenstat.tokenstat.ui.logic.ChatOutbox
+import ai.tokenstat.tokenstat.ui.logic.ChatSteer
+import ai.tokenstat.tokenstat.ui.logic.SteerHold
 import ai.tokenstat.tokenstat.ui.logic.ChatOutboxFailure
 import ai.tokenstat.tokenstat.ui.logic.ChatOutboxRules
 import ai.tokenstat.tokenstat.ui.logic.FileChatOutbox
@@ -226,8 +234,9 @@ fun ChatSection(
     ///
     /// Not the account's own connection state: that is only recomputed when
     /// something refreshes the account, so it still read "connected" with the
-    /// radio off. The poll below asks this host every two seconds, and its
-    /// answer is the truthful one.
+    /// radio off. The poll below asks this host about every 400ms while a
+    /// turn is running or a note is parked, and every two seconds otherwise.
+    /// Its answer is the truthful one.
     var hostReachable by remember(workspace) { mutableStateOf(true) }
     val offline = !hostReachable
     var queued by remember(workspace) { mutableStateOf<List<QueuedMessage>>(emptyList()) }
@@ -241,6 +250,23 @@ fun ChatSection(
     /// `ChatModel.deliveringFromComposer`: the strip draws `pending` rather
     /// than `queued`, so a healthy send never opens it.
     var deliveringFromComposer by remember(workspace) { mutableStateOf<String?>(null) }
+    /// A note this screen is holding until the host list echoes the same words.
+    var heldSteer by remember(workspace) { mutableStateOf<SteerHold?>(null) }
+    /// Conversations whose note was cleared here. An in-flight list that still
+    /// carries the old words must not put them back.
+    var retiredSteers by remember(workspace) { mutableStateOf<Set<String>>(emptySet()) }
+    /// Counts `chat.list` requests, so a list asked for after a note was
+    /// parked or dropped is trusted over what this screen is holding.
+    val listRequests = remember(workspace) { java.util.concurrent.atomic.AtomicLong() }
+    /// The last list request started before the newest drop.
+    var retiredAt by remember(workspace) { mutableStateOf(0L) }
+    /// One delivery of a parked note is already in flight.
+    var deliveringSteer by remember(workspace) { mutableStateOf(false) }
+    /// A note is being parked. Send stays Send, and a second tap waits.
+    var parkingSteer by remember(workspace) { mutableStateOf(false) }
+    /// This computer's helper has no mid-turn note. Remembered with the peer,
+    /// so a folder change on the same computer does not ask again.
+    var steerUnsupported by remember(peer) { mutableStateOf(false) }
     /// What the pending strip draws: everything genuinely waiting, which is
     /// to say everything except the send that is in flight right now. A
     /// refused or unconfirmed send clears the filter on its way out, so it
@@ -281,12 +307,54 @@ fun ChatSection(
         }
     }
 
+    fun retireSteer(id: String) {
+        retiredSteers = retiredSteers + id
+        retiredAt = listRequests.get()
+    }
+
+    fun applyChatRows(rows: List<JsonObject>, listRequest: Long) {
+        val hold = heldSteer?.takeUnless { ChatSteer.answers(listRequest, it.parkedAt) }
+        val retired = if (ChatSteer.answers(listRequest, retiredAt)) emptySet() else retiredSteers
+        val reconciled = ChatSteer.reconcile(rows, hold, retired)
+        chats = reconciled.rows
+        heldSteer = reconciled.held
+        retiredSteers = reconciled.retired
+    }
+
+    /// Drop the note on this screen. The host copy is a separate call.
+    fun clearLocalSteer(id: String) {
+        if (heldSteer?.conversationId == id) heldSteer = null
+        chats = chats.map { row ->
+            if (row.str("id") == id) ChatSteer.withNote(row, null) else row
+        }
+    }
+
+    fun noteFailure(thrown: Throwable): String {
+        val raw = thrown.message?.trim().orEmpty()
+        return raw.ifEmpty { "The note could not be saved." }
+    }
+
+    /// Say why a note failed, and only when this conversation is still open
+    /// and the sentence is new.
+    fun showNoteFailure(thrown: Throwable, id: String) {
+        if (openId != id) return
+        val sentence = noteFailure(thrown)
+        if (sendError != sentence) sendError = sentence
+    }
+
+    fun showNoteSentence(sentence: String, id: String) {
+        if (openId != id) return
+        val text = sentence.trim().ifEmpty { "The note could not be saved." }
+        if (sendError != text) sendError = text
+    }
+
     suspend fun loadChats() {
         loading = true
+        val listRequest = listRequests.incrementAndGet()
         runCatching {
             model.workspaceSection(peer, "chat.list", buildJsonObject { put("workspaceId", workspace) })
         }.onSuccess {
-            chats = (it as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()
+            applyChatRows((it as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList(), listRequest)
             error = null
         }.onFailure { error = friendlyError(it.message).message }
         loading = false
@@ -295,7 +363,9 @@ fun ChatSection(
     // Recorded from the record rather than from each control, so a setting
     // changed anywhere (composer, setup sheet, agent picker) is carried.
     // Twin of `ChatModel.saveLaunchChoice`. Written only when it changed:
-    // the poll below runs every two seconds for as long as a chat is open.
+    // the poll below runs about every 400ms while a turn is running or a
+    // note is parked, and every two seconds otherwise, for as long as a
+    // chat is open.
     var lastLaunch by remember(workspace) { mutableStateOf<LaunchChoice?>(null) }
     fun rememberLaunch(chat: JsonObject?) {
         val backend = chat?.str("backend")?.ifBlank { null } ?: return
@@ -317,10 +387,11 @@ fun ChatSection(
     // `loadChats` would do, but it flashes the spinner and clears a sticky
     // list error on every pass.
     suspend fun refreshChats() {
+        val listRequest = listRequests.incrementAndGet()
         runCatching {
             model.workspaceSection(peer, "chat.list", buildJsonObject { put("workspaceId", workspace) })
         }.onSuccess {
-            chats = (it as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()
+            applyChatRows((it as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList(), listRequest)
             hostReachable = true
         }.onFailure {
             hostReachable = false
@@ -547,9 +618,16 @@ fun ChatSection(
                 return false
             }
             if (stopCurrent && chats.firstOrNull { it.str("id") == id }?.bol("running") == true) {
-                runCatching {
+                clearLocalSteer(id)
+                var stopped = false
+                try {
                     model.workspaceSection(peer, "chat.stop", buildJsonObject { put("id", id) })
+                    stopped = true
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
                 }
+                if (stopped) retireSteer(id)
                 repeat(80) {
                     if (chats.firstOrNull { it.str("id") == id }?.bol("running") != true) return@repeat
                     refreshChats()
@@ -638,7 +716,7 @@ fun ChatSection(
     }
 
     /// Send what is waiting, oldest first, while the host will take it.
-    suspend fun drainQueue() {
+    suspend fun drainOutbox() {
         val id = openId ?: return
         while (true) {
             if (sendingIds.isNotEmpty() || !hostReachable) return
@@ -649,6 +727,163 @@ fun ChatSection(
         }
     }
 
+    fun openChatNote(): String {
+        val id = openId ?: return ""
+        return ChatSteer.noteOf(chats.firstOrNull { it.str("id") == id })
+    }
+
+    /// Hand a note the turn ended without taking to the host as the next
+    /// message. The queue moves only once that note is gone.
+    suspend fun deliverParked(id: String) {
+        val captured = ChatSteer.noteOf(chats.firstOrNull { it.str("id") == id })
+        if (captured.isEmpty()) {
+            if (openChatNote().isEmpty()) drainOutbox()
+            return
+        }
+        val payload = try {
+            model.workspaceSection(peer, "chat.steerDeliver", buildJsonObject { put("id", id) })
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            val raw = failure.message
+            if (ChatSteer.isStillInTurn(raw?.trim())) return
+            if (ChatSteer.isUnknownMethod((failure as? CoreFailure)?.code, raw)) {
+                steerUnsupported = true
+                clearLocalSteer(id)
+                if (openChatNote().isEmpty()) drainOutbox()
+                return
+            }
+            showNoteFailure(failure, id)
+            refreshChats()
+            return
+        }
+        val obj = payload as? JsonObject
+        if (obj == null) {
+            showNoteSentence("The note could not be saved.", id)
+            refreshChats()
+            return
+        }
+        val hold = heldSteer
+        val sameHold = hold != null && hold.conversationId == id && hold.note.trim() == captured
+        val newerHold = hold != null && hold.conversationId == id && !sameHold
+        if (obj.bol("delivered")) {
+            if (newerHold) return
+            if (sameHold) heldSteer = null
+            val conversation = obj["conversation"] as? JsonObject
+            if (conversation != null) {
+                val stripped = ChatSteer.withNote(conversation, null)
+                val rowId = stripped.str("id")?.takeIf { it.isNotEmpty() } ?: id
+                chats = if (chats.any { it.str("id") == rowId }) {
+                    chats.map { row -> if (row.str("id") == rowId) stripped else row }
+                } else {
+                    chats + stripped
+                }
+            } else {
+                clearLocalSteer(id)
+            }
+            return
+        }
+        if (sameHold) heldSteer = null
+        if (newerHold) return
+        refreshChats()
+        if (chats.none { it.str("id") == id }) {
+            heldSteer = heldSteer?.takeUnless { it.conversationId == id }
+        }
+        if (openChatNote().isEmpty()) drainOutbox()
+    }
+
+    /// A parked note goes out before anything waiting in the queue.
+    /// `deliverNote` false is the path after the note was just handed off.
+    suspend fun drainQueue(deliverNote: Boolean = true) {
+        if (sendingIds.isNotEmpty() || !hostReachable) return
+        val id = openId ?: return
+        val note = ChatSteer.noteOf(chats.firstOrNull { it.str("id") == id })
+        if (note.isNotEmpty()) {
+            val running = chats.firstOrNull { it.str("id") == id }?.bol("running") == true
+            if (!deliverNote || deliveringSteer || running) return
+            deliveringSteer = true
+            try {
+                deliverParked(id)
+            } finally {
+                deliveringSteer = false
+            }
+            return
+        }
+        drainOutbox()
+    }
+
+    /// Park the words on the next tool step. True when this send is finished.
+    /// False when the words should wait in the queue instead.
+    suspend fun tryParkSteer(id: String, text: String): Boolean {
+        val chat = chats.firstOrNull { it.str("id") == id }
+        if (!ChatSteer.canAttempt(
+                chat?.bol("running") == true,
+                text,
+                staged.isEmpty(),
+                chat?.str("backend"),
+                chat?.str("autonomy"),
+                protocol,
+                steerUnsupported,
+            )
+        ) return false
+        if (parkingSteer) return true
+        parkingSteer = true
+        try {
+            if (openId != id) return true
+            val trimmed = text.trim()
+            val payload = try {
+                model.workspaceSection(peer, "chat.steer", buildJsonObject {
+                    put("id", id)
+                    put("text", trimmed)
+                })
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                val raw = failure.message
+                if (ChatSteer.isUnknownMethod((failure as? CoreFailure)?.code, raw)) {
+                    steerUnsupported = true
+                    return false
+                }
+                if (ChatSteer.isSteerFallback(raw?.trim())) return false
+                showNoteFailure(failure, id)
+                return true
+            }
+            if (payload !is JsonObject) {
+                showNoteSentence("The note could not be saved.", id)
+                return true
+            }
+            retiredSteers = retiredSteers - id
+            if (openId != id) return true
+            heldSteer = SteerHold(id, trimmed, listRequests.get())
+            chats = chats.map { row ->
+                if (row.str("id") == id) ChatSteer.withNote(row, trimmed) else row
+            }
+            if (draft.trim() == trimmed) draft = ""
+            sendError = null
+            return true
+        } finally {
+            parkingSteer = false
+        }
+    }
+
+    /// Take the note off this screen, then ask the host to drop it.
+    suspend fun clearSteer(id: String) {
+        clearLocalSteer(id)
+        try {
+            model.workspaceSection(peer, "chat.steerClear", buildJsonObject { put("id", id) })
+            retireSteer(id)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            val raw = failure.message
+            if (ChatSteer.isUnknownMethod((failure as? CoreFailure)?.code, raw)) {
+                steerUnsupported = true
+                return
+            }
+            showNoteFailure(failure, id)
+        }
+    }
+
     suspend fun send(text: String) {
         val id = openId ?: return
         val clean = text.trim()
@@ -656,6 +891,7 @@ fun ChatSection(
         // Sending is engaging: follow is the default, so a new turn resumes
         // it even from a scrollback.
         pinToLatest()
+        if (staged.isEmpty() && tryParkSteer(id, clean)) return
         // Uploaded first, and only then queued: a message that names a file
         // the host does not have yet is worse than a slower send. A refused
         // attachment stops the send with the draft intact. The ids travel on
@@ -824,7 +1060,13 @@ fun ChatSection(
             // rather than the value composed with this effect: this loop
             // outlives the composition that started it.
             if (hostReachable) drainQueue()
-            kotlinx.coroutines.delay(2000)
+            val open = chats.firstOrNull { it.str("id") == id }
+            kotlinx.coroutines.delay(
+                ChatSteer.pollDelayMillis(
+                    open?.bol("running") == true,
+                    ChatSteer.noteOf(open).isNotEmpty(),
+                ),
+            )
         }
     }
 
@@ -1165,7 +1407,16 @@ fun ChatSection(
                         // while you wait.
                         if (openChat?.bol("running") == true) {
                             item(key = "working") {
-                                ChatWorkingIndicator(seed = personaSeed(openId ?: workspace))
+                                val waiting = pending.isNotEmpty()
+                                val step = if (waiting) null else liveStep(transcript)
+                                val speaking = !waiting && step == null &&
+                                    (transcript.lastOrNull() as? ChatDisplayItem.Assistant)?.text?.isNotEmpty() == true
+                                ChatWorkingIndicator(
+                                    seed = personaSeed(openId ?: workspace),
+                                    waiting = waiting,
+                                    step = step,
+                                    speaking = speaking,
+                                )
                             }
                         }
                     }
@@ -1212,6 +1463,25 @@ fun ChatSection(
                 Banner(message, BannerSeverity.WARNING)
                 TextButton(onClick = { setupError = null }) { Text("Dismiss") }
             }
+            val runningTurn = openChat?.bol("running") == true
+            val noteForStep = ChatSteer.promisesNote(
+                runningTurn,
+                staged.isEmpty(),
+                openChat?.str("backend"),
+                openChat?.str("autonomy"),
+                protocol,
+                steerUnsupported,
+            )
+            val steerNote = ChatSteer.noteOf(openChat)
+            if (steerNote.isNotEmpty()) {
+                ChatSteerNoteBanner(
+                    note = steerNote,
+                    onRemove = {
+                        val id = openId ?: return@ChatSteerNoteBanner
+                        scope.launch { clearSteer(id) }
+                    },
+                )
+            }
             ChatQueueStrip(
                 items = pendingQueue,
                 // Paused when the next message is not one this session was
@@ -1252,8 +1522,10 @@ fun ChatSection(
                 chat = chats.firstOrNull { it.str("id") == openId },
                 draft = draft,
                 onDraft = { draft = it },
-                hint = ai.tokenstat.tokenstat.ui.logic.ChatHint.hint(folderName, sending),
+                hint = ChatHint.hint(folderName, sending || runningTurn, note = noteForStep),
                 sending = sending,
+                parking = parkingSteer,
+                sendLabel = if (noteForStep) "Add a note for the next step" else "Send",
                 staged = staged,
                 onPick = { attachError = null; picker.launch(arrayOf("*/*")) },
                 onRemove = { staged = staged - it },
@@ -1261,10 +1533,16 @@ fun ChatSection(
                 onStop = {
                     val id = openId ?: return@ChatComposer
                     scope.launch {
-                        runCatching {
+                        clearLocalSteer(id)
+                        try {
                             model.workspaceSection(peer, "chat.stop", buildJsonObject { put("id", id) })
+                            retireSteer(id)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                        } finally {
+                            sendingIds = sendingIds - id
                         }
-                        sendingIds = sendingIds - id
                     }
                 },
                 backends = backends,
@@ -1470,13 +1748,17 @@ private fun ChatRow(chat: JsonObject) {
     }
 }
 
-/// A tool approval awaiting an answer: verb, preview, and Allow, Always
-/// allow, Deny. Decided approvals read back their outcome instead.
+/// A tool approval awaiting an answer: the step in plain words, the
+/// preview, and Allow, Always allow, Deny. The line under the buttons
+/// names what Always allow actually stores. Decided approvals read back
+/// their outcome instead.
 @Composable
 internal fun ApprovalCard(approval: JsonObject, onResolve: (String) -> Unit) {
-    val verb = approval.str("verb") ?: "Approval"
+    val verb = approval.str("verb")
     val preview = approval.str("preview") ?: ""
     val pending = approval.str("decision").isNullOrBlank()
+    val chip = ChatSeat.approvalWord(verb, pending)
+    val note = ChatSeat.allowAlwaysNote(verb, approval.str("shellPrefix"))
     val colors = LocalTsColors.current
     Column(
         Modifier
@@ -1494,9 +1776,11 @@ internal fun ApprovalCard(approval: JsonObject, onResolve: (String) -> Unit) {
                 modifier = Modifier.weight(1f),
             )
             Text(
-                verb,
+                chip,
                 style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium),
                 color = colors.accent,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         if (preview.isNotBlank()) {
@@ -1507,6 +1791,9 @@ internal fun ApprovalCard(approval: JsonObject, onResolve: (String) -> Unit) {
                 TsAccentButton(label = "Allow", small = true, onClick = { onResolve("allow") })
                 TsSecondaryButton(label = "Always allow", small = true, onClick = { onResolve("allowAlways") })
                 TsSecondaryButton(label = "Deny", small = true, onClick = { onResolve("deny") })
+            }
+            if (note != null) {
+                Text(note, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
             }
         } else {
             Text(
@@ -2100,23 +2387,57 @@ internal fun readAttachment(context: android.content.Context, uri: android.net.U
     )
 }
 
+/// The newest running tool or edit, in the words the seat shows.
+private fun liveStep(items: List<ChatDisplayItem>): String? {
+    for (item in items.asReversed()) {
+        when (item) {
+            is ChatDisplayItem.Tool -> if (item.state.running) {
+                return ChatSeat.phrase(item.state.verb, item.state.target)
+            }
+            is ChatDisplayItem.Edit -> if (item.state.running) {
+                return ChatSeat.phrase("Edit", item.state.path)
+            }
+            else -> Unit
+        }
+    }
+    return null
+}
+
 /// The turn in progress, with the conversation's own face at the same left
 /// edge as an agent reply. Port of `ChatWorkingIndicator`.
 @Composable
-private fun ChatWorkingIndicator(seed: ULong, modifier: Modifier = Modifier) {
+private fun ChatWorkingIndicator(
+    seed: ULong,
+    waiting: Boolean,
+    step: String?,
+    speaking: Boolean,
+    modifier: Modifier = Modifier,
+) {
     val colors = LocalTsColors.current
+    val mood = when {
+        waiting -> PersonaMood.Waiting
+        step != null -> PersonaMood.Running
+        speaking -> PersonaMood.Speaking
+        else -> PersonaMood.Thinking
+    }
+    val label = ChatSeat.seatLabel(waiting, step, speaking)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.s),
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = Space.m, vertical = Space.xs),
+            .height(34.dp)
+            .padding(horizontal = Space.m)
+            .clearAndSetSemantics { contentDescription = label },
     ) {
-        PersonaMark(seed = seed, size = 26.dp, mood = ai.tokenstat.tokenstat.ui.persona.PersonaMood.Thinking)
+        PersonaMark(seed = seed, size = 26.dp, mood = mood)
         Text(
-            "Thinking…",
+            label,
             style = TsType.caption,
             color = colors.textSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
         )
     }
 }
@@ -2136,6 +2457,10 @@ private fun ChatComposer(
     onDraft: (String) -> Unit,
     hint: String,
     sending: Boolean,
+    /// A note is being parked. Send stays Send and stays quiet.
+    parking: Boolean = false,
+    /// What the send control says it will do.
+    sendLabel: String = "Send",
     staged: List<StagedAttachment>,
     onPick: () -> Unit,
     onRemove: (StagedAttachment) -> Unit,
@@ -2167,6 +2492,7 @@ private fun ChatComposer(
     // say so rather than accepting a press it will reject. `sending` alone
     // was this screen's own flag and went false long before the turn did.
     val locked = sending || chat?.bol("running") == true
+    val canSend = !parking && (draft.isNotBlank() || staged.isNotEmpty())
     // An agent that can only run on Bypass is put on it, the way the Apple
     // header enforces it on appear and on every change of agent.
     LaunchedEffect(bypassOnly, autonomy, locked) {
@@ -2311,12 +2637,12 @@ private fun ChatComposer(
                             expanded = false
                             onSend()
                         },
-                        enabled = draft.isNotBlank() || staged.isNotEmpty(),
+                        enabled = canSend,
                     ) {
                         Icon(
                             ActionIcon.Send.vector,
-                            "Send",
-                            tint = if (draft.isNotBlank() || staged.isNotEmpty()) colors.accent else colors.textTertiary,
+                            sendLabel,
+                            tint = if (canSend) colors.accent else colors.textTertiary,
                         )
                     }
                 }

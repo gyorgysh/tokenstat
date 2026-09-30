@@ -446,6 +446,8 @@ struct ChatWorkingIndicator: View {
     /// the character you already associate with this chat.
     var seed: UInt64
     var mood: PersonaMood = .thinking
+    /// What a running tool is doing, in words. Empty leaves the mood's own word.
+    var step: String? = nil
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
@@ -461,6 +463,9 @@ struct ChatWorkingIndicator: View {
             Text(label)
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -470,9 +475,11 @@ struct ChatWorkingIndicator: View {
         .accessibilityLabel(label)
     }
 
-    /// The mood names itself. One list, so a state added to the character
-    /// cannot arrive in the transcript still calling itself "Thinking".
-    private var label: String { mood.label }
+    /// A running tool names the step. Every other mood uses its own word.
+    private var label: String {
+        if mood == .working, let step, !step.isEmpty { return step }
+        return mood.label
+    }
 }
 
 /// The point where a conversation changed hands.
@@ -575,9 +582,10 @@ struct ChatApprovalCard: View {
                         .monospacedDigit()
                         .accessibilityLabel("\(remaining) left to answer")
                 }
-                Text(approval.verb)
+                Text(SeatStep.approvalWord(verb: approval.verb, pending: isPending))
                     .font(Theme.caption.weight(.medium))
                     .foregroundStyle(outcome.tint)
+                    .lineLimit(1)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(outcome.tint.opacity(0.12), in: Capsule())
@@ -589,12 +597,8 @@ struct ChatApprovalCard: View {
                 .lineLimit(4)
             if isPending {
                 ChatApprovalActions(approval: approval, resolve: resolve)
-                if let prefix = approval.shellPrefix {
-                    Text("Always allow remembers \(prefix) for this chat only.")
-                        .font(Theme.caption)
-                        .foregroundStyle(.tertiary)
-                } else {
-                    Text("Always allow remembers \(approval.verb) for this chat only.")
+                if let note = SeatStep.allowAlwaysNote(verb: approval.verb, shellPrefix: approval.shellPrefix) {
+                    Text(note)
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                 }

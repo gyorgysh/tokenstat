@@ -4,5 +4,9 @@
     <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
   </PropertyGroup>
-  <ItemGroup><Compile Include="../../../apps/windows/Pages/ChatHistoryBuffer.cs" Link="ChatHistoryBuffer.cs" /><Compile Include="../../../apps/windows/Navigation/ChatPreviewStore.cs" Link="ChatPreviewStore.cs" /></ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../../apps/windows/Pages/ChatHistoryBuffer.cs" Link="ChatHistoryBuffer.cs" />
+    <Compile Include="../../../apps/windows/Navigation/ChatPreviewStore.cs" Link="ChatPreviewStore.cs" />
+    <Compile Include="../../../apps/windows/Pages/SeatStep.cs" Link="SeatStep.cs" />
+  </ItemGroup>
 </Project>

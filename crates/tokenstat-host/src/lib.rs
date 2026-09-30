@@ -222,4 +222,6 @@ pub use tokenstat_pty::warm_shell_pool;
 /// diagnostics. Desktop clients replace older helpers so these fixes also
 /// reach an already-running always-on host.
 /// Version 24 adds `workspace.worktrees` and `workspace.createWorktree`.
-pub const PROTOCOL_VERSION: &str = "24";
+/// Version 25 adds `chat.steer`, `chat.steerClear` and `chat.steerDeliver`,
+/// so a short note can ride the next tool step while a turn is still running.
+pub const PROTOCOL_VERSION: &str = "25";

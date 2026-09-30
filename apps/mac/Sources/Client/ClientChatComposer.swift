@@ -19,6 +19,9 @@ struct ClientChatComposer: View {
     var attachments: [ChatAttachment]
     var previews: [String: Data]
     var running: Bool
+    /// A message typed now is read on the agent's next step, rather than
+    /// waiting until the turn ends.
+    var sendsAsNote: Bool = false
     var placeholder: String
     var onSend: () -> Void
     var onSendNow: () -> Void = {}
@@ -278,16 +281,21 @@ struct ClientChatComposer: View {
     @ViewBuilder
     private var sendControl: some View {
         Button { sendTapped() } label: {
-            ActionIcon.send.label(running ? "Send after this turn" : "Send").frame(width: 44, height: 44)
+            ActionIcon.send.label(sendTitle).frame(width: 44, height: 44)
         }
         .modifier(ChatSendStyle())
         .environment(\.compactActions, true)
-        .accessibilityLabel(running ? "Send after this turn" : "Send")
+        .accessibilityLabel(sendsAsNote ? "Add a note for the next step" : sendTitle)
         .contextMenu {
             if running {
                 Button("Stop and send now", .send, action: sendNowTapped)
             }
         }
+    }
+
+    private var sendTitle: String {
+        if sendsAsNote { return "Next step" }
+        return running ? "Send after this turn" : "Send"
     }
 
     private var canSend: Bool { !cannotSend }

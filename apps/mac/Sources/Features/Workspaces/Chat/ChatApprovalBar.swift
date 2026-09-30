@@ -45,9 +45,10 @@ struct ChatApprovalBar: View {
                         .labelStyle(.titleOnly)
                 }
                 HStack(spacing: Theme.Space.s) {
-                    Text(approval.verb)
+                    Text(SeatStep.approvalWord(verb: approval.verb, pending: true))
                         .font(Theme.caption.weight(.medium))
                         .foregroundStyle(Theme.accent)
+                        .lineLimit(1)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(Theme.accentSoft, in: Capsule())
@@ -59,6 +60,12 @@ struct ChatApprovalBar: View {
                     Spacer(minLength: 0)
                 }
                 ChatApprovalActions(approval: approval, resolve: resolve)
+                if let note = SeatStep.allowAlwaysNote(verb: approval.verb, shellPrefix: approval.shellPrefix) {
+                    Text(note)
+                        .font(Theme.caption)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)

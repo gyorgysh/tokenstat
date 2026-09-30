@@ -89,10 +89,12 @@ object HubCountsParser {
         summaries.firstOrNull { (it["id"] as? JsonPrimitive)?.contentOrNull == workspaceId }
 }
 
-/// The chat composer hint. A busy composer says what happens next; otherwise
-/// the folder is named, quoted, so the question reads as about that place.
+/// The chat composer hint. A busy composer says the words wait for this
+/// turn, unless they can ride the next step as a note. Otherwise the folder
+/// is named, quoted, so the question reads as about that place.
 object ChatHint {
-    fun hint(folderName: String, busy: Boolean): String {
+    fun hint(folderName: String, busy: Boolean, note: Boolean = false): String {
+        if (note) return "Add a note for the next step"
         if (busy) return "Send after this turn"
         val name = folderName.trim()
         return if (name.isEmpty()) "Ask about this folder" else "Ask about '$name'"

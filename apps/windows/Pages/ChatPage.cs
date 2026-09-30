@@ -8,6 +8,7 @@ using Microsoft.UI;
 using Microsoft.UI.Input;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -26,6 +27,8 @@ namespace Tokenstat.Pages;
 /// The list comes first. One field picks agent, model and effort. Plan and
 /// bypass sit as pills beside it. Enter sends, Shift+Enter inserts a
 /// newline, Escape stops a running turn. Approvals sit in the transcript.
+/// While the agent asks before each tool, a short note rides the next step
+/// instead of waiting out the turn.
 /// </summary>
 internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 {
@@ -339,6 +342,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         RememberDraft();
         _poll?.Cancel();
         var generation = ++_openGeneration;
+        AbandonSteerDelivery();
         _opening = false;
         _openId = null;
         _listReady = false;
@@ -586,6 +590,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         RememberDraft();
         _poll?.Cancel();
         var generation = ++_openGeneration;
+        AbandonSteerDelivery();
         _opening = true;
         // Remove the previous conversation's controls before changing its id.
         // A pending open must never let a click send or rename the new chat
@@ -632,6 +637,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             _opening = false;
             PaintConversation();
             StartPoll();
+            ProbeSteerIfNeeded(fromBusyLoop: false);
         }
         catch (Exception ex)
         {
@@ -1075,15 +1081,17 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (Busy())
         {
             var workingIdx = prefix + visible;
-            // The mood is part of the key, so thinking turning into replying
-            // rebuilds the row instead of leaving a stale face behind.
-            var workingKey = "__working__:" + LiveMood(items);
+            var mood = LiveMood(items);
+            var words = mood == PersonaMood.Working ? WorkingWords(items) : mood.Label();
+            // The words are part of the key, so thinking turning into reading
+            // a file rebuilds the row instead of leaving the old sentence.
+            var workingKey = "__working__:" + words;
             if (workingIdx < _transcript.Children.Count)
             {
                 var existing = _transcript.Children[workingIdx] as FrameworkElement;
                 if (existing?.Tag as string != workingKey)
                 {
-                    var workingBlock = WorkingRow(items);
+                    var workingBlock = WorkingRow(mood, words);
                     workingBlock.Tag = workingKey;
                     _transcript.Children.RemoveAt(workingIdx);
                     _transcript.Children.Insert(workingIdx, workingBlock);
@@ -1091,7 +1099,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             }
             else
             {
-                var working = WorkingRow(items);
+                var working = WorkingRow(mood, words);
                 working.Tag = workingKey;
                 _transcript.Children.Add(working);
             }
@@ -1165,9 +1173,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     /// than holding a pose, because one loop held for a minute reads as a
     /// hang. The face is the motion, so the label beside it stays still.
     /// </summary>
-    private FrameworkElement WorkingRow(List<DisplayItem> items)
+    private FrameworkElement WorkingRow(PersonaMood mood, string words)
     {
-        var mood = LiveMood(items);
         FrameworkElement face = mood == PersonaMood.Thinking
             ? new PersonaPastime(FaceSeed(), 26, PersonaPastime.Repertoire.Thought)
             : new PersonaMark(FaceSeed(), 26, mood);
@@ -1181,24 +1188,30 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         grid.Children.Add(face);
         var label = new TextBlock
         {
-            Text = mood.Label(),
+            Text = words,
             FontSize = 12,
             Opacity = 0.7,
             VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            TextWrapping = TextWrapping.NoWrap,
+            MaxLines = 1,
         };
+        AutomationProperties.SetName(label, words);
         Grid.SetColumn(label, 1);
         grid.Children.Add(label);
-        return new Border
+        var seat = new Border
         {
             Height = WorkingSeatHeight,
             Padding = new Thickness(Theme.SpaceM, 0, Theme.SpaceM, 0),
             Child = grid,
         };
+        AutomationProperties.SetName(seat, words);
+        return seat;
     }
 
     /// <summary>
     /// What the working row says it is doing. An approval waiting on the
-    /// person wins over everything, then a running tool, then growing
+    /// person wins over everything, then a running tool or edit, then growing
     /// prose, like the Mac live mood.
     /// </summary>
     private PersonaMood LiveMood(List<DisplayItem> items)
@@ -1206,7 +1219,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (HasPendingApproval()) return PersonaMood.Waiting;
         foreach (var item in items)
         {
-            if (item.Kind == ItemKind.Tool && item.Running) return PersonaMood.Working;
+            if (item.Running && (item.Kind == ItemKind.Tool || item.Kind == ItemKind.Edit))
+            {
+                return PersonaMood.Working;
+            }
         }
         if (items.Count > 0)
         {
@@ -1217,6 +1233,23 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             }
         }
         return PersonaMood.Thinking;
+    }
+
+    /// <summary>
+    /// The newest running tool or edit, in the words the seat shows.
+    /// Other running rows are skipped, so a later tool stays visible.
+    /// With none left, the sentence is the same word the mood already uses.
+    /// </summary>
+    private static string WorkingWords(List<DisplayItem> items)
+    {
+        for (var index = items.Count - 1; index >= 0; index--)
+        {
+            var item = items[index];
+            if (!item.Running) continue;
+            if (item.Kind == ItemKind.Tool) return SeatStep.Phrase(item.Verb, item.Target);
+            if (item.Kind == ItemKind.Edit) return SeatStep.Phrase("Edit", item.Path);
+        }
+        return "Working";
     }
 
     private bool HasPendingApproval()
@@ -1338,13 +1371,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     {
         var approval = item.Approval ?? new JsonObject();
         var pending = item.Pending;
+        var verb = Format.Text(approval, "verb");
         var body = new StackPanel { Spacing = Theme.SpaceS };
         body.Children.Add(new TextBlock
         {
             Text = pending ? "Permission needed" : "Permission answered",
             FontWeight = FontWeights.SemiBold,
         });
-        body.Children.Add(Chip(Format.Text(approval, "verb")));
+        body.Children.Add(Chip(SeatStep.ApprovalWord(verb, pending)));
         body.Children.Add(new TextBlock
         {
             Text = Format.Text(approval, "preview"),
@@ -1361,6 +1395,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             actions.Children.Add(ActionIconGlyph.PrimaryButton("Always allow", ActionIcon.Allow, async (_, _) => await ResolveAsync(id, "allowAlways")));
             actions.Children.Add(ActionIconGlyph.Button("Deny", ActionIcon.Deny, async (_, _) => await ResolveAsync(id, "deny")));
             body.Children.Add(actions);
+            var note = SeatStep.AllowAlwaysNote(verb, Format.Text(approval, "shellPrefix"));
+            if (!string.IsNullOrEmpty(note)) body.Children.Add(Muted(note));
         }
         else
         {
@@ -1508,6 +1544,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _draft.Background = Theme.PanelBrush;
         _draft.BorderThickness = new Thickness(0);
         _draft.MinHeight = 76;
+        var steerNote = PendingSteerText(_openChat);
+        if (steerNote.Length > 0) well.Children.Add(SteerNoteBanner(steerNote));
         well.Children.Add(PendingMessages());
         well.Children.Add(_draft);
         RebuildAttachStrip();
@@ -1774,6 +1812,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             {
                 _attachments.Remove(remove);
                 RebuildAttachStrip();
+                if (Busy()) RebuildComposerActions();
             };
             _attachStrip.Children.Add(button);
         }
@@ -1785,10 +1824,17 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private void RebuildComposerActions()
     {
+        RefreshComposerHint();
         _composerActions.Children.Clear();
         if (Busy())
         {
-            var queue = ActionIconGlyph.PrimaryButton("Queue", ActionIcon.Send, async (_, _) => await SendAsync());
+            var steering = SteerKnownAvailable();
+            var queue = ActionIconGlyph.PrimaryButton(steering ? "Next step" : "Queue", ActionIcon.Send, async (_, _) => await SendAsync());
+            var tip = steering
+                ? "The agent reads this on its next step."
+                : "Waits until this turn finishes. Stop and send now is on the queued message.";
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(queue, steering ? "Add a note for the next step" : "Queue");
+            ToolTipService.SetToolTip(queue, tip);
             ContextMenus.AddAsync(ContextMenus.Menu(queue), "Stop and send now", async () =>
             {
                 if (_openId is null) return;
@@ -1805,7 +1851,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         }
         else
         {
-            _composerActions.Children.Add(ActionIconGlyph.PrimaryButton("Send", ActionIcon.Send, async (_, _) => await SendAsync()));
+            var send = ActionIconGlyph.PrimaryButton("Send", ActionIcon.Send, async (_, _) => await SendAsync());
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(send, "Send");
+            ToolTipService.SetToolTip(send, "Send");
+            _composerActions.Children.Add(send);
         }
     }
 
@@ -1850,6 +1899,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             }
             _attachments.Add(new StagedFile(id, file.Name));
             RebuildAttachStrip();
+            if (Busy()) RebuildComposerActions();
         }
         catch (Exception ex)
         {
@@ -1875,6 +1925,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             var key = await OutboxKeyAsync(chat);
             if (_openId != chat || !IsLoaded) return;
+            if (await TryParkSteerAsync(chat, text, sendNext, attachmentIds)) return;
             if (_openChat?["sendRevision"] is null) throw new InvalidOperationException("Update the host to use reliable message delivery.");
             var item = new QueuedChatMessage(Guid.NewGuid().ToString("N"), text, attachmentIds, Format.Long(_openChat, "sendRevision"));
             ChatOutbox.Shared.Update(key, rows =>
@@ -1959,10 +2010,19 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (_opening) return;
         if (_openId is null) return;
         patch["id"] = _openId;
+        var steerNote = PendingSteerText(_openChat);
         try
         {
             _suppress = true;
             _openChat = await CallChatAsync("chat.update", patch);
+            // chat.update returns the saved record, which has no parked note.
+            // Keep the one the person still sees until the next list read.
+            if (steerNote.Length > 0
+                && _openChat is JsonObject updated
+                && PendingSteerText(updated).Length == 0)
+            {
+                updated["pendingSteer"] = steerNote;
+            }
         }
         catch (Exception ex)
         {
@@ -2040,24 +2100,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     DispatcherQueue.TryEnqueue(() =>
                     {
                         ApplyPoll(approvals);
-                        _openChat = FindChat(chatId);
-                        var running = Format.Flag(_openChat, "running");
-                        var started = _events.Count > 0 || !string.IsNullOrEmpty(Format.Text(_openChat, "resumeToken"));
-                        _running = running;
-                        _started = started;
-                        if (_titleBox.FocusState == FocusState.Unfocused)
-                        {
-                            _titleBox.Text = Format.Text(_openChat, "title", "New chat");
-                        }
-                        if (wasBusy != Busy())
-                        {
-                            PaintConversation();
-                        }
-                        else if (transcriptChanged)
-                        {
-                            RebuildTranscript();
-                            RefreshCost();
-                        }
+                        ApplyOpenChat(chatId, wasBusy, transcriptChanged);
                         tcs.SetResult();
                     });
                     await tcs.Task;
@@ -2065,24 +2108,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 else
                 {
                     ApplyPoll(approvals);
-                    _openChat = FindChat(chatId);
-                    var running = Format.Flag(_openChat, "running");
-                    var started = _events.Count > 0 || !string.IsNullOrEmpty(Format.Text(_openChat, "resumeToken"));
-                    _running = running;
-                    _started = started;
-                    if (_titleBox.FocusState == FocusState.Unfocused)
-                    {
-                        _titleBox.Text = Format.Text(_openChat, "title", "New chat");
-                    }
-                    if (wasBusy != Busy())
-                    {
-                        PaintConversation();
-                    }
-                    else if (transcriptChanged)
-                    {
-                        RebuildTranscript();
-                        RefreshCost();
-                    }
+                    ApplyOpenChat(chatId, wasBusy, transcriptChanged);
                 }
                 if (!Busy())
                 {
@@ -2268,7 +2294,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     {
                         Id = "tool-" + callId,
                         Kind = ItemKind.Tool,
-                        Verb = Format.Text(ev, "verb", "Tool"),
+                        // Empty when the event named no tool. The row then says Working.
+                        Verb = Format.Text(ev, "verb"),
                         Target = Format.Text(ev, "target"),
                         Running = true,
                         StartedAt = Format.Long(row, "atMs"),

@@ -632,6 +632,9 @@ struct ChatParams {
     call_id: Option<String>,
     ok: Option<bool>,
     detail: Option<String>,
+    /// `chat.toolResult` only. Take a parked note without recording a tool outcome.
+    /// A model-step hook has no tool call to record.
+    note_only: Option<bool>,
     offset: Option<u64>,
     /// Opaque, from a previous `chat.eventPage`. Absent asks for the newest
     /// page. Never built by a client: it names a byte boundary in a file
@@ -2056,10 +2059,14 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
     let p: ChatParams = parse(params)?;
     let store = crate::chat::shared();
     match method {
-        "chat.list" => serde_json::to_value(
-            store.list(&p.workspace_id.ok_or("chat.list needs a workspaceId")?),
-        )
-        .envelope(),
+        "chat.list" => {
+            let mut value = serde_json::to_value(
+                store.list(&p.workspace_id.ok_or("chat.list needs a workspaceId")?),
+            )
+            .envelope()?;
+            store.attach_pending_steers(&mut value);
+            Ok(value)
+        }
         "chat.recent" => {
             serde_json::to_value(store.recent(p.limit.unwrap_or(20) as usize)).envelope()
         }
@@ -2121,6 +2128,18 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             store.stop(&p.id.ok_or("chat.stop needs id")?)?;
             Ok(json!({ "stopped": true }))
         }
+        "chat.steer" => {
+            store.steer(
+                &p.id.ok_or("chat.steer needs id")?,
+                &p.text.ok_or("chat.steer needs text")?,
+            )?;
+            Ok(json!({ "parked": true }))
+        }
+        "chat.steerClear" => {
+            store.steer_clear(&p.id.ok_or("chat.steerClear needs id")?)?;
+            Ok(json!({ "cleared": true }))
+        }
+        "chat.steerDeliver" => store.steer_deliver(&p.id.ok_or("chat.steerDeliver needs id")?),
         "chat.events" => serde_json::to_value(store.tail_events_positions(
             &p.id.ok_or("chat.events needs id")?,
             p.offset.unwrap_or(0),
@@ -2196,13 +2215,28 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
         ))
         .map_err(|error| error.to_string().into()),
         "chat.toolResult" => {
+            let token = p.turn_token.ok_or("chat.toolResult needs turnToken")?;
+            if p.note_only == Some(true) {
+                let note = store.take_steer_for_token(&token)?;
+                return Ok(match note {
+                    Some(note) => json!({ "note": note }),
+                    None => json!({}),
+                });
+            }
             store.record_turn_result(
-                &p.turn_token.ok_or("chat.toolResult needs turnToken")?,
+                &token,
                 &p.call_id.ok_or("chat.toolResult needs callId")?,
                 p.ok.unwrap_or(false),
                 p.detail,
             )?;
-            Ok(json!({ "recorded": true }))
+            // A missing credential after a successful record is a turn that
+            // already ended. The result stays recorded, and the note stays
+            // parked for the client to send once the turn is idle.
+            let note = store.take_steer_for_token(&token).ok().flatten();
+            Ok(match note {
+                Some(note) => json!({ "recorded": true, "note": note }),
+                None => json!({ "recorded": true }),
+            })
         }
         "chat.resolveApproval" => serde_json::to_value(store.resolve_approval(
             &p.id.ok_or("chat.resolveApproval needs id")?,

@@ -293,7 +293,7 @@ internal sealed partial class ChatPage
 
         var verb = new TextBlock
         {
-            Text = string.IsNullOrEmpty(item.Verb) ? "Tool" : item.Verb,
+            Text = SeatStep.Word(item.Verb, item.Running),
             FontSize = 13,
             FontWeight = FontWeights.Medium,
             Foreground = tint,
@@ -325,7 +325,7 @@ internal sealed partial class ChatPage
             header.Children.Add(stat);
         }
 
-        if (item.Running)
+        if (item.Running && !SeatStep.Speaks(item.Verb))
         {
             var running = new TextBlock
             {
@@ -338,18 +338,41 @@ internal sealed partial class ChatPage
             Grid.SetColumn(running, 4);
             header.Children.Add(running);
         }
-        else if (!string.IsNullOrEmpty(item.Duration))
+        else
         {
-            var time = new TextBlock
+            var status = new StackPanel
             {
-                Text = item.Duration,
-                FontFamily = Fonts.Mono,
-                FontSize = 10,
-                Opacity = 0.55,
+                Orientation = Orientation.Horizontal,
+                Spacing = Theme.SpaceS,
                 VerticalAlignment = VerticalAlignment.Center,
             };
-            Grid.SetColumn(time, 4);
-            header.Children.Add(time);
+            if (item.Failed)
+            {
+                status.Children.Add(new TextBlock
+                {
+                    Text = "Failed",
+                    FontFamily = Fonts.Mono,
+                    FontSize = 10,
+                    Foreground = Theme.Brush(static () => Theme.Danger),
+                    VerticalAlignment = VerticalAlignment.Center,
+                });
+            }
+            if (!string.IsNullOrEmpty(item.Duration))
+            {
+                status.Children.Add(new TextBlock
+                {
+                    Text = item.Duration,
+                    FontFamily = Fonts.Mono,
+                    FontSize = 10,
+                    Opacity = 0.55,
+                    VerticalAlignment = VerticalAlignment.Center,
+                });
+            }
+            if (status.Children.Count > 0)
+            {
+                Grid.SetColumn(status, 4);
+                header.Children.Add(status);
+            }
         }
 
         if (lines.Count > 0 && !item.Running)

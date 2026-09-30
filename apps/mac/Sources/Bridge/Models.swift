@@ -2796,6 +2796,9 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     var lastMessageAuthor: String?
     var sendRevision: UInt64?
     var running: Bool
+    /// A note the host will hand to the next tool step. Injected on `chat.list`
+    /// only, so a restart cannot send words the person no longer sees.
+    var pendingSteer: String?
 
     /// A saved page has no live setup or permissions. These inert values are
     /// replaced by the host's record before the reader can return to live work.
@@ -2822,7 +2825,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         case personaID = "personaId"
         case model, effort, systemPrompt, mode, autonomy, resumeToken
         case allowedTools, allowedShellPrefixes, budgetSeconds
-        case createdAtMs, updatedAtMs, lastMessageAtMs, lastMessageAuthor, running, sendRevision
+        case createdAtMs, updatedAtMs, lastMessageAtMs, lastMessageAuthor, running, sendRevision, pendingSteer
     }
 
     init(from decoder: Decoder) throws {
@@ -2847,6 +2850,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         lastMessageAtMs = try c.decodeIfPresent(Int64.self, forKey: .lastMessageAtMs)
         lastMessageAuthor = try c.decodeIfPresent(String.self, forKey: .lastMessageAuthor)
         running = try c.decodeIfPresent(Bool.self, forKey: .running) ?? false
+        pendingSteer = try c.decodeIfPresent(String.self, forKey: .pendingSteer)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -2870,7 +2874,18 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         try c.encodeIfPresent(lastMessageAtMs, forKey: .lastMessageAtMs)
         try c.encodeIfPresent(lastMessageAuthor, forKey: .lastMessageAuthor)
         try c.encode(running, forKey: .running)
+        try c.encodeIfPresent(pendingSteer, forKey: .pendingSteer)
     }
+}
+
+/// Answer from `chat.steerDeliver`.
+///
+/// `delivered` is false when the note did not start a turn. The conversation,
+/// when present, is the disk record of the turn that did start, and it does
+/// not carry the parked note.
+struct ChatSteerDelivery: Codable, Sendable {
+    var delivered: Bool
+    var conversation: ChatConversation?
 }
 
 /// Host-wide chat metadata for the Workspaces shortcut.

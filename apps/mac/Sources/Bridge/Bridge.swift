@@ -1268,6 +1268,21 @@ extension Bridge {
         _ = try await chatInvoke(peer: peer, "chat.stop", ["id": id], as: Ack.self)
     }
 
+    /// Park a short note on the next tool step. The turn keeps going.
+    static func steerChat(id: String, text: String, peer: String? = nil) async throws {
+        _ = try await chatInvoke(peer: peer, "chat.steer", ["id": id, "text": text], as: Ack.self)
+    }
+
+    /// Drop a parked note so it cannot ride a tool result or start a turn.
+    static func steerClearChat(id: String, peer: String? = nil) async throws {
+        _ = try await chatInvoke(peer: peer, "chat.steerClear", ["id": id], as: Ack.self)
+    }
+
+    /// Send a parked note once the turn has finished, if it is still there.
+    static func steerDeliverChat(id: String, peer: String? = nil) async throws -> ChatSteerDelivery {
+        try await chatInvoke(peer: peer, "chat.steerDeliver", ["id": id], as: ChatSteerDelivery.self)
+    }
+
     static func chatEvents(id: String, offset: UInt64, tailCursor: String? = nil, peer: String? = nil) async throws -> ChatEventChunk {
         var params: [String: Any] = ["id": id, "offset": offset, "stablePositions": true]
         if let tailCursor { params["tailCursor"] = tailCursor }

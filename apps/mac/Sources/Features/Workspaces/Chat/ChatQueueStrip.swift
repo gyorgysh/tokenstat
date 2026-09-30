@@ -93,6 +93,42 @@ struct ChatQueueStrip: View {
     }
 }
 
+/// A short note parked for the next tool step, above the waiting messages.
+///
+/// It is not a queued prompt. The agent reads it beside the next result, and
+/// removing it drops the note before that step arrives.
+struct ChatSteerNoteBanner: View {
+    let note: String
+    var onRemove: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(spacing: Theme.Space.s) {
+                Text("On the next step")
+                    .font(Theme.caption.weight(.medium))
+                    .foregroundStyle(Theme.accent)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Button("Remove", .dismiss, action: onRemove)
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+                    .help("Remove this note")
+            }
+            Text(note)
+                .font(Theme.callout)
+                .lineLimit(3)
+        }
+        .padding(Theme.Space.s)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Theme.accent.opacity(0.35), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("On the next step. \(note)")
+    }
+}
+
 /// The rest of the queue, as a task sheet rather than a system form.
 ///
 /// A NavigationStack sheet on the Mac draws the platform's grey footer and a

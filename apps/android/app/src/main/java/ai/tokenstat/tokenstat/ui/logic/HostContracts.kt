@@ -9,7 +9,7 @@ import kotlinx.serialization.json.longOrNull
 /// `expectedProtocolVersion` and `RemoteHostFeature` minimums, plus the
 /// `insights.snapshot` (proto 5) shape the Mac uses.
 object HostContracts {
-    const val PROTOCOL_VERSION = "24"
+    const val PROTOCOL_VERSION = "25"
     const val WORKTREES_MIN_PROTOCOL = 24
     const val CHAT_MIN_PROTOCOL = 4
     const val PULLS_MIN_PROTOCOL = 3
@@ -40,12 +40,14 @@ object HostContracts {
     /// 20 added checked task runs, exact-run stops and launch receipts.
     /// Version 21 added revision-checked automation edits and create/run
     /// receipts. Version 22 added revision-checked workflow edits.
+    /// Version 25 adds a short note that rides the next tool step.
     const val TASK_EDITING_MIN_PROTOCOL = 17
     const val TASK_DELETION_MIN_PROTOCOL = 18
     const val TASK_CREATION_MIN_PROTOCOL = 19
     const val TASK_EXECUTION_MIN_PROTOCOL = 20
     const val AUTOMATION_RECEIPTS_MIN_PROTOCOL = 21
     const val WORKFLOW_EDITING_MIN_PROTOCOL = 22
+    const val STEER_MIN_PROTOCOL = 25
 
     fun supportsTaskEditing(protocol: Long?): Boolean =
         protocol == null || protocol >= TASK_EDITING_MIN_PROTOCOL
@@ -64,6 +66,9 @@ object HostContracts {
 
     fun supportsWorkflowEditing(protocol: Long?): Boolean =
         protocol == null || protocol >= WORKFLOW_EDITING_MIN_PROTOCOL
+
+    fun supportsSteer(protocol: Long?): Boolean =
+        protocol == null || protocol >= STEER_MIN_PROTOCOL
 
     /// Version 6 added asking the host to read an agent's model list again,
     /// mirroring `RemoteHostFeature.modelRefresh`. An older host still lists

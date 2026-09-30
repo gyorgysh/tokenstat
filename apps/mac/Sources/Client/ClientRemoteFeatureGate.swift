@@ -31,6 +31,7 @@ enum RemoteHostFeature: Hashable {
     case taskExecution
     case automationReceipts
     case workflowEditing
+    case steer
 
     var title: String {
         switch self {
@@ -55,6 +56,7 @@ enum RemoteHostFeature: Hashable {
         case .taskExecution: "Running tasks"
         case .automationReceipts: "Saving automations"
         case .workflowEditing: "Saving workflows"
+        case .steer: "Notes on the next step"
         }
     }
 
@@ -81,6 +83,7 @@ enum RemoteHostFeature: Hashable {
     /// Version 20 adds checked task runs, exact-run stops and launch receipts.
     /// Version 21 adds revision-checked automation edits and create/run receipts.
     /// Version 22 adds revision-checked workflow edits.
+    /// Version 25 adds a short note that rides the next tool step.
     var minimumProtocol: Int {
         switch self {
         case .worktrees: 24
@@ -107,6 +110,7 @@ enum RemoteHostFeature: Hashable {
         case .taskExecution: 20
         case .automationReceipts: 21
         case .workflowEditing: 22
+        case .steer: 25
         }
     }
 
@@ -133,6 +137,7 @@ enum RemoteHostFeature: Hashable {
         case .taskExecution: "play.fill"
         case .automationReceipts: "bolt.fill"
         case .workflowEditing: "square.and.arrow.down"
+        case .steer: "text.bubble"
         }
     }
 

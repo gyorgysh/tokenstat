@@ -47,7 +47,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 /// Messages waiting for the open turn to finish, sitting above the composer.
@@ -314,4 +317,53 @@ private fun copyToClipboard(context: Context, text: String) {
     if (text.isEmpty()) return
     val manager = context.getSystemService(ClipboardManager::class.java) ?: return
     manager.setPrimaryClip(ClipData.newPlainText("message", text))
+}
+
+/// A note waiting to ride the next tool step. Shown even when nothing else
+/// is queued, because the words are already with the agent.
+@Composable
+fun ChatSteerNoteBanner(
+    note: String,
+    onRemove: () -> Unit,
+) {
+    val colors = LocalTsColors.current
+    val shape = RoundedCornerShape(16.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.accentSoft)
+            .border(1.dp, colors.accent.copy(alpha = 0.35f), shape)
+            .padding(Space.s),
+        horizontalArrangement = Arrangement.spacedBy(Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            Modifier
+                .weight(1f)
+                .semantics(mergeDescendants = false) {
+                    contentDescription = "On the next step. $note"
+                },
+            verticalArrangement = Arrangement.spacedBy(Space.xs),
+        ) {
+            Text(
+                "On the next step",
+                style = TsType.caption.copy(fontWeight = FontWeight.Medium),
+                color = colors.accent,
+            )
+            Text(
+                note,
+                style = TsType.callout,
+                color = colors.textPrimary,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        TsSecondaryButton(
+            label = "Remove",
+            icon = ActionIcon.Delete.vector,
+            small = true,
+            onClick = onRemove,
+        )
+    }
 }

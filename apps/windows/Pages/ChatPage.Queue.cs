@@ -130,15 +130,26 @@ internal sealed partial class ChatPage
         if (!IsLoaded || _openId != chat) return false;
         var before = Busy();
         var hasAuthorizedQueue = _authorizedQueue.Count > 0;
-        if (hasAuthorizedQueue) await DrainQueueAsync();
+        var hasNote = PendingSteerText(_openChat).Length > 0;
+        if (hasAuthorizedQueue || hasNote) await DrainQueueAsync();
         if (!IsLoaded || _openId != chat) return false;
         if (hasAuthorizedQueue || before != Busy()) PaintConversation();
         return true;
     }
 
-    private async Task DrainQueueAsync()
+    private async Task DrainQueueAsync(bool deliverNote = true)
     {
-        if (_sending || Busy() || _openId is not string chat || _outboxKey is not string key || !IsLoaded) return;
+        // A parked note does not need the outbox key, and it goes out before
+        // any queued message. The flag is set by the delivery itself so a
+        // poll tick cannot start a second one.
+        if (_sending || _deliveringSteer || _openId is not string chat || !IsLoaded) return;
+        if (PendingSteerText(_openChat).Length > 0)
+        {
+            if (!deliverNote || Busy()) return;
+            await DeliverParkedSteerAsync(chat);
+            return;
+        }
+        if (Busy() || _outboxKey is not string key) return;
         var candidate = ChatOutbox.Shared.Read(key).FirstOrDefault();
         if (candidate is null || candidate.AttemptedAt.HasValue || !_authorizedQueue.Contains(candidate.Id)) return;
         _sending = true;

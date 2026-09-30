@@ -43,6 +43,8 @@ const PAGE_BYTES: u64 = 768 * 1024;
 /// rather than pulling the whole archive into memory looking for a newline.
 const PAGE_RECORD_BYTES: u64 = 4 * 1024 * 1024;
 const ATTACHMENT_CAP: usize = 12 * 1024 * 1024;
+/// Short enough to ride the next step. A longer note is its own message.
+const STEER_NOTE_MAX_CHARS: usize = 1_500;
 /// The most assistant text the end-of-turn output-link pass reads. Links are
 /// taken from the final reply, so only its tail has to survive.
 const ASSISTANT_TEXT_TAIL: usize = 512 * 1024;
@@ -415,6 +417,29 @@ pub struct Store {
     /// hook reads contains the opaque value, while this map is what binds it
     /// to exactly one live conversation at the daemon boundary.
     turn_tokens: Mutex<HashMap<String, TurnBinding>>,
+    /// One short note the person added while a turn was running. Memory only.
+    /// It rides the next step, or becomes the next message if the turn ends
+    /// first. A restart drops it rather than sending it later unasked.
+    steers: Mutex<HashMap<String, String>>,
+    /// Conversations whose parked note must not start a turn. Stop and a
+    /// removed note set this so a delivery that already holds the text comes
+    /// back without launching. A person's own send, or a newer note, clears it.
+    suppress_follow_up: Mutex<HashSet<String>>,
+}
+
+/// How `send` finished. A suppressed follow-up is a note Stop already retired,
+/// so the caller must not treat it as a turn that started.
+enum SendOutcome {
+    Started(Conversation),
+    Suppressed(Conversation),
+}
+
+impl SendOutcome {
+    fn into_conversation(self) -> Conversation {
+        match self {
+            Self::Started(chat) | Self::Suppressed(chat) => chat,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -461,6 +486,45 @@ impl Drop for PendingTurnCredential {
     }
 }
 
+/// Retires a private muse hook home that never reached the drain thread.
+///
+/// Every fallible step between installing that home and a successful spawn
+/// runs with this guard alive. Missing one would leave the home on disk
+/// after the send refused.
+struct PendingMuseHome {
+    root: Option<PathBuf>,
+}
+
+impl PendingMuseHome {
+    fn idle() -> Self {
+        Self { root: None }
+    }
+
+    fn arm(&mut self, root: PathBuf) {
+        self.root = Some(root);
+    }
+
+    /// The spawned turn's drain thread now owns cleanup.
+    fn release(&mut self) -> Option<PathBuf> {
+        self.root.take()
+    }
+}
+
+impl Drop for PendingMuseHome {
+    fn drop(&mut self) {
+        if let Some(root) = self.root.take() {
+            crate::chat_gate::remove_muse_home(&root);
+        }
+    }
+}
+
+/// Muse takes its note through a private hook home, which only a unix host
+/// builds. Elsewhere a note would never ride a step, so it is refused and
+/// the client queues the words instead.
+fn note_backend(backend: &str) -> bool {
+    matches!(backend, "claude" | "codex") || (backend == "muse" && cfg!(unix))
+}
+
 pub fn shared() -> Arc<Store> {
     static STORE: OnceLock<Arc<Store>> = OnceLock::new();
     Arc::clone(STORE.get_or_init(|| Arc::new(Store::load())))
@@ -477,6 +541,8 @@ impl Store {
             personas: Mutex::new(PersonaIndex::default()),
             approvals: Mutex::new(Vec::new()),
             turn_tokens: Mutex::new(HashMap::new()),
+            steers: Mutex::new(HashMap::new()),
+            suppress_follow_up: Mutex::new(HashSet::new()),
         }
     }
 
@@ -530,6 +596,8 @@ impl Store {
             personas: Mutex::new(personas),
             approvals: Mutex::new(Vec::new()),
             turn_tokens: Mutex::new(HashMap::new()),
+            steers: Mutex::new(HashMap::new()),
+            suppress_follow_up: Mutex::new(HashSet::new()),
         };
         for (id, backend) in interrupted {
             store.record_events(
@@ -863,6 +931,210 @@ impl Store {
                 backend: binding.backend,
             },
         )
+    }
+
+    /// Take the parked note for a live turn, once, and only when that turn's
+    /// agent can take a note. Any other backend leaves the note in place. An
+    /// invalid credential is an error so the caller can ignore it without
+    /// failing a result that was already recorded.
+    pub fn take_steer_for_token(&self, turn_token: &str) -> Result<Option<String>, String> {
+        let binding = self
+            .turn_tokens
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(turn_token)
+            .cloned()
+            .ok_or("the chat turn credential is invalid or expired")?;
+        if !note_backend(&binding.backend) {
+            return Ok(None);
+        }
+        Ok(self
+            .steers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&binding.conversation_id))
+    }
+
+    /// Park one short note on the next step of a turn that is already running.
+    ///
+    /// The note is not a chat message. The next step for an agent that can
+    /// carry extra context hands it over, and the turn keeps going. A second
+    /// note replaces the first. Stop drops it.
+    pub fn steer(&self, id: &str, text: &str) -> Result<(), String> {
+        validate_record_id(id)?;
+        let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
+        if !self.turn_is_live(id)? {
+            return Err("This chat is not in the middle of a turn.".into());
+        }
+        let chat = self.get(id)?;
+        if !note_backend(&chat.backend) {
+            return Err("This agent cannot take a note mid-turn.".into());
+        }
+        if chat.backend != "muse" && chat.autonomy != "standard" {
+            return Err(
+                "This chat is not asking before tools, so a note cannot ride the next step.".into(),
+            );
+        }
+        let note = text.trim();
+        if note.is_empty() {
+            return Err("Write the note you want on the next step.".into());
+        }
+        if note.chars().count() > STEER_NOTE_MAX_CHARS {
+            return Err(
+                "That note is too long to ride the next step. Send it as its own message.".into(),
+            );
+        }
+        self.steers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(id.to_string(), note.to_string());
+        self.suppress_follow_up
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(id);
+        Ok(())
+    }
+
+    /// Drop a parked note so it cannot ride the next step or start a turn.
+    pub fn steer_clear(&self, id: &str) -> Result<(), String> {
+        validate_record_id(id)?;
+        let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
+        self.get(id)?;
+        self.retire_steer(id);
+        Ok(())
+    }
+
+    /// Send a parked note as the next message once the turn has finished.
+    ///
+    /// Called by the client that still shows the note. If the turn is still
+    /// going, this refuses and leaves the note where it is. If Stop already
+    /// retired it, the answer is that nothing was sent.
+    pub fn steer_deliver(self: &Arc<Self>, id: &str) -> Result<Value, DispatchError> {
+        let Some(note) = self.claim_idle_steer(id)? else {
+            return Ok(json!({ "delivered": false }));
+        };
+        match self.send_inner(id, &note, &[], None, None, None, true) {
+            Ok(SendOutcome::Started(chat)) => Ok(json!({
+                "delivered": true,
+                "conversation": chat,
+            })),
+            Ok(SendOutcome::Suppressed(_)) => Ok(json!({ "delivered": false })),
+            Err(error) => {
+                self.restore_steer_if_idle(id, &note);
+                Err(error)
+            }
+        }
+    }
+
+    /// Copy parked notes onto a `chat.list` payload. They stay out of the
+    /// conversation record. A restart cannot send one the person no longer sees.
+    pub fn attach_pending_steers(&self, value: &mut Value) {
+        let Some(rows) = value.as_array_mut() else {
+            return;
+        };
+        let steers = self.steers.lock().unwrap_or_else(PoisonError::into_inner);
+        for row in rows {
+            let Some(id) = row.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(note) = steers.get(id) else {
+                continue;
+            };
+            let Some(object) = row.as_object_mut() else {
+                continue;
+            };
+            object.insert("pendingSteer".into(), Value::String(note.clone()));
+        }
+    }
+
+    /// Forget a parked note and refuse a delivery that already holds its text.
+    ///
+    /// The two maps are never locked together. Holding both is how a Stop and
+    /// a delivery would wait on each other.
+    fn retire_steer(&self, id: &str) {
+        self.steers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(id);
+        self.suppress_follow_up
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(id.to_string());
+    }
+
+    /// A follow-up is the note Stop may already have retired. A person's own
+    /// send clears that refusal and is never skipped.
+    ///
+    /// A newer note parked after this text was taken also skips the launch.
+    /// The newer words stay in the map for the next step.
+    fn follow_up_should_skip(&self, id: &str, follow_up: bool) -> bool {
+        if !follow_up {
+            self.suppress_follow_up
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(id);
+            return false;
+        }
+        let suppressed = self
+            .suppress_follow_up
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(id);
+        let replaced = self
+            .steers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains_key(id);
+        suppressed || replaced
+    }
+
+    fn turn_is_live(&self, id: &str) -> Result<bool, String> {
+        let running = self.get(id)?.running;
+        let active = self
+            .active
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains_key(id);
+        Ok(running || active)
+    }
+
+    /// Take the note only while nothing is running. The acceptance lock is
+    /// dropped with this function, before a delivery tries to send.
+    fn claim_idle_steer(&self, id: &str) -> Result<Option<String>, String> {
+        validate_record_id(id)?;
+        let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
+        if self.turn_is_live(id)? {
+            return Err("This chat is still in the middle of a turn.".into());
+        }
+        Ok(self
+            .steers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(id))
+    }
+
+    /// Put a note back when the send that was supposed to carry it did not
+    /// start, and the turn is still idle. A newer note, a Stop, or a turn
+    /// that started in between wins, and this copy is dropped.
+    fn restore_steer_if_idle(&self, id: &str, note: &str) {
+        let Ok(_acceptance) = crate::chat_receipts::Operation::conversation(&self.root, id) else {
+            return;
+        };
+        let suppressed = self
+            .suppress_follow_up
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(id);
+        if suppressed || self.turn_is_live(id).unwrap_or(true) {
+            return;
+        }
+        let mut steers = self.steers.lock().unwrap_or_else(PoisonError::into_inner);
+        if !steers.contains_key(id) {
+            steers.insert(id.to_string(), note.to_string());
+        }
     }
 
     /// Give one spawned turn an opaque credential. This is separate from the
@@ -1908,6 +2180,32 @@ impl Store {
         client_message_created_at_ms: Option<i64>,
         expected_revision: Option<u64>,
     ) -> Result<Conversation, DispatchError> {
+        self.send_inner(
+            id,
+            text,
+            attachment_ids,
+            client_message_id,
+            client_message_created_at_ms,
+            expected_revision,
+            false,
+        )
+        .map(SendOutcome::into_conversation)
+    }
+
+    /// `follow_up` is a parked note being sent after its turn ended. Stop can
+    /// retire that note after it was already taken, and this returns the
+    /// conversation without launching. A person's own send is never that path.
+    #[allow(clippy::too_many_arguments)]
+    fn send_inner(
+        self: &Arc<Self>,
+        id: &str,
+        text: &str,
+        attachment_ids: &[String],
+        client_message_id: Option<&str>,
+        client_message_created_at_ms: Option<i64>,
+        expected_revision: Option<u64>,
+        follow_up: bool,
+    ) -> Result<SendOutcome, DispatchError> {
         validate_record_id(id)?;
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         crate::workspace_policy::require_current_access()?;
@@ -1959,7 +2257,9 @@ impl Store {
                     return Err("that message id was already used for a different message".into());
                 }
                 match receipt.state {
-                    crate::chat_receipts::ReceiptState::Accepted => return Ok(chat),
+                    crate::chat_receipts::ReceiptState::Accepted => {
+                        return Ok(SendOutcome::Started(chat));
+                    }
                     // A missing transcript row cannot prove that spawn never
                     // happened. Preserve this receipt for explicit review.
                     crate::chat_receipts::ReceiptState::Pending
@@ -1985,6 +2285,12 @@ impl Store {
                 "conversation_changed",
                 "This conversation changed before your message was sent. Review the latest conversation and try again. Your pending copy stays here.",
             ));
+        }
+        // After a receipt replay, which must not clear a Stop, and before the
+        // running guard, which would turn a retired note into an error the
+        // caller then puts back.
+        if self.follow_up_should_skip(id, follow_up) {
+            return Ok(SendOutcome::Suppressed(chat));
         }
         if chat.running
             || self
@@ -2054,7 +2360,11 @@ impl Store {
         // PATH lookup would be wrong under launchd and inside the private
         // environment an agent CLI runs in, so this is the absolute path and
         // `chat_gate` is what turns it into a runnable command line.
-        let helper = if chat.autonomy == "standard" {
+        // Muse still needs the helper on a bypass turn. Its note rides a model
+        // step whether or not the turn asks first.
+        let asks_before_tools = chat.autonomy == "standard";
+        let muse_note = chat.backend == "muse" && note_backend("muse");
+        let helper = if asks_before_tools || muse_note {
             Some(std::env::current_exe().map_err(|_| "cannot locate the tokenstat host hook")?)
         } else {
             None
@@ -2079,7 +2389,7 @@ impl Store {
                 attachments: &attachments,
             },
         )?;
-        let turn = if chat.autonomy == "standard" {
+        let turn = if asks_before_tools || muse_note {
             let token = self.register_turn_token(id, &chat.backend)?;
             match self.write_turn_file(id, &token) {
                 Ok(file) => Some((token, file)),
@@ -2097,6 +2407,7 @@ impl Store {
         let mut pending_credential = turn
             .as_ref()
             .map(|(token, file)| PendingTurnCredential::new(self, token.clone(), file.clone()));
+        let mut pending_muse = PendingMuseHome::idle();
         let mut environment = Vec::new();
         if let Some((_, turn_file)) = &turn {
             environment.push((
@@ -2174,6 +2485,27 @@ impl Store {
         } else {
             None
         };
+        if muse_note {
+            let hook_helper = helper
+                .as_deref()
+                .ok_or(crate::chat_gate::MUSE_NOTE_PREPARE)?;
+            let turn_file = turn
+                .as_ref()
+                .map(|(_, file)| file.as_path())
+                .ok_or(crate::chat_gate::MUSE_NOTE_PREPARE)?;
+            let socket = crate::server::default_socket_path()?;
+            let user_config =
+                tokenstat_paths::home_dir().map(|home| home.join(".config").join("muse"));
+            if let Some(root) = crate::chat_gate::install_muse_note_home(
+                user_config.as_deref(),
+                hook_helper,
+                &socket,
+                turn_file,
+            )? {
+                environment.push(("XDG_CONFIG_HOME".into(), root.display().to_string()));
+                pending_muse.arm(root);
+            }
+        }
         // Read last of the things that can refuse this send, so a repeat of a
         // message the host already took is answered even if the folder has
         // since been unregistered.
@@ -2230,6 +2562,7 @@ impl Store {
         if let Some(pending) = pending_credential.as_mut() {
             pending.release();
         }
+        let muse_hook_home = pending_muse.release();
         self.active
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -2291,6 +2624,15 @@ impl Store {
             }
             self.mark_last_message(id, user_at, "user")?;
             self.retitle_if_untitled(id, prompt)?;
+            // The person's own message is on the timeline. A note parked for
+            // the turn this replaces must not ride the next tool of the new
+            // one. A follow-up is that note, so it is left for the hooks.
+            if !follow_up {
+                self.steers
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(id);
+            }
             OpenOptions::new()
                 .read(true)
                 .write(true)
@@ -2357,10 +2699,15 @@ impl Store {
                     if let Some(home) = opencode_hook_home {
                         let _ = fs::remove_dir_all(home);
                     }
+                    if let Some(home) = muse_hook_home {
+                        crate::chat_gate::remove_muse_home(&home);
+                    }
                 },
             );
         });
-        recorded.map_err(DispatchError::delivery_unknown)
+        recorded
+            .map(SendOutcome::Started)
+            .map_err(DispatchError::delivery_unknown)
     }
 
     pub fn stop(&self, id: &str) -> Result<(), String> {
@@ -2374,6 +2721,9 @@ impl Store {
             .get(id)
             .cloned();
         if let Some(pty) = pty {
+            // Before kill, and before any path that clears `running`. A poll
+            // must not see a finished turn that still carries the note.
+            self.retire_steer(id);
             self.killed
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -2424,10 +2774,11 @@ impl Store {
                         .into(),
                 );
             }
-            // Also terminate the transcript's open tools. Clearing only the
-            // conversation bit left older clients treating a dangling tool
-            // as a live turn, so Stop could never release their composer.
+            // After the conversation is known to be this instance's, and
+            // before `running` is cleared. A missing id still takes the
+            // existing error and leaves any note alone.
             let chat = self.get(id)?;
+            self.retire_steer(id);
             self.append(
                 id,
                 &StoredEvent::Agent {
@@ -4418,6 +4769,281 @@ mod tests {
         assert!(matches!(last, StoredEvent::Agent {
             event: Event::Done { ref status, .. }, ..
         } if status == "stopped"));
+    }
+
+    fn parked_note(store: &Store, id: &str) -> Option<String> {
+        store.steers.lock().unwrap().get(id).cloned()
+    }
+
+    fn prepare_live_chat(store: &Store, id: &str) {
+        conversation_for_receipts(store, id);
+        store.set_running(id, true).unwrap();
+    }
+
+    fn retune_chat(store: &Store, id: &str, backend: &str, autonomy: &str) {
+        store
+            .edit_conversation(id, |chat| {
+                chat.backend = backend.into();
+                chat.autonomy = autonomy.into();
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn steer_parks_one_note_and_a_later_note_replaces_it() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        prepare_live_chat(&store, "chat-test");
+        store.steer("chat-test", "  look left  ").unwrap();
+        assert_eq!(
+            parked_note(&store, "chat-test").as_deref(),
+            Some("look left")
+        );
+        store.steer("chat-test", "look right").unwrap();
+        assert_eq!(
+            parked_note(&store, "chat-test").as_deref(),
+            Some("look right")
+        );
+
+        store.set_running("chat-test", false).unwrap();
+        store
+            .active
+            .lock()
+            .unwrap()
+            .insert("chat-test".into(), "not-a-session".into());
+        store.steer("chat-test", "still live").unwrap();
+        assert_eq!(
+            parked_note(&store, "chat-test").as_deref(),
+            Some("still live")
+        );
+    }
+
+    #[test]
+    fn steer_refuses_an_idle_turn_the_wrong_agent_and_a_note_that_cannot_ride() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "chat-test");
+        let idle = store.steer("chat-test", "hello").unwrap_err();
+        assert!(idle.contains("not in the middle of a turn"), "{idle}");
+
+        prepare_live_chat(&store, "other");
+        retune_chat(&store, "other", "grok", "standard");
+        let backend = store.steer("other", "hello").unwrap_err();
+        assert!(backend.contains("cannot take a note mid-turn"), "{backend}");
+
+        retune_chat(&store, "other", "claude", "bypass");
+        let autonomy = store.steer("other", "hello").unwrap_err();
+        assert!(autonomy.contains("not asking before tools"), "{autonomy}");
+
+        retune_chat(&store, "other", "codex", "standard");
+        let empty = store.steer("other", "   ").unwrap_err();
+        assert!(empty.contains("Write the note"), "{empty}");
+        let long = "n".repeat(STEER_NOTE_MAX_CHARS + 1);
+        let too_long = store.steer("other", &long).unwrap_err();
+        assert!(too_long.contains("too long"), "{too_long}");
+        let edge = "n".repeat(STEER_NOTE_MAX_CHARS);
+        store.steer("other", &edge).unwrap();
+        assert_eq!(
+            parked_note(&store, "other").unwrap().chars().count(),
+            STEER_NOTE_MAX_CHARS
+        );
+    }
+
+    #[test]
+    fn steer_stop_drops_a_parked_note_and_a_missing_chat_does_not() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        prepare_live_chat(&store, "chat-test");
+        store.steer("chat-test", "hold this").unwrap();
+        store.stop("chat-test").unwrap();
+        assert!(parked_note(&store, "chat-test").is_none());
+        assert!(store.follow_up_should_skip("chat-test", true));
+        assert!(!store.follow_up_should_skip("chat-test", true));
+
+        prepare_live_chat(&store, "kept");
+        store.steer("kept", "stay").unwrap();
+        assert!(store.stop("missing").is_err());
+        assert_eq!(parked_note(&store, "kept").as_deref(), Some("stay"));
+        assert!(!store.suppress_follow_up.lock().unwrap().contains("kept"));
+    }
+
+    #[test]
+    fn steer_tool_result_takes_the_note_once_and_only_for_claude_codex_or_muse() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        prepare_live_chat(&store, "chat-test");
+        store.steer("chat-test", "use the left door").unwrap();
+        let claude = store.register_turn_token("chat-test", "claude").unwrap();
+        assert_eq!(
+            store.take_steer_for_token(&claude).unwrap().as_deref(),
+            Some("use the left door")
+        );
+        assert!(store.take_steer_for_token(&claude).unwrap().is_none());
+
+        store.steer("chat-test", "stay").unwrap();
+        let grok = store.register_turn_token("chat-test", "grok").unwrap();
+        assert!(store.take_steer_for_token(&grok).unwrap().is_none());
+        assert_eq!(parked_note(&store, "chat-test").as_deref(), Some("stay"));
+        let codex = store.register_turn_token("chat-test", "codex").unwrap();
+        assert_eq!(
+            store.take_steer_for_token(&codex).unwrap().as_deref(),
+            Some("stay")
+        );
+
+        let invalid = store.take_steer_for_token("no-such-token").unwrap_err();
+        assert!(invalid.contains("invalid or expired"), "{invalid}");
+
+        store.steer("chat-test", "pear").unwrap();
+        let muse = store.register_turn_token("chat-test", "muse").unwrap();
+        if cfg!(unix) {
+            assert_eq!(
+                store.take_steer_for_token(&muse).unwrap().as_deref(),
+                Some("pear")
+            );
+        } else {
+            assert!(store.take_steer_for_token(&muse).unwrap().is_none());
+            store.steers.lock().unwrap().remove("chat-test");
+        }
+        assert!(store.take_steer_for_token(&muse).unwrap().is_none());
+        let events = store.events_path("chat-test");
+        if events.exists() {
+            let body = fs::read_to_string(&events).unwrap();
+            assert!(!body.contains("toolEnd"), "{body}");
+        }
+        store.steer("chat-test", "stay put").unwrap();
+        let opencode = store.register_turn_token("chat-test", "opencode").unwrap();
+        assert!(store.take_steer_for_token(&opencode).unwrap().is_none());
+        assert_eq!(
+            parked_note(&store, "chat-test").as_deref(),
+            Some("stay put")
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn steer_lets_muse_park_on_any_autonomy_and_refuses_opencode() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        prepare_live_chat(&store, "chat-test");
+
+        retune_chat(&store, "chat-test", "muse", "bypass");
+        store.steer("chat-test", "pear").unwrap();
+        assert_eq!(parked_note(&store, "chat-test").as_deref(), Some("pear"));
+
+        retune_chat(&store, "chat-test", "muse", "plan");
+        store.steer("chat-test", "plan note").unwrap();
+        assert_eq!(
+            parked_note(&store, "chat-test").as_deref(),
+            Some("plan note")
+        );
+
+        retune_chat(&store, "chat-test", "muse", "standard");
+        store.steer("chat-test", "ask first").unwrap();
+        assert_eq!(
+            parked_note(&store, "chat-test").as_deref(),
+            Some("ask first")
+        );
+
+        retune_chat(&store, "chat-test", "opencode", "standard");
+        let opencode = store.steer("chat-test", "nope").unwrap_err();
+        assert!(
+            opencode.contains("cannot take a note mid-turn"),
+            "{opencode}"
+        );
+        assert_eq!(
+            parked_note(&store, "chat-test").as_deref(),
+            Some("ask first")
+        );
+
+        retune_chat(&store, "chat-test", "grok", "standard");
+        let grok = store.steer("chat-test", "nope").unwrap_err();
+        assert!(grok.contains("cannot take a note mid-turn"), "{grok}");
+        assert_eq!(
+            parked_note(&store, "chat-test").as_deref(),
+            Some("ask first")
+        );
+
+        retune_chat(&store, "chat-test", "claude", "bypass");
+        let claude = store.steer("chat-test", "nope").unwrap_err();
+        assert!(claude.contains("not asking before tools"), "{claude}");
+        assert_eq!(
+            parked_note(&store, "chat-test").as_deref(),
+            Some("ask first")
+        );
+    }
+
+    #[test]
+    fn steer_idle_claim_takes_the_note_and_a_live_turn_keeps_it() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        prepare_live_chat(&store, "chat-test");
+        store.steer("chat-test", "after this").unwrap();
+        let live = store.claim_idle_steer("chat-test").unwrap_err();
+        assert!(live.contains("still in the middle of a turn"), "{live}");
+        assert_eq!(
+            parked_note(&store, "chat-test").as_deref(),
+            Some("after this")
+        );
+
+        store.set_running("chat-test", false).unwrap();
+        assert_eq!(
+            store.claim_idle_steer("chat-test").unwrap().as_deref(),
+            Some("after this")
+        );
+        assert!(store.claim_idle_steer("chat-test").unwrap().is_none());
+    }
+
+    #[test]
+    fn steer_follow_up_skips_when_stop_retired_the_note_or_a_newer_one_arrived() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        prepare_live_chat(&store, "chat-test");
+        store.retire_steer("chat-test");
+        assert!(store.follow_up_should_skip("chat-test", true));
+        assert!(!store.follow_up_should_skip("chat-test", true));
+
+        store.retire_steer("chat-test");
+        assert!(!store.follow_up_should_skip("chat-test", false));
+        assert!(!store.follow_up_should_skip("chat-test", true));
+
+        store.retire_steer("chat-test");
+        store.steer("chat-test", "newer").unwrap();
+        assert!(store.follow_up_should_skip("chat-test", true));
+        assert_eq!(parked_note(&store, "chat-test").as_deref(), Some("newer"));
+        store.steers.lock().unwrap().remove("chat-test");
+        assert!(!store.follow_up_should_skip("chat-test", true));
+    }
+
+    #[test]
+    fn steer_clear_retires_it() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        prepare_live_chat(&store, "chat-test");
+        store.steer("chat-test", "drop me").unwrap();
+        store.steer_clear("chat-test").unwrap();
+        assert!(parked_note(&store, "chat-test").is_none());
+        assert!(
+            store
+                .suppress_follow_up
+                .lock()
+                .unwrap()
+                .contains("chat-test")
+        );
+    }
+
+    #[test]
+    fn steer_list_shows_a_parked_note_without_writing_it_into_the_conversation() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        prepare_live_chat(&store, "chat-test");
+        store.steer("chat-test", "on the next step").unwrap();
+        let mut value = serde_json::to_value(store.list("workspace-a")).unwrap();
+        store.attach_pending_steers(&mut value);
+        assert_eq!(value[0]["pendingSteer"], "on the next step");
+        let disk = fs::read_to_string(store.root.join("conversations.json")).unwrap();
+        assert!(!disk.contains("pendingSteer"));
+        assert!(!disk.contains("on the next step"));
     }
 
     #[test]

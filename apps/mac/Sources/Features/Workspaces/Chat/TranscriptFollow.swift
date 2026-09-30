@@ -57,6 +57,24 @@ enum TranscriptFollow {
         return .thinking
     }
 
+    /// The newest running step, in the words the seat shows.
+    ///
+    /// Waiting still wins in the indicator. This only names a tool or an edit
+    /// that is still going. A finished row keeps its own card.
+    static func liveStep(_ items: [ChatDisplayItem]) -> String? {
+        for item in items.reversed() {
+            switch item.kind {
+            case let .tool(state) where state.running:
+                return SeatStep.phrase(verb: state.verb, target: state.target)
+            case let .edit(state) where state.running:
+                return SeatStep.phrase(verb: "Edit", target: state.path)
+            default:
+                continue
+            }
+        }
+        return nil
+    }
+
     /// The one row allowed an animated spinner, newest first.
     ///
     /// A running `ProgressView` on macOS is an `NSProgressIndicator` behind a

@@ -197,10 +197,22 @@ fn run_hook(flavor: &str, phase: &str) -> Result<(), String> {
     if phase != "pre" && phase != "post" {
         return Err("hook phase must be pre or post".into());
     }
+    if phase == "post" && flavor == "muse" {
+        return run_muse_post_hook();
+    }
     if phase == "post" {
         // A post hook records an outcome. It cannot block anything, so a
         // failure here is silence rather than a refusal of work already done.
-        let _ = run_post_hook(flavor);
+        // A note the person parked rides beside that result, and only on a
+        // backend that reads extra context there. Printing nothing leaves
+        // the tool output exactly as the agent wrote it.
+        let note = run_post_hook(flavor).ok().flatten();
+        if let Some(note) = note {
+            let document = post_note_document(flavor, &note);
+            if !document.is_empty() {
+                println!("{document}");
+            }
+        }
         if flavor == "agy" {
             println!("{{}}");
         }
@@ -263,12 +275,116 @@ fn deny_word(flavor: &str) -> &'static str {
     if flavor == "codex" { "block" } else { "deny" }
 }
 
+/// Extra context for a step that already ran. This is not a refusal.
+///
+/// `decision: block` would replace the tool output, so it is never set.
+/// Codex reads a top-level `additionalContext` on some builds and the
+/// wrapped field on others, so both carry the same sentence. Muse gets
+/// its own document for a model step. Any other backend gets nothing,
+/// so its post hook must not grow a second document.
+fn post_note_document(flavor: &str, note: &str) -> String {
+    let context = format!(
+        "The person added a note while this step was running. Apply it now, then continue: {note}"
+    );
+    match flavor {
+        "claude" => json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "additionalContext": context,
+            }
+        })
+        .to_string(),
+        "codex" => json!({
+            "additionalContext": context,
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "additionalContext": context,
+            }
+        })
+        .to_string(),
+        "muse" => json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PostLLMCall",
+                "additionalContext": context,
+            }
+        })
+        .to_string(),
+        _ => String::new(),
+    }
+}
+
+/// Print one muse document and always succeed. A model step has no tool to report.
+fn run_muse_post_hook() -> Result<(), String> {
+    let document = match hook_context() {
+        Ok((token, socket, input)) if !muse_skips_note(&input) => {
+            match muse_take_note(&socket, &token) {
+                Ok(note) => muse_post_stdout(note.as_deref()),
+                Err(_) => "{}".into(),
+            }
+        }
+        _ => "{}".into(),
+    };
+    println!("{document}");
+    Ok(())
+}
+
+/// A reminder observer, or any event that is not the model step this note rides.
+fn muse_skips_note(input: &Value) -> bool {
+    if let Some(name) = input.get("hook_event_name").and_then(Value::as_str)
+        && name != "PostLLMCall"
+    {
+        return true;
+    }
+    muse_payload_is_observer(input)
+}
+
+fn muse_payload_is_observer(value: &Value) -> bool {
+    match value {
+        Value::String(text) => text.contains("reminder observer"),
+        Value::Array(items) => items.iter().any(muse_payload_is_observer),
+        Value::Object(map) => map.iter().any(|(key, child)| {
+            ((key == "name" || key == "tool_name" || key == "tool")
+                && child.as_str() == Some("submit_reminder_decision"))
+                || muse_payload_is_observer(child)
+        }),
+        _ => false,
+    }
+}
+
+fn muse_take_request(token: &str) -> Value {
+    json!({
+        "id": "muse-note",
+        "method": "chat.toolResult",
+        "params": { "turnToken": token, "noteOnly": true }
+    })
+}
+
+fn muse_take_note(socket: &str, token: &str) -> Result<Option<String>, String> {
+    let answer = hook_call(socket, &muse_take_request(token))?;
+    if answer.get("error").is_some() || answer.get("ok") != Some(&Value::Bool(true)) {
+        return Err("muse note was not taken".into());
+    }
+    Ok(answer
+        .pointer("/result/note")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|note| !note.is_empty())
+        .map(str::to_owned))
+}
+
+fn muse_post_stdout(note: Option<&str>) -> String {
+    match note.map(str::trim).filter(|note| !note.is_empty()) {
+        Some(note) => post_note_document("muse", note),
+        None => "{}".into(),
+    }
+}
+
 fn run_pre_hook(flavor: &str) -> Result<Decision, String> {
     let (token, socket, input) = hook_context()?;
     hook_request(flavor, &token, &socket, &input)
 }
 
-fn run_post_hook(flavor: &str) -> Result<(), String> {
+fn run_post_hook(flavor: &str) -> Result<Option<String>, String> {
     let (token, socket, input) = hook_context()?;
     hook_report(flavor, &token, &socket, &input)
 }
@@ -363,7 +479,15 @@ fn gate_deadline() -> u64 {
 }
 
 /// Record what a tool call actually did, once it has run.
-fn hook_report(flavor: &str, token: &str, socket: &str, input: &Value) -> Result<(), String> {
+///
+/// The optional note is the person's own words for this step. Empty means
+/// there was nothing to add, and the tool output stays as the agent wrote it.
+fn hook_report(
+    flavor: &str,
+    token: &str,
+    socket: &str,
+    input: &Value,
+) -> Result<Option<String>, String> {
     let (call_id, ok, detail) = hook_result(flavor, input);
     let request = json!({
         "id": "chat-hook",
@@ -371,9 +495,15 @@ fn hook_report(flavor: &str, token: &str, socket: &str, input: &Value) -> Result
         "params": {"turnToken": token, "callId": call_id, "ok": ok, "detail": detail}
     });
     let answer = hook_call(socket, &request)?;
-    (answer.pointer("/result/recorded").and_then(Value::as_bool) == Some(true))
-        .then_some(())
-        .ok_or_else(|| "the host rejected the tool result".to_string())
+    if answer.pointer("/result/recorded").and_then(Value::as_bool) != Some(true) {
+        return Err("the host rejected the tool result".to_string());
+    }
+    Ok(answer
+        .pointer("/result/note")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|note| !note.is_empty())
+        .map(str::to_string))
 }
 
 fn hook_result(flavor: &str, input: &Value) -> (String, bool, Option<String>) {
@@ -743,6 +873,92 @@ mod tests {
         // for is a chance to be misread.
         let allowed = decision_document("claude", &Decision::Allow);
         assert_eq!(allowed, "{}");
+    }
+
+    /// A mid-turn note is extra context beside a step that already ran. It must
+    /// not replace that step. Muse prints its own document. A backend that
+    /// cannot read one prints nothing.
+    #[test]
+    fn steer_post_note_is_context_not_a_block() {
+        let note = "say \"hi\"";
+        let claude: Value = serde_json::from_str(&post_note_document("claude", note)).unwrap();
+        assert!(claude.get("decision").is_none());
+        assert!(claude.get("continue").is_none());
+        assert_eq!(claude["hookSpecificOutput"]["hookEventName"], "PostToolUse");
+        let claude_context = claude["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        assert!(claude_context.contains("say \"hi\""));
+        assert!(claude_context.contains("Apply it now, then continue"));
+
+        let codex: Value = serde_json::from_str(&post_note_document("codex", note)).unwrap();
+        assert!(codex.get("decision").is_none());
+        assert_eq!(
+            codex["additionalContext"],
+            codex["hookSpecificOutput"]["additionalContext"]
+        );
+        assert_eq!(codex["hookSpecificOutput"]["hookEventName"], "PostToolUse");
+
+        let muse: Value = serde_json::from_str(&post_note_document("muse", note)).unwrap();
+        assert!(muse.get("additionalContext").is_none());
+        assert!(muse.get("decision").is_none());
+        assert!(muse.get("continue").is_none());
+        assert_eq!(muse["hookSpecificOutput"]["hookEventName"], "PostLLMCall");
+        let muse_context = muse["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        assert!(muse_context.contains(note));
+        assert!(muse_context.contains("Apply it now, then continue"));
+
+        assert!(post_note_document("grok", note).is_empty());
+        assert!(post_note_document("agy", note).is_empty());
+        assert!(post_note_document("opencode", note).is_empty());
+        assert_eq!(muse_post_stdout(None), "{}");
+        assert_eq!(muse_post_stdout(Some("  ")), "{}");
+        assert_eq!(
+            muse_post_stdout(Some(note)),
+            post_note_document("muse", note)
+        );
+    }
+
+    #[test]
+    fn muse_take_request_carries_note_only_and_no_call_id() {
+        let token = "turn-token";
+        let request = muse_take_request(token);
+        assert_eq!(request["method"], "chat.toolResult");
+        assert_eq!(request["params"]["noteOnly"], true);
+        assert_eq!(request["params"]["turnToken"], token);
+        assert!(request["params"].get("callId").is_none());
+    }
+
+    #[test]
+    fn muse_skips_an_observer_and_a_foreign_event() {
+        let observer = json!({
+            "hook_event_name": "PostLLMCall",
+            "messages": [{ "text": "this is a reminder observer call" }]
+        });
+        assert!(muse_skips_note(&observer));
+
+        let named = json!({
+            "hook_event_name": "PostLLMCall",
+            "tools": [{ "name": "submit_reminder_decision" }]
+        });
+        assert!(muse_skips_note(&named));
+
+        let tool_name = json!({ "tool_name": "submit_reminder_decision" });
+        assert!(muse_skips_note(&tool_name));
+
+        assert!(muse_skips_note(&json!({ "hook_event_name": "PreLLMCall" })));
+
+        assert!(!muse_skips_note(&json!({
+            "tools": [{ "name": "read_file" }]
+        })));
+        assert!(!muse_skips_note(&json!({})));
+        assert!(!muse_skips_note(&json!({
+            "hook_event_name": "PostLLMCall",
+            "tools": [{ "name": "read_file" }],
+            "messages": [{ "text": "read the file" }]
+        })));
     }
 
     /// A refusal has to tell the model to stop, or it burns the turn retrying.

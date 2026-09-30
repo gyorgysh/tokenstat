@@ -436,7 +436,8 @@ fun coalesceTranscript(
                 } else {
                     "tool-$callId#$occurrence"
                 }
-                val verb = inner.str("verb") ?: "Tool"
+                // Empty when the event named no tool. The row then says Working.
+                val verb = inner.str("verb") ?: ""
                 val target = ChatToolState.clip(inner.str("target") ?: "")
                 noteToolIndex(items.size, callId)
                 // A bare "tool" event without a start/end pair arrives
@@ -535,7 +536,8 @@ fun coalesceTranscript(
                     items.add(ChatDisplayItem.Edit(rowID, state))
                 } else {
                     val fallback = callId.ifEmpty { "end-${stamp(ev, items.size)}" }
-                    val fallbackVerb = inner.str("verb") ?: "Tool"
+                    // Empty when the event named no tool. The row then says Worked.
+                    val fallbackVerb = inner.str("verb") ?: ""
                     val rowID = if (ev.safeLong("seq") != null) {
                         "tool-${stamp(ev, items.size)}"
                     } else {

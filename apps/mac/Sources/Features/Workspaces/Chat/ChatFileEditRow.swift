@@ -110,11 +110,17 @@ struct ChatFileEditRow: View {
                 DiffStat(added: Int(state.added), removed: Int(state.removed), font: Self.diffFont)
             }
             if state.running {
-                Text("Writing")
+                Text(SeatStep.word(verb: "Edit", running: true))
                     .font(Self.metaFont)
                     .foregroundStyle(Theme.accent)
                     .fixedSize()
-            } else if let time = state.duration, !time.isEmpty {
+            } else if state.failed {
+                Text("Failed")
+                    .font(Self.metaFont)
+                    .foregroundStyle(Theme.danger)
+                    .fixedSize()
+            }
+            if !state.running, let time = state.duration, !time.isEmpty {
                 Text(time)
                     .font(Self.metaFont)
                     .foregroundStyle(.tertiary)
@@ -158,7 +164,7 @@ struct ChatFileEditRow: View {
         if state.added + state.removed > 0 {
             parts.append("\(state.added) added, \(state.removed) removed")
         }
-        if state.running { parts.append("writing") }
+        if state.running { parts.append("editing") }
         if state.failed { parts.append("failed") }
         return parts.joined(separator: ", ")
     }

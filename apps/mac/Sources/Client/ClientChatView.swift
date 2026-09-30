@@ -752,6 +752,10 @@ struct ClientChatThread: View {
                 }
                 // Pending writing stays available offline for copying or cancellation.
                 // Sending and receipt checks require a live, verified owner.
+                if let note = chat.pendingSteer?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
+                    ChatSteerNoteBanner(note: note) { model.clearSteer() }
+                        .padding(.horizontal, Theme.Space.s)
+                }
                 if !model.pendingQueue.isEmpty {
                         let queueOwner = model.currentReference
                     ChatQueueStrip(
@@ -778,9 +782,12 @@ struct ClientChatThread: View {
                     attachments: model.attachments,
                     previews: model.attachmentPreviews,
                     running: model.busy,
-                    placeholder: model.busy
-                        ? "Send after this turn"
-                        : "Ask about \(folderName.isEmpty ? "this folder" : folderName)",
+                    sendsAsNote: model.sendsAsNote,
+                    placeholder: model.sendsAsNote
+                        ? "Add a note for the next step"
+                        : (model.busy
+                            ? "Send after this turn"
+                            : "Ask about \(folderName.isEmpty ? "this folder" : folderName)"),
                     onSend: { submit(from: chat) },
                     onSendNow: { submit(from: chat, sendNow: true) },
                     onStop: { Task { await model.stop() } },
@@ -885,7 +892,11 @@ struct ClientChatThread: View {
                     }
                     if sliceOffset == 0 {
                         if !model.isShowingCachedTranscript, let mood = liveMood {
-                            ChatWorkingIndicator(seed: model.faceSeed, mood: mood)
+                            ChatWorkingIndicator(
+                                seed: model.faceSeed,
+                                mood: mood,
+                                step: TranscriptFollow.liveStep(model.transcriptItems)
+                            )
                         }
                         TranscriptBottomSentinel()
                     }
@@ -1394,12 +1405,30 @@ struct ClientChatThread: View {
             return
         }
         if model.busy {
-            guard model.enqueue(text) != nil else { return }
-            model.clearDraft()
-            showNewest()
-            follow.jump()
-            followPulse += 1
-            return
+            switch model.beginBusyNote(text) {
+            case .queue:
+                guard model.enqueue(text) != nil else { return }
+                model.clearDraft()
+                showNewest()
+                follow.jump()
+                followPulse += 1
+                return
+            case .steering:
+                showNewest()
+                follow.jump()
+                followPulse += 1
+                Task {
+                    switch await model.finishBusyNote(text) {
+                    case .steered:
+                        model.clearDraft(ifStill: text)
+                    case .queue:
+                        if model.enqueue(text) != nil { model.clearDraft(ifStill: text) }
+                    case .kept:
+                        break
+                    }
+                }
+                return
+            }
         }
         // The composer empties, the stored copy does not: it is dropped when
         // the host has the words and put back when it refuses them.
