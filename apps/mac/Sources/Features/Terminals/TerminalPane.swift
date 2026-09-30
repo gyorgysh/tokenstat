@@ -280,7 +280,7 @@ struct TerminalPane: View {
                     splitAxis: showsTerminal ? splitLayout.axis : nil,
                     fraction: CGFloat(terminals.fraction(for: folder.id)),
                     claimsFocus: isSurfaceActive && showsTerminal,
-                    isSurfaceVisible: showsTerminal,
+                    isSurfaceVisible: isSurfaceActive && showsTerminal,
                     onActivate: { terminals.select($0) }
                 )
                 .frame(width: size.width, height: size.height)
@@ -946,6 +946,7 @@ private struct SessionChip: View {
     }
 
     private var label: String {
+        if let name = session.customName { return name }
         if let title = session.title, !title.isEmpty { return title }
         return session.command
     }

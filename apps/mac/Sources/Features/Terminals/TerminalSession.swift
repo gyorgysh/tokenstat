@@ -137,6 +137,16 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     /// Folder the session runs in, as the host reported it.
     nonisolated let cwd: String
 
+    var workReference: WorkReference? {
+        guard !isPending, let scope = WorkSessionContext.shared.scope else { return nil }
+        let route = WorkDestinationResolver.route(folderID: workspaceID)
+        guard let host = route.peer ?? WorkSessionContext.shared.localHostIdentity else { return nil }
+        return WorkReference(scope: scope, hostIdentity: host, workspaceID: route.workspaceID,
+                             kind: .terminal, itemID: hostID)
+    }
+
+    var customName: String? { SidebarTerminalNames.shared.name(for: workReference) }
+
     /// The archive source id when this command is a known harness.
     var harnessID: String? { Tokenstat.harnessID(forCommand: command) }
 

@@ -77,6 +77,7 @@ struct RootView: View {
     @State private var browserLiveWidth: Double?
     @State private var browserCursorPushed = false
     @State private var browserWorkspaceID: String?
+    @State private var terminalWorkspaceID: String?
     @State private var workspaceBrowserURLs: [String: String] = [:]
     /// Explicit sidebar preference, preserved when a narrow window uses a peek.
     @State private var columnVisibilityChoice: NavigationSplitViewVisibility = .all
@@ -142,10 +143,10 @@ struct RootView: View {
             let next = WindowWidthSignature(
                 isKnown: width > 0,
                 sidebarFits: Self.sidebarColumnFits(
-                    width: width, browserOpen: showsWorkspaceBrowser, persistedBrowser: browserPaneWidth
+                    width: width, browserOpen: showsWorkspaceCompanion, persistedBrowser: browserPaneWidth
                 ),
                 inspectorFits: inspectorFits(at: width),
-                browserWidth: showsWorkspaceBrowser ? width : nil
+                browserWidth: showsWorkspaceCompanion ? width : nil
             )
             if windowWidthSignature != next { windowWidthSignature = next }
         })
@@ -506,6 +507,7 @@ struct RootView: View {
         .task(id: WorkSessionContext.shared.scope) {
             workspaceBrowserURLs = [:]
             browserWorkspaceID = nil
+            terminalWorkspaceID = nil
             await BridgeLaunch.wait()
             await savedWorkCatalog.observe(scope: WorkSessionContext.shared.scope)
         }
@@ -779,6 +781,7 @@ struct RootView: View {
                   ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
                   let id = route.workspaceID else { return .systemAction }
             workspaceBrowserURLs[id] = url.absoluteString
+            terminalWorkspaceID = nil
             browserWorkspaceID = id
             return .handled
         })
@@ -1060,15 +1063,26 @@ struct RootView: View {
         if supportsWorkspaceBrowser {
             ToolbarIconButton(systemImage: "globe", help: "Browser, open a web preview beside this project", isAccent: showsWorkspaceBrowser) {
                 if showsWorkspaceBrowser { browserWorkspaceID = nil }
-                else { browserWorkspaceID = route.workspaceID }
+                else {
+                    terminalWorkspaceID = nil
+                    browserWorkspaceID = route.workspaceID
+                }
             }
             .accessibilityLabel("Browser")
+            ToolbarIconButton(systemImage: "terminal", help: "Shell or agent beside this chat", isAccent: showsWorkspaceTerminal) {
+                if showsWorkspaceTerminal { terminalWorkspaceID = nil }
+                else {
+                    browserWorkspaceID = nil
+                    terminalWorkspaceID = route.workspaceID
+                }
+            }
+            .accessibilityLabel("Terminal beside chat")
         }
         SidebarToggleButton(
             edge: .trailing,
-            isOpen: isRightSidebarOpen && !showsWorkspaceBrowser,
+            isOpen: isRightSidebarOpen && !showsWorkspaceCompanion,
             action: toggleRightSidebar,
-            help: showsWorkspaceBrowser ? "Show Inspector" : isRightSidebarOpen
+            help: showsWorkspaceCompanion ? "Show Inspector" : isRightSidebarOpen
                 ? "Hide Inspector (⌥⌘B)"
                 : (inspectorFits
                     ? "Show Inspector (⌥⌘B)"
@@ -1141,10 +1155,14 @@ struct RootView: View {
     /// not.
     private func toggleRightSidebar() {
         guard route.hasInspector else { return }
-        if showsWorkspaceBrowser {
+        if showsWorkspaceCompanion {
             browserWorkspaceID = nil
+            terminalWorkspaceID = nil
             isInspectorPresented = true
-            if !inspectorFits { isOverlayVisible = true; overlayHeldByPress = true }
+            if !inspectorFits {
+                isOverlayVisible = true
+                overlayHeldByPress = true
+            }
             return
         }
         if isInspectorPresented {
@@ -1228,7 +1246,7 @@ struct RootView: View {
     private func showsSidebarColumn(at width: CGFloat) -> Bool {
         columnVisibilityChoice != .detailOnly
             && (width <= 0 || Self.sidebarColumnFits(
-                width: width, browserOpen: showsWorkspaceBrowser, persistedBrowser: browserPaneWidth
+                width: width, browserOpen: showsWorkspaceCompanion, persistedBrowser: browserPaneWidth
             ))
     }
 
@@ -1249,7 +1267,7 @@ struct RootView: View {
         windowContentWidth > 0
             && Self.sidebarColumnFits(
                 width: windowContentWidth,
-                browserOpen: showsWorkspaceBrowser,
+                browserOpen: showsWorkspaceCompanion,
                 persistedBrowser: browserPaneWidth
             )
     }
@@ -1266,7 +1284,7 @@ struct RootView: View {
         // again. A popup pinned below the edge is the user saying "keep the
         // sidebar", so hand it to the column. Otherwise the collapsed choice
         // stands, and the next narrowing auto-closes again.
-        if Self.sidebarColumnFits(width: width, browserOpen: showsWorkspaceBrowser, persistedBrowser: browserPaneWidth) {
+        if Self.sidebarColumnFits(width: width, browserOpen: showsWorkspaceCompanion, persistedBrowser: browserPaneWidth) {
             if isSidebarPinned {
                 columnVisibilityChoice = .all
             }
@@ -1511,12 +1529,12 @@ struct RootView: View {
             detail
                 .background(Theme.background)
                 .frame(minWidth: Self.detailMinimumWidth, maxWidth: .infinity, maxHeight: .infinity)
-            if showsWorkspaceBrowser && browserFitsBesideWorkspace {
+            if showsWorkspaceCompanion && browserFitsBesideWorkspace {
                 browserResizeHandle
-                workspaceBrowserPane
+                workspaceCompanionPane
                 .frame(width: fittedBrowserWidth)
                 .frame(maxHeight: .infinity)
-            } else if showsInspector && !showsWorkspaceBrowser {
+            } else if showsInspector && !showsWorkspaceCompanion {
                 boundedInspector { inspectorContent }
                     .frame(width: currentInspectorWidth)
                     .background(Theme.sidebar)
@@ -1545,10 +1563,10 @@ struct RootView: View {
             .overlay(alignment: .leading) { sidebarFloatLayer }
             .overlay(alignment: .trailing) { inspectorFloatLayer }
             .overlay(alignment: .trailing) {
-                if showsWorkspaceBrowser && !browserFitsBesideWorkspace {
+                if showsWorkspaceCompanion && !browserFitsBesideWorkspace {
                     HStack(spacing: 0) {
                         browserResizeHandle
-                        workspaceBrowserPane
+                        workspaceCompanionPane
                             .frame(width: fittedBrowserWidth)
                     }
                     .frame(maxHeight: .infinity)
@@ -1574,6 +1592,27 @@ struct RootView: View {
 
     private var showsWorkspaceBrowser: Bool {
         supportsWorkspaceBrowser && route.workspaceID != nil && browserWorkspaceID == route.workspaceID
+    }
+
+    private var showsWorkspaceTerminal: Bool {
+        supportsWorkspaceBrowser && route.workspaceID != nil && terminalWorkspaceID == route.workspaceID
+    }
+
+    private var showsWorkspaceCompanion: Bool { showsWorkspaceBrowser || showsWorkspaceTerminal }
+
+    @ViewBuilder private var workspaceCompanionPane: some View {
+        #if os(macOS)
+        if showsWorkspaceTerminal, let id = route.workspaceID,
+           let folder = workspaces.folders.first(where: { $0.id == id }) {
+            ChatTerminalPane(folder: folder, terminals: terminals, workspaces: workspaces,
+                             onClose: { terminalWorkspaceID = nil })
+                .id(id)
+        } else {
+            workspaceBrowserPane
+        }
+        #else
+        workspaceBrowserPane
+        #endif
     }
 
     /// Whether the browser sits beside the workspace rather than floating.
@@ -1646,7 +1685,7 @@ struct RootView: View {
                 browserLiveWidth = nil
                 browserResizeStart = nil
             }
-            .accessibilityLabel("Browser width")
+            .accessibilityLabel(showsWorkspaceTerminal ? "Terminal pane width" : "Browser width")
             .accessibilityAdjustableAction { direction in
                 browserPaneWidth = max(320, min(1000, fittedBrowserWidth + (direction == .increment ? 40 : -40)))
             }
@@ -1677,7 +1716,7 @@ struct RootView: View {
     /// left. Same non-overlapping hit model as the sidebar float.
     @ViewBuilder
     private var inspectorFloatLayer: some View {
-        if showsOverlayInspector && !showsWorkspaceBrowser {
+        if showsOverlayInspector && !showsWorkspaceCompanion {
             HStack(spacing: 0) {
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2222,58 +2261,24 @@ struct RootView: View {
                 // is the folder's own surface and lights the folder.
                 isSelected: isCurrent
                     && (!isExpanded || showingLauncher || !(showingTerminal || showingChat)),
-                isCurrent: isCurrent
-            ) { selectWorkspace(folder.id) }
-        }
-        .contextMenu {
-            if let reference = pinReference(for: folder) {
-                Button("Saved work on this device", .archive) {
-                    savedFolder = .init(reference: reference, name: folder.name)
-                }
-                let pinned = pins.isPinned(reference)
-                Button(pinned ? "Unpin" : "Pin", pinned ? .pinned : .pin) {
-                    Task {
-                        if pinned {
-                            await PinnedWorkActions.unpin(reference)
-                        } else {
-                            await PinnedWorkActions.pin(
-                                reference, label: folder.name, folderName: folder.name
-                            )
-                        }
+                isCurrent: isCurrent,
+                summary: workspaces.summary(for: folder.id),
+                activeTerminals: activeSessions.count,
+                rename: { name in
+                    let scope = WorkSessionContext.shared.scope
+                    let reference = pinReference(for: folder)
+                    try await Bridge.renameWorkspace(id: folder.id, name: name)
+                    guard scope == WorkSessionContext.shared.scope else { return }
+                    await workspaces.load()
+                    if let reference, pins.isPinned(reference) {
+                        pins.pin(reference, label: name, folderName: name)
                     }
-                }
-                .disabled(!pinned && pins.pins(in: reference.scope).count >= PinnedWorkStore.capacity)
-                if !pinned && pins.pins(in: reference.scope).count >= PinnedWorkStore.capacity {
-                    Text("Home holds eight pins. Unpin one to make room.")
-                }
-                ThemeRule()
-            }
-            if !folder.isRemote {
-                Button("Reveal in Finder", .reveal) { workspaces.revealInFinder(folder) }
-            } else if let peer = folder.machineID, !peer.isEmpty {
-                // A remote folder is where its machine is used,
-                // so the way back belongs here too. Disconnect
-                // drops the peer's folders from the sidebar;
-                // Remove below forgets just this folder on
-                // the machine that owns it.
-                Button("Disconnect from \(folder.machineLabel ?? "this computer")", .disconnect) {
-                    NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: peer)
-                }
-            }
-            ThemeRule()
-            Button("New chat", .create) { startNewChat(in: folder) }
-            Button("New terminal", .create) { openSection(.sessions, in: folder.id) }
-            if folder.git?.isRepo == true {
-                Button("Worktrees…", .source) { worktreeProject = folder }
-            }
-            Button("Delete all chats…", .delete, role: .destructive) {
-                workspacePendingChatRemoval = folder
-            }
-            ThemeRule()
-            // "Remove" and not "Delete": the folder stays.
-            Button("Remove from tokenstat", .delete, role: .destructive) {
-                workspacePendingRemove = folder
-            }
+                },
+                remove: { workspacePendingRemove = folder },
+                reveal: { workspaces.revealInFinder(folder) },
+                actions: { projectActions(folder) },
+                action: { selectWorkspace(folder.id) }
+            )
         }
         .modifier(WorkspaceReorder(id: folder.id, enabled: workspaces.folders.count > 1) {
             workspaces.moveWorkspace($0, before: folder.id)
@@ -2898,6 +2903,59 @@ struct RootView: View {
         #endif
     }
 
+    #if os(macOS)
+    private func projectActions(_ folder: WorkspaceFolder) -> [NativeMenuItem] {
+        var items = SidebarPinAction.items(reference: pinReference(for: folder), name: folder.name, folderName: folder.name)
+        if let reference = pinReference(for: folder) {
+            items.append(.init("Saved work on this device", icon: .archive) {
+                savedFolder = .init(reference: reference, name: folder.name)
+            })
+        }
+        items.append(.separator)
+        if !folder.isRemote {
+            items.append(.init("Reveal in Finder", icon: .reveal) { workspaces.revealInFinder(folder) })
+        } else if let peer = folder.machineID, !peer.isEmpty {
+            items.append(.init("Disconnect from \(folder.machineLabel ?? "this computer")", icon: .disconnect) {
+                NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: peer)
+            })
+        }
+        items.append(.separator)
+        items.append(.init("New chat", icon: .create) { startNewChat(in: folder) })
+        items.append(.init("New terminal…", icon: .create) {
+            openSection(.sessions, in: folder.id) { workspaces.showLauncher(in: folder.id) }
+        })
+        if folder.git?.isRepo == true {
+            items.append(.init("Worktrees…", icon: .source) { worktreeProject = folder })
+        }
+        items.append(.init("Delete all chats…", icon: .delete, destructive: true) { workspacePendingChatRemoval = folder })
+        items.append(.separator)
+        items.append(.init("Remove from tokenstat…", icon: .delete, destructive: true) { workspacePendingRemove = folder })
+        return items
+    }
+
+    private func duplicateTerminal(_ session: TerminalSession, in folder: WorkspaceFolder) {
+        let scope = WorkSessionContext.shared.scope
+        Task {
+            let catalog = LaunchCatalog.shared
+            let peer = Bridge.chatRoute(workspaceID: folder.id).peer
+            if let peer { await catalog.resolveRemote(peer: peer) }
+            else { await catalog.resolve() }
+            guard scope == WorkSessionContext.shared.scope else { return }
+            let profiles = peer.map { catalog.remoteAvailable(for: $0) } ?? catalog.available
+            guard let shell = profiles.first(where: { $0.id == "shell" }) ?? (peer == nil ? .shellFallback : nil) else {
+                terminals.errorMessage = "Reconnect the project's computer to open a new shell."
+                return
+            }
+            openSection(.sessions, in: folder.id)
+            if let copy = await terminals.start(workspace: folder, command: shell.command,
+                                                args: shell.args, rows: session.rows, cols: session.cols) {
+                SidebarTerminalNames.shared.rename(copy.workReference, to: "\(session.customName ?? "Shell") (copy)",
+                                                   folderName: folder.name)
+            }
+        }
+    }
+    #endif
+
     private var workspaceInsertionLine: some View {
         RoundedRectangle(cornerRadius: 1)
             .fill(Theme.accent)
@@ -2916,6 +2974,8 @@ struct RootView: View {
         ForEach(sessions) { session in
             ActiveSessionRow(
                 session: session,
+                folder: folder,
+                duplicate: { duplicateTerminal(session, in: folder) },
                 // Selected only when this session is the one actually on
                 // screen. `showingTerminal` carries the whole test, launcher
                 // included: with the launch grid up, the pane is showing a
@@ -2973,6 +3033,18 @@ struct RootView: View {
             ForEach(visible) { conversation in
                 ChatSidebarConversationRow(
                     conversation: conversation,
+                    folder: folder,
+                    rename: { try await chat.rename(conversation, in: folder.id, to: $0) },
+                    fork: {
+                        let previousRoute = route
+                        let copied = try await chat.fork(conversation, in: folder.id)
+                        if route == previousRoute {
+                            chat.reveal(id: copied.id, in: folder.id)
+                            expandedWorkspaces.insert(folder.id)
+                            expandedChatHistories.insert(folder.id)
+                            openSection(.chat, in: folder.id)
+                        }
+                    },
                     // The reference, not the answer. The mark reads the store
                     // itself, so a draft coming or going does not lay this
                     // window out again. See `ChatDraftMark`.
@@ -3278,8 +3350,23 @@ struct RootView: View {
     }
 
     private func pinAvailability(_ pin: PinnedWorkStore.Pin) -> String? {
-        workAvailabilityMessage(pin.reference)
+        if let message = workAvailabilityMessage(pin.reference) { return message }
+        #if os(macOS)
+        if pin.reference.kind == .terminal, terminalForPin(pin) == nil {
+            return "This terminal session has ended"
+        }
+        #endif
+        return nil
     }
+
+    #if os(macOS)
+    private func terminalForPin(_ pin: PinnedWorkStore.Pin) -> TerminalSession? {
+        guard let folderID = WorkPlaceRestoration.folderID(for: pin.reference,
+            among: workspaces.folders.map(\.id), localHostIdentity: WorkSessionContext.shared.localHostIdentity)
+        else { return nil }
+        return terminals.sessions(in: folderID).first { $0.hostID == pin.reference.itemID }
+    }
+    #endif
 
     /// Reuse the exact folder and conversation routing used by the sidebar.
     private func openPin(_ pin: PinnedWorkStore.Pin) {
@@ -3305,7 +3392,13 @@ struct RootView: View {
             expandedWorkspaces.insert(folderID)
             expandedChatHistories.insert(folderID)
             openSection(.chat, in: folderID)
-        case .terminal, .commit, .savedDiff:
+        case .terminal:
+            #if os(macOS)
+            guard let session = terminalForPin(pin) else { return }
+            expandedWorkspaces.insert(folderID)
+            openSection(.sessions, in: folderID) { terminals.select(session) }
+            #endif
+        case .commit, .savedDiff:
             return
         }
     }
@@ -3745,12 +3838,17 @@ struct NativeMenuItem {
     let kind: Kind
     let title: String
     let isEnabled: Bool
+    let symbol: String?
+    let destructive: Bool
     let action: () -> Void
 
-    init(_ title: String, isEnabled: Bool = true, action: @escaping () -> Void) {
+    init(_ title: String, icon: ActionIcon? = nil, isEnabled: Bool = true,
+         destructive: Bool = false, action: @escaping () -> Void) {
         self.kind = .action
         self.title = title
         self.isEnabled = isEnabled
+        self.symbol = icon?.symbol
+        self.destructive = destructive
         self.action = action
     }
 
@@ -3758,6 +3856,8 @@ struct NativeMenuItem {
         kind = .separator
         title = ""
         isEnabled = false
+        symbol = nil
+        destructive = false
         action = {}
     }
 
@@ -3776,6 +3876,8 @@ struct NativeMenuTrigger: NSViewRepresentable {
     /// Read at press time, not at build time, so item titles and enablement
     /// describe the moment the menu opens.
     var items: () -> [NativeMenuItem]
+    var accessibilityLabel: String? = nil
+    var rightClickOnly = false
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -3785,12 +3887,19 @@ struct NativeMenuTrigger: NSViewRepresentable {
         context.coordinator.items = items
         let view = TriggerView()
         view.coordinator = context.coordinator
+        view.rightClickOnly = rightClickOnly
+        if let accessibilityLabel {
+            view.setAccessibilityElement(true)
+            view.setAccessibilityRole(.popUpButton)
+            view.setAccessibilityLabel(accessibilityLabel)
+        }
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.items = items
         (nsView as? TriggerView)?.coordinator = context.coordinator
+        (nsView as? TriggerView)?.rightClickOnly = rightClickOnly
     }
 
     /// Builds the menu and runs the chosen item.
@@ -3827,6 +3936,10 @@ struct NativeMenuTrigger: NSViewRepresentable {
                     item.target = self
                     item.tag = index
                     item.isEnabled = entry.isEnabled
+                    if let symbol = entry.symbol {
+                        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: entry.title)
+                        item.image?.size = NSSize(width: 16, height: 16)
+                    }
                     menu.addItem(item)
                 }
             }
@@ -3841,6 +3954,12 @@ struct NativeMenuTrigger: NSViewRepresentable {
 
     final class TriggerView: NSView {
         weak var coordinator: Coordinator?
+        var rightClickOnly = false
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            if rightClickOnly && NSApp.currentEvent?.type != .rightMouseDown { return nil }
+            return super.hitTest(point)
+        }
 
         /// Menus drop from the bottom of the row, which is where a pop-up
         /// button puts them, and flipped coordinates make that `maxY`.
@@ -3851,7 +3970,19 @@ struct NativeMenuTrigger: NSViewRepresentable {
         /// the press has to be repeated.
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-        override func mouseDown(with event: NSEvent) {
+        override func mouseDown(with event: NSEvent) { openMenu() }
+
+        override func rightMouseDown(with event: NSEvent) {
+            guard let menu = coordinator?.menu() else { return }
+            NSMenu.popUpContextMenu(menu, with: event, for: self)
+        }
+
+        override func accessibilityPerformPress() -> Bool {
+            openMenu()
+            return true
+        }
+
+        private func openMenu() {
             guard let menu = coordinator?.menu() else { return }
             menu.popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.maxY), in: self)
         }
@@ -4168,9 +4299,17 @@ private struct WorkspaceRow: View {
     /// tinted mark and a heavier name, and nothing louder, so that a selected
     /// session below can be the only lit row.
     let isCurrent: Bool
+    let summary: WorkspaceSummary?
+    let activeTerminals: Int
+    let rename: (String) async throws -> Void
+    let remove: () -> Void
+    let reveal: () -> Void
+    let actions: () -> [NativeMenuItem]
     let action: () -> Void
 
     @State private var isHovering = false
+    @State private var controlsHovered = false
+    @State private var renaming = false
 
     private var label: String {
         folder.isRemote
@@ -4179,41 +4318,75 @@ private struct WorkspaceRow: View {
     }
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: Theme.Space.s) {
-                Image(
-                    systemName: folder.isRemote
-                        ? "network"
-                        : (folder.exists ? "folder" : "questionmark.folder")
-                )
-                .symbolVariant(isCurrent ? .fill : .none)
-                .font(Theme.fit(13, weight: .medium))
-                .foregroundStyle(isCurrent ? Theme.accent : Theme.controlGlyph)
-                .frame(width: 18)
-                Text(label)
-                    .font(Theme.fit(RowMetrics.title, weight: isCurrent ? .semibold : .medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer(minLength: Theme.Space.xs)
-                changeCounts
+        ZStack(alignment: .trailing) {
+            Button(action: action) {
+                HStack(spacing: Theme.Space.s) {
+                    Image(systemName: folder.isRemote ? "network" : (folder.exists ? "folder" : "questionmark.folder"))
+                        .symbolVariant(isCurrent ? .fill : .none)
+                        .font(Theme.fit(13, weight: .medium))
+                        .foregroundStyle(isCurrent ? Theme.accent : Theme.controlGlyph)
+                        .frame(width: 18)
+                    Text(label)
+                        .font(Theme.fit(RowMetrics.title, weight: isCurrent ? .semibold : .medium))
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: Theme.Space.xs)
+                    changeCounts.opacity(isHovering ? 0 : 1)
+                        .frame(minWidth: 24, alignment: .trailing)
+                }
+                .padding(.horizontal, Theme.Space.s)
+                .frame(maxWidth: .infinity)
+                .frame(height: DisplayFit.dp(30))
+                .contentShape(.rect)
             }
-            .padding(.horizontal, Theme.Space.s)
-            .frame(height: DisplayFit.dp(30))
-            .background(background)
-            .contentShape(.rect)
+            .buttonStyle(.plain)
+            SidebarRowActions(name: folder.name, visible: isHovering,
+                              deleteTitle: "Remove project", delete: remove,
+                              hover: { controlsHovered = $0 }, actions: { menu })
+                .padding(.trailing, Theme.Space.s)
         }
-        .buttonStyle(.plain)
+        .background(background)
+        .contentShape(.rect)
         .onHover { isHovering = $0 }
-        .help(helpText)
-        .accessibilityElement(children: .combine)
+        .sidebarContextMenu(items: { menu })
+        .sidebarHoverCard(hovering: isHovering, enabled: !renaming, suppressOpening: controlsHovered) {
+            SidebarDetailCard(title: folder.name, subtitle: "Project", symbol: "folder",
+                              path: folder.path, fields: detailFields) {
+                if !folder.isRemote {
+                    Button("Open in Finder", .reveal, action: reveal)
+                        .buttonStyle(AccentButtonStyle())
+                }
+            }
+        }
+        .sheet(isPresented: $renaming) {
+            SidebarRenameSheet(title: "Rename project", currentName: folder.name, save: rename)
+        }
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("\(label). \(folder.subtitle ?? "No branch")")
     }
 
-    /// Path and branch on hover. The row itself keeps to the name and what
-    /// has changed, and the branch is in the project bar once it is open.
-    private var helpText: String {
-        guard let git = folder.git, git.isRepo else { return folder.path }
-        return "\(folder.path)\n\(git.branch.map { $0.isEmpty ? "detached" : $0 } ?? "detached")"
+    private var menu: [NativeMenuItem] {
+        [.init("Rename…", icon: .edit) { renaming = true }] + actions()
+    }
+
+    private var detailFields: [SidebarDetailField] {
+        var fields = [
+            SidebarDetailField(title: "Computer", value: folder.sidebarComputer, symbol: "laptopcomputer"),
+            SidebarDetailField(title: "Chats", value: summary?.chats.map { String($0) } ?? "Not loaded yet", symbol: "bubble.left.and.bubble.right"),
+            SidebarDetailField(title: "Active terminals", value: String(summary?.sessions ?? activeTerminals), symbol: "terminal"),
+        ]
+        if let git = folder.git, git.isRepo {
+            fields.append(.init(title: "Branch", value: git.branch.flatMap { $0.isEmpty ? nil : $0 } ?? "Detached HEAD", symbol: "arrow.triangle.branch"))
+            fields.append(.init(title: "Changed files", value: String(git.files.count), symbol: "doc.badge.ellipsis"))
+            if !git.files.isEmpty {
+                fields.append(.init(title: "Lines", value: "+\(git.added) −\(git.removed)\(git.partial ? " (partial)" : "")", symbol: "plus.forwardslash.minus"))
+            }
+            if git.ahead > 0 || git.behind > 0 {
+                fields.append(.init(title: "Upstream", value: "\(git.ahead) ahead · \(git.behind) behind", symbol: "arrow.up.arrow.down"))
+            }
+        } else {
+            fields.append(.init(title: "Git", value: folder.exists ? "Not a repository" : "Folder missing", symbol: "questionmark.folder"))
+        }
+        return fields
     }
 
     /// What is uncommitted, and what is not pushed, at the row's end.
@@ -4327,44 +4500,6 @@ extension SidebarGroupHeader where Trailing == EmptyView {
     }
 }
 
-/// One transcript nested under the workspace Chat section. Destructive
-/// affordances stay quiet until hover, then sit in the row where the pointer
-/// already is. The confirmation is owned by the row so moving the pointer
-/// away cannot dismiss or retarget it.
-/// The remove control a project's rows show under the pointer.
-///
-/// One view for chats and terminals, so the two siblings under a project
-/// offer the same mark in the same seat. It is always laid out and only
-/// shown on hover, so the title beside it never re-truncates.
-private struct SidebarRowTrash: View {
-    let help: String
-    let visible: Bool
-    let action: () -> Void
-
-    @State private var isHovering = false
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: ActionIcon.delete.symbol)
-                .font(Theme.fit(10, weight: .medium))
-                .foregroundStyle(isHovering ? Theme.accent : Color.secondary)
-                .frame(width: 20, height: 20)
-                .background(
-                    isHovering ? Theme.accentSoft : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 5, style: .continuous)
-                )
-                .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .help(help)
-        .accessibilityLabel(help)
-        .opacity(visible ? 1 : 0)
-        // A control nobody can see is a control nobody can press.
-        .allowsHitTesting(visible)
-    }
-}
-
 private struct ChatSidebarConversationRow: View {
     /// Where the mark starts: a `SidebarRow`'s padding plus half the slack
     /// between its 18 pt glyph frame and the 16 pt mark.
@@ -4373,6 +4508,9 @@ private struct ChatSidebarConversationRow: View {
     static var titleInset: CGFloat { markInset + DisplayFit.dp(16) + Theme.Space.s }
 
     let conversation: ChatConversation
+    let folder: WorkspaceFolder
+    let rename: (String) async throws -> Void
+    let fork: () async throws -> Void
     /// How the mark names this conversation to the draft store. Nil while
     /// the folder's owner is unknown, which draws nothing.
     let draft: WorkReference?
@@ -4386,6 +4524,11 @@ private struct ChatSidebarConversationRow: View {
 
     @State private var isHovering = false
     @State private var confirmsRemoval = false
+    @State private var controlsHovered = false
+    @State private var renaming = false
+    @State private var copying = false
+    @State private var actionError: String?
+
 
     var body: some View {
         ZStack(alignment: .trailing) {
@@ -4401,10 +4544,10 @@ private struct ChatSidebarConversationRow: View {
                         ChatDraftMark(reference: draft)
                     }
 
-                    // Reserve the remove control's seat even before hover, so
-                    // the title keeps its width when the pointer arrives.
+                    // The status and actions share one seat, so the title
+                    // keeps its width when the pointer arrives.
                     trailingState
-                        .opacity(isHovering && !conversation.running ? 0 : 1)
+                        .opacity(isHovering ? 0 : 1)
                         .frame(minWidth: 26, alignment: .trailing)
                 }
                 // Padding belongs to the label: every part of the highlighted
@@ -4417,11 +4560,11 @@ private struct ChatSidebarConversationRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(conversation.title.isEmpty ? "Untitled conversation" : conversation.title)
-            // The remove button sits above selection as a separate sibling.
             // Only this small control intercepts clicks on the full row.
-            SidebarRowTrash(help: "Remove chat", visible: isHovering && !conversation.running) {
-                confirmsRemoval = true
-            }
+            SidebarRowActions(name: conversation.title, visible: isHovering,
+                              canDelete: !conversation.running && !copying,
+                              deleteTitle: "Delete chat", delete: { confirmsRemoval = true },
+                              hover: { controlsHovered = $0 }, actions: { menu })
             .padding(.trailing, Theme.Space.s + 2)
         }
         .background(
@@ -4441,23 +4584,49 @@ private struct ChatSidebarConversationRow: View {
             guard !Task.isCancelled else { return }
             await warmPreview()
         }
-        .contextMenu {
-            Button("Remove chat", .delete, role: .destructive) {
-                confirmsRemoval = true
-            }
+        .sidebarContextMenu(items: { menu })
+        .sidebarHoverCard(hovering: isHovering,
+                          enabled: !renaming && !confirmsRemoval && !copying && actionError == nil,
+                          suppressOpening: controlsHovered) {
+            SidebarChatDetailCard(conversation: conversation, folder: folder)
         }
+        .sheet(isPresented: $renaming) {
+            SidebarRenameSheet(title: "Rename chat", currentName: conversation.title, save: rename)
+        }
+        .alert("Couldn’t fork this chat", isPresented: Binding(
+            get: { actionError != nil }, set: { if !$0 { actionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { actionError = nil }
+        } message: { Text(actionError ?? "") }
         .confirmationDialog(
-            "Remove this chat?",
+            "Delete this chat?",
             isPresented: $confirmsRemoval,
             titleVisibility: .visible
         ) {
-            Button("Remove chat", role: .destructive, action: remove)
+            Button("Delete chat", role: .destructive, action: remove)
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This permanently deletes the transcript.")
         }
-        .help("\(conversation.title) · \(harnessName(conversation.backend))")
     }
+    private var menu: [NativeMenuItem] {
+        var items = [NativeMenuItem("Rename…", icon: .edit) { renaming = true }]
+        items += SidebarPinAction.items(reference: draft, name: conversation.title, folderName: folder.name)
+        items.append(.init(copying ? "Forking…" : "Fork chat", icon: .copy, isEnabled: !conversation.running && !copying) {
+            guard !copying else { return }
+            copying = true
+            Task {
+                defer { copying = false }
+                do { try await fork() }
+                catch { actionError = error.localizedDescription }
+            }
+        })
+        items.append(.separator)
+        items.append(.init("Delete chat…", icon: .delete, isEnabled: !conversation.running && !copying,
+                           destructive: true) { confirmsRemoval = true })
+        return items
+    }
+
 }
 
 extension ChatSidebarConversationRow {
@@ -4623,12 +4792,17 @@ private struct ActiveAutomationRow: View {
 /// line.
 private struct ActiveSessionRow: View {
     let session: TerminalSession
+    let folder: WorkspaceFolder
+    let duplicate: () -> Void
     let isSelected: Bool
-    /// The hover trash and right-click. A live session asks before it stops.
+    /// Every removal path asks before it stops a live session.
     let close: () -> Void
     let action: () -> Void
 
     @State private var isHovering = false
+    @State private var controlsHovered = false
+    @State private var renaming = false
+
 
     /// Line one: what was launched.
     ///
@@ -4638,6 +4812,7 @@ private struct ActiveSessionRow: View {
     /// reading moved under you. What you picked from the launcher does not
     /// change, so that is what names the row.
     private var title: String {
+        if let name = session.customName { return name }
         if let harnessID = session.harnessID { return harnessName(harnessID) }
         return (session.command as NSString).lastPathComponent
     }
@@ -4744,47 +4919,82 @@ private struct ActiveSessionRow: View {
     }
 
     var body: some View {
-        HStack(spacing: Theme.Space.xs) {
+        ZStack(alignment: .trailing) {
             Button(action: action) {
-                // One line, like the chats beside it. The meter, the context
-                // window and the resources are one hover away, and the
-                // terminal itself carries them while it is in front.
                 HStack(spacing: Theme.Space.s) {
                     leadingMark
                     Text(dynamicTitle.map { "\(title) · \($0)" } ?? title)
                         .font(Theme.fit(13, weight: isSelected ? .medium : .regular))
                         .foregroundStyle(isSelected ? Color.primary : Theme.controlGlyph)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                        .lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 0)
+                    StateBadge(state: session.state, since: session.lastOutputAt)
+                        .opacity(isHovering ? 0 : 1)
+                        .frame(minWidth: 26, alignment: .trailing)
                 }
+                .padding(.leading, ChatSidebarConversationRow.markInset)
+                .padding(.trailing, Theme.Space.s + 2)
+                .frame(maxWidth: .infinity)
+                .frame(height: DisplayFit.dp(30))
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-
-            // The state, or under the pointer the way to close it: the same
-            // seat and mark a chat row uses. A live session still asks first.
-            ZStack(alignment: .trailing) {
-                StateBadge(state: session.state, since: session.lastOutputAt)
-                    .opacity(isHovering ? 0 : 1)
-                SidebarRowTrash(help: session.alive ? "Stop and close" : "Close", visible: isHovering, action: close)
-            }
-            .frame(minWidth: 26, alignment: .trailing)
+            SidebarRowActions(name: title, visible: isHovering,
+                              deleteTitle: session.alive ? "Stop and close" : "Close terminal",
+                              delete: close, hover: { controlsHovered = $0 }, actions: { menu })
+                .padding(.trailing, Theme.Space.s + 2)
         }
-        .padding(.leading, ChatSidebarConversationRow.markInset)
-        .padding(.trailing, Theme.Space.s + 2)
-        .frame(height: DisplayFit.dp(30))
         .background(background)
         .contentShape(.rect)
         .onHover { isHovering = $0 }
-        .contextMenu {
-            Button(session.alive ? "Stop and close" : "Close", role: .destructive) {
-                close()
+        .sidebarContextMenu(items: { menu })
+        .sidebarHoverCard(hovering: isHovering, enabled: !renaming, suppressOpening: controlsHovered) {
+            SidebarDetailCard(title: title, subtitle: dynamicTitle.map { "Terminal · \($0)" } ?? "Terminal",
+                              symbol: "terminal", path: session.reportedCwd ?? session.cwd,
+                              fields: detailFields) { EmptyView() }
+        }
+        .sheet(isPresented: $renaming) {
+            SidebarRenameSheet(title: "Rename terminal", currentName: title) { name in
+                SidebarTerminalNames.shared.rename(session.workReference, to: name, folderName: folder.name)
             }
         }
-        .help(helpText)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(spokenLabel)
+    }
+
+    private var menu: [NativeMenuItem] {
+        var items = [NativeMenuItem("Rename…", icon: .edit, isEnabled: session.workReference != nil) { renaming = true }]
+        items += SidebarPinAction.items(reference: session.workReference, name: title, folderName: folder.name)
+        items.append(.init("Duplicate into new shell", icon: .copy, isEnabled: !session.isPending, action: duplicate))
+        items.append(.separator)
+        items.append(.init(session.alive ? "Stop and close…" : "Close", icon: .delete,
+                           destructive: true, action: close))
+        return items
+    }
+
+    private var detailFields: [SidebarDetailField] {
+        var fields = [
+            SidebarDetailField(title: "Project", value: folder.name, symbol: "folder"),
+            SidebarDetailField(title: "Computer", value: folder.sidebarComputer, symbol: "laptopcomputer"),
+            SidebarDetailField(title: "Status", value: session.state.label, symbol: "circle.dotted"),
+            SidebarDetailField(title: "Command", value: session.command, symbol: "terminal"),
+        ]
+        if let meter = session.meter {
+            fields.append(.init(title: "Tokens", value: meter.tokens.formatted(), symbol: "number"))
+            fields.append(.init(title: "Context", value: contextText, symbol: "gauge.with.dots.needle.50percent"))
+            if let model = meter.model { fields.append(.init(title: "Model", value: model, symbol: "sparkles")) }
+            if let cost = meter.costMicros {
+                fields.append(.init(title: "List price", value: Money(micros: cost, estimated: meter.estimated,
+                                                                    complete: meter.complete).formatted,
+                                    symbol: "dollarsign.circle"))
+            }
+        } else {
+            fields.append(.init(title: "Tokens", value: "Not reported by this terminal", symbol: "number"))
+        }
+        if let resources = resourceStats {
+            fields.append(.init(title: "Resources", value: resources, symbol: "cpu"))
+        }
+        return fields
     }
 
     /// The agent's mark with a small terminal badge, so a terminal running

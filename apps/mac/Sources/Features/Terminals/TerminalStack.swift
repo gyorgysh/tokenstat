@@ -165,6 +165,20 @@ final class TerminalStackView: NSView {
         if isHidden != !surfaceVisible {
             isHidden = !surfaceVisible
         }
+        // A chat can display one of these same emulators beside its composer.
+        // An inactive stack must leave its hierarchy and frames alone instead
+        // of taking the view back from the visible pane on every model update.
+        if !surfaceVisible {
+            leadingView = nil
+            trailingView = nil
+            splitAxis = nil
+            for sub in subviews where !views.contains(where: { $0 === sub }) {
+                sub.removeFromSuperview()
+            }
+            shown = nil
+            lastClaimsFocus = false
+            return
+        }
 
         // Views just re-parented into this stack need a repaint even when they
         // stay visible: a fresh TerminalStackView after a folder switch hands
@@ -289,6 +303,7 @@ final class TerminalStackView: NSView {
 
     override func layout() {
         super.layout()
+        guard !isHidden else { return }
         guard bounds.width > 1, bounds.height > 1 else {
             // No valid size yet (fresh mount with a zero frame). Leave the
             // pending full paint queued and the frames alone: collapsing a

@@ -224,4 +224,5 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 24 adds `workspace.worktrees` and `workspace.createWorktree`.
 /// Version 25 adds `chat.steer`, `chat.steerClear` and `chat.steerDeliver`,
 /// so a short note can ride the next tool step while a turn is still running.
-pub const PROTOCOL_VERSION: &str = "25";
+/// Version 26 adds independent saved-transcript copies with `chat.fork`.
+pub const PROTOCOL_VERSION: &str = "26";

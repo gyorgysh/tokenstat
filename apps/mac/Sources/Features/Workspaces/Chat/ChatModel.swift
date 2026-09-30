@@ -1573,6 +1573,47 @@ final class ChatModel {
         return result
     }
 
+    /// Sidebar mutations route through the row's project, including unopened projects.
+    func rename(_ conversation: ChatConversation, in folderID: String, to title: String) async throws {
+        let scope = WorkSessionContext.shared.scope
+        let updated = try await Bridge.updateChat(id: conversation.id, title: title,
+                                                  peer: Bridge.chatRoute(workspaceID: folderID).peer)
+        guard scope == WorkSessionContext.shared.scope else { return }
+        publishSidebarConversation(updated, in: folderID)
+        if let reference = draftReference(for: updated.id, in: folderID),
+           PinnedWorkStore.shared.isPinned(reference) {
+            let folderName = PinnedWorkStore.shared.pins(in: reference.scope)
+                .first { $0.reference == reference }?.folderName ?? "Project"
+            PinnedWorkStore.shared.pin(reference, label: updated.title, folderName: folderName)
+        }
+    }
+
+    func fork(_ conversation: ChatConversation, in folderID: String) async throws -> ChatConversation {
+        let scope = WorkSessionContext.shared.scope
+        let copied = try await Bridge.forkChat(id: conversation.id,
+                                               peer: Bridge.chatRoute(workspaceID: folderID).peer)
+        guard scope == WorkSessionContext.shared.scope else {
+            throw NSError(domain: "Chat", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "The account changed while copying the chat."])
+        }
+        publishSidebarConversation(copied, in: folderID)
+        return copied
+    }
+
+    private func publishSidebarConversation(_ conversation: ChatConversation, in folderID: String) {
+        var list = sidebarChats(in: folderID)
+        if let index = list.firstIndex(where: { $0.id == conversation.id }) {
+            list[index] = conversation
+        } else {
+            list.insert(conversation, at: 0)
+        }
+        storeChatListCache(list, folderID: folderID)
+        if self.folderID == folderID {
+            chats = list
+            if selected?.id == conversation.id { selected = conversation }
+        }
+    }
+
     func remove(_ chat: ChatConversation) async {
         await remove(chat, in: folderID)
     }
@@ -2130,6 +2171,12 @@ final class ChatModel {
             if let current = latest.first(where: { $0.id == selected.id }),
                current != self.selected {
                 self.selected = current
+                // Muse flushes counters to its saved session when a turn ends.
+                // Ask for the host's complete fold after that transition too.
+                if selected.running && !current.running {
+                    await refreshUsage(id: selected.id, generation: generation)
+                    guard selectionMatches(id: selected.id, generation: generation) else { return }
+                }
             }
             settleNotifications()
         } catch {}
@@ -2231,6 +2278,13 @@ final class ChatModel {
         busy || hasPendingResponseAttachments ? .milliseconds(400) : .seconds(2)
     }
 
+    private func refreshUsage(id: String, generation: UInt64) async {
+        let page = try? await Bridge.chatEventPage(id: id, cursor: nil, limit: 10, peer: peer)
+        guard selectionMatches(id: id, generation: generation), let usage = page?.usage, usage.isValid else { return }
+        conversationUsage = usage
+        usageThrough = page?.events.compactMap(\.seq).max() ?? events.compactMap(\.seq).max()
+    }
+
     func poll() async {
         guard !Task.isCancelled, !openingConversation, savedCopy == nil, let selected else { return }
         let generation = selectionGeneration
@@ -2252,6 +2306,10 @@ final class ChatModel {
             if let current = latest.first(where: { $0.id == selected.id }),
                current != self.selected {
                 self.selected = current
+                if selected.running && !current.running {
+                    await refreshUsage(id: selected.id, generation: generation)
+                    guard selectionMatches(id: selected.id, generation: generation) else { return }
+                }
                 #if !os(macOS)
                 if !Task.isCancelled {
                     ClientChatReadState.shared.markRead(peer: peer, chat: current)

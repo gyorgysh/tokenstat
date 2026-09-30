@@ -9,7 +9,7 @@ import kotlinx.serialization.json.longOrNull
 /// `expectedProtocolVersion` and `RemoteHostFeature` minimums, plus the
 /// `insights.snapshot` (proto 5) shape the Mac uses.
 object HostContracts {
-    const val PROTOCOL_VERSION = "25"
+    const val PROTOCOL_VERSION = "26"
     const val WORKTREES_MIN_PROTOCOL = 24
     const val CHAT_MIN_PROTOCOL = 4
     const val PULLS_MIN_PROTOCOL = 3

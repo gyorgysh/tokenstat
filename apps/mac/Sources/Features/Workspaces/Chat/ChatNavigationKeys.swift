@@ -2,6 +2,7 @@
 #if os(macOS)
 import AppKit
 import SwiftUI
+import SwiftTerm
 
 /// Arrow navigation belongs only to the visible chat in this window. Text
 /// editors keep their cursor keys, and sheets keep their own key handling.
@@ -34,6 +35,7 @@ struct ChatNavigationKeys: NSViewRepresentable {
                       window.isKeyWindow, event.window === window,
                       window.attachedSheet == nil,
                       event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
+                      !(window.firstResponder is TerminalView),
                       (!(window.firstResponder is NSTextView)
                         || ChatDraftTextView.yieldsArrowKeys(window.firstResponder)),
                       !(window.firstResponder is NSControl) else { return event }

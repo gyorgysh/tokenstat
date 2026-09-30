@@ -3,7 +3,8 @@
 import SwiftUI
 
 enum Bridge {
-    static func peerProtocolVersion(_ peer: String) async throws -> Int { 99 }
+    static var version = 99
+    static func peerProtocolVersion(_ peer: String) async throws -> Int { version }
 }
 
 enum Theme {
@@ -45,13 +46,23 @@ struct AccentButtonStyle: ButtonStyle {
 
 @main
 struct RemoteHostFeatureProbeTests {
-    @MainActor static func main() {
+    @MainActor static func main() async {
         func check(_ condition: Bool, _ message: String) {
             precondition(condition, message)
         }
         func key(_ peer: String, _ feature: RemoteHostFeature = .chat, _ retry: Int = 0) -> RemoteHostFeatureProbeKey {
             RemoteHostFeatureProbeKey(peer: peer, feature: feature, retry: retry)
         }
+        Bridge.version = 25
+        let oldForkSupport = await RemoteHostFeature.chatFork.isSupported(peer: "peer")
+        check(!oldForkSupport, "an older host cannot receive chat.fork")
+        Bridge.version = 26
+        let newForkSupport = await RemoteHostFeature.chatFork.isSupported(peer: "peer")
+        check(newForkSupport, "the first fork-capable host is accepted")
+        Bridge.version = 25
+        let localForkSupport = await RemoteHostFeature.chatFork.isSupported(peer: nil)
+        check(localForkSupport, "the bundled local host does not need a peer probe")
+        Bridge.version = 99
         // The first run asks.
         do {
             let probe = RemoteHostFeatureProbe()

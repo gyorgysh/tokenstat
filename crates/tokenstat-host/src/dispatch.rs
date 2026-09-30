@@ -2071,6 +2071,9 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             serde_json::to_value(store.recent(p.limit.unwrap_or(20) as usize)).envelope()
         }
         "chat.create" => serde_json::to_value(store.create(p.create())?).envelope(),
+        "chat.fork" => {
+            serde_json::to_value(store.fork(&p.id.ok_or("chat.fork needs id")?)?).envelope()
+        }
         "chat.update" => serde_json::to_value(
             store.update(&p.id.clone().ok_or("chat.update needs id")?, p.changes())?,
         )

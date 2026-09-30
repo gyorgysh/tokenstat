@@ -1513,6 +1513,109 @@ impl Store {
         })
     }
 
+    /// Copy the saved transcript into a new conversation with its own future.
+    /// Backend sessions, receipts, pending notes and live permissions stay with
+    /// the original. Its stored setup and attachments belong to the copy too.
+    pub fn fork(&self, id: &str) -> Result<Conversation, String> {
+        validate_record_id(id)?;
+        let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
+        let lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+        let _transcript = self.transcript_guard()?;
+        let (source, mut fork) = {
+            let chats = self
+                .conversations
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let original = chats
+                .iter()
+                .find(|chat| chat.id == id)
+                .ok_or("no chat with that id")?;
+            self.verified_conversation(&original.workspace_id, id, &chats)?
+        };
+        if fork.running
+            || self
+                .active
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains_key(id)
+        {
+            return Err("finish or stop this turn before forking the chat".into());
+        }
+        let _runner = crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?
+            .ok_or("finish or stop this turn before forking the chat")?;
+        match fs::symlink_metadata(&source) {
+            Ok(metadata) if !metadata.is_dir() => return Err("invalid chat directory".into()),
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                return Err(error.to_string());
+            }
+            _ => {}
+        }
+        let source_usage = self.conversation_usage(&fork, &source.join("events.ndjson"))?;
+        let stored_usage = usage_totals(&source.join("events.ndjson"))?;
+        fork.id = mint_record_id("chat");
+        fork.title = format!("{} (fork)", fork.title);
+        fork.created_at_ms = now_ms();
+        fork.updated_at_ms = fork.created_at_ms;
+        fork.send_revision = 0;
+        fork.resume_token = None;
+        fork.resume_tokens.clear();
+        fork.standing_sent.clear();
+        fork.running = false;
+        let destination = safe_join(&self.root, &fork.id)?;
+        fs::create_dir(&destination).map_err(|error| error.to_string())?;
+        let result = (|| {
+            let bytes = read_fork_file(
+                &source.join("events.ndjson"),
+                PAGE_RECORD_BYTES + crate::work_transcript_identity::SUMMARY_BYTES as u64,
+                true,
+            )?;
+            if !bytes.is_empty() && !bytes.ends_with(b"\n") {
+                return Err("the transcript is incomplete and cannot be copied".into());
+            }
+            let mut copied = Vec::new();
+            for line in bytes
+                .split(|byte| *byte == b'\n')
+                .filter(|line| !line.is_empty())
+            {
+                let mut record: Value = serde_json::from_slice(line)
+                    .map_err(|_| "the transcript could not be verified for copying")?;
+                if record["kind"] == "agent" && record["event"]["kind"] == "session" {
+                    continue;
+                }
+                if record["kind"] == "approval" {
+                    let approval = &mut record["approval"];
+                    let original = approval["id"].as_str().ok_or("invalid stored approval")?;
+                    approval["id"] = json!(format!("{}-{original}", fork.id));
+                    approval["conversationId"] = json!(fork.id);
+                    approval["expiresAtMs"] = json!(0);
+                    if approval["decision"].is_null() {
+                        approval["decision"] = json!("deny");
+                    }
+                }
+                serde_json::to_writer(&mut copied, &record).map_err(|error| error.to_string())?;
+                copied.push(b'\n');
+            }
+            if let Some(extra) = usage_difference(&source_usage, &stored_usage)? {
+                let seq = crate::work_transcript_identity::next_sequence(&copied, 0)?;
+                let Value::Object(record) = json!({"kind":"retainedUsage", "usage":extra}) else {
+                    return Err("invalid copied usage".into());
+                };
+                copied.extend(crate::work_transcript_identity::encoded(record, seq)?);
+            }
+            replace_chat_file(&destination.join("events.ndjson"), &copied)?;
+            copy_fork_files(&source.join("files"), &destination.join("files"))?;
+            self.edit_index_locked(&lifecycle, false, |_, current| {
+                current.push(fork.clone());
+                Ok(fork.clone())
+            })
+        })();
+        if result.is_err() {
+            let _ = fs::remove_dir_all(&destination);
+        }
+        result
+    }
+
     pub fn update(&self, id: &str, changes: Update) -> Result<Conversation, String> {
         validate_record_id(id)?;
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
@@ -1910,7 +2013,7 @@ impl Store {
         stable: bool,
     ) -> Result<EventPage, String> {
         let _guard = self.transcript_guard()?;
-        self.get(id)?;
+        let chat = self.get(id)?;
         let path = self.events_path(id);
         let len = file_len(&path);
         let first = archive_generation(&path)?;
@@ -1940,11 +2043,77 @@ impl Store {
             // figure, it does not change as somebody reads backwards, and it
             // is the one thing here that has to look past the window.
             usage: if cursor.is_none() || reset {
-                Some(usage_totals(&path)?)
+                Some(self.conversation_usage(&chat, &path)?)
             } else {
                 None
             },
         })
+    }
+
+    /// Saved vendor counts fill gaps left by older live-stream parsers. The
+    /// numeric snapshot is bounded and never includes prompts in the reply.
+    fn conversation_usage(&self, chat: &Conversation, path: &Path) -> Result<Value, String> {
+        let baseline = usage_totals(path)?;
+        let bytes = read_fork_file(
+            path,
+            PAGE_RECORD_BYTES + crate::work_transcript_identity::SUMMARY_BYTES as u64,
+            true,
+        )?;
+        let records: Vec<Value> = bytes
+            .split(|byte| *byte == b'\n')
+            .filter_map(|line| serde_json::from_slice(line).ok())
+            .collect();
+        let mut totals = baseline.clone();
+        if !records.iter().any(|row| {
+            row["kind"] == "retainedUsage" && row["usage"]["turns"].as_u64().unwrap_or(0) > 0
+        }) {
+            let times: Vec<i64> = records
+                .iter()
+                .filter(|row| row["backend"] == "codex" && row["event"]["kind"] == "usage")
+                .filter_map(|row| row["at_ms"].as_i64().or_else(|| row["atMs"].as_i64()))
+                .collect();
+            let recovered = legacy_codex_usage(
+                &path.parent().ok_or("invalid transcript path")?.join("raw"),
+                &times,
+            )?;
+            add_usage_value(&mut totals, &recovered)?;
+        }
+        let muse = chat
+            .resume_tokens
+            .get("muse")
+            .map(String::as_str)
+            .or_else(|| {
+                (chat.backend == "muse")
+                    .then_some(chat.resume_token.as_deref())
+                    .flatten()
+            });
+        if let Some(token) = muse.filter(|token| validate_record_id(token).is_ok()) {
+            let directory = if let Some(root) = tokenstat_paths::home_dir()
+                .and_then(|home| tokenstat_core::sources::muse::discover(&home))
+            {
+                muse_session_directory(&root, token)?
+            } else {
+                None
+            };
+            if let Some(directory) = directory {
+                let recovered = muse_log_usage(&directory)?;
+                let mut stored = crate::work_transcript_identity::UsageTotals::default();
+                for record in &records {
+                    if record["backend"] == "muse"
+                        && let Some(record) = record.as_object()
+                    {
+                        stored.add(&crate::work_transcript_identity::UsageTotals::from_record(
+                            record,
+                        )?)?;
+                    }
+                }
+                // A missing or older vendor log does not erase already recorded usage.
+                if let Some(extra) = usage_difference(&recovered, &stored.value())? {
+                    add_usage_value(&mut totals, &extra)?;
+                }
+            }
+        }
+        Ok(totals)
     }
 
     /// A bounded, server-internal input for live search. The caller must first
@@ -3544,6 +3713,75 @@ fn append_raw(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
     file.write_all(bytes).map_err(|e| e.to_string())
 }
 
+fn read_fork_file(path: &Path, maximum: u64, missing_is_empty: bool) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.is_file() || metadata.len() > maximum => {
+            return Err("the chat file cannot be copied".into());
+        }
+        Err(error) if missing_is_empty && error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Vec::new());
+        }
+        Err(error) => return Err(error.to_string()),
+        _ => {}
+    }
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let file = match options.open(path) {
+        Ok(file) => file,
+        Err(error) if missing_is_empty && error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Vec::new());
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
+    if !metadata.is_file() || metadata.len() > maximum {
+        return Err("the chat file cannot be copied".into());
+    }
+    let mut bytes = Vec::new();
+    file.take(maximum + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() as u64 > maximum {
+        return Err("the chat file exceeds the copying limit".into());
+    }
+    Ok(bytes)
+}
+
+fn copy_fork_files(source: &Path, destination: &Path) -> Result<(), String> {
+    let metadata = match fs::symlink_metadata(source) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.to_string()),
+    };
+    if !metadata.is_dir() {
+        return Err("invalid chat attachment directory".into());
+    }
+    for attachment in fs::read_dir(source).map_err(|error| error.to_string())? {
+        let attachment = attachment.map_err(|error| error.to_string())?;
+        if !attachment
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_dir()
+        {
+            return Err("invalid chat attachment directory".into());
+        }
+        let directory = destination.join(attachment.file_name());
+        fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+        for file in fs::read_dir(attachment.path()).map_err(|error| error.to_string())? {
+            let file = file.map_err(|error| error.to_string())?;
+            let bytes = read_fork_file(&file.path(), ATTACHMENT_CAP as u64, false)?;
+            write_private_file(&directory.join(file.file_name()), &bytes)?;
+        }
+    }
+    Ok(())
+}
+
 /// Write a chat-owned file at user-only permissions, refusing to follow a
 /// symlink at the path. Raw output, `brain.md` and `history.md` are private
 /// records; the process umask is not a permission model.
@@ -4070,6 +4308,194 @@ pub struct EventPage {
 ///
 /// Cheap despite reading the file, because usage is a few dozen records out
 /// of thousands and a substring test skips the rest without parsing them.
+/// No unbounded vendor-file walks on a sidebar hover.
+const VENDOR_USAGE_BYTES: u64 = 32 * 1024 * 1024;
+const VENDOR_USAGE_FILES: usize = 256;
+
+fn add_usage_value(total: &mut Value, extra: &Value) -> Result<(), String> {
+    let mut sum = crate::work_transcript_identity::UsageTotals::from_record(
+        json!({"kind":"retainedUsage", "usage":total})
+            .as_object()
+            .ok_or("invalid usage")?,
+    )?;
+    sum.add(&crate::work_transcript_identity::UsageTotals::from_record(
+        json!({"kind":"retainedUsage", "usage":extra})
+            .as_object()
+            .ok_or("invalid usage")?,
+    )?)?;
+    *total = sum.value();
+    Ok(())
+}
+
+fn usage_difference(total: &Value, recorded: &Value) -> Result<Option<Value>, String> {
+    let mut extra = crate::work_transcript_identity::UsageTotals::default().value();
+    for key in ["turns", "input", "output", "cacheRead", "cacheWrite"] {
+        let count = total[key].as_u64().ok_or("invalid vendor usage")?;
+        let previous = recorded[key].as_u64().ok_or("invalid recorded usage")?;
+        // Logs may lag a live stream while the vendor is still flushing.
+        extra[key] = json!(count.saturating_sub(previous));
+    }
+    extra["cost"] = json!(
+        (total["cost"].as_f64().ok_or("invalid vendor cost")?
+            - recorded["cost"].as_f64().ok_or("invalid recorded cost")?)
+        .max(0.0)
+    );
+    Ok((extra["turns"].as_u64().unwrap_or(0) > 0
+        || extra["input"].as_u64().unwrap_or(0) > 0
+        || extra["output"].as_u64().unwrap_or(0) > 0
+        || extra["cacheRead"].as_u64().unwrap_or(0) > 0
+        || extra["cacheWrite"].as_u64().unwrap_or(0) > 0
+        || extra["cost"].as_f64().unwrap_or(0.0) > 0.0)
+        .then_some(extra))
+}
+
+fn legacy_codex_usage(directory: &Path, recorded_at: &[i64]) -> Result<Value, String> {
+    let mut totals = crate::work_transcript_identity::UsageTotals::default();
+    let mut files = match fs::read_dir(directory) {
+        Ok(entries) => entries
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                let path = entry.path();
+                if path.extension()?.to_str()? != "ndjson" {
+                    return None;
+                }
+                Some((path.file_stem()?.to_str()?.parse::<i64>().ok()?, path))
+            })
+            .collect::<Vec<_>>(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(totals.value()),
+        Err(error) => return Err(error.to_string()),
+    };
+    if files.len() > VENDOR_USAGE_FILES {
+        return Err("saved usage exceeds the reading limit".into());
+    }
+    files.sort_by_key(|(time, _)| *time);
+    let mut remaining = VENDOR_USAGE_BYTES;
+    for (index, (start, path)) in files.iter().enumerate() {
+        let end = files
+            .get(index + 1)
+            .map(|(time, _)| *time)
+            .unwrap_or(i64::MAX);
+        if recorded_at
+            .iter()
+            .any(|time| *time >= *start && *time < end)
+        {
+            continue;
+        }
+        let bytes = read_fork_file(path, remaining.min(RAW_CAP), false)?;
+        remaining = remaining.saturating_sub(bytes.len() as u64);
+        for line in bytes.split(|byte| *byte == b'\n') {
+            if !line
+                .windows(b"turn.completed".len())
+                .any(|chunk| chunk == b"turn.completed")
+            {
+                continue;
+            }
+            let Ok(value) = serde_json::from_slice::<Value>(line) else {
+                continue;
+            };
+            if value["type"] != "turn.completed" {
+                continue;
+            }
+            let usage = &value["usage"];
+            let Some(input) = usage["input_tokens"].as_u64() else {
+                continue;
+            };
+            let cached = usage["cached_input_tokens"].as_u64().unwrap_or(0);
+            let write = usage["cache_write_input_tokens"].as_u64().unwrap_or(0);
+            let record = json!({"event":Event::Usage { input: input.saturating_sub(cached).saturating_sub(write),
+                output: usage["output_tokens"].as_u64().unwrap_or(0), cache_read: cached, cache_write: write, cost_usd: None }});
+            totals.add(&crate::work_transcript_identity::UsageTotals::from_record(
+                record.as_object().ok_or("invalid usage")?,
+            )?)?;
+        }
+    }
+    Ok(totals.value())
+}
+
+/// Muse keeps sessions under year/month/day, independently of the project's
+/// creation date. Probe date directories rather than reading unrelated logs.
+fn muse_session_directory(root: &Path, token: &str) -> Result<Option<PathBuf>, String> {
+    validate_record_id(token)?;
+    let direct = root.join(token);
+    if fs::symlink_metadata(&direct).is_ok_and(|metadata| metadata.is_dir()) {
+        return Ok(Some(direct));
+    }
+    let date_parts =
+        |directory: &Path, width: usize, maximum: u32| -> Result<Vec<PathBuf>, String> {
+            let entries = match fs::read_dir(directory) {
+                Ok(entries) => entries,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+                Err(error) => return Err(error.to_string()),
+            };
+            let mut paths = Vec::new();
+            for entry in entries {
+                let entry = entry.map_err(|error| error.to_string())?;
+                let name = entry.file_name();
+                let Some(name) = name.to_str().filter(|name| name.len() == width) else {
+                    continue;
+                };
+                if name.bytes().all(|byte| byte.is_ascii_digit())
+                    && name
+                        .parse::<u32>()
+                        .is_ok_and(|value| value > 0 && value <= maximum)
+                    && entry
+                        .file_type()
+                        .map_err(|error| error.to_string())?
+                        .is_dir()
+                {
+                    paths.push(entry.path());
+                }
+                if paths.len() > VENDOR_USAGE_FILES {
+                    return Err("saved usage exceeds the directory reading limit".into());
+                }
+            }
+            Ok(paths)
+        };
+    for year in date_parts(root, 4, 9999)? {
+        for month in date_parts(&year, 2, 12)? {
+            for day in date_parts(&month, 2, 31)? {
+                let directory = day.join(token);
+                if fs::symlink_metadata(&directory).is_ok_and(|metadata| metadata.is_dir()) {
+                    return Ok(Some(directory));
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn muse_log_usage(directory: &Path) -> Result<Value, String> {
+    let mut totals = crate::work_transcript_identity::UsageTotals::default();
+    if !directory.is_dir() {
+        return Ok(totals.value());
+    }
+    let files = tokenstat_core::sources::muse::shards(directory);
+    if files.len() > VENDOR_USAGE_FILES {
+        return Err("saved usage exceeds the reading limit".into());
+    }
+    let mut remaining = VENDOR_USAGE_BYTES;
+    let mut seen = HashSet::new();
+    for path in files {
+        let bytes = read_fork_file(&path, remaining, false)?;
+        remaining = remaining.saturating_sub(bytes.len() as u64);
+        let parsed =
+            tokenstat_core::sources::muse::parse_file(&path, &String::from_utf8_lossy(&bytes));
+        for event in parsed.events {
+            if !seen.insert(event.id) {
+                continue;
+            }
+            let counters = event.counters;
+            let record = json!({"event":Event::Usage { input: counters.input_fresh.unwrap_or(0),
+                output: counters.output.unwrap_or(0), cache_read: counters.cache_read.unwrap_or(0),
+                cache_write: counters.cache_write_5m.unwrap_or(0).saturating_add(counters.cache_write_1h.unwrap_or(0)), cost_usd: None }});
+            totals.add(&crate::work_transcript_identity::UsageTotals::from_record(
+                record.as_object().ok_or("invalid usage")?,
+            )?)?;
+        }
+    }
+    Ok(totals.value())
+}
+
 fn usage_totals(path: &Path) -> Result<Value, String> {
     use std::io::Read;
     let file = match fs::File::open(path) {
@@ -5680,6 +6106,377 @@ mod tests {
             running: false,
         });
         store.save().unwrap();
+    }
+
+    #[test]
+    fn legacy_codex_usage_is_recovered_once_and_survives_forking() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "original");
+        let raw = store.root.join("original/raw");
+        fs::create_dir_all(&raw).unwrap();
+        let first = json!({"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":60,"output_tokens":20}});
+        let second = json!({"type":"turn.completed","usage":{"input_tokens":200,"cached_input_tokens":100,"output_tokens":30}});
+        fs::write(raw.join("100.ndjson"), format!("{first}\n")).unwrap();
+        fs::write(raw.join("200.ndjson"), format!("{second}\n")).unwrap();
+        store
+            .append(
+                "original",
+                &StoredEvent::Agent {
+                    event: Event::Usage {
+                        input: 100,
+                        output: 30,
+                        cache_read: 100,
+                        cache_write: 0,
+                        cost_usd: None,
+                    },
+                    backend: "codex".into(),
+                    at_ms: 250,
+                },
+            )
+            .unwrap();
+        // Retention can leave logical positions above physical offsets.
+        let path = store.events_path("original");
+        let mut record: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        record["seq"] = json!(900_000);
+        fs::write(&path, format!("{record}\n")).unwrap();
+        let expected =
+            json!({"turns":2,"input":140,"output":50,"cacheRead":160,"cacheWrite":0,"cost":0.0});
+        assert_eq!(
+            store
+                .event_page("original", None, 1)
+                .unwrap()
+                .usage
+                .unwrap(),
+            expected
+        );
+        assert_eq!(
+            store
+                .event_page("original", None, 1)
+                .unwrap()
+                .usage
+                .unwrap(),
+            expected
+        );
+        let fork = store.fork("original").unwrap();
+        assert!(!store.root.join(&fork.id).join("raw").exists());
+        assert_eq!(
+            store.event_page(&fork.id, None, 1).unwrap().usage.unwrap(),
+            expected
+        );
+        assert_eq!(
+            store
+                .event_page(&fork.id, None, 100)
+                .unwrap()
+                .history_trimmed,
+            store
+                .event_page("original", None, 100)
+                .unwrap()
+                .history_trimmed
+        );
+        store
+            .append(
+                &fork.id,
+                &StoredEvent::User {
+                    text: "Independent follow-up".into(),
+                    at_ms: 300,
+                },
+            )
+            .unwrap();
+        fs::write(raw.join("100.ndjson"), "").unwrap();
+        assert_eq!(
+            store.event_page(&fork.id, None, 1).unwrap().usage.unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn muse_saved_usage_includes_subagents_without_recounting_records() {
+        let root = tempfile::tempdir().unwrap();
+        let child = root.path().join("children/agent-a");
+        fs::create_dir_all(&child).unwrap();
+        let record = |id: &str, input: u64, output: u64, cached: u64| {
+            json!({
+                "id":id,"recorded_at":1788257973508549_u64,"payload_type":"runtime.session",
+                "payload":{"event":{"kind":"model_completed","model":"test-model",
+                    "usage":{"input_tokens":input,"output_tokens":output,"cache_read_tokens":cached,"cache_write_tokens":0}}}
+            })
+        };
+        let first = record("first", 100, 20, 60);
+        let second = record("second", 200, 30, 100);
+        fs::write(root.path().join("session.jsonl"), format!("{first}\n")).unwrap();
+        fs::write(child.join("session.jsonl"), format!("{first}\n{second}\n")).unwrap();
+        let usage = muse_log_usage(root.path()).unwrap();
+        assert_eq!(
+            usage,
+            json!({"turns":2,"input":140,"output":50,"cacheRead":160,"cacheWrite":0,"cost":0.0})
+        );
+        let previous =
+            json!({"turns":1,"input":40,"output":20,"cacheRead":60,"cacheWrite":0,"cost":0.0});
+        let extra = usage_difference(&usage, &previous).unwrap().unwrap();
+        assert_eq!(extra["input"], 100);
+        assert_eq!(extra["cacheRead"], 100);
+        assert!(usage_difference(&previous, &usage).unwrap().is_none());
+    }
+
+    #[test]
+    fn muse_usage_finds_the_session_in_date_directories() {
+        let root = tempfile::tempdir().unwrap();
+        let session = root.path().join("2026/09/30/session-a");
+        fs::create_dir_all(&session).unwrap();
+        fs::create_dir_all(root.path().join("unrelated/09/30/session-a")).unwrap();
+        assert_eq!(
+            muse_session_directory(root.path(), "session-a").unwrap(),
+            Some(session)
+        );
+        assert!(
+            muse_session_directory(root.path(), "missing")
+                .unwrap()
+                .is_none()
+        );
+        assert!(muse_session_directory(root.path(), "../session-a").is_err());
+    }
+
+    #[test]
+    fn fork_preserves_history_usage_and_files_without_sharing_live_state() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "original");
+        store
+            .edit_conversation("original", |chat| {
+                chat.title = "Design".into();
+                chat.model = Some("model-a".into());
+                chat.system_prompt = "Keep explanations concrete".into();
+                chat.resume_token = Some("vendor-session".into());
+                chat.resume_tokens
+                    .insert("claude".into(), "vendor-session".into());
+                chat.standing_sent
+                    .insert("claude".into(), "standing-fingerprint".into());
+                chat.send_revision = 7;
+                Ok(())
+            })
+            .unwrap();
+        store
+            .append(
+                "original",
+                &StoredEvent::User {
+                    text: "Original prompt".into(),
+                    at_ms: 1,
+                },
+            )
+            .unwrap();
+        store
+            .append(
+                "original",
+                &StoredEvent::Agent {
+                    event: Event::Session {
+                        id: "vendor-session".into(),
+                    },
+                    at_ms: 2,
+                    backend: "claude".into(),
+                },
+            )
+            .unwrap();
+        store
+            .append(
+                "original",
+                &StoredEvent::Agent {
+                    event: Event::Text {
+                        delta: "Previous answer".into(),
+                    },
+                    at_ms: 3,
+                    backend: "claude".into(),
+                },
+            )
+            .unwrap();
+        store
+            .append(
+                "original",
+                &StoredEvent::Agent {
+                    event: Event::Usage {
+                        input: 100,
+                        output: 20,
+                        cache_read: 5,
+                        cache_write: 2,
+                        cost_usd: Some(0.01),
+                    },
+                    at_ms: 4,
+                    backend: "claude".into(),
+                },
+            )
+            .unwrap();
+        store
+            .append(
+                "original",
+                &StoredEvent::Approval {
+                    approval: Approval {
+                        id: "permission-a".into(),
+                        conversation_id: "original".into(),
+                        verb: "Shell".into(),
+                        preview: "Read files".into(),
+                        shell_prefix: None,
+                        created_at_ms: 5,
+                        expires_at_ms: i64::MAX,
+                        decision: None,
+                    },
+                    at_ms: 5,
+                },
+            )
+            .unwrap();
+        let original_path = store.root.join("original");
+        fs::create_dir_all(original_path.join("files/attachment-a")).unwrap();
+        fs::write(
+            original_path.join("files/attachment-a/diagram.txt"),
+            "attached bytes",
+        )
+        .unwrap();
+        fs::write(original_path.join("steer.txt"), "Pending note").unwrap();
+        fs::create_dir(original_path.join("codex-home")).unwrap();
+        let original_bytes = fs::read(store.events_path("original")).unwrap();
+        let copied = store.fork("original").unwrap();
+        assert_ne!(copied.id, "original");
+        assert_eq!(copied.title, "Design (fork)");
+        assert_eq!(copied.workspace_id, "workspace-a");
+        assert_eq!(copied.model.as_deref(), Some("model-a"));
+        assert_eq!(copied.system_prompt, "Keep explanations concrete");
+        assert_eq!(copied.send_revision, 0);
+        assert!(!copied.running);
+        assert!(copied.resume_token.is_none());
+        assert!(copied.resume_tokens.is_empty());
+        assert!(copied.standing_sent.is_empty());
+        let copied_path = store.root.join(&copied.id);
+        assert_eq!(
+            fs::read(copied_path.join("files/attachment-a/diagram.txt")).unwrap(),
+            b"attached bytes"
+        );
+        assert!(!copied_path.join("steer.txt").exists());
+        assert!(!copied_path.join("codex-home").exists());
+        let page = store.event_page(&copied.id, None, 100).unwrap();
+        assert!(
+            !page
+                .events
+                .iter()
+                .any(|row| row["event"]["kind"] == "session")
+        );
+        let approval = page
+            .events
+            .iter()
+            .find(|row| row["kind"] == "approval")
+            .unwrap();
+        assert_eq!(approval["approval"]["conversationId"], copied.id);
+        assert_ne!(approval["approval"]["id"], "permission-a");
+        assert_eq!(approval["approval"]["decision"], "deny");
+        assert_eq!(approval["approval"]["expiresAtMs"], 0);
+        let usage = page.usage.unwrap();
+        assert_eq!(usage["input"], 100);
+        assert_eq!(usage["output"], 20);
+        assert!(
+            store
+                .handover(&copied)
+                .unwrap()
+                .unwrap()
+                .brief
+                .contains("Previous answer")
+        );
+        let reloaded = Store::load_at(store.root.clone());
+        assert_eq!(reloaded.get(&copied.id).unwrap().title, copied.title);
+        reloaded
+            .append(
+                &copied.id,
+                &StoredEvent::User {
+                    text: "Fork prompt".into(),
+                    at_ms: 6,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            fs::read(store.events_path("original")).unwrap(),
+            original_bytes
+        );
+        fs::write(
+            copied_path.join("files/attachment-a/diagram.txt"),
+            "changed copy",
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read(original_path.join("files/attachment-a/diagram.txt")).unwrap(),
+            b"attached bytes"
+        );
+    }
+
+    #[test]
+    fn fork_refuses_running_stale_and_incomplete_sources_without_publishing_a_copy() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "original");
+        store
+            .edit_conversation("original", |chat| {
+                chat.running = true;
+                Ok(())
+            })
+            .unwrap();
+        assert!(
+            store
+                .fork("original")
+                .unwrap_err()
+                .contains("stop this turn")
+        );
+        store
+            .edit_conversation("original", |chat| {
+                chat.running = false;
+                Ok(())
+            })
+            .unwrap();
+        let runner = crate::chat_receipts::RunnerLease::try_acquire(&store.root, "original")
+            .unwrap()
+            .unwrap();
+        assert!(
+            store
+                .fork("original")
+                .unwrap_err()
+                .contains("stop this turn")
+        );
+        drop(runner);
+        fs::create_dir_all(store.root.join("original")).unwrap();
+        fs::write(
+            store.events_path("original"),
+            b"{\"kind\":\"user\",\"text\":\"partial\",\"atMs\":1}",
+        )
+        .unwrap();
+        assert!(store.fork("original").unwrap_err().contains("incomplete"));
+        assert_eq!(store.list("workspace-a").len(), 1);
+        let stale = Store::load_at(store.root.clone());
+        store.remove("original").unwrap();
+        assert!(stale.fork("original").is_err());
+        assert!(
+            Store::load_at(store.root.clone())
+                .list("workspace-a")
+                .is_empty()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fork_refuses_symlinked_transcripts_and_attachments() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "original");
+        let outside = root.path().join("outside");
+        fs::write(&outside, "private bytes").unwrap();
+        let path = store.root.join("original");
+        fs::create_dir_all(&path).unwrap();
+        symlink(&outside, path.join("events.ndjson")).unwrap();
+        assert!(store.fork("original").is_err());
+        fs::remove_file(path.join("events.ndjson")).unwrap();
+        fs::create_dir_all(path.join("files/attachment-a")).unwrap();
+        symlink(&outside, path.join("files/attachment-a/file.txt")).unwrap();
+        assert!(store.fork("original").is_err());
+        assert_eq!(
+            Store::load_at(store.root.clone()).list("workspace-a").len(),
+            1
+        );
+        assert_eq!(fs::read(outside).unwrap(), b"private bytes");
     }
 
     #[test]

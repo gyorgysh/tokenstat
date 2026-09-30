@@ -1213,6 +1213,15 @@ extension Bridge {
         return try await chatInvoke(peer: route.peer, "chat.create", params, as: ChatConversation.self)
     }
 
+    static func forkChat(id: String, peer: String? = nil) async throws -> ChatConversation {
+        guard await RemoteHostFeature.chatFork.isSupported(peer: peer) else {
+            throw NSError(domain: "Chat", code: 26, userInfo: [
+                NSLocalizedDescriptionKey: "Update the project's computer to fork chats."
+            ])
+        }
+        return try await chatInvoke(peer: peer, "chat.fork", ["id": id], as: ChatConversation.self)
+    }
+
     static func updateChat(
         id: String,
         title: String? = nil,
@@ -1918,7 +1927,12 @@ extension Bridge {
     }
 
     static func renameWorkspace(id: String, name: String) async throws {
-        _ = try await background("workspace.rename", ["id": id, "name": name], as: Renamed.self)
+        if let target = remoteWorkspace(id) {
+            _ = try await onPeer(target.peer, "workspace.rename",
+                                 ["id": target.workspace, "name": name], as: Renamed.self)
+        } else {
+            _ = try await background("workspace.rename", ["id": id, "name": name], as: Renamed.self)
+        }
     }
 
     /// Recent commits, newest first. Empty for a folder that is not a

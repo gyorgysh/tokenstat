@@ -1395,7 +1395,24 @@ fn events_codex(value: &Value) -> Vec<Event> {
         };
     }
     if kind == "turn.completed" {
-        return vec![done("done", None)];
+        let mut events = event_usage(value);
+        // Codex includes cached input in input_tokens. Keep fresh input and
+        // cache separate, as the archive and the chat meter both do.
+        for event in &mut events {
+            if let Event::Usage {
+                input,
+                cache_read,
+                cache_write,
+                ..
+            } = event
+            {
+                *input = input
+                    .saturating_sub(*cache_read)
+                    .saturating_sub(*cache_write);
+            }
+        }
+        events.push(done("done", None));
+        return events;
     }
     if kind == "error" {
         return event_failed(value.get("message").and_then(Value::as_str));
@@ -2008,11 +2025,13 @@ fn event_usage(value: &Value) -> Vec<Event> {
         output: output.unwrap_or(0),
         cache_read: usage
             .get("cache_read_input_tokens")
+            .or_else(|| usage.get("cached_input_tokens"))
             .or_else(|| usage.get("cacheReadTokens"))
             .and_then(Value::as_u64)
             .unwrap_or(0),
         cache_write: usage
             .get("cache_creation_input_tokens")
+            .or_else(|| usage.get("cache_write_input_tokens"))
             .or_else(|| usage.get("cacheWriteTokens"))
             .and_then(Value::as_u64)
             .unwrap_or(0),
@@ -3312,6 +3331,29 @@ mod tests {
             b"{\"type\":\"tool_call\",\"title\":\"Read\",\"rawInput\":{\"path\":\"a.rs\"}}\n",
         );
         assert_eq!(format!("{a}{b}"), "Hi\n\nRead a.rs");
+    }
+
+    #[test]
+    fn codex_completed_turn_reports_fresh_cached_and_output_tokens() {
+        let events = events_codex(&serde_json::json!({"type":"turn.completed", "usage":{
+            "input_tokens":42000, "cached_input_tokens":36000, "cache_write_input_tokens":500,
+            "output_tokens":300, "reasoning_output_tokens":70
+        }}));
+        assert!(matches!(
+            events[0],
+            Event::Usage {
+                input: 5500,
+                output: 300,
+                cache_read: 36000,
+                cache_write: 500,
+                ..
+            }
+        ));
+        assert!(matches!(events[1], Event::Done { .. }));
+        assert_eq!(
+            events_codex(&serde_json::json!({"type":"turn.completed"})).len(),
+            1
+        );
     }
 
     #[test]
