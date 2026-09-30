@@ -23,6 +23,12 @@ pub fn create(
     if !destination.is_absolute() || destination.symlink_metadata().is_ok() {
         return GitOutcome::failed("Choose a new absolute folder path for this worktree.");
     }
+    // Git creates the branch before it tries to create the folder. Refuse an
+    // invalid parent first so a failed destination cannot leave a branch that
+    // blocks the person's corrected retry.
+    if destination.parent().is_none_or(|parent| !parent.is_dir()) {
+        return GitOutcome::failed("Choose an existing folder to hold this worktree.");
+    }
     let valid = git_command(repository)
         .args(["check-ref-format", "--branch", &branch])
         .output();
@@ -199,5 +205,35 @@ mod tests {
             "keep"
         );
         assert!(!parent.path().join("new").exists());
+    }
+
+    #[test]
+    fn rejects_a_file_parent_before_creating_the_branch() {
+        let repository = repository();
+        let parent = tempfile::tempdir().expect("parent");
+        let file = parent.path().join("keep.txt");
+        std::fs::write(&file, "keep").expect("fixture");
+        let destination = file.join("isolated");
+        assert!(!create(repository.path(), &destination, "feature", "safe", "HEAD").ok);
+        let branch = git_command(repository.path())
+            .args(["show-ref", "--verify", "refs/heads/feature/safe"])
+            .output()
+            .expect("branch check");
+        assert!(
+            !branch.status.success(),
+            "an invalid folder must not create its branch"
+        );
+        assert_eq!(std::fs::read_to_string(file).expect("fixture"), "keep");
+        assert!(
+            create(
+                repository.path(),
+                &parent.path().join("isolated"),
+                "feature",
+                "safe",
+                "HEAD"
+            )
+            .ok,
+            "the corrected destination can reuse the branch name"
+        );
     }
 }

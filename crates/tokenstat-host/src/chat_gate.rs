@@ -299,6 +299,18 @@ pub(crate) const MUSE_NOTE_PREPARE: &str = "muse could not prepare the next step
 pub(crate) const MUSE_SIGN_IN: &str =
     "muse is signed in, but this turn could not use that sign-in.";
 
+/// Muse follows XDG's absolute config root, falling back to the user's home
+/// for an unset, empty or relative value.
+pub(crate) fn muse_config_directory(
+    config_home: Option<&Path>,
+    user_home: Option<&Path>,
+) -> Option<PathBuf> {
+    config_home
+        .filter(|path| path.is_absolute())
+        .map(|path| path.join("muse"))
+        .or_else(|| user_home.map(|home| home.join(".config/muse")))
+}
+
 /// One PostLLMCall command appended to a muse settings document.
 ///
 /// An existing object is kept. A missing or non-object `hooks` map is replaced.
@@ -346,9 +358,8 @@ fn path_is_bare(path: &Path) -> bool {
     let Some(text) = path.to_str() else {
         return false;
     };
-    !text
-        .chars()
-        .any(|c| c.is_whitespace() || c == '\'' || c == '"' || c == '\\')
+    text.bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'-'))
 }
 
 /// A fresh private directory whose `hook` path is safe to put in settings.
@@ -525,6 +536,24 @@ pub(crate) fn remove_muse_home(root: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn muse_uses_a_custom_xdg_config_root_before_its_private_override() {
+        let fixture = tempfile::tempdir().unwrap();
+        let custom = fixture.path().join("custom config");
+        let home = fixture.path().join("home");
+        assert_eq!(
+            muse_config_directory(Some(&custom), Some(&home)),
+            Some(custom.join("muse"))
+        );
+        for config in [None, Some(Path::new("")), Some(Path::new("relative"))] {
+            assert_eq!(
+                muse_config_directory(config, Some(&home)),
+                Some(home.join(".config/muse"))
+            );
+        }
+        assert_eq!(muse_config_directory(None, None), None);
+    }
 
     #[test]
     fn shell_quoting_survives_the_paths_this_app_actually_uses() {
@@ -889,6 +918,22 @@ mod tests {
         );
         assert_eq!(result.unwrap_err(), MUSE_NOTE_PREPARE);
         assert!(!spaced.exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn muse_hook_paths_refuse_shell_metacharacters() {
+        assert!(path_is_bare(Path::new("/tmp/tokenstat-muse-safe_1/hook")));
+        for path in [
+            "/tmp/temp(1)/hook",
+            "/tmp/temp;command/hook",
+            "/tmp/$VARIABLE/hook",
+            "/tmp/`command`/hook",
+            "/tmp/a&b/hook",
+            "/tmp/a*b/hook",
+        ] {
+            assert!(!path_is_bare(Path::new(path)), "{path}");
+        }
     }
 
     #[test]

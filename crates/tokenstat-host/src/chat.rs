@@ -530,6 +530,13 @@ fn note_backend(backend: &str) -> bool {
     matches!(backend, "claude" | "codex") || (backend == "muse" && cfg!(unix))
 }
 
+/// Credential links are available only on Unix. A Windows bypass turn must
+/// keep the tool's own home, where it was signed in, rather than relocate to
+/// an empty credential store. Hooked turns keep their existing private home.
+fn private_codex_home(has_hooks: bool) -> bool {
+    cfg!(unix) || has_hooks
+}
+
 pub fn shared() -> Arc<Store> {
     static STORE: OnceLock<Arc<Store>> = OnceLock::new();
     Arc::clone(STORE.get_or_init(|| Arc::new(Store::load())))
@@ -1056,7 +1063,7 @@ impl Store {
             })),
             Ok(SendOutcome::Suppressed(_)) => Ok(json!({ "delivered": false })),
             Err(error) => {
-                self.restore_steer_if_idle(id, &note);
+                self.restore_steer_if_idle(id, &note, &error);
                 Err(error)
             }
         }
@@ -1153,7 +1160,12 @@ impl Store {
     /// Put a note back when the send that was supposed to carry it did not
     /// start, and the turn is still idle. A newer note, a Stop, or a turn
     /// that started in between wins, and this copy is dropped.
-    fn restore_steer_if_idle(&self, id: &str, note: &str) {
+    fn restore_steer_if_idle(&self, id: &str, note: &str, error: &DispatchError) {
+        // The process can finish before this retry decision runs. An idle
+        // conversation does not prove a failed acknowledgement never launched.
+        if error.code == crate::error::DELIVERY_UNKNOWN {
+            return;
+        }
         let Ok(_acceptance) = crate::chat_receipts::Operation::conversation(&self.root, id) else {
             return;
         };
@@ -2058,6 +2070,23 @@ impl Store {
     /// Saved vendor counts fill gaps left by older live-stream parsers. The
     /// numeric snapshot is bounded and never includes prompts in the reply.
     fn conversation_usage(&self, chat: &Conversation, path: &Path) -> Result<Value, String> {
+        let muse_root = if chat.resume_tokens.contains_key("muse")
+            || (chat.backend == "muse" && chat.resume_token.is_some())
+        {
+            tokenstat_paths::home_dir()
+                .and_then(|home| tokenstat_core::sources::muse::discover(&home))
+        } else {
+            None
+        };
+        self.conversation_usage_with_muse_root(chat, path, muse_root.as_deref())
+    }
+
+    fn conversation_usage_with_muse_root(
+        &self,
+        chat: &Conversation,
+        path: &Path,
+        muse_root: Option<&Path>,
+    ) -> Result<Value, String> {
         let baseline = usage_totals(path)?;
         let bytes = read_fork_file(
             path,
@@ -2080,8 +2109,12 @@ impl Store {
             let recovered = legacy_codex_usage(
                 &path.parent().ok_or("invalid transcript path")?.join("raw"),
                 &times,
-            )?;
-            add_usage_value(&mut totals, &recovered)?;
+            );
+            // Vendor logs are optional repair inputs. Their size, permissions
+            // or availability must not make a verified transcript unreadable.
+            if let Ok(recovered) = recovered {
+                let _ = add_usage_value(&mut totals, &recovered);
+            }
         }
         let muse = chat
             .resume_tokens
@@ -2093,15 +2126,14 @@ impl Store {
                     .flatten()
             });
         if let Some(token) = muse.filter(|token| validate_record_id(token).is_ok()) {
-            let directory = if let Some(root) = tokenstat_paths::home_dir()
-                .and_then(|home| tokenstat_core::sources::muse::discover(&home))
-            {
-                muse_session_directory(&root, token)?
+            let directory = if let Some(root) = muse_root {
+                muse_session_directory(root, token).ok().flatten()
             } else {
                 None
             };
-            if let Some(directory) = directory {
-                let recovered = muse_log_usage(&directory)?;
+            if let Some(directory) = directory
+                && let Ok(recovered) = muse_log_usage(&directory)
+            {
                 let mut stored = crate::work_transcript_identity::UsageTotals::default();
                 for record in &records {
                     if record["backend"] == "muse"
@@ -2114,7 +2146,7 @@ impl Store {
                 }
                 // A missing or older vendor log does not erase already recorded usage.
                 if let Some(extra) = usage_difference(&recovered, &stored.value())? {
-                    add_usage_value(&mut totals, &extra)?;
+                    let _ = add_usage_value(&mut totals, &extra);
                 }
             }
         }
@@ -2630,7 +2662,7 @@ impl Store {
                 crate::chat_gate::GATE_DEADLINE_SECONDS.to_string(),
             ));
         }
-        let codex_home = if chat.backend == "codex" {
+        let codex_home = if chat.backend == "codex" && private_codex_home(helper.is_some()) {
             let home = self.codex_home(id);
             crate::chat_gate::write_codex_home(&home, helper.as_deref())?;
             environment.push(("CODEX_HOME".into(), home.display().to_string()));
@@ -2695,8 +2727,24 @@ impl Store {
                 .map(|(_, file)| file.as_path())
                 .ok_or(crate::chat_gate::MUSE_NOTE_PREPARE)?;
             let socket = crate::server::default_socket_path()?;
-            let user_config =
-                tokenstat_paths::home_dir().map(|home| home.join(".config").join("muse"));
+            // Mirror the same config root Muse inherited before this turn's
+            // override. A customized XDG home can hold its sign-in as well as
+            // its settings, and the login shell can supply it to a daemon.
+            let login = tokenstat_pty::login_env();
+            let config_root = match &login {
+                Some(environment) => environment.vars.get("XDG_CONFIG_HOME").map(PathBuf::from),
+                None => std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+            };
+            let user_home = login
+                .as_ref()
+                .and_then(|environment| environment.vars.get("HOME"))
+                .filter(|home| !home.is_empty())
+                .map(PathBuf::from)
+                .or_else(tokenstat_paths::home_dir);
+            let user_config = crate::chat_gate::muse_config_directory(
+                config_root.as_deref(),
+                user_home.as_deref(),
+            );
             if let Some(root) = crate::chat_gate::install_muse_note_home(
                 user_config.as_deref(),
                 hook_helper,
@@ -3369,7 +3417,10 @@ impl Store {
     /// session the stored conversation instead of resuming a missing rollout.
     /// Keep this decision local until the new session reports its own token.
     fn recover_codex_session(&self, chat: &mut Conversation) {
-        if chat.backend == "codex" && !self.codex_home(&chat.id).join("sessions").is_dir() {
+        if chat.backend == "codex"
+            && private_codex_home(chat.autonomy == "standard")
+            && !self.codex_home(&chat.id).join("sessions").is_dir()
+        {
             chat.resume_tokens.remove("codex");
             chat.resume_token = None;
             chat.standing_sent.remove("codex");
@@ -5547,6 +5598,23 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(unix))]
+    fn codex_bypass_keeps_the_signed_in_default_home_and_its_resume_token() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "chat-test");
+        retune_chat(&store, "chat-test", "codex", "bypass");
+        store
+            .set_resume("chat-test", "codex", "codex-session")
+            .unwrap();
+        let mut chat = store.get("chat-test").unwrap();
+        assert!(!private_codex_home(false));
+        store.recover_codex_session(&mut chat);
+        assert_eq!(chat.resume_tokens["codex"], "codex-session");
+        assert_eq!(chat.resume_token.as_deref(), Some("codex-session"));
+    }
+
+    #[test]
     fn steer_consumption_keeps_the_note_when_the_transcript_cannot_be_written() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
@@ -5644,6 +5712,29 @@ mod tests {
             Some("after this")
         );
         assert!(store.claim_idle_steer("chat-test").unwrap().is_none());
+    }
+
+    #[test]
+    fn steer_delivery_does_not_retry_an_uncertain_send_that_already_finished() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        prepare_live_chat(&store, "chat-test");
+        store.steer("chat-test", "Send once.").unwrap();
+        store.set_running("chat-test", false).unwrap();
+        let note = store.claim_idle_steer("chat-test").unwrap().unwrap();
+        // A spawned turn may have drained before its failed transcript or
+        // receipt write returns to steerDeliver. It is already idle here.
+        store.restore_steer_if_idle(
+            "chat-test",
+            &note,
+            &DispatchError::delivery_unknown("acknowledgement failed"),
+        );
+        assert!(store.claim_idle_steer("chat-test").unwrap().is_none());
+        store.restore_steer_if_idle("chat-test", &note, &"spawn failed".into());
+        assert_eq!(
+            store.claim_idle_steer("chat-test").unwrap().as_deref(),
+            Some("Send once.")
+        );
     }
 
     #[test]
@@ -6233,6 +6324,97 @@ mod tests {
         assert_eq!(
             store.event_page(&fork.id, None, 1).unwrap().usage.unwrap(),
             expected
+        );
+    }
+
+    #[test]
+    fn optional_vendor_usage_limits_do_not_block_transcript_reading_or_forking() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "original");
+        store.record_events(
+            "original",
+            "claude",
+            vec![Event::Usage {
+                input: 100,
+                output: 20,
+                cache_read: 5,
+                cache_write: 0,
+                cost_usd: None,
+            }],
+        );
+        let expected = usage_totals(&store.events_path("original")).unwrap();
+        let raw = store.root.join("original/raw");
+        fs::create_dir_all(&raw).unwrap();
+        for turn in 0..=VENDOR_USAGE_FILES {
+            fs::write(raw.join(format!("{turn}.ndjson")), b"{}\n").unwrap();
+        }
+        assert_eq!(
+            store
+                .event_page("original", None, 100)
+                .unwrap()
+                .usage
+                .unwrap(),
+            expected
+        );
+        let fork = store.fork("original").unwrap();
+        assert_eq!(
+            store
+                .event_page(&fork.id, None, 100)
+                .unwrap()
+                .usage
+                .unwrap(),
+            expected
+        );
+        fs::remove_dir_all(&raw).unwrap();
+        fs::write(&raw, b"not a directory").unwrap();
+        assert_eq!(
+            store
+                .event_page("original", None, 100)
+                .unwrap()
+                .usage
+                .unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn retained_other_backend_usage_does_not_hide_a_new_muse_session() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "original");
+        retune_chat(&store, "original", "muse", "standard");
+        store.set_resume("original", "muse", "session-a").unwrap();
+        let directory = root.path().join("muse/session-a");
+        fs::create_dir_all(&directory).unwrap();
+        let record = |id: &str| {
+            json!({"id":id,"recorded_at":1788257973508549_u64,
+            "payload_type":"runtime.session","payload":{"event":{
+                "kind":"model_completed","model":"test-model","usage":{
+                    "input_tokens":100,"output_tokens":20,"cache_read_tokens":0
+                }}}})
+        };
+        fs::write(
+            directory.join("session.jsonl"),
+            format!("{}\n{}\n", record("first"), record("second")),
+        )
+        .unwrap();
+        let path = store.events_path("original");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, concat!(
+            "{\"kind\":\"retainedUsage\",\"usage\":{\"turns\":1,\"input\":100,\"output\":20,\"cacheRead\":0,\"cacheWrite\":0,\"cost\":0.0},\"seq\":1}\n",
+            "{\"kind\":\"agent\",\"backend\":\"claude\",\"event\":{\"kind\":\"usage\",\"input\":100,\"output\":20},\"seq\":2}\n"
+        )).unwrap();
+        assert_eq!(usage_totals(&path).unwrap()["input"], 200);
+        assert_eq!(
+            store
+                .conversation_usage_with_muse_root(
+                    &store.get("original").unwrap(),
+                    &path,
+                    Some(&root.path().join("muse")),
+                )
+                .unwrap(),
+            json!({"turns":4,"input":400,"output":80,"cacheRead":0,"cacheWrite":0,"cost":0.0})
         );
     }
 
