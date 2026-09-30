@@ -22,11 +22,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    #if DEBUG
     func applicationDidFinishLaunching(_ notification: Notification) {
-        MainActor.assumeIsolated { DebugUIHooks.install() }
+        MainActor.assumeIsolated {
+            DiagnosticsLog.watchInput()
+            #if DEBUG
+            DebugUIHooks.install()
+            #endif
+        }
     }
-    #endif
 
     func applicationWillTerminate(_ notification: Notification) {
         // Stop hostd before dropping the lock, so launchd does not win a
@@ -136,6 +139,10 @@ struct TokenstatApp: App {
     /// the interactive patience on a host that never answers, and that wait
     /// must not sit in front of the first frame. See `BridgeLaunch`.
     init() {
+        #if os(macOS)
+        // Before anything else, so a crash during launch still leaves a line.
+        DiagnosticsLog.start()
+        #endif
         // First, and before any view exists. A font registered after the first
         // Text is built leaves that screen in the fallback face until
         // something redraws it.

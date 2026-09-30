@@ -697,12 +697,27 @@ enum Bridge {
             BridgeObserver.note(method, peer: peer, refusal)
             throw refusal
         }
+        #if os(macOS)
+        // A long poll waits on purpose, so it is left out of the disk log.
+        let diagnostic = isExpectedLongPoll(method) ? 0 : DiagnosticsLog.callStarted(method)
+        var failure: String?
+        defer {
+            DiagnosticsLog.callFinished(diagnostic, method: method, remote: peer != nil, failure: failure)
+        }
+        #endif
         do {
             let value = try await work()
             notePerformance(method: method, peer: peer, started: started, failed: false)
             BridgeObserver.note(method, peer: peer, nil)
             return value
         } catch {
+            #if os(macOS)
+            switch error {
+            case let BridgeError.core(code, _): failure = code
+            case BridgeError.decoding: failure = "decoding"
+            default: failure = String(describing: type(of: error))
+            }
+            #endif
             notePerformance(method: method, peer: peer, started: started, failed: true)
             BridgeObserver.note(method, peer: peer, error)
             throw error

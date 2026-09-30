@@ -22,7 +22,8 @@ import AppKit
 /// - `ai.tokenstat.debug.snapshot`: a PNG path to write the main window to.
 /// - `ai.tokenstat.debug.route`: `home`, `insights`, `machines`, `todo`,
 ///   `notes`, `workflows`, `automations`, `account`, `overview`, `ssh`, or
-///   `workspace:<folder name or index>:<section>`.
+///   `workspace:<folder name or index>:<section>`, `newchat:<folder>`
+///   (the project menu's New chat), or `chat:<folder>:<n>`.
 /// - `ai.tokenstat.debug.window`: the content size, as `1440x900`.
 /// - `ai.tokenstat.debug.appearance`: `dark`, `light` or `system`.
 /// - `ai.tokenstat.debug.key`: a named action, such as `sidebar` or

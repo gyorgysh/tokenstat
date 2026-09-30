@@ -44,6 +44,17 @@ enum Route: Hashable {
     /// switches in the library answer for a case they can never be handed.
     case sshTerminals(host: String)
 
+    /// The screen, for the disk log. Sections only, never a folder or host.
+    var diagnosticName: String {
+        switch self {
+        case let .global(section): "\(section)"
+        case let .workspace(_, section): "workspace.\(section)"
+        case .workspacesOverview: "workspaces"
+        case let .ssh(section): "ssh.\(section)"
+        case .sshTerminals: "ssh.terminals"
+        }
+    }
+
     var globalSection: GlobalSection? {
         if case let .global(section) = self { return section }
         return nil

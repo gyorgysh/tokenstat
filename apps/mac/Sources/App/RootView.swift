@@ -355,6 +355,25 @@ struct RootView: View {
             navigate(to: .workspacesOverview)
         case "ssh":
             openSSH(lastSSHSection)
+        case "newchat":
+            // The project menu's New chat, through the same function.
+            startNewChat(in: debugFolder(parts.count > 1 ? parts[1] : "0"))
+        case "chat":
+            // `chat:<folder>:<n>`, the nth conversation. Reliable across
+            // folders only: inside the folder already open, the pane's own
+            // reload selects its first chat again, so click a sidebar row.
+            guard let folder = debugFolder(parts.count > 1 ? parts[1] : "0") else { return }
+            let index = parts.count > 2 ? Int(parts[2]) ?? 0 : 0
+            openSection(.chat, in: folder.id)
+            // Waits for the pane like New chat does.
+            Task {
+                for _ in 0..<60 {
+                    if chat.folderID == folder.id, !chat.isLoading { break }
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
+                guard chat.folderID == folder.id, chat.chats.indices.contains(index) else { return }
+                await chat.select(chat.chats[index])
+            }
         case "workspace":
             let key = parts.count > 1 ? parts[1] : "0"
             let folder = Int(key).flatMap { workspaces.folders.indices.contains($0) ? workspaces.folders[$0] : nil }
@@ -370,6 +389,12 @@ struct RootView: View {
                 navigate(to: .global(section))
             }
         }
+    }
+
+    /// A folder by index or by name, for the route strings above.
+    private func debugFolder(_ key: String) -> WorkspaceFolder? {
+        Int(key).flatMap { workspaces.folders.indices.contains($0) ? workspaces.folders[$0] : nil }
+            ?? workspaces.folders.first { $0.name == key }
     }
     #endif
 
@@ -561,6 +586,7 @@ struct RootView: View {
             // Returning to Home after work elsewhere: quiet re-read if the last
             // load is older than the stale window (see HomeModel.refreshIfStale).
             .onChange(of: route) { _, next in
+                DiagnosticsLog.note("screen \(next.diagnosticName)")
                 // A float belongs to the screen it was opened over. Carrying one
                 // across a navigation is how somebody who clicked a workspace ends
                 // up with a pane over it that they never asked for.
