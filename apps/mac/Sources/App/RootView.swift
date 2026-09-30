@@ -1534,6 +1534,7 @@ struct RootView: View {
                 workspaceCompanionPane
                 .frame(width: fittedBrowserWidth)
                 .frame(maxHeight: .infinity)
+                .background(Theme.sidebar.ignoresSafeArea(.container, edges: .top))
             } else if showsInspector && !showsWorkspaceCompanion {
                 boundedInspector { inspectorContent }
                     .frame(width: currentInspectorWidth)
@@ -1568,6 +1569,7 @@ struct RootView: View {
                         browserResizeHandle
                         workspaceCompanionPane
                             .frame(width: fittedBrowserWidth)
+                            .background(Theme.sidebar.ignoresSafeArea(.container, edges: .top))
                     }
                     .frame(maxHeight: .infinity)
                     .background(Theme.background)
@@ -1653,8 +1655,12 @@ struct RootView: View {
     }
 
     private var browserResizeHandle: some View {
-        Rectangle().fill(Theme.border)
+        Color.clear
             .frame(width: 5)
+            .background {
+                Theme.sidebar.overlay { Theme.border }
+                    .ignoresSafeArea(.container, edges: .top)
+            }
             .contentShape(.rect)
             .onHover { hovering in
                 if hovering && !browserCursorPushed {
@@ -2276,6 +2282,7 @@ struct RootView: View {
                 },
                 remove: { workspacePendingRemove = folder },
                 reveal: { workspaces.revealInFinder(folder) },
+                newChat: { startNewChat(in: folder) },
                 actions: { projectActions(folder) },
                 action: { selectWorkspace(folder.id) }
             )
@@ -4304,11 +4311,13 @@ private struct WorkspaceRow: View {
     let rename: (String) async throws -> Void
     let remove: () -> Void
     let reveal: () -> Void
+    let newChat: () -> Void
     let actions: () -> [NativeMenuItem]
     let action: () -> Void
 
     @State private var isHovering = false
     @State private var controlsHovered = false
+    @State private var composeHovered = false
     @State private var renaming = false
 
     private var label: String {
@@ -4331,7 +4340,7 @@ private struct WorkspaceRow: View {
                         .lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: Theme.Space.xs)
                     changeCounts.opacity(isHovering ? 0 : 1)
-                        .frame(minWidth: 24, alignment: .trailing)
+                        .frame(minWidth: 52, alignment: .trailing)
                 }
                 .padding(.horizontal, Theme.Space.s)
                 .frame(maxWidth: .infinity)
@@ -4339,10 +4348,30 @@ private struct WorkspaceRow: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            SidebarRowActions(name: folder.name, visible: isHovering,
-                              deleteTitle: "Remove project", delete: remove,
-                              hover: { controlsHovered = $0 }, actions: { menu })
-                .padding(.trailing, Theme.Space.s)
+            HStack(spacing: 4) {
+                SidebarRowActions(name: folder.name, visible: isHovering,
+                                  deleteTitle: "Remove project", delete: remove,
+                                  hover: { _ in }, actions: { menu })
+                Button(action: newChat) {
+                    Image(systemName: "square.and.pencil")
+                        .font(Theme.fit(12, weight: .medium))
+                        .foregroundStyle(composeHovered ? Theme.accent : Color.secondary)
+                        .frame(width: 24, height: 24)
+                        .background(composeHovered ? Theme.accentSoft : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 5))
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help("New chat in \(folder.name)")
+                .accessibilityLabel("New chat in \(folder.name)")
+                .opacity(isHovering ? 1 : 0)
+                .allowsHitTesting(isHovering)
+                .accessibilityHidden(!isHovering)
+                .onHover { composeHovered = $0 }
+            }
+            .contentShape(.rect)
+            .onHover { controlsHovered = $0 }
+            .padding(.trailing, Theme.Space.s)
         }
         .background(background)
         .contentShape(.rect)

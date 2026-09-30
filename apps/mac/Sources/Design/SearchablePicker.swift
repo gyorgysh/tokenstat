@@ -86,10 +86,17 @@ extension View {
     func pickerPanelSurface<Content: View>(
         title: String,
         isPresented: Binding<Bool>,
+        anchorsToLeadingEdge: Bool = false,
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         #if os(macOS)
-        popover(isPresented: isPresented, arrowEdge: .bottom) {
+        // The composer summary grows as model and effort are selected. A
+        // fixed anchor the width of this panel keeps its leading edge still.
+        popover(isPresented: isPresented,
+                attachmentAnchor: anchorsToLeadingEdge
+                    ? .rect(.rect(CGRect(x: 0, y: 0, width: 320, height: 1)))
+                    : .rect(.bounds),
+                arrowEdge: .bottom) {
             content()
                 .frame(width: 320, height: 420)
                 .background(Theme.panel)

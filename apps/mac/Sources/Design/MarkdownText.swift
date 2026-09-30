@@ -120,9 +120,32 @@ extension MarkdownText {
 /// surrounding text's size, because `##` at 22pt would make a footnote the
 /// largest thing on screen, and wide content wraps in place rather than
 /// nesting another scroll view inside the transcript's.
-enum MarkdownStyle {
+enum MarkdownStyle: String {
     case document
+    /// Chat headings keep their hierarchy without adopting document titles.
+    case chat
     case aside
+
+    func headingFont(bodyFont: Font, level: Int) -> Font {
+        if self == .aside {
+            return bodyFont.weight(level <= 2 ? .bold : .semibold)
+        }
+        #if os(macOS)
+        if self == .chat {
+            switch level {
+            case 1: return Theme.title2.weight(.semibold)
+            case 2: return Theme.title3.weight(.semibold)
+            default: return bodyFont.weight(.semibold)
+            }
+        }
+        #endif
+        switch level {
+        case 1: return Theme.title
+        case 2: return Theme.title2
+        case 3: return Theme.title3
+        default: return Theme.headline
+        }
+    }
 }
 
 /// Parsed markdown, kept between draws.
@@ -414,17 +437,7 @@ private struct MarkdownBlockView: View {
     }
 
     private func headingFont(_ level: Int) -> Font {
-        switch style {
-        case .aside:
-            return bodyFont.weight(level <= 2 ? .bold : .semibold)
-        case .document:
-            switch level {
-            case 1: return Theme.title
-            case 2: return Theme.title2
-            case 3: return Theme.title3
-            default: return Theme.headline
-            }
-        }
+        style.headingFont(bodyFont: bodyFont, level: level)
     }
 }
 
@@ -596,7 +609,7 @@ struct MessageMarkdown: View {
             // replaced at most once per `LiveMarkdown.cadence`; a token that
             // arrives sooner keeps the revision on screen and is picked up by
             // the body's task.
-            let slot = "\(liveID.utf8.count):\(liveID):\(cacheScope):\(style == .aside ? "a" : "d")"
+            let slot = "\(liveID.utf8.count):\(liveID):\(cacheScope):\(style.rawValue)"
             self.liveSlot = slot
             let cache = MarkdownCache.live
             if let shown = cache.take(slot: slot, text: markdown) {
@@ -620,7 +633,7 @@ struct MessageMarkdown: View {
             // rebuilding every `Text` chain there was the per-edge cost that
             // brought the hitches back. The scope names the caller's font set,
             // which is baked into the chains and cannot be keyed from `Font`.
-            let key = "\(cacheScope):\(style == .aside ? "a" : "d"):\(markdown)"
+            let key = "\(cacheScope):\(style.rawValue):\(markdown)"
             self.liveSlot = ""
             needsRefresh = false
             cachedSegments = MarkdownCache.segments.value(for: key) {
@@ -817,17 +830,7 @@ struct MessageMarkdown: View {
     }
 
     private static func headingFont(style: MarkdownStyle, bodyFont: Font, level: Int) -> Font {
-        switch style {
-        case .aside:
-            return bodyFont.weight(level <= 2 ? .bold : .semibold)
-        case .document:
-            switch level {
-            case 1: return Theme.title
-            case 2: return Theme.title2
-            case 3: return Theme.title3
-            default: return Theme.headline
-            }
-        }
+        style.headingFont(bodyFont: bodyFont, level: level)
     }
 }
 
@@ -863,7 +866,7 @@ private struct MarkdownCodeBlock: View {
     /// a line's shape, and it is also what would propose an unbounded width to
     /// the transcript around it.
     private var needsScroller: Bool {
-        style == .document && widest > 54
+        style != .aside && widest > 54
     }
 
     /// One parsed diff per fence, held across the evaluations a scroll causes.

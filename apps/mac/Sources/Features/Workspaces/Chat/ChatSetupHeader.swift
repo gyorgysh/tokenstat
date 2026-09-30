@@ -254,7 +254,8 @@ struct ChatComposerControls: View {
         layout
             .pickerPanelSurface(
                 title: "Agent, model and effort",
-                isPresented: $pickingAgent
+                isPresented: $pickingAgent,
+                anchorsToLeadingEdge: true
             ) {
                 ChatAgentPanel(model: model, chat: chat, locked: locked) {
                     pickingAgent = false
