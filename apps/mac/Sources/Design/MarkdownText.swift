@@ -172,9 +172,11 @@ private enum MarkdownCache {
     // whole conversation a second time on the way down. These hold structs,
     // and `NSCache` gives the memory back under pressure.
     /// One entry per assistant message and per thinking block, roughly.
-    static let blocks = ParsedTextCache<[MarkdownBlock]>(limit: 1500)
+    // Room for ten warm conversations in a few projects. At 1500 the second
+    // project's warming pushed out the first one's parsed text.
+    static let blocks = ParsedTextCache<[MarkdownBlock]>(limit: 3000)
     /// One entry per paragraph, list row and table cell, so several per block.
-    static let inline = ParsedTextCache<AttributedString>(limit: 6000)
+    static let inline = ParsedTextCache<AttributedString>(limit: 10000)
     /// Finished, coloured code, keyed by the fence's digest.
     ///
     /// Spans used to be cached here and turned into a `Text` chain inside a

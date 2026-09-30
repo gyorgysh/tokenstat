@@ -19,6 +19,13 @@ enum ChatHistoryWindow {
     /// large enough that looping feels instant.
     static let inlineLimit = 10
 
+    /// The active chat occupies a warm slot too. Skip its background read
+    /// after choosing the window, or warming ten other chats evicts the
+    /// first one as soon as the active conversation is remembered.
+    static func previews<Item>(in items: [Item], limit: Int, isSelected: (Item) -> Bool) -> [Item] {
+        items.prefix(max(0, limit)).filter { !isSelected($0) }
+    }
+
     /// The slice of `0..<count` to draw for `selected` (nil when nothing in
     /// this folder is selected) and the manual `expanded` state.
     ///

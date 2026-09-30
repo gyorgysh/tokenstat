@@ -597,6 +597,11 @@ final class ChatModel {
 
     @ObservationIgnored private var recentMessages = ChatRecentMessages<ChatDisplayItem>()
     @ObservationIgnored private var previewWarmTask: Task<Void, Never>?
+    /// Chats waiting to be warmed, for one account, host and project.
+    @ObservationIgnored private var warmQueue: [ChatConversation] = []
+    @ObservationIgnored private var warmQueueOwner: String?
+    @ObservationIgnored private var warmGeneration: UInt64 = 0
+    @ObservationIgnored private var previewCacheEpoch: UInt64 = 0
     private(set) var recentMessagePreview: [ChatDisplayItem] = []
 
     /// The transcript reads the preview, so an empty write to an empty
@@ -607,30 +612,43 @@ final class ChatModel {
 
     @ObservationIgnored private var previewReads: Set<String> = []
 
+    private func cancelPreviewWarmup() {
+        warmGeneration &+= 1
+        previewWarmTask?.cancel()
+        previewWarmTask = nil
+        warmQueue = []
+        warmQueueOwner = nil
+    }
+
     /// A row's cancellable dwell task calls this without selecting the chat.
     /// Uses the same bounded preview cache and account/host keys as opening.
     func warmConversationPreview(_ conversation: ChatConversation, in folder: String) async {
         #if os(macOS)
-        guard !pagingUnavailable, selected?.id != conversation.id,
+        guard !Task.isCancelled, !pagingUnavailable,
+              !(folderID == folder && selected?.id == conversation.id),
               let owner = continuityOwner(folderID: folder),
               owner.scope == WorkSessionContext.shared.scope else { return }
         let key = WorkReferenceKey.folder(scope: owner.scope, hostIdentity: owner.host,
             workspaceID: owner.workspace) + WorkReferenceKey.encode(conversation.id)
-        guard recentMessages.messages(for: key).isEmpty,
+        guard !recentMessages.contains(key),
               previewReads.count < 2,
               previewReads.insert(key).inserted else { return }
         defer { previewReads.remove(key) }
+        let epoch = previewCacheEpoch
         let route = WorkDestinationResolver.route(folderID: folder,
             explicitPeer: folder == folderID ? peer : nil)
         do {
             let page = try await Bridge.chatEventPage(id: conversation.id, cursor: nil,
                 limit: ChatPaging.previewPageEvents, peer: route.peer)
             guard !Task.isCancelled, WorkSessionContext.shared.scope == owner.scope,
-                  continuityScope == owner.scope, selected?.id != conversation.id else { return }
+                  continuityScope == owner.scope, previewCacheEpoch == epoch,
+                  !recentMessages.contains(key),
+                  !(folderID == folder && selected?.id == conversation.id) else { return }
             let rows = ChatDisplayItem.coalesce(page.events,
                 defaultBackend: conversation.backend, running: conversation.running)
-            recentMessages.store(rows, for: key) { String(reflecting: $0).utf8.count }
-            Self.warmMarkdown(recentMessages.messages(for: key))
+            recentMessages.store(rows, for: key, speculative: true) { String(reflecting: $0).utf8.count }
+            DiagnosticsLog.note("chat preview prepared source=hover rows=\(rows.count) held=\(recentMessages.contains(key))")
+            Self.warmMarkdown(recentMessages.peek(key))
         } catch { /* Opening still performs its normal fresh read. */ }
         #endif
     }
@@ -640,13 +658,15 @@ final class ChatModel {
     func warmWorkspacePreviews(_ folder: String, includeMessages: Bool = true) async {
         #if os(macOS)
         let scope = WorkSessionContext.shared.scope
+        let epoch = previewCacheEpoch
         let route = Bridge.chatRoute(workspaceID: folder, peer: nil)
         if route.peer == nil { await WorkSessionContext.shared.resolveLocalHostIdentity() }
         guard let scope, let host = route.peer ?? WorkSessionContext.shared.localHostIdentity,
               !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
         do {
             let list = try await Bridge.chats(workspaceID: route.workspaceID, peer: route.peer)
-            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
+            guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
+                  previewCacheEpoch == epoch else { return }
             if continuityScope == nil { continuityScope = scope }
             guard continuityScope == scope else { return }
             storeChatListCache(Self.uniqued(list), folderID: folder)
@@ -654,21 +674,42 @@ final class ChatModel {
             // Leave message warming to hover or explicitly opening a project.
             guard includeMessages else { return }
             let prefix = WorkReferenceKey.folder(scope: scope, hostIdentity: host, workspaceID: route.workspaceID)
-            for chat in list.prefix(5) {
-                guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
+            let worth = Self.uniqued(list).filter { !isUnused($0, in: folder) }
+            let candidates = ChatHistoryWindow.previews(in: worth,
+                limit: ChatRecentMessages<ChatDisplayItem>.perFolderLimit) {
+                    folderID == folder && selected?.id == $0.id
+                }
+            for chat in candidates {
+                guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
+                      previewCacheEpoch == epoch else { return }
+                if folderID == folder && selected?.id == chat.id { continue }
                 let key = prefix + WorkReferenceKey.encode(chat.id)
-                if !recentMessages.messages(for: key).isEmpty { continue }
+                if recentMessages.contains(key) { continue }
+                while previewReads.count >= 2 {
+                    try await Task.sleep(for: .milliseconds(40))
+                    guard scope == WorkSessionContext.shared.scope,
+                          previewCacheEpoch == epoch else { return }
+                }
+                if recentMessages.contains(key) || (folderID == folder && selected?.id == chat.id) { continue }
                 guard previewReads.insert(key).inserted else { continue }
                 defer { previewReads.remove(key) }
-                let page = try await Bridge.chatEventPage(id: chat.id, cursor: nil,
-                    limit: ChatPaging.previewPageEvents, peer: route.peer)
-                guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
-                let rows = ChatDisplayItem.coalesce(page.events,
-                    defaultBackend: chat.backend, running: chat.running)
-                recentMessages.store(rows, for: key) {
-                    String(reflecting: $0).utf8.count
+                do {
+                    let page = try await Bridge.chatEventPage(id: chat.id, cursor: nil,
+                        limit: ChatPaging.previewPageEvents, peer: route.peer)
+                    guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
+                          previewCacheEpoch == epoch else { return }
+                    if recentMessages.contains(key) || (folderID == folder && selected?.id == chat.id) { continue }
+                    let rows = ChatDisplayItem.coalesce(page.events,
+                        defaultBackend: chat.backend, running: chat.running)
+                    recentMessages.store(rows, for: key, speculative: true) {
+                        String(reflecting: $0).utf8.count
+                    }
+                    DiagnosticsLog.note("chat preview prepared source=workspace rows=\(rows.count) held=\(recentMessages.contains(key))")
+                    Self.warmMarkdown(recentMessages.peek(key))
+                } catch {
+                    // One unavailable conversation must not stop the rest.
+                    continue
                 }
-                Self.warmMarkdown(recentMessages.messages(for: key))
             }
         } catch { /* A preview failure leaves normal opening available. */ }
         #endif
@@ -676,40 +717,77 @@ final class ChatModel {
 
     /// Speculative reads use the same small, memory-only preview as a chat
     /// just left. Never fall back to the legacy whole-conversation endpoint.
-    private func warmRecentChats(limit: Int, after selection: String? = nil) {
+    ///
+    /// A queue per project rather than one task per call. Every selection
+    /// used to cancel the warm-up in flight and start one for the next three
+    /// chats, so a person moving around a project never got past the first
+    /// few and came back to chats that opened cold. Now a selection adds to
+    /// the queue, and only a change of project throws it away.
+    private func warmRecentChats() {
         #if os(macOS)
-        previewWarmTask?.cancel()
         guard !pagingUnavailable, let folderID,
-              let owner = continuityOwner(folderID: folderID) else { return }
+              let owner = continuityOwner(folderID: folderID),
+              owner.scope == WorkSessionContext.shared.scope else { return }
         let prefix = WorkReferenceKey.folder(scope: owner.scope,
             hostIdentity: owner.host, workspaceID: owner.workspace)
-        let start = selection.flatMap { id in chats.firstIndex { $0.id == id } }.map { $0 + 1 } ?? 0
-        let candidates = Array(chats.dropFirst(start).filter { $0.id != selected?.id }.prefix(limit))
+        if warmQueueOwner != prefix {
+            cancelPreviewWarmup()
+            warmQueueOwner = prefix
+        }
+        // The chats the sidebar shows. Empty New chats have nothing to read,
+        // and a project with twenty of them at the top spent every warm read
+        // on those and never reached a real conversation.
+        let worth = chats.filter { !isUnused($0, in: folderID) }
+        let candidates = ChatHistoryWindow.previews(in: worth,
+            limit: ChatRecentMessages<ChatDisplayItem>.perFolderLimit) { $0.id == selected?.id }
+        for chat in candidates where !recentMessages.contains(prefix + WorkReferenceKey.encode(chat.id))
+            && !warmQueue.contains(where: { $0.id == chat.id }) {
+            warmQueue.append(chat)
+        }
+        guard previewWarmTask == nil, !warmQueue.isEmpty else { return }
         let peer = self.peer
+        warmGeneration &+= 1
+        let generation = warmGeneration
         previewWarmTask = Task { [weak self] in
+            defer {
+                if let self, self.warmGeneration == generation { self.previewWarmTask = nil }
+            }
             // Let the selected conversation and its first frame finish first.
             try? await Task.sleep(for: .milliseconds(250))
-            for chat in candidates {
-                guard !Task.isCancelled, let self,
-                      self.folderID == folderID, self.continuityScope == owner.scope,
-                      WorkSessionContext.shared.scope == owner.scope else { return }
+            while let self, !Task.isCancelled, !self.warmQueue.isEmpty,
+                  self.warmGeneration == generation, self.warmQueueOwner == prefix,
+                  self.folderID == folderID, self.continuityScope == owner.scope,
+                  WorkSessionContext.shared.scope == owner.scope {
+                if self.previewReads.count >= 2 {
+                    do { try await Task.sleep(for: .milliseconds(40)) } catch { return }
+                    continue
+                }
+                let chat = self.warmQueue.removeFirst()
                 let key = prefix + WorkReferenceKey.encode(chat.id)
-                guard self.recentMessages.messages(for: key).isEmpty,
+                guard self.selected?.id != chat.id,
+                      self.chats.contains(where: { $0.id == chat.id }),
+                      !self.recentMessages.contains(key),
                       self.previewReads.insert(key).inserted else { continue }
                 defer { self.previewReads.remove(key) }
+                let epoch = self.previewCacheEpoch
                 do {
                     let page = try await Bridge.chatEventPage(id: chat.id, cursor: nil,
                         limit: ChatPaging.previewPageEvents, peer: peer)
                     guard !Task.isCancelled, self.folderID == folderID,
-                          WorkSessionContext.shared.scope == owner.scope,
-                          self.selected?.id != chat.id else { return }
+                          self.warmGeneration == generation,
+                          WorkSessionContext.shared.scope == owner.scope else { break }
+                    // Opened while this was reading: the live page owns it.
+                    guard self.selected?.id != chat.id,
+                          !self.recentMessages.contains(key),
+                          self.previewCacheEpoch == epoch else { continue }
                     let rows = ChatDisplayItem.coalesce(page.events,
                         defaultBackend: chat.backend, running: chat.running)
-                    self.recentMessages.store(rows, for: key) { String(reflecting: $0).utf8.count }
-                    Self.warmMarkdown(self.recentMessages.messages(for: key))
+                    self.recentMessages.store(rows, for: key, speculative: true) { String(reflecting: $0).utf8.count }
+                    DiagnosticsLog.note("chat preview prepared source=recent rows=\(rows.count) held=\(self.recentMessages.contains(key))")
+                    Self.warmMarkdown(self.recentMessages.peek(key))
                 } catch {
-                    // Warming is optional. A failed read must not interrupt work.
-                    return
+                    // Warming is optional. One failed read skips that chat.
+                    continue
                 }
             }
         }
@@ -739,6 +817,9 @@ final class ChatModel {
               reference.scope == WorkSessionContext.shared.scope,
               let key = WorkReferenceKey.conversation(reference) else { return }
         let preview = recentMessages.messages(for: key)
+        #if os(macOS)
+        DiagnosticsLog.note("chat preview cache \(preview.isEmpty ? "miss" : "hit") rows=\(preview.count)")
+        #endif
         if preview != recentMessagePreview { recentMessagePreview = preview }
     }
 
@@ -864,17 +945,24 @@ final class ChatModel {
     }
 
     func load(workspaceID: String, peer: String? = nil, selectFirst: Bool = true) async {
-        previewWarmTask?.cancel()
+        let route = Bridge.chatRoute(workspaceID: workspaceID, peer: peer)
+        let scope = WorkSessionContext.shared.scope
+        // Keep the conversation being left while the model still describes
+        // it. Once the list below is another project's, this chat is no
+        // longer in it and would not be kept, so coming back opened cold.
+        if folderID != workspaceID || self.workspaceID != route.workspaceID
+            || self.peer != route.peer || continuityScope != scope {
+            rememberRecentMessages()
+            cancelPreviewWarmup()
+        }
         loadGeneration &+= 1
         let generation = loadGeneration
         let probe = Logger(subsystem: "ai.tokenstat.tokenstat", category: "chatload")
         probe.error("load start ws=\(workspaceID) gen=\(generation) scope=\(String(describing: WorkSessionContext.shared.scope?.identity)) selectFirst=\(selectFirst)")
-        let route = Bridge.chatRoute(workspaceID: workspaceID, peer: peer)
         isLoading = true
         defer {
             if generation == loadGeneration { isLoading = false }
         }
-        let scope = WorkSessionContext.shared.scope
         if route.peer == nil {
             await WorkSessionContext.shared.resolveLocalHostIdentity()
             guard generation == loadGeneration, scope == WorkSessionContext.shared.scope else { return }
@@ -894,6 +982,7 @@ final class ChatModel {
             }
             chatListCache = [:]
             noteRunningChats()
+            previewCacheEpoch &+= 1
             recentMessages.removeAll()
             clearRecentMessagePreview()
             chats = []
@@ -903,7 +992,6 @@ final class ChatModel {
         }
         let draftHost = route.peer ?? WorkSessionContext.shared.localHostIdentity
         if folderID != workspaceID || self.workspaceID != route.workspaceID || self.peer != route.peer {
-            rememberRecentMessages()
             clearRecentMessagePreview()
             if self.peer != route.peer { pagingUnavailable = false }
             // The folder is changing. Remember which conversation was open
@@ -1044,7 +1132,11 @@ final class ChatModel {
             } else {
                 await select(nil)
             }
-            if generation == loadGeneration { warmRecentChats(limit: 5) }
+            // Prepare the project's ten recent conversations. Already warm
+            // ones are skipped without a read.
+            if generation == loadGeneration {
+                warmRecentChats()
+            }
         } catch {
             if generation == loadGeneration {
                 self.error = error.localizedDescription
@@ -1077,9 +1169,8 @@ final class ChatModel {
     }
 
     func select(_ chat: ChatConversation?) async {
-        previewWarmTask?.cancel()
         await select(chat, savedPage: nil)
-        if selected?.id == chat?.id { warmRecentChats(limit: 3, after: chat?.id) }
+        if selected?.id == chat?.id { warmRecentChats() }
     }
 
     /// Cold opening of an existing copy. No pairing, peer request or queue
@@ -1494,11 +1585,21 @@ final class ChatModel {
     /// the open transcript alone.
     func remove(_ chat: ChatConversation, in folderID: String?) async {
         let targetPeer = WorkDestinationResolver.deletionPeer(folderID: folderID, currentFolderID: self.folderID, currentPeer: peer)
+        let cacheKey = (folderID ?? self.folderID).flatMap { folder in
+            continuityOwner(folderID: folder).map { owner in
+                WorkReferenceKey.folder(scope: owner.scope, hostIdentity: owner.host,
+                    workspaceID: owner.workspace) + WorkReferenceKey.encode(chat.id)
+            }
+        }
         let context = loadGeneration
         do {
             try await Bridge.removeChat(id: chat.id, peer: targetPeer)
-            recentMessages.removeAll()
-            clearRecentMessagePreview()
+            // Only this chat. Every other warm conversation is still right.
+            previewCacheEpoch &+= 1
+            if let cacheKey { recentMessages.remove(cacheKey) }
+            if (folderID == nil || folderID == self.folderID) && selected?.id == chat.id {
+                clearRecentMessagePreview()
+            }
             guard context == loadGeneration else { return }
             if let folderID { forgetDraft(chatID: chat.id, folderID: folderID) }
             if let folderID, folderID != self.folderID {
@@ -1525,14 +1626,18 @@ final class ChatModel {
     }
 
     func removeAll(in folderID: String) async {
+        let cachePrefix = continuityOwner(folderID: folderID).map { owner in
+            WorkReferenceKey.folder(scope: owner.scope, hostIdentity: owner.host, workspaceID: owner.workspace)
+        }
         let context = loadGeneration
         do {
             // `folderID` may encode a different remote peer than the chat
             // currently loaded in this model. Let the bridge route the folder
             // itself instead of borrowing the current conversation's peer.
             _ = try await Bridge.removeAllChats(workspaceID: folderID)
-            recentMessages.removeAll()
-            clearRecentMessagePreview()
+            previewCacheEpoch &+= 1
+            if let cachePrefix { recentMessages.retain([], in: cachePrefix) }
+            if self.folderID == folderID { clearRecentMessagePreview() }
             guard context == loadGeneration else { return }
             storeChatListCache([], folderID: folderID)
             forgetLastSelected(folderID: folderID)

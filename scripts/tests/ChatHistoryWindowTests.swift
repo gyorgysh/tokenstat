@@ -18,6 +18,17 @@ struct ChatHistoryWindowTests {
         require(ChatHistoryWindow.visible(count: 30, selected: nil, expanded: true) == 0..<10, "expanded ten")
         require(ChatHistoryWindow.visible(count: 3, selected: nil, expanded: false) == 0..<3, "short list intact")
 
+        // The active conversation consumes one of the ten warm slots.
+        // Preparing ten others discarded the first preview when leaving it.
+        let chats = Array(0..<30)
+        for selected in 0..<10 {
+            let previews = ChatHistoryWindow.previews(in: chats, limit: 10) { $0 == selected }
+            require(Set(previews + [selected]) == Set(0..<10), "exact warm window for every selection")
+        }
+        require(ChatHistoryWindow.previews(in: chats, limit: 10) { $0 == 25 } == Array(0..<10), "outside selection keeps recent window")
+        require(ChatHistoryWindow.previews(in: chats, limit: 0) { _ in false }.isEmpty, "zero warm budget")
+        require(ChatHistoryWindow.previews(in: Array(chats.suffix(3)), limit: 10) { _ in false } == [27, 28, 29], "short preview window")
+
         // A selection in the first five changes nothing.
         require(ChatHistoryWindow.visible(count: 30, selected: 2, expanded: false) == 0..<5, "shallow selection")
 
