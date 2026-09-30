@@ -29,9 +29,16 @@ internal static class PersonaSceneSmoke
         {
             scene.Begin();
             var path = scene.Paint(new PathGeometry());
-            if (!ReferenceEquals(first, path) || path.Fill is not null || path.Clip is not null
-                || path.RenderTransform is not null || path.Opacity != 1)
-                throw new Exception("Native persona slot leaked prior appearance or replaced its visual");
+            if (!ReferenceEquals(first, path))
+                throw new Exception("Native persona slot replaced its visual");
+            if (path.Fill is not null)
+                throw new Exception("Native persona slot leaked its fill");
+            if (path.Clip is not null)
+                throw new Exception("Native persona slot leaked its clip");
+            if (path.RenderTransform is not null)
+                throw new Exception("Native persona slot leaked its transform");
+            if (path.Opacity != 1)
+                throw new Exception("Native persona slot leaked its opacity");
             scene.End();
             if (ElementCompositionPreview.GetElementVisual(first).Clip is not null)
                 throw new Exception("Persona slot retained its previous composition clip");

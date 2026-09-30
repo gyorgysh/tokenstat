@@ -35,19 +35,16 @@ internal sealed class PersonaScene(Canvas canvas)
         }
         var path = _paths[Count++];
         _clips[Count - 1] = clip is null ? null : new PersonaClip(clip, mask);
-        // A slot can hold an eye in one frame and a prop in the next. Reset all
-        // per-mark state, including transforms and fading applied after Paint.
         path.Visibility = Visibility.Visible;
+        ClearLocalValues(path);
         path.Data = data;
-        path.Fill = fill;
-        path.Stroke = stroke;
+        if (fill is not null) path.Fill = fill;
+        if (stroke is not null) path.Stroke = stroke;
         path.StrokeThickness = thickness;
         path.StrokeStartLineCap = cap;
         path.StrokeEndLineCap = cap;
         path.StrokeLineJoin = join;
-        path.RenderTransform = null;
         path.Opacity = 1;
-        path.Clip = null;
         return path;
     }
 
@@ -60,13 +57,20 @@ internal sealed class PersonaScene(Canvas canvas)
             var path = _paths[i];
             if (path.Visibility == Visibility.Collapsed) continue;
             path.Visibility = Visibility.Collapsed;
-            path.Data = null;
-            path.Fill = null;
-            path.Stroke = null;
-            path.Clip = null;
-            path.RenderTransform = null;
+            ClearLocalValues(path);
         }
     }
 
     public void ReleaseClips() => _clipper.Clear();
+
+    // A slot can hold an eye in one frame and a prop in the next. Drop the
+    // local fill, stroke, clip, and turn before that slot is shown again.
+    private static void ClearLocalValues(ShapesPath path)
+    {
+        path.ClearValue(ShapesPath.DataProperty);
+        path.ClearValue(ShapesPath.FillProperty);
+        path.ClearValue(ShapesPath.StrokeProperty);
+        path.ClearValue(ShapesPath.ClipProperty);
+        path.ClearValue(ShapesPath.RenderTransformProperty);
+    }
 }

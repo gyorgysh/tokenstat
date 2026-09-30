@@ -4,6 +4,11 @@
 namespace Microsoft.UI.Xaml
 {
     public enum Visibility { Visible, Collapsed }
+
+    public sealed class DependencyProperty
+    {
+        internal DependencyProperty() {}
+    }
 }
 namespace Microsoft.UI.Xaml.Controls
 {
@@ -25,6 +30,12 @@ namespace Microsoft.UI.Xaml.Shapes
 {
     public sealed class Path
     {
+        public static DependencyProperty DataProperty { get; } = new();
+        public static DependencyProperty FillProperty { get; } = new();
+        public static DependencyProperty StrokeProperty { get; } = new();
+        public static DependencyProperty ClipProperty { get; } = new();
+        public static DependencyProperty RenderTransformProperty { get; } = new();
+
         public bool IsHitTestVisible { get; set; }
         public Visibility Visibility { get; set; }
         public Media.PathGeometry? Data { get; set; }
@@ -37,6 +48,17 @@ namespace Microsoft.UI.Xaml.Shapes
         public object? RenderTransform { get; set; }
         public double Opacity { get; set; }
         public Media.RectangleGeometry? Clip { get; set; }
+
+        // The scene drops a local value through ClearValue. The stub has to
+        // do the same, or a reused slot keeps the previous eye, clip, or turn.
+        public void ClearValue(DependencyProperty property)
+        {
+            if (ReferenceEquals(property, DataProperty)) Data = null;
+            else if (ReferenceEquals(property, FillProperty)) Fill = null;
+            else if (ReferenceEquals(property, StrokeProperty)) Stroke = null;
+            else if (ReferenceEquals(property, ClipProperty)) Clip = null;
+            else if (ReferenceEquals(property, RenderTransformProperty)) RenderTransform = null;
+        }
     }
 }
 
