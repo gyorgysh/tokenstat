@@ -217,15 +217,20 @@ struct PersonaIndex {
 
 /// Names for a workspace's first persona.
 ///
-/// One register on purpose: short, soft, and drawn from materials, weather and
-/// landscape rather than from people. A persona is a voice, not a colleague,
-/// and a list of first names would invite everybody to wonder who Daniel is.
-///
 /// Long enough that somebody with a folder per project sees a new one each
 /// time. `starter_name` walks the list from a hash of the workspace id and
 /// steps forward past any name already in use, so a repeat needs more open
 /// workspaces than there are names here.
 const STARTER_NAMES: [&str; 48] = [
+    "Abby", "Ada", "Alfie", "Anna", "Archie", "Ben", "Charlie", "Clara", "Daisy", "Danny", "Ellie",
+    "Emma", "Eva", "Felix", "Finn", "Freddie", "George", "Grace", "Harry", "Hazel", "Henry",
+    "Jack", "Jamie", "Jess", "Katie", "Leo", "Lily", "Lola", "Lucy", "Maisie", "Max", "Mia",
+    "Milo", "Molly", "Nell", "Nora", "Oliver", "Oscar", "Penny", "Polly", "Rosie", "Ruby", "Sam",
+    "Sophie", "Teddy", "Theo", "Tom", "Zoe",
+];
+
+/// Recognizes untouched starters from the previous naming set.
+const LEGACY_STARTER_NAMES: [&str; 48] = [
     "Alder", "Alto", "Amber", "Arbor", "Ash", "Aster", "Basil", "Birch", "Cairn", "Cedar",
     "Cinder", "Clay", "Cove", "Delta", "Dune", "Ember", "Fern", "Flint", "Glade", "Harbour",
     "Haven", "Indigo", "Iris", "Ivy", "Juniper", "Lark", "Linden", "Lumen", "Meadow", "Mesa",
@@ -4030,7 +4035,44 @@ fn load_persona_index(root: &Path) -> PersonaIndex {
             persona.system_prompt = STARTER_BRIEF.to_string();
         }
     }
+    migrate_starter_names(&mut index);
     index
+}
+
+fn migrate_starter_names(index: &mut PersonaIndex) {
+    for position in 0..index.personas.len() {
+        let persona = &index.personas[position];
+        let Some(workspace) = persona.workspace_id.as_deref() else {
+            continue;
+        };
+        // A saved edit or a custom brief belongs to the person who wrote it.
+        if persona.created_at_ms <= 0
+            || persona.created_at_ms != persona.updated_at_ms
+            || persona.system_prompt != STARTER_BRIEF
+        {
+            continue;
+        }
+        let Some(legacy) = LEGACY_STARTER_NAMES
+            .iter()
+            .position(|name| *name == persona.name)
+        else {
+            continue;
+        };
+        let taken: HashSet<String> = index
+            .personas
+            .iter()
+            .enumerate()
+            .filter(|(other, persona)| *other != position && persona_visible(persona, workspace))
+            .map(|(_, persona)| persona.name.clone())
+            .collect();
+        let preferred = STARTER_NAMES[legacy];
+        let name = if taken.contains(preferred) {
+            starter_name(workspace, &taken)
+        } else {
+            preferred
+        };
+        index.personas[position].name = name.to_string();
+    }
 }
 
 fn persona_visible(persona: &Persona, workspace_id: &str) -> bool {
@@ -4088,7 +4130,11 @@ fn starter_name(workspace_id: &str, taken: &HashSet<String>) -> &'static str {
 fn draft_prompt(brief: &str, name: Option<&str>) -> String {
     let name_rule = match name.map(str::trim).filter(|name| !name.is_empty()) {
         Some(name) => format!("Keep this name exactly: \"{name}\". Do not rename it."),
-        None => "`name` is two or three words, a role rather than a person's name.".into(),
+        None => {
+            "`name` is a short, friendly, familiar human first name, such as Nora, Milo or Lucy. \
+                 Avoid role titles, nature words and invented names."
+                .into()
+        }
     };
     format!(
         "Write a short persona for an AI coding assistant, from this description \
@@ -7729,7 +7775,7 @@ mod tests {
         let kept = draft_prompt("Reviews diffs.", Some("Reviewer"));
         assert!(kept.contains("Keep this name exactly: \"Reviewer\""));
         let open = draft_prompt("Reviews diffs.", None);
-        assert!(open.contains("two or three words"));
+        assert!(open.contains("familiar human first name"));
     }
 
     /// A model wraps JSON in prose and in fences however clearly it is asked
@@ -8606,6 +8652,66 @@ mod tests {
             .request_approval("chat-test", "Bash", "Bash git status", None)
             .unwrap();
         assert_eq!(later.decision, None, "a later shell call still asks");
+    }
+
+    #[test]
+    fn untouched_starter_names_migrate_without_rewriting_custom_personas() {
+        let root = tempfile::tempdir().unwrap();
+        let starter = |id: &str, name: &str| Persona {
+            id: id.into(),
+            workspace_id: Some("workspace-a".into()),
+            name: name.into(),
+            system_prompt: STARTER_BRIEF.into(),
+            seed: 73,
+            created_at_ms: 10,
+            updated_at_ms: 10,
+        };
+        let untouched = starter("starter", "Sage");
+        let mut edited_name = starter("edited-name", "Sora");
+        edited_name.updated_at_ms = 20;
+        let mut edited_brief = starter("edited-brief", "Slate");
+        edited_brief.system_prompt = "You review changes carefully.".into();
+        let mut shared = starter("shared", "Sage");
+        shared.workspace_id = None;
+        let collision = starter("custom-human-name", "Ruby");
+        let mut legacy_brief = starter("legacy-brief", "Mica");
+        legacy_brief.system_prompt = LEGACY_STARTER_BRIEF.into();
+        let original = PersonaIndex {
+            personas: vec![
+                untouched.clone(),
+                edited_name.clone(),
+                edited_brief.clone(),
+                shared.clone(),
+                collision.clone(),
+                legacy_brief,
+            ],
+            default_by_workspace: HashMap::from([("workspace-a".into(), "starter".into())]),
+        };
+        fs::write(
+            root.path().join("personas.json"),
+            serde_json::to_vec(&original).unwrap(),
+        )
+        .unwrap();
+        let migrated = load_persona_index(root.path());
+        let first = &migrated.personas[0];
+        assert!(STARTER_NAMES.contains(&first.name.as_str()));
+        assert_ne!(first.name, collision.name);
+        assert_eq!(first.id, untouched.id);
+        assert_eq!(first.seed, untouched.seed);
+        assert_eq!(first.system_prompt, untouched.system_prompt);
+        assert_eq!(migrated.default_by_workspace, original.default_by_workspace);
+        assert_eq!(migrated.personas[1], edited_name);
+        assert_eq!(migrated.personas[2], edited_brief);
+        assert_eq!(migrated.personas[3], shared);
+        assert_eq!(migrated.personas[4], collision);
+        assert!(STARTER_NAMES.contains(&migrated.personas[5].name.as_str()));
+        assert_eq!(migrated.personas[5].system_prompt, STARTER_BRIEF);
+        fs::write(
+            root.path().join("personas.json"),
+            serde_json::to_vec(&migrated).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(load_persona_index(root.path()).personas, migrated.personas);
     }
 
     #[test]
