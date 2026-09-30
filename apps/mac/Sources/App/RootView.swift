@@ -825,6 +825,11 @@ struct RootView: View {
         .ignoresSafeArea(.container, edges: .top)
     }
 
+    /// A chat row's scroll id in the sidebar, apart from any other id there.
+    static func sidebarChatRowID(_ conversationID: String) -> String {
+        "sidebar-chat-\(conversationID)"
+    }
+
     /// The sidebar's width right now: the drag in flight, else the stored one.
     private var currentSidebarWidth: CGFloat {
         CGFloat(sidebarLiveWidth ?? sidebarWidth)
@@ -1945,16 +1950,27 @@ struct RootView: View {
         // scrolled up through the wordmark and the search row.
         VStack(spacing: 0) {
             sidebarHeader
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    projectsSection
-                    #if os(macOS)
-                    liveServersSection
-                    #endif
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        projectsSection
+                        #if os(macOS)
+                        liveServersSection
+                        #endif
+                    }
+                    .padding(.bottom, Theme.Space.m)
                 }
-                .padding(.bottom, Theme.Space.m)
+                .scrollContentBackground(.hidden)
+                // Keep the lit chat on screen when ⌥⌘↑ or ⌥⌘↓ steps past
+                // the edge. No anchor: the smallest scroll that shows it, so
+                // a click on a row already in view moves nothing.
+                .onChange(of: chat.selected?.id) { _, id in
+                    guard let id, route.workspaceSection == .chat else { return }
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) {
+                        proxy.scrollTo(Self.sidebarChatRowID(id))
+                    }
+                }
             }
-            .scrollContentBackground(.hidden)
             accountFooter
         }
         // Confirm lives on the sidebar column, not RootView's outer body chain,
@@ -2986,6 +3002,7 @@ struct RootView: View {
                     },
                     warmPreview: { await chat.warmConversationPreview(conversation, in: folder.id) }
                 )
+                .id(Self.sidebarChatRowID(conversation.id))
             }
             // One quiet footer row instead of stacked loud ones: the
             // expander on the left, the archive on the right.
@@ -4314,6 +4331,40 @@ extension SidebarGroupHeader where Trailing == EmptyView {
 /// affordances stay quiet until hover, then sit in the row where the pointer
 /// already is. The confirmation is owned by the row so moving the pointer
 /// away cannot dismiss or retarget it.
+/// The remove control a project's rows show under the pointer.
+///
+/// One view for chats and terminals, so the two siblings under a project
+/// offer the same mark in the same seat. It is always laid out and only
+/// shown on hover, so the title beside it never re-truncates.
+private struct SidebarRowTrash: View {
+    let help: String
+    let visible: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: ActionIcon.delete.symbol)
+                .font(Theme.fit(10, weight: .medium))
+                .foregroundStyle(isHovering ? Theme.accent : Color.secondary)
+                .frame(width: 20, height: 20)
+                .background(
+                    isHovering ? Theme.accentSoft : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+                )
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help(help)
+        .accessibilityLabel(help)
+        .opacity(visible ? 1 : 0)
+        // A control nobody can see is a control nobody can press.
+        .allowsHitTesting(visible)
+    }
+}
+
 private struct ChatSidebarConversationRow: View {
     /// Where the mark starts: a `SidebarRow`'s padding plus half the slack
     /// between its 18 pt glyph frame and the 16 pt mark.
@@ -4334,7 +4385,6 @@ private struct ChatSidebarConversationRow: View {
     let warmPreview: () async -> Void
 
     @State private var isHovering = false
-    @State private var isTrashHovering = false
     @State private var confirmsRemoval = false
 
     var body: some View {
@@ -4359,25 +4409,9 @@ private struct ChatSidebarConversationRow: View {
             ZStack(alignment: .trailing) {
                 trailingState
                     .opacity(isHovering && !conversation.running ? 0 : 1)
-                Button {
+                SidebarRowTrash(help: "Remove chat", visible: isHovering && !conversation.running) {
                     confirmsRemoval = true
-                } label: {
-                    Image(systemName: "trash")
-                        .font(Theme.fit(10, weight: .medium))
-                        .foregroundStyle(isTrashHovering ? Theme.accent : Color.secondary)
-                        .frame(width: 20, height: 20)
-                        .background(
-                            isTrashHovering ? Theme.accentSoft : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        )
-                        .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
-                .onHover { isTrashHovering = $0 }
-                .help("Remove chat")
-                .opacity(isHovering && !conversation.running ? 1 : 0)
-                // A control nobody can see is a control nobody can press.
-                .allowsHitTesting(isHovering && !conversation.running)
             }
             .frame(minWidth: 26, alignment: .trailing)
         }
@@ -4586,8 +4620,7 @@ private struct ActiveAutomationRow: View {
 private struct ActiveSessionRow: View {
     let session: TerminalSession
     let isSelected: Bool
-    /// Right-click, because the row has no room for a button and a session
-    /// was closeable from the strip and from nowhere else.
+    /// The hover trash and right-click. A live session asks before it stops.
     let close: () -> Void
     let action: () -> Void
 
@@ -4707,27 +4740,38 @@ private struct ActiveSessionRow: View {
     }
 
     var body: some View {
-        Button(action: action) {
-            // One line, like the chats beside it. The meter, the context
-            // window and the resources are one hover away, and the terminal
-            // itself carries them while it is in front.
-            HStack(spacing: Theme.Space.s) {
-                leadingMark
-                Text(dynamicTitle.map { "\(title) · \($0)" } ?? title)
-                    .font(Theme.fit(13, weight: isSelected ? .medium : .regular))
-                    .foregroundStyle(isSelected ? Color.primary : Theme.controlGlyph)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer(minLength: 0)
-                StateBadge(state: session.state, since: session.lastOutputAt)
+        HStack(spacing: Theme.Space.xs) {
+            Button(action: action) {
+                // One line, like the chats beside it. The meter, the context
+                // window and the resources are one hover away, and the
+                // terminal itself carries them while it is in front.
+                HStack(spacing: Theme.Space.s) {
+                    leadingMark
+                    Text(dynamicTitle.map { "\(title) · \($0)" } ?? title)
+                        .font(Theme.fit(13, weight: isSelected ? .medium : .regular))
+                        .foregroundStyle(isSelected ? Color.primary : Theme.controlGlyph)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(.rect)
             }
-            .padding(.leading, ChatSidebarConversationRow.markInset)
-            .padding(.trailing, Theme.Space.s + 2)
-            .frame(height: DisplayFit.dp(30))
-            .background(background)
-            .contentShape(.rect)
+            .buttonStyle(.plain)
+
+            // The state, or under the pointer the way to close it: the same
+            // seat and mark a chat row uses. A live session still asks first.
+            ZStack(alignment: .trailing) {
+                StateBadge(state: session.state, since: session.lastOutputAt)
+                    .opacity(isHovering ? 0 : 1)
+                SidebarRowTrash(help: session.alive ? "Stop and close" : "Close", visible: isHovering, action: close)
+            }
+            .frame(minWidth: 26, alignment: .trailing)
         }
-        .buttonStyle(.plain)
+        .padding(.leading, ChatSidebarConversationRow.markInset)
+        .padding(.trailing, Theme.Space.s + 2)
+        .frame(height: DisplayFit.dp(30))
+        .background(background)
+        .contentShape(.rect)
         .onHover { isHovering = $0 }
         .contextMenu {
             Button(session.alive ? "Stop and close" : "Close", role: .destructive) {

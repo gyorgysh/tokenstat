@@ -747,13 +747,17 @@ final class ChatModel {
     /// the archive; older chats live behind See-all. The sidebar draws the
     /// same window, so every landing is already on screen.
     func adjacentConversation(_ step: Int) -> ChatConversation? {
-        guard !chats.isEmpty, step == -1 || step == 1 else { return nil }
-        let current = chats.firstIndex(where: { $0.id == selected?.id })
-        guard let next = ChatHistoryWindow.looped(count: chats.count, current: current, step: step),
-              chats.indices.contains(next) else {
+        // The rows the sidebar draws, in its order. Stepping over the list
+        // it hides landed on an empty chat that had no row to light, so the
+        // arrows looked as if they had selected nothing.
+        let rows = folderID.map { folder in chats.filter { !isUntouched($0, in: folder) } } ?? chats
+        guard !rows.isEmpty, step == -1 || step == 1 else { return nil }
+        let current = rows.firstIndex(where: { $0.id == selected?.id })
+        guard let next = ChatHistoryWindow.looped(count: rows.count, current: current, step: step),
+              rows.indices.contains(next) else {
             return nil
         }
-        return chats[next]
+        return rows[next]
     }
 
     /// Conversation lists read earlier this session, keyed by the folder id
