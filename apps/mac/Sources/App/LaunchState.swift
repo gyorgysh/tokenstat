@@ -47,7 +47,7 @@ final class LaunchState {
         // Prove a real method answers, not only that a socket file exists.
         let deadline = ContinuousClock.now + Self.hostDeadline
         while ContinuousClock.now < deadline {
-            if (try? await Bridge.info()) != nil {
+            if await Bridge.hostSettled() {
                 break
             }
             try? await Task.sleep(for: .milliseconds(80))
@@ -61,7 +61,7 @@ final class LaunchState {
             try? HostAgentInstaller.applyPolicy(alwaysOn: policy.alwaysOn)
             let again = ContinuousClock.now + .seconds(4)
             while ContinuousClock.now < again {
-                if (try? await Bridge.info()) != nil { break }
+                if await Bridge.hostSettled() { break }
                 try? await Task.sleep(for: .milliseconds(80))
                 guard !Task.isCancelled else { return }
             }

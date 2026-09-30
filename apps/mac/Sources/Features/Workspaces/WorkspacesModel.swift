@@ -1030,7 +1030,8 @@ final class WorkspacesModel {
                     // it every thirty seconds for the rest of the session is
                     // three pointless tunnel dials a minute, forever.
                     let neverAnswered = !stagedEverAnswered.contains(peer.key)
-                    let wait = neverAnswered && failures >= Self.failuresBeforeBackingOff
+                    let wait = neverAnswered
+                        && (failures >= Self.failuresBeforeBackingOff || Self.isLongUnseen(peer))
                         ? Self.peerColdRetrySeconds
                         : Self.peerRetrySeconds
                     stagedNextDial[peer.key] = Date().addingTimeInterval(wait)
@@ -1118,6 +1119,15 @@ final class WorkspacesModel {
     private static let peerColdRetrySeconds: TimeInterval = 600
     /// Misses before a peer that has never answered moves to the slow rate.
     private static let failuresBeforeBackingOff = 3
+    /// A peer this machine has not heard from in this long starts on the slow
+    /// rate after one miss. Pairings outlive the devices behind them, and a
+    /// list of old installs was dialled three times each on every launch.
+    private static let longUnseenSeconds: TimeInterval = 7 * 86_400
+
+    private static func isLongUnseen(_ peer: Peer) -> Bool {
+        guard let seen = ISO8601DateFormatter().date(from: peer.lastSeen) else { return false }
+        return Date().timeIntervalSince(seen) > longUnseenSeconds
+    }
     /// Consecutive failures before a peer's folders leave the sidebar.
     private static let maxPeerFailures = 2
 

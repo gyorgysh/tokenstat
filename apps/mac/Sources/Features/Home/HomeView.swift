@@ -251,7 +251,7 @@ struct HomeView: View {
     /// sharing a binding. Bounded so a dead host still shows empty Home.
     private static func waitForHost() async {
         for _ in 0..<100 {
-            if (try? await Bridge.info()) != nil { return }
+            if await Bridge.hostSettled() { return }
             try? await Task.sleep(for: .milliseconds(50))
             if Task.isCancelled { return }
         }

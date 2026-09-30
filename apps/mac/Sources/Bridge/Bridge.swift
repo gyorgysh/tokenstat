@@ -676,7 +676,7 @@ enum Bridge {
         patience: TimeInterval = Patience.standard,
         as type: T.Type
     ) async throws -> T {
-        try await observed(method, peer: peerOf(params)) {
+        try await observed(method, peer: peerOf(params), inner: params["method"] as? String) {
             try await offMainActor {
                 try invoke(method, params, patience: patience, as: type)
             }
@@ -690,6 +690,7 @@ enum Bridge {
     private static func observed<T: Sendable>(
         _ method: String,
         peer: String?,
+        inner: String? = nil,
         _ work: () async throws -> T
     ) async throws -> T {
         let started = DispatchTime.now().uptimeNanoseconds
@@ -699,10 +700,13 @@ enum Bridge {
         }
         #if os(macOS)
         // A long poll waits on purpose, so it is left out of the disk log.
-        let diagnostic = isExpectedLongPoll(method) ? 0 : DiagnosticsLog.callStarted(method)
+        // A remote call names the method it carried, or every peer poll in
+        // the log reads as the same line.
+        let logged = inner.map { "\(method):\($0)" } ?? method
+        let diagnostic = isExpectedLongPoll(method) ? 0 : DiagnosticsLog.callStarted(logged)
         var failure: String?
         defer {
-            DiagnosticsLog.callFinished(diagnostic, method: method, remote: peer != nil, failure: failure)
+            DiagnosticsLog.callFinished(diagnostic, method: logged, remote: peer != nil, failure: failure)
         }
         #endif
         do {
@@ -775,7 +779,7 @@ enum Bridge {
         _ params: [String: Any] = [:],
         as type: T.Type
     ) async throws -> T {
-        try await observed(method, peer: peerOf(params)) {
+        try await observed(method, peer: peerOf(params), inner: params["method"] as? String) {
             try await offMainActor {
                 let paramData = try JSONSerialization.data(withJSONObject: params)
                 let paramString = String(decoding: paramData, as: UTF8.self)
@@ -853,7 +857,7 @@ enum Bridge {
         patience: TimeInterval = Patience.standard,
         as type: T.Type
     ) async throws -> T? {
-        try await observed(method, peer: peerOf(params)) {
+        try await observed(method, peer: peerOf(params), inner: params["method"] as? String) {
             try await offMainActor {
                 try invokeOptional(method, params, patience: patience, as: type)
             }
@@ -864,6 +868,23 @@ enum Bridge {
 
     static func info() async throws -> Info {
         try await background("info", as: Info.self)
+    }
+
+    /// Whether waiting for the host is still worth it.
+    ///
+    /// `settled` covers a host that answered and one that answered
+    /// `host_incompatible`. The second will not change until the helper is
+    /// replaced, so a readiness loop that kept asking only spent the launch
+    /// polling it a dozen times a second.
+    static func hostSettled() async -> Bool {
+        do {
+            _ = try await info()
+            return true
+        } catch let BridgeError.core(code, _) where code == "host_incompatible" {
+            return true
+        } catch {
+            return false
+        }
     }
 
     static func totals(_ query: Query = Query()) async throws -> Totals {
