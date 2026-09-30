@@ -52,6 +52,11 @@ extension View {
     func retainedPane(isActive: Bool) -> some View {
         RetainedPaneLayout(isActive: isActive) { self }
             .transformEnvironment(\.personaMotionAllowed) { $0 = $0 && isActive }
+            // The bar's tabs and toggles are rebuilt on every shell update,
+            // and every pane's bar read them, so a chat switch rebuilt and
+            // measured about ten tab strips that nobody could see. A hidden
+            // pane has no bar to show and now holds nothing that changes.
+            .transformEnvironment(\.detailChromeToggles) { if !isActive { $0 = nil } }
     }
 
     /// The left chrome's surface: a native clear glass backdrop on macOS 26
@@ -423,9 +428,10 @@ struct ProjectHeader: View {
                 .frame(width: 1, height: 16)
                 .padding(.horizontal, 2)
             // Names for the five everyday sections survive the middle width.
-            ChromeTabStrip(tabs: tabs, selected: selected?.rawValue, primary: Self.primary) { id in
+            ChromeTabStrip(tabs: tabs, selected: selected?.rawValue, primary: Self.primary, owner: folder.id) { id in
                 if let section = WorkspaceSection(rawValue: id) { select(section) }
             }
+            .equatable()
         }
     }
 
@@ -466,22 +472,46 @@ struct ChromeTab: Identifiable, Hashable {
 /// The tab you are on always says what it is, even at the narrowest width.
 /// One component for a project's sections, the SSH library's and the
 /// automations place, so they read as the same control wherever they appear.
-struct ChromeTabStrip: View {
+struct ChromeTabStrip: View, Equatable {
     let tabs: [ChromeTab]
     let selected: String?
     /// How many tabs keep their names at the middle width.
     var primary: Int = 3
+    /// Whose sections these are. Only for equality: a strip that compares
+    /// equal keeps its previous `select`, which must never be a closure that
+    /// was made for another project.
+    var owner: String = ""
     let select: (String) -> Void
 
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
-            strip(counts: true) { _, _ in true }
-            strip(counts: false) { _, _ in true }
-            strip(counts: false) { index, isSelected in isSelected || index < primary }
-            compactStrip
-            sectionMenu(tabs)
+    /// What the strip draws. The closure is left out on purpose: no two
+    /// closures compare equal, so with it every parent update re-measured
+    /// all four `ViewThatFits` candidates, about 100 ms per chat switch.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.tabs == rhs.tabs && lhs.selected == rhs.selected
+            && lhs.primary == rhs.primary && lhs.owner == rhs.owner
+    }
 
+    var body: some View {
+        MemoizedSizeLayout(key: sizeKey) {
+            ViewThatFits(in: .horizontal) {
+                strip(counts: true) { _, _ in true }
+                strip(counts: false) { _, _ in true }
+                strip(counts: false) { index, isSelected in isSelected || index < primary }
+                compactStrip
+                sectionMenu(tabs)
+            }
         }
+    }
+
+    /// Everything the strip's size depends on: what it draws and the display
+    /// scale its type is fitted to.
+    private var sizeKey: Int {
+        var hasher = Hasher()
+        hasher.combine(tabs)
+        hasher.combine(selected)
+        hasher.combine(primary)
+        hasher.combine(DisplayFit.factor)
+        return hasher.finalize()
     }
 
     /// Keep the two main destinations named before falling back to one

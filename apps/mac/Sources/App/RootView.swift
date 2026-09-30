@@ -971,7 +971,8 @@ struct RootView: View {
                 selected: route.globalSection?.rawValue
             ) { id in
                 if let section = GlobalSection(rawValue: id) { navigate(to: .global(section)) }
-            })
+            }
+            .equatable())
         #if os(macOS)
         case .ssh, .sshTerminals:
             // The library's four sections, which used to be sidebar rows.
@@ -981,7 +982,8 @@ struct RootView: View {
                 primary: 4
             ) { id in
                 if let section = SSHSection.rows.first(where: { $0.id == id }) { openSSH(section) }
-            })
+            }
+            .equatable())
         #endif
         default:
             return nil
@@ -1001,7 +1003,7 @@ struct RootView: View {
             #else
             let openWorktrees: (() -> Void)? = nil
             #endif
-            branch = AnyView(ViewThatFits(in: .horizontal) {
+            branch = AnyView(AlignmentShieldLayout { ViewThatFits(in: .horizontal) {
                 BranchChip(workspaceID: folder.id, git: git, model: workspaces,
                            onWorktrees: openWorktrees) {
                     await workspaces.refresh()
@@ -1012,7 +1014,7 @@ struct RootView: View {
                     await workspaces.refresh()
                 }
                 .fixedSize()
-            })
+            } })
         }
         return ProjectHeader(
             folder: folder,

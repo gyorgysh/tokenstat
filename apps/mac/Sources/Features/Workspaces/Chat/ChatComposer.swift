@@ -76,6 +76,9 @@ struct ChatComposer: View {
                 strip
             }
             field
+            // Shielded so the stack's alignment question does not rebuild
+            // and measure both rows on every layout pass.
+            AlignmentShieldLayout {
             ViewThatFits(in: .horizontal) {
                 utilityRow
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -88,6 +91,7 @@ struct ChatComposer: View {
                         turnActions
                     }
                 }
+            }
             }
         }
         #if os(macOS)
