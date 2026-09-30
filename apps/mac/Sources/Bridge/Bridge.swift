@@ -215,7 +215,14 @@ enum Bridge {
     /// bridge warms the login environment and the shell pool, and this is asked
     /// at launch, before the daemon has been chosen, in an app that is usually
     /// about to hand that work to the daemon instead.
+    #if DEBUG
+    /// `TOKENSTAT_EXPECT_PROTOCOL` pretends this build speaks another
+    /// version, to reproduce what an older app sees beside a newer helper.
+    private static let expectedProtocolVersion = ProcessInfo.processInfo
+        .environment["TOKENSTAT_EXPECT_PROTOCOL"] ?? InProcessTransport.protocolVersion
+    #else
     private static let expectedProtocolVersion = InProcessTransport.protocolVersion
+    #endif
 
     private static func adopt(_ next: Route) {
         routeLock.lock()
