@@ -3946,6 +3946,13 @@ struct NativeMenuTrigger: NSViewRepresentable {
                     if let symbol = entry.symbol {
                         item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: entry.title)
                         item.image?.size = NSSize(width: 16, height: 16)
+                        // macOS 27 hides menu images automatically. Older SDKs
+                        // keep their existing image behavior.
+                        #if compiler(>=6.4)
+                        if #available(macOS 27.0, *) {
+                            item.preferredImageVisibility = .visible
+                        }
+                        #endif
                     }
                     menu.addItem(item)
                 }
