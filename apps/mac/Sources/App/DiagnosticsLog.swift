@@ -186,14 +186,20 @@ enum DiagnosticsLog {
             note("shortcut \(names.joined(separator: "+"))")
         default:
             let kind = event.type == .rightMouseDown ? "right-click" : "click"
-            var target = "none"
-            if let window = event.window {
-                let screen = window.convertPoint(toScreen: event.locationInWindow)
-                target = describe(window.accessibilityHitTest(screen))
-                let size = window.frame.size
-                target += " window=\(Int(size.width))x\(Int(size.height))"
+            guard let window = event.window else {
+                note("\(kind) role=none")
+                return
             }
-            note("\(kind) \(target)")
+            let screen = window.convertPoint(toScreen: event.locationInWindow)
+            let size = window.frame.size
+            // After the click is handled, not before it. The hit test walks
+            // the accessibility tree, and the click should not wait on a log.
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    let target = describe(window.accessibilityHitTest(screen))
+                    note("\(kind) \(target) window=\(Int(size.width))x\(Int(size.height))")
+                }
+            }
         }
     }
 

@@ -42,7 +42,26 @@ enum ChatInbox {
         .fileURL, .url, .image, .png, .jpeg, .gif, .webP, .heic, .tiff, .pdf, .plainText,
     ]
 
+    /// The last answer and the pasteboard generation it was for. The
+    /// composer asks on every redraw, and asking read the pasteboard from
+    /// another process, decoding a copied image each time. `changeCount`
+    /// moves with every copy, so a cached answer is never stale.
+    @MainActor private static var attachmentAnswer: (change: Int, has: Bool)?
+
+    @MainActor
     static func pasteboardHasAttachment() -> Bool {
+        #if os(macOS)
+        let change = NSPasteboard.general.changeCount
+        #else
+        let change = UIPasteboard.general.changeCount
+        #endif
+        if let answer = attachmentAnswer, answer.change == change { return answer.has }
+        let has = readPasteboardHasAttachment()
+        attachmentAnswer = (change, has)
+        return has
+    }
+
+    private static func readPasteboardHasAttachment() -> Bool {
         #if os(macOS)
         let pasteboard = NSPasteboard.general
         if pasteboard.canReadObject(

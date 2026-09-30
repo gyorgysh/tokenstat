@@ -2452,6 +2452,23 @@ enum DisplayFit {
     static func update(screen: NSScreen?) {
         guard let screen else { return }
         tracked = screen
+        cachedFactor = nil
+    }
+
+    /// The factor for the tracked screen, worked out once. Every fitted font
+    /// in every view body asks for it, and each ask read the screen's visible
+    /// frame from AppKit. Cleared when the screen or its parameters change.
+    private static var cachedFactor: CGFloat?
+    private static var watchingScreens = false
+
+    private static func watchScreenChanges() {
+        guard !watchingScreens else { return }
+        watchingScreens = true
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { _ in cachedFactor = nil }
     }
     #else
     static func update(width: CGFloat?) {
@@ -2479,6 +2496,18 @@ enum DisplayFit {
     /// of a desktop and the height of a laptop, and a layout sized to the
     /// width alone overflows the window's height.
     static var factor: CGFloat {
+        #if os(macOS)
+        if let cachedFactor { return cachedFactor }
+        let value = measuredFactor
+        cachedFactor = value
+        watchScreenChanges()
+        return value
+        #else
+        return measuredFactor
+        #endif
+    }
+
+    private static var measuredFactor: CGFloat {
         let size = screenSize
         let byWidth = size.width / referenceWidth
         let byHeight = size.height / referenceHeight
