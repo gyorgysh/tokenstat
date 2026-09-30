@@ -63,14 +63,16 @@ internal sealed class PersonaScene(Canvas canvas)
 
     public void ReleaseClips() => _clipper.Clear();
 
-    // A slot can hold an eye in one frame and a prop in the next. Drop the
-    // local fill, stroke, clip, and turn before that slot is shown again.
+    // A slot can hold an eye in one frame and a prop in the next. ClearValue
+    // drops the fill, stroke, and clip. The same call leaves RenderTransform
+    // set, so the turn is written back to null on UIElement.
     private static void ClearLocalValues(ShapesPath path)
     {
         path.ClearValue(ShapesPath.DataProperty);
         path.ClearValue(ShapesPath.FillProperty);
         path.ClearValue(ShapesPath.StrokeProperty);
         path.ClearValue(ShapesPath.ClipProperty);
-        path.ClearValue(ShapesPath.RenderTransformProperty);
+        path.RenderTransform = null;
+        path.SetValue(UIElement.RenderTransformProperty, null);
     }
 }

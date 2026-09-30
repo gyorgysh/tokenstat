@@ -9,6 +9,13 @@ namespace Microsoft.UI.Xaml
     {
         internal DependencyProperty() {}
     }
+
+    // RenderTransform is declared on UIElement. The scene writes that
+    // property back to null. ClearValue leaves the slot's turn in place.
+    public class UIElement
+    {
+        public static DependencyProperty RenderTransformProperty { get; } = new();
+    }
 }
 namespace Microsoft.UI.Xaml.Controls
 {
@@ -49,15 +56,24 @@ namespace Microsoft.UI.Xaml.Shapes
         public double Opacity { get; set; }
         public Media.RectangleGeometry? Clip { get; set; }
 
-        // The scene drops a local value through ClearValue. The stub has to
-        // do the same, or a reused slot keeps the previous eye, clip, or turn.
+        // The scene drops fill, stroke, clip, and data through ClearValue.
+        // The turn is stored as null through SetValue on UIElement.
         public void ClearValue(DependencyProperty property)
         {
             if (ReferenceEquals(property, DataProperty)) Data = null;
             else if (ReferenceEquals(property, FillProperty)) Fill = null;
             else if (ReferenceEquals(property, StrokeProperty)) Stroke = null;
             else if (ReferenceEquals(property, ClipProperty)) Clip = null;
-            else if (ReferenceEquals(property, RenderTransformProperty)) RenderTransform = null;
+            else if (ReferenceEquals(property, RenderTransformProperty)
+                || ReferenceEquals(property, UIElement.RenderTransformProperty))
+                RenderTransform = null;
+        }
+
+        public void SetValue(DependencyProperty property, object? value)
+        {
+            if (ReferenceEquals(property, RenderTransformProperty)
+                || ReferenceEquals(property, UIElement.RenderTransformProperty))
+                RenderTransform = value;
         }
     }
 }
