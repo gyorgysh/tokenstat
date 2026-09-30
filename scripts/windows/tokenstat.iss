@@ -32,7 +32,7 @@
   #define WizardSmallImage "apps\windows\Assets\tokenstat.png"
 #endif
 #ifndef FileVersion
-  #define FileVersion "0.0.0"
+  #define FileVersion "0.0.0.0"
 #endif
 
 [Setup]
@@ -44,7 +44,7 @@ AppPublisher=pueev OÜ
 AppPublisherURL=https://tokenstat.ai
 AppSupportURL=https://tokenstat.ai
 AppCopyright=© pueev OÜ. All rights reserved.
-VersionInfoVersion={#FileVersion}.0
+VersionInfoVersion={#FileVersion}
 VersionInfoCompany=pueev OÜ
 VersionInfoProductName=tokenstat
 VersionInfoCopyright=© pueev OÜ. All rights reserved.

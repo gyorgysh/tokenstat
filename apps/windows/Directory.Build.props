@@ -1,10 +1,11 @@
 <Project>
   <PropertyGroup>
     <!-- Keep in lockstep with workspace Cargo.toml. CI may override. -->
-    <TokenstatVersion Condition="'$(TokenstatVersion)' == ''">1.0.8</TokenstatVersion>
+    <TokenstatVersion Condition="'$(TokenstatVersion)' == ''">1.1.0</TokenstatVersion>
+    <TokenstatBuildNumber Condition="'$(TokenstatBuildNumber)' == ''">118</TokenstatBuildNumber>
     <Version>$(TokenstatVersion)</Version>
     <AssemblyVersion>$(TokenstatVersion).0</AssemblyVersion>
-    <FileVersion>$(TokenstatVersion).0</FileVersion>
+    <FileVersion>$(TokenstatVersion).$(TokenstatBuildNumber)</FileVersion>
     <InformationalVersion Condition="'$(InformationalVersion)' == ''">$(TokenstatVersion)</InformationalVersion>
     <Company>pueev OÜ</Company>
     <Authors>Gyorgy</Authors>

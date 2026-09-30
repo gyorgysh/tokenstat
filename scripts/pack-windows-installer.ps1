@@ -4,7 +4,7 @@
 # The wizard extracts to a temp directory and runs Tokenstat.exe --install.
 #
 # Usage:
-#   scripts/pack-windows-installer.ps1 -StageDir dist/tokenstat-1.0.8-windows-x64 -Version 1.0.8 [-Out dist]
+#   scripts/pack-windows-installer.ps1 -StageDir dist/tokenstat-1.1.0-windows-x64 -Version 1.1.0 [-Out dist]
 
 param(
     [Parameter(Mandatory = $true)]
@@ -79,13 +79,15 @@ $iss = Join-Path $Root "scripts\windows\tokenstat.iss"
 $outDir = Join-Path $Root $Out
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $base = "tokenstat-$Version-windows-$Arch-setup"
-$fileVersion = ($Version -split '-')[0]
-if ($fileVersion -notmatch '^\d+\.\d+\.\d+$') {
-    $fileVersion = "0.0.0"
+$appVersion = ($Version -split '-')[0]
+if ($appVersion -notmatch '^\d+\.\d+\.\d+$') {
+    $appVersion = "0.0.0"
 }
+$metadata = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
+$fileVersion = "$($metadata.FileMajorPart).$($metadata.FileMinorPart).$($metadata.FileBuildPart).$($metadata.FilePrivatePart)"
 
 & $iscc `
-    "/DAppVersion=$fileVersion" `
+    "/DAppVersion=$appVersion" `
     "/DFileVersion=$fileVersion" `
     "/DStageDir=$StageDir" `
     "/DOutputDir=$outDir" `

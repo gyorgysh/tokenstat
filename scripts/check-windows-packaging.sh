@@ -71,6 +71,8 @@ need "$ISS" 'Parameters: "--install"' \
     "installer must run Tokenstat.exe --install rather than copy ARP itself"
 need "$ISS" "Uninstallable=no" \
     "Inno must not write a second Add/Remove Programs row"
+need "$ISS" '^VersionInfoVersion={#FileVersion}$' \
+    "installer must preserve the executable's four-part file version"
 need "$PACK" "ISCC" \
     "pack script must compile the Inno script"
 if grep -qiE 'open source' "$ISS" "$PACK"; then
