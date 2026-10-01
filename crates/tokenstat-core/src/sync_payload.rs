@@ -231,10 +231,10 @@ impl SyncPayload {
             return Err(CoreError::InvalidSaltId(self.salt_id.clone()));
         }
         for row in &self.rows {
-            if let Some(p) = &row.proj {
-                if !is_valid_project_key(p) {
-                    return Err(CoreError::InvalidProjectKey(p.clone()));
-                }
+            if let Some(p) = &row.proj
+                && !is_valid_project_key(p)
+            {
+                return Err(CoreError::InvalidProjectKey(p.clone()));
             }
         }
         let mut seen = std::collections::BTreeSet::new();
@@ -386,21 +386,21 @@ pub fn build_sync_payload(
         if b.model.is_empty() || b.model.len() > 128 {
             continue;
         }
-        if let Some(allowed) = args.allowed_sources {
-            if !allowed.iter().any(|s| s == &b.src) {
-                return Err(CoreError::UnsupportedSyncEnum {
-                    field: "src".into(),
-                    value: b.src,
-                });
-            }
+        if let Some(allowed) = args.allowed_sources
+            && !allowed.iter().any(|s| s == &b.src)
+        {
+            return Err(CoreError::UnsupportedSyncEnum {
+                field: "src".into(),
+                value: b.src,
+            });
         }
-        if let Some(allowed) = args.allowed_confidence {
-            if !allowed.iter().any(|c| c == &b.conf) {
-                return Err(CoreError::UnsupportedSyncEnum {
-                    field: "conf".into(),
-                    value: b.conf,
-                });
-            }
+        if let Some(allowed) = args.allowed_confidence
+            && !allowed.iter().any(|c| c == &b.conf)
+        {
+            return Err(CoreError::UnsupportedSyncEnum {
+                field: "conf".into(),
+                value: b.conf,
+            });
         }
         let proj = project_key(args.salt_key, &b.project)?;
         // Schema v1 only has a single write bucket: fold both tiers into cw5 so
@@ -572,16 +572,11 @@ pub fn default_sync_window(
     if let (Ok(from_d), Ok(to_d)) = (
         from.parse::<jiff::civil::Date>(),
         end.parse::<jiff::civil::Date>(),
-    ) {
-        if let Ok(span) = from_d.until((jiff::Unit::Day, to_d)) {
-            if i64::from(span.get_days()) >= SYNC_WINDOW_MAX_DAYS {
-                if let Ok(trimmed) =
-                    to_d.checked_sub(jiff::Span::new().days(SYNC_WINDOW_MAX_DAYS - 1))
-                {
-                    from = trimmed.to_string();
-                }
-            }
-        }
+    ) && let Ok(span) = from_d.until((jiff::Unit::Day, to_d))
+        && i64::from(span.get_days()) >= SYNC_WINDOW_MAX_DAYS
+        && let Ok(trimmed) = to_d.checked_sub(jiff::Span::new().days(SYNC_WINDOW_MAX_DAYS - 1))
+    {
+        from = trimmed.to_string();
     }
 
     Some(SyncWindow {

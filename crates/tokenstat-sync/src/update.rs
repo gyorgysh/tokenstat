@@ -1415,10 +1415,10 @@ pub const UPDATE_JITTER_WINDOW_SECS: u64 = 900;
 /// gain from a stable offset, and a random one avoids deriving a machine id for
 /// people who never linked an account.
 fn update_jitter() -> u64 {
-    if let Ok(raw) = std::env::var("TOKENSTAT_UPDATE_JITTER") {
-        if let Ok(secs) = raw.trim().parse::<u64>() {
-            return secs.min(3600);
-        }
+    if let Ok(raw) = std::env::var("TOKENSTAT_UPDATE_JITTER")
+        && let Ok(secs) = raw.trim().parse::<u64>()
+    {
+        return secs.min(3600);
     }
     let mut b = [0u8; 2];
     if getrandom::fill(&mut b).is_err() {

@@ -254,40 +254,39 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
                 store.record_vendor_days("claude_code", &seen, &now)?;
             }
             report.days_active_unmeasured = store.days_active_without_usage("claude_code")?;
-            if !stats_unchanged {
-                if let Ok(contents) = std::fs::read_to_string(&stats_path) {
-                    if let Some(stats) = claude_stats::parse(&contents) {
-                        // From our copy, not the file: a day the vendor has
-                        // since dropped is still recoverable from here.
-                        let daily = vendor_daily_tokens(store)?;
-                        let have = store.archive_by_date_model()?;
-                        let recovered = claude_stats::backfill_events(&stats, &daily, &have, tz);
-                        report.warnings.extend(recovered.warnings);
-                        let events = recovered.events;
-                        report.days_recovered = events
-                            .iter()
-                            .map(|e| e.ts.local_date(tz))
-                            .collect::<std::collections::HashSet<_>>()
-                            .len() as u64;
-                        report.events_recovered = events.len() as u64;
-                        // Applied below, after the ordinary inserts, and only
-                        // then stamped: a pass that fails or produces nothing
-                        // must not delete rows a later scan would never
-                        // rebuild.
-                        pending_recovery = Some((events, stamp));
-                        let (head_sig, sig_len) = watermark::head_signature(contents.as_bytes());
-                        marks_to_store.push((
-                            stats_key,
-                            watermark::Watermark {
-                                size: stats_size,
-                                mtime_ms: stats_mtime,
-                                head_sig,
-                                sig_len,
-                                byte_offset: contents.len() as u64,
-                            },
-                        ));
-                    }
-                }
+            if !stats_unchanged
+                && let Ok(contents) = std::fs::read_to_string(&stats_path)
+                && let Some(stats) = claude_stats::parse(&contents)
+            {
+                // From our copy, not the file: a day the vendor has
+                // since dropped is still recoverable from here.
+                let daily = vendor_daily_tokens(store)?;
+                let have = store.archive_by_date_model()?;
+                let recovered = claude_stats::backfill_events(&stats, &daily, &have, tz);
+                report.warnings.extend(recovered.warnings);
+                let events = recovered.events;
+                report.days_recovered = events
+                    .iter()
+                    .map(|e| e.ts.local_date(tz))
+                    .collect::<std::collections::HashSet<_>>()
+                    .len() as u64;
+                report.events_recovered = events.len() as u64;
+                // Applied below, after the ordinary inserts, and only
+                // then stamped: a pass that fails or produces nothing
+                // must not delete rows a later scan would never
+                // rebuild.
+                pending_recovery = Some((events, stamp));
+                let (head_sig, sig_len) = watermark::head_signature(contents.as_bytes());
+                marks_to_store.push((
+                    stats_key,
+                    watermark::Watermark {
+                        size: stats_size,
+                        mtime_ms: stats_mtime,
+                        head_sig,
+                        sig_len,
+                        byte_offset: contents.len() as u64,
+                    },
+                ));
             }
         }
     }
@@ -336,20 +335,20 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
     }
 
     // Grok: one append-only log plus a session summary index for model/project.
-    if let Some(grok_home) = grok::discover(&home) {
-        if let Some(log) = grok::log_path(&grok_home) {
-            report.files_found += 1;
-            let sessions = grok::session_index(&grok_home);
-            let outcome = read_shard(&log, &marks, |p, text| {
-                grok::parse_file(p, text, &sessions).into()
-            });
-            absorb(
-                &mut report,
-                &mut all_events,
-                &mut marks_to_store,
-                vec![outcome],
-            );
-        }
+    if let Some(grok_home) = grok::discover(&home)
+        && let Some(log) = grok::log_path(&grok_home)
+    {
+        report.files_found += 1;
+        let sessions = grok::session_index(&grok_home);
+        let outcome = read_shard(&log, &marks, |p, text| {
+            grok::parse_file(p, text, &sessions).into()
+        });
+        absorb(
+            &mut report,
+            &mut all_events,
+            &mut marks_to_store,
+            vec![outcome],
+        );
     }
 
     // OpenCode: SQLite. Re-parse when the db file changes.

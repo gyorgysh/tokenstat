@@ -97,7 +97,7 @@ struct Store {
 
 // Validate encoded lengths without decoding every encrypted record on each list.
 fn encoded_size(value: &str) -> Option<usize> {
-    if value.is_empty() || value.len() % 4 != 0 {
+    if value.is_empty() || !value.len().is_multiple_of(4) {
         return None;
     }
     let padding = value.bytes().rev().take_while(|byte| *byte == b'=').count();
@@ -587,10 +587,10 @@ fn put(params: &PutParams) -> Result<Value, String> {
     if !params.payload.is_object() {
         return Err("cache payload must be an object".into());
     }
-    if let Some(revision) = &params.revision {
-        if revision.len() > MAX_ID_LEN || revision.bytes().any(|b| b == 0) {
-            return Err("invalid cache revision".into());
-        }
+    if let Some(revision) = &params.revision
+        && (revision.len() > MAX_ID_LEN || revision.bytes().any(|b| b == 0))
+    {
+        return Err("invalid cache revision".into());
     }
     let key = parse_key(&params.key)?;
     let plaintext = serde_json::to_vec(&params.payload).map_err(|e| e.to_string())?;
@@ -794,10 +794,10 @@ fn pin(params: &PinParams) -> Result<Value, String> {
 
 fn stats(scope: Option<&str>) -> Result<Value, String> {
     let _transaction = crate::identity_storage::lock_at(&path().with_extension("lock"), lock())?;
-    if let Some(scope) = scope {
-        if !valid_token(scope, MAX_SCOPE_LEN) {
-            return Err("invalid cache scope".into());
-        }
+    if let Some(scope) = scope
+        && !valid_token(scope, MAX_SCOPE_LEN)
+    {
+        return Err("invalid cache scope".into());
     }
     let (store, repaired) = load()?;
     let selected: Vec<(&String, &HashMap<String, Record>)> = store
@@ -851,10 +851,10 @@ fn clear_scope(scope: &str) -> Result<Value, String> {
 
 fn evict(scope: Option<&str>, now: i64, retention_ms: i64) -> Result<Value, String> {
     let _transaction = crate::identity_storage::lock_at(&path().with_extension("lock"), lock())?;
-    if let Some(scope) = scope {
-        if !valid_token(scope, MAX_SCOPE_LEN) {
-            return Err("invalid cache scope".into());
-        }
+    if let Some(scope) = scope
+        && !valid_token(scope, MAX_SCOPE_LEN)
+    {
+        return Err("invalid cache scope".into());
     }
     let (mut store, repaired) = load()?;
     let evicted = evict_expired(&mut store, now, retention_ms, scope);

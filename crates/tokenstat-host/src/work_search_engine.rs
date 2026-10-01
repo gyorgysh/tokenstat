@@ -196,13 +196,11 @@ pub fn search(
                     snapshot.updated_at_ms,
                     snapshot.partial,
                     &terms,
-                ) {
-                    if best
-                        .as_ref()
-                        .is_none_or(|previous| hit.score > previous.score)
-                    {
-                        best = Some(hit);
-                    }
+                ) && best
+                    .as_ref()
+                    .is_none_or(|previous| hit.score > previous.score)
+                {
+                    best = Some(hit);
                 }
             }
             if let Some(hit) = best {

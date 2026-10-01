@@ -442,12 +442,12 @@ fn add_meter(item: &mut Value, siblings: &[(String, u64)]) {
         // A harness we can meter but which has not written a turn yet starts
         // at zero rather than at nothing. The row then counts up from $0.00
         // instead of showing the command and later jumping to a figure.
-        if crate::session_meter::can_meter(&command) {
-            if let Some(map) = item.as_object_mut() {
-                map.insert("tokens".into(), json!(0));
-                map.insert("costMicros".into(), json!(0));
-                map.insert("costComplete".into(), json!(true));
-            }
+        if crate::session_meter::can_meter(&command)
+            && let Some(map) = item.as_object_mut()
+        {
+            map.insert("tokens".into(), json!(0));
+            map.insert("costMicros".into(), json!(0));
+            map.insert("costComplete".into(), json!(true));
         }
         return;
     };
@@ -1030,12 +1030,11 @@ fn invalidate_workspace_status(id: Option<&str>) {
 /// cannot mistake "we did not look" for "nothing has changed".
 #[cfg(feature = "local-host")]
 fn describe(ws: &tokenstat_workspace::Workspace) -> WorkspaceDto {
-    if let Ok(cache) = workspace_status_cache().lock() {
-        if let Some((at, dto)) = cache.entries.get(&ws.id) {
-            if at.elapsed() < WORKSPACE_STATUS_TTL {
-                return dto.clone();
-            }
-        }
+    if let Ok(cache) = workspace_status_cache().lock()
+        && let Some((at, dto)) = cache.entries.get(&ws.id)
+        && at.elapsed() < WORKSPACE_STATUS_TTL
+    {
+        return dto.clone();
     }
 
     let exists = ws.exists();
@@ -1995,10 +1994,10 @@ fn handoff_call(method: &str, params: &str) -> Result<Value, DispatchError> {
     if params.len() > 2 * 1024 * 1024 {
         return Err("handoff request is too large".into());
     }
-    if let Some(peer) = crate::request_context::remote_peer() {
-        if !crate::workspace_policy::is_allowed(&peer) {
-            return Err("workspace access is required for handoff".into());
-        }
+    if let Some(peer) = crate::request_context::remote_peer()
+        && !crate::workspace_policy::is_allowed(&peer)
+    {
+        return Err("workspace access is required for handoff".into());
     }
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]

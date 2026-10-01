@@ -997,10 +997,10 @@ fn claude_tool_result_detail(block: &Value) -> Option<String> {
                     if !text.is_empty() {
                         texts.push(text.to_string());
                     }
-                } else if let Some(text) = part.get("text").and_then(Value::as_str) {
-                    if !text.is_empty() {
-                        texts.push(text.to_string());
-                    }
+                } else if let Some(text) = part.get("text").and_then(Value::as_str)
+                    && !text.is_empty()
+                {
+                    texts.push(text.to_string());
                 }
             }
             (!texts.is_empty()).then(|| texts.join("\n"))
@@ -1208,17 +1208,16 @@ fn cursor_success_detail(success: &Value) -> Option<String> {
             parts.push(text.to_string());
         }
     }
-    if parts.is_empty() {
-        if let Some(text) = success
+    if parts.is_empty()
+        && let Some(text) = success
             .get("interleavedOutput")
             .or_else(|| success.get("content"))
             .or_else(|| success.get("message"))
             .and_then(Value::as_str)
             .map(str::trim_end)
             .filter(|text| !text.trim().is_empty())
-        {
-            parts.push(text.to_string());
-        }
+    {
+        parts.push(text.to_string());
     }
     if parts.is_empty()
         && let Some(files) = success.get("files").and_then(Value::as_array)
@@ -2360,14 +2359,12 @@ fn render_opencode(value: &serde_json::Value) -> Option<Piece> {
                 .split_once(' ')
                 .map(|(_, a)| a.trim().is_empty())
                 .unwrap_or(true)
-            {
-                if let Some(title) = part
+                && let Some(title) = part
                     .pointer("/state/title")
                     .and_then(|v| v.as_str())
                     .filter(|s| !s.is_empty())
-                {
-                    body = format!("{} {title}", display_verb(tool));
-                }
+            {
+                body = format!("{} {title}", display_verb(tool));
             }
             if let Some(out) = part.pointer("/state/output").and_then(|v| v.as_str()) {
                 let snippet = output_snippet(out);
@@ -2474,10 +2471,10 @@ fn lookup_str<'a>(value: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str
     let obj = value.as_object()?;
     let wanted: Vec<String> = keys.iter().map(|k| fold_key(k)).collect();
     for (key, val) in obj {
-        if wanted.iter().any(|want| want == &fold_key(key)) {
-            if let Some(s) = val.as_str().filter(|s| !s.is_empty()) {
-                return Some(s);
-            }
+        if wanted.iter().any(|want| want == &fold_key(key))
+            && let Some(s) = val.as_str().filter(|s| !s.is_empty())
+        {
+            return Some(s);
         }
     }
     None
@@ -2787,10 +2784,10 @@ fn assistant_split(value: &serde_json::Value) -> (Vec<String>, Vec<String>) {
                     }
                     continue;
                 }
-                if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
-                    if !text.is_empty() {
-                        texts.push(text.to_string());
-                    }
+                if let Some(text) = block.get("text").and_then(|v| v.as_str())
+                    && !text.is_empty()
+                {
+                    texts.push(text.to_string());
                 }
             }
         }

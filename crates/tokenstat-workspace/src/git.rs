@@ -945,7 +945,7 @@ fn git_allowing(dir: &Path, args: &[&str], codes: &[i32]) -> Option<String> {
         .ok()?;
     codes
         .contains(&out.status.code().unwrap_or(-1))
-        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+        .then(|| String::from_utf8_lossy_owned(out.stdout))
 }
 
 /// Decode git's C-style path quoting.
@@ -1027,7 +1027,7 @@ fn unquote_path(raw: &str) -> String {
             }
         }
     }
-    String::from_utf8_lossy(&out).into_owned()
+    String::from_utf8_lossy_owned(out)
 }
 
 /// Parse `git status --porcelain=v2 --branch`.
@@ -1085,15 +1085,15 @@ fn parse_porcelain_v2(raw: &str, status: &mut GitStatus) {
                     removed: None,
                 });
             }
-        } else if let Some(rest) = line.strip_prefix("u ") {
-            if let Some((_, path)) = entry(rest, 8) {
-                status.files.push(FileChange {
-                    path: unquote_path(&path),
-                    kind: ChangeKind::Conflicted,
-                    added: None,
-                    removed: None,
-                });
-            }
+        } else if let Some(rest) = line.strip_prefix("u ")
+            && let Some((_, path)) = entry(rest, 8)
+        {
+            status.files.push(FileChange {
+                path: unquote_path(&path),
+                kind: ChangeKind::Conflicted,
+                added: None,
+                removed: None,
+            });
         }
     }
 }

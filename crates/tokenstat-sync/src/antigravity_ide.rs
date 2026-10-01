@@ -288,10 +288,10 @@ fn detect_connections() -> anyhow::Result<Vec<Connection>> {
 }
 
 fn candidate_probe_ports(candidate: &ProcessCandidate, mut ports: Vec<u16>) -> Vec<u16> {
-    if let Some(declared) = candidate.declared_port {
-        if !ports.contains(&declared) {
-            ports.push(declared);
-        }
+    if let Some(declared) = candidate.declared_port
+        && !ports.contains(&declared)
+    {
+        ports.push(declared);
     }
     ports.sort_unstable();
     ports.dedup();

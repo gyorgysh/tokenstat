@@ -730,13 +730,14 @@ pub fn chat_agent_command(
             .unwrap_or(argv.len());
         argv.splice(at + 1..at + 1, ["--dangerously-bypass-hook-trust".into()]);
     }
-    if backend == "agy" && !launch.bypass {
-        if let Some(directory) = launch.agy_customization_dir {
-            insert_flags(
-                &mut argv,
-                ["--add-dir".into(), directory.display().to_string()],
-            );
-        }
+    if backend == "agy"
+        && !launch.bypass
+        && let Some(directory) = launch.agy_customization_dir
+    {
+        insert_flags(
+            &mut argv,
+            ["--add-dir".into(), directory.display().to_string()],
+        );
     }
     // These two CLIs accept image files natively. The other backends receive
     // the staged paths in the turn text, which lets their normal Read tool
@@ -1488,28 +1489,28 @@ impl Store {
         }
         // One Auto commit per folder. A later create with a different
         // agent edits that job rather than adding another row.
-        if is_auto_commit_name(&job.name) {
-            if let Some(idx) = jobs.iter().position(|existing| {
+        if is_auto_commit_name(&job.name)
+            && let Some(idx) = jobs.iter().position(|existing| {
                 existing.workspace_id == job.workspace_id && is_auto_commit_name(&existing.name)
-            }) {
-                let id = jobs[idx].id.clone();
-                let last_run_at_ms = jobs[idx].last_run_at_ms;
-                let last_run_id = jobs[idx].last_run_id.clone();
-                job.id = id;
-                job.revision = jobs[idx].revision;
-                job.last_run_at_ms = last_run_at_ms;
-                job.last_run_id = last_run_id;
-                if job.enabled {
-                    job.next_run_at_ms = job.schedule.next_run_ms(now_ms());
-                } else {
-                    job.next_run_at_ms = None;
-                }
-                advance_revision(&mut job)?;
-                jobs[idx] = job.clone();
-                drop(jobs);
-                self.save()?;
-                return Ok(job);
+            })
+        {
+            let id = jobs[idx].id.clone();
+            let last_run_at_ms = jobs[idx].last_run_at_ms;
+            let last_run_id = jobs[idx].last_run_id.clone();
+            job.id = id;
+            job.revision = jobs[idx].revision;
+            job.last_run_at_ms = last_run_at_ms;
+            job.last_run_id = last_run_id;
+            if job.enabled {
+                job.next_run_at_ms = job.schedule.next_run_ms(now_ms());
+            } else {
+                job.next_run_at_ms = None;
             }
+            advance_revision(&mut job)?;
+            jobs[idx] = job.clone();
+            drop(jobs);
+            self.save()?;
+            return Ok(job);
         }
         if job.id.is_empty() {
             job.id = format!("automation-{}", now_ms());

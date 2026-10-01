@@ -977,19 +977,19 @@ pub fn authorize_with(
         let mut trust = store.seen(&peer, &label, Some(address), &crate::now());
         let mut approved_now = false;
         // Auto-approve only when still pending (never when revoked).
-        if trust == Trust::Pending && prior != Some(Trust::Revoked) {
-            if let Some(hook) = auto_approve {
-                if let Some(account_label) = hook(&peer) {
-                    let name = if label.is_empty() {
-                        account_label
-                    } else {
-                        label.clone()
-                    };
-                    store.add_approved(&peer, &name, Some(address), &crate::now());
-                    trust = Trust::Approved;
-                    approved_now = true;
-                }
-            }
+        if trust == Trust::Pending
+            && prior != Some(Trust::Revoked)
+            && let Some(hook) = auto_approve
+            && let Some(account_label) = hook(&peer)
+        {
+            let name = if label.is_empty() {
+                account_label
+            } else {
+                label.clone()
+            };
+            store.add_approved(&peer, &name, Some(address), &crate::now());
+            trust = Trust::Approved;
+            approved_now = true;
         }
         // Written back only when something changed. A phone opens a channel
         // per workspace, per terminal and per port, and rewriting peers.json

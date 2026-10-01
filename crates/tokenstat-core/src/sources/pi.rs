@@ -143,10 +143,10 @@ pub fn parse_file(path: &Path, sessions_root: &Path, contents: &str) -> ParseOut
             }
         };
         if row.kind.as_deref() == Some("session") {
-            if let Some(cwd) = row.cwd.as_deref() {
-                if let Some(label) = last_component(cwd) {
-                    project = label;
-                }
+            if let Some(cwd) = row.cwd.as_deref()
+                && let Some(label) = last_component(cwd)
+            {
+                project = label;
             }
             continue;
         }

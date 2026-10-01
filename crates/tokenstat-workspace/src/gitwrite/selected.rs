@@ -290,10 +290,10 @@ fn build_review(dir: &Path, paths: &[String], index: &Path) -> Result<Review, St
         .map_err(|e| e.to_string())?
         .trim()
         .to_owned();
-    if let Some(head) = &head {
-        if tree == text(dir, &["rev-parse", &format!("{head}^{{tree}}")])? {
-            return Err("The selected files have no changes to commit.".into());
-        }
+    if let Some(head) = &head
+        && tree == text(dir, &["rev-parse", &format!("{head}^{{tree}}")])?
+    {
+        return Err("The selected files have no changes to commit.".into());
     }
     Ok(Review {
         branch,

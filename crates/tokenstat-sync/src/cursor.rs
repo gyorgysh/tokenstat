@@ -130,26 +130,25 @@ pub fn limits() -> ProviderLimits {
         })
     })
     .collect::<Vec<_>>();
-    if windows.is_empty() {
-        if let Some(plan) = body.get("planUsage").or_else(|| {
+    if windows.is_empty()
+        && let Some(plan) = body.get("planUsage").or_else(|| {
             body.get("individualUsage")
                 .and_then(|usage| usage.get("plan"))
-        }) {
-            if let Some(percent) = number(
-                plan,
-                &["totalPercentUsed", "apiPercentUsed", "autoPercentUsed"],
-            ) {
-                if percent.is_finite() && (0.0..=100.0).contains(&percent) {
-                    windows.push(UsageWindow {
-                        label: "billing cycle".to_string(),
-                        scope: None,
-                        percent,
-                        resets_at_ms: body.get("billingCycleEnd").and_then(epoch_or_iso_ms),
-                        severity: LimitSeverity::from_percent(percent),
-                    });
-                }
-            }
-        }
+        })
+        && let Some(percent) = number(
+            plan,
+            &["totalPercentUsed", "apiPercentUsed", "autoPercentUsed"],
+        )
+        && percent.is_finite()
+        && (0.0..=100.0).contains(&percent)
+    {
+        windows.push(UsageWindow {
+            label: "billing cycle".to_string(),
+            scope: None,
+            percent,
+            resets_at_ms: body.get("billingCycleEnd").and_then(epoch_or_iso_ms),
+            severity: LimitSeverity::from_percent(percent),
+        });
     }
     if windows.is_empty() {
         return unavailable_limits("Cursor reported no subscription usage windows.".to_string());
@@ -175,10 +174,10 @@ fn find_named_object<'a>(
     match value {
         serde_json::Value::Object(object) => {
             for name in names {
-                if let Some(value) = object.get(*name) {
-                    if value.is_object() {
-                        return Some(value);
-                    }
+                if let Some(value) = object.get(*name)
+                    && value.is_object()
+                {
+                    return Some(value);
                 }
             }
             object
@@ -227,10 +226,10 @@ fn reset_at_ms(value: &serde_json::Value, observed_at_ms: i64) -> Option<i64> {
         }
     }
     for key in ["resetAt", "resetsAt", "resetTime"] {
-        if let Some(raw) = value.get(key).and_then(serde_json::Value::as_str) {
-            if let Ok(timestamp) = raw.parse::<jiff::Timestamp>() {
-                return Some(timestamp.as_millisecond());
-            }
+        if let Some(raw) = value.get(key).and_then(serde_json::Value::as_str)
+            && let Ok(timestamp) = raw.parse::<jiff::Timestamp>()
+        {
+            return Some(timestamp.as_millisecond());
         }
     }
     None

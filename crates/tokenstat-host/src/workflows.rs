@@ -1393,12 +1393,12 @@ fn has_illegal_cycle(workflow: &Workflow) -> bool {
         if !stack.insert(id.to_string()) {
             return true;
         }
-        if seen.insert(id.to_string()) {
-            if let Some(next) = adj.get(id) {
-                for child in next {
-                    if visit(child, adj, stack, seen) {
-                        return true;
-                    }
+        if seen.insert(id.to_string())
+            && let Some(next) = adj.get(id)
+        {
+            for child in next {
+                if visit(child, adj, stack, seen) {
+                    return true;
                 }
             }
         }
@@ -1700,13 +1700,13 @@ fn wildcard_match(pattern: &str, text: &str) -> bool {
         return text.contains(pattern);
     }
     let mut rest = text;
-    if let Some(first) = parts.first() {
-        if !first.is_empty() {
-            if let Some(idx) = rest.find(first) {
-                rest = &rest[idx + first.len()..];
-            } else {
-                return false;
-            }
+    if let Some(first) = parts.first()
+        && !first.is_empty()
+    {
+        if let Some(idx) = rest.find(first) {
+            rest = &rest[idx + first.len()..];
+        } else {
+            return false;
         }
     }
     for (i, part) in parts.iter().enumerate().skip(1) {
@@ -1857,14 +1857,14 @@ fn lookup(
     if key == "workspace.path" {
         return workspace_path.to_string();
     }
-    if let Some((id, field)) = key.split_once('.') {
-        if let Some(step) = outputs.get(id) {
-            return match field {
-                "output" => step.output.clone(),
-                "status" => step.status.clone(),
-                _ => String::new(),
-            };
-        }
+    if let Some((id, field)) = key.split_once('.')
+        && let Some(step) = outputs.get(id)
+    {
+        return match field {
+            "output" => step.output.clone(),
+            "status" => step.status.clone(),
+            _ => String::new(),
+        };
     }
     String::new()
 }

@@ -338,7 +338,8 @@ and an explicitly enabled Always-on host keep their existing behavior.
 
 ## Development
 
-Requires a recent stable Rust toolchain (`rust-toolchain.toml`).
+Requires Rust 1.99 or later (`rust-toolchain.toml` follows stable). Native app
+builds also need the platform tools described in each app's README.
 
 ```bash
 cargo fmt --all

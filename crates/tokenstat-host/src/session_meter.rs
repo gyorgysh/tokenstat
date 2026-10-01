@@ -855,11 +855,11 @@ fn read_head(path: &Path) -> Option<String> {
         .take(HEAD_BYTES as u64)
         .read_to_end(&mut buffer)
         .ok()?;
-    let text = String::from_utf8_lossy(&buffer).into_owned();
-    match text.rfind('\n') {
-        Some(cut) => Some(text[..cut].to_string()),
-        None => Some(text),
+    let mut text = String::from_utf8_lossy_owned(buffer);
+    if let Some(cut) = text.rfind('\n') {
+        text.truncate(cut);
     }
+    Some(text)
 }
 
 /// OpenCode's database, read for one folder since this session started.

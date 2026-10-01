@@ -85,10 +85,10 @@ fn endpoint(dir: &Path, remote: &str) -> Result<String, String> {
 fn remote_head(dir: &Path, url: &str, reference: &str) -> Result<Option<String>, String> {
     let refs = text(dir, &["ls-remote", "--refs", "--", url, reference])?;
     for line in refs.lines() {
-        if let Some((oid, name)) = line.split_once('\t') {
-            if name == reference {
-                return Ok(Some(oid.into()));
-            }
+        if let Some((oid, name)) = line.split_once('\t')
+            && name == reference
+        {
+            return Ok(Some(oid.into()));
         }
     }
     Ok(None)
@@ -243,11 +243,11 @@ pub fn push(dir: &Path, id: &str, reviewed: &Review, retry: bool) -> Result<Rece
                     .message
                     .push_str(&format!(" Local tracking could not be refreshed: {error}"));
             }
-            if reviewed.set_upstream {
-                if let Err(error) = set_upstream(dir, reviewed) {
-                    result.message =
-                        format!("Pushed the reviewed commit. Tracking could not be set: {error}");
-                }
+            if reviewed.set_upstream
+                && let Err(error) = set_upstream(dir, reviewed)
+            {
+                result.message =
+                    format!("Pushed the reviewed commit. Tracking could not be set: {error}");
             }
         }
         Ok(out) => {
@@ -301,19 +301,21 @@ pub fn recover(dir: &Path, id: &str) -> Result<Receipt, String> {
         result.retry_allowed = false;
         let same_destination =
             endpoint(dir, &result.review.remote).is_ok_and(|current| current == url);
-        if same_destination && current.as_ref() == Some(&result.review.head) {
-            if let Err(error) = refresh_tracking(dir, &result.review) {
-                result
-                    .message
-                    .push_str(&format!(" Local tracking could not be refreshed: {error}"));
-            }
+        if same_destination
+            && current.as_ref() == Some(&result.review.head)
+            && let Err(error) = refresh_tracking(dir, &result.review)
+        {
+            result
+                .message
+                .push_str(&format!(" Local tracking could not be refreshed: {error}"));
         }
-        if same_destination && result.review.set_upstream {
-            if let Err(error) = set_upstream(dir, &result.review) {
-                result
-                    .message
-                    .push_str(&format!(" Tracking could not be set: {error}"));
-            }
+        if same_destination
+            && result.review.set_upstream
+            && let Err(error) = set_upstream(dir, &result.review)
+        {
+            result
+                .message
+                .push_str(&format!(" Tracking could not be set: {error}"));
         }
     } else {
         result.state = "unknown".into();

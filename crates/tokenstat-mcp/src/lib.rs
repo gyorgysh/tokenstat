@@ -641,15 +641,13 @@ fn call_tool(engine: &mut Engine, params: Option<&Value>) -> Result<Value, Strin
     if matches!(
         name,
         "task_create" | "task_update" | "note_create" | "note_update"
-    ) {
-        if let Some(id) = args
-            .get("workspaceId")
-            .and_then(Value::as_str)
-            .filter(|id| !id.is_empty())
-        {
-            host_call(engine, "workspace.status", json!({"id":id}))
+    ) && let Some(id) = args
+        .get("workspaceId")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+    {
+        host_call(engine, "workspace.status", json!({"id":id}))
                 .map_err(|error| format!("Invalid or unavailable workspaceId: {error}. Use workspace_list or workspace_add first."))?;
-        }
     }
     let q = query_from_args(&args);
 
@@ -969,15 +967,15 @@ fn validate_arguments(args: &Value, schema: &Value) -> Result<(), String> {
         if !valid {
             return Err(format!("invalid type for {key}"));
         }
-        if let Some(options) = rule["enum"].as_array() {
-            if !options.contains(value) {
-                return Err(format!("invalid {key}; expected one of {options:?}"));
-            }
+        if let Some(options) = rule["enum"].as_array()
+            && !options.contains(value)
+        {
+            return Err(format!("invalid {key}; expected one of {options:?}"));
         }
-        if let Some(min) = rule["minimum"].as_f64() {
-            if value.as_f64().is_some_and(|v| v < min) {
-                return Err(format!("{key} must be at least {min}"));
-            }
+        if let Some(min) = rule["minimum"].as_f64()
+            && value.as_f64().is_some_and(|v| v < min)
+        {
+            return Err(format!("{key} must be at least {min}"));
         }
         if rule["minLength"].as_u64().is_some_and(|min| {
             value

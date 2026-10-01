@@ -288,15 +288,15 @@ fn stored_credentials() -> Option<Stored> {
             // The file fallback still runs: an older Claude Code put the
             // login there when the Keychain only held plugins.
             let path = credentials_file_path();
-            if let Some(path) = path {
-                if let Ok(raw) = std::fs::read_to_string(&path) {
-                    let file = Stored {
-                        raw,
-                        store: Store::File(path),
-                    };
-                    if file.token().is_some() {
-                        return Some(file);
-                    }
+            if let Some(path) = path
+                && let Ok(raw) = std::fs::read_to_string(&path)
+            {
+                let file = Stored {
+                    raw,
+                    store: Store::File(path),
+                };
+                if file.token().is_some() {
+                    return Some(file);
                 }
             }
             return Some(stored);

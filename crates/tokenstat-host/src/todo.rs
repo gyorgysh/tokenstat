@@ -297,33 +297,33 @@ impl Board {
         let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
         let mut changed = false;
         for card in cards.iter_mut() {
-            if let Some(delegate) = card.delegate.as_mut() {
-                if matches!(
+            if let Some(delegate) = card.delegate.as_mut()
+                && matches!(
                     delegate.status.as_str(),
                     "starting" | "running" | "queued" | "stopping"
-                ) {
-                    if let Some(run) = runs.iter().find(|r| r.id == delegate.run_id) {
-                        if run.status != delegate.status {
-                            delegate.status = run.status.clone();
-                            delegate.ended_at_ms = run.ended_at_ms;
-                            if run.status == "error" {
-                                delegate.error = Some(run_error_note(run));
-                            }
-                            card.updated_at_ms = Self::now_ms();
-                            card.revision = card.revision.saturating_add(1);
-                            changed = true;
+                )
+            {
+                if let Some(run) = runs.iter().find(|r| r.id == delegate.run_id) {
+                    if run.status != delegate.status {
+                        delegate.status = run.status.clone();
+                        delegate.ended_at_ms = run.ended_at_ms;
+                        if run.status == "error" {
+                            delegate.error = Some(run_error_note(run));
                         }
-                    } else if Self::now_ms().saturating_sub(delegate.started_at_ms) > 60_000 {
-                        delegate.status = "interrupted".into();
-                        delegate.ended_at_ms = Some(Self::now_ms());
-                        delegate.error = Some(
-                            "The host stopped before this run was recorded. It was not started again."
-                                .into(),
-                        );
                         card.updated_at_ms = Self::now_ms();
                         card.revision = card.revision.saturating_add(1);
                         changed = true;
                     }
+                } else if Self::now_ms().saturating_sub(delegate.started_at_ms) > 60_000 {
+                    delegate.status = "interrupted".into();
+                    delegate.ended_at_ms = Some(Self::now_ms());
+                    delegate.error = Some(
+                        "The host stopped before this run was recorded. It was not started again."
+                            .into(),
+                    );
+                    card.updated_at_ms = Self::now_ms();
+                    card.revision = card.revision.saturating_add(1);
+                    changed = true;
                 }
             }
         }
@@ -525,11 +525,12 @@ impl Board {
             cards[idx].budget_seconds = budget_seconds;
         }
         let mut column_changed = false;
-        if let Some(column) = changes.column.as_deref() {
-            if COLUMNS.contains(&column) && cards[idx].column != column {
-                cards[idx].column = column.to_string();
-                column_changed = true;
-            }
+        if let Some(column) = changes.column.as_deref()
+            && COLUMNS.contains(&column)
+            && cards[idx].column != column
+        {
+            cards[idx].column = column.to_string();
+            column_changed = true;
         }
         let requested_order = changes.order.map(|o| o.max(0));
         cards[idx].updated_at_ms = Self::now_ms();

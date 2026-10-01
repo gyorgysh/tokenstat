@@ -611,27 +611,25 @@ pub fn machine_usage(
     // A caller with more devices than this sees the first of them rather than
     // turning one call into that many HTTP requests.
     let machines = &machines[..machines.len().min(MAX_MACHINE_USAGE)];
-    if let Ok(guard) = machine_cache().lock() {
-        if let Some(c) = guard.as_ref() {
-            if c.days == days
-                && c.fetched_at.elapsed() < MACHINE_FRESH_FOR
-                && machines
-                    .iter()
-                    .all(|m| c.rows.iter().any(|r| &r.machine == m))
-            {
-                return Ok(c
-                    .rows
-                    .iter()
-                    .filter(|r| machines.contains(&r.machine))
-                    .map(|r| MachineUsage {
-                        machine: r.machine.clone(),
-                        micros: r.micros,
-                        events: r.events,
-                        active_days: r.active_days,
-                    })
-                    .collect());
-            }
-        }
+    if let Ok(guard) = machine_cache().lock()
+        && let Some(c) = guard.as_ref()
+        && c.days == days
+        && c.fetched_at.elapsed() < MACHINE_FRESH_FOR
+        && machines
+            .iter()
+            .all(|m| c.rows.iter().any(|r| &r.machine == m))
+    {
+        return Ok(c
+            .rows
+            .iter()
+            .filter(|r| machines.contains(&r.machine))
+            .map(|r| MachineUsage {
+                machine: r.machine.clone(),
+                micros: r.micros,
+                events: r.events,
+                active_days: r.active_days,
+            })
+            .collect());
     }
 
     let today = activity::today(tz);
@@ -901,16 +899,16 @@ fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError>
             }
             // A recent failure is reported from here rather than by dialling
             // again. Nothing about being signed out changes in a second.
-            if let Some((message, at)) = &c.last_error {
-                if at.elapsed() < RETRY_AFTER {
-                    // Unless there is a real answer to serve. A remembered grid
-                    // beats a blank one, and on a client there is no local
-                    // archive to fall back to.
-                    if !c.rows.is_empty() {
-                        return Ok(c.fetched(true));
-                    }
-                    return Err(FetchError::new(message.clone()));
+            if let Some((message, at)) = &c.last_error
+                && at.elapsed() < RETRY_AFTER
+            {
+                // Unless there is a real answer to serve. A remembered grid
+                // beats a blank one, and on a client there is no local
+                // archive to fall back to.
+                if !c.rows.is_empty() {
+                    return Ok(c.fetched(true));
                 }
+                return Err(FetchError::new(message.clone()));
             }
         }
     }

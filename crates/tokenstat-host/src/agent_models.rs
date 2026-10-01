@@ -369,7 +369,7 @@ fn run_list(bin: &str, args: &[&str]) -> Option<String> {
         return None;
     }
     let bytes = rx.recv_timeout(Duration::from_secs(1)).ok()?;
-    Some(String::from_utf8_lossy(&bytes).into_owned())
+    Some(String::from_utf8_lossy_owned(bytes))
 }
 
 /// Codex's model list, over its app server.
@@ -533,10 +533,10 @@ pub(crate) fn parse_agy_models(out: &str) -> Vec<String> {
         if line.is_empty() || line.to_ascii_lowercase().starts_with("fetching") {
             continue;
         }
-        if let Some(id) = sanitize_agy_model(line) {
-            if !models.iter().any(|m| m == &id) {
-                models.push(id);
-            }
+        if let Some(id) = sanitize_agy_model(line)
+            && !models.iter().any(|m| m == &id)
+        {
+            models.push(id);
         }
     }
     models
@@ -855,13 +855,13 @@ gpt-oss-120b-mediumGPT-OSS 120B (Medium)
         }
         // Codex speaks a protocol instead of printing a list, so this one
         // exercises the whole handshake on a machine that has the CLI.
-        if crate::launcher::resolve_command("codex").is_some() {
-            if let Some(list) = codex_models() {
-                assert!(
-                    list.iter().all(|m| !m.is_empty()),
-                    "codex models parsed to {list:?}"
-                );
-            }
+        if crate::launcher::resolve_command("codex").is_some()
+            && let Some(list) = codex_models()
+        {
+            assert!(
+                list.iter().all(|m| !m.is_empty()),
+                "codex models parsed to {list:?}"
+            );
         }
     }
 

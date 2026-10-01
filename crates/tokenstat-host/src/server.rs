@@ -567,13 +567,30 @@ mod tests {
     #[test]
     fn missing_params_are_the_same_as_empty() {
         let dir = temp_dir("noparams");
-        let s = Mutex::new(session(&dir));
-        let out = respond(r#"{"id": 1, "method": "totals"}"#, &s);
-        assert_eq!(
-            serde_json::from_str::<Value>(&out).unwrap()["ok"],
-            true,
-            "{out}"
-        );
+        let local = Session::open_local(&OpenParams {
+            db_path: Some(dir.join("tokenstat.db").display().to_string()),
+            timezone: Some("UTC".into()),
+        })
+        .unwrap();
+        let client = Session::open_client(Some("UTC")).unwrap();
+        for opened in [local, client] {
+            let has_archive = opened.has_archive();
+            let s = Mutex::new(opened);
+            let out = respond(r#"{"id": 1, "method": "totals"}"#, &s);
+            let missing: Value = serde_json::from_str(&out).unwrap();
+            for request in [
+                r#"{"id": 1, "method": "totals", "params": {}}"#,
+                r#"{"id": 1, "method": "totals", "params": null}"#,
+            ] {
+                let explicit: Value = serde_json::from_str(&respond(request, &s)).unwrap();
+                assert_eq!(missing, explicit);
+            }
+            assert_eq!(missing["ok"], has_archive, "{out}");
+            if !has_archive {
+                assert_eq!(missing["error"]["code"], crate::error::NO_LOCAL_ARCHIVE);
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[cfg(unix)]

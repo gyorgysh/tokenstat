@@ -150,10 +150,10 @@ pub fn session_cwd(contents: &str) -> Option<String> {
         let Ok(row) = serde_json::from_str::<Row>(line) else {
             continue;
         };
-        if let Some(cwd) = row.payload.and_then(|p| p.cwd) {
-            if !cwd.is_empty() {
-                return Some(cwd.to_string());
-            }
+        if let Some(cwd) = row.payload.and_then(|p| p.cwd)
+            && !cwd.is_empty()
+        {
+            return Some(cwd.to_string());
         }
     }
     None
@@ -209,11 +209,11 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
                 // repeated header for the same session (a rewrite that
                 // restates the meta) must not move it, or the fallback would
                 // keep earlier rows it already judged inconsistent.
-                if let Some(id) = payload.id {
-                    if session != id {
-                        session = id.to_string();
-                        first_index = out.events.len();
-                    }
+                if let Some(id) = payload.id
+                    && session != id
+                {
+                    session = id.to_string();
+                    first_index = out.events.len();
                 }
                 if let Some(cwd) = payload.cwd {
                     project = cwd
@@ -238,11 +238,11 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
         }
         let Some(info) = payload.info else { continue };
 
-        if let Some(rl) = &payload.rate_limits {
-            if rl.plan_type.is_some() {
-                // A plan is in force, so this usage was not billed per token.
-                billing = BillingMode::Plan;
-            }
+        if let Some(rl) = &payload.rate_limits
+            && rl.plan_type.is_some()
+        {
+            // A plan is in force, so this usage was not billed per token.
+            billing = BillingMode::Plan;
         }
 
         if let Some(total) = info.total_token_usage {

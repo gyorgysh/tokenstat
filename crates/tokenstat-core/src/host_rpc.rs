@@ -71,12 +71,12 @@ pub fn exchange(
     }
     let envelope: Value = serde_json::from_slice(&response)
         .map_err(|_| format!("The host sent an invalid response to {method}"))?;
-    if let Some(id) = envelope.get("id") {
-        if id != &json!(1) {
-            return Err(format!(
-                "The host response did not match the request for {method}"
-            ));
-        }
+    if let Some(id) = envelope.get("id")
+        && id != &json!(1)
+    {
+        return Err(format!(
+            "The host response did not match the request for {method}"
+        ));
     }
     match envelope.get("ok").and_then(Value::as_bool) {
         Some(true) => envelope

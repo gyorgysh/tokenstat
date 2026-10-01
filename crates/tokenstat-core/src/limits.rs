@@ -716,10 +716,10 @@ fn parse_iso_ms(raw: &str) -> Option<i64> {
 /// Where Codex keeps its sessions, in the order to prefer them.
 fn codex_homes() -> Vec<PathBuf> {
     let mut homes = Vec::new();
-    if let Ok(explicit) = std::env::var("CODEX_HOME") {
-        if !explicit.is_empty() {
-            homes.push(PathBuf::from(explicit));
-        }
+    if let Ok(explicit) = std::env::var("CODEX_HOME")
+        && !explicit.is_empty()
+    {
+        homes.push(PathBuf::from(explicit));
     }
     if let Some(dirs) = directories::UserDirs::new() {
         homes.push(dirs.home_dir().join(".codex"));

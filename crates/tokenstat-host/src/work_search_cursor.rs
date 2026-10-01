@@ -49,9 +49,7 @@ impl Cursors {
         getrandom::fill(&mut random).map_err(|_| "search continuation is unavailable")?;
         let token: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
         self.expire(now);
-        while self.entries.len() >= CAPACITY {
-            self.entries.pop_front();
-        }
+        self.entries.retain_back(CAPACITY - 1);
         let mut bound = request.clone();
         bound.cursor = None;
         self.entries.push_back(Entry {

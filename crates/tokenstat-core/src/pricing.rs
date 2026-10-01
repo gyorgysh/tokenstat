@@ -331,10 +331,11 @@ pub(crate) fn lookup_keys(model: &str) -> Vec<String> {
         }
     }
     // Anthropic-style dotted ids: `anthropic.claude-fable-5`.
-    if let Some((head, rest)) = model.split_once('.') {
-        if head.chars().all(|c| c.is_ascii_alphabetic()) && rest.contains('-') {
-            push(&mut keys, rest.to_string());
-        }
+    if let Some((head, rest)) = model.split_once('.')
+        && head.chars().all(|c| c.is_ascii_alphabetic())
+        && rest.contains('-')
+    {
+        push(&mut keys, rest.to_string());
     }
     // Cursor wraps underlying models: `cursor-grok-4.5-high-fast`.
     if let Some(rest) = model.strip_prefix("cursor-") {
@@ -366,10 +367,11 @@ pub(crate) fn lookup_keys(model: &str) -> Vec<String> {
             }
         }
         // Date suffixes like `-20251001`.
-        if let Some((base, tail)) = cur.rsplit_once('-') {
-            if tail.len() == 8 && tail.chars().all(|c| c.is_ascii_digit()) {
-                push(&mut keys, base.to_string());
-            }
+        if let Some((base, tail)) = cur.rsplit_once('-')
+            && tail.len() == 8
+            && tail.chars().all(|c| c.is_ascii_digit())
+        {
+            push(&mut keys, base.to_string());
         }
         i += 1;
     }

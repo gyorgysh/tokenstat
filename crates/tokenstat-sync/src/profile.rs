@@ -1675,20 +1675,19 @@ pub fn sync_scheduled(
         None => jitter_offset(&machine, JITTER_WINDOW_SECS) + jitter_smear(),
     };
 
-    if let Some(cursor) = config::cursor_for(&host)? {
-        if let Some(next) = cursor.next_allowed_at.as_deref() {
-            if let Ok(next_ts) = next.parse::<jiff::Timestamp>() {
-                // Measured from when the POST would land, and with the same
-                // grace the server allows, so a couple of seconds of timer drift
-                // never costs a whole interval.
-                let at = jiff::Timestamp::now() + Duration::from_secs(sleep_secs);
-                let grace = Duration::from_secs(SERVER_GRACE_SECS);
-                if at + grace < next_ts {
-                    return Ok(ScheduledOutcome::Held {
-                        until: Some(next.to_string()),
-                    });
-                }
-            }
+    if let Some(cursor) = config::cursor_for(&host)?
+        && let Some(next) = cursor.next_allowed_at.as_deref()
+        && let Ok(next_ts) = next.parse::<jiff::Timestamp>()
+    {
+        // Measured from when the POST would land, and with the same
+        // grace the server allows, so a couple of seconds of timer drift
+        // never costs a whole interval.
+        let at = jiff::Timestamp::now() + Duration::from_secs(sleep_secs);
+        let grace = Duration::from_secs(SERVER_GRACE_SECS);
+        if at + grace < next_ts {
+            return Ok(ScheduledOutcome::Held {
+                until: Some(next.to_string()),
+            });
         }
     }
 
@@ -1719,16 +1718,15 @@ pub fn sync_scheduled_now(
             reason: "another sync is already running".into(),
         });
     };
-    if let Some(cursor) = config::cursor_for(&host)? {
-        if let Some(next) = cursor.next_allowed_at.as_deref() {
-            if let Ok(next_ts) = next.parse::<jiff::Timestamp>() {
-                let grace = Duration::from_secs(SERVER_GRACE_SECS);
-                if jiff::Timestamp::now() + grace < next_ts {
-                    return Ok(ScheduledOutcome::Held {
-                        until: Some(next.to_string()),
-                    });
-                }
-            }
+    if let Some(cursor) = config::cursor_for(&host)?
+        && let Some(next) = cursor.next_allowed_at.as_deref()
+        && let Ok(next_ts) = next.parse::<jiff::Timestamp>()
+    {
+        let grace = Duration::from_secs(SERVER_GRACE_SECS);
+        if jiff::Timestamp::now() + grace < next_ts {
+            return Ok(ScheduledOutcome::Held {
+                until: Some(next.to_string()),
+            });
         }
     }
 

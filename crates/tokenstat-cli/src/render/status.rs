@@ -562,16 +562,14 @@ fn spawn_background_scan() {
         }
         Err(_) => {
             // Stale lock older than 10 minutes: steal it. Fresher: skip.
-            if let Ok(meta) = std::fs::metadata(&lock_path) {
-                if let Ok(modified) = meta.modified() {
-                    if modified
-                        .elapsed()
-                        .map(|a| a.as_secs() < 600)
-                        .unwrap_or(true)
-                    {
-                        return;
-                    }
-                }
+            if let Ok(meta) = std::fs::metadata(&lock_path)
+                && let Ok(modified) = meta.modified()
+                && modified
+                    .elapsed()
+                    .map(|a| a.as_secs() < 600)
+                    .unwrap_or(true)
+            {
+                return;
             }
             let _ = std::fs::remove_file(&lock_path);
             if std::fs::OpenOptions::new()

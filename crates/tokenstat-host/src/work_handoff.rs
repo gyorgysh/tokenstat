@@ -85,10 +85,10 @@ pub(crate) fn validate(request: &PutHandoff, device_id: &str) -> Result<(), Stri
             return Err("handoff repeats an attachment".into());
         }
     }
-    if let Some(anchor) = &request.anchor {
-        if !valid_id(&anchor.event_id) || anchor.fraction > 10_000 {
-            return Err("handoff reading position is not usable".into());
-        }
+    if let Some(anchor) = &request.anchor
+        && (!valid_id(&anchor.event_id) || anchor.fraction > 10_000)
+    {
+        return Err("handoff reading position is not usable".into());
     }
     Ok(())
 }
@@ -106,20 +106,21 @@ pub fn apply(
     if now_ms < 0 {
         return Err("handoff timestamp is not usable".into());
     }
-    if let Some(current) = current {
-        if current.device_id == authenticated_device && current.request_id == request.request_id {
-            if current.device_name != request.device_name.trim()
-                || current.draft != request.draft
-                || current.anchor != request.anchor
-                || request.expected_revision.checked_add(1) != Some(current.revision)
-            {
-                return Err("handoff request ID was already used for different content".into());
-            }
-            // A lost reply does not create a new revision or change its time.
-            return Ok(PutResult::Saved {
-                handoff: current.clone(),
-            });
+    if let Some(current) = current
+        && current.device_id == authenticated_device
+        && current.request_id == request.request_id
+    {
+        if current.device_name != request.device_name.trim()
+            || current.draft != request.draft
+            || current.anchor != request.anchor
+            || request.expected_revision.checked_add(1) != Some(current.revision)
+        {
+            return Err("handoff request ID was already used for different content".into());
         }
+        // A lost reply does not create a new revision or change its time.
+        return Ok(PutResult::Saved {
+            handoff: current.clone(),
+        });
     }
     let revision = current.map_or(0, |record| record.revision);
     if request.expected_revision != revision {

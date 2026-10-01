@@ -133,10 +133,10 @@ fn auth_token() -> Option<String> {
                 continue;
             };
             for key in ["key", "token", "apiKey"] {
-                if let Some(token) = value.get(key).and_then(serde_json::Value::as_str) {
-                    if !token.trim().is_empty() {
-                        return Some(token.to_string());
-                    }
+                if let Some(token) = value.get(key).and_then(serde_json::Value::as_str)
+                    && !token.trim().is_empty()
+                {
+                    return Some(token.to_string());
                 }
             }
         }

@@ -413,21 +413,20 @@ const CREDENTIAL_REFRESH_MARGIN: Duration = Duration::from_secs(600);
 /// moving target: each new token superseded the one the live socket was about
 /// to reconnect with.
 fn tunnel_hello_token(force: bool) -> Result<(String, Option<u64>), String> {
-    if !force {
-        if let Ok(guard) = held_credential().lock() {
-            if let Some(held) = guard.as_ref() {
-                // The lifetime left, not None: the caller schedules the refresh
-                // loop from what comes back, and a cache hit that said "no
-                // expiry" would start a tunnel nothing ever refreshed.
-                match held.expires_at_ms {
-                    None => return Ok((held.token.clone(), None)),
-                    Some(at) => {
-                        if let Some(left) = seconds_left(at)
-                            && left > CREDENTIAL_REFRESH_MARGIN.as_secs()
-                        {
-                            return Ok((held.token.clone(), Some(left)));
-                        }
-                    }
+    if !force
+        && let Ok(guard) = held_credential().lock()
+        && let Some(held) = guard.as_ref()
+    {
+        // The lifetime left, not None: the caller schedules the refresh
+        // loop from what comes back, and a cache hit that said "no
+        // expiry" would start a tunnel nothing ever refreshed.
+        match held.expires_at_ms {
+            None => return Ok((held.token.clone(), None)),
+            Some(at) => {
+                if let Some(left) = seconds_left(at)
+                    && left > CREDENTIAL_REFRESH_MARGIN.as_secs()
+                {
+                    return Ok((held.token.clone(), Some(left)));
                 }
             }
         }
@@ -622,22 +621,22 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
     let _starting = STARTING.lock().unwrap_or_else(|e| e.into_inner());
     // Already live: refresh HELLO and leave the supervisor alone.
     if tunnel_running().load(Ordering::Acquire) {
-        if let Ok(guard) = tunnel_session().lock() {
-            if guard.is_some() {
-                // The held credential, minted again only when it is close to
-                // expiry. The live socket is already registered, so this is
-                // about what the next reconnect will carry.
-                if let Ok((hello_token, _)) = tunnel_hello_token(false) {
-                    if let Some(existing) = guard.as_ref() {
-                        existing.set_token(&hello_token);
-                    }
-                    // A later successful mint must not leave a previous
-                    // plan-refusal sitting in `tunnelError`. The panel
-                    // reads that field even when the socket is up.
-                    set_tunnel_state(|state| state.error = None);
+        if let Ok(guard) = tunnel_session().lock()
+            && guard.is_some()
+        {
+            // The held credential, minted again only when it is close to
+            // expiry. The live socket is already registered, so this is
+            // about what the next reconnect will carry.
+            if let Ok((hello_token, _)) = tunnel_hello_token(false) {
+                if let Some(existing) = guard.as_ref() {
+                    existing.set_token(&hello_token);
                 }
-                return;
+                // A later successful mint must not leave a previous
+                // plan-refusal sitting in `tunnelError`. The panel
+                // reads that field even when the socket is up.
+                set_tunnel_state(|state| state.error = None);
             }
+            return;
         }
         // Marked running but no session: fall through and rebuild.
         tunnel_running().store(false, Ordering::Release);
@@ -1293,7 +1292,7 @@ fn serve_peer(
         connection.close();
         return;
     }
-    let line = String::from_utf8_lossy(&first).to_string();
+    let line = String::from_utf8_lossy_owned(first);
     let response = respond_remote(&line, session, &tokenstat_identity::hex(&peer));
     if connection.send(response.as_bytes()).is_err() {
         return;
@@ -1310,7 +1309,7 @@ fn serve_peer(
             connection.close();
             return;
         }
-        let line = String::from_utf8_lossy(&request).to_string();
+        let line = String::from_utf8_lossy_owned(request);
         let response = respond_remote(&line, session, &tokenstat_identity::hex(&peer));
         if connection.send(response.as_bytes()).is_err() {
             return;
@@ -1496,10 +1495,11 @@ fn remember_route(peer: &str, route: Route) {
     if let Ok(mut map) = last_routes().lock() {
         // Bounded: entries for peers that were removed from the store
         // otherwise accumulate for the life of the daemon.
-        if !map.contains_key(peer) && map.len() >= MAX_REMEMBERED_ROUTES {
-            if let Some(first) = map.keys().next().cloned() {
-                map.remove(&first);
-            }
+        if !map.contains_key(peer)
+            && map.len() >= MAX_REMEMBERED_ROUTES
+            && let Some(first) = map.keys().next().cloned()
+        {
+            map.remove(&first);
         }
         map.insert(peer.to_string(), route);
     }
@@ -2909,7 +2909,7 @@ fn round_trip(
 ) -> Result<String, tokenstat_remote::RemoteError> {
     connection.send(request)?;
     let answer = connection.receive_within(MAX_MESSAGE, ANSWER_IDLE)?;
-    Ok(String::from_utf8_lossy(&answer).to_string())
+    Ok(String::from_utf8_lossy_owned(answer))
 }
 
 fn checkout(peer: &str, purpose: ChannelPurpose) -> Option<tokenstat_remote::Connection> {
@@ -3093,14 +3093,14 @@ fn reconsider_plan() -> Result<Value, String> {
     // Already READY: drop a leftover plan refusal and leave the mint alone.
     // Every app launch used to remint here, which spent the hourly budget
     // replacing a credential that was working.
-    if let Some(session) = tunnel_session().lock().ok().and_then(|guard| guard.clone()) {
-        if session.status().connected {
-            set_tunnel_state(|state| {
-                state.connected = true;
-                state.error = None;
-            });
-            return Ok(json!({"reconsidered": true, "tunnel": true, "allowed": true}));
-        }
+    if let Some(session) = tunnel_session().lock().ok().and_then(|guard| guard.clone())
+        && session.status().connected
+    {
+        set_tunnel_state(|state| {
+            state.connected = true;
+            state.error = None;
+        });
+        return Ok(json!({"reconsidered": true, "tunnel": true, "allowed": true}));
     }
     match tunnel_hello_token(true) {
         Ok((hello_token, _)) => {

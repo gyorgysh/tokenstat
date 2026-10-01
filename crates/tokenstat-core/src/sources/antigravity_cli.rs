@@ -187,10 +187,10 @@ fn parse_gen_metadata(
     let response_id = string_field(usage, 11)
         .filter(|text| !text.trim().is_empty())
         .map(|text| text.to_string());
-    if let Some(key) = &response_id {
-        if !seen_response_ids.insert(key.clone()) {
-            return None;
-        }
+    if let Some(key) = &response_id
+        && !seen_response_ids.insert(key.clone())
+    {
+        return None;
     }
 
     let model = string_field(chat_model, 19)
@@ -248,10 +248,10 @@ fn read_trajectory_meta(conn: &rusqlite::Connection, path: &Path) -> (i64, Optio
         if let Some(ms) = session_created_ms(blob).filter(|&ms| ms > 0) {
             timestamp = ms;
         }
-        if let Some(uri) = message_field(blob, 1).and_then(|folder| string_field(folder, 1)) {
-            if let Some(path_str) = file_uri_to_path(uri) {
-                project = Some(project_label(&path_str));
-            }
+        if let Some(uri) = message_field(blob, 1).and_then(|folder| string_field(folder, 1))
+            && let Some(path_str) = file_uri_to_path(uri)
+        {
+            project = Some(project_label(&path_str));
         }
     }
 
@@ -300,12 +300,13 @@ fn percent_decode(input: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let (Some(hi), Some(lo)) = (hex_value(bytes[i + 1]), hex_value(bytes[i + 2])) {
-                out.push((hi << 4) | lo);
-                i += 3;
-                continue;
-            }
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let (Some(hi), Some(lo)) = (hex_value(bytes[i + 1]), hex_value(bytes[i + 2]))
+        {
+            out.push((hi << 4) | lo);
+            i += 3;
+            continue;
         }
         out.push(bytes[i]);
         i += 1;
@@ -395,10 +396,10 @@ impl<'a> ProtoReader<'a> {
 fn message_field(buf: &[u8], field: u64) -> Option<&[u8]> {
     let mut reader = ProtoReader::new(buf);
     while let Some((found, wire)) = reader.next_field() {
-        if found == field {
-            if let Wire::Len(bytes) = wire {
-                return Some(bytes);
-            }
+        if found == field
+            && let Wire::Len(bytes) = wire
+        {
+            return Some(bytes);
         }
     }
     None
@@ -407,10 +408,10 @@ fn message_field(buf: &[u8], field: u64) -> Option<&[u8]> {
 fn varint_field(buf: &[u8], field: u64) -> Option<u64> {
     let mut reader = ProtoReader::new(buf);
     while let Some((found, wire)) = reader.next_field() {
-        if found == field {
-            if let Wire::Varint(value) = wire {
-                return Some(value);
-            }
+        if found == field
+            && let Wire::Varint(value) = wire
+        {
+            return Some(value);
         }
     }
     None

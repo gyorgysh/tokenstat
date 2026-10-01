@@ -1650,17 +1650,17 @@ impl Store {
             if let Some(title) = changes.title.filter(|text| !text.trim().is_empty()) {
                 chat.title = title;
             }
-            if let Some(backend) = changes.backend {
-                if backend != chat.backend {
-                    chat.backend = backend;
-                    // A model/effort value and a backend session are backend-
-                    // specific. Do not send stale setup or a legacy token to the
-                    // newly selected agent. A previously used backend can still
-                    // recover its own token from `resume_tokens`.
-                    chat.model = None;
-                    chat.effort = None;
-                    chat.resume_token = chat.resume_tokens.get(&chat.backend).cloned();
-                }
+            if let Some(backend) = changes.backend
+                && backend != chat.backend
+            {
+                chat.backend = backend;
+                // A model/effort value and a backend session are backend-
+                // specific. Do not send stale setup or a legacy token to the
+                // newly selected agent. A previously used backend can still
+                // recover its own token from `resume_tokens`.
+                chat.model = None;
+                chat.effort = None;
+                chat.resume_token = chat.resume_tokens.get(&chat.backend).cloned();
             }
             if let Some(model) = changes.model {
                 chat.model = Some(model).filter(|value| !value.trim().is_empty());
@@ -2375,17 +2375,16 @@ impl Store {
         );
         let ledger = crate::chat_receipts::Ledger::load(self.receipts_path(id), now_ms())?;
         let mut receipt = ledger.get(&key).cloned();
-        if let Some(receipt) = &mut receipt {
-            if receipt.state == crate::chat_receipts::ReceiptState::Pending
-                && !self
-                    .active
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .contains_key(id)
-                && crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?.is_some()
-            {
-                receipt.state = crate::chat_receipts::ReceiptState::NeedsRecovery;
-            }
+        if let Some(receipt) = &mut receipt
+            && receipt.state == crate::chat_receipts::ReceiptState::Pending
+            && !self
+                .active
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains_key(id)
+            && crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?.is_some()
+        {
+            receipt.state = crate::chat_receipts::ReceiptState::NeedsRecovery;
         }
         Ok(receipt)
     }
@@ -3982,7 +3981,7 @@ fn percent_decode_path(value: &str) -> String {
             index += 1;
         }
     }
-    String::from_utf8_lossy(&output).into_owned()
+    String::from_utf8_lossy_owned(output)
 }
 
 fn hex_digit(value: u8) -> Option<u8> {

@@ -297,7 +297,7 @@ fn unhex(value: &str) -> Result<Vec<u8>, String> {
     if !value.is_ascii() {
         return Err("invalid encrypted vault data".into());
     }
-    if value.len() % 2 != 0 {
+    if !value.len().is_multiple_of(2) {
         return Err("invalid encrypted vault data".into());
     }
     (0..value.len())

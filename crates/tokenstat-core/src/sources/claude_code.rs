@@ -246,18 +246,18 @@ pub fn parse_file(path: &Path, projects_root: &Path, contents: &str) -> ParseOut
         // Where `iterations` is present it should restate the top-level
         // counters. Verify rather than assume: if a future version makes the
         // top level a partial figure, silently trusting it would undercount.
-        if let Some(iters) = &usage.iterations {
-            if let Some(last) = iters.last() {
-                let mismatch = last.output_tokens != usage.output_tokens
-                    || last.input_tokens != usage.input_tokens
-                    || last.cache_read_input_tokens != usage.cache_read_input_tokens
-                    || last.cache_creation_input_tokens != usage.cache_creation_input_tokens;
-                if mismatch {
-                    out.warnings.push(Warning::IterationMismatch {
-                        path: path.to_path_buf(),
-                        line: i + 1,
-                    });
-                }
+        if let Some(iters) = &usage.iterations
+            && let Some(last) = iters.last()
+        {
+            let mismatch = last.output_tokens != usage.output_tokens
+                || last.input_tokens != usage.input_tokens
+                || last.cache_read_input_tokens != usage.cache_read_input_tokens
+                || last.cache_creation_input_tokens != usage.cache_creation_input_tokens;
+            if mismatch {
+                out.warnings.push(Warning::IterationMismatch {
+                    path: path.to_path_buf(),
+                    line: i + 1,
+                });
             }
         }
 

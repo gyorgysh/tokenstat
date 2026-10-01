@@ -260,6 +260,9 @@ jobs:
           TOKENSTAT_SCREEN_FIXTURE: ${{ runner.temp }}/tokenstat-screen-fixture
         run: cargo test --workspace --all-features --locked
 
+      - name: Test without the local half
+        run: cargo test -p tokenstat-host -p tokenstat-ffi --no-default-features --locked
+
       - uses: actions/setup-dotnet@v6
         if: runner.os == 'Windows'
         with:

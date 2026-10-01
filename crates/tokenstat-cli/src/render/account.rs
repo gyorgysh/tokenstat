@@ -35,17 +35,17 @@ pub fn fetch_reports(reports: &[tokenstat_sync::FetchReport], json: bool) -> Res
             continue;
         }
         // Antigravity may report quota and/or IDE sync with zero new events.
-        if r.events == 0 {
-            if let Some(msg) = &r.message {
-                if msg.contains("quota") || msg.contains("IDE") {
-                    let g = good();
-                    println!("  {g}{}{g:#}: {msg}", r.vendor);
-                    continue;
-                }
-                let w = warn();
-                println!("  {w}{}: {msg}{w:#}", r.vendor);
+        if r.events == 0
+            && let Some(msg) = &r.message
+        {
+            if msg.contains("quota") || msg.contains("IDE") {
+                let g = good();
+                println!("  {g}{}{g:#}: {msg}", r.vendor);
                 continue;
             }
+            let w = warn();
+            println!("  {w}{}: {msg}{w:#}", r.vendor);
+            continue;
         }
         let src = if r.from_cache { "cache" } else { "network" };
         let g = good();
