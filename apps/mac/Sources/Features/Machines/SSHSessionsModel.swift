@@ -265,6 +265,15 @@ final class SSHSessionsModel {
         return stored
     }
 
+    func swapPanes(in hostID: String) {
+        guard layout(for: hostID).isSplit else { return }
+        var selection = TerminalPaneSelection(selectedID: activeSession(for: hostID)?.id,
+                                              leadingID: splitLeadingID[hostID], trailingID: splitTrailingID[hostID])
+        selection.swapPanes(available: sessions(for: hostID).map(\.id))
+        splitLeadingID[hostID] = selection.leadingID
+        splitTrailingID[hostID] = selection.trailingID
+    }
+
     func setFraction(_ value: Double, for hostID: String) {
         let clamped = min(0.8, max(0.2, value))
         splitFraction[hostID] = clamped

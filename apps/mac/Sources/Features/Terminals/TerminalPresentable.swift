@@ -14,9 +14,8 @@ import SwiftTerm
 /// named `TerminalSession` concretely, which is what kept SSH out of the split
 /// and tab machinery the workspace terminals have had all along.
 ///
-/// Generic rather than existential on purpose: a `[any TerminalPresentable]`
-/// would push a downcast into every caller's `onActivate`, and there is no
-/// screen that mixes the two kinds in one stack.
+/// Generic rather than existential: `WorkspaceTerminal` supplies a common
+/// tab identity when a project mixes CLI and SSH sessions in one stack.
 @MainActor
 protocol TerminalPresentable: AnyObject, Identifiable {
     /// The emulator, if one has been made. Nil for a session that is still

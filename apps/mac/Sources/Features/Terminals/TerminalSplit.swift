@@ -29,6 +29,23 @@ enum TerminalSplitLayout: String, Sendable, Equatable {
     }
 }
 
+/// Shared by project, chat and server split menus.
+struct TerminalSwapButton: View {
+    let layout: TerminalSplitLayout
+    let onSwap: () -> Void
+
+    var body: some View {
+        Button(action: onSwap) {
+            Label(
+                layout == .stacked
+                    ? L10n.text("apple.terminalsplit.swap_top_and_bottom")
+                    : L10n.text("apple.terminalsplit.swap_left_and_right"),
+                systemImage: layout == .stacked ? "arrow.up.arrow.down" : "arrow.left.arrow.right"
+            )
+        }
+    }
+}
+
 extension WorkspacePreference {
     private static let splitKey = "workspace.split"
     private static let splitFractionKey = "workspace.splitFraction"

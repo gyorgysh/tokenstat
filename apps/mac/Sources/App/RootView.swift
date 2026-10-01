@@ -636,6 +636,7 @@ struct RootView: View {
             // shells. For the life of the shell, not the life of a screen,
             // because the sidebar draws them whichever screen is in front.
             .task {
+                terminals.sshSessions = sshSessions
                 await BridgeLaunch.wait()
                 await sshSessions.watch()
             }
@@ -932,21 +933,22 @@ struct RootView: View {
             .frame(width: 40, height: 40)
             .overlay {
                 if let tier = railAccountTier, BadgeShape(tier: tier) != nil {
-                    Circle()
-                        .strokeBorder(
-                            AngularGradient(
-                                colors: [Theme.accent, Theme.secondary, Theme.accent],
-                                center: .center
-                            ),
-                            lineWidth: railAccountHovered ? 2 : 1.5
-                        )
+                    Circle().strokeBorder(Theme.border, lineWidth: 1)
+                        .overlay {
+                            Circle()
+                                .strokeBorder(
+                                    AngularGradient(
+                                        colors: [Theme.accent, Theme.secondary, Theme.accent],
+                                        center: .center
+                                    ),
+                                    lineWidth: 1.5
+                                )
+                                .rotationEffect(.degrees(railAccountHovered && !reduceMotion ? 120 : 0))
+                                .opacity(railAccountHovered ? 1 : 0)
+                                .shadow(color: Theme.secondary.opacity(railAccountHovered ? 0.22 : 0), radius: 3)
+                                .animation(reduceMotion ? nil : .easeInOut(duration: 0.65), value: railAccountHovered)
+                        }
                         .frame(width: 34, height: 34)
-                        .rotationEffect(.degrees(railAccountHovered && !reduceMotion ? 120 : 0))
-                        .shadow(
-                            color: Theme.secondary.opacity(railAccountHovered ? 0.32 : 0),
-                            radius: railAccountHovered ? 4 : 0
-                        )
-                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.55), value: railAccountHovered)
                 }
             }
             .overlay(alignment: .bottomTrailing) {
@@ -1655,6 +1657,8 @@ struct RootView: View {
         if showsWorkspaceTerminal, let id = route.workspaceID,
            let folder = workspaces.folders.first(where: { $0.id == id }) {
             ChatTerminalPane(folder: folder, terminals: terminals, workspaces: workspaces,
+                             ssh: ssh, sshSessions: sshSessions,
+                             onManageServers: { openSSH(.hosts(folder: nil)) },
                              onClose: { terminalWorkspaceID = nil })
                 .id(id)
         } else {
@@ -2280,7 +2284,7 @@ struct RootView: View {
         let showingTerminal = isCurrent
             && route.workspaceSection == .sessions
             && workspaces.isShowingTerminal(in: folder.id)
-            && terminals.active(in: folder.id) != nil
+            && terminals.activeTerminal(in: folder.id) != nil
         let isExpanded = expandedWorkspaces.contains(folder.id)
         // A chat row under this folder is the lit one while that chat is in
         // front, the same test the conversation row itself makes.
@@ -2386,6 +2390,22 @@ struct RootView: View {
             // every project; a terminal carries a small terminal badge on its
             // mark instead, and the Terminals tab in the bar opens the rest.
             sessionRows(sessions, in: folder, showingTerminal: showingTerminal)
+            ForEach(terminals.workspaceTerminals(in: folder.id).filter { $0.ssh != nil && $0.alive }) { session in
+                SidebarRow(label: session.label, symbol: "server.rack",
+                           isSelected: showingTerminal && terminals.activeTerminal(in: folder.id)?.id == session.id,
+                           indent: 1) {
+                    openSection(.sessions, in: folder.id) {
+                        terminals.select(session, in: folder.id)
+                    }
+                }
+                .contextMenu {
+                    Button(L10n.text("apple.terminalpane.open_in_split.6b36cec3"), .compare) {
+                        openSection(.sessions, in: folder.id) {
+                            terminals.sendToOtherHalf(session, in: folder.id)
+                        }
+                    }
+                }
+            }
             chatHistoryRows(for: folder)
             ForEach(automations.liveJobs(in: folder.id)) { job in
                 let run = automations.lastRun(for: job)
@@ -2410,7 +2430,7 @@ struct RootView: View {
                     openWorkflow(graphID: run.workflowID, runID: run.id, in: folder.id)
                 }
             }
-            if chat.sidebarChats(in: folder.id).isEmpty, sessions.isEmpty {
+            if chat.sidebarChats(in: folder.id).isEmpty, terminals.workspaceTerminals(in: folder.id).isEmpty {
                 Text(L10n.text("apple.rootview.no_chats_yet.269208e4"))
                     .font(Theme.fit(12))
                     .foregroundStyle(.tertiary)
@@ -2557,6 +2577,9 @@ struct RootView: View {
                 model: workspaces,
                 terminals: terminals,
                 chat: chat,
+                ssh: ssh,
+                sshSessions: sshSessions,
+                onManageServers: { openSSH(.hosts(folder: nil)) },
                 onOpenSection: { section, folderID in
                     openSection(section, in: folderID) {
                         if section == .chat { showingChatOverview = true }
@@ -3188,7 +3211,7 @@ struct RootView: View {
         let remote = folder.isRemote ? workspaces.summary(for: folder.id) : nil
         let value: Int
         switch section {
-        case .sessions: value = terminals.sessions(in: folder.id).filter(\.alive).count
+        case .sessions: value = terminals.workspaceTerminals(in: folder.id).filter(\.alive).count
         case .chat:
             if chat.folderID == folder.id || chat.workspaceID == folder.id {
                 value = chat.chats.count
@@ -3216,12 +3239,9 @@ struct RootView: View {
         return value > 0 ? value : nil
     }
 
-    /// Go to an SSH section, and remember it as where SSH was left.
-    ///
-    /// The heading itself is not a destination, so leaving for Home and coming
-    /// back has to land somewhere. It lands on the section you were on, the
-    /// same promise a workspace makes with `lastSection`.
     #if os(macOS)
+    /// Go to an SSH section, and remember it as where SSH was left.
+    /// The heading returns to this section after visiting another destination.
     private func openSSH(_ section: SSHSection) {
         navigate(to: .ssh(section)) {
             // A selection belongs to the section it was made in. Carrying it
@@ -4440,7 +4460,7 @@ private struct WorkspaceRow: View {
         .sidebarContextMenu(items: { menu })
         .sidebarHoverCard(hovering: isHovering, enabled: !renaming, suppressOpening: controlsHovered) {
             SidebarDetailCard(title: folder.name, subtitle: L10n.text("apple.rootview.project.98595978"), symbol: "folder",
-                              path: folder.path, fields: detailFields) {
+                              path: folder.path, fields: detailFields, git: folder.git) {
                 if !folder.isRemote {
                     Button(L10n.text("apple.rootview.open_in_finder.91fd498d"), .reveal, action: reveal)
                         .buttonStyle(AccentButtonStyle())
@@ -4461,19 +4481,10 @@ private struct WorkspaceRow: View {
     private var detailFields: [SidebarDetailField] {
         var fields = [
             SidebarDetailField(title: L10n.text("apple.rootview.computer.76ed42d2"), value: folder.sidebarComputer, symbol: "laptopcomputer"),
-            SidebarDetailField(title: L10n.text("common.chats"), value: summary?.chats.map { String($0) } ?? "Not loaded yet", symbol: "bubble.left.and.bubble.right"),
-            SidebarDetailField(title: L10n.text("apple.rootview.active_terminals.f3f30a21"), value: String(summary?.sessions ?? activeTerminals), symbol: "terminal"),
+            SidebarDetailField(title: L10n.text("common.chats"), value: summary?.chats.map { $0.formatted() } ?? "Not loaded yet", symbol: "bubble.left.and.bubble.right", numeric: true),
+            SidebarDetailField(title: L10n.text("apple.rootview.active_terminals.f3f30a21"), value: (summary?.sessions ?? activeTerminals).formatted(), symbol: "terminal", numeric: true),
         ]
-        if let git = folder.git, git.isRepo {
-            fields.append(.init(title: L10n.text("apple.rootview.branch.52656e81"), value: git.branch.flatMap { $0.isEmpty ? nil : $0 } ?? "Detached HEAD", symbol: "arrow.triangle.branch"))
-            fields.append(.init(title: L10n.text("apple.rootview.changed_files.5d4041aa"), value: String(git.files.count), symbol: "doc.badge.ellipsis"))
-            if !git.files.isEmpty {
-                fields.append(.init(title: L10n.text("apple.rootview.lines.3b26a542"), value: "+\(git.added) −\(git.removed)\(git.partial ? " (partial)" : "")", symbol: "plus.forwardslash.minus"))
-            }
-            if git.ahead > 0 || git.behind > 0 {
-                fields.append(.init(title: L10n.text("apple.rootview.upstream.94adc696"), value: "\(git.ahead) ahead · \(git.behind) behind", symbol: "arrow.up.arrow.down"))
-            }
-        } else {
+        if folder.git?.isRepo != true {
             fields.append(.init(title: L10n.text("apple.rootview.git.b949c922"), value: folder.exists ? "Not a repository" : "Folder missing", symbol: "questionmark.folder"))
         }
         return fields
@@ -5041,7 +5052,7 @@ private struct ActiveSessionRow: View {
         .sidebarHoverCard(hovering: isHovering, enabled: !renaming, suppressOpening: controlsHovered) {
             SidebarDetailCard(title: title, subtitle: dynamicTitle.map { L10n.text("apple.rootview.terminal_0.f851d42b", "\($0)") } ?? L10n.text("apple.rootview.terminal.e0926fda"),
                               symbol: "terminal", path: session.reportedCwd ?? session.cwd,
-                              fields: detailFields) { EmptyView() }
+                              fields: detailFields, git: folder.git) { EmptyView() }
         }
         .sheet(isPresented: $renaming) {
             SidebarRenameSheet(title: L10n.text("apple.rootview.rename_terminal.68e0c2a6"), currentName: title) { name in
@@ -5066,12 +5077,12 @@ private struct ActiveSessionRow: View {
         var fields = [
             SidebarDetailField(title: L10n.text("apple.rootview.project.98595978"), value: folder.name, symbol: "folder"),
             SidebarDetailField(title: L10n.text("apple.rootview.computer.76ed42d2"), value: folder.sidebarComputer, symbol: "laptopcomputer"),
-            SidebarDetailField(title: L10n.text("apple.rootview.status.920e413c"), value: session.state.label, symbol: "circle.dotted"),
-            SidebarDetailField(title: L10n.text("apple.rootview.command.71316697"), value: session.command, symbol: "terminal"),
+            SidebarDetailField(title: L10n.text("apple.rootview.status.920e413c"), value: session.state.label, symbol: "circle.dotted", tint: session.state == .needsAttention ? Theme.warning : session.state == .working || session.state == .starting ? Theme.stateWorking : Theme.controlGlyph),
+            SidebarDetailField(title: L10n.text("apple.rootview.command.71316697"), value: session.command, symbol: "terminal", monospaced: true),
         ]
         if let meter = session.meter {
-            fields.append(.init(title: L10n.text("apple.rootview.tokens.a039dfb9"), value: meter.tokens.formatted(), symbol: "number"))
-            fields.append(.init(title: L10n.text("apple.rootview.context.a6e600a1"), value: contextText, symbol: "gauge.with.dots.needle.50percent"))
+            fields.append(.init(title: L10n.text("apple.rootview.tokens.a039dfb9"), value: meter.tokens.formatted(), symbol: "number", numeric: true))
+            fields.append(.init(title: L10n.text("apple.rootview.context.a6e600a1"), value: contextText, symbol: "gauge.with.dots.needle.50percent", numeric: true))
             if let model = meter.model { fields.append(.init(title: L10n.text("apple.rootview.model.5e2c614c"), value: model, symbol: "sparkles")) }
             if let cost = meter.costMicros {
                 fields.append(.init(title: L10n.text("apple.rootview.list_price.5d5835fd"), value: Money(micros: cost, estimated: meter.estimated,

@@ -18,6 +18,9 @@ struct TerminalPane: View {
     @Bindable var terminals: TerminalsModel
     @Bindable var workspaces: WorkspacesModel
     @Bindable var chat: ChatModel
+    @Bindable var ssh: SSHLibraryModel
+    @Bindable var sshSessions: SSHSessionsModel
+    var onManageServers: () -> Void
     /// Routes launcher destinations that live outside this terminal surface.
     var onOpenSection: (WorkspaceSection) -> Void
     /// False while the workspace surface is kept mounted but another
@@ -25,14 +28,15 @@ struct TerminalPane: View {
     /// hierarchy so paint is not lost; focus and keystroke-speed polling only
     /// apply when this is true.
     var isSurfaceActive: Bool = true
-    @State private var closingSession: TerminalSession?
+    @State private var closingSession: WorkspaceTerminal?
+    @State private var connectingServer: SSHHost?
     @State private var browserWorkspaces: Set<String> = []
     @State private var browserURLs: [String: String] = [:]
 
     private var showsBrowser: Bool { browserWorkspaces.contains(folder.id) }
 
-    private var sessions: [TerminalSession] {
-        terminals.sessions(in: folder.id)
+    private var sessions: [WorkspaceTerminal] {
+        terminals.workspaceTerminals(in: folder.id)
     }
 
     /// What this pane is showing. One value, so no two surfaces can both
@@ -112,8 +116,8 @@ struct TerminalPane: View {
 
     /// The session to display: the globally selected one when it belongs to
     /// this folder, otherwise the folder's first.
-    private var active: TerminalSession? {
-        terminals.active(in: folder.id)
+    private var active: WorkspaceTerminal? {
+        terminals.activeTerminal(in: folder.id)
     }
 
     /// Sessions the user can actually see. A split names two. Nothing while a
@@ -121,16 +125,7 @@ struct TerminalPane: View {
     /// destination is in front of this whole surface.
     private var focusedSessionIDs: Set<String> {
         guard isSurfaceActive, showsTerminal else { return [] }
-        var ids = Set<String>()
-        if let active { ids.insert(active.id) }
-        if terminals.layout(for: folder.id).isSplit,
-           let other = terminals.trailingSession(in: folder.id)
-            ?? terminals.leadingSession(in: folder.id),
-           other.id != active?.id
-        {
-            ids.insert(other.id)
-        }
-        return ids
+        return Set(visibleSessions.compactMap { $0.local?.id })
     }
 
     private var splitLayout: TerminalSplitLayout {
@@ -177,6 +172,16 @@ struct TerminalPane: View {
             terminals.focus(focusedSessionIDs)
         }
         .onDisappear { terminals.focus(nil) }
+        .onChange(of: sessions.map(\.id)) { terminals.reconcilePane(in: folder.id) }
+        .sheet(item: $connectingServer) { host in
+            SSHConnectForm(host: host, model: ssh) { session in
+                sshSessions.adopt(session, startup: session.hostID.map { ssh.startupSnippets(for: $0) } ?? [])
+                if let adopted = sshSessions.sessions.first(where: { $0.id == session.id }) {
+                    terminals.attach(adopted, in: folder.id)
+                    workspaces.showTerminal(in: folder.id)
+                }
+            }
+        }
         // Asking the login shell for the real PATH (once per launch, off the
         // main actor), and a remote folder's owner what it can launch. Both
         // fill in when they answer.
@@ -227,12 +232,14 @@ struct TerminalPane: View {
             Button(L10n.text("apple.terminalpane.stop_and_close.52b40c33"), role: .destructive) {
                 if let session = closingSession {
                     closingSession = nil
-                    Task { await terminals.close(session) }
+                    Task { await terminals.close(session, in: folder.id) }
                 }
             }
             Button(L10n.text("common.cancel"), role: .cancel) { closingSession = nil }
         } message: {
-            Text(L10n.text("apple.terminalpane.the_process_will_be_killed_a_stopped_sessi.bf3e9249"))
+            Text(closingSession?.ssh == nil
+                 ? L10n.text("apple.terminalpane.the_process_will_be_killed_a_stopped_sessi.bf3e9249")
+                 : L10n.text("apple.sshterminalpane.whatever_is_running_in_it_stops_nothing_el.f25aee6b"))
         }
     }
 
@@ -270,20 +277,21 @@ struct TerminalPane: View {
                     // down. Positions stay put when focus moves.
                     leading: showsTerminal
                         ? (splitLayout.isSplit
-                            ? terminals.leadingSession(in: folder.id)
+                            ? terminals.leadingTerminal(in: folder.id)
                             : active)
                         : nil,
                     trailing: showsTerminal && splitLayout.isSplit
-                        ? terminals.trailingSession(in: folder.id)
+                        ? terminals.trailingTerminal(in: folder.id)
                         : nil,
                     focused: showsTerminal ? active : nil,
                     splitAxis: showsTerminal ? splitLayout.axis : nil,
                     fraction: CGFloat(terminals.fraction(for: folder.id)),
                     claimsFocus: isSurfaceActive && showsTerminal,
                     isSurfaceVisible: isSurfaceActive && showsTerminal,
-                    onActivate: { terminals.select($0) }
+                    onActivate: { terminals.select($0, in: folder.id) }
                 )
                 .frame(width: size.width, height: size.height)
+                .modifier(PaletteSnippetSheet(session: active?.ssh))
 
                 if showsTerminal, splitLayout.isSplit {
                     TerminalSplitHandle(
@@ -291,7 +299,7 @@ struct TerminalPane: View {
                         fraction: splitFraction
                     )
                     .frame(width: size.width, height: size.height)
-                    if terminals.trailingSession(in: folder.id) == nil {
+                    if terminals.trailingTerminal(in: folder.id) == nil {
                         trailingPlaceholder(in: size)
                     }
                 }
@@ -300,7 +308,7 @@ struct TerminalPane: View {
                 // process is up but has not painted yet. Agent CLIs spend
                 // several seconds in that gap; an empty live terminal there
                 // is what read as a 10s hang.
-                if showsTerminal, !splitLayout.isSplit, let active, active.showsStartingState {
+                if showsTerminal, !splitLayout.isSplit, let active = active?.local, active.showsStartingState {
                     SessionStartingView(command: active.command)
                         .frame(width: size.width, height: size.height)
                 }
@@ -316,7 +324,7 @@ struct TerminalPane: View {
                     .frame(width: size.width, height: size.height)
                     .overlay(alignment: .bottomTrailing) {
                         if showsTerminal {
-                            TerminalNotices(sessions: visibleSessions)
+                            TerminalNotices(sessions: visibleSessions.compactMap(\.local))
                                 .padding(Theme.Space.s)
                         }
                     }
@@ -359,6 +367,10 @@ struct TerminalPane: View {
                     terminals: terminals,
                     workspaces: workspaces,
                     chat: chat,
+                    ssh: ssh,
+                    sshSessions: sshSessions,
+                    onOpenServer: openServer,
+                    onManageServers: onManageServers,
                     onOpenSection: onOpenSection,
                     grid: spawnGrid,
                     profiles: launcherCatalog,
@@ -403,6 +415,10 @@ struct TerminalPane: View {
                 terminals: terminals,
                 workspaces: workspaces,
                 chat: chat,
+                ssh: ssh,
+                sshSessions: sshSessions,
+                onOpenServer: openServer,
+                onManageServers: onManageServers,
                 onOpenSection: onOpenSection,
                 grid: spawnGrid,
                 profiles: launcherCatalog,
@@ -499,25 +515,25 @@ struct TerminalPane: View {
                                 isSelected: showsTerminal && session.id == active?.id,
                                 isOtherHalf: showsTerminal
                                     && splitLayout.isSplit
-                                    && (session.id == terminals.leadingSession(in: folder.id)?.id
-                                        || session.id == terminals.trailingSession(in: folder.id)?.id)
+                                    && (session.id == terminals.leadingTerminal(in: folder.id)?.id
+                                        || session.id == terminals.trailingTerminal(in: folder.id)?.id)
                                     && session.id != active?.id
                             ) {
                                 workspaces.showTerminal(in: folder.id)
                                 if NSEvent.modifierFlags.contains(.option) {
-                                    terminals.sendToOtherHalf(session)
+                                    terminals.sendToOtherHalf(session, in: folder.id)
                                 } else {
-                                    terminals.select(session)
+                                    terminals.select(session, in: folder.id)
                                 }
                             } onClose: {
                                 if session.alive {
                                     closingSession = session
                                 } else {
-                                    Task { await terminals.close(session) }
+                                    Task { await terminals.close(session, in: folder.id) }
                                 }
                             } onSplit: {
                                 workspaces.showTerminal(in: folder.id)
-                                terminals.sendToOtherHalf(session)
+                                terminals.sendToOtherHalf(session, in: folder.id)
                             }
                             .id("session:" + session.id)
                         }
@@ -565,6 +581,16 @@ struct TerminalPane: View {
                         }
                     }
                 }
+                if !ssh.hosts.isEmpty {
+                    ThemeRule()
+                    Menu(L10n.text("apple.rootview.servers.68d7beb6")) {
+                        ForEach(ssh.launcherHosts) { host in
+                            Button { openServer(host) } label: {
+                                Label(host.label, systemImage: "server.rack")
+                            }
+                        }
+                    }
+                }
                 if peer != nil {
                     ThemeRule()
                     Button {
@@ -581,7 +607,7 @@ struct TerminalPane: View {
             .fixedSize()
             .help(L10n.text("apple.terminalpane.launch_a_shell_or_an_agent_cli_in_this_fol.c2d4b278"))
 
-            if let error = active?.transportError {
+            if let error = active?.local?.transportError ?? active?.ssh?.error {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(Theme.font(11))
                     .foregroundStyle(Theme.warning)
@@ -604,6 +630,11 @@ struct TerminalPane: View {
                     }
                     Button(L10n.text("apple.terminalpane.stacked.c2fed746"), .compare) {
                         terminals.setLayout(.stacked, for: folder.id)
+                    }
+                    if splitLayout.isSplit {
+                        Divider()
+                        TerminalSwapButton(layout: splitLayout) { terminals.swapPanes(in: folder.id) }
+                            .disabled(terminals.trailingTerminal(in: folder.id) == nil)
                     }
                 } label: {
                     ActionIcon.compare.label(L10n.text("apple.terminalpane.split.32afaa78"))
@@ -639,15 +670,15 @@ struct TerminalPane: View {
 
     /// The sessions on screen right now, in reading order. One unless the
     /// pane is split.
-    private var visibleSessions: [TerminalSession] {
+    private var visibleSessions: [WorkspaceTerminal] {
         if splitLayout.isSplit {
             // Deduplicated: a leading pin whose session has gone falls back to
             // the workspace's active session, which can be the trailing one,
             // and the same id twice is not a list SwiftUI can identify.
             var seen = Set<String>()
             return [
-                terminals.leadingSession(in: folder.id),
-                terminals.trailingSession(in: folder.id),
+                terminals.leadingTerminal(in: folder.id),
+                terminals.trailingTerminal(in: folder.id),
             ].compactMap { $0 }.filter { seen.insert($0.id).inserted }
         }
         return [active].compactMap { $0 }
@@ -656,13 +687,13 @@ struct TerminalPane: View {
     @ViewBuilder
     private var hostLines: some View {
         if splitLayout.isSplit {
-            if let lead = terminals.leadingSession(in: folder.id), lead.showsHostLine {
+            if let lead = terminals.leadingTerminal(in: folder.id)?.local, lead.showsHostLine {
                 TerminalHost(session: lead)
             }
-            if let trail = terminals.trailingSession(in: folder.id), trail.showsHostLine {
+            if let trail = terminals.trailingTerminal(in: folder.id)?.local, trail.showsHostLine {
                 TerminalHost(session: trail)
             }
-        } else if let active, active.showsHostLine {
+        } else if let active = active?.local, active.showsHostLine {
             TerminalHost(session: active)
         }
     }
@@ -750,6 +781,16 @@ struct TerminalPane: View {
         case .sessions, .launcher:
             // Not tabs. `WorkspaceSurface.isTab` keeps them out of the strip.
             EmptyView()
+        }
+    }
+
+    private func openServer(_ host: SSHHost) {
+        let live = sshSessions.sessions(for: host.id).filter(\.alive)
+        if let session = live.first(where: { $0.id == sshSessions.selectedID }) ?? live.last {
+            terminals.attach(session, in: folder.id)
+            workspaces.showTerminal(in: folder.id)
+        } else {
+            connectingServer = host
         }
     }
 
@@ -877,7 +918,7 @@ private struct LaunchChip: View {
 
 /// One session's tab: status dot, label, and a close button on the active one.
 private struct SessionChip: View {
-    let session: TerminalSession
+    let session: WorkspaceTerminal
     let isSelected: Bool
     var isOtherHalf: Bool = false
     let onSelect: () -> Void
@@ -890,10 +931,10 @@ private struct SessionChip: View {
         HStack(spacing: 2) {
             Button(action: onSelect) {
                 HStack(spacing: Theme.Space.xs) {
-                    if let harnessID = session.harnessID {
+                    if let harnessID = session.local?.harnessID {
                         HarnessMark(id: harnessID, size: 16)
                     } else {
-                        Image(systemName: "terminal")
+                        Image(systemName: session.ssh == nil ? "terminal" : "server.rack")
                             .font(Theme.font(11))
                             .foregroundStyle(Theme.accent)
                             .frame(width: 16, height: 16)
@@ -907,7 +948,7 @@ private struct SessionChip: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .help(session.cwd)
+            .help(session.local?.cwd ?? session.label)
 
             if isSelected || isHovering {
                 TabCloseButton(help: L10n.text("apple.terminalpane.close_this_session.fa2af1b6"), action: onClose)
@@ -946,9 +987,7 @@ private struct SessionChip: View {
     }
 
     private var label: String {
-        if let name = session.customName { return name }
-        if let title = session.title, !title.isEmpty { return title }
-        return session.command
+        session.label
     }
 
 }
@@ -1206,6 +1245,10 @@ private struct LaunchSurface: View {
     let terminals: TerminalsModel
     let workspaces: WorkspacesModel
     let chat: ChatModel
+    let ssh: SSHLibraryModel
+    let sshSessions: SSHSessionsModel
+    let onOpenServer: (SSHHost) -> Void
+    let onManageServers: () -> Void
     let onOpenSection: (WorkspaceSection) -> Void
     /// The grid to spawn at, measured by the pane. Passed in rather than
     /// guessed, so the first session opens at the size it will keep.
@@ -1288,7 +1331,7 @@ private struct LaunchSurface: View {
     var body: some View {
         ScrollView {
             VStack(spacing: Theme.Space.m) {
-                if !terminals.sessions(in: folder.id).isEmpty {
+                if !terminals.workspaceTerminals(in: folder.id).isEmpty {
                     runningSessionsBanner
                 }
 
@@ -1332,6 +1375,9 @@ private struct LaunchSurface: View {
                     }
                 }
                 .frame(maxWidth: 620)
+
+                ServerLauncher(library: ssh, sessions: sshSessions, onOpen: onOpenServer, onManage: onManageServers)
+                    .frame(maxWidth: 620).padding(.top, Theme.Space.s)
 
                 launcherHeading(L10n.text("apple.terminalpane.run_an_agent.b7046310"))
 

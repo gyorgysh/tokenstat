@@ -18,6 +18,9 @@ struct WorkspacesView: View {
     #if os(macOS)
     @Bindable var terminals: TerminalsModel
     @Bindable var chat: ChatModel
+    @Bindable var ssh: SSHLibraryModel
+    @Bindable var sshSessions: SSHSessionsModel
+    var onManageServers: () -> Void
     /// Workspace destinations live in RootView, outside the terminal surface.
     /// The launcher names what should open and the root performs the route.
     var onOpenSection: (WorkspaceSection, String) -> Void
@@ -68,6 +71,9 @@ struct WorkspacesView: View {
                     terminals: terminals,
                     workspaces: model,
                     chat: chat,
+                    ssh: ssh,
+                    sshSessions: sshSessions,
+                    onManageServers: onManageServers,
                     onOpenSection: { onOpenSection($0, folder.id) },
                     isSurfaceActive: isActive
                 )

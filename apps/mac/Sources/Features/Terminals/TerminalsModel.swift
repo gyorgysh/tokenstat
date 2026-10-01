@@ -24,6 +24,9 @@ final class TerminalsModel {
     /// Client id of the selected session (stable; never the host's `pty-N`).
     var selectedID: String?
     var errorMessage: String?
+    /// The SSH model owns its sessions. Projects keep only tab associations.
+    var sshSessions: SSHSessionsModel?
+    private var workspaceSSHIDs = UserDefaults.standard.dictionary(forKey: "workspace.sshSessionTabs") as? [String: [String]] ?? [:]
 
     /// Whether the app is painting dark right now, so a spawning agent can be
     /// told which background it is drawing on.
@@ -65,6 +68,59 @@ final class TerminalsModel {
         }
     }
 
+    func workspaceTerminals(in workspaceID: String) -> [WorkspaceTerminal] {
+        let local = sessions(in: workspaceID).map(WorkspaceTerminal.init)
+        let remote = (workspaceSSHIDs[workspaceID] ?? []).compactMap { id in
+            sshSessions?.sessions.first { $0.id == id }.map(WorkspaceTerminal.init)
+        }
+        return local + remote
+    }
+
+    func attach(_ session: SSHLiveTerminal, in workspaceID: String) {
+        if !(workspaceSSHIDs[workspaceID] ?? []).contains(session.id) {
+            workspaceSSHIDs[workspaceID, default: []].append(session.id)
+            UserDefaults.standard.set(workspaceSSHIDs, forKey: "workspace.sshSessionTabs")
+        }
+        select(WorkspaceTerminal(session), in: workspaceID)
+    }
+
+    private func paneSelection(in workspaceID: String) -> TerminalPaneSelection {
+        TerminalPaneSelection(selectedID: selectedByWorkspace[workspaceID],
+                              leadingID: splitLeadingID[workspaceID], trailingID: splitTrailingID[workspaceID])
+    }
+
+    private func apply(_ selection: TerminalPaneSelection, in workspaceID: String) {
+        selectedByWorkspace[workspaceID] = selection.selectedID
+        splitLeadingID[workspaceID] = selection.leadingID
+        splitTrailingID[workspaceID] = selection.trailingID
+    }
+
+    func activeTerminal(in workspaceID: String) -> WorkspaceTerminal? {
+        let available = workspaceTerminals(in: workspaceID)
+        let id = paneSelection(in: workspaceID).active(in: available.map(\.id))
+        return available.first { $0.id == id }
+    }
+
+    func leadingTerminal(in workspaceID: String) -> WorkspaceTerminal? {
+        let available = workspaceTerminals(in: workspaceID)
+        let id = paneSelection(in: workspaceID).panes(in: available.map(\.id), split: layout(for: workspaceID).isSplit).leading
+        return available.first { $0.id == id }
+    }
+
+    func trailingTerminal(in workspaceID: String) -> WorkspaceTerminal? {
+        let available = workspaceTerminals(in: workspaceID)
+        let id = paneSelection(in: workspaceID).panes(in: available.map(\.id), split: layout(for: workspaceID).isSplit).trailing
+        return available.first { $0.id == id }
+    }
+
+    func reconcilePane(in workspaceID: String) {
+        var selection = paneSelection(in: workspaceID)
+        if selection.reconcile(available: workspaceTerminals(in: workspaceID).map(\.id)) {
+            setLayout(.single, for: workspaceID)
+        }
+        apply(selection, in: workspaceID)
+    }
+
     /// Layout of the terminal column in this folder.
     private(set) var splitLayout: [String: TerminalSplitLayout] = [:]
     /// Divider position, 0.2...0.8, leading share of the column.
@@ -86,19 +142,16 @@ final class TerminalsModel {
     func setLayout(_ layout: TerminalSplitLayout, for workspaceID: String) {
         splitLayout[workspaceID] = layout
         WorkspacePreference.setSplitLayout(layout, for: workspaceID)
-        if !layout.isSplit {
-            splitLeadingID[workspaceID] = nil
-            splitTrailingID[workspaceID] = nil
-            return
-        }
-        if splitLeadingID[workspaceID] == nil {
-            splitLeadingID[workspaceID] = active(in: workspaceID)?.id
-        }
-        if splitTrailingID[workspaceID] == nil {
-            let lead = splitLeadingID[workspaceID]
-            splitTrailingID[workspaceID] = sessions(in: workspaceID)
-                .first { $0.id != lead }?.id
-        }
+        var selection = paneSelection(in: workspaceID)
+        selection.setSplit(layout.isSplit, available: workspaceTerminals(in: workspaceID).map(\.id))
+        apply(selection, in: workspaceID)
+    }
+
+    func swapPanes(in workspaceID: String) {
+        guard layout(for: workspaceID).isSplit else { return }
+        var selection = paneSelection(in: workspaceID)
+        selection.swapPanes(available: workspaceTerminals(in: workspaceID).map(\.id))
+        apply(selection, in: workspaceID)
     }
 
     func fraction(for workspaceID: String) -> Double {
@@ -115,68 +168,40 @@ final class TerminalsModel {
     }
 
     func leadingSession(in workspaceID: String) -> TerminalSession? {
-        guard layout(for: workspaceID).isSplit,
-              let id = splitLeadingID[workspaceID]
-        else { return active(in: workspaceID) }
-        return sessions(in: workspaceID).first { $0.id == id } ?? active(in: workspaceID)
+        leadingTerminal(in: workspaceID)?.local
     }
 
     func trailingSession(in workspaceID: String) -> TerminalSession? {
-        guard layout(for: workspaceID).isSplit,
-              let id = splitTrailingID[workspaceID]
-        else { return nil }
-        return sessions(in: workspaceID).first { $0.id == id }
+        trailingTerminal(in: workspaceID)?.local
     }
 
     /// Put `session` in the half that is not focused, opening a side split
     /// when the column is still single.
     func sendToOtherHalf(_ session: TerminalSession) {
-        let workspaceID = session.workspaceID
+        sendToOtherHalf(WorkspaceTerminal(session), in: session.workspaceID)
+    }
+
+    func sendToOtherHalf(_ session: WorkspaceTerminal, in workspaceID: String) {
         guard !workspaceID.isEmpty else { return }
         if !layout(for: workspaceID).isSplit {
             setLayout(.side, for: workspaceID)
         }
-        let focused = active(in: workspaceID)
-        if session.id == focused?.id {
-            return
-        }
-        if session.id == splitLeadingID[workspaceID] || session.id == splitTrailingID[workspaceID] {
-            select(session)
-            return
-        }
-        if focused?.id == splitLeadingID[workspaceID] {
-            splitTrailingID[workspaceID] = session.id
-        } else {
-            splitLeadingID[workspaceID] = session.id
-        }
+        var selection = paneSelection(in: workspaceID)
+        selection.sendToOtherHalf(session.id, available: workspaceTerminals(in: workspaceID).map(\.id))
+        apply(selection, in: workspaceID)
+        selectedID = selection.selectedID
     }
 
     /// The last session in a half closed: collapse back to one pane.
     func collapseIfNeeded(afterClosing session: TerminalSession) {
-        let workspaceID = session.workspaceID
-        guard layout(for: workspaceID).isSplit else { return }
-        let lead = splitLeadingID[workspaceID]
-        let trail = splitTrailingID[workspaceID]
-        if session.id == lead || session.id == trail {
-            if session.id == lead, let trail {
-                select(sessions(in: workspaceID).first { $0.id == trail } ?? session)
-            } else if session.id == trail, let lead {
-                select(sessions(in: workspaceID).first { $0.id == lead } ?? session)
-            }
-            setLayout(.single, for: workspaceID)
-        }
+        reconcilePane(in: session.workspaceID)
     }
 
     /// The last session selected in a workspace, falling back to its first
     /// session. Selection belongs to the workspace, not the current pane, so
     /// switching projects does not lose the place the user was working in.
     func active(in workspaceID: String) -> TerminalSession? {
-        let available = sessions(in: workspaceID)
-        if let id = selectedByWorkspace[workspaceID],
-           let session = available.first(where: { $0.id == id }) {
-            return session
-        }
-        return available.first
+        activeTerminal(in: workspaceID)?.local
     }
 
     /// Say which sessions are on screen.
@@ -214,37 +239,16 @@ final class TerminalsModel {
 
     func select(_ session: TerminalSession) {
         let workspaceID = session.workspaceID
-        if !workspaceID.isEmpty, layout(for: workspaceID).isSplit {
-            // The halves as they are actually drawn, not as they are pinned.
-            // A pin whose session has exited is an empty pane: `load()` drops
-            // a session that ended on its own without clearing the pin, and a
-            // nil leading pin still draws the workspace's active session.
-            let showingLead = leadingSession(in: workspaceID)?.id
-            let showingTrail = trailingSession(in: workspaceID)?.id
-            if session.id != showingLead, session.id != showingTrail {
-                if showingTrail == nil, let showingLead {
-                    // The split opened a second pane and has been showing
-                    // "Another session" ever since. This is that session.
-                    // Filling the empty half is what the placeholder asked
-                    // for, and replacing the half already in front of the
-                    // user meant the split had to be redone by hand.
-                    splitLeadingID[workspaceID] = showingLead
-                    splitTrailingID[workspaceID] = session.id
-                } else {
-                    // Both halves are taken: the tab replaces the focused one.
-                    let previous = selectedByWorkspace[workspaceID] ?? selectedID
-                    if previous == showingTrail {
-                        splitTrailingID[workspaceID] = session.id
-                    } else {
-                        splitLeadingID[workspaceID] = session.id
-                    }
-                }
-            }
-        }
+        guard !workspaceID.isEmpty else { selectedID = session.id; return }
+        select(WorkspaceTerminal(session), in: workspaceID)
+    }
+
+    func select(_ session: WorkspaceTerminal, in workspaceID: String) {
+        var selection = paneSelection(in: workspaceID)
+        selection.select(session.id, available: workspaceTerminals(in: workspaceID).map(\.id), split: layout(for: workspaceID).isSplit)
+        apply(selection, in: workspaceID)
         selectedID = session.id
-        if !workspaceID.isEmpty {
-            selectedByWorkspace[workspaceID] = session.id
-        }
+        if let remote = session.ssh { sshSessions?.select(remote) }
     }
 
     /// Reconcile against the host. Spawned and closed elsewhere show up and
@@ -266,6 +270,7 @@ final class TerminalsModel {
             for session in gone {
                 session.stop()
                 sessions.removeAll { $0.id == session.id }
+                reconcilePane(in: session.workspaceID)
             }
 
             // Host ids already represented by a local session (pending ones
@@ -297,7 +302,7 @@ final class TerminalsModel {
                 select(first)
             }
             // Selection can point at a session that was removed as gone.
-            if let selectedID, !sessions.contains(where: { $0.id == selectedID }) {
+            if let selectedID, !selectedID.hasPrefix("ssh:"), !sessions.contains(where: { $0.id == selectedID }) {
                 self.selectedID = sessions.first(where: { !$0.isInspectorShell })?.id
             }
             errorMessage = nil
@@ -520,13 +525,29 @@ final class TerminalsModel {
         collapseIfNeeded(afterClosing: session)
         if selectedID == session.id {
             if !session.workspaceID.isEmpty {
-                selectedByWorkspace[session.workspaceID] = sessions(in: session.workspaceID).first?.id
+                selectedID = activeTerminal(in: session.workspaceID)?.id
+            } else {
+                selectedID = sessions.first(where: { !$0.isInspectorShell })?.id
             }
-            selectedID = sessions.first(where: { !$0.isInspectorShell })?.id
         }
         if session.isInspectorShell {
             WorkspacePreference.setInspectorShellHostID(nil, for: session.workspaceID)
         }
+    }
+
+    func close(_ session: WorkspaceTerminal, in workspaceID: String) async {
+        if let local = session.local {
+            await close(local)
+            return
+        }
+        guard let remote = session.ssh else { return }
+        for workspace in Array(workspaceSSHIDs.keys) {
+            workspaceSSHIDs[workspace]?.removeAll { $0 == remote.id }
+            reconcilePane(in: workspace)
+        }
+        UserDefaults.standard.set(workspaceSSHIDs, forKey: "workspace.sshSessionTabs")
+        if selectedID == session.id { selectedID = activeTerminal(in: workspaceID)?.id }
+        await sshSessions?.close(remote)
     }
 
     /// Re-apply the inspector-shell mark after a host reconcile. The flag is

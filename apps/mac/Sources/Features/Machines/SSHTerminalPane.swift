@@ -172,6 +172,11 @@ struct SSHTerminalPane: View {
                     Button(L10n.text("apple.sshterminalpane.single.8888a029"), .layout) { sessions.setLayout(.single, for: host.id) }
                     Button(L10n.text("apple.sshterminalpane.side_by_side.a3d7b387"), .compare) { sessions.setLayout(.side, for: host.id) }
                     Button(L10n.text("apple.sshterminalpane.stacked.c2fed746"), .compare) { sessions.setLayout(.stacked, for: host.id) }
+                    if layout.isSplit {
+                        Divider()
+                        TerminalSwapButton(layout: layout) { sessions.swapPanes(in: host.id) }
+                            .disabled(trailing == nil || leading?.id == trailing?.id)
+                    }
                 } label: {
                     ActionIcon.compare.label(L10n.text("apple.sshterminalpane.split.32afaa78"))
                         .font(Theme.font(12))
@@ -227,15 +232,11 @@ struct SSHTerminalPane: View {
 /// The fill-in sheet for a saved command the palette chose, on whichever
 /// session is in front. Written as a modifier because the session in front
 /// can be nil and a `sheet(item:)` needs something to bind to.
-private struct PaletteSnippetSheet: ViewModifier {
+struct PaletteSnippetSheet: ViewModifier {
     let session: SSHLiveTerminal?
 
     func body(content: Content) -> some View {
-        if let session {
-            content.paletteSnippetSheet(session)
-        } else {
-            content
-        }
+        content.paletteSnippetSheet(session)
     }
 }
 

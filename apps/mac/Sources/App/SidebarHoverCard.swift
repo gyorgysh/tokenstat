@@ -8,6 +8,9 @@ struct SidebarDetailField: Identifiable {
     let title: String
     let value: String
     let symbol: String
+    var tint: Color = .primary
+    var numeric = false
+    var monospaced = false
     var id: String { title }
 }
 
@@ -19,6 +22,7 @@ struct SidebarDetailCard<Footer: View>: View {
     let symbol: String
     let path: String
     let fields: [SidebarDetailField]
+    var git: GitStatus? = nil
     @ViewBuilder var footer: Footer
 
     var body: some View {
@@ -30,35 +34,93 @@ struct SidebarDetailCard<Footer: View>: View {
                     .frame(width: 30, height: 30)
                     .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 8))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(Theme.callout.weight(.semibold))
+                    Text(title).font(Theme.fit(14, weight: .semibold))
                         .lineLimit(3).fixedSize(horizontal: false, vertical: true)
                     Text(subtitle).font(Theme.caption).foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
             }
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
+            VStack(alignment: .leading, spacing: 9) {
                 ForEach(fields) { field in
                     HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
                         Image(systemName: field.symbol)
                             .font(Theme.fit(11)).foregroundStyle(.secondary)
                             .frame(width: 16)
                             .accessibilityHidden(true)
-                        Text(field.title).font(Theme.caption).foregroundStyle(.secondary)
+                        Text(field.title).font(Theme.fit(12)).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: true, vertical: false)
                         Spacer(minLength: Theme.Space.s)
-                        Text(field.value).font(Theme.caption.weight(.medium))
+                        Text(field.value)
+                            .font(field.monospaced ? Theme.monoText(12) : field.numeric ? Theme.numeric(12, weight: .medium) : Theme.fit(12, weight: .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(field.tint)
                             .multilineTextAlignment(.trailing)
                             .lineLimit(3).fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
+            if let git, git.isRepo {
+                SidebarGitDetail(git: git)
+            }
+            Divider().overlay(Theme.border)
             Text(path).font(Theme.caption).foregroundStyle(.tertiary)
                 .lineLimit(3).truncationMode(.middle)
                 .textSelection(.enabled)
             footer
         }
         .padding(Theme.Space.m)
-        .frame(width: DisplayFit.dp(310), alignment: .leading)
+        .frame(width: DisplayFit.dp(340), alignment: .leading)
         .background(Theme.panel)
+    }
+}
+
+private struct SidebarGitDetail: View {
+    let git: GitStatus
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch").foregroundStyle(Theme.accent)
+                Text(git.branch.flatMap { $0.isEmpty ? nil : $0 } ?? "Detached HEAD")
+                    .font(Theme.monoText(12, weight: .medium))
+                    .lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 0)
+            }
+            .accessibilityLabel(L10n.text("apple.rootview.branch.52656e81") + ": " + (git.branch ?? "Detached HEAD"))
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+                Text(L10n.text("apple.rootview.changed_files.5d4041aa"))
+                    .font(Theme.fit(12)).foregroundStyle(.secondary)
+                Text(git.files.count.formatted()).font(Theme.numeric(12))
+                Spacer(minLength: Theme.Space.s)
+                if !git.files.isEmpty {
+                    HStack(spacing: 8) {
+                        Text("+\(git.added.formatted())").foregroundStyle(Theme.diffAdded)
+                        Text("−\(git.removed.formatted())").foregroundStyle(Theme.diffRemoved)
+                    }
+                    .font(Theme.numeric(12, weight: .semibold))
+                    .accessibilityLabel(L10n.text("apple.rootview.lines.3b26a542") + ": +\(git.added) −\(git.removed)")
+                }
+            }
+            if git.partial {
+                Text(L10n.text("apple.sidebarhovercard.partial_line_counts"))
+                    .font(Theme.caption).foregroundStyle(.secondary)
+            }
+            if git.ahead > 0 || git.behind > 0 {
+                HStack(spacing: Theme.Space.s) {
+                    Text(L10n.text("apple.rootview.upstream.94adc696"))
+                        .font(Theme.fit(12)).foregroundStyle(.secondary)
+                    Spacer(minLength: Theme.Space.s)
+                    Label("\(git.ahead.formatted())", systemImage: "arrow.up")
+                        .foregroundStyle(Theme.accent)
+                    Label("\(git.behind.formatted())", systemImage: "arrow.down")
+                        .foregroundStyle(git.behind > 0 ? Theme.warning : Theme.controlGlyph)
+                }
+                .font(Theme.numeric(12))
+            }
+        }
+        .padding(Theme.Space.s)
+        .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.accent.opacity(0.18)))
     }
 }
 
@@ -75,7 +137,8 @@ struct SidebarChatDetailCard: View {
             subtitle: L10n.text("apple.sidebarhovercard.chat_0.34012b11", "\(harnessName(conversation.backend))"),
             symbol: "bubble.left.and.bubble.right",
             path: folder.path,
-            fields: fields
+            fields: fields,
+            git: folder.git
         ) { EmptyView() }
         .task(id: "\(conversation.id)-\(conversation.updatedAtMs)") {
             finishedLoading = false
@@ -92,21 +155,21 @@ struct SidebarChatDetailCard: View {
         var fields = [
             SidebarDetailField(title: L10n.text("apple.sidebarhovercard.project.98595978"), value: folder.name, symbol: "folder"),
             SidebarDetailField(title: L10n.text("apple.sidebarhovercard.computer.76ed42d2"), value: folder.sidebarComputer, symbol: "laptopcomputer"),
-            SidebarDetailField(title: L10n.text("apple.sidebarhovercard.status.920e413c"), value: conversation.running ? "Working" : "Ready", symbol: "circle.dotted"),
+            SidebarDetailField(title: L10n.text("apple.sidebarhovercard.status.920e413c"), value: conversation.running ? L10n.text("common.working") : L10n.text("apple.sidebarhovercard.ready"), symbol: "circle.dotted", tint: conversation.running ? Theme.stateWorking : Theme.controlGlyph),
         ]
         if let model = conversation.model, !model.isEmpty {
             fields.append(.init(title: L10n.text("apple.sidebarhovercard.model.5e2c614c"), value: model, symbol: "sparkles"))
         }
         if let usage, !usage.isEmpty {
             let total = Decimal(usage.input) + Decimal(usage.output) + usage.cache
-            fields.append(.init(title: L10n.text("apple.sidebarhovercard.tokens.a039dfb9"), value: total.formatted(), symbol: "number"))
-            fields.append(.init(title: L10n.text("apple.sidebarhovercard.fresh_input.a5156480"), value: usage.input.formatted(), symbol: "arrow.down"))
-            fields.append(.init(title: L10n.text("apple.sidebarhovercard.tokens_out.da9a58f8"), value: usage.output.formatted(), symbol: "arrow.up"))
+            fields.append(.init(title: L10n.text("apple.sidebarhovercard.tokens.a039dfb9"), value: total.formatted(), symbol: "number", numeric: true))
+            fields.append(.init(title: L10n.text("apple.sidebarhovercard.fresh_input.a5156480"), value: usage.input.formatted(), symbol: "arrow.down", numeric: true))
+            fields.append(.init(title: L10n.text("apple.sidebarhovercard.tokens_out.da9a58f8"), value: usage.output.formatted(), symbol: "arrow.up", numeric: true))
             if usage.cache > 0 {
-                fields.append(.init(title: L10n.text("apple.sidebarhovercard.cached_tokens.3efd7d16"), value: usage.cache.formatted(), symbol: "arrow.clockwise"))
+                fields.append(.init(title: L10n.text("apple.sidebarhovercard.cached_tokens.3efd7d16"), value: usage.cache.formatted(), symbol: "arrow.clockwise", numeric: true))
             }
         } else {
-            fields.append(.init(title: L10n.text("apple.sidebarhovercard.tokens.a039dfb9"), value: !finishedLoading ? "Checking…" : loadFailed ? "Couldn’t load usage" : "Not reported yet", symbol: "number"))
+            fields.append(.init(title: L10n.text("apple.sidebarhovercard.tokens.a039dfb9"), value: !finishedLoading ? L10n.text("apple.sidebarhovercard.checking") : loadFailed ? L10n.text("apple.sidebarhovercard.usage_unavailable") : L10n.text("apple.sidebarhovercard.usage_not_reported"), symbol: "number", tint: .secondary))
         }
         fields.append(.init(title: L10n.text("apple.sidebarhovercard.last_message.ee5c88bf"), value: sidebarDate(conversation.lastMessageAtMs), symbol: "clock"))
         return fields
@@ -153,6 +216,8 @@ private struct SidebarHoverPresentation<Card: View>: NSViewRepresentable {
         private var pending: Task<Void, Never>?
         private var localMonitor: Any?
         private var globalMonitor: Any?
+        private var pointerTimer: Timer?
+        private var pointerState = SidebarHoverState()
         private var hovered = false
         private var enabled = false
         private var suppressOpening = false
@@ -162,6 +227,7 @@ private struct SidebarHoverPresentation<Card: View>: NSViewRepresentable {
             self.anchor = anchor
             self.card = card
             let enabledChanged = self.enabled != enabled
+            let suppressionChanged = self.suppressOpening != suppressOpening
             self.enabled = enabled
             self.suppressOpening = suppressOpening
             if let controller = popover?.contentViewController as? NSHostingController<Card> {
@@ -172,41 +238,35 @@ private struct SidebarHoverPresentation<Card: View>: NSViewRepresentable {
                 close()
                 return
             }
-            guard hovered != hovering || enabledChanged else { return }
+            guard hovered != hovering || enabledChanged || suppressionChanged else { return }
             hovered = hovering
             pending?.cancel()
+            pending = nil
+            if popover != nil {
+                checkPointer()
+                return
+            }
+            guard hovering, !suppressOpening else { return }
             pending = Task { [weak self] in
                 do { try await Task.sleep(for: .milliseconds(450)) }
                 catch { return }
                 guard let self, !Task.isCancelled else { return }
-                if hovering { self.show() }
-                else if !self.containsPointer { self.close() }
+                self.show()
             }
         }
 
         private var containsPointer: Bool {
-            let point = NSEvent.mouseLocation
             let cardRect = popover?.contentViewController?.view.window?.frame
+            var rowRect: NSRect?
             if let anchor, let window = anchor.window {
-                let rect = window.convertToScreen(anchor.convert(anchor.bounds, to: nil))
-                if rect.insetBy(dx: -12, dy: -8).contains(point) { return true }
-                if let cardRect {
-                    // The popover arrow leaves a gap. Crossing it is still
-                    // travelling toward this card, even after the row exits.
-                    let left = min(rect.maxX, cardRect.minX)
-                    let right = max(rect.maxX, cardRect.minX)
-                    let bridge = NSRect(x: left, y: min(rect.minY, cardRect.minY),
-                                        width: right - left,
-                                        height: max(rect.maxY, cardRect.maxY) - min(rect.minY, cardRect.minY))
-                    if bridge.insetBy(dx: -12, dy: -8).contains(point) { return true }
-                }
+                rowRect = window.convertToScreen(anchor.convert(anchor.bounds, to: nil))
             }
-            return cardRect?.insetBy(dx: -12, dy: -8).contains(point) == true
+            return SidebarHoverState.contains(NSEvent.mouseLocation, row: rowRect, card: cardRect)
         }
 
         private func show() {
-            guard enabled, !suppressOpening, !SidebarMenuTracking.shared.active,
-                  popover == nil, let anchor, anchor.window != nil, let card else { return }
+            guard enabled, hovered, containsPointer, !suppressOpening, !SidebarMenuTracking.shared.active,
+                  popover == nil, let anchor, anchor.window?.isVisible == true, let card else { return }
             let popover = NSPopover()
             popover.behavior = .applicationDefined
             popover.animates = false
@@ -214,11 +274,21 @@ private struct SidebarHoverPresentation<Card: View>: NSViewRepresentable {
             popover.contentViewController = NSHostingController(rootView: card)
             self.popover = popover
             popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxX)
+            // Mouse-move events are not guaranteed in an NSPopover window.
+            // Sample the actual pointer while a card is open so leaving it
+            // still closes the card even when no row receives a hover exit.
+            pointerState = SidebarHoverState()
+            let timer = Timer(timeInterval: 0.08, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.checkPointer() }
+            }
+            timer.tolerance = 0.02
+            pointerTimer = timer
+            RunLoop.main.add(timer, forMode: .common)
             localMonitor = NSEvent.addLocalMonitorForEvents(
                 matching: [.mouseMoved, .leftMouseDown, .rightMouseDown, .scrollWheel, .keyDown]
             ) { [weak self] event in
                 guard let self else { return event }
-                if event.type == .mouseMoved { self.pointerMoved() }
+                if event.type == .mouseMoved { self.checkPointer() }
                 else if event.type == .keyDown {
                     if event.keyCode == 53 || event.window != self.popover?.contentViewController?.view.window { self.close() }
                 } else if event.type == .scrollWheel || event.type == .rightMouseDown {
@@ -231,24 +301,29 @@ private struct SidebarHoverPresentation<Card: View>: NSViewRepresentable {
             globalMonitor = NSEvent.addGlobalMonitorForEvents(
                 matching: [.mouseMoved, .leftMouseDown, .rightMouseDown]
             ) { [weak self] event in
-                if event.type == .mouseMoved { self?.pointerMoved() }
+                if event.type == .mouseMoved { self?.checkPointer() }
                 else { self?.close() }
             }
         }
 
-        private func pointerMoved() {
-            pending?.cancel()
-            guard !containsPointer else { return }
-            pending = Task { [weak self] in
-                do { try await Task.sleep(for: .milliseconds(450)) } catch { return }
-                guard let self, !Task.isCancelled, !self.containsPointer else { return }
-                self.close()
+        private func checkPointer() {
+            guard let popover else { return }
+            guard popover.isShown, anchor?.window?.isVisible == true, NSApp.isActive,
+                  !SidebarMenuTracking.shared.active else {
+                close()
+                return
+            }
+            if pointerState.shouldClose(pointerInside: containsPointer, at: ProcessInfo.processInfo.systemUptime) {
+                close()
             }
         }
 
         func close() {
             pending?.cancel()
             pending = nil
+            pointerTimer?.invalidate()
+            pointerTimer = nil
+            pointerState = SidebarHoverState()
             popover?.close()
             popover = nil
             if let localMonitor { NSEvent.removeMonitor(localMonitor) }

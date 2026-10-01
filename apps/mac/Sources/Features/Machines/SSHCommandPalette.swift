@@ -150,26 +150,28 @@ extension View {
     /// Written as a modifier so it can be attached to the terminal itself
     /// rather than to the screen around it: a view may present one sheet, and
     /// both of these screens already have one for the snippets menu.
-    func paletteSnippetSheet(_ session: SSHLiveTerminal) -> some View {
+    func paletteSnippetSheet(_ session: SSHLiveTerminal?) -> some View {
         sheet(
             item: Binding(
-                get: { session.snippetToFill },
-                set: { session.snippetToFill = $0 }
+                get: { session?.snippetToFill },
+                set: { session?.snippetToFill = $0 }
             )
         ) { row in
-            SSHSnippetRunSheet(
-                snippet: SSHSnippet(
-                    id: row.id,
-                    title: row.title,
-                    command: row.insert,
-                    tags: [],
-                    hostIDs: [],
-                    variables: row.variables
-                ),
-                action: L10n.text("apple.sshcommandpalette.insert.8aa318eb"),
-                icon: .apply
-            ) { [replacing = session.pendingReplacement] command in
-                session.insert(command, replacing: replacing)
+            if let session {
+                SSHSnippetRunSheet(
+                    snippet: SSHSnippet(
+                        id: row.id,
+                        title: row.title,
+                        command: row.insert,
+                        tags: [],
+                        hostIDs: [],
+                        variables: row.variables
+                    ),
+                    action: L10n.text("apple.sshcommandpalette.insert.8aa318eb"),
+                    icon: .apply
+                ) { [replacing = session.pendingReplacement] command in
+                    session.insert(command, replacing: replacing)
+                }
             }
         }
     }
