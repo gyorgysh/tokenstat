@@ -4410,7 +4410,13 @@ fn proxy_listen(params: &str) -> Result<Value, String> {
             }
         }
         if let Ok(mut registry) = proxy_listeners().lock() {
-            registry.remove(&key);
+            // A reopened listener may already own the same endpoint.
+            if registry
+                .get(&key)
+                .is_some_and(|current| std::sync::Arc::ptr_eq(current, &stop))
+            {
+                registry.remove(&key);
+            }
         }
     });
     Ok(json!({"url": format!("http://127.0.0.1:{port}/")}))
@@ -4588,6 +4594,49 @@ pub fn call_sessionless(method: &str, params: &str) -> Option<String> {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[cfg(feature = "local-host")]
+    #[test]
+    fn proxy_retired_listener_preserves_replacement() {
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+
+        let params = json!({ "peer": "test-proxy-replacement", "host": "127.0.0.1", "port": 3000 })
+            .to_string();
+        let key = "test-proxy-replacement:127.0.0.1:3000";
+        proxy_listen(&params).unwrap();
+        let replacement = Arc::new(AtomicBool::new(false));
+        let retired = {
+            let mut registry = proxy_listeners().lock().unwrap();
+            let retired = registry
+                .insert(key.to_string(), Arc::clone(&replacement))
+                .unwrap();
+            // Publication precedes the real old thread's cleanup, removing
+            // scheduler timing from the close-and-reopen regression.
+            retired.store(true, Ordering::Relaxed);
+            retired
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while Arc::strong_count(&retired) != 1 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let still_current = proxy_listeners()
+            .lock()
+            .unwrap()
+            .get(key)
+            .is_some_and(|current| Arc::ptr_eq(current, &replacement));
+        proxy_unlisten(&params).unwrap();
+        assert_eq!(
+            Arc::strong_count(&retired),
+            1,
+            "retired listener did not exit"
+        );
+        assert!(still_current, "old cleanup erased the new registration");
+        assert!(
+            replacement.load(Ordering::Relaxed),
+            "replacement could not be stopped"
+        );
+    }
 
     #[cfg(feature = "local-host")]
     #[test]

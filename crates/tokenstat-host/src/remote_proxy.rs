@@ -85,7 +85,14 @@ pub(crate) fn listen(peer: &str, host: &str, target: u16) -> Result<Value, Strin
             }
         }
         if let Ok(mut registry) = listeners().lock() {
-            registry.remove(&key);
+            // A replacement can already own this key while the old thread
+            // finishes. Retire only this thread's registration.
+            if registry
+                .get(&key)
+                .is_some_and(|current| Arc::ptr_eq(current, &stop))
+            {
+                registry.remove(&key);
+            }
         }
     });
     // The listener is IPv4-only. Returning the numeric address prevents iOS
@@ -131,4 +138,49 @@ fn open_proxy_stream(peer: &str, host: &str, port: u16) -> Result<Connection, St
         .send(handshake.to_string().as_bytes())
         .map_err(|e| e.to_string())?;
     Ok(connection)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn proxy_retired_listener_preserves_replacement() {
+        let peer = "test-proxy-replacement";
+        let host = "127.0.0.1";
+        let port = 3000;
+        let key = format!("{peer}:{host}:{port}");
+        listen(peer, host, port).unwrap();
+        let replacement = Arc::new(AtomicBool::new(false));
+        let retired = {
+            let mut registry = listeners().lock().unwrap();
+            let retired = registry
+                .insert(key.clone(), Arc::clone(&replacement))
+                .unwrap();
+            // Hold the registry until replacement publication is complete,
+            // so the real listener thread always finishes after replacement.
+            retired.store(true, Ordering::Relaxed);
+            retired
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while Arc::strong_count(&retired) != 1 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let still_current = listeners()
+            .lock()
+            .unwrap()
+            .get(&key)
+            .is_some_and(|current| Arc::ptr_eq(current, &replacement));
+        unlisten(peer, host, port).unwrap();
+        assert_eq!(
+            Arc::strong_count(&retired),
+            1,
+            "retired listener did not exit"
+        );
+        assert!(still_current, "old cleanup erased the new registration");
+        assert!(
+            replacement.load(Ordering::Relaxed),
+            "replacement could not be stopped"
+        );
+    }
 }
