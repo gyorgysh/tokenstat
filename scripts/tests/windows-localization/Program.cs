@@ -35,6 +35,13 @@ try
     Equal(formatted.Text("overflow", "x"), "{999999999999999999999}");
     Equal(formatted.Text("missing"), "missing");
     Equal(L10n.Text("common.cancel"), "Cancel");
+    var malformed = Path.Combine(directory, "xx");
+    Directory.CreateDirectory(malformed);
+    foreach (var content in new[] { "{", "{\"shared\":null}", "{\"shared\":42}" })
+    {
+        File.WriteAllText(Path.Combine(malformed, "windows.json"), content);
+        Equal(LanguageCatalog.Load(directory, new[] { "xx" }).Text("shared"), "English");
+    }
     Console.WriteLine("Language catalog fallback, formatting, and bundled English passed.");
 }
 finally { Directory.Delete(directory, recursive: true); }

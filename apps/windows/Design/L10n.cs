@@ -33,12 +33,13 @@ internal sealed class LanguageCatalog
             var path = Path.Combine(directory, language, table + ".json");
             try
             {
-                return File.Exists(path)
-                    ? JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(path)) ?? new()
-                    : new();
+                if (!File.Exists(path)) return new();
+                var values = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(path));
+                return values is not null && values.Values.All(value => value is not null) ? values : new();
             }
             catch (JsonException) { return new(); }
             catch (IOException) { return new(); }
+            catch (UnauthorizedAccessException) { return new(); }
         }
         var strings = Read("en", "common");
         foreach (var pair in Read("en", "windows")) strings[pair.Key] = pair.Value;

@@ -21,7 +21,7 @@ object L10n {
         val stream = L10n::class.java.getResourceAsStream("/$language/$table.json") ?: return emptyMap()
         return stream.bufferedReader(Charsets.UTF_8).use { reader ->
             runCatching {
-                Json.parseToJsonElement(reader.readText()).jsonObject.mapValues { it.value.jsonPrimitive.content }
+                LanguageCatalog.decode(reader.readText())
             }.getOrDefault(emptyMap())
         }
     }
@@ -38,6 +38,14 @@ internal class LanguageCatalog(private val strings: Map<String, String>) {
 
     companion object {
         private val placeholder = Regex("\\{([0-9]+)\\}")
+
+        internal fun decode(source: String): Map<String, String> = runCatching {
+            Json.parseToJsonElement(source).jsonObject.mapValues {
+                val value = it.value.jsonPrimitive
+                require(value.isString)
+                value.content
+            }
+        }.getOrDefault(emptyMap())
 
         fun load(languages: List<String>, read: (String, String) -> Map<String, String>): LanguageCatalog {
             val strings = (read("en", "common") + read("en", "android")).toMutableMap()

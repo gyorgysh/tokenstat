@@ -38,4 +38,14 @@ class LanguageCatalogTest {
     @Test fun englishResourcesAreOnTheAppClasspath() {
         assertEquals("Cancel", L10n.text("common.cancel"))
     }
+
+    @Test fun malformedTablesCannotReplaceEnglishWithNonStringValues() {
+        for (source in listOf("{", "[]", "{\"shared\":null}", "{\"shared\":42}", "{\"shared\":false}")) {
+            val catalog = LanguageCatalog.load(listOf("xx")) { language, _ ->
+                if (language == "en") mapOf("shared" to "English") else LanguageCatalog.decode(source)
+            }
+            assertEquals("English", catalog.text("shared"))
+        }
+        assertEquals(mapOf("shared" to "Magyar"), LanguageCatalog.decode("{\"shared\":\"Magyar\"}"))
+    }
 }
