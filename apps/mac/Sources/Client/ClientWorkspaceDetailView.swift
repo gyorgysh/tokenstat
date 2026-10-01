@@ -31,11 +31,10 @@ struct ClientWorkspaceSessionsView: View {
     @State private var showingCatalog = false
     @State private var pendingInstall: RemoteLaunchProfile?
     @State private var pendingHide: RemoteLaunchProfile?
-    @State private var browserURL: String?
-    @State private var forwardedPort: Int?
+    @State private var browserSession: ProjectBrowserSession?
     @State private var pendingClose: PtySessionInfo?
     @State private var showPort = false
-    @AppStorage("browser.lastPort") private var portText = "5173"
+    @State private var portText = "5173"
     @State private var isOpeningPort = false
     /// Read-only launcher state for the Chat tile's count and character.
     @State private var chatPreview = ChatModel()
@@ -63,6 +62,11 @@ struct ClientWorkspaceSessionsView: View {
         ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
     }
 
+    private var browserOwner: WorkReference? {
+        WorkViewedChange.owner(folderID: workspaceID, peer: peer)
+    }
+
+
     private var visibility: LauncherVisibility { LauncherVisibility.shared }
     private var visibilityScope: String { peer }
 
@@ -85,11 +89,11 @@ struct ClientWorkspaceSessionsView: View {
 
     var body: some View {
         Group {
-            if showsBrowserPane, let url = browserURL {
+            if showsBrowserPane, let session = browserSession {
                 HStack(spacing: 0) {
                     sessionsColumn
                     ThemeRule.vertical
-                    browserPane(url: url)
+                    browserPane(session: session)
                         .frame(minWidth: 340, maxWidth: 560)
                 }
             } else {
@@ -107,6 +111,7 @@ struct ClientWorkspaceSessionsView: View {
             await ClientRefresh.pull("workspace-sessions-\(workspaceID)") { await reload() }
         }
         .onChange(of: folder.id, initial: true) {
+            closeBrowser()
             bypassOn = WorkspacePreference.bypassPermissions(for: folder.id)
         }
         .task(id: workspaceID) {
@@ -131,11 +136,12 @@ struct ClientWorkspaceSessionsView: View {
         .task(id: workspaceID) {
             await chatPreview.load(workspaceID: workspaceID, peer: peer, selectFirst: false)
             #if WORKBENCH_QA
-            if ProcessInfo.processInfo.environment["WORKBENCH_BROWSER"] == "1", browserURL == nil {
+            if ProcessInfo.processInfo.environment["WORKBENCH_BROWSER"] == "1", browserSession == nil {
                 // The web view's policy allows about: pages without a host.
                 // Real forwarded pages arrive over the tunnel; this proves
                 // the beside-work layout, not the tunnel.
-                browserURL = "about:blank"
+                browserSession = ProjectBrowserOwner.make(workspaceID: workspaceID, peer: peer)
+                browserSession?.showFixture()
             }
             #endif
         }
@@ -208,14 +214,15 @@ struct ClientWorkspaceSessionsView: View {
             Text("The tool stays on \(hostName). You can add it again from +.")
         }
         .fullScreenCover(item: Binding(
-            get: { showsBrowserPane ? nil : browserURL.map { BrowserURL(url: $0) } },
-            set: { browserURL = $0?.url }
+            get: { showsBrowserPane ? nil : browserSession },
+            set: { if $0 == nil, !showsBrowserPane { closeBrowser() } }
         )) { item in
-            ClientBrowserScreen(url: item.url) {
+            ClientBrowserScreen(session: item) {
                 closeBrowser()
             }
         }
-        .sheet(isPresented: $showPort) { browserPortSheet }
+        .sheet(isPresented: $showPort) { browserPortSheet.onAppear { portText = BrowserHistory.shared.portSuggestion(for: browserOwner) } }
+        .onChange(of: WorkSessionContext.shared.scope) { _, _ in closeBrowser() }
     }
 
     /// The forwarded browser beside the launcher on a wide iPad, instead of
@@ -224,7 +231,7 @@ struct ClientWorkspaceSessionsView: View {
     /// never touches this device's own localhost. Rotation only moves the
     /// presentation: the port forward and the URL survive it.
     private var showsBrowserPane: Bool {
-        browserURL != nil
+        browserSession != nil
             && sizeClass == .regular
             && UIDevice.current.userInterfaceIdiom == .pad
     }
@@ -249,7 +256,7 @@ struct ClientWorkspaceSessionsView: View {
         }
     }
 
-    private func browserPane(url: String) -> some View {
+    private func browserPane(session: ProjectBrowserSession) -> some View {
         VStack(spacing: 0) {
             HStack {
                 Text("Browser")
@@ -268,18 +275,15 @@ struct ClientWorkspaceSessionsView: View {
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.top, Theme.Space.s)
-            ClientBrowserScreen(url: url) {
+            ClientBrowserScreen(session: session) {
                 closeBrowser()
             }
         }
     }
 
     private func closeBrowser() {
-        browserURL = nil
-        if let port = forwardedPort {
-            forwardedPort = nil
-            Task { await Bridge.proxyUnlisten(peer: peer, host: "127.0.0.1", port: port) }
-        }
+        browserSession?.close()
+        browserSession = nil
     }
 
     /// Bypass, the switch the Mac keeps next to Launch. Branch lives on the
@@ -496,6 +500,7 @@ struct ClientWorkspaceSessionsView: View {
                 TextField("Port", text: $portText)
                     .keyboardType(.numberPad)
                     .textFieldStyle(.themed)
+                ClientRecentBrowserPorts(owner: browserOwner, portText: $portText)
                 Spacer(minLength: 0)
                 HStack(spacing: Theme.Space.s) {
                     Button("Not now", .dismiss) { showPort = false }
@@ -503,7 +508,7 @@ struct ClientWorkspaceSessionsView: View {
                     Spacer(minLength: 0)
                     Button("Open", .browser) { Task { await openPort() } }
                         .buttonStyle(AccentButtonStyle())
-                        .disabled(isOpeningPort || UInt16(portText) == nil)
+                        .disabled(isOpeningPort || BrowserTarget.parsePort(portText) == nil)
                 }
             }
             .padding(Theme.Space.l)
@@ -516,22 +521,25 @@ struct ClientWorkspaceSessionsView: View {
     }
 
     private func openPort() async {
-        guard let port = UInt16(portText.trimmingCharacters(in: .whitespaces)) else { return }
+        guard !isOpeningPort, let port = BrowserTarget.parsePort(portText),
+              let target = BrowserHistory.shared.target(for: browserOwner, port: port) else { return }
         isOpeningPort = true
         defer { isOpeningPort = false }
-        do {
-            let result = try await Bridge.proxyListen(
-                peer: peer,
-                host: "127.0.0.1",
-                port: Int(port)
-            )
-            forwardedPort = Int(port)
-            browserURL = result.url
-            showPort = false
-        } catch {
-            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
-            showPort = false
+        let session = ProjectBrowserOwner.make(workspaceID: workspaceID, peer: peer)
+        await session.open(target.url)
+        guard session.owner == browserOwner, !Task.isCancelled else {
+            session.close()
+            return
         }
+        if let error = session.error {
+            errorMessage = ClientTunnelCopy.display(error, host: hostName)
+            session.close()
+            return
+        }
+        guard !session.transportURL.isEmpty else { return }
+        closeBrowser()
+        browserSession = session
+        showPort = false
     }
 
     @ViewBuilder
@@ -610,9 +618,11 @@ struct ClientWorkspaceSessionsView: View {
                         Button {
                             openExisting(session)
                         } label: {
-                            ClientSessionRow(session: session)
+                            ClientSessionRow(session: session, displayName: terminalName(session))
                         }
                         .buttonStyle(.plain)
+                        .modifier(ClientTerminalActions(peer: peer, workspaceID: workspaceID, folderName: folder.name,
+                            info: session, onDuplicate: { copied in sessions.append(copied); openExisting(copied) }))
                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: Theme.Space.s, trailing: 0))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
@@ -662,6 +672,12 @@ struct ClientWorkspaceSessionsView: View {
 
     private func openExisting(_ info: PtySessionInfo) {
         openSession = ClientTerminalSession(peer: peer, info: info)
+    }
+
+    private func terminalName(_ info: PtySessionInfo) -> String? {
+        guard let scope = WorkSessionContext.shared.scope else { return nil }
+        return SidebarTerminalNames.shared.name(for: WorkReference(scope: scope, hostIdentity: peer,
+            workspaceID: workspaceID, kind: .terminal, itemID: info.id))
     }
 
     private func closeSession(_ info: PtySessionInfo) async {
@@ -748,24 +764,27 @@ struct ClientWorkspaceSessionsView: View {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
             return
         }
-        // The process is already up. A failed port forward must not kill it.
-        guard let page = profile.openUrl, let port = URL(string: page)?.port else { return }
-        do {
-            try? await Task.sleep(for: .seconds(2))
-            let result = try await Bridge.proxyListen(
-                peer: peer,
-                host: "127.0.0.1",
-                port: port
-            )
-            forwardedPort = port
-            if let proxy = URL(string: result.url) {
-                _ = await Self.waitForPage(proxy)
-            }
-            openSession = nil
-            browserURL = result.url
-        } catch {
-            errorMessage = error.localizedDescription
+        // The process is already up. A failed browser connection leaves it running.
+        guard let page = profile.openUrl, let target = BrowserTarget(page) else { return }
+        let browser = ProjectBrowserOwner.make(workspaceID: workspaceID, peer: peer)
+        await browser.open(target.url)
+        guard browser.owner == browserOwner, !Task.isCancelled else {
+            browser.close()
+            return
         }
+        if let error = browser.error {
+            errorMessage = ClientTunnelCopy.display(error, host: hostName)
+            browser.close()
+            return
+        }
+        if let proxy = URL(string: browser.transportURL) { _ = await Self.waitForPage(proxy) }
+        guard browser.owner == browserOwner, !Task.isCancelled else {
+            browser.close()
+            return
+        }
+        closeBrowser()
+        openSession = nil
+        browserSession = browser
     }
 
     /// True when the harness answered. The local proxy writes 502 while the
@@ -786,11 +805,6 @@ struct ClientWorkspaceSessionsView: View {
         }
         return false
     }
-}
-
-struct BrowserURL: Identifiable {
-    var id: String { url }
-    var url: String
 }
 
 // MARK: - Files
@@ -1196,118 +1210,194 @@ struct ClientFileEditor: View {
 // MARK: - Browser
 
 struct ClientBrowserScreen: View {
-    let url: String
+    @Bindable var session: ProjectBrowserSession
     var onClose: () -> Void
     @State private var address: String
     @State private var loadError: String?
+    @State private var reloadToken = 0
 
-    init(url: String, onClose: @escaping () -> Void) {
-        self.url = url
+    init(session: ProjectBrowserSession, onClose: @escaping () -> Void) {
+        self.session = session
         self.onClose = onClose
-        _address = State(initialValue: url)
+        _address = State(initialValue: session.targetURL)
     }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                TextField("URL", text: $address)
+                TextField("URL or port", text: $address)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .submitLabel(.go)
+                    .onSubmit { openAddress() }
                     .font(ClientType.caption)
                     .padding(Theme.Space.s)
                     .background(Color.secondary.opacity(0.12))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
-                Button("Reload", .refresh) {
+                Menu {
+                    ForEach(session.recentPorts, id: \.self) { port in
+                        Button(String(port), .browser) { address = "http://127.0.0.1:\(port)/" }
+                    }
+                } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                }
+                .disabled(session.recentPorts.isEmpty)
+                .accessibilityLabel("Recent project ports")
+                Button(action: openAddress) {
+                    Image(systemName: "arrow.right.circle")
+                        .frame(minWidth: 32, minHeight: 44)
+                }
+                    .font(ClientType.caption.weight(.semibold))
+                    .accessibilityLabel("Open address")
+                    .disabled(session.isOpening)
+                Button {
                     loadError = nil
-                    // Force WebView identity change via address nudge is
-                    // unnecessary; ClientWebView reloads when urlString matches.
-                    let current = address
-                    address = ""
-                    DispatchQueue.main.async { address = current }
+                    reloadToken += 1
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .frame(minWidth: 32, minHeight: 44)
                 }
                 .font(ClientType.caption.weight(.semibold))
+                .accessibilityLabel("Reload")
                 Button("Done", .done, action: onClose)
                     .font(ClientType.caption.weight(.semibold))
             }
             .padding(Theme.Space.m)
-            if let loadError {
-                Text(loadError)
+            if let error = session.error ?? loadError {
+                Text(error)
                     .font(ClientType.caption)
                     .foregroundStyle(Theme.danger)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, Theme.Space.m)
             }
-            ClientWebView(urlString: address, onError: { loadError = $0 })
+            ClientWebView(urlString: session.transportURL, reloadToken: reloadToken, navigationGeneration: session.navigationGeneration, loadRevision: session.loadRevision,
+                onError: { loadError = $0 }, onURLChange: { actual, completion in
+                    session.observed(actual, generation: completion.generation, registered: completion.registered)
+                },
+                onLocalNavigation: { request, isMainFrame in session.intercept(request, isMainFrame: isMainFrame) })
+                .id(session.id)
         }
         .background(Theme.background)
+        .onChange(of: session.targetURL) { _, target in address = target }
+    }
+
+    private func openAddress() {
+        loadError = nil
+        Task { await session.open(address) }
     }
 }
 
 struct ClientWebView: UIViewRepresentable {
     let urlString: String
+    var reloadToken = 0
+    var navigationGeneration = 0
+    var loadRevision = 0
     var onError: (String) -> Void = { _ in }
+    var onURLChange: (String, BrowserNavigationEpoch.Completion) -> Bool = { _, _ in true }
+    var onLocalNavigation: ((URLRequest, Bool) -> Bool)?
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onError: onError)
+        Coordinator(onError: onError, onURLChange: onURLChange, onLocalNavigation: onLocalNavigation)
     }
 
     func makeUIView(context: Context) -> WKWebView {
         let view = WKWebView()
         view.navigationDelegate = context.coordinator
-        if let url = URL(string: urlString) {
-            view.load(URLRequest(url: url))
+        view.uiDelegate = context.coordinator
+        context.coordinator.requestedURL = urlString
+        context.coordinator.reloadToken = reloadToken
+        context.coordinator.loadRevision = loadRevision
+        context.coordinator.epochs.current = navigationGeneration
+        if let url = URL(string: urlString), !urlString.isEmpty {
+            context.coordinator.epochs.register(view.load(URLRequest(url: url)), generation: navigationGeneration)
         }
         return view
     }
 
-    func updateUIView(_ uiView: WKWebView, context: Context) {
+    func updateUIView(_ view: WKWebView, context: Context) {
         context.coordinator.onError = onError
-        if let url = URL(string: urlString),
-           uiView.url?.absoluteString != urlString,
-           !urlString.isEmpty
-        {
-            uiView.load(URLRequest(url: url))
+        context.coordinator.onURLChange = onURLChange
+        context.coordinator.onLocalNavigation = onLocalNavigation
+        context.coordinator.epochs.current = navigationGeneration
+        let explicitLoad = context.coordinator.loadRevision != loadRevision
+        if explicitLoad || context.coordinator.requestedURL != urlString {
+            context.coordinator.requestedURL = urlString
+            context.coordinator.loadRevision = loadRevision
+            if let url = URL(string: urlString), !urlString.isEmpty, explicitLoad || view.url?.absoluteString != urlString {
+                context.coordinator.epochs.register(view.load(URLRequest(url: url)), generation: navigationGeneration)
+            }
+        }
+        if context.coordinator.reloadToken != reloadToken {
+            context.coordinator.reloadToken = reloadToken
+            context.coordinator.epochs.register(view.reload(), generation: navigationGeneration)
         }
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
-        var onError: (String) -> Void
+    static func dismantleUIView(_ view: WKWebView, coordinator: Coordinator) {
+        view.stopLoading()
+        view.navigationDelegate = nil
+        view.uiDelegate = nil
+    }
 
-        init(onError: @escaping (String) -> Void) {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+        var onError: (String) -> Void
+        var onURLChange: (String, BrowserNavigationEpoch.Completion) -> Bool
+        var onLocalNavigation: ((URLRequest, Bool) -> Bool)?
+        var requestedURL = ""
+        var reloadToken = 0
+        var loadRevision = 0
+        var epochs = BrowserNavigationEpoch()
+
+        init(onError: @escaping (String) -> Void, onURLChange: @escaping (String, BrowserNavigationEpoch.Completion) -> Bool,
+             onLocalNavigation: ((URLRequest, Bool) -> Bool)?) {
             self.onError = onError
+            self.onURLChange = onURLChange
+            self.onLocalNavigation = onLocalNavigation
         }
 
-        func webView(
-            _ webView: WKWebView,
-            decidePolicyFor navigationAction: WKNavigationAction,
-            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
-        ) {
-            decisionHandler(Self.allows(navigationAction.request.url) ? .allow : .cancel)
+        func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
+                     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            if onLocalNavigation?(action.request, action.targetFrame?.isMainFrame != false) == true {
+                decisionHandler(.cancel)
+                return
+            }
+            decisionHandler(Self.allows(action.request.url) ? .allow : .cancel)
         }
 
         static func allows(_ url: URL?) -> Bool {
             guard let url, let scheme = url.scheme?.lowercased() else { return false }
             if scheme == "about" { return true }
-            if let host = url.host, host == "127.0.0.1" || host == "localhost" {
-                return scheme == "http" || scheme == "https"
-            }
+            if let host = url.host, BrowserTarget.isLoopback(host) { return BrowserTarget(url.absoluteString) != nil }
             return scheme == "https" && (url.host == "tokenstat.ai" || url.host?.hasSuffix(".tokenstat.ai") == true)
         }
 
-        func webView(
-            _ webView: WKWebView,
-            didFailProvisionalNavigation navigation: WKNavigation!,
-            withError error: Error
-        ) {
-            onError(error.localizedDescription)
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            _ = epochs.started(navigation)
         }
 
-        func webView(
-            _ webView: WKWebView,
-            didFail navigation: WKNavigation!,
-            withError error: Error
-        ) {
-            onError(error.localizedDescription)
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard let completion = epochs.finish(navigation) else { return }
+            if let url = webView.url?.absoluteString {
+                if onURLChange(url, completion) { requestedURL = url }
+            }
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            guard epochs.finish(navigation) != nil else { return }
+            if (error as NSError).code != NSURLErrorCancelled { onError(error.localizedDescription) }
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            guard epochs.finish(navigation) != nil else { return }
+            if (error as NSError).code != NSURLErrorCancelled { onError(error.localizedDescription) }
+        }
+
+        func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                     for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+            guard action.targetFrame == nil, let url = action.request.url else { return nil }
+            if onLocalNavigation?(action.request, true) == true { return nil }
+            if Self.allows(url) { epochs.register(webView.load(action.request), generation: epochs.current) }
+            return nil
         }
     }
 }

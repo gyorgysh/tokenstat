@@ -1258,6 +1258,14 @@ extension Bridge {
     static func removeAllChats(workspaceID: String, peer: String? = nil) async throws -> Int {
         struct Removed: Codable, Sendable { var removed: Int }
         let route = chatRoute(workspaceID: workspaceID, peer: peer)
+        let scope = await WorkSessionContext.shared.scope
+        guard await RemoteHostFeature.chatRemoveAll.isSupported(peer: route.peer) else {
+            throw NSError(domain: "Chat", code: 26, userInfo: [NSLocalizedDescriptionKey: "Update the project's computer to delete all chats."])
+        }
+        let currentScope = await WorkSessionContext.shared.scope
+        guard scope == currentScope else {
+            throw NSError(domain: "Chat", code: 1, userInfo: [NSLocalizedDescriptionKey: "The account changed before deleting chats."])
+        }
         return try await chatInvoke(
             peer: route.peer,
             "chat.removeAll",
@@ -3674,12 +3682,19 @@ extension Bridge {
     }
 
     static func proxyUnlisten(peer: String, host: String, port: Int) async {
-        struct Stopped: Codable, Sendable { let stopped: Bool? }
-        _ = try? await background(
+        try? await proxyUnlistenConfirmed(peer: peer, host: host, port: port)
+    }
+
+    static func proxyUnlistenConfirmed(peer: String, host: String, port: Int) async throws {
+        struct Stopped: Codable, Sendable { let stopped: Bool }
+        let reply = try await background(
             "proxy.unlisten",
             ["peer": peer, "host": host, "port": port],
             as: Stopped.self
         )
+        guard reply.stopped else {
+            throw NSError(domain: "Browser", code: 1, userInfo: [NSLocalizedDescriptionKey: "The previous preview connection could not be closed. Try again."])
+        }
     }
 
     /// Call a device on the account something.

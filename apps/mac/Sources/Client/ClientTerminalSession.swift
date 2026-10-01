@@ -21,10 +21,16 @@ import UIKit
 final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     let id: String
     let peer: String
+    let ownerScope = WorkSessionContext.shared.scope
     private(set) var hostID: String
     let command: String
     let cwd: String
     private(set) var workspaceID: String?
+    var workReference: WorkReference? {
+        guard let ownerScope, ownerScope == WorkSessionContext.shared.scope,
+              let workspaceID, !workspaceID.isEmpty, !hostID.hasPrefix("pending-") else { return nil }
+        return WorkReference(scope: ownerScope, hostIdentity: peer, workspaceID: workspaceID, kind: .terminal, itemID: hostID)
+    }
 
     private(set) var alive: Bool
     private(set) var exitCode: Int?
@@ -543,7 +549,7 @@ struct ClientTerminalScreen: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(URL(fileURLWithPath: session.command).lastPathComponent)
+                    Text(SidebarTerminalNames.shared.name(for: session.workReference) ?? URL(fileURLWithPath: session.command).lastPathComponent)
                         .font(ClientType.label.weight(.semibold))
                         .lineLimit(1)
                     Text(session.alive ? session.cwd : (session.exitCode.map { "exited \($0)" } ?? "stopped"))
@@ -559,6 +565,9 @@ struct ClientTerminalScreen: View {
                         .foregroundStyle(Theme.warning)
                 }
                 if session.workspaceID != nil {
+                    PinToggleButton(reference: session.workReference,
+                        label: SidebarTerminalNames.shared.name(for: session.workReference) ?? "Terminal",
+                        folderName: URL(fileURLWithPath: session.cwd).lastPathComponent)
                     Button("Project", .source) { showingWorkspace = true }
                         .font(ClientType.caption.weight(.semibold))
                         .accessibilityLabel("Project files, changes and history")

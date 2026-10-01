@@ -6,6 +6,7 @@ struct AutomationEditorRoute: Identifiable, Hashable {
     let workspaceID: String
     let folderName: String
     let job: Automation?
+    var template: AutomationTemplate? = nil
 
     var id: String { job?.id ?? "new:\(workspaceID)" }
 }
@@ -16,6 +17,7 @@ struct AutomationEditorDestination: View {
     let folderName: String
     let hostName: String
     var existing: Automation? = nil
+    var template: AutomationTemplate? = nil
     var onFinished: (Automation?) async -> Void
     @State private var session: AutomationEditorSession?
     private var identity: Identity {
@@ -38,16 +40,27 @@ struct AutomationEditorDestination: View {
         }
         .modalFrame(width: 1000, height: 760)
         .task(id: identity) {
+            let owner = WorkSessionContext.shared.scope
             session = nil
             if target.peer == nil { await WorkSessionContext.shared.resolveLocalHostIdentity() }
             guard !Task.isCancelled else { return }
-            session = AutomationEditorSessions.session(
+            let loadedSession = AutomationEditorSessions.session(
                 target: target,
                 workspaceID: workspaceID,
                 folderName: folderName,
                 existing: existing,
                 lockedFolder: true
             )
+            if let template, existing == nil {
+                await loadedSession.load()
+                guard !Task.isCancelled, owner == WorkSessionContext.shared.scope else { return }
+                let job = Automation(id: "template", name: template.name, backend: template.backendID,
+                    workspaceID: workspaceID, prompt: template.prompt, schedule: template.schedule,
+                    budgetSeconds: template.budgetSeconds, enabled: true)
+                loadedSession.applyTemplate(AutomationEditorDraft(job))
+            }
+            guard !Task.isCancelled, owner == WorkSessionContext.shared.scope else { return }
+            session = loadedSession
         }
     }
 }

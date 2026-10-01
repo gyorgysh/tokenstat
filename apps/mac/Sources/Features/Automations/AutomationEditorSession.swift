@@ -105,6 +105,20 @@ final class AutomationEditorSession {
             && saved.created == nil && fields.validation == nil
     }
 
+    /// A template never replaces writing restored from a previous visit.
+    @discardableResult
+    func applyTemplate(_ draft: AutomationEditorDraft) -> Bool {
+        guard loaded, isCreate, !dirty, !creating, !working, otherDraft == nil,
+              fields.model.isEmpty, fields.effort.isEmpty,
+              draft.workspaceID == workspaceID else {
+            noticeMessage = "Your existing automation draft is still here. Finish or clear it before choosing a template."
+            return false
+        }
+        fields = draft
+        noticeMessage = nil
+        return true
+    }
+
     func load() async {
         if loaded {
             await refresh()

@@ -29,6 +29,7 @@ struct ClientWorkspaceToolsView: View {
         case files = "Files"
         case changes = "Changes"
         case history = "History"
+        case sessions = "Sessions"
     }
 
     /// Fixtures open on Changes to show a working tab. Production starts on Files.
@@ -60,6 +61,8 @@ struct ClientWorkspaceToolsView: View {
             .padding(.top, Theme.Space.s)
             .onAppear { surface = initial }
             switch surface {
+            case .sessions:
+                ClientWorkspaceSessionsView(peer: peer, hostName: hostName, folder: folder)
             case .files:
                 ClientFilesView(peer: peer, workspace: workspaceID, folderName: folderName)
             case .changes:

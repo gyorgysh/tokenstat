@@ -18,6 +18,7 @@ struct ClientAutomationWorkspace: View {
 
     @State private var session: ClientAutomationSession
     @State private var search = ""
+    @State private var sort: AutomationMobileOrder = .name
     @State private var navigation = ClientJobNavigation()
     @State private var editor: AutomationEditorRoute?
     @State private var showingQueue = false
@@ -71,14 +72,24 @@ struct ClientAutomationWorkspace: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("New automation", .create) {
-                    editor = AutomationEditorRoute(
-                        workspaceID: workspaceID, folderName: folderName, job: nil
-                    )
-                }
+                Menu {
+                    Button("Blank automation", .create) { editor = AutomationEditorRoute(workspaceID: workspaceID, folderName: folderName, job: nil) }
+                    Section("Templates") {
+                        ForEach(AutomationTemplate.suggested) { template in
+                            Button(template.title, systemImage: template.symbol) {
+                                editor = AutomationEditorRoute(workspaceID: workspaceID, folderName: folderName, job: nil, template: template)
+                            }
+                        }
+                    }
+                } label: { ActionIcon.create.label("New automation") }
                 .labelStyle(.iconOnly)
                 .keyboardShortcut("n", modifiers: .command)
                 .disabled(editor != nil || showingQueue || showingHistory)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Picker("Sort automations", selection: $sort) { ForEach(AutomationMobileOrder.allCases) { Text($0.rawValue).tag($0) } }
+                } label: { ActionIcon.filter.label("Sort automations") }
             }
         }
         .fullScreenCover(item: $editor) { route in
@@ -87,7 +98,8 @@ struct ClientAutomationWorkspace: View {
                 workspaceID: route.workspaceID,
                 folderName: route.folderName,
                 hostName: hostName,
-                existing: route.job
+                existing: route.job,
+                template: route.template
             ) { created in
                 await session.load()
                 if let created { session.selectJob(created.id) }
@@ -185,11 +197,11 @@ struct ClientAutomationWorkspace: View {
     }
 
     private var filteredJobs: [Automation] {
-        session.jobs.filter {
+        sort.sorted(session.jobs.filter {
             search.isEmpty
                 || $0.name.localizedCaseInsensitiveContains(search)
                 || $0.prompt.localizedCaseInsensitiveContains(search)
-        }
+        })
     }
 
     @ViewBuilder

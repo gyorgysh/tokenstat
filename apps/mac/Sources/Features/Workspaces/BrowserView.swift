@@ -12,8 +12,15 @@ import WebKit
 /// A lightweight project browser, useful for local dev servers and previews.
 struct BrowserView: View {
     var initialURL: String
-    var onURLChange: (String) -> Void
+    var onURLChange: (String, BrowserNavigationEpoch.Completion) -> Bool
     var allowsExternalNavigation: Bool
+    var navigationGeneration: Int
+    var loadRevision: Int
+    var displayURL: String?
+    var recentPorts: [Int]
+    var onNavigate: ((String) -> Void)?
+    var displayAddress: ((String) -> String)?
+    var onLocalNavigation: ((URLRequest, Bool) -> Bool)?
 
     /// What the user is typing. Never what the page is: a half-typed URL must
     /// not start loading, or the first keystroke throws a DNS error.
@@ -30,11 +37,21 @@ struct BrowserView: View {
     /// A non-loopback URL waiting for the user's go-ahead.
     @State private var remoteURL: RemoteNavigation?
 
-    init(url: String, allowsExternalNavigation: Bool = false, onURLChange: @escaping (String) -> Void) {
+    init(url: String, allowsExternalNavigation: Bool = false, navigationGeneration: Int = 0, loadRevision: Int = 0, displayURL: String? = nil,
+         recentPorts: [Int] = [], onNavigate: ((String) -> Void)? = nil,
+         displayAddress: ((String) -> String)? = nil, onLocalNavigation: ((URLRequest, Bool) -> Bool)? = nil,
+         onURLChange: @escaping (String, BrowserNavigationEpoch.Completion) -> Bool) {
         initialURL = url
         self.allowsExternalNavigation = allowsExternalNavigation
         self.onURLChange = onURLChange
-        _text = State(initialValue: url)
+        self.navigationGeneration = navigationGeneration
+        self.loadRevision = loadRevision
+        self.displayURL = displayURL
+        self.recentPorts = recentPorts
+        self.onNavigate = onNavigate
+        self.displayAddress = displayAddress
+        self.onLocalNavigation = onLocalNavigation
+        _text = State(initialValue: displayURL ?? url)
         _loadedURL = State(initialValue: url)
     }
 
@@ -53,12 +70,14 @@ struct BrowserView: View {
                 WebBrowser(
                     allowsExternalNavigation: allowsExternalNavigation,
                     url: normalizedURL(loadedURL),
+                    navigationGeneration: navigationGeneration,
                     command: command,
                     commandID: commandID,
-                    onURLChange: { url in
-                        text = url
+                    onURLChange: { url, completion in
+                        guard completion.generation == navigationGeneration, onURLChange(url, completion) else { return false }
+                        text = displayAddress?(url) ?? url
                         loadedURL = url
-                        onURLChange(url)
+                        return true
                     },
                     onRemoteNavigation: { url in
                         if allowsExternalNavigation { navigate(to: url) }
@@ -66,7 +85,8 @@ struct BrowserView: View {
                     },
                     onLoadingChange: { isLoading = $0 },
                     onHistoryChange: { back, forward in canGoBack = back; canGoForward = forward },
-                    onError: { loadError = $0 }
+                    onError: { loadError = $0 },
+                    onLocalNavigation: onLocalNavigation
                 )
             }
         }
@@ -85,8 +105,19 @@ struct BrowserView: View {
         }
         .onChange(of: initialURL) { _, newURL in
             guard newURL != loadedURL else { return }
-            text = newURL
-            commit(newURL)
+            text = displayURL ?? newURL
+            loadedURL = newURL
+            loadError = ""
+            if loadRevision == 0 { send(.navigate) }
+        }
+        .onChange(of: loadRevision) { _, _ in
+            loadedURL = initialURL
+            text = displayURL ?? initialURL
+            loadError = ""
+            send(.navigate)
+        }
+        .onChange(of: displayURL) { _, address in
+            if let address { text = address }
         }
     }
 
@@ -122,6 +153,19 @@ struct BrowserView: View {
                 .font(Theme.mono(11))
                 .onSubmit { commit(text) }
 
+            if !recentPorts.isEmpty {
+                Menu {
+                    ForEach(recentPorts, id: \.self) { port in
+                        Button(String(port), .browser) { text = "http://127.0.0.1:\(port)/" }
+                    }
+                } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                }
+                .menuStyle(.borderlessButton)
+                .help("Recent ports for this project")
+                .accessibilityLabel("Recent project ports")
+            }
+
             Button("Go", .next) { commit(text) }
                 .buttonStyle(AccentButtonStyle(small: true))
                 .controlSize(.small)
@@ -147,6 +191,14 @@ struct BrowserView: View {
     private func commit(_ raw: String) {
         var candidate = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !candidate.isEmpty else { return }
+        if let target = BrowserTarget(candidate), let url = URL(string: target.url) {
+            navigate(to: url)
+            return
+        }
+        if candidate.allSatisfy({ $0.isASCII && $0.isNumber }) {
+            loadError = "Choose a port from 1 to 65535."
+            return
+        }
         if !candidate.contains("://") {
             // Local dev servers are plain HTTP; anything else defaults to
             // HTTPS so a mistyped or remote site is never sent in the clear.
@@ -170,10 +222,14 @@ struct BrowserView: View {
     }
 
     private func navigate(to url: URL) {
+        if let onNavigate {
+            onNavigate(url.absoluteString)
+            return
+        }
         text = url.absoluteString
         loadedURL = url.absoluteString
         loadError = ""
-        onURLChange(loadedURL)
+        _ = onURLChange(loadedURL, .init(generation: navigationGeneration, registered: true))
         send(.navigate)
     }
 
@@ -193,17 +249,7 @@ private struct RemoteNavigation: Identifiable {
 private func isLoopbackHost(_ url: URL) -> Bool {
     // Missing host is not loopback: fail closed so odd URLs get a confirm.
     guard let host = url.host?.lowercased(), !host.isEmpty else { return false }
-    if host == "localhost" || host == "::1" || host == "0.0.0.0" {
-        return true
-    }
-    // IPv4 127.0.0.0/8 only when every label is numeric (not 127.evil.com).
-    let parts = host.split(separator: ".")
-    if parts.count == 4,
-       parts.allSatisfy({ $0.allSatisfy(\.isNumber) }),
-       parts[0] == "127" {
-        return true
-    }
-    return false
+    return BrowserTarget.isLoopback(host)
 }
 
 private extension BrowserView {
@@ -232,13 +278,15 @@ private enum BrowserCommand {
 private struct WebBrowser: NSViewRepresentable {
     var allowsExternalNavigation: Bool
     var url: URL?
+    var navigationGeneration: Int
     var command: BrowserCommand
     var commandID: Int
-    var onURLChange: (String) -> Void
+    var onURLChange: (String, BrowserNavigationEpoch.Completion) -> Bool
     var onRemoteNavigation: (URL) -> Void
     var onLoadingChange: (Bool) -> Void
     var onHistoryChange: (Bool, Bool) -> Void
     var onError: (String) -> Void
+    var onLocalNavigation: ((URLRequest, Bool) -> Bool)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -247,7 +295,8 @@ private struct WebBrowser: NSViewRepresentable {
             onRemoteNavigation: onRemoteNavigation,
             onLoadingChange: onLoadingChange,
             onHistoryChange: onHistoryChange,
-            onError: onError
+            onError: onError,
+            onLocalNavigation: onLocalNavigation
         )
     }
 
@@ -258,28 +307,33 @@ private struct WebBrowser: NSViewRepresentable {
         view.customUserAgent = Self.safariUserAgent
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
+        context.coordinator.epochs.current = navigationGeneration
         if let url {
-            view.load(URLRequest(url: url))
+            context.coordinator.epochs.register(view.load(URLRequest(url: url)), generation: navigationGeneration)
         }
         context.coordinator.webView = view
+        context.coordinator.onLocalNavigation = onLocalNavigation
         context.coordinator.lastCommandID = commandID
         return view
     }
 
     func updateNSView(_ view: WKWebView, context: Context) {
         context.coordinator.webView = view
+        context.coordinator.onLocalNavigation = onLocalNavigation
+        context.coordinator.onURLChange = onURLChange
+        context.coordinator.epochs.current = navigationGeneration
         view.customUserAgent = Self.safariUserAgent
         guard context.coordinator.lastCommandID != commandID else { return }
         context.coordinator.lastCommandID = commandID
         switch command {
         case .navigate:
-            if let url { view.load(URLRequest(url: url)) }
+            if let url { context.coordinator.epochs.register(view.load(URLRequest(url: url)), generation: navigationGeneration) }
         case .back:
-            if view.canGoBack { view.goBack() }
+            if view.canGoBack { context.coordinator.epochs.register(view.goBack(), generation: navigationGeneration) }
         case .forward:
-            if view.canGoForward { view.goForward() }
+            if view.canGoForward { context.coordinator.epochs.register(view.goForward(), generation: navigationGeneration) }
         case .reload:
-            view.reload()
+            context.coordinator.epochs.register(view.reload(), generation: navigationGeneration)
         case .stop:
             view.stopLoading()
             DispatchQueue.main.async { onLoadingChange(false) }
@@ -304,19 +358,22 @@ private struct WebBrowser: NSViewRepresentable {
         let allowsExternalNavigation: Bool
         weak var webView: WKWebView?
         var lastCommandID: Int = 0
-        let onURLChange: (String) -> Void
+        var epochs = BrowserNavigationEpoch()
+        var onURLChange: (String, BrowserNavigationEpoch.Completion) -> Bool
         let onRemoteNavigation: (URL) -> Void
         let onLoadingChange: (Bool) -> Void
         let onHistoryChange: (Bool, Bool) -> Void
         let onError: (String) -> Void
+        var onLocalNavigation: ((URLRequest, Bool) -> Bool)?
 
         init(
             allowsExternalNavigation: Bool,
-            onURLChange: @escaping (String) -> Void,
+            onURLChange: @escaping (String, BrowserNavigationEpoch.Completion) -> Bool,
             onRemoteNavigation: @escaping (URL) -> Void,
             onLoadingChange: @escaping (Bool) -> Void,
             onHistoryChange: @escaping (Bool, Bool) -> Void,
-            onError: @escaping (String) -> Void
+            onError: @escaping (String) -> Void,
+            onLocalNavigation: ((URLRequest, Bool) -> Bool)?
         ) {
             self.allowsExternalNavigation = allowsExternalNavigation
             self.onURLChange = onURLChange
@@ -324,14 +381,17 @@ private struct WebBrowser: NSViewRepresentable {
             self.onLoadingChange = onLoadingChange
             self.onHistoryChange = onHistoryChange
             self.onError = onError
+            self.onLocalNavigation = onLocalNavigation
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            guard epochs.started(navigation) else { return }
             onLoadingChange(true)
             onError("")
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            guard epochs.finish(navigation) != nil else { return }
             onLoadingChange(false)
             if (error as NSError).code != NSURLErrorCancelled { onError(error.localizedDescription) }
         }
@@ -341,19 +401,28 @@ private struct WebBrowser: NSViewRepresentable {
             didFailProvisionalNavigation navigation: WKNavigation!,
             withError error: Error
         ) {
+            guard epochs.finish(navigation) != nil else { return }
             onLoadingChange(false)
             if (error as NSError).code != NSURLErrorCancelled { onError(error.localizedDescription) }
         }
 
         /// Links inside a page can leave localhost; ask before letting them,
         /// the same way a typed address is asked about. Navigations the page
-        /// itself starts (scripts, form posts) stay allowed — blocking those
-        /// breaks real local apps.
+        /// itself starts through the current listener stay allowed. Unmapped
+        /// remote forms and frames cannot fall back to this computer.
         func webView(
             _ webView: WKWebView,
             decidePolicyFor navigationAction: WKNavigationAction,
             decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
         ) {
+            if onLocalNavigation?(navigationAction.request, navigationAction.targetFrame?.isMainFrame != false) == true {
+                decisionHandler(.cancel)
+                return
+            }
+            if let url = navigationAction.request.url, isLoopbackHost(url), BrowserTarget(url.absoluteString) == nil {
+                decisionHandler(.cancel)
+                return
+            }
             if let url = navigationAction.request.url,
                !["http", "https", "about"].contains(url.scheme?.lowercased() ?? "") {
                 if navigationAction.navigationType == .linkActivated { NSWorkspace.shared.open(url) }
@@ -375,8 +444,9 @@ private struct WebBrowser: NSViewRepresentable {
                      for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
             if navigationAction.targetFrame == nil, let url = navigationAction.request.url,
                ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
-                if allowsExternalNavigation || isLoopbackHost(url) {
-                    webView.load(navigationAction.request)
+                if onLocalNavigation?(navigationAction.request, true) == true { return nil }
+                if (allowsExternalNavigation || isLoopbackHost(url)) && (!isLoopbackHost(url) || BrowserTarget(url.absoluteString) != nil) {
+                    epochs.register(webView.load(navigationAction.request), generation: epochs.current)
                 } else {
                     onRemoteNavigation(url)
                 }
@@ -385,10 +455,11 @@ private struct WebBrowser: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard let completion = epochs.finish(navigation) else { return }
             onLoadingChange(false)
             onHistoryChange(webView.canGoBack, webView.canGoForward)
             if let url = webView.url?.absoluteString {
-                onURLChange(url)
+                _ = onURLChange(url, completion)
             }
         }
 

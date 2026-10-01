@@ -392,8 +392,8 @@ struct TerminalPane: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if case let .browser(id) = front,
                   let browser = workspaces.browserTabs(in: folder.id).first(where: { $0.id == id }) {
-            BrowserView(
-                url: browser.url,
+            ProjectBrowserView(
+                workspaceID: folder.id, initialURL: browser.url,
                 onURLChange: { workspaces.setBrowserURL($0, in: folder.id, tabID: browser.id) }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -439,7 +439,7 @@ struct TerminalPane: View {
                 InspectorTitle(title: "Browser", symbol: "globe")
                 Spacer(minLength: 0)
             }
-            BrowserView(url: browserURLs[folder.id] ?? "", allowsExternalNavigation: true) {
+            ProjectBrowserView(workspaceID: folder.id, initialURL: browserURLs[folder.id] ?? "", allowsExternalNavigation: true) {
                 browserURLs[folder.id] = $0
             }
             .id(folder.id)

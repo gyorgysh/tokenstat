@@ -441,6 +441,8 @@ struct ClientWorkspacesView: View {
                     ClientFolderRow(folder: folder)
                 }
                 .buttonStyle(.plain)
+                .modifier(ClientProjectRename(peer: peer, folder: folder,
+                    onChanged: { await model.refresh(account: account.account) }))
             }
             }
         }
@@ -473,9 +475,12 @@ struct ClientWorkspacesView: View {
                         Button {
                             model.openSession(session)
                         } label: {
-                            ClientSessionRow(session: session)
+                            ClientSessionRow(session: session, displayName: SidebarTerminalNames.shared.name(peer: model.connectedKey ?? "", workspaceID: session.workspaceID, sessionID: session.id))
                         }
                         .buttonStyle(.plain)
+                        .modifier(ClientTerminalActions(peer: model.connectedKey ?? "", workspaceID: session.workspaceID ?? "",
+                            folderName: model.folders.first { ClientRemote.rawWorkspaceID(of: $0) == session.workspaceID || $0.id == session.workspaceID }?.name ?? "Project",
+                            info: session, onDuplicate: { copied in model.openSession(copied); Task { await model.refresh(account: account.account) } }))
                         .listRowInsets(EdgeInsets(
                             top: 0, leading: 0, bottom: Theme.Space.s, trailing: 0
                         ))

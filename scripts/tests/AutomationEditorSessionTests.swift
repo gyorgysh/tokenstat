@@ -233,6 +233,30 @@ actor FixtureAutomations: AutomationEditorService {
         }
 
         do {
+            func templateSession() -> AutomationEditorSession {
+                AutomationEditorSession(target: AutomationEditorTarget(peer: "computer"), workspaceID: "folder",
+                    folderName: "Website", scope: .local(installationID: "template-fixture"), hostIdentity: "computer",
+                    service: service, draftDirectory: directory)
+            }
+            let editor = templateSession()
+            await editor.load()
+            var template = AutomationEditorDraft(workspaceID: "folder", backend: "codex")
+            template.name = "Daily brief"
+            template.prompt = "Summarise usage"
+            template.scheduleKind = .daily
+            template.hour = 8
+            template.budgetMinutes = "10"
+            check(editor.applyTemplate(template), "template fills a new blank editor")
+            check(editor.fields == template, "template schedule and budget stay exact")
+            editor.fields.prompt = "my unfinished writing"
+            await editor.flush()
+            let reopened = templateSession()
+            await reopened.load()
+            check(!reopened.applyTemplate(template), "template refuses restored writing")
+            check(reopened.fields.prompt == "my unfinished writing", "restored writing survives template selection")
+        }
+
+        do {
             var draft = AutomationEditorDraft(workspaceID: "")
             check(draft.validation == "Give this job a name.", "empty name")
             draft.name = "Nightly"

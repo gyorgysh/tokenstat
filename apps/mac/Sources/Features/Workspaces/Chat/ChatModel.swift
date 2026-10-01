@@ -1603,10 +1603,10 @@ final class ChatModel {
     }
 
     /// Sidebar mutations route through the row's project, including unopened projects.
-    func rename(_ conversation: ChatConversation, in folderID: String, to title: String) async throws {
+    func rename(_ conversation: ChatConversation, in folderID: String, to title: String, peer: String? = nil) async throws {
         let scope = WorkSessionContext.shared.scope
         let updated = try await Bridge.updateChat(id: conversation.id, title: title,
-                                                  peer: Bridge.chatRoute(workspaceID: folderID).peer)
+                                                  peer: Bridge.chatRoute(workspaceID: folderID, peer: peer).peer)
         guard scope == WorkSessionContext.shared.scope else { return }
         publishSidebarConversation(updated, in: folderID)
         if let reference = draftReference(for: updated.id, in: folderID),
@@ -1617,10 +1617,10 @@ final class ChatModel {
         }
     }
 
-    func fork(_ conversation: ChatConversation, in folderID: String) async throws -> ChatConversation {
+    func fork(_ conversation: ChatConversation, in folderID: String, peer: String? = nil) async throws -> ChatConversation {
         let scope = WorkSessionContext.shared.scope
         let copied = try await Bridge.forkChat(id: conversation.id,
-                                               peer: Bridge.chatRoute(workspaceID: folderID).peer)
+                                               peer: Bridge.chatRoute(workspaceID: folderID, peer: peer).peer)
         guard scope == WorkSessionContext.shared.scope else {
             throw NSError(domain: "Chat", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "The account changed while copying the chat."])
@@ -1697,7 +1697,8 @@ final class ChatModel {
         }
     }
 
-    func removeAll(in folderID: String) async {
+    func removeAll(in folderID: String, peer: String? = nil) async {
+        let scope = WorkSessionContext.shared.scope
         let cachePrefix = continuityOwner(folderID: folderID).map { owner in
             WorkReferenceKey.folder(scope: owner.scope, hostIdentity: owner.host, workspaceID: owner.workspace)
         }
@@ -1706,11 +1707,13 @@ final class ChatModel {
             // `folderID` may encode a different remote peer than the chat
             // currently loaded in this model. Let the bridge route the folder
             // itself instead of borrowing the current conversation's peer.
-            _ = try await Bridge.removeAllChats(workspaceID: folderID)
+            _ = try await Bridge.removeAllChats(workspaceID: folderID, peer: peer)
+            guard scope == WorkSessionContext.shared.scope else { return }
             previewCacheEpoch &+= 1
             if let cachePrefix { recentMessages.retain([], in: cachePrefix) }
             if self.folderID == folderID { clearRecentMessagePreview() }
             guard context == loadGeneration else { return }
+            error = nil
             storeChatListCache([], folderID: folderID)
             forgetLastSelected(folderID: folderID)
             if self.folderID == folderID || workspaceID == folderID {

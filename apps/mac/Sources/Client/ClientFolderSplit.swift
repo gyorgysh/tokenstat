@@ -22,14 +22,18 @@ struct ClientFolderSplit: View {
     @State private var pullCounts = PullCountStore.shared
     @State private var errorMessage: String?
     @State private var showPort = false
-    @AppStorage("browser.lastPort") private var portText = "5173"
-    @State private var forwardedPort: Int?
-    @State private var browserURL: String?
+    @State private var portText = "5173"
+    @State private var browserSession: ProjectBrowserSession?
     @State private var isOpeningPort = false
 
     private var workspaceID: String {
         ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
     }
+
+    private var browserOwner: WorkReference? {
+        WorkViewedChange.owner(folderID: workspaceID, peer: peer)
+    }
+
 
     private var current: WorkspaceFolder {
         guard var merged = live else { return folder }
@@ -47,6 +51,11 @@ struct ClientFolderSplit: View {
         .background(Theme.background)
         .navigationTitle(current.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                ClientProjectRenameButton(peer: peer, folder: current, onChanged: { await reload() })
+            }
+        }
         .refreshable {
             await ClientRefresh.pull("workspace-\(workspaceID)") { await reload() }
         }
@@ -55,19 +64,15 @@ struct ClientFolderSplit: View {
             guard note.object as? GitCommitTarget == GitCommitTarget(peer: peer, workspaceID: workspaceID) else { return }
             Task { await reload() }
         }
-        .sheet(isPresented: $showPort) { portSheet }
+        .sheet(isPresented: $showPort) { portSheet.onAppear { portText = BrowserHistory.shared.portSuggestion(for: browserOwner) } }
         .fullScreenCover(item: Binding(
-            get: { browserURL.map { BrowserURL(url: $0) } },
-            set: { browserURL = $0?.url }
-        )) { item in
-            ClientBrowserScreen(url: item.url) {
-                browserURL = nil
-                if let port = forwardedPort {
-                    forwardedPort = nil
-                    Task { await Bridge.proxyUnlisten(peer: peer, host: "127.0.0.1", port: port) }
-                }
-            }
+            get: { browserSession },
+            set: { if $0 == nil { closeBrowser() } }
+        )) { session in
+            ClientBrowserScreen(session: session) { closeBrowser() }
         }
+        .onChange(of: WorkSessionContext.shared.scope) { _, _ in closeBrowser() }
+        .onChange(of: folder.id) { _, _ in closeBrowser() }
     }
 
     private var split: some View {
@@ -163,6 +168,7 @@ struct ClientFolderSplit: View {
                 Section {
                     TextField("Port", text: $portText)
                         .keyboardType(.numberPad)
+                    ClientRecentBrowserPorts(owner: browserOwner, portText: $portText)
                 } footer: {
                     Text("Opens a loopback bridge to that port on \(hostName) and shows it in the in-app browser.")
                 }
@@ -175,7 +181,7 @@ struct ClientFolderSplit: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Open") { Task { await openPort() } }
-                        .disabled(isOpeningPort || UInt16(portText) == nil)
+                        .disabled(isOpeningPort || BrowserTarget.parsePort(portText) == nil)
                 }
             }
         }
@@ -210,19 +216,31 @@ struct ClientFolderSplit: View {
         errorMessage = nil
     }
 
+    private func closeBrowser() {
+        browserSession?.close()
+        browserSession = nil
+    }
+
     private func openPort() async {
-        guard let port = UInt16(portText.trimmingCharacters(in: .whitespaces)) else { return }
+        guard !isOpeningPort, let port = BrowserTarget.parsePort(portText),
+              let target = BrowserHistory.shared.target(for: browserOwner, port: port) else { return }
         isOpeningPort = true
         defer { isOpeningPort = false }
-        do {
-            let result = try await Bridge.proxyListen(peer: peer, host: "127.0.0.1", port: Int(port))
-            showPort = false
-            forwardedPort = Int(port)
-            browserURL = result.url
-        } catch {
-            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
-            showPort = false
+        let session = ProjectBrowserOwner.make(workspaceID: workspaceID, peer: peer)
+        await session.open(target.url)
+        guard session.owner == browserOwner, !Task.isCancelled else {
+            session.close()
+            return
         }
+        if let error = session.error {
+            errorMessage = ClientTunnelCopy.display(error, host: hostName)
+            session.close()
+            return
+        }
+        guard !session.transportURL.isEmpty else { return }
+        closeBrowser()
+        browserSession = session
+        showPort = false
     }
 }
 

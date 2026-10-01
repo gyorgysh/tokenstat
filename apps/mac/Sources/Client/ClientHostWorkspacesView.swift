@@ -340,6 +340,8 @@ struct ClientHostWorkspacesView: View {
                         ClientFolderRow(folder: folder)
                     }
                     .buttonStyle(.plain)
+                    .modifier(ClientProjectRename(peer: peerKey, folder: folder,
+                        onChanged: { await model.connect(peerKey: peerKey, name: hostName) }))
                 }
             }
         }
@@ -363,9 +365,12 @@ struct ClientHostWorkspacesView: View {
                 Button {
                     model.open(session, peer: peerKey)
                 } label: {
-                    ClientSessionRow(session: session)
+                    ClientSessionRow(session: session, displayName: SidebarTerminalNames.shared.name(peer: peerKey, workspaceID: session.workspaceID, sessionID: session.id))
                 }
                 .buttonStyle(.plain)
+                .modifier(ClientTerminalActions(peer: peerKey, workspaceID: session.workspaceID ?? "",
+                    folderName: model.folders.first { ClientRemote.rawWorkspaceID(of: $0) == session.workspaceID || $0.id == session.workspaceID }?.name ?? "Project",
+                    info: session, onDuplicate: { copied in model.open(copied, peer: peerKey); Task { await model.connect(peerKey: peerKey, name: hostName) } }))
             }
             if model.sessions.isEmpty {
                 Text("Nothing running. Start one from a folder.")

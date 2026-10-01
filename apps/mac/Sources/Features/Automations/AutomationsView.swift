@@ -645,61 +645,7 @@ struct AutomationsView: View {
         model.runs.filter { $0.status == "running" }.count
     }
 
-    private static let suggestedTemplates: [AutomationTemplate] = [
-        AutomationTemplate(
-            title: "Daily brief",
-            subtitle: "Every morning at 8:00",
-            symbol: "sunrise",
-            name: "Daily brief",
-            prompt: "Summarise yesterday's usage and flag anything that needs attention.",
-            backendID: "claude",
-            schedule: AutomationSchedule(kind: .daily, everySeconds: 0, hour: 8, minute: 0, weekday: 0),
-            budgetSeconds: 600
-        ),
-        AutomationTemplate(
-            title: "System health check",
-            subtitle: "Every hour",
-            symbol: "heart.text.square",
-            name: "System health check",
-            prompt: "Check disk, memory and CPU, and confirm the tokenstat daemon is running. Report anything abnormal.",
-            backendID: "sh",
-            schedule: AutomationSchedule(kind: .interval, everySeconds: 3600, hour: 0, minute: 0, weekday: 0),
-            budgetSeconds: 120
-        ),
-        AutomationTemplate(
-            title: "Dependency check",
-            subtitle: "Every week",
-            symbol: "shippingbox",
-            name: "Dependency check",
-            prompt: "Check for outdated or vulnerable dependencies (npm audit and the package managers this project uses) and summarise what needs a bump.",
-            backendID: "sh",
-            schedule: AutomationSchedule(kind: .weekly, hour: 9, minute: 0, weekday: 0),
-            budgetSeconds: 900
-        ),
-        AutomationTemplate(
-            title: "Weekday standup",
-            subtitle: "Weekdays at 9:00",
-            symbol: "person.3",
-            name: "Weekday standup",
-            prompt: "Summarise open work and anything that blocked progress yesterday. Keep it short.",
-            backendID: "claude",
-            schedule: AutomationSchedule(
-                kind: .weekdays, hour: 9, minute: 0,
-                weekdays: AutomationSchedule.weekdaysMask
-            ),
-            budgetSeconds: 600
-        ),
-        AutomationTemplate(
-            title: "Release",
-            subtitle: "Once, when you run it",
-            symbol: "tag",
-            name: "Release",
-            prompt: AutomationsModel.releasePrompt(),
-            backendID: "claude",
-            schedule: AutomationSchedule(kind: .once),
-            budgetSeconds: 1800
-        ),
-    ]
+    private static let suggestedTemplates = AutomationTemplate.suggested
 
     // MARK: - Nothing set up yet
 
@@ -872,19 +818,6 @@ private struct AutomationHistorySheet: View {
 }
 
 // MARK: - Creating one
-
-/// A suggested setup on the Automations screen, pre-filling the sheet.
-struct AutomationTemplate: Identifiable {
-    var id: String { title }
-    var title: String
-    var subtitle: String
-    var symbol: String
-    var name: String
-    var prompt: String
-    var backendID: String
-    var schedule: AutomationSchedule
-    var budgetSeconds: UInt64
-}
 
 /// Setting up an automation, in a sheet.
 ///

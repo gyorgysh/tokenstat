@@ -26,6 +26,8 @@ struct ClientChatView: View {
     @State private var runningOnly = false
     @State private var alphabetical = false
     @State private var retainedThread: ChatConversation?
+    @State private var deleteAll = false
+    @State private var supportsDeleteAll = false
 
     private var filteredChats: [ChatConversation] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -77,7 +79,8 @@ struct ClientChatView: View {
                     folderName: folderName,
                     hostName: hostName,
                     isActive: opened != nil,
-                    onBack: { retainedThread = opened; self.opened = nil }
+                    onBack: { retainedThread = opened; self.opened = nil },
+                    onFork: { copied in retainedThread = nil; opened = copied }
                 )
                 .opacity(opened == nil ? 0 : 1)
                 .allowsHitTesting(opened != nil)
@@ -160,12 +163,14 @@ struct ClientChatView: View {
                 Text("No matching conversations. Adjust your search or filters.").font(ClientType.label).foregroundStyle(.secondary).clientCardRow()
             }
             ForEach(filteredChats) { chat in
-                Button {
-                    opened = chat
-                } label: {
-                    row(chat, draft: model.draftReference(for: chat.id, in: workspaceID))
+                HStack {
+                    Button { opened = chat } label: {
+                        row(chat, draft: model.draftReference(for: chat.id, in: workspaceID))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }.buttonStyle(.plain)
+                    ClientChatMenu(model: model, conversation: chat, peer: peer, workspaceID: workspaceID,
+                                   onFork: { opened = $0 })
                 }
-                .buttonStyle(.plain)
                 .clientCardRow()
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button("Delete", role: .destructive) { pendingDelete = chat }
@@ -196,6 +201,21 @@ struct ClientChatView: View {
                 Button("New chat", .create) { Task { await create() } }
                     .disabled(model.isCreating)
             }
+            if supportsDeleteAll && !model.chats.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu { Button("Delete all chats…", role: .destructive) { deleteAll = true } }
+                    label: { ActionIcon.more.label("Chat list actions") }
+                }
+            }
+        }
+        .task(id: peer) { supportsDeleteAll = await RemoteHostFeature.chatRemoveAll.isSupported(peer: peer) }
+        .confirmationDialog("Delete all chats?", isPresented: $deleteAll, titleVisibility: .visible) {
+            Button("Delete all chats", role: .destructive) {
+                Task { await model.removeAll(in: workspaceID, peer: peer); if model.error == nil { retainedThread = nil; opened = nil } }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Every chat in this project on \(hostName.isEmpty ? "the computer" : hostName) will be deleted. This cannot be undone.")
         }
         .confirmationDialog(
             "Delete this chat?",
@@ -380,6 +400,7 @@ struct ClientChatThread: View {
     /// same reason.
     var isActive = true
     var onBack: (() -> Void)?
+    var onFork: ((ChatConversation) -> Void)?
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
     /// A row the transcript should jump to, set by the pending-approval bar.
@@ -631,6 +652,10 @@ struct ClientChatThread: View {
                             .keyboardShortcut("i", modifiers: [.command, .option])
                         }
                         if model.savedCopy == nil {
+                            if let chat, let tools = toolsIdentity {
+                                ClientChatMenu(model: model, conversation: chat, peer: tools.peer,
+                                               workspaceID: tools.workspaceID, onFork: onFork)
+                            }
                             Button("Continue on another device", .device) { showingHandoff = true }
                             Button("Setup", .settings) { showingSetup = true }
                         }

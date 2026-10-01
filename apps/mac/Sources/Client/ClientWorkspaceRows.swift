@@ -142,10 +142,12 @@ struct ClientFolderRow: View {
 struct ClientSessionRow: View {
     let session: PtySessionInfo
     var showsChevron: Bool = false
+    var displayName: String?
 
     private var harness: String? { harnessID(forCommand: session.command) }
 
     private var title: String {
+        if let displayName, !displayName.isEmpty { return displayName }
         if let harness { return harnessName(harness) }
         return URL(fileURLWithPath: session.command).lastPathComponent
     }

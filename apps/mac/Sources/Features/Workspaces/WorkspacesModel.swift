@@ -161,8 +161,6 @@ struct WorkspaceBrowserTab: Identifiable, Hashable, Sendable {
     let id: String
     var url: String
     var number: Int
-    var peer: String?
-    var port: Int?
     var title: String { "Browser \(number)" }
 }
 
@@ -521,10 +519,6 @@ final class WorkspacesModel {
 
     /// Drop a browser tab's payload, and the port forward it was holding open.
     private func forgetBrowser(_ id: String, in workspaceID: String) {
-        guard let tab = browserTabs[workspaceID]?.first(where: { $0.id == id }) else { return }
-        if let peer = tab.peer, let port = tab.port {
-            Task { await Bridge.proxyUnlisten(peer: peer, host: "127.0.0.1", port: port) }
-        }
         browserTabs[workspaceID]?.removeAll { $0.id == id }
     }
 
@@ -541,15 +535,16 @@ final class WorkspacesModel {
     /// hand. Time out and open anyway, so a slow first run is not a stuck
     /// terminal with no page.
     func openHarnessPage(_ url: String, in folder: WorkspaceFolder) async {
-        guard let parsed = URL(string: url), let port = parsed.port else { return }
+        guard let target = BrowserTarget(url) else { return }
+        let owner = WorkViewedChange.owner(folderID: folder.id)
         if folder.id.hasPrefix("remote:") {
             try? await Task.sleep(for: .seconds(2))
-            await openRemotePort(port, in: folder)
-            return
+        } else {
+            _ = await Self.waitForLoopback(port: target.port)
         }
-        _ = await Self.waitForLoopback(port: port)
+        guard !Task.isCancelled, WorkViewedChange.owner(folderID: folder.id) == owner else { return }
         let tab = showBrowser(in: folder.id)
-        setBrowserURL(url, in: folder.id, tabID: tab.id)
+        setBrowserURL(target.url, in: folder.id, tabID: tab.id)
     }
 
     /// True when something on this machine's loopback answered.
@@ -573,52 +568,18 @@ final class WorkspacesModel {
         return false
     }
 
-    /// True when the remote harness answered through the local proxy.
-    ///
-    /// The proxy writes 502 while the peer port is still closed, so that
-    /// status is "not yet". Time out and return false so the caller can
-    /// still open the tab.
-    private nonisolated static func waitForProxyPage(_ url: URL, timeout: TimeInterval = 45) async -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if Task.isCancelled { return false }
-            var request = URLRequest(url: url)
-            request.timeoutInterval = 1
-            request.httpMethod = "GET"
-            if let (_, response) = try? await URLSession.shared.data(for: request),
-               let http = response as? HTTPURLResponse,
-               http.statusCode != 502 {
-                return true
-            }
-            try? await Task.sleep(for: .milliseconds(400))
-        }
-        return false
-    }
-
     /// Open a browser tab pointed at a service on a remote machine's own
     /// localhost. The daemon binds a loopback port here and bridges it over
     /// the authenticated stream, so the tab is an ordinary local URL.
     func openRemotePort(_ port: Int, in folder: WorkspaceFolder) async {
         let parts = folder.id.split(separator: ":", maxSplits: 2).map(String.init)
-        guard parts.count == 3, parts[0] == "remote" else {
-            errorMessage = "Port forwarding works on a workspace on another device."
+        guard parts.count == 3, parts[0] == "remote", let target = BrowserTarget(String(port)) else {
+            errorMessage = "Choose a port from 1 to 65535 on a project on another device."
             return
         }
-        do {
-            let proxy = try await Bridge.proxyListen(peer: parts[1], host: "127.0.0.1", port: port)
-            if let url = URL(string: proxy.url) {
-                _ = await Self.waitForProxyPage(url)
-            }
-            let tab = showBrowser(in: folder.id)
-            if let index = browserTabs[folder.id]?.firstIndex(where: { $0.id == tab.id }) {
-                browserTabs[folder.id]?[index].peer = parts[1]
-                browserTabs[folder.id]?[index].port = port
-            }
-            setBrowserURL(proxy.url, in: folder.id, tabID: tab.id)
-            errorMessage = nil
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        let tab = showBrowser(in: folder.id)
+        setBrowserURL(target.url, in: folder.id, tabID: tab.id)
+        errorMessage = nil
     }
 
     func showFiles(in workspaceID: String) {

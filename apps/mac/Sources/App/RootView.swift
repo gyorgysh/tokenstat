@@ -1642,7 +1642,7 @@ struct RootView: View {
                     InspectorTitle(title: "Browser", symbol: "globe")
                     Spacer(minLength: 0)
                 }
-                BrowserView(url: workspaceBrowserURLs[id] ?? "", allowsExternalNavigation: true) {
+                ProjectBrowserView(workspaceID: id, initialURL: workspaceBrowserURLs[id] ?? "", allowsExternalNavigation: true) {
                     workspaceBrowserURLs[id] = $0
                 }
                 .id(id)

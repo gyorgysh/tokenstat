@@ -33,6 +33,7 @@ enum RemoteHostFeature: Hashable {
     case workflowEditing
     case steer
     case chatFork
+    case chatRemoveAll
 
     var title: String {
         switch self {
@@ -58,6 +59,7 @@ enum RemoteHostFeature: Hashable {
         case .automationReceipts: "Saving automations"
         case .workflowEditing: "Saving workflows"
         case .chatFork: "Forking chats"
+        case .chatRemoveAll: "Deleting all chats"
         case .steer: "Notes on the next step"
         }
     }
@@ -113,6 +115,7 @@ enum RemoteHostFeature: Hashable {
         case .automationReceipts: 21
         case .workflowEditing: 22
         case .chatFork: 26
+        case .chatRemoveAll: 26
         case .steer: 25
         }
     }
@@ -141,6 +144,7 @@ enum RemoteHostFeature: Hashable {
         case .automationReceipts: "bolt.fill"
         case .workflowEditing: "square.and.arrow.down"
         case .chatFork: "doc.on.doc"
+        case .chatRemoveAll: "trash"
         case .steer: "text.bubble"
         }
     }
