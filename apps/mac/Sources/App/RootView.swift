@@ -26,6 +26,7 @@ struct RootView: View {
 
     @State private var route: Route = .global(.home)
     @State private var showWorkSearch = false
+    @State private var railAccountHovered = false
     /// The folder whose chat pane is mounted, on macOS.
     ///
     /// Set on the first visit and kept. Chat is the one non-workspace screen
@@ -928,20 +929,63 @@ struct RootView: View {
                 handle: account.account?.handle,
                 size: 28
             )
+            .frame(width: 40, height: 40)
+            .overlay {
+                if let tier = railAccountTier, BadgeShape(tier: tier) != nil {
+                    Circle()
+                        .strokeBorder(
+                            AngularGradient(
+                                colors: [Theme.accent, Theme.secondary, Theme.accent],
+                                center: .center
+                            ),
+                            lineWidth: railAccountHovered ? 2 : 1.5
+                        )
+                        .frame(width: 34, height: 34)
+                        .rotationEffect(.degrees(railAccountHovered && !reduceMotion ? 120 : 0))
+                        .shadow(
+                            color: Theme.secondary.opacity(railAccountHovered ? 0.32 : 0),
+                            radius: railAccountHovered ? 4 : 0
+                        )
+                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.55), value: railAccountHovered)
+                }
+            }
             .overlay(alignment: .bottomTrailing) {
+                if let tier = railAccountTier, BadgeShape(tier: tier) != nil {
+                    TierMark(tier: tier, size: 11)
+                        .frame(width: 18, height: 18)
+                        .background(Theme.sidebar, in: Circle())
+                        .overlay(Circle().strokeBorder(Theme.border, lineWidth: 1))
+                }
+            }
+            .overlay(alignment: .topTrailing) {
                 if account.isSyncing {
                     Circle().fill(Theme.accent)
                         .frame(width: 8, height: 8)
                         .overlay(Circle().strokeBorder(Theme.sidebar, lineWidth: 1.5))
                 }
             }
+            .accessibilityHidden(true)
             #if os(macOS)
-            NativeMenuTrigger(items: { accountMenuItems })
+            NativeMenuTrigger(items: { accountMenuItems }, accessibilityLabel: railAccountLabel)
             #endif
         }
         .frame(width: 40, height: 40)
-        .help(account.account?.title ?? "Account")
-        .accessibilityLabel("Account")
+        .onHover { railAccountHovered = $0 }
+        .help(railAccountLabel)
+    }
+
+    private var railAccountTier: String? {
+        guard account.signedIn,
+              let tier = account.account?.tier?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !tier.isEmpty else { return nil }
+        return tier.lowercased()
+    }
+
+    private var railAccountLabel: String {
+        guard account.signedIn else { return "Account, sign in to tokenstat" }
+        let name = account.account?.title ?? "Signed in"
+        guard let tier = railAccountTier else { return "Account, \(name)" }
+        return "Account, \(name), \(tier.capitalized) plan"
     }
 
     /// Leading toggles injected into every destination's chrome bar.
@@ -3911,6 +3955,9 @@ struct NativeMenuTrigger: NSViewRepresentable {
         context.coordinator.items = items
         (nsView as? TriggerView)?.coordinator = context.coordinator
         (nsView as? TriggerView)?.rightClickOnly = rightClickOnly
+        if let accessibilityLabel {
+            nsView.setAccessibilityLabel(accessibilityLabel)
+        }
     }
 
     /// Builds the menu and runs the chosen item.

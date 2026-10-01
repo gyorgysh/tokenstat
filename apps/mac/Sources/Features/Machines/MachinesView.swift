@@ -58,11 +58,9 @@ struct MachinesView: View {
             }
             if model.remoteReachAllowed {
                 HStack(spacing: Theme.Space.m) {
-                    Picker("Device management", selection: $devicePage) {
-                        ForEach(DevicePage.allCases, id: \.self) { page in Text(page.rawValue).tag(page) }
-                    }
-                    .pickerStyle(.segmented).labelsHidden()
-                    .frame(maxWidth: 360)
+                    SegmentedTabs(options: DevicePage.allCases, selection: $devicePage)
+                        .frame(maxWidth: 320)
+                        .accessibilityLabel("Device management")
                     Spacer(minLength: 0)
                     Button("Add device", .create) { addingDevice = true }
                         .buttonStyle(AccentButtonStyle(small: true))
