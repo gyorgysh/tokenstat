@@ -36,7 +36,8 @@ cat <<EOF
 
 tokenstat is CLI-first, local usage tracking for AI coding agents. Stable
 downloads below include the CLI for macOS, Linux, and Windows, plus the macOS
-desktop app. Counters stay on your machine unless you opt into sync.
+desktop app and Windows desktop review build. Counters stay on your machine
+unless you opt into sync.
 
 ### Install the CLI
 
@@ -57,9 +58,14 @@ Or download an archive below, verify \`SHA256SUMS\`, and put \`tokenstat\` on yo
 Download \`tokenstat-${version}-macos.dmg\` below, open it, and drag the app to
 Applications.
 
-The Windows desktop and Android clients are still maturing. Their unsigned
-development builds remain available from the **Preview** workflow and are not
-stable release downloads yet.
+### Windows desktop review build
+
+Download \`tokenstat-${version}-windows-x64-setup.exe\` below and run the installer.
+The Windows desktop is still a review build.
+
+Unsigned desktop previews and Android debug APKs remain available from the
+**Preview** workflow. Android Play uploads use a separately signed App Bundle;
+this release workflow does not build or publish Android releases.
 
 ## What's changed
 EOF

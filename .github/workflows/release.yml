@@ -103,7 +103,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: ${{ matrix.target }}
 
@@ -184,7 +184,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           # Universal, so one download runs on both kinds of Mac.
           targets: aarch64-apple-darwin,x86_64-apple-darwin
@@ -222,7 +222,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: x86_64-pc-windows-msvc
 
@@ -384,7 +384,12 @@ jobs:
             echo ".p12, update DEVELOPER_ID_P12_BASE64 and DEVELOPER_ID_P12_PASSWORD." >&2
             exit 1
           fi
-          security list-keychains -d user -s "${KEYCHAIN}" $(security list-keychains -d user | tr -d '"')
+          existing_keychains=()
+          while IFS= read -r existing_keychain; do
+            existing_keychain="$(printf '%s' "${existing_keychain}" | sed 's/^[[:space:]]*"//;s/"[[:space:]]*$//')"
+            existing_keychains+=("${existing_keychain}")
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "${KEYCHAIN}" "${existing_keychains[@]}"
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "${KEYCHAIN_PW}" "${KEYCHAIN}"
           rm -f "${CERT_PATH}" "${CERT_IMPORT}" "${CERT_PEM}" "${KEY_PEM}" "${PASS_FILE}"
@@ -424,7 +429,8 @@ jobs:
               echo "no tokenstat binary in ${archive}" >&2
               exit 1
             fi
-            local daemon="$(dirname "${bin}")/tokenstat-hostd"
+            local daemon
+            daemon="$(dirname "${bin}")/tokenstat-hostd"
             test -f "${daemon}" || { echo "no tokenstat-hostd beside ${bin} in ${archive}" >&2; exit 1; }
             for executable in "${bin}" "${daemon}"; do
               codesign --force --options runtime --timestamp \
@@ -432,7 +438,8 @@ jobs:
               codesign --verify --verbose=2 "${executable}"
             done
             if [ -n "${NOTARY_KEY_PATH}" ]; then
-              local zip="${RUNNER_TEMP}/tokenstat-notarize-${target}.zip"
+              local zip
+              zip="${RUNNER_TEMP}/tokenstat-notarize-${target}.zip"
               ditto -c -k --keepParent "$(dirname "${bin}")" "${zip}"
               xcrun notarytool submit "${zip}" \
                 --key "${NOTARY_KEY_PATH}" \

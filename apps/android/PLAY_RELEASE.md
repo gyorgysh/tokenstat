@@ -2,9 +2,10 @@
 
 Package name: `ai.tokenstat.tokenstat`.
 
-The repository already builds an AAB, signs it when the upload keystore is
-present, and the tag workflow uploads that AAB to the internal track. None of
-that creates a Play Console account. Google does not expose developer signup,
+The local release script builds and verifies an upload-key-signed Android App
+Bundle (AAB), the file to upload to Google Play. Upload it manually in Play
+Console; the tag workflow does not build or publish Android releases. None of
+this creates a Play Console account. Google does not expose developer signup,
 identity verification, or "create app" over the Android Publisher API. Those
 steps are a browser session on [play.google.com/console](https://play.google.com/console).
 
@@ -14,12 +15,13 @@ steps are a browser session on [play.google.com/console](https://play.google.com
 - Subscription product ids: `ai.tokenstat.supporter.yearly`,
   `ai.tokenstat.patron.yearly`, `ai.tokenstat.legend.yearly`.
   Duration lives on those products as a second base plan (`monthly` on
-  Patron and Legend), not as a separate product id. Paywall UI still
-  lists yearly. Leave the monthly base plans draft until the client
-  picks offers by `basePlanId`.
+  Patron and Legend), not as a separate product id. The paywall selects offers
+  by billing period and base plan; use the existing Console base plan ids below.
 - Gradle `signingConfigs.play` reads `TOKENSTAT_ANDROID_KEYSTORE` and friends.
-- `.github/workflows/release.yml` job `android` publishes to the internal
-  track when the `release` environment has the secrets below.
+- CI builds an unsigned release AAB and retains its R8 mapping and native
+  debug symbols. This verifies release compilation, not Play distribution.
+- `.github/workflows/release.yml` publishes desktop and CLI artifacts only.
+  Play automation would need a separate job and service-account setup.
 - Preview builds stay debug APKs. They are not Play uploads.
 
 ## Local upload key (this machine)
@@ -42,12 +44,30 @@ locked as the upload cert. Losing it means a Play support request to rotate.
 Signed local bundle:
 
 ```bash
-scripts/build-android-release.sh
+ANDROID_HOME="$HOME/Library/Android/sdk" scripts/build-android-release.sh dist/android/1.1.0-118
 ```
 
-That sources `play.env` and writes `dist/android/tokenstat-<version>-release.aab`.
+Set `ANDROID_HOME` to your SDK installation. The script sources `play.env`,
+requires a matching upload-key signature on both the AAB and APK, checks APK
+16 KB ZIP alignment, and writes these files to the chosen output directory:
 
-The `release` GitHub environment needs:
+- `tokenstat-<version>-release.aab`: upload to Play Console.
+- `tokenstat-<version>-release.apk`: direct installation using the upload key.
+- `tokenstat-<version>-<versionCode>-symbols.zip`: R8 mappings and native symbols.
+- `release-info.txt` and `SHA256SUMS`: source commit, signer and file hashes.
+
+The default output directory is `dist/android`. Nothing is uploaded or published
+by this command. A directly installed APK cannot replace a Play installation
+when Play uses a different app signing key.
+
+Before uploading, check the bundle with Google's `bundletool validate` and
+`bundletool dump config`; native-library alignment must be `PAGE_ALIGNMENT_16K`.
+Check every packaged native library's ELF alignment as described in the
+[Android 16 KB page-size guidance](https://developer.android.com/guide/practices/page-sizes).
+Use a version code greater than every bundle already uploaded to that Play app.
+
+The upload-key helper can store these secrets in the `release` GitHub environment
+for future automation. Existing workflows do not consume them:
 
 | Secret | Source |
 | --- | --- |
@@ -98,8 +118,9 @@ debug keystore can force a "prove you own this key" step on create-app.
 
 ## API access, after the app exists
 
-The tag workflow talks to Play through a service account. Create it on a
-Cloud project owned by the same Google account as Play Console.
+Future automated Play uploads need a service account and an explicit workflow
+job. Create the account on a Cloud project owned by the same Google account
+as Play Console; storing its secret alone does not enable uploads.
 
 1. Play Console → Setup → API access → link a Cloud project (create one
    named `tokenstat-play` if none is linked).
@@ -139,6 +160,10 @@ verify the package, product and purchase token with the Play Developer API,
 acknowledge initial purchases, and consume Real-time Developer Notifications.
 It must return the same account billing shape as `/api/v1/me`, with
 `provider: "google_play"`. That endpoint lives in the website repo, not here.
+Before releasing deferred downgrades, deploy the website's current-entitlement
+fix (`b92866e3`) so the paid plan remains active until renewal. Exercise upgrades,
+downgrades, duration changes, restoration and account changes through the internal
+track with Play license testers before promoting to production.
 
 ## Firebase
 

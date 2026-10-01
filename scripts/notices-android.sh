@@ -7,7 +7,7 @@ set -eu
 OUT="$1"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-cargo run -q -p xtask -- notices "$OUT" tokenstat-ffi
+cargo run --locked -q -p xtask -- notices "$OUT" tokenstat-ffi
 {
   printf '\n\n## xterm.js\n\nThe terminal emulator behind SSH and workspace shells.\n\n'
   cat "apps/android/app/src/main/assets/term/LICENSE-xterm.txt"

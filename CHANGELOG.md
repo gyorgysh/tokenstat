@@ -17,7 +17,9 @@ A simpler desktop. Machine-wide places move to an icon rail, the sidebar
 lists your projects with their chats and terminals, and each screen has
 one toolbar row. A project can open another branch in a folder of its
 own. Notes gain formatting, Tasks are a three-stage board, Devices fit in
-one list, and the characters are plush toys that keep their shape.
+one list, and the characters are plush toys that keep their shape. A short
+note can steer the next step of a running chat, and desktop terminal tabs
+can mix local coding tools with saved SSH servers.
 
 ### Added
 
@@ -35,6 +37,16 @@ one list, and the characters are plush toys that keep their shape.
   usable Home pins, and automation templates and sorting.
 - Project browsers remember the last page and eight recent ports, separately
   for each account, computer and project.
+- Send a short note to the next step of a running chat on every client.
+  Pending notes can be edited or cancelled, and survive a host restart.
+- Mac and Windows launch saved SSH servers from the project terminal launcher.
+  Local coding tools and remote terminals share tabs and split panes, including
+  the terminal beside a chat. Split panes can swap their left and right positions.
+- Desktop chat and terminal hover cards show status, model, usage, last activity
+  and Git changes. Additions and deletions use their usual green and red; the
+  changes box uses the app's colours with normal readable text.
+- The Mac keeps local diagnostics for stalls, memory and calls to help
+  investigate performance problems.
 
 ### Changed
 
@@ -66,6 +78,9 @@ one list, and the characters are plush toys that keep their shape.
 - Money figures say API list price, and plan limits say how much of each
   coding tool's subscription is left.
 - Untouched starter personas use familiar names such as Ruby, Milo and Daisy.
+- Account avatars keep their colours. On desktop the profile ring stays subtle
+  until hover or keyboard focus, with gentle motion that respects reduced motion.
+- Server launchers and SSH tabs use friendly names instead of exposing addresses.
 
 ### Fixed
 
@@ -80,8 +95,25 @@ one list, and the characters are plush toys that keep their shape.
   Older queued messages can be reviewed and recovered into the current account.
 - Closing or reopening a remote browser keeps its listener ownership intact,
   and stale account responses cannot replace the current page or saved ports.
+- Starting a coding tool in a remote project waits for the browser tunnel to
+  become ready instead of failing while the connection is still opening.
 - In a narrow window the project bar, chat composer and terminal controls
   stay readable on the Mac, and the chat composer wraps on Windows.
+- Chat rows respond across their full width. Mac project New chat opens the
+  composer reliably, and sidebar menu icons remain visible on macOS 27.
+- Desktop hover cards close after leaving both the row and card. Switching,
+  collapsing or swapping Windows terminal panes keeps their sessions and output.
+- Notes keep formatting, selection and undo history when changing views.
+- Creating, listing and cloning Windows worktrees uses paths Git can open,
+  and the update prompt appears only for computers that need a newer host.
+- Forking a chat starts with fresh permission grants, and reopening a steered
+  Codex chat keeps its session and pending note.
+- Natural-language automation templates launch the coding tool correctly on
+  every client. Windows Run and Stop buttons become available after loading.
+- Android plan upgrades prorate the remaining period, downgrades wait until
+  renewal, and a purchase cannot switch to another account while the sheet opens.
+- Invalid language-table values fall back to readable text and cannot alter
+  technical paths, terminal keys or HTTP headers.
 
 ## [1.0.8] - 2026-09-21
 

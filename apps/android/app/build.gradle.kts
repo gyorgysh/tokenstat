@@ -105,7 +105,7 @@ val buildRust by tasks.registering(GenerateAndroidFiles::class) {
 val generatePriceBook by tasks.registering(GenerateAndroidFiles::class) {
     outputDirectory.set(layout.buildDirectory.dir("generated-assets/pricing"))
     workingDir(rootProject.projectDir.resolve("../.."))
-    commandLine("cargo", "run", "-q", "-p", "xtask", "--", "pricing-seed",
+    commandLine("cargo", "run", "--locked", "-q", "-p", "xtask", "--", "pricing-seed",
         outputDirectory.file("PriceBookSeed.json").get().asFile)
 }
 val generateNotices by tasks.registering(GenerateAndroidFiles::class) {
@@ -124,6 +124,13 @@ androidComponents {
 }
 
 dependencies {
+    constraints {
+        for (module in listOf("datastore", "datastore-core", "datastore-preferences", "datastore-preferences-core")) {
+            implementation("androidx.datastore:$module:1.2.1") {
+                because("The native shared counter needs 16 KB RELRO alignment.")
+            }
+        }
+    }
     val composeBom = platform("androidx.compose:compose-bom:2026.06.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)

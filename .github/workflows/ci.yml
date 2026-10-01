@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           components: rustfmt, clippy
 
@@ -54,7 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.0
 
       - uses: Swatinem/rust-cache@v2
 
@@ -69,7 +69,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.0
 
       - uses: Swatinem/rust-cache@v2
 
@@ -245,7 +245,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.0
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -274,6 +274,7 @@ jobs:
 
       - name: Native Windows editor and H.264 playback regressions
         if: runner.os == 'Windows'
+        shell: pwsh
         env:
           TOKENSTAT_SCREEN_FIXTURE: ${{ runner.temp }}/tokenstat-screen-fixture
         timeout-minutes: 5
@@ -295,6 +296,7 @@ jobs:
 
       - name: Windows client and daemon lifetime regressions
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
           dotnet run --project scripts/tests/windows-install/WindowsInstallTests.csproj
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -325,7 +327,7 @@ jobs:
       # the link on x86_64 even on an Apple Silicon runner. Installing the
       # second target is cheaper than teaching the build to skip it, and it is
       # the slice anyone on an Intel Mac needs anyway.
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: aarch64-apple-ios-sim, x86_64-apple-ios
 
@@ -365,7 +367,7 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: aarch64-linux-android,x86_64-linux-android
 
@@ -384,7 +386,7 @@ jobs:
         run: gradle -p apps/android testDebugUnitTest lintDebug lintRelease bundleRelease
 
       - name: Keep native debug symbols with the bundle
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: tokenstat-android
           path: |

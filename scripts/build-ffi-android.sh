@@ -11,4 +11,4 @@ command -v cargo-ndk >/dev/null || {
 mkdir -p "$OUT"
 cd "$ROOT"
 cargo ndk --platform 28 --target arm64-v8a --target x86_64 \
-  --output-dir "$OUT" build --profile release-ffi -p tokenstat-ffi --no-default-features
+  --output-dir "$OUT" build --locked --profile release-ffi -p tokenstat-ffi --no-default-features
