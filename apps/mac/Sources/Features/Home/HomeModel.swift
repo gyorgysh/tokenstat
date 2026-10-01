@@ -442,8 +442,7 @@ final class HomeModel {
         if !keepStale { selectedOverview = nil }
         dayOverviewTask = Task { [weak self] in
             let query = Query(since: date, until: date)
-            var sessionQuery = query
-            sessionQuery.limit = 80
+            let sessionQuery = Query(since: date, until: date, limit: 80)
             async let totalsResult = Bridge.totals(query)
             async let byModelResult = Bridge.report(group: .model, query: query)
             async let bySourceResult = Bridge.report(group: .source, query: query)

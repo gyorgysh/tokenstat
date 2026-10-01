@@ -16,7 +16,6 @@ import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -61,6 +60,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
@@ -573,7 +573,7 @@ private fun LegalLine(onOpen: (String) -> Unit, modifier: Modifier = Modifier) {
     // Word for word with the iPhone's line, which reads it as one sentence
     // with two links in it rather than a sentence about two documents.
     val text = L10n.text("android.tokenstatapp.by_signing_in_you_accept_the_0_and_1.78bf1e2f", "${terms}", "${privacy}")
-    val annotated = remember {
+    val annotated = remember(text, terms, privacy, colors.accent, onOpen) {
         buildAnnotatedString {
             append(text)
             addStyle(
@@ -581,22 +581,21 @@ private fun LegalLine(onOpen: (String) -> Unit, modifier: Modifier = Modifier) {
                 text.indexOf(terms),
                 text.indexOf(terms) + terms.length,
             )
-            addStringAnnotation("url", "https://tokenstat.ai/terms", text.indexOf(terms), text.indexOf(terms) + terms.length)
+            addLink(LinkAnnotation.Url("https://tokenstat.ai/terms") { onOpen("https://tokenstat.ai/terms") },
+                text.indexOf(terms), text.indexOf(terms) + terms.length)
             addStyle(
                 SpanStyle(color = colors.accent, fontWeight = FontWeight.Medium),
                 text.indexOf(privacy),
                 text.indexOf(privacy) + privacy.length,
             )
-            addStringAnnotation("url", "https://tokenstat.ai/privacy", text.indexOf(privacy), text.indexOf(privacy) + privacy.length)
+            addLink(LinkAnnotation.Url("https://tokenstat.ai/privacy") { onOpen("https://tokenstat.ai/privacy") },
+                text.indexOf(privacy), text.indexOf(privacy) + privacy.length)
         }
     }
-    ClickableText(
+    Text(
         annotated,
         style = TsType.caption.copy(color = colors.textTertiary, textAlign = TextAlign.Center),
         modifier = modifier.padding(top = Space.xs),
-        onClick = { offset ->
-            annotated.getStringAnnotations("url", offset, offset).firstOrNull()?.let { onOpen(it.item) }
-        },
     )
 }
 

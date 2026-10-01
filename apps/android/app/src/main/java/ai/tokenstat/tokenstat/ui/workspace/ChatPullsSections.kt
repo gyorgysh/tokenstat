@@ -1344,15 +1344,18 @@ fun ChatSection(
             }
             LazyColumn(contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(shown, key = { it.str("id") ?: it.hashCode().toString() }) { chat ->
-                    val dismiss = rememberSwipeToDismissBoxState(
-                        confirmValueChange = { value ->
-                            if (value != SwipeToDismissBoxValue.Settled) pendingDelete = chat
-                            false
-                        },
-                    )
+                    val dismiss = rememberSwipeToDismissBoxState()
                     SwipeToDismissBox(
                         state = dismiss,
                         enableDismissFromStartToEnd = false,
+                        onDismiss = {
+                            // Only the dialog removes a chat. Restore the row
+                            // first so dismissing that dialog cannot reopen it.
+                            scope.launch {
+                                dismiss.reset()
+                                if (ownsProject()) pendingDelete = chat
+                            }
+                        },
                         backgroundContent = {
                             Box(
                                 Modifier

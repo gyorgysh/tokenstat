@@ -865,7 +865,6 @@ struct AwakeDot: View {
         case true: return Theme.accent
         case false: return Color.secondary.opacity(0.35)
         case nil: return .clear
-        default: return .clear
         }
     }
 }

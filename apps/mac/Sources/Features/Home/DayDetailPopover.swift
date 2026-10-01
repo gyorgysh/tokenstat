@@ -28,9 +28,9 @@ struct DayDetailPopover: View {
 
     var body: some View {
         Group {
-            if let detail, let anchor {
+            if let detail, anchor != nil {
                 card(detail)
-            } else if isLoading, let anchor {
+            } else if isLoading, anchor != nil {
                 loadingCard
             } else {
                 EmptyView()

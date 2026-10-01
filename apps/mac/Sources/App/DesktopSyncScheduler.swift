@@ -36,7 +36,7 @@ enum DesktopSyncScheduler {
                 // this loop is the only scheduler there is. Once up front so a
                 // fresh install without the CLI gets real rates, then on the
                 // same minute cadence as sync.
-                try? await Bridge.pricingRefresh()
+                _ = try? await Bridge.pricingRefresh()
                 if status.loggedIn && !status.cliScheduleActive && status.due {
                     // Re-read due immediately before posting. A Sync now
                     // that landed while this loop was between ticks would

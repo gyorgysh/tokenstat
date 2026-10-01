@@ -199,7 +199,8 @@ fun PortBrowserScreen(
                             }
                         }
 
-                        @Suppress("DEPRECATION")
+                        @Deprecated("Legacy callback without frame or method; retained to refuse unclassified navigation.")
+                        @Suppress("OVERRIDE_DEPRECATION")
                         override fun shouldOverrideUrlLoading(v: WebView?, url: String?): Boolean {
                             // This callback carries neither method nor frame;
                             // an unmapped request cannot be replayed as GET.
@@ -244,7 +245,8 @@ fun PortBrowserScreen(
                             }
                         }
 
-                        @Suppress("DEPRECATION")
+                        @Deprecated("Legacy error callback; use the request overload for main-frame errors.")
+                        @Suppress("OVERRIDE_DEPRECATION")
                         override fun onReceivedError(
                             v: WebView?,
                             errorCode: Int,

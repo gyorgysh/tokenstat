@@ -172,29 +172,42 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
                 mutableState.value = mutableState.value.copy(error = fresh.billingResult.debugMessage)
                 return@launch
             }
-            val oldToken = ourPurchase(fresh.purchasesList)?.purchaseToken
-            mutableState.value = mutableState.value.copy(hasPlaySubscription = oldToken != null)
+            if (appAccountToken?.trim() != token) return@launch
+            val previous = ourPurchase(fresh.purchasesList)
+            val oldProductId = previous?.products?.firstOrNull()
+            mutableState.value = mutableState.value.copy(hasPlaySubscription = previous != null)
+            val change = runCatching {
+                subscriptionChange(oldProductId, product.details.productId, PRODUCT_IDS)
+            }.getOrElse {
+                mutableState.value = mutableState.value.copy(error = L10n.text("android.playbillingmanager.could_not_check_your_play_subscription_ple.85eea382"))
+                return@launch
+            }
             val details = BillingFlowParams.ProductDetailsParams.newBuilder()
-                .setProductDetails(product.details).setOfferToken(product.offerToken).build()
+                .setProductDetails(product.details).setOfferToken(product.offerToken)
             val flow = BillingFlowParams.newBuilder()
-                .setProductDetailsParamsList(listOf(details))
                 .setObfuscatedAccountId(token)
-            if (oldToken != null) {
-                // A plan change replaces the subscription Play already holds,
-                // which is what the product shape is for: monthly and yearly
-                // are base plans under one product id. Immediate, with the
-                // price difference settled pro rata, and Play's own sheet
-                // says so before anything is charged.
+            val replacementMode = when (change) {
+                SubscriptionChange.StoreDefault -> null
+                SubscriptionChange.ProratedUpgrade -> BillingFlowParams.ProductDetailsParams.SubscriptionProductReplacementParams.ReplacementMode.CHARGE_PRORATED_PRICE
+                SubscriptionChange.DeferredDowngrade -> BillingFlowParams.ProductDetailsParams.SubscriptionProductReplacementParams.ReplacementMode.DEFERRED
+            }
+            if (replacementMode != null && previous != null && oldProductId != null) {
+                details.setSubscriptionProductReplacementParams(
+                    BillingFlowParams.ProductDetailsParams.SubscriptionProductReplacementParams.newBuilder()
+                        .setOldProductId(oldProductId)
+                        .setReplacementMode(replacementMode)
+                        .build()
+                )
                 flow.setSubscriptionUpdateParams(
                     BillingFlowParams.SubscriptionUpdateParams.newBuilder()
-                        .setOldPurchaseToken(oldToken)
-                        .setSubscriptionReplacementMode(
-                            BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.CHARGE_PRORATED_PRICE
-                        )
+                        .setOldPurchaseToken(previous.purchaseToken)
                         .build()
                 )
             }
-            val result = withContext(Dispatchers.Main) { client.launchBillingFlow(activity, flow.build()) }
+            flow.setProductDetailsParamsList(listOf(details.build()))
+            val result = withContext(Dispatchers.Main) {
+                if (appAccountToken?.trim() != token) null else client.launchBillingFlow(activity, flow.build())
+            } ?: return@launch
             if (result.responseCode != BillingClient.BillingResponseCode.OK) {
                 mutableState.value = mutableState.value.copy(error = result.debugMessage)
             }

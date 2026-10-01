@@ -295,7 +295,7 @@ fun TaskEditorScreen(
                 val draft = fields
                 error = null
                 if (base != null && draft != null) {
-                    if (pendingEdit && fresh.revision != null) {
+                    if (pendingEdit) {
                         if (draft.matches(fresh)) {
                             baseline = fresh
                             pendingEdit = false
@@ -310,7 +310,7 @@ fun TaskEditorScreen(
                             if (!conflict) error = L10n.text("android.taskeditor.the_task_has_not_changed_your_draft_is_rea.c2632d0f")
                         }
                     } else if (fresh.revision != base.revision) {
-                        if (draft != null && !draft.matches(base)) {
+                        if (!draft.matches(base)) {
                             conflict = true
                         } else {
                             baseline = fresh

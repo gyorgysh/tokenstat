@@ -13,7 +13,7 @@ import CryptoKit
 /// and the conversation inside that scope.
 /// A sealed envelope as the reader sees it, before the page inside is
 /// re-decoded into the timeline type.
-struct WorkCachedEnvelope: Sendable {
+struct WorkCachedEnvelope {
     var title: String
     var savedAt: Date
     var revision: String

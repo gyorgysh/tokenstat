@@ -198,9 +198,10 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
                 for await event in events {
                     switch event {
                     case let .write(bytes):
-                        var failure: String?
+                        let failure: String?
                         do {
                             try await ClientRemote.ptyWrite(peer: peer, id: bridgeID, bytes: bytes)
+                            failure = nil
                         } catch {
                             failure = error.localizedDescription
                         }
@@ -211,7 +212,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
                             }
                         }
                     case let .resize(rows, cols):
-                        try? await ClientRemote.ptyResize(
+                        _ = try? await ClientRemote.ptyResize(
                             peer: peer,
                             id: bridgeID,
                             rows: rows,

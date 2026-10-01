@@ -32,7 +32,7 @@ struct OfflineCard: View {
                 Spacer(minLength: Theme.Space.s)
                 HStack(spacing: Theme.Space.xs) {
                     Button(L10n.text("apple.offlinecard.try_now.549f5e23"), .refresh) {
-                        Task { await connectivity.checkNow() }
+                        connectivity.checkNow()
                     }
                     .buttonStyle(.borderless)
                     .font(Theme.caption.weight(.medium))
