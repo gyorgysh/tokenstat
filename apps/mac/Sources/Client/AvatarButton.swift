@@ -56,6 +56,12 @@ struct AvatarButton: View {
     /// spins up. See `Avatar`, which reads the same cache for the same reason.
     @State private var pictureImage: Image?
 
+    private var tier: String? {
+        guard signedIn, let value = account.account?.tier?.trimmingCharacters(in: .whitespacesAndNewlines),
+              BadgeShape(tier: value) != nil else { return nil }
+        return value.lowercased()
+    }
+
     /// The toolbar's own metric, and the whole item.
     ///
     /// This used to draw at 30 inside a 44pt frame, on the reasoning that 44 is
@@ -110,13 +116,32 @@ struct AvatarButton: View {
                     .strokeBorder(Theme.accent.opacity(signedIn ? 0 : 0.55), lineWidth: 1.5)
             }
             .frame(width: drawn, height: drawn)
+            .frame(width: 40, height: 40)
+            .overlay(alignment: .bottomTrailing) {
+                if let tier {
+                    TierMark(tier: tier, size: 10)
+                        .frame(width: 16, height: 16)
+                        .background(Theme.panel, in: Circle())
+                        .overlay(Circle().strokeBorder(Theme.border, lineWidth: 1))
+                        .accessibilityHidden(true)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if account.isSyncing {
+                    Circle().fill(Theme.accent)
+                        .frame(width: 8, height: 8)
+                        .overlay(Circle().strokeBorder(Theme.panel, lineWidth: 1.5))
+                        .accessibilityHidden(true)
+                }
+            }
             // The circle, not its bounding box. A rect content shape on a
             // round control claims the corners it does not draw, which in a
             // toolbar means swallowing taps meant for what sits beside it.
             .contentShape(.circle)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(signedIn ? L10n.text("apple.avatarbutton.account_0.1342b321", "\(name)") : L10n.text("apple.avatarbutton.sign_in_to_tokenstat.9a950fc4"))
+        .buttonStyle(ClientAccountButtonStyle(showsPlan: tier != nil))
+        .accessibilityLabel(tier.map { L10n.text("apple.avatarbutton.account_plan", name, $0.capitalized) }
+            ?? (signedIn ? L10n.text("apple.avatarbutton.account_0.1342b321", "\(name)") : L10n.text("apple.avatarbutton.sign_in_to_tokenstat.9a950fc4")))
         .accessibilityHint(L10n.text("apple.avatarbutton.opens_your_account.bf04ed9e"))
         .task(id: pictureRaw) {
             guard let raw = pictureRaw else {
@@ -169,6 +194,29 @@ struct AvatarButton: View {
         Avatar.initials(from: account.account?.title)
             ?? Avatar.initials(from: account.account?.handle)
             ?? "t"
+    }
+}
+
+private struct ClientAccountButtonStyle: ButtonStyle {
+    let showsPlan: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background {
+                if showsPlan {
+                    Circle().strokeBorder(Theme.border, lineWidth: 1)
+                        .overlay {
+                            Circle()
+                                .strokeBorder(AngularGradient(colors: [Theme.accent, Theme.secondary, Theme.accent], center: .center), lineWidth: 1.5)
+                                .rotationEffect(.degrees(configuration.isPressed && !reduceMotion ? 120 : 0))
+                                .opacity(configuration.isPressed ? 1 : 0)
+                                .shadow(color: Theme.secondary.opacity(configuration.isPressed ? 0.22 : 0), radius: 3)
+                        }
+                        .frame(width: 38, height: 38)
+                }
+            }
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: configuration.isPressed)
     }
 }
 

@@ -27,7 +27,8 @@ struct ClientDiffView: View {
     @State private var errorMessage: String?
     @State private var loaded = false
     @State private var editorContent: EditableFile?
-    @State private var showAll = false
+    @State private var revision = UUID()
+    @State private var loadRevision = UUID()
     @Environment(\.fileContent) private var files
 
     private struct EditableFile: Identifiable {
@@ -35,48 +36,21 @@ struct ClientDiffView: View {
         var text: String
         var id: String { path }
     }
-    /// The width of the screen, measured.
-    ///
-    /// Inside a horizontally scrolling container `maxWidth: .infinity` means
-    /// *unbounded* rather than "fill", so rows grow enormous and the content
-    /// ends up somewhere off to the right. `DiffView` on the Mac learned this
-    /// the same way. A row takes it as a minimum instead, which is also what
-    /// makes the tint behind a short line span the screen rather than stop at
-    /// the last character.
-    @State private var paneWidth: CGFloat = 0
-
     private var name: String {
         file.path.split(separator: "/").last.map(String.init) ?? file.path
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                if let errorMessage {
-                    ClientErrorCard(message: errorMessage) {
-                        Task { await load() }
-                    }
-                }
-                header
-                body(for: diff)
+        ClientDiffDocumentView(diffs: diff.map { [$0] } ?? [], revision: revision, fileHeaders: false) {
+            if let errorMessage {
+                ClientErrorCard(message: errorMessage) { Task { await load() } }
             }
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.top, Theme.Space.s)
-            .padding(.bottom, 96)
+            header
+            if !loaded {
+                ProgressView().frame(maxWidth: .infinity, minHeight: 80)
+            }
         }
         .background(Theme.background)
-        .background(
-            GeometryReader { proxy in
-                Color.clear
-                    // Quantised: `minWidth` relays every row in the diff, and
-                    // a rotation or a split-view drag would otherwise deliver
-                    // a new width, and a full relayout, on every frame.
-                    .onAppear { paneWidth = (proxy.size.width / 8).rounded(.down) * 8 }
-                    .onChange(of: (proxy.size.width / 8).rounded(.down) * 8) { _, new in
-                        paneWidth = new
-                    }
-            }
-        )
         .navigationTitle(name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -138,103 +112,26 @@ struct ClientDiffView: View {
         .cardSurface()
     }
 
-    /// Every way this can have nothing to draw says which way it is. An empty
-    /// screen is the one answer that tells a person nothing.
-    @ViewBuilder
-    private func body(for diff: FileDiff?) -> some View {
-        if !loaded {
-            ProgressView()
-                .frame(maxWidth: .infinity)
-                .padding(.top, Theme.Space.xl)
-        } else if let diff {
-            if diff.binary {
-                note(L10n.text("apple.clientdiffview.this_is_a_binary_file_there_is_nothing_to.6573d54c"))
-            } else if diff.hunks.isEmpty {
-                note(diff.untracked
-                     ? L10n.text("apple.clientdiffview.this_file_is_not_tracked_yet_and_is_empty.7354c94b")
-                     : L10n.text("apple.clientdiffview.no_changes_against_head.84a982f2"))
-            } else {
-                hunks(of: diff)
-            }
-        } else if errorMessage == nil {
-            note(L10n.text("apple.clientdiffview.that_file_is_not_in_this_folder_any_more.da5bd527"))
-        }
-    }
-
-    /// The width a row should fill, less the card's own horizontal padding.
-    private var rowWidth: CGFloat {
-        max(0, paneWidth - Theme.Space.m * 2)
-    }
-
-    /// One horizontal scroll around the whole diff, not one per row, so the
-    /// gutter and the code cannot slide out of step with each other.
-    ///
-    /// Eager, deliberately. A lazy stack grows wider as new rows materialize,
-    /// and content widening mid-scroll is what dragged the offset back to the
-    /// start. The width is known up front here instead. Capped, because eager
-    /// means every row exists at once and a generated file can have oceans.
-    /// "Show all" lifts the cap for human-sized diffs; oceans stay capped
-    /// with an honest note instead of a dead end.
-    private static let maxLines = 2000
-    private static let fullRenderLimit = 20_000
-
-    private func hunks(of diff: FileDiff) -> some View {
-        let total = diff.hunks.reduce(0) { $0 + $1.lines.count }
-        let capped = showAll && total <= Self.fullRenderLimit
-        let (shown, cut) = capped ? (diff, 0) : diff.clipped(toLines: Self.maxLines)
-        return VStack(alignment: .leading, spacing: Theme.Space.s) {
-            ScrollView(.horizontal, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(shown.hunks) { hunk in
-                        Text(hunk.header)
-                            .font(ClientType.code)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .padding(.horizontal, Theme.Space.s)
-                            .padding(.vertical, 6)
-                            .frame(minWidth: rowWidth, alignment: .leading)
-                            .background(Theme.panel)
-                        ForEach(hunk.lines) { line in
-                            DiffLineRow(line: line, minWidth: rowWidth)
-                        }
-                    }
-                }
-                .padding(.vertical, Theme.Space.xs)
-            }
-            .cardSurface()
-            if cut > 0 {
-                if total <= Self.fullRenderLimit {
-                    Button(L10n.text("apple.clientdiffview.show_all_0_lines.8c1a7690", "\(total)"), .reveal) {
-                        showAll = true
-                    }
-                    .buttonStyle(SecondaryButtonStyle(comfortable: true))
-                } else {
-                    note(L10n.text("apple.clientdiffview.showing_the_first_0_of_1_lines_the_rest_is.fb1dbaa3", "\(total - cut)", "\(total)", "\(hostName.isEmpty ? L10n.text("apple.clientdiffview.the_computer.da52d93a") : hostName)"))
-                }
-            }
-        }
-    }
-
-    private func note(_ text: String) -> some View {
-        Text(text)
-            .font(ClientType.body)
-            .foregroundStyle(.secondary)
-            .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .cardSurface()
-    }
-
     private func load() async {
+        let request = UUID()
+        loadRevision = request
         let owner = WorkViewedChange.owner(folderID: workspaceID, peer: peer)
         do {
-            diff = try await files.diff(
+            let fresh = try await files.diff(
                 peer: peer,
                 workspace: workspaceID,
                 path: file.path
             )
-            if let diff { await WorkViewedChange.save(owner: owner, diff: diff) }
+            guard !Task.isCancelled, request == loadRevision,
+                  owner?.scope == WorkSessionContext.shared.scope else { return }
+            diff = fresh
+            revision = UUID()
             errorMessage = nil
+            loaded = true
+            await WorkViewedChange.save(owner: owner, diff: fresh)
         } catch {
+            guard !Task.isCancelled, request == loadRevision,
+                  owner?.scope == WorkSessionContext.shared.scope else { return }
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
         loaded = true
@@ -263,6 +160,8 @@ struct DiffLineRow: View {
     /// At least this wide, so the tint behind a short line spans the screen
     /// rather than stopping at the last character. Zero sizes to content.
     let minWidth: CGFloat
+    @ScaledMetric(relativeTo: .footnote) private var gutterWidth: CGFloat = 34
+    @ScaledMetric(relativeTo: .footnote) private var markerWidth: CGFloat = 12
 
     /// Both the gutter and the code scale with Dynamic Type, and they scale
     /// together because they share a font, so the columns stay aligned at
@@ -300,12 +199,12 @@ struct DiffLineRow: View {
             Text(number)
                 .font(ClientType.code)
                 .foregroundStyle(.tertiary)
-                .frame(minWidth: 34, alignment: .trailing)
+                .frame(minWidth: gutterWidth, alignment: .trailing)
                 .padding(.trailing, Theme.Space.xs)
             Text(marker)
                 .font(ClientType.code)
                 .foregroundStyle(tint)
-                .frame(width: 12, alignment: .center)
+                .frame(width: markerWidth, alignment: .center)
             Text(line.text.isEmpty ? " " : line.text)
                 .font(ClientType.code)
                 .foregroundStyle(tint)

@@ -20,7 +20,9 @@ struct ClientAutoCommitCard: View {
             Text(L10n.text("apple.clientautocommitcard.runs_on_0.6b563ff8", "\(session.hostName)"))
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
-            if session.backends.isEmpty {
+            if !session.loaded {
+                ProgressView().frame(maxWidth: .infinity, alignment: .leading)
+            } else if session.backends.isEmpty {
                 Text(L10n.text("apple.clientautocommitcard.no_agent_on_this_computer_can_write_a_comm.9b85195e"))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)

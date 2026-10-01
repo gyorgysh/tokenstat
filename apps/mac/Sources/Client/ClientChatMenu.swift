@@ -30,7 +30,13 @@ struct ClientChatMenu: View {
                     }
                 }.disabled(copying)
             }
-        } label: { ActionIcon.more.label(L10n.text("apple.clientchatmenu.chat_actions.8ba35bb8")) }
+        } label: {
+            ActionIcon.more.label(L10n.text("apple.clientchatmenu.chat_actions.8ba35bb8"))
+                .environment(\.compactActions, true)
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
+        }
+        .menuIndicator(.hidden)
         .task(id: peer) { supportsFork = await RemoteHostFeature.chatFork.isSupported(peer: peer) }
         .sheet(isPresented: $rename) {
             ClientNameEditor(title: L10n.text("apple.clientchatmenu.rename_chat.26076241"), initial: conversation.title) { title in

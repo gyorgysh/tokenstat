@@ -101,6 +101,9 @@ struct ClientFolderSplit: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        if item == .history, current.git?.isRepo == true {
+                            ClientProjectWorktreesButton(peer: peer, hostName: hostName, folder: current)
+                        }
                     }
                 }
                 .padding(Theme.Space.m)

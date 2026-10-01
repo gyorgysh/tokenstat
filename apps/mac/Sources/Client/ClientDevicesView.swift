@@ -651,7 +651,7 @@ struct ClientDeviceDetailView: View {
            !key.isEmpty,
            machine.isHost {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                ClientSectionTitle(title: L10n.text("apple.clientdevicesview.folders.c4d6bb20"), mark: "mark_folder")
+                ClientSectionTitle(title: L10n.text("common.projects"), mark: "mark_folder")
                 NavigationLink {
                     ClientFolderPicker(peer: key, hostName: DeviceCopy.name(current)) { _ in }
                 } label: {

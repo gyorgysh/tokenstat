@@ -28,6 +28,30 @@ import SwiftUI
 /// that, chrome falls back to the same Theme capsules the Mac already
 /// uses: content stays opaque, accent stays one colour.
 extension View {
+    /// Custom project cards keep their native row actions coordinated on iOS 27.
+    @ViewBuilder
+    func clientSwipeActionsContainer() -> some View {
+        #if compiler(>=6.4)
+        if #available(iOS 27, *) { swipeActionsContainer() } else { self }
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder
+    func clientProjectTransitionSource(id: some Hashable, in namespace: Namespace.ID) -> some View {
+        if #available(iOS 18, *) { matchedTransitionSource(id: id, in: namespace) } else { self }
+    }
+
+    @ViewBuilder
+    func clientProjectTransition(id: some Hashable, in namespace: Namespace.ID, enabled: Bool) -> some View {
+        if #available(iOS 18, *), enabled {
+            navigationTransition(.zoom(sourceID: id, in: namespace))
+        } else {
+            self
+        }
+    }
+
     /// A content card: opaque panel, hairline, card radius.
     func cardSurface() -> some View {
         background(Theme.panel, in: .rect(cornerRadius: Theme.cardRadius))

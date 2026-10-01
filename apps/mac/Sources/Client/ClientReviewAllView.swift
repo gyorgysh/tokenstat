@@ -11,7 +11,7 @@ import SwiftUI
 /// Every changed file's diff on one screen, for the final read before a
 /// commit.
 ///
-/// Bounded twice: at most twenty files, sixty lines each, with a Full diff
+/// Bounded twice: at most twenty files, sixty display rows each, with a Full diff
 /// link per file for the rest. A generated file with oceans of output stays
 /// a card with a link rather than a hang. File selection and the commit
 /// draft live above this screen and are untouched by opening it.
@@ -25,9 +25,14 @@ struct ClientReviewAllView: View {
     static let linesPerFile = 60
 
     @Environment(\.fileContent) private var content
-    @State private var diffs: [String: FileDiff] = [:]
+    private struct Preview: Sendable {
+        let rows: [DiffDocumentRow]
+        let total: Int
+    }
+    @State private var diffs: [String: Preview] = [:]
     @State private var failures = 0
     @State private var loaded = false
+    @State private var loadRevision = UUID()
     /// The width of the screen, measured.
     ///
     /// Inside a horizontally scrolling container `maxWidth: .infinity` means
@@ -104,20 +109,17 @@ struct ClientReviewAllView: View {
                     .font(ClientType.caption.weight(.medium))
                     .foregroundStyle(file.kind.tint)
             }
-            if let diff = diffs[file.path] {
-                if diff.binary {
-                    Text(L10n.text("apple.clientreviewallview.a_binary_file_there_is_nothing_to_show_lin.d8a6c19c"))
-                        .font(ClientType.caption)
-                        .foregroundStyle(.secondary)
-                } else if diff.hunks.isEmpty {
-                    Text(L10n.text("apple.clientreviewallview.no_changes_against_head.84a982f2"))
+            if let preview = diffs[file.path] {
+                if preview.rows.count == 1, case let .note(text) = preview.rows[0].content {
+                    Text(text)
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    hunks(of: diff)
+                    hunks(preview)
                 }
             } else {
-                Text(L10n.text("apple.clientreviewallview.still_loading.fa2e3194"))
+                Text(loaded ? L10n.text("apple.workingtreereviewview.could_not_load_changes.07be1deb")
+                            : L10n.text("apple.clientreviewallview.still_loading.fa2e3194"))
                     .font(ClientType.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -155,30 +157,37 @@ struct ClientReviewAllView: View {
     /// container the per-file diff and the commit detail use: without it a
     /// long line, which never wraps, forces its row wider than the screen and
     /// the card overflows with nowhere to scroll.
-    private func hunks(of diff: FileDiff) -> some View {
-        let total = diff.hunks.reduce(0) { $0 + $1.lines.count }
-        let (shown, cut) = diff.clipped(toLines: Self.linesPerFile)
+    private func hunks(_ preview: Preview) -> some View {
+        let cut = max(0, preview.total - preview.rows.count)
         return VStack(alignment: .leading, spacing: 0) {
             ScrollView(.horizontal, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(shown.hunks) { hunk in
-                        Text(hunk.header)
-                            .font(ClientType.code)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .padding(.horizontal, Theme.Space.s)
-                            .padding(.vertical, 6)
-                            .frame(minWidth: rowWidth, alignment: .leading)
-                            .background(Theme.panel)
-                        ForEach(hunk.lines) { line in
+                    ForEach(preview.rows) { row in
+                        switch row.content {
+                        case let .hunk(header):
+                            Text(header)
+                                .font(ClientType.code)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .padding(.horizontal, Theme.Space.s)
+                                .padding(.vertical, 6)
+                                .frame(minWidth: rowWidth, alignment: .leading)
+                                .background(Theme.panel)
+                        case let .line(line):
                             DiffLineRow(line: line, minWidth: rowWidth)
+                        case let .note(text):
+                            Text(text)
+                                .font(ClientType.caption)
+                                .foregroundStyle(.secondary)
+                        case .file:
+                            EmptyView()
                         }
                     }
                 }
                 .padding(.vertical, Theme.Space.xs)
             }
             if cut > 0 {
-                Text(L10n.text("apple.clientreviewallview.showing_0_of_1_lines_here.f2764462", "\(total - cut)", "\(total)"))
+                Text(L10n.text("apple.clientreviewallview.showing_0_of_1_lines_here.f2764462", "\(preview.rows.count)", "\(preview.total)"))
                     .font(ClientType.caption)
                     .foregroundStyle(Theme.controlGlyph)
                     .padding(.top, Theme.Space.xs)
@@ -187,15 +196,34 @@ struct ClientReviewAllView: View {
     }
 
     private func load() async {
-        var fresh: [String: FileDiff] = [:]
+        let request = UUID()
+        loadRevision = request
+        let owner = WorkSessionContext.shared.scope
+        var fresh: [String: Preview] = [:]
         var missed = 0
         for file in shown {
             do {
-                fresh[file.path] = try await content.diff(peer: peer, workspace: workspaceID, path: file.path)
+                let diff = try await content.diff(peer: peer, workspace: workspaceID, path: file.path)
+                guard !Task.isCancelled else { return }
+                let limit = Self.linesPerFile
+                let task = Task.detached(priority: .userInitiated) {
+                    Preview(rows: DiffDocumentRow.make([diff], fileHeaders: false, rowLimit: limit),
+                            total: DiffDocumentRow.count([diff], fileHeaders: false))
+                }
+                let preview = await withTaskCancellationHandler {
+                    await task.value
+                } onCancel: { task.cancel() }
+                guard !Task.isCancelled, request == loadRevision,
+                      owner == WorkSessionContext.shared.scope else { return }
+                fresh[file.path] = preview
             } catch {
+                guard !Task.isCancelled, request == loadRevision,
+                      owner == WorkSessionContext.shared.scope else { return }
                 missed += 1
             }
         }
+        guard !Task.isCancelled, request == loadRevision,
+              owner == WorkSessionContext.shared.scope else { return }
         diffs = fresh
         failures = missed
         loaded = true

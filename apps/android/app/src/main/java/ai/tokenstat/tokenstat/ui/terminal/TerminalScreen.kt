@@ -1198,10 +1198,10 @@ fun TerminalKeys(
         KeyCap(if (shift) "⇧⇥" else "⇥", colors) {
             fire(if (shift) TerminalKeysLogic.backTab else byteArrayOf(0x09))
         }
-        KeyCap("↑", colors) { fire(byteArrayOf(0x1B, 0x5B, 0x41)) }
-        KeyCap("↓", colors) { fire(byteArrayOf(0x1B, 0x5B, 0x42)) }
-        KeyCap("←", colors) { fire(byteArrayOf(0x1B, 0x5B, 0x44)) }
-        KeyCap("→", colors) { fire(byteArrayOf(0x1B, 0x5B, 0x43)) }
+        KeyCap("↑", colors) { fire(TerminalKeysLogic.arrow('A', shift, control)) }
+        KeyCap("↓", colors) { fire(TerminalKeysLogic.arrow('B', shift, control)) }
+        KeyCap("←", colors) { fire(TerminalKeysLogic.arrow('D', shift, control)) }
+        KeyCap("→", colors) { fire(TerminalKeysLogic.arrow('C', shift, control)) }
         listOf("/", "-", "|", "~").forEach { glyph ->
             KeyCap(glyph, colors) { fire(glyph.toByteArray(Charsets.UTF_8)) }
         }

@@ -23,7 +23,7 @@ enum WorkspacesSection: String, CaseIterable, Identifiable, Codable, Sendable {
 
     var label: String {
         switch self {
-        case .folders: L10n.text("apple.workspaceslayout.folders.c4d6bb20")
+        case .folders: L10n.text("common.projects")
         case .recentChats: L10n.text("apple.workspaceslayout.recent_chats.2ccfecbc")
         case .sessions: L10n.text("apple.workspaceslayout.all_sessions.78648d4d")
         }
@@ -56,7 +56,7 @@ enum WorkspacesPreset: String, CaseIterable, Identifiable, Codable, Sendable {
 
     var label: String {
         switch self {
-        case .foldersFirst: L10n.text("apple.workspaceslayout.folders_first.6f94fb69")
+        case .foldersFirst: L10n.text("apple.workspaceslayout.projects_first")
         case .chatsFirst: L10n.text("apple.workspaceslayout.chats_first.82395c40")
         case .sessionsFirst: L10n.text("apple.workspaceslayout.sessions_first.c0b0e0e8")
         }

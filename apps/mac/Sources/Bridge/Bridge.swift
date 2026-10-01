@@ -1379,8 +1379,18 @@ extension Bridge {
     ) async throws -> CachePutResult {
         let generation = await WorkCacheMutationQueue.shared.generation(scope: scope)
         let encoded = try JSONSerialization.data(withJSONObject: payload)
-        return try await WorkCacheMutationQueue.shared.run(scope: scope, expectedGeneration: generation) {
-            guard let payload = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] else { throw WorkCacheError.encoding }
+        return try await cachePutEncoded(key: key, scope: scope, id: id, kind: kind, itemId: itemId,
+                                         revision: revision, payload: encoded, expectedGeneration: generation)
+    }
+
+    /// Prepared snapshots cross actors as bytes, with deletion ownership
+    /// captured before preparation starts. JSON expansion stays off the UI.
+    static func cachePutEncoded(
+        key: String, scope: String, id: String, kind: String, itemId: String,
+        revision: String?, payload: Data, expectedGeneration: UInt64
+    ) async throws -> CachePutResult {
+        return try await WorkCacheMutationQueue.shared.run(scope: scope, expectedGeneration: expectedGeneration) {
+            guard let payload = try JSONSerialization.jsonObject(with: payload) as? [String: Any] else { throw WorkCacheError.encoding }
             return try await cachePutOrdered(key: key, scope: scope, id: id, kind: kind, itemId: itemId, revision: revision, payload: payload)
         }
     }

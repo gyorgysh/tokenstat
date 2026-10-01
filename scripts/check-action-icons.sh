@@ -203,6 +203,8 @@ ALLOWED = [
     # fill, like the Mac workspace inspector, not a second action glyph.
     ("Client/ClientTaskResultView.swift", "inspectorSurface = surface"),
     ("Client/ClientFolderSplit.swift", "section = item"),
+    # A project navigation row, carrying the branch glyph in the shared row.
+    ("Client/ClientWorkspaceSections.swift", "symbol: \"arrow.triangle.branch\""),
     ("Client/ClientWorkflowWorkspace.swift", "session.selectGraph"),
     ("Client/ClientWorkflowWorkspace.swift", "session.selectRun"),
     ("Client/ClientAutomationWorkspace.swift", "session.selectJob"),

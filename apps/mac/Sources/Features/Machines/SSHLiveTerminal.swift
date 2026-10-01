@@ -166,7 +166,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         let made = TerminalSelectionView(frame: .zero)
         made.font = AppFonts.terminal(size: 12)
         #else
-        let made = TerminalView(frame: .zero)
+        let made = ClientTerminalInputView(frame: .zero)
         made.font = AppFonts.terminal(size: 12)
         made.inputAccessoryView = nil
         #endif

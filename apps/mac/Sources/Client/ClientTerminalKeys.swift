@@ -22,6 +22,17 @@ enum TerminalControlCode {
     }
 }
 
+/// Xterm cursor sequences retain modifiers even in application-cursor mode.
+enum TerminalArrowCode {
+    static func encode(_ direction: UInt8, shift: Bool = false, option: Bool = false,
+                       control: Bool = false, applicationCursor: Bool = false) -> [UInt8] {
+        precondition((0x41...0x44).contains(direction))
+        let modifier: UInt8 = 1 + (shift ? 1 : 0) + (option ? 2 : 0) + (control ? 4 : 0)
+        if modifier == 1 { return [0x1B, applicationCursor ? 0x4F : 0x5B, direction] }
+        return [0x1B, 0x5B, 0x31, 0x3B, 0x30 + modifier, direction]
+    }
+}
+
 #if !os(macOS)
 import SwiftUI
 import UIKit
@@ -93,10 +104,6 @@ struct ClientTerminalKeys: View {
         static let tab: [UInt8] = [0x09]
         /// CSI Z. Back-tab, and the reason this bar exists.
         static let backTab: [UInt8] = [0x1B, 0x5B, 0x5A]
-        static let up: [UInt8] = [0x1B, 0x5B, 0x41]
-        static let down: [UInt8] = [0x1B, 0x5B, 0x42]
-        static let right: [UInt8] = [0x1B, 0x5B, 0x43]
-        static let left: [UInt8] = [0x1B, 0x5B, 0x44]
     }
 
     var body: some View {
@@ -131,10 +138,10 @@ struct ClientTerminalKeys: View {
                 // armed. Shift+Tab as a separate button would have been a
                 // chord nobody would look for under a keyboard.
                 key(shift ? "⇧⇥" : "⇥") { fire(shift ? Key.backTab : Key.tab) }
-                key("↑") { fire(Key.up) }
-                key("↓") { fire(Key.down) }
-                key("←") { fire(Key.left) }
-                key("→") { fire(Key.right) }
+                key("↑") { arrow(0x41) }
+                key("↓") { arrow(0x42) }
+                key("←") { arrow(0x44) }
+                key("→") { arrow(0x43) }
                 ForEach(["/", "-", "|", "~"], id: \.self) { text in
                     key(text) { fire(Array(text.utf8)) }
                 }
@@ -179,6 +186,10 @@ struct ClientTerminalKeys: View {
         send(out)
         if shift { shift = false }
         if controlArmed.wrappedValue { controlArmed.wrappedValue = false }
+    }
+
+    private func arrow(_ direction: UInt8) {
+        fire(TerminalArrowCode.encode(direction, shift: shift, control: controlArmed.wrappedValue))
     }
 
     /// The C0 code for a printable byte, or nil when there is none.

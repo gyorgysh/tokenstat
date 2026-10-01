@@ -37,8 +37,6 @@ struct ClientWorkspaceDetailView: View {
     @State private var pullCounts = PullCountStore.shared
     @State private var errorMessage: String?
     @State private var showPort = false
-    @State private var showingWorktrees = false
-    @Environment(ClientNavigationModel.self) private var navigation
     @State private var portText = "5173"
     @State private var browserSession: ProjectBrowserSession?
     @State private var isOpeningPort = false
@@ -61,14 +59,6 @@ struct ClientWorkspaceDetailView: View {
         return merged
     }
 
-    private var worktreeFolder: WorkspaceFolder {
-        var remote = current
-        remote.id = "remote:\(peer):\(workspaceID)"
-        remote.machineID = peer
-        remote.machineLabel = hostName
-        return remote
-    }
-
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     /// iPad regular width only. A large iPhone in landscape is regular, and
@@ -86,18 +76,6 @@ struct ClientWorkspaceDetailView: View {
             }
         }
         .rememberWorkspace(peer: peer, folder: folder)
-        .sheet(isPresented: $showingWorktrees) {
-            RemoteHostFeatureGate(feature: .worktrees, peer: peer, hostName: hostName) {
-                ProjectWorktreeSheet(folder: worktreeFolder) { created in
-                    showingWorktrees = false
-                    var remote = created
-                    remote.id = "remote:\(peer):\(created.id)"
-                    remote.machineID = peer
-                    remote.machineLabel = hostName
-                    navigation.pushFolder(peerKey: peer, hostName: hostName, folder: remote, section: .sessions)
-                }
-            }
-        }
         .onReceive(NotificationCenter.default.publisher(for: GitCommitTarget.didChange)) { note in
             guard !usesWorkspaceLayout,
                   note.object as? GitCommitTarget == GitCommitTarget(peer: peer, workspaceID: workspaceID) else { return }
@@ -107,11 +85,6 @@ struct ClientWorkspaceDetailView: View {
             if !usesWorkspaceLayout {
                 ToolbarItem(placement: .primaryAction) {
                     ClientProjectRenameButton(peer: peer, folder: current, onChanged: { await reload() })
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                if current.git?.isRepo == true {
-                    Button(L10n.text("apple.clientworkspacesections.worktrees.aec2f93d"), systemImage: "arrow.triangle.branch") { showingWorktrees = true }
                 }
             }
             ToolbarItem(placement: .primaryAction) {
@@ -227,6 +200,10 @@ struct ClientWorkspaceDetailView: View {
                 ClientSectionRow(section: .history, count: nil)
             }
             .buttonStyle(.plain)
+
+            if current.git?.isRepo == true {
+                ClientProjectWorktreesButton(peer: peer, hostName: hostName, folder: current)
+            }
 
             NavigationLink {
                 PullsView(
@@ -439,12 +416,25 @@ struct ClientSectionRow: View {
     var showsChevron: Bool = true
 
     var body: some View {
+        ClientProjectSectionRow(title: section.label, symbol: section.symbol, count: count,
+                                isSelected: isSelected, showsChevron: showsChevron)
+    }
+}
+
+struct ClientProjectSectionRow: View {
+    let title: String
+    let symbol: String
+    var count: Int? = nil
+    var isSelected = false
+    var showsChevron = true
+
+    var body: some View {
         HStack(spacing: Theme.Space.m) {
-            Image(systemName: section.symbol)
+            Image(systemName: symbol)
                 .font(Theme.title3)
                 .foregroundStyle(Theme.accent)
                 .frame(width: 28)
-            Text(section.label)
+            Text(title)
                 .font(ClientType.label.weight(.medium))
                 .foregroundStyle(.primary)
             Spacer()
@@ -473,6 +463,43 @@ struct ClientSectionRow: View {
     }
 }
 
+/// The same project row on iPhone and iPad, opening the existing host-gated sheet.
+struct ClientProjectWorktreesButton: View {
+    let peer: String
+    let hostName: String
+    let folder: WorkspaceFolder
+    @State private var showing = false
+    @Environment(ClientNavigationModel.self) private var navigation
+
+    var body: some View {
+        Button { showing = true } label: {
+            ClientProjectSectionRow(title: L10n.text("apple.clientworkspacesections.worktrees.aec2f93d"),
+                                    symbol: "arrow.triangle.branch")
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showing) {
+            RemoteHostFeatureGate(feature: .worktrees, peer: peer, hostName: hostName) {
+                ProjectWorktreeSheet(folder: remoteFolder) { created in
+                    showing = false
+                    var remote = created
+                    remote.id = "remote:\(peer):\(created.id)"
+                    remote.machineID = peer
+                    remote.machineLabel = hostName
+                    navigation.pushFolder(peerKey: peer, hostName: hostName, folder: remote, section: .sessions)
+                }
+            }
+        }
+    }
+
+    private var remoteFolder: WorkspaceFolder {
+        var remote = folder
+        remote.id = "remote:\(peer):\(ClientRemote.rawWorkspaceID(of: folder) ?? folder.id)"
+        remote.machineID = peer
+        remote.machineLabel = hostName
+        return remote
+    }
+}
+
 // MARK: - Changes
 
 /// What is uncommitted in this folder, as the host last reported it.
@@ -496,6 +523,9 @@ struct ClientWorkspaceChangesView: View {
     @State private var autoCommit: AutoCommitSession
     @State private var showingComposer = false
     @State private var openedRun: AutoCommitRunRoute?
+    @State private var loaded = false
+    @State private var loadRevision = 0
+    @Environment(\.scenePhase) private var scenePhase
 
     init(
         peer: String,
@@ -528,7 +558,7 @@ struct ClientWorkspaceChangesView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
+            LazyVStack(alignment: .leading, spacing: Theme.Space.s) {
                 HStack {
                     Text(current.git?.branch ?? L10n.text("apple.clientworkspacesections.changes.bbd4b6a8"))
                         .font(ClientType.label.weight(.semibold))
@@ -557,7 +587,9 @@ struct ClientWorkspaceChangesView: View {
                         Task { await load() }
                     }
                 }
-                if files.isEmpty {
+                if !loaded && files.isEmpty {
+                    ProgressView().frame(maxWidth: .infinity, minHeight: 80)
+                } else if files.isEmpty && errorMessage == nil {
                     ClientSectionEmpty(
                         text: L10n.text("apple.clientworkspacesections.nothing_to_commit.f377a9f6"),
                         art: .changes,
@@ -640,18 +672,42 @@ struct ClientWorkspaceChangesView: View {
                 await autoCommit.load()
             }
         }
-        .task { await session.load(); await autoCommit.load(); await load() }
+        .task { await load() }
+        .task { await session.load() }
+        .task { await autoCommit.load() }
+        .onReceive(NotificationCenter.default.publisher(for: GitCommitTarget.didChange)) { note in
+            guard note.object as? GitCommitTarget == session.target else { return }
+            Task { await load() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
+            Task { await load() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await load() } }
+        }
+        .onChange(of: session.loaded) { _, ready in
+            if ready && loaded { session.reconcileAvailablePaths(Set(files.map(\.path))) }
+        }
         .onChange(of: session.draft) { _, _ in Task { await session.persist() } }
     }
 
     private func load() async {
+        loadRevision += 1
+        let revision = loadRevision
+        let owner = WorkSessionContext.shared.scope
         do {
-            live = try await session.service.status()
+            let fresh = try await session.service.status()
+            guard !Task.isCancelled, revision == loadRevision,
+                  owner == WorkSessionContext.shared.scope else { return }
+            live = fresh
             session.reconcileAvailablePaths(Set((live?.git?.files ?? []).map(\.path)))
             errorMessage = nil
         } catch {
+            guard !Task.isCancelled, revision == loadRevision,
+                  owner == WorkSessionContext.shared.scope else { return }
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
+        loaded = true
     }
 
 }

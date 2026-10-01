@@ -19,6 +19,12 @@ object TerminalKeysLogic {
 
     val backTab: ByteArray = byteArrayOf(0x1B, 0x5B, 0x5A)
 
+    fun arrow(direction: Char, shift: Boolean = false, control: Boolean = false): ByteArray {
+        require(direction in 'A'..'D')
+        val modifier = 1 + (if (shift) 1 else 0) + (if (control) 4 else 0)
+        return (if (modifier == 1) "\u001B[$direction" else "\u001B[1;$modifier$direction").toByteArray(Charsets.UTF_8)
+    }
+
     /// What a screen reader says for a glyph face. "Right arrow", not
     /// "greater than".
     fun spoken(label: String): String = when (label) {

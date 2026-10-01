@@ -373,7 +373,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     }
 
     private static func makeView(delegate: TerminalViewDelegate) -> TerminalView {
-        let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 360, height: 640))
+        let view = ClientTerminalInputView(frame: CGRect(x: 0, y: 0, width: 360, height: 640))
         let dark = UITraitCollection.current.userInterfaceStyle == .dark
         let background: UInt32 = dark ? 0x0A0A0B : 0xF7F7F8
         let foreground: UInt32 = dark ? 0xDCDCE0 : 0x1C1C1F

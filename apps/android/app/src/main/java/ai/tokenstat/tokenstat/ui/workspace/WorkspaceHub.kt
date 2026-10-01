@@ -9,7 +9,6 @@ import ai.tokenstat.tokenstat.ui.chrome.LocalTabBarPresence
 
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.browser.BrowserOpenRequest
-import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
@@ -110,6 +109,17 @@ fun HubSectionRow(
     onOpen: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    HubNavigationRow(section.label, hubIcon(section), count, onOpen, modifier)
+}
+
+@Composable
+private fun HubNavigationRow(
+    label: String,
+    icon: ImageVector,
+    count: Int?,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = ai.tokenstat.tokenstat.ui.theme.LocalTsColors.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -123,13 +133,13 @@ fun HubSectionRow(
             .padding(ai.tokenstat.tokenstat.ui.theme.Space.m),
     ) {
         Icon(
-            hubIcon(section),
+            icon,
             contentDescription = null,
             tint = colors.accent,
             modifier = Modifier.size(22.dp),
         )
         Text(
-            section.label,
+            label,
             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
             color = colors.textPrimary,
             modifier = Modifier.weight(1f),
@@ -147,7 +157,7 @@ fun HubSectionRow(
         }
         Icon(
             Icons.Default.ChevronRight,
-            contentDescription = L10n.text("android.workspacehub.open_0.e71b4013", "${section.label}"),
+            contentDescription = L10n.text("android.workspacehub.open_0.e71b4013", label),
             tint = colors.textTertiary,
             modifier = Modifier.size(14.dp),
         )
@@ -190,7 +200,7 @@ fun WorkspaceHubMenu(
     val workspace = folder.str("id") ?: ""
     var counts by remember(workspace) { mutableStateOf(HubCounts()) }
     var branch by remember(workspace) { mutableStateOf<String?>(null) }
-    var isRepo by remember(workspace) { mutableStateOf(true) }
+    var isRepo by remember(peer, workspace) { mutableStateOf((folder["git"] as? JsonObject)?.bol("isRepo") == true) }
     var gitChanged by remember(workspace) { mutableStateOf<Int?>(null) }
     var cachedPulls by remember(workspace) { mutableStateOf<Int?>(null) }
     var error by remember(workspace) { mutableStateOf<String?>(null) }
@@ -201,7 +211,7 @@ fun WorkspaceHubMenu(
         }.getOrNull()
         val git = status?.get("git") as? JsonObject
         branch = git?.str("branch")
-        isRepo = git?.bol("isRepo") ?: true
+        isRepo = git?.bol("isRepo") ?: isRepo
         gitChanged = (git?.get("files") as? kotlinx.serialization.json.JsonArray)?.size
         runCatching {
             model.workspaceSection(peer, "workspace.summary", buildJsonObject {})
@@ -270,17 +280,6 @@ fun WorkspaceHubMenu(
                 onChanged = { scope.launch { reload() } },
                 stats = folderGitStats(folder),
             )
-            // Small and glyphed like the rest of the card's controls. A
-            // worktree is a branch with its own folder, so it sits under the
-            // branch row rather than as a heavy button of its own.
-            if (isRepo) {
-                TsSecondaryButton(
-                    label = L10n.text("android.workspacehub.worktrees.aec2f93d"),
-                    icon = ActionIcon.Source.vector,
-                    small = true,
-                    onClick = { onOpenSection("Worktrees") },
-                )
-            }
         }
         HubSection.entries.forEach { section ->
             HubSectionRow(
@@ -288,6 +287,14 @@ fun WorkspaceHubMenu(
                 count = counts.forSection(section),
                 onOpen = { onOpenSection(section.key) },
             )
+            if (section == HubSection.HISTORY && isRepo) {
+                HubNavigationRow(
+                    label = L10n.text("android.workspacehub.worktrees.aec2f93d"),
+                    icon = Icons.Default.AccountTree,
+                    count = null,
+                    onOpen = { onOpenSection("Worktrees") },
+                )
+            }
         }
     }
 }

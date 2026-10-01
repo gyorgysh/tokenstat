@@ -191,33 +191,26 @@ struct ClientCommitDetailView: View {
     @State private var detail: CommitDetail?
     @State private var errorMessage: String?
     @State private var loaded = false
-    @State private var paneWidth: CGFloat = 0
+    @State private var revision = UUID()
+    @State private var loadRevision = UUID()
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                if let errorMessage {
-                    ClientErrorCard(message: errorMessage) {
-                        Task { await load() }
-                    }
-                }
-                header
-                body(for: detail)
+        ClientDiffDocumentView(diffs: detail?.diffs ?? [], revision: revision) {
+            if let errorMessage {
+                ClientErrorCard(message: errorMessage) { Task { await load() } }
             }
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.top, Theme.Space.s)
-            .padding(.bottom, 96)
+            header
+            if !loaded {
+                ProgressView().frame(maxWidth: .infinity, minHeight: 80)
+            } else if let detail, detail.diffs.isEmpty {
+                ClientSectionEmpty(
+                    text: detail.isMerge ? L10n.text("apple.clientworkspacehistoryview.a_merge_with_no_patch_of_its_own.862cd9e3") : L10n.text("apple.clientworkspacehistoryview.no_files_in_this_commit.db8823ee"),
+                    art: .history,
+                    message: detail.isMerge ? L10n.text("apple.clientworkspacehistoryview.the_changes_live_on_the_parents.24d17008") : nil
+                )
+            }
         }
         .background(Theme.background)
-        .background(
-            GeometryReader { proxy in
-                Color.clear
-                    .onAppear { paneWidth = (proxy.size.width / 8).rounded(.down) * 8 }
-                    .onChange(of: (proxy.size.width / 8).rounded(.down) * 8) { _, new in
-                        paneWidth = new
-                    }
-            }
-        )
         .navigationTitle(commit.shortID)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
@@ -281,112 +274,26 @@ struct ClientCommitDetailView: View {
         .cardSurface()
     }
 
-    @ViewBuilder
-    private func body(for detail: CommitDetail?) -> some View {
-        if !loaded {
-            ProgressView()
-                .frame(maxWidth: .infinity)
-                .padding(.top, Theme.Space.xl)
-        } else if let detail {
-            if detail.diffs.isEmpty {
-                ClientSectionEmpty(
-                    text: detail.isMerge ? L10n.text("apple.clientworkspacehistoryview.a_merge_with_no_patch_of_its_own.862cd9e3") : L10n.text("apple.clientworkspacehistoryview.no_files_in_this_commit.db8823ee"),
-                    art: .history,
-                    message: detail.isMerge
-                        ? L10n.text("apple.clientworkspacehistoryview.the_changes_live_on_the_parents.24d17008")
-                        : nil
-                )
-            } else {
-                ForEach(detail.diffs, id: \.path) { diff in
-                    fileCard(diff)
-                }
-            }
-        }
-    }
-
-    private func fileCard(_ diff: FileDiff) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: Theme.Space.s) {
-                Text(diff.fileName)
-                    .font(ClientType.label.weight(.medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer(minLength: 0)
-                Text(diff.path)
-                    .font(ClientType.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-            }
-            .padding(Theme.Space.m)
-            if diff.binary {
-                note(L10n.text("apple.clientworkspacehistoryview.this_is_a_binary_file_there_is_nothing_to.6573d54c"))
-            } else if diff.hunks.isEmpty {
-                note(L10n.text("apple.clientworkspacehistoryview.no_line_changes_in_this_file.2406d2d9"))
-            } else {
-                hunks(of: diff)
-            }
-        }
-        .cardSurface()
-    }
-
-    private var rowWidth: CGFloat {
-        max(0, paneWidth - Theme.Space.m * 2)
-    }
-
-    /// Eager, like the file diff: a lazy stack widens as rows materialize and
-    /// the widening drags a horizontal scroll back to the start. Capped for
-    /// the same reason, with the count said out loud.
-    private static let maxLines = 2000
-
-    private func hunks(of diff: FileDiff) -> some View {
-        let total = diff.hunks.reduce(0) { $0 + $1.lines.count }
-        let (shown, cut) = diff.clipped(toLines: Self.maxLines)
-        return VStack(alignment: .leading, spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(shown.hunks) { hunk in
-                        Text(hunk.header)
-                            .font(ClientType.code)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .padding(.horizontal, Theme.Space.s)
-                            .padding(.vertical, 6)
-                            .frame(minWidth: rowWidth, alignment: .leading)
-                            .background(Theme.panel)
-                        ForEach(hunk.lines) { line in
-                            DiffLineRow(line: line, minWidth: rowWidth)
-                        }
-                    }
-                }
-                .padding(.vertical, Theme.Space.xs)
-            }
-            if cut > 0 {
-                note(L10n.text("apple.clientworkspacehistoryview.showing_the_first_0_of_1_lines.348d454c", "\(total - cut)", "\(total)"))
-            }
-        }
-    }
-
-    private func note(_ text: String) -> some View {
-        Text(text)
-            .font(ClientType.caption)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.bottom, Theme.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     private func load() async {
+        let request = UUID()
+        loadRevision = request
         let owner = WorkViewedChange.owner(folderID: workspaceID, peer: peer)
         do {
-            detail = try await ClientRemote.showCommit(
+            let fresh = try await ClientRemote.showCommit(
                 peer: peer,
                 workspace: workspaceID,
                 commit: commit.id
             )
-            if let detail { await WorkViewedChange.save(owner: owner, commit: detail) }
+            guard !Task.isCancelled, request == loadRevision,
+                  owner?.scope == WorkSessionContext.shared.scope else { return }
+            detail = fresh
+            revision = UUID()
             errorMessage = nil
+            loaded = true
+            await WorkViewedChange.save(owner: owner, commit: fresh)
         } catch {
+            guard !Task.isCancelled, request == loadRevision,
+                  owner?.scope == WorkSessionContext.shared.scope else { return }
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
         loaded = true

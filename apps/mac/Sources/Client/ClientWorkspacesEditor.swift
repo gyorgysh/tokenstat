@@ -9,7 +9,7 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// Arrange Workspaces once a host is connected: order and hide Folders,
+/// Arrange Workspaces once a host is connected: order and hide Projects,
 /// Recent chats and All sessions. Same working-copy pattern as Customize Home.
 struct ClientWorkspacesEditor: View {
     @Bindable var layout: WorkspacesLayout

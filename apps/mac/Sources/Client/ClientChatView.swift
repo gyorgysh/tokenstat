@@ -204,7 +204,11 @@ struct ClientChatView: View {
             if supportsDeleteAll && !model.chats.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu { Button(L10n.text("apple.clientchatview.delete_all_chats.9753e785"), role: .destructive) { deleteAll = true } }
-                    label: { ActionIcon.more.label(L10n.text("apple.clientchatview.chat_list_actions.43ea56ad")) }
+                    label: {
+                        ActionIcon.more.label(L10n.text("apple.clientchatview.chat_list_actions.43ea56ad"))
+                            .environment(\.compactActions, true)
+                    }
+                    .menuIndicator(.hidden)
                 }
             }
         }
@@ -660,6 +664,7 @@ struct ClientChatThread: View {
                             Button(L10n.text("apple.clientchatview.setup.7013af4c"), .settings) { showingSetup = true }
                         }
                     }
+                    .labelStyle(.iconOnly)
                 }
             }
         }

@@ -203,6 +203,7 @@ import ai.tokenstat.tokenstat.ui.components.TsProminentButton
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
 import ai.tokenstat.tokenstat.ui.auth.Onboarding
 import ai.tokenstat.tokenstat.ui.marks.Avatar
+import ai.tokenstat.tokenstat.ui.marks.AccountAvatarButton
 import ai.tokenstat.tokenstat.ui.marks.AwakeDot
 import ai.tokenstat.tokenstat.ui.marks.DeviceGlyph
 import ai.tokenstat.tokenstat.ui.marks.LogoMark
@@ -699,26 +700,13 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                     }
                 },
                 navigationIcon = {
-                    // Ringed, the way the Apple toolbar rings it: the photo
-                    // needs an edge of its own or it bleeds into the
-                    // background on a light theme.
-                    IconButton(onClick = { accountOpen = true }) {
-                        Box(
-                            Modifier
-                                .size(38.dp)
-                                .shadow(2.dp, CircleShape)
-                                .clip(CircleShape)
-                                .background(colors.panel),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                        Avatar(
-                            state.account?.string("displayName") ?: state.account?.string("handle") ?: L10n.text("android.tokenstatapp.your_account.17a7e5cf"),
-                            size = 34,
-                            avatarUrl = state.account?.string("avatar"),
-                            signedIn = state.signedIn,
-                        )
-                        }
-                    }
+                    AccountAvatarButton(
+                        name = state.account?.string("displayName") ?: state.account?.string("handle") ?: L10n.text("android.tokenstatapp.your_account.17a7e5cf"),
+                        avatarUrl = state.account?.string("avatar"),
+                        signedIn = state.signedIn,
+                        tier = state.account?.string("tier"),
+                        onClick = { accountOpen = true },
+                    )
                 },
                 actions = {
                     // A chip, not a naked glyph. On iPhone this is a circular
