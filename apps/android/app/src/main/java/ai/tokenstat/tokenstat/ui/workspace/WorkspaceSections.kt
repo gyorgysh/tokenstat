@@ -70,6 +70,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -86,7 +87,16 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.lifecycle.viewModelScope
 import ai.tokenstat.tokenstat.AppViewModel
+import ai.tokenstat.tokenstat.ui.browser.BrowserHistory
+import ai.tokenstat.tokenstat.ui.browser.BrowserHistoryStore
+import ai.tokenstat.tokenstat.ui.browser.BrowserOpenRequest
+import ai.tokenstat.tokenstat.ui.browser.BrowserListenerPool
+import ai.tokenstat.tokenstat.ui.browser.acquireBrowserListener
+import ai.tokenstat.tokenstat.ui.logic.ProjectOwner
 import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
 import ai.tokenstat.tokenstat.ui.components.EmptyState
@@ -144,7 +154,7 @@ fun WorkspaceSection(
     protocol: Long? = null,
     folderName: String = "",
     onOpenTerminal: (String?) -> Unit,
-    onOpenBrowser: (String, Int) -> Unit = { _, _ -> },
+    onOpenBrowser: (BrowserOpenRequest) -> Unit = {},
     onOpenSection: (String) -> Unit = {},
     onChatOpened: (String) -> Unit = {},
     initialChatId: String? = null,
@@ -179,7 +189,7 @@ fun WorkspaceSection(
     val reload: () -> Unit = { scope.launch { load() } }
     when (section) {
         "Sessions" -> SessionsSection(model, peer, workspace, folderName, hostLabel, data, error, loading, onOpenTerminal, reload, onOpenSection, onStartChat, modifier)
-        "Chat" -> ChatSection(model, peer, workspace, protocol = protocol, modifier, folderName, hostLabel, onChatOpened, initialChatId, openConversationOnAppear, conversationNonce, machineId = machineId)
+        "Chat" -> ChatSection(model, peer, workspace, protocol = protocol, modifier, folderName, hostLabel, onChatOpened, initialChatId, openConversationOnAppear, conversationNonce, machineId = machineId, onOpenSection = onOpenSection)
         "Pulls" -> PullsSection(model, peer, workspace, protocol = protocol, modifier, folderName, hostLabel)
         "Changes" -> ChangesSection(model, peer, workspace, modifier, folderName, hostLabel, protocol, onChanged = reload)
         "History" -> HistorySection(model, peer, workspace, modifier, folderName, hostLabel)
@@ -188,7 +198,7 @@ fun WorkspaceSection(
         "Workflows" -> WorkflowsSection(model, peer, workspace, data, error, loading, reload, modifier, folderName, hostLabel, protocol)
         "Automations" -> AutomationsSection(model, peer, workspace, data, error, loading, reload, modifier, folderName, hostLabel, protocol)
         "Files" -> FilesSection(model, peer, workspace, modifier, folderName, hostLabel)
-        "Browser" -> BrowserSection(model, peer, onOpenBrowser, modifier)
+        "Browser" -> BrowserSection(model, peer, workspace, onOpenBrowser, modifier)
         else -> EmptyState(Icons.AutoMirrored.Filled.Notes, "Nothing here", "This section has no content yet.", modifier)
     }
 }
@@ -229,6 +239,13 @@ private fun SessionsSection(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
+    val client by model.state.collectAsStateWithLifecycle()
+    val owner = ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(client.account, peer, workspace)
+    fun current() = owner != null && ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(model.state.value.account, peer, workspace) == owner
+    val names = remember(context) { ai.tokenstat.tokenstat.ui.logic.TerminalNames(context) }
+    val pins = remember(context) { ai.tokenstat.tokenstat.ui.home.HomeStores(context) }
+    val pinIdentity = ai.tokenstat.tokenstat.ui.home.HomeStores.pinIdentity(client.account)
+    var renaming by remember(owner) { mutableStateOf<JsonObject?>(null) }
     val dark = androidx.compose.foundation.isSystemInDarkTheme()
     val prefs = remember(peer, workspace) {
         context.getSharedPreferences("tokenstat.launcher.v1", android.content.Context.MODE_PRIVATE)
@@ -291,8 +308,9 @@ private fun SessionsSection(
         }
     }
 
-    fun launch(profile: ai.tokenstat.tokenstat.ui.logic.LaunchProfile) {
+    fun launch(profile: ai.tokenstat.tokenstat.ui.logic.LaunchProfile, duplicate: JsonObject? = null) {
         if (launchingId != null || installingId != null) return
+        if (!current()) return
         launchingId = profile.id
         stickyError = null
         scope.launch {
@@ -301,19 +319,29 @@ private fun SessionsSection(
                     put("workspaceId", workspace)
                     put("command", profile.command)
                     putJsonArray("args") { profile.launchArgs(bypassOn).forEach { add(it) } }
-                    put("rows", 40)
-                    put("cols", 100)
+                    put("rows", duplicate?.long("rows")?.coerceIn(1, 500)?.toInt() ?: 40)
+                    put("cols", duplicate?.long("cols")?.coerceIn(1, 500)?.toInt() ?: 100)
                     put("noColor", false)
                     put("dark", dark)
                 }) as? JsonObject
             }.onSuccess { info ->
                 launchingId = null
-                val id = info?.str("id")
+                if (!current()) return@onSuccess
+                val id = info?.str("id")?.takeIf { it.isNotBlank() }
+                if (id == null) {
+                    stickyError = "The computer did not return a terminal. Refresh sessions before trying again."
+                    onLoad()
+                    return@onSuccess
+                }
+                if (duplicate != null) {
+                    val originalName = names.name(owner, duplicate.str("id").orEmpty()) ?: "Terminal"
+                    names.rename(owner, id, "$originalName copy")
+                }
                 onOpen(id)
                 onLoad()
             }.onFailure {
                 launchingId = null
-                stickyError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+                if (current()) stickyError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
             }
         }
     }
@@ -464,7 +492,7 @@ private fun SessionsSection(
             ) {
                 Icon(Icons.Default.Terminal, null, tint = LocalTsColors.current.accent)
                 Column(Modifier.weight(1f)) {
-                    Text(session.str("command") ?: "shell", style = TsType.mono(13), color = LocalTsColors.current.textPrimary)
+                    Text(names.name(owner, id) ?: session.str("command") ?: "shell", style = TsType.mono(13), color = LocalTsColors.current.textPrimary)
                     Text(
                         listOfNotNull(session.str("status"), session.str("title")).joinToString(" · ").ifBlank { id },
                         style = TextStyle(fontSize = 11.sp),
@@ -473,7 +501,25 @@ private fun SessionsSection(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                TextButton(onClick = { pendingClose = session }) { Text("Close") }
+                Box {
+                    var menu by remember(id) { mutableStateOf(false) }
+                    IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Session actions") }
+                    DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; renaming = session })
+                        DropdownMenuItem(text = { Text("Duplicate") }, onClick = {
+                            menu = false
+                            if (current()) launch(catalog.firstOrNull { it.id == "shell" } ?: ai.tokenstat.tokenstat.ui.logic.LaunchCatalog.shellFallback(), session)
+                        })
+                        val pinned = pins.isPinned(pinIdentity, peer, workspace, ai.tokenstat.tokenstat.ui.logic.PinnedWork.Kind.TERMINAL, id)
+                        DropdownMenuItem(text = { Text(if (pinned) "Unpin" else "Pin") }, onClick = {
+                            menu = false
+                            if (current() && !pins.togglePin(pinIdentity, peer, workspace, ai.tokenstat.tokenstat.ui.logic.PinnedWork.Kind.TERMINAL, id, names.name(owner, id) ?: session.str("title") ?: "Terminal", folderName)) {
+                                stickyError = "Pinned work holds eight items. Unpin one before adding another."
+                            }
+                        })
+                        DropdownMenuItem(text = { Text("Close session") }, onClick = { menu = false; pendingClose = session })
+                    }
+                }
             }
         }
     }
@@ -509,6 +555,16 @@ private fun SessionsSection(
             },
             dismissButton = { TextButton(onClick = { pendingClose = null }) { Text("Keep it") } },
         )
+    }
+    renaming?.let { session ->
+        val id = session.str("id") ?: return@let
+        ai.tokenstat.tokenstat.ui.components.NameEditorDialog("Rename terminal", names.name(owner, id) ?: session.str("title") ?: "Terminal", onDismiss = { renaming = null }) { name ->
+            renaming = null
+            if (current()) {
+                names.rename(owner, id, name)
+                pins.renamePinned(pinIdentity, peer, workspace, ai.tokenstat.tokenstat.ui.logic.PinnedWork.Kind.TERMINAL, id, name)
+            }
+        }
     }
 }
 
@@ -1217,17 +1273,24 @@ private fun AutomationsSection(
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun BrowserSection(
     model: AppViewModel,
     peer: String,
-    onOpen: (String, Int) -> Unit,
+    workspace: String,
+    onOpen: (BrowserOpenRequest) -> Unit,
     modifier: Modifier,
 ) {
-    val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
-    val preferences = remember(context) { context.getSharedPreferences("browser", android.content.Context.MODE_PRIVATE) }
-    var portText by remember { mutableStateOf(preferences.getString("lastPort", "3000") ?: "3000") }
-    var error by remember { mutableStateOf<String?>(null) }
+    val clientState by model.state.collectAsStateWithLifecycle()
+    val owner = ProjectOwner.from(clientState.account, peer, workspace)
+    val store = remember(context) { BrowserHistoryStore(context) }
+    var history by remember(owner, peer, workspace, store) { mutableStateOf(store.read(owner)) }
+    var portText by remember(owner, peer, workspace, store) { mutableStateOf(store.initial(owner).port.toString()) }
+    var error by remember(owner, peer, workspace) { mutableStateOf<String?>(null) }
+    var busy by remember(owner, peer, workspace) { mutableStateOf(false) }
+    val active = remember(owner, peer, workspace) { booleanArrayOf(true) }
+    DisposableEffect(active) { onDispose { active[0] = false } }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
         Text("Open a port on that computer in this device's browser.", color = LocalTsColors.current.textSecondary)
         OutlinedTextField(
@@ -1238,25 +1301,44 @@ private fun BrowserSection(
             modifier = Modifier.fillMaxWidth(),
             leadingIcon = { Icon(Icons.Default.Language, null) },
         )
+        if (history.recentPorts.isNotEmpty()) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+                history.recentPorts.forEach { port ->
+                    TsSecondaryButton(label = port.toString(), small = true, onClick = { portText = port.toString() })
+                }
+            }
+        }
         error?.let { SectionError(it) }
         TsAccentButton(
-            label = "Open",
+            label = if (busy) "Opening…" else "Open",
+            enabled = !busy,
             onClick = {
-                val port = portText.toIntOrNull()?.takeIf { it in 1..65535 } ?: return@TsAccentButton
-                preferences.edit().putString("lastPort", port.toString()).apply()
-                scope.launch {
+                val target = portText.toIntOrNull()?.let { BrowserHistory.forPort(history, it) }
+                if (target == null) {
+                    error = "Enter a port from 1 to 65535."
+                    return@TsAccentButton
+                }
+                error = null
+                busy = true
+                // A listener result can arrive after this section disappears.
+                // Keep its cleanup alive and retain the original owner.
+                model.viewModelScope.launch {
                     runCatching {
-                        val opened = model.core(
-                            "proxy.listen",
-                            buildJsonObject {
-                                put("peer", peer)
-                                put("host", "127.0.0.1")
-                                put("port", port)
-                            },
-                        ) as JsonObject
-                        val url = opened.str("url") ?: "http://127.0.0.1:$port/"
-                        onOpen(url, port)
+                        val ownsContext = {
+                            active[0] && owner != null && model.state.value.signedIn &&
+                                ProjectOwner.from(model.state.value.account, peer, workspace) == owner
+                        }
+                        val accountScope = owner?.accountScope ?: return@runCatching
+                        val lease = model.acquireBrowserListener(peer, target, accountScope, ownsContext)
+                            ?: return@runCatching
+                        if (!ownsContext()) {
+                            BrowserListenerPool.Shared.release(lease)
+                        } else {
+                            history = store.record(owner, target)
+                            onOpen(BrowserOpenRequest(peer, workspace, owner, target, lease))
+                        }
                     }.onFailure { error = it.message }
+                    busy = false
                 }
             },
         )

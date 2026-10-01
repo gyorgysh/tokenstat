@@ -88,6 +88,9 @@ import ai.tokenstat.tokenstat.ui.theme.rememberReduceMotion
 import ai.tokenstat.tokenstat.ui.components.TsType
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.booleanOrNull
 
 /// Device-local Home furniture: the continue shelf, the pin shelf, and the
 /// card arrangement. Ports `ClientRecentPlaces`, `PinnedWorkStore`, and
@@ -133,15 +136,25 @@ private fun placeKindOf(key: String): RecentPlaces.Kind? = when (key) {
 private fun PinnedWork.Kind.key(): String = when (this) {
     PinnedWork.Kind.WORKSPACE -> "workspace"
     PinnedWork.Kind.CONVERSATION -> "conversation"
+    PinnedWork.Kind.TERMINAL -> "terminal"
 }
 
 private fun pinKindOf(key: String): PinnedWork.Kind? = when (key) {
     "workspace" -> PinnedWork.Kind.WORKSPACE
     "conversation", "chat" -> PinnedWork.Kind.CONVERSATION
+    "terminal" -> PinnedWork.Kind.TERMINAL
     else -> null
 }
 
 class HomeStores(context: Context) {
+    companion object {
+        fun pinIdentity(account: kotlinx.serialization.json.JsonObject?): String {
+            fun field(key: String) = (account?.get(key) as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+            val identity = RecentPlaces.accountIdentity(field("handle"), field("accountId")) ?: return ""
+            val host = field("host")?.trim().orEmpty()
+            return if (host.isEmpty() || (account?.get("signedIn") as? JsonPrimitive)?.booleanOrNull != true) "" else RecentPlaces.scopeKey(host, identity)
+        }
+    }
     private val prefs: SharedPreferences =
         context.getSharedPreferences("tokenstat.home.v1", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
@@ -267,6 +280,14 @@ class HomeStores(context: Context) {
     private fun readPinsDto(scope: String): List<StoredPin> {
         val raw = prefs.getString(pinsKey(scope), null) ?: return emptyList()
         return runCatching { json.decodeFromString<List<StoredPin>>(raw) }.getOrNull() ?: emptyList()
+    }
+
+    fun renamePinned(identity: String, peer: String, workspace: String, kind: PinnedWork.Kind, item: String?, label: String) {
+        val scope = pinScope(identity)
+        val key = PinnedWork.pinKey(scope, peer, workspace, kind, item) ?: return
+        savePins(scope, pins(identity).map { pin ->
+            if (PinnedWork.pinKey(scope, pin.hostIdentity, pin.workspaceId, pin.kind, pin.itemId) == key) pin.copy(label = label) else pin
+        })
     }
 
     private fun savePins(scope: String, pins: List<PinnedWork.Pin>) {
@@ -546,6 +567,7 @@ fun PinnedSection(
                             when (pin.kind) {
                                 PinnedWork.Kind.WORKSPACE -> Icons.Default.Folder
                                 PinnedWork.Kind.CONVERSATION -> Icons.Default.ChatBubbleOutline
+                                PinnedWork.Kind.TERMINAL -> Icons.Default.Terminal
                             },
                             null,
                             tint = colors.accent,

@@ -4,8 +4,10 @@ package ai.tokenstat.tokenstat.ui.browser
 /// Which URLs the port-forwarded browser may load, ported from Apple
 /// `ClientWebView.allows`.
 ///
-/// The tunnel proxy answers on this device's own loopback, so host
-/// localhost resolves through the tunnel and never touches anything else.
+/// The tunnel proxy answers on this device's own loopback. PortBrowser
+/// routes supported navigation callbacks to the paired computer. WebView
+/// controls redirected resource loads; this is a preview policy, not a
+/// network sandbox.
 /// Only web pages belong here: allowing a mailto:, tel: or custom scheme
 /// stalls on a navigation the view cannot perform, so everything else is
 /// refused.
@@ -19,7 +21,8 @@ object BrowserPolicy {
         if (scheme == "about") return true
         val host = parsed.host?.lowercase() ?: return false
         if (host == "127.0.0.1" || host == "localhost") {
-            return scheme == "http" || scheme == "https"
+            return (scheme == "http" || scheme == "https") && parsed.rawUserInfo == null &&
+                (parsed.port == -1 || parsed.port in 1..65535)
         }
         return scheme == "https" &&
             (host == "tokenstat.ai" || host.endsWith(".tokenstat.ai"))

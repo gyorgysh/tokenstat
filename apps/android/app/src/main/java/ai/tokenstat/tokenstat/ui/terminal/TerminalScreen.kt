@@ -56,6 +56,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -73,6 +74,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewModelScope
 import ai.tokenstat.tokenstat.AppViewModel
+import ai.tokenstat.tokenstat.ui.logic.ProjectOwner
+import ai.tokenstat.tokenstat.ui.logic.TerminalNames
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
@@ -107,6 +110,10 @@ fun TerminalScreen(
     BackHandler { onClose() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val client by model.state.collectAsStateWithLifecycle()
+    val names = remember(context) { TerminalNames(context) }
+    val openingOwner = remember(peer, workspaceId) { ProjectOwner.from(model.state.value.account, peer, workspaceId) }
+    val nameOwner = openingOwner?.takeIf { it == ProjectOwner.from(client.account, peer, workspaceId) }
     val dark = isSystemInDarkTheme()
     val bridge = remember {
         TerminalBridge().also {
@@ -115,6 +122,7 @@ fun TerminalScreen(
     }
     bridge.lifecycle = LocalLifecycleOwner.current.lifecycle
     var sessionId by remember { mutableStateOf(existingSessionId) }
+    val displayName = sessionId?.let { names.name(nameOwner, it) }
     var confirmClose by remember { mutableStateOf(false) }
     // The bar's Ctrl key reads the bridge, which is what spends the flag.
     var controlArmed by remember { mutableStateOf(false) }
@@ -184,7 +192,7 @@ fun TerminalScreen(
             title = {
                 key(tick) {
                     Column {
-                        Text(bridgeTitle(bridge))
+                        Text(displayName ?: bridgeTitle(bridge))
                         Text(
                             bridgeSubtitle(bridge),
                             style = androidx.compose.material3.MaterialTheme.typography.bodySmall,

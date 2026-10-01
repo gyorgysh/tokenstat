@@ -6,6 +6,7 @@ import ai.tokenstat.tokenstat.ui.chrome.HideTopBar
 import ai.tokenstat.tokenstat.ui.chrome.LocalTabBarPresence
 
 import ai.tokenstat.tokenstat.AppViewModel
+import ai.tokenstat.tokenstat.ui.browser.BrowserOpenRequest
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
@@ -305,7 +306,7 @@ fun WorkspaceHub(
     initialSection: String? = null,
     onBack: (() -> Unit)? = null,
     onOpenTerminal: (String?) -> Unit = {},
-    onOpenBrowser: (String, Int) -> Unit = { _, _ -> },
+    onOpenBrowser: (BrowserOpenRequest) -> Unit = {},
     onRecordChat: (String) -> Unit = {},
     onOpenProject: (JsonObject) -> Unit = {},
     initialChatId: String? = null,

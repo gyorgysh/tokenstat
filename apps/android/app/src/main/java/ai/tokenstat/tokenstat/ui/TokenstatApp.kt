@@ -173,6 +173,7 @@ import ai.tokenstat.tokenstat.ui.legal.LicensesSheet
 import ai.tokenstat.tokenstat.ui.billing.PaywallSheet
 import ai.tokenstat.tokenstat.ui.billing.Plans
 import ai.tokenstat.tokenstat.ui.browser.PortBrowserScreen
+import ai.tokenstat.tokenstat.ui.browser.BrowserOpenRequest
 import ai.tokenstat.tokenstat.ui.screen.ScreenViewerScreen
 import ai.tokenstat.tokenstat.ui.ssh.SshConnectDialog
 import ai.tokenstat.tokenstat.ui.ssh.SshHostRow
@@ -604,6 +605,9 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     var selected by rememberSaveable { mutableStateOf(Destination.Home) }
     var pendingWorkHostId by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingWorkFolderId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingWorkKind by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingWorkItem by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingWorkOwner by rememberSaveable { mutableStateOf<String?>(null) }
     var accountOpen by remember { mutableStateOf(false) }
     var wizardOpen by remember { mutableStateOf(false) }
     var searchOpen by remember { mutableStateOf(false) }
@@ -789,9 +793,12 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                         state = state,
                         stores = homeStores,
                         tabBarScroll = tabBarScroll,
-                        onOpenWork = { hostId, folderId ->
+                        onOpenWork = { hostId, folderId, kind, item ->
                             pendingWorkHostId = hostId
                             pendingWorkFolderId = folderId
+                            pendingWorkKind = kind
+                            pendingWorkItem = item
+                            pendingWorkOwner = HomeStores.pinIdentity(state.account)
                             selected = Destination.Workspaces
                         },
                         onOpenDevices = { selected = Destination.Devices },
@@ -812,10 +819,16 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                             tabBarScroll = tabBarScroll,
                             pendingHostId = pendingWorkHostId,
                             pendingFolderId = pendingWorkFolderId,
+                            pendingKind = pendingWorkKind,
+                            pendingItem = pendingWorkItem,
+                            pendingOwner = pendingWorkOwner,
                             stores = homeStores,
                             onPendingConsumed = {
                                 pendingWorkHostId = null
                                 pendingWorkFolderId = null
+                                pendingWorkKind = null
+                                pendingWorkItem = null
+                                pendingWorkOwner = null
                             },
                             onSetupWizard = { wizardOpen = true },
                             onOpenDevice = { id ->
@@ -837,7 +850,10 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                         onPlans = { Plans.open() },
                         onOpenWork = { id ->
                             pendingWorkHostId = id
-                            selected = Destination.Workspaces
+                            pendingWorkKind = null
+                        pendingWorkItem = null
+                        pendingWorkOwner = null
+                        selected = Destination.Workspaces
                         },
                         onSetupWizard = { wizardOpen = true },
                         sshOpenSignal = sshSignal,
@@ -887,6 +903,9 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                     is SearchOpen.Folder -> {
                         pendingWorkHostId = open.hostId
                         pendingWorkFolderId = open.folderId
+                        pendingWorkKind = null
+                        pendingWorkItem = null
+                        pendingWorkOwner = null
                         selected = Destination.Workspaces
                     }
                 }
@@ -935,7 +954,10 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                 wizardOpen = false
                 pendingWorkHostId = hostId
                 pendingWorkFolderId = folderId
-                selected = Destination.Workspaces
+                pendingWorkKind = null
+                        pendingWorkItem = null
+                        pendingWorkOwner = null
+                        selected = Destination.Workspaces
             },
         )
     }
@@ -991,7 +1013,7 @@ private fun HomeScreen(
     model: AppViewModel,
     state: ClientState,
     stores: HomeStores,
-    onOpenWork: (hostId: String, folderId: String?) -> Unit,
+    onOpenWork: (hostId: String, folderId: String?, kind: String?, item: String?) -> Unit,
     onOpenDevices: () -> Unit,
     onSetupWizard: (() -> Unit)? = null,
     onSignIn: (() -> Unit)? = null,
@@ -1034,7 +1056,8 @@ private fun HomeScreen(
     val (order, hidden) = stores.layout()
     val sections = order.filter { it !in hidden }
     val places = stores.places(accountIdentity, accountHost)
-    val pins = stores.pins(accountHandle)
+    val pinIdentity = HomeStores.pinIdentity(state.account)
+    val pins = stores.pins(pinIdentity)
     val machines = ((state.account?.get("machines") as? JsonArray).orEmpty())
         .mapNotNull { it as? JsonObject }
     val thisId = state.account?.string("thisMachineId")
@@ -1060,9 +1083,9 @@ private fun HomeScreen(
             platform = machine.string("platform"),
         )
     }
-    fun openPlace(peer: String, workspaceId: String?) {
+    fun openPlace(peer: String, workspaceId: String?, kind: String? = null, item: String? = null) {
         val id = machineByPeer(peer)?.string("id")
-        if (id != null) onOpenWork(id, workspaceId) else onOpenDevices()
+        if (id != null) onOpenWork(id, workspaceId, kind, item) else onOpenDevices()
     }
     fun emptyReason(section: HomeSection): String? = when (section) {
         HomeSection.CONTINUE -> if (places.isEmpty()) "Appears after you open a folder or conversation." else null
@@ -1152,18 +1175,18 @@ private fun HomeScreen(
                             machineName = ::machineName,
                             machineOnline = ::machineOnline,
                             offline = state.connection.offline,
-                            onOpen = { place -> openPlace(place.id.peer, place.id.workspaceId) },
+                            onOpen = { place -> openPlace(place.id.peer, place.id.workspaceId, place.id.kind.name, place.id.itemId) },
                             isPinned = { place ->
                                 stores.isPinned(
-                                    accountHandle, place.id.peer, place.id.workspaceId ?: "",
-                                    if (place.id.kind == RecentPlaces.Kind.CHAT) PinnedWork.Kind.CONVERSATION else PinnedWork.Kind.WORKSPACE,
+                                    pinIdentity, place.id.peer, place.id.workspaceId ?: "",
+                                    when (place.id.kind) { RecentPlaces.Kind.CHAT -> PinnedWork.Kind.CONVERSATION; RecentPlaces.Kind.TERMINAL -> PinnedWork.Kind.TERMINAL; RecentPlaces.Kind.WORKSPACE -> PinnedWork.Kind.WORKSPACE },
                                     place.id.itemId,
                                 )
                             },
                             onTogglePin = { place ->
                                 stores.togglePin(
-                                    accountHandle, place.id.peer, place.id.workspaceId ?: "",
-                                    if (place.id.kind == RecentPlaces.Kind.CHAT) PinnedWork.Kind.CONVERSATION else PinnedWork.Kind.WORKSPACE,
+                                    pinIdentity, place.id.peer, place.id.workspaceId ?: "",
+                                    when (place.id.kind) { RecentPlaces.Kind.CHAT -> PinnedWork.Kind.CONVERSATION; RecentPlaces.Kind.TERMINAL -> PinnedWork.Kind.TERMINAL; RecentPlaces.Kind.WORKSPACE -> PinnedWork.Kind.WORKSPACE },
                                     place.id.itemId,
                                     RecentPlaces.title(place),
                                     place.workspaceName,
@@ -1176,7 +1199,7 @@ private fun HomeScreen(
                     item {
                         MachinesSection(
                             machines = awakeHosts,
-                            onOpenWork = { id -> onOpenWork(id, null) },
+                            onOpenWork = { id -> onOpenWork(id, null, null, null) },
                             onOpenDevices = onOpenDevices,
                         )
                     }
@@ -1188,8 +1211,8 @@ private fun HomeScreen(
                             machineName = ::machineName,
                             machineOnline = ::machineOnline,
                             offline = state.connection.offline,
-                            onOpen = { pin -> openPlace(pin.hostIdentity, pin.workspaceId) },
-                            onUnpin = { pin -> stores.unpin(accountHandle, pin) },
+                            onOpen = { pin -> openPlace(pin.hostIdentity, pin.workspaceId, if (pin.kind == PinnedWork.Kind.CONVERSATION) "CHAT" else pin.kind.name, pin.itemId) },
+                            onUnpin = { pin -> stores.unpin(pinIdentity, pin) },
                         )
                     }
                 }
@@ -2865,12 +2888,16 @@ private fun WorkspacesScreen(
     expanded: Boolean,
     pendingHostId: String? = null,
     pendingFolderId: String? = null,
+    pendingKind: String? = null,
+    pendingItem: String? = null,
+    pendingOwner: String? = null,
     stores: HomeStores? = null,
     onPendingConsumed: () -> Unit = {},
     onSetupWizard: (() -> Unit)? = null,
     onOpenDevice: (String) -> Unit = {},
     tabBarScroll: NestedScrollConnection? = null,
 ) {
+    val navigationOwner = HomeStores.pinIdentity(state.account)
     // The host list the iOS model keeps: hosts only, without this phone
     // (by account id and by its own key, for records that predate kinds),
     // and without keyless records, which cannot be dialled.
@@ -3065,23 +3092,32 @@ private fun WorkspacesScreen(
             }
         }
     }
-    LaunchedEffect(pendingHostId, hosts) {
+    LaunchedEffect(pendingHostId, hosts, navigationOwner) {
         val id = pendingHostId ?: return@LaunchedEffect
+        if (pendingOwner != null && pendingOwner != HomeStores.pinIdentity(state.account)) { onPendingConsumed(); return@LaunchedEffect }
         val match = hosts.find { it.string("id") == id } ?: return@LaunchedEffect
         session.setHost(match)
         if (connectedPeer != match.string("publicIdentity")) connect(match)
         if (pendingFolderId == null) onPendingConsumed()
     }
     var terminalSession by remember { mutableStateOf<WorkspaceTerminalRequest?>(null) }
-    var browser by remember { mutableStateOf<Pair<String, Int>?>(null) }
+    var browser by remember { mutableStateOf<BrowserOpenRequest?>(null) }
     var cloning by remember { mutableStateOf(false) }
     var folderRefresh by remember { mutableStateOf(0) }
     var pendingSelectFolderId by rememberSaveable { mutableStateOf<String?>(null) }
-    LaunchedEffect(host, folders, pendingFolderId) {
+    LaunchedEffect(host, connectedPeer, folders, pendingFolderId, pendingKind, pendingItem, pendingOwner, navigationOwner) {
         val folderId = pendingFolderId ?: return@LaunchedEffect
+        if (pendingOwner != null && pendingOwner != HomeStores.pinIdentity(state.account)) { onPendingConsumed(); return@LaunchedEffect }
+        if (connectedPeer != host?.string("publicIdentity")) return@LaunchedEffect
         val match = folders.mapNotNull { it as? JsonObject }.find { it.string("id") == folderId }
             ?: return@LaunchedEffect
         selectedFolderId = match.string("id")
+        initialSection = if (pendingKind == "CHAT") "Chat" else if (pendingKind == "TERMINAL") "Sessions" else null
+        pendingChatId = if (pendingKind == "CHAT") pendingItem else null
+        pendingOpenConversation = false
+        if (pendingKind == "TERMINAL" && !pendingItem.isNullOrBlank()) {
+            terminalSession = WorkspaceTerminalRequest(pendingItem, folderId, host?.string("label") ?: "Computer")
+        }
         onPendingConsumed()
     }
     // Home reads device history: opening a folder files it on the continue
@@ -3323,12 +3359,10 @@ private fun WorkspacesScreen(
             onClose = { terminalSession = null; folderRefresh += 1 },
             onSessionOpened = ::recordTerminalOpened,
         )
-    } else if (browsing != null && boundHost != null) {
+    } else if (browsing != null) {
         PortBrowserScreen(
             model = model,
-            peer = boundHost.string("publicIdentity") ?: "",
-            url = browsing.first,
-            port = browsing.second,
+            request = browsing,
             onClose = { browser = null },
         )
     } else if (expanded && boundFolder != null && boundHost != null) {
@@ -3340,7 +3374,7 @@ private fun WorkspacesScreen(
                 initialSection = initialSection,
                 onBack = null,
                 onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: "Computer") },
-                onOpenBrowser = { url, port -> browser = url to port },
+                onOpenBrowser = { browser = it },
                 onRecordChat = ::recordChatOpened,
             onOpenProject = ::openRegisteredProject,
                 initialChatId = pendingChatId,
@@ -3353,7 +3387,7 @@ private fun WorkspacesScreen(
             initialSection = initialSection,
             onBack = { selectedFolderId = null; initialSection = null; pendingChatId = null; pendingOpenConversation = false },
             onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: "Computer") },
-            onOpenBrowser = { url, port -> browser = url to port },
+            onOpenBrowser = { browser = it },
             onRecordChat = ::recordChatOpened,
             onOpenProject = ::openRegisteredProject,
             initialChatId = pendingChatId,
@@ -3442,12 +3476,21 @@ private fun WorkspaceList(
 ) {
     val colors = LocalTsColors.current
     val connectedHost = hosts.find { it.string("publicIdentity") == connectedPeer }
+    val actionScope = rememberCoroutineScope()
+    val client by model.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val terminalNames = remember(context) { ai.tokenstat.tokenstat.ui.logic.TerminalNames(context) }
+    val accountOwner = HomeStores.pinIdentity(client.account)
+    var renamingProject by remember(accountOwner, connectedPeer) { mutableStateOf<JsonObject?>(null) }
+    var renameError by remember(accountOwner, connectedPeer) { mutableStateOf<String?>(null) }
+    fun currentProjectOwner() = accountOwner.isNotEmpty() && accountOwner == HomeStores.pinIdentity(model.state.value.account) && connectedPeer == model.workspacesConnection.connectedPeer.value
     val folderRows = folders.mapNotNull { it as? JsonObject }
     val sessionRows = sessions.mapNotNull { it as? JsonObject }
     val chatRows = chats.mapNotNull { it as? JsonObject }
     val visibleSections = layoutOrder.filter { it !in layoutHidden }
     var chatsExpanded by remember { mutableStateOf(false) }
     LazyColumn(modifier, contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        renameError?.let { message -> item { ErrorCard(message) } }
         error?.let { message ->
             item {
                 // A stable failure stays readable with its retry, the way
@@ -3611,7 +3654,7 @@ private fun WorkspaceList(
                             (it.string("name") ?: "").contains(search, ignoreCase = true) ||
                             (it.string("path") ?: "").contains(search, ignoreCase = true)
                     }) { folder ->
-                        WorkspaceFolderRow(folder = folder, onOpen = { onFolder(folder) })
+                        WorkspaceFolderRow(folder = folder, onOpen = { onFolder(folder) }, onRename = { renamingProject = folder })
                     }
                 }
                 WorkSection.RECENT_CHATS -> if (chatRows.isNotEmpty()) {
@@ -3676,7 +3719,12 @@ private fun WorkspaceList(
                         }
                     }
                     items(sessionRows) { session ->
-                        WorkspaceSessionRow(session = session, onOpen = { onSession(session) })
+                        val project = session.string("workspaceID") ?: session.string("workspaceId")
+                        val owner = project?.let {
+                            ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(client.account, connectedPeer.orEmpty(), it)
+                        }
+                        WorkspaceSessionRow(session = session, displayName = terminalNames.name(owner, session.string("id").orEmpty()),
+                            onOpen = { onSession(session) })
                     }
                     if (sessionRows.isEmpty()) {
                         item {
@@ -3713,6 +3761,18 @@ private fun WorkspaceList(
             }
         }
     }
+    renamingProject?.let { project ->
+        ai.tokenstat.tokenstat.ui.components.NameEditorDialog("Rename project", project.string("name") ?: "Project", onDismiss = { renamingProject = null }) { name ->
+            renamingProject = null
+            actionScope.launch {
+                if (!currentProjectOwner()) return@launch
+                runCatching { model.workspaceSection(connectedPeer.orEmpty(), "workspace.rename", buildJsonObject { put("id", project.string("id") ?: ""); put("name", name) }) }
+                    .onSuccess { if (currentProjectOwner()) onRetry?.invoke() }
+                    .onFailure { renameError = friendlyError(it.message).message }
+            }
+        }
+    }
+
 }
 
 @Composable
@@ -3721,7 +3781,7 @@ private fun WorkspaceDetail(
     initialSection: String? = null,
     onBack: (() -> Unit)? = null,
     onOpenTerminal: (String?) -> Unit = {},
-    onOpenBrowser: (String, Int) -> Unit = { _, _ -> },
+    onOpenBrowser: (BrowserOpenRequest) -> Unit = {},
     onRecordChat: (String) -> Unit = {},
     onOpenProject: (JsonObject) -> Unit = {},
     initialChatId: String? = null,

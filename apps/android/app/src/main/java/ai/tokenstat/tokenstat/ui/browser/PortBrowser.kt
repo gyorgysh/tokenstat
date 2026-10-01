@@ -13,6 +13,7 @@ import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Column
@@ -40,60 +41,101 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewModelScope
 import ai.tokenstat.tokenstat.AppViewModel
+import ai.tokenstat.tokenstat.ui.logic.ProjectOwner
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
+import java.io.ByteArrayInputStream
 
 /// Port-forwarded localhost on this phone, matching Apple
 /// `ClientBrowserScreen`.
 ///
-/// The URL is the tunnel proxy's, so host localhost resolves through the
-/// tunnel and never touches this device's own localhost. Leaving the screen
-/// unlistens the forward, the way closing the Apple cover does. Only web
-/// pages load here; anything else is refused rather than stalled on.
+/// Original loopback addresses resolve through the paired computer's tunnel.
+/// Listener URLs live only for this screen, and every owned forward is
+/// released on exit. Only web pages pass the navigation gate.
 @SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PortBrowserScreen(
     model: AppViewModel,
-    peer: String,
-    url: String,
-    port: Int,
+    request: BrowserOpenRequest,
     onClose: () -> Unit,
 ) {
     // Its own header and its own way out, so the app chrome steps aside.
     HideTopBar()
     HideTabBar()
+    val context = LocalContext.current
+    val store = remember(context) { BrowserHistoryStore(context) }
+    val active = remember(request) { booleanArrayOf(true) }
     var progress by remember { mutableFloatStateOf(0f) }
-    var address by remember { mutableStateOf(url) }
-    var shownHost by remember { mutableStateOf(BrowserPolicy.title(url)) }
+    var address by remember(request) { mutableStateOf(request.target.url) }
+    var shownHost by remember(request) { mutableStateOf(request.target.host) }
     var loadError by remember { mutableStateOf<String?>(null) }
+    var opening by remember { mutableStateOf(false) }
     var view by remember { mutableStateOf<WebView?>(null) }
+
+    fun ownsContext(): Boolean = active[0] && request.owner != null && model.state.value.signedIn &&
+        ProjectOwner.from(model.state.value.account, request.peer, request.workspace) == request.owner
+
+    val listeners = remember(request) {
+        BrowserListenerSession(request.target, request.lease, ::ownsContext,
+            acquire = { target, current -> model.acquireBrowserListener(request.peer, target, request.lease.accountScope, current) })
+    }
+
+    fun original(url: String?): BrowserTarget? = listeners.original(url)
+
+    fun navigate(url: String) {
+        if (opening || !ownsContext()) return
+        val value = url.trim()
+        if (!BrowserPolicy.allows(value)) {
+            loadError = "That address cannot open here."
+            return
+        }
+        loadError = null
+        val target = BrowserTarget.parse(value)
+        if (target == null) {
+            address = value
+            view?.loadUrl(value)
+            return
+        }
+        opening = true
+        // Listener cleanup must also run if the screen leaves during the call.
+        model.viewModelScope.launch {
+            runCatching {
+                val forwarded = listeners.open(target) ?: return@runCatching
+                if (ownsContext()) {
+                    store.record(request.owner, target)
+                    address = target.url
+                    shownHost = target.host
+                    view?.loadUrl(forwarded)
+                }
+            }.onFailure { loadError = it.message }
+            opening = false
+        }
+    }
+
+    fun blockedResponse(): WebResourceResponse = WebResourceResponse(
+        "text/plain", "utf-8", 403, "Forbidden", emptyMap(),
+        ByteArrayInputStream("Open this preview's port before loading this address.".toByteArray()),
+    )
+
+    fun blockNavigation() { loadError = "Open this preview's port before loading this address." }
     // A pushed screen owns the system back. Without it the gesture falls
     // through to the activity and closes the app instead of stepping back.
     // History first: followed links and address-bar loads are pages, and
     // back walks them before it leaves the screen.
-    BackHandler { if (view?.canGoBack() == true) view?.goBack() else onClose() }
-    DisposableEffect(peer, port) {
+    BackHandler { if (listeners.isCurrent && view?.canGoBack() == true) view?.goBack() else onClose() }
+    DisposableEffect(request) {
         onDispose {
+            active[0] = false
             // Cleanup must outlive the composition that owns this screen.
             model.viewModelScope.launch {
-                runCatching {
-                    model.core(
-                        "proxy.unlisten",
-                        buildJsonObject {
-                            put("peer", peer)
-                            put("host", "127.0.0.1")
-                            put("port", port)
-                        },
-                    )
-                }
+                listeners.close()
             }
         }
     }
@@ -104,13 +146,9 @@ fun PortBrowserScreen(
                 IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
             },
             actions = {
-                TextButton(onClick = {
-                    loadError = null
-                    // Reload through the same gate a fresh address goes
-                    // through, so a blocked scheme cannot return that way.
-                    val current = address
-                    if (BrowserPolicy.allows(current)) view?.loadUrl(current)
-                    else view?.reload()
+                TextButton(enabled = !opening, onClick = {
+                    val actual = view?.url ?: address
+                    navigate(original(actual)?.url ?: actual)
                 }) { Text("Reload") }
                 TextButton(onClick = onClose) { Text("Done") }
             },
@@ -130,16 +168,7 @@ fun PortBrowserScreen(
                 ),
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = {
-                loadError = null
-                val target = address.trim()
-                if (BrowserPolicy.allows(target)) {
-                    shownHost = BrowserPolicy.title(target)
-                    view?.loadUrl(target)
-                } else {
-                    loadError = "That address cannot open here."
-                }
-            }) { Text("Go") }
+            TextButton(enabled = !opening, onClick = { navigate(address) }) { Text("Go") }
         }
         loadError?.let { error ->
             Text(
@@ -161,19 +190,46 @@ fun PortBrowserScreen(
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(v: WebView?, request: WebResourceRequest?): Boolean {
                             val target = request?.url?.toString()
-                            return if (BrowserPolicy.allows(target)) false else true
+                            return when (listeners.route(target, request?.isForMainFrame == true, request?.method)) {
+                                BrowserListenerSession.Route.Direct -> false
+                                BrowserListenerSession.Route.Open -> { navigate(original(target)!!.url); true }
+                                BrowserListenerSession.Route.Block -> { blockNavigation(); true }
+                            }
                         }
 
                         @Suppress("DEPRECATION")
                         override fun shouldOverrideUrlLoading(v: WebView?, url: String?): Boolean {
-                            return if (BrowserPolicy.allows(url)) false else true
+                            // This callback carries neither method nor frame;
+                            // an unmapped request cannot be replayed as GET.
+                            val direct = listeners.route(url, false, null) == BrowserListenerSession.Route.Direct
+                            if (!direct) blockNavigation()
+                            return !direct
+                        }
+
+                        override fun shouldInterceptRequest(v: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                            val target = request?.url?.toString()
+                            // WebView omits POST and resource loads from the
+                            // override callback. This hook runs off the UI
+                            // thread and refuses direct device loopback too.
+                            return when (listeners.route(target, request?.isForMainFrame == true, request?.method)) {
+                                BrowserListenerSession.Route.Direct -> null
+                                BrowserListenerSession.Route.Open -> {
+                                    val canonical = original(target)!!
+                                    v?.post { navigate(canonical.url) }
+                                    blockedResponse()
+                                }
+                                BrowserListenerSession.Route.Block -> {
+                                    v?.post { blockNavigation() }
+                                    blockedResponse()
+                                }
+                            }
                         }
 
                         override fun onPageCommitVisible(v: WebView?, url: String?) {
-                            // The title follows committed navigation the way
-                            // the Apple bar follows didCommit. The address
-                            // field stays what was typed until Go runs.
-                            shownHost = BrowserPolicy.title(url)
+                            if (!listeners.isCurrent) return
+                            val canonical = original(url)
+                            address = canonical?.url ?: url.orEmpty()
+                            shownHost = canonical?.host ?: BrowserPolicy.title(url)
                         }
 
                         override fun onReceivedError(
@@ -207,7 +263,8 @@ fun PortBrowserScreen(
                         }
                     }
                     view = this
-                    if (BrowserPolicy.allows(url)) loadUrl(url)
+                    val forwarded = request.target.through(request.listenerUrl)
+                    if (listeners.isCurrent && forwarded != null && BrowserPolicy.allows(forwarded)) loadUrl(forwarded)
                     else loadError = "That address cannot open here."
                 }
             },

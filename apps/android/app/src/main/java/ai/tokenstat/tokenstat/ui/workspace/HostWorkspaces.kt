@@ -637,7 +637,7 @@ private fun SecurityKeyRow(
 /// One registered folder: its name, path, and git state. Port of
 /// `ClientFolderRow`.
 @Composable
-fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit) {
+fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> Unit)? = null) {
     val colors = LocalTsColors.current
     val git = folder["git"] as? JsonObject
     Row(
@@ -697,6 +697,11 @@ fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit) {
                 }
             }
         }
+        if (onRename != null) {
+            androidx.compose.material3.IconButton(onClick = onRename) {
+                Icon(ai.tokenstat.tokenstat.ui.components.ActionIcon.Edit.vector, "Rename project", tint = colors.textTertiary)
+            }
+        }
         Icon(Icons.Default.ChevronRight, null, tint = colors.textTertiary, modifier = Modifier.size(12.dp))
     }
 }
@@ -704,11 +709,11 @@ fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit) {
 /// One running session: the harness mark where the command names one, a
 /// terminal tile otherwise. Port of `ClientSessionRow`.
 @Composable
-fun WorkspaceSessionRow(session: JsonObject, onOpen: () -> Unit) {
+fun WorkspaceSessionRow(session: JsonObject, displayName: String? = null, onOpen: () -> Unit) {
     val colors = LocalTsColors.current
     val command = session.str("command").orEmpty()
     val harness = harnessIdForCommand(command)
-    val title = harness?.let { harnessName(it) } ?: command.substringAfterLast("/").ifEmpty { "Shell" }
+    val title = displayName ?: harness?.let { harnessName(it) } ?: command.substringAfterLast("/").ifEmpty { "Shell" }
     val alive = (session["alive"] as? JsonPrimitive)?.booleanOrNull != false
     Row(
         verticalAlignment = Alignment.CenterVertically,

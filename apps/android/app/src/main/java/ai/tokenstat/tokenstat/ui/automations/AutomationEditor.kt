@@ -111,6 +111,7 @@ fun AutomationEditorScreen(
     workspaceID: String,
     folderName: String,
     existing: AutomationJob?,
+    template: AutomationTemplate? = null,
     backends: List<BackendRef>,
     defaultBudget: Long,
     timezone: String,
@@ -121,7 +122,7 @@ fun AutomationEditorScreen(
     val supportsReceipts = HostContracts.supportsAutomationReceipts(protocol)
     var baseline by remember { mutableStateOf(existing) }
     var fields by remember {
-        mutableStateOf(existing?.let(AutomationEditorDraft::fromJob) ?: AutomationEditorDraft.blank(workspaceID, defaultBudget))
+        mutableStateOf(existing?.let(AutomationEditorDraft::fromJob) ?: template?.draft(workspaceID) ?: AutomationEditorDraft.blank(workspaceID, defaultBudget))
     }
     var folders by remember { mutableStateOf<List<FolderRef>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }

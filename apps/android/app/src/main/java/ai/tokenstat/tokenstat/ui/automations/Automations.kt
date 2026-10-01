@@ -80,7 +80,7 @@ private sealed interface AutomationRoute {
     data class Detail(val jobID: String) : AutomationRoute
     data class History(val jobID: String) : AutomationRoute
     data class Run(val jobID: String, val runID: String) : AutomationRoute
-    data object Create : AutomationRoute
+    data class Create(val template: AutomationTemplate? = null) : AutomationRoute
     data class Edit(val jobID: String) : AutomationRoute
     data object Queue : AutomationRoute
 }
@@ -407,7 +407,8 @@ fun AutomationsScreen(
                 onReload = { scope.launch { load() } },
                 onBack = onBack,
                 onOpen = { push(AutomationRoute.Detail(it)) },
-                onCreate = { push(AutomationRoute.Create) },
+                onCreate = { push(AutomationRoute.Create()) },
+                onTemplate = { push(AutomationRoute.Create(it)) },
                 onEdit = { push(AutomationRoute.Edit(it)) },
                 onDelete = { confirm = AutomationConfirm.Delete(it) },
                 onQueue = { push(AutomationRoute.Queue) },
@@ -479,6 +480,7 @@ fun AutomationsScreen(
                 workspaceID = workspaceID,
                 folderName = folderName,
                 existing = null,
+                template = route.template,
                 backends = backends,
                 defaultBudget = queue.defaultBudgetSeconds,
                 timezone = timezone,
@@ -586,11 +588,15 @@ private fun AutomationListPage(
     onBack: () -> Unit,
     onOpen: (String) -> Unit,
     onCreate: () -> Unit,
+    onTemplate: (AutomationTemplate) -> Unit,
     onEdit: (String) -> Unit,
     onDelete: (String) -> Unit,
     onQueue: () -> Unit,
 ) {
-    val filtered = remember(scoped, search) { scoped.filter { jobMatchesQuery(it, search) } }
+    var order by remember { mutableStateOf(AutomationMobileOrder.NAME) }
+    var newMenu by remember { mutableStateOf(false) }
+    var sortMenu by remember { mutableStateOf(false) }
+    val filtered = remember(scoped, search, order) { order.sorted(scoped.filter { jobMatchesQuery(it, search) }) }
     val enabledCount = remember(scoped) { scoped.count { it.enabled } }
     val runningCount = remember(runs, scoped) {
         val ids = scoped.map { it.id }.toSet()
@@ -602,8 +608,22 @@ private fun AutomationListPage(
             subtitle = folderCaption,
             onBack = onBack,
             actions = {
-                IconButton(onClick = onCreate) {
-                    Icon(ActionIcon.Create.vector, "New automation", tint = LocalTsColors.current.accent)
+                Box {
+                    IconButton(onClick = { newMenu = true }) { Icon(ActionIcon.Create.vector, "New automation", tint = LocalTsColors.current.accent) }
+                    androidx.compose.material3.DropdownMenu(newMenu, onDismissRequest = { newMenu = false }) {
+                        androidx.compose.material3.DropdownMenuItem(text = { Text("Blank automation") }, onClick = { newMenu = false; onCreate() })
+                        AutomationTemplates.suggested.forEach { template ->
+                            androidx.compose.material3.DropdownMenuItem(text = { Text(template.title) }, onClick = { newMenu = false; onTemplate(template) })
+                        }
+                    }
+                }
+                Box {
+                    IconButton(onClick = { sortMenu = true }) { Icon(ActionIcon.Filter.vector, "Sort automations", tint = LocalTsColors.current.accent) }
+                    androidx.compose.material3.DropdownMenu(sortMenu, onDismissRequest = { sortMenu = false }) {
+                        AutomationMobileOrder.entries.forEach { choice ->
+                            androidx.compose.material3.DropdownMenuItem(text = { Text(choice.label + if (choice == order) " ✓" else "") }, onClick = { order = choice; sortMenu = false })
+                        }
+                    }
                 }
             },
         )

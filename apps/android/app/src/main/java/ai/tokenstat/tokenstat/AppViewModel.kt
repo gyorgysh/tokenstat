@@ -137,6 +137,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val mutableState = MutableStateFlow(ClientState())
     val state = mutableState.asStateFlow()
 
+    /// ViewModel-owned, so Back and changing project tools keep unsent writing.
+    val chatComposers = ai.tokenstat.tokenstat.ui.logic.ChatComposerSessions<ai.tokenstat.tokenstat.ui.workspace.StagedAttachment>(
+        attachmentCost = { it.data.length.toLong() * 2 + it.name.length.toLong() * 2 },
+    )
+
     /// The live SSH shells, in one place. Held here so navigating between
     /// tabs cannot orphan a shell: a refresh reconciles against what the host
     /// is holding and never drops a live connection. See `SshConnectionState`.

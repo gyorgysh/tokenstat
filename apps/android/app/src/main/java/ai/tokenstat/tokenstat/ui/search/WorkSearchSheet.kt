@@ -105,8 +105,8 @@ fun WorkSearchSheet(
             runCatching {
                 // Pins and recents first: they are on this device already.
                 val known = mutableListOf<SearchFolder>()
-                if (handle.isNotEmpty()) {
-                    for (pin in stores.pins(handle)) {
+                if (HomeStores.pinIdentity(state.account).isNotEmpty()) {
+                    for (pin in stores.pins(HomeStores.pinIdentity(state.account))) {
                         if (pin.kind != PinnedWork.Kind.WORKSPACE) continue
                         val id = machineIds[pin.hostIdentity] ?: continue
                         known += SearchFolder(pin.hostIdentity, id, displayNames[pin.hostIdentity] ?: id, pin.workspaceId, pin.folderName, null)
@@ -278,4 +278,3 @@ private fun JsonObject.string(key: String): String? {
     val element = get(key) as? kotlinx.serialization.json.JsonPrimitive ?: return null
     return element.contentOrNull
 }
-

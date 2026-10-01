@@ -182,6 +182,8 @@ object UntouchedChats {
         running: Boolean,
         id: String?,
         openId: String? = null,
+        hasWriting: Boolean = false,
+        hasPending: Boolean = false,
     ): Boolean =
-        title == DEFAULT_TITLE && lastMessageAtMs == null && !running && (openId == null || id != openId)
+        title == DEFAULT_TITLE && lastMessageAtMs == null && !running && !hasWriting && !hasPending && (openId == null || id != openId)
 }

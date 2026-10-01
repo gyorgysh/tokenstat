@@ -172,6 +172,37 @@ object ChatOutboxRules {
     fun key(peer: String, workspaceId: String, chatId: String): String =
         listOf(peer, workspaceId, chatId).joinToString("\u0000")
 
+    /// Claim only the writing actually reviewed. A recovered record is never
+    /// authorized to send, and an uncertain delivery still needs its receipt.
+    fun recoverLegacy(
+        legacy: List<QueuedMessage>,
+        scoped: List<QueuedMessage>,
+        reviewed: List<QueuedMessage>,
+    ): List<QueuedMessage> {
+        if (legacy != reviewed) {
+            throw ChatOutboxFailure(ChatOutboxFailure.Reason.Conflict,
+                "These saved messages changed. Review them again before recovering them.")
+        }
+        if (!valid(legacy) || !valid(scoped)) {
+            throw ChatOutboxFailure(ChatOutboxFailure.Reason.Invalid, "That queue is not valid.")
+        }
+        val ids = scoped.map { it.id }.toSet()
+        if (legacy.any { it.id in ids }) {
+            throw ChatOutboxFailure(ChatOutboxFailure.Reason.Conflict,
+                "This conversation already has a message with the same identity. Both copies have been kept.")
+        }
+        if (legacy.size > CAPACITY - scoped.size) {
+            throw ChatOutboxFailure(ChatOutboxFailure.Reason.Full,
+                "This conversation cannot hold all the recovered messages. Remove a queued message before recovering them.")
+        }
+        return scoped + legacy.map { item ->
+            item.copy(
+                delivery = if (item.needsReceipt) ChatDelivery.DeliveryUnknown else ChatDelivery.NeedsReview,
+                whenConnected = false,
+            )
+        }
+    }
+
 
     /// Whether a failed send might still have reached the host.
     ///
@@ -198,9 +229,15 @@ class ChatOutboxFailure(val reason: Reason, message: String) : Exception(message
 interface ChatOutbox {
     suspend fun items(key: String): List<QueuedMessage>
 
+    suspend fun pendingKeys(): Set<String>
+
     /// Read, mutate and write under one lock, so a change is never made
     /// against a copy that something else has already replaced.
     suspend fun update(key: String, mutate: (MutableList<QueuedMessage>) -> Unit): List<QueuedMessage>
+
+    /// Explicitly transfer reviewed accountless writing to a ProjectOwner
+    /// conversation key. Both queues change in one durable write or neither does.
+    suspend fun recoverLegacy(legacyKey: String, scopedKey: String, reviewed: List<QueuedMessage>): List<QueuedMessage>
 
     /// One delivery per conversation at a time. Returns false when one is
     /// already running.
@@ -232,6 +269,9 @@ class FileChatOutbox internal constructor(
     override suspend fun items(key: String): List<QueuedMessage> =
         withContext(files) { read()[key].orEmpty() }
 
+    override suspend fun pendingKeys(): Set<String> =
+        withContext(files) { read().filterValues { it.isNotEmpty() }.keys }
+
     override suspend fun update(
         key: String,
         mutate: (MutableList<QueuedMessage>) -> Unit,
@@ -253,6 +293,22 @@ class FileChatOutbox internal constructor(
         if (items.isEmpty()) queues.remove(key) else queues[key] = items
         write(queues)
         return@withContext items
+    }
+
+    override suspend fun recoverLegacy(
+        legacyKey: String,
+        scopedKey: String,
+        reviewed: List<QueuedMessage>,
+    ): List<QueuedMessage> = withContext(files) {
+        checkRecoveryKeys(legacyKey, scopedKey)
+        val queues = read().toMutableMap()
+        val legacy = queues[legacyKey].orEmpty()
+        val merged = ChatOutboxRules.recoverLegacy(legacy, queues[scopedKey].orEmpty(), reviewed)
+        if (legacy.isEmpty()) return@withContext merged
+        queues.remove(legacyKey)
+        queues[scopedKey] = merged
+        write(queues)
+        merged
     }
 
     override fun beginDelivery(key: String): Boolean = synchronized(active) {
@@ -395,6 +451,8 @@ class InMemoryChatOutbox : ChatOutbox {
 
     override suspend fun items(key: String): List<QueuedMessage> = queues[key].orEmpty()
 
+    override suspend fun pendingKeys(): Set<String> = queues.filterValues { it.isNotEmpty() }.keys
+
     override suspend fun update(
         key: String,
         mutate: (MutableList<QueuedMessage>) -> Unit,
@@ -413,9 +471,27 @@ class InMemoryChatOutbox : ChatOutbox {
         return items
     }
 
+    override suspend fun recoverLegacy(
+        legacyKey: String,
+        scopedKey: String,
+        reviewed: List<QueuedMessage>,
+    ): List<QueuedMessage> {
+        checkRecoveryKeys(legacyKey, scopedKey)
+        val merged = ChatOutboxRules.recoverLegacy(queues[legacyKey].orEmpty(), queues[scopedKey].orEmpty(), reviewed)
+        queues.remove(legacyKey)
+        if (merged.isEmpty()) queues.remove(scopedKey) else queues[scopedKey] = merged
+        return merged
+    }
+
     override fun beginDelivery(key: String): Boolean = active.add(key)
 
     override fun endDelivery(key: String) {
         active.remove(key)
+    }
+}
+
+private fun checkRecoveryKeys(legacyKey: String, scopedKey: String) {
+    if (legacyKey.isBlank() || scopedKey.isBlank() || legacyKey == scopedKey) {
+        throw ChatOutboxFailure(ChatOutboxFailure.Reason.Invalid, "The recovery destination is not valid.")
     }
 }

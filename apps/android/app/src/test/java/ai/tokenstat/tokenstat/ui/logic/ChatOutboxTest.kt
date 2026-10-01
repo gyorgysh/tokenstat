@@ -218,4 +218,67 @@ class ChatOutboxTest {
         assertEquals(listOf("a", "b"), ChatOutboxRules.accept(items, "gone", revision = 8).map { it.id })
         assertNull(ChatOutboxRules.accept(items, "a", 8).firstOrNull { it.id == "a" })
     }
+
+    @Test
+    fun `legacy recovery preserves uncertain deliveries and requires review for every unsent state`() = runTest {
+        val store = InMemoryChatOutbox()
+        val reviewed = ChatDelivery.entries.map { delivery ->
+            message(delivery.wire, delivery, whenConnected = true).copy(
+                attachments = listOf(QueuedAttachment("file-${delivery.wire}", "notes.txt")),
+                firstAttemptAtMs = 100,
+                attemptedAtMs = 200,
+            )
+        }
+        val existing = message("current", ChatDelivery.Ready)
+        store.update("legacy") { it.addAll(reviewed) }
+        store.update("scoped") { it.add(existing) }
+        val merged = store.recoverLegacy("legacy", "scoped", reviewed)
+        assertTrue(store.items("legacy").isEmpty())
+        assertEquals(existing, merged.first())
+        reviewed.zip(merged.drop(1)).forEach { (before, after) ->
+            val expected = if (before.needsReceipt) ChatDelivery.DeliveryUnknown else ChatDelivery.NeedsReview
+            assertEquals(before.copy(delivery = expected, whenConnected = false), after)
+            assertEquals(before.needsReceipt, after.needsReceipt)
+            assertFalse(after.whenConnected)
+        }
+    }
+
+    @Test
+    fun `changed legacy writing must be reviewed again and leaves both queues intact`() = runTest {
+        val store = InMemoryChatOutbox()
+        val reviewed = listOf(message("old"))
+        val changed = reviewed.single().copy(text = "new writing")
+        val current = listOf(message("current"))
+        store.update("legacy") { it.add(changed) }
+        store.update("scoped") { it.addAll(current) }
+        val failure = runCatching { store.recoverLegacy("legacy", "scoped", reviewed) }.exceptionOrNull() as? ChatOutboxFailure
+        assertEquals(ChatOutboxFailure.Reason.Conflict, failure?.reason)
+        assertEquals(listOf(changed), store.items("legacy"))
+        assertEquals(current, store.items("scoped"))
+    }
+
+    @Test
+    fun `recovery never overwrites or silently discards a duplicate message identity`() = runTest {
+        val store = InMemoryChatOutbox()
+        val same = listOf(message("same"))
+        store.update("legacy") { it.addAll(same) }
+        store.update("scoped") { it.addAll(same) }
+        val failure = runCatching { store.recoverLegacy("legacy", "scoped", same) }.exceptionOrNull() as? ChatOutboxFailure
+        assertEquals(ChatOutboxFailure.Reason.Conflict, failure?.reason)
+        assertEquals(same, store.items("legacy"))
+        assertEquals(same, store.items("scoped"))
+    }
+
+    @Test
+    fun `recovery capacity refusal preserves both complete queues`() = runTest {
+        val store = InMemoryChatOutbox()
+        val legacy = listOf(message("legacy"))
+        val current = (1..ChatOutboxRules.CAPACITY).map { message("current-$it") }
+        store.update("legacy") { it.addAll(legacy) }
+        store.update("scoped") { it.addAll(current) }
+        val failure = runCatching { store.recoverLegacy("legacy", "scoped", legacy) }.exceptionOrNull() as? ChatOutboxFailure
+        assertEquals(ChatOutboxFailure.Reason.Full, failure?.reason)
+        assertEquals(legacy, store.items("legacy"))
+        assertEquals(current, store.items("scoped"))
+    }
 }

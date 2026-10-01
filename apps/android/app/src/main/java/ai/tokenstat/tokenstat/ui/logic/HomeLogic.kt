@@ -148,7 +148,7 @@ object RecentPlaces {
 object PinnedWork {
     const val CAPACITY = 8
 
-    enum class Kind { WORKSPACE, CONVERSATION }
+    enum class Kind { WORKSPACE, CONVERSATION, TERMINAL }
 
     data class Pin(
         val scope: String,
@@ -172,9 +172,10 @@ object PinnedWork {
                 if (itemId != null) return null
                 "workspace|${encode(hostIdentity)}|${encode(workspaceId)}"
             }
-            Kind.CONVERSATION -> {
+            Kind.CONVERSATION, Kind.TERMINAL -> {
                 if (itemId == null || !validIdentifier(itemId)) return null
-                "conversation|${encode(hostIdentity)}|${encode(workspaceId)}|${encode(itemId)}"
+                val name = if (kind == Kind.CONVERSATION) "conversation" else "terminal"
+                "$name|${encode(hostIdentity)}|${encode(workspaceId)}|${encode(itemId)}"
             }
         }
     }

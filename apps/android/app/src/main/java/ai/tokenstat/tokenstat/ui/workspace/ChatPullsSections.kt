@@ -82,6 +82,12 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ai.tokenstat.tokenstat.ui.logic.ProjectOwner
+import ai.tokenstat.tokenstat.ui.logic.PinnedWork
+import ai.tokenstat.tokenstat.ui.home.HomeStores
+import ai.tokenstat.tokenstat.ui.components.NameEditorDialog
+import androidx.compose.material.icons.filled.MoreVert
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -177,60 +183,80 @@ fun ChatSection(
     openConversationOnAppear: Boolean = false,
     conversationNonce: Int = 0,
     machineId: String? = null,
+    onOpenSection: (String) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
-    var chats by remember(workspace) { mutableStateOf<List<JsonObject>>(emptyList()) }
-    var openId by remember(workspace) { mutableStateOf<String?>(null) }
-    var creating by remember(workspace) { mutableStateOf(false) }
+    val client by model.state.collectAsStateWithLifecycle()
+    val projectOwner = ProjectOwner.from(client.account, peer, workspace)
+    fun ownsProject() = projectOwner != null && ProjectOwner.from(model.state.value.account, peer, workspace) == projectOwner
+    var chats by remember(projectOwner) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var openId by remember(projectOwner) { mutableStateOf<String?>(null) }
+    var creating by remember(projectOwner) { mutableStateOf(false) }
     var didOpenConversation by remember(workspace, openConversationOnAppear, conversationNonce) { mutableStateOf(false) }
-    var events by remember(peer, workspace, openId) { mutableStateOf<List<JsonObject>>(emptyList()) }
-    val history = remember(peer, workspace, openId) { ChatHistoryWindow() }
-    var hasEarlier by remember(peer, workspace, openId) { mutableStateOf(false) }
-    var loadingEarlier by remember(peer, workspace, openId) { mutableStateOf(false) }
-    var approvals by remember(peer, workspace, openId) { mutableStateOf<List<JsonObject>>(emptyList()) }
-    var error by remember(workspace) { mutableStateOf<String?>(null) }
-    var loading by remember(workspace) { mutableStateOf(true) }
-    var draft by remember(workspace) { mutableStateOf("") }
+    var events by remember(projectOwner, openId) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    val history = remember(projectOwner, openId) { ChatHistoryWindow() }
+    var hasEarlier by remember(projectOwner, openId) { mutableStateOf(false) }
+    var loadingEarlier by remember(projectOwner, openId) { mutableStateOf(false) }
+    var approvals by remember(projectOwner, openId) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var error by remember(projectOwner) { mutableStateOf<String?>(null) }
+    var loading by remember(projectOwner) { mutableStateOf(true) }
+    val composerKey = openId?.let { projectOwner?.conversation(it) }
+    val composerRevision by model.chatComposers.revision.collectAsStateWithLifecycle()
+    val draftDelegate: kotlin.properties.ReadWriteProperty<Any?, String> =
+        remember(composerKey, composerRevision) { model.chatComposers.text(composerKey) }
+    val stagedDelegate: kotlin.properties.ReadWriteProperty<Any?, List<StagedAttachment>> =
+        remember(composerKey, composerRevision) { model.chatComposers.attachments(composerKey) }
+    var draft: String by draftDelegate
+    var staged: List<StagedAttachment> by stagedDelegate
+    val composerFailure by model.chatComposers.failure.collectAsStateWithLifecycle()
     /// Which conversations have a send in flight. Per conversation, because a
     /// send outlives a navigation: one unkeyed flag showed the spinner on
     /// whatever conversation was opened next.
-    var sendingIds by remember(workspace) { mutableStateOf<Set<String>>(emptySet()) }
+    var sendingIds by remember(projectOwner) { mutableStateOf<Set<String>>(emptySet()) }
     val sending = openId?.let { it in sendingIds } == true
-    var sendError by remember(workspace) { mutableStateOf<String?>(null) }
-    var actionError by remember(workspace) { mutableStateOf<String?>(null) }
-    var eventsError by remember(peer, workspace, openId) { mutableStateOf<String?>(null) }
-    var search by remember { mutableStateOf("") }
-    var agentFilter by remember { mutableStateOf("") }
-    var runningOnly by remember { mutableStateOf(false) }
-    var alphabetical by remember { mutableStateOf(false) }
-    var filterOpen by remember { mutableStateOf(false) }
-    var pendingDelete by remember { mutableStateOf<JsonObject?>(null) }
-    var showingSetup by remember { mutableStateOf(false) }
+    var sendError by remember(projectOwner) { mutableStateOf<String?>(null) }
+    var actionError by remember(projectOwner) { mutableStateOf<String?>(null) }
+    var eventsError by remember(projectOwner, openId) { mutableStateOf<String?>(null) }
+    var search by remember(projectOwner) { mutableStateOf("") }
+    var agentFilter by remember(projectOwner) { mutableStateOf("") }
+    var runningOnly by remember(projectOwner) { mutableStateOf(false) }
+    var alphabetical by remember(projectOwner) { mutableStateOf(false) }
+    var filterOpen by remember(projectOwner) { mutableStateOf(false) }
+    var pendingDelete by remember(projectOwner) { mutableStateOf<JsonObject?>(null) }
+    var pendingRename by remember(projectOwner) { mutableStateOf<JsonObject?>(null) }
+    var deleteAll by remember(projectOwner) { mutableStateOf(false) }
+    var showingSetup by remember(projectOwner) { mutableStateOf(false) }
     // Agent, model and effort, one tap from the composer the way the iPhone
     // reaches them. The list lives here rather than in the sheet, because the
     // composer's summary line reads it too.
-    var showingAgent by remember { mutableStateOf(false) }
-    var backends by remember(peer) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var showingAgent by remember(projectOwner) { mutableStateOf(false) }
+    var backends by remember(projectOwner) { mutableStateOf<List<JsonObject>>(emptyList()) }
     // Files chosen but not sent yet. They go up with the message rather than
     // on pick, so removing one before sending costs the host nothing.
-    var staged by remember(workspace) { mutableStateOf<List<StagedAttachment>>(emptyList()) }
-    var attachError by remember(workspace) { mutableStateOf<String?>(null) }
+    var attachError by remember(projectOwner) { mutableStateOf<String?>(null) }
     /// Why a setup change did not take. The host refuses one while a turn is
     /// running, and a pill that snaps back explains nothing by itself.
-    var setupError by remember(workspace) { mutableStateOf<String?>(null) }
+    var setupError by remember(projectOwner) { mutableStateOf<String?>(null) }
     // A conversation opens on its latest turn and stays with it, the way the
     // Apple transcript does. Fresh per conversation, so opening another chat
     // starts pinned again rather than inheriting a scrollback.
-    val follow = remember(openId) { TranscriptFollowState() }
-    val listState = remember(openId) { LazyListState() }
-    var autoScrolling by remember(openId) { mutableStateOf(false) }
+    val follow = remember(projectOwner, openId) { TranscriptFollowState() }
+    val listState = remember(projectOwner, openId) { LazyListState() }
+    var autoScrolling by remember(projectOwner, openId) { mutableStateOf(false) }
     val context = LocalContext.current
+    val homeStores = remember(context) { HomeStores(context) }
+    val pinIdentity = HomeStores.pinIdentity(client.account)
     /// How the last conversation was set up, which is what a new one opens
     /// with. See `LaunchDefaults`.
     val launchChoice: LaunchChoiceStore = remember(context) { SharedPrefsLaunchChoice(context) }
     /// Messages waiting for the open turn. Durable, because they are somebody's
     /// own writing rather than a cache. See `ChatOutbox`.
     val outbox: ChatOutbox = remember(context) { FileChatOutbox(context) }
+    var pendingQueueKeys by remember(projectOwner) { mutableStateOf<Set<String>>(emptySet()) }
+    var legacyReviewId by remember(projectOwner) { mutableStateOf<String?>(null) }
+    var legacyReviewed by remember(projectOwner, legacyReviewId) { mutableStateOf<List<QueuedMessage>>(emptyList()) }
+    var recoveringLegacy by remember(projectOwner) { mutableStateOf(false) }
+    var legacyFailure by remember(projectOwner, legacyReviewId) { mutableStateOf<String?>(null) }
     /// Whether the last attempt to reach this host worked.
     ///
     /// Not the account's own connection state: that is only recomputed when
@@ -238,37 +264,37 @@ fun ChatSection(
     /// radio off. The poll below asks this host about every 400ms while a
     /// turn is running or a note is parked, and every two seconds otherwise.
     /// Its answer is the truthful one.
-    var hostReachable by remember(workspace) { mutableStateOf(true) }
+    var hostReachable by remember(projectOwner) { mutableStateOf(true) }
     val offline = !hostReachable
-    var queued by remember(workspace) { mutableStateOf<List<QueuedMessage>>(emptyList()) }
+    var queued by remember(projectOwner) { mutableStateOf<List<QueuedMessage>>(emptyList()) }
     /// Which queued messages this session may send without being asked again.
     ///
     /// A message somebody just pressed Send on is authorised. Messages found
     /// on disk at open are not, except the ones explicitly marked Send when
     /// connected: reopening the app is not the same as asking to send.
-    var authorized by remember(workspace) { mutableStateOf<Set<String>>(emptySet()) }
+    var authorized by remember(projectOwner) { mutableStateOf<Set<String>>(emptySet()) }
     /// The message the composer is delivering on its first attempt. Twin of
     /// `ChatModel.deliveringFromComposer`: the strip draws `pending` rather
     /// than `queued`, so a healthy send never opens it.
-    var deliveringFromComposer by remember(workspace) { mutableStateOf<String?>(null) }
+    var deliveringFromComposer by remember(projectOwner) { mutableStateOf<String?>(null) }
     /// Accepted notes remain protected over lists requested before each park.
-    var heldSteers by remember(workspace) { mutableStateOf<Map<String, SteerHold>>(emptyMap()) }
-    val steerVersions = remember(workspace) { SteerVersions() }
+    var heldSteers by remember(projectOwner) { mutableStateOf<Map<String, SteerHold>>(emptyMap()) }
+    val steerVersions = remember(projectOwner) { SteerVersions() }
     /// Conversations whose note was cleared here. An in-flight list that still
     /// carries the old words must not put them back.
-    var retiredSteers by remember(workspace) { mutableStateOf<Map<String, Long>>(emptyMap()) }
+    var retiredSteers by remember(projectOwner) { mutableStateOf<Map<String, Long>>(emptyMap()) }
     /// Counts `chat.list` requests, so a list asked for after a note was
     /// parked or dropped is trusted over what this screen is holding.
-    val listRequests = remember(workspace) { java.util.concurrent.atomic.AtomicLong() }
-    var appliedListRequest by remember(workspace) { mutableStateOf(0L) }
+    val listRequests = remember(projectOwner) { java.util.concurrent.atomic.AtomicLong() }
+    var appliedListRequest by remember(projectOwner) { mutableStateOf(0L) }
     /// One delivery of a parked note is already in flight.
-    var deliveringSteer by remember(workspace) { mutableStateOf(false) }
-    var clearingSteer by remember(workspace) { mutableStateOf(false) }
+    var deliveringSteer by remember(projectOwner) { mutableStateOf(false) }
+    var clearingSteer by remember(projectOwner) { mutableStateOf(false) }
     /// A note is being parked. Send stays Send, and a second tap waits.
-    var parkingSteer by remember(workspace) { mutableStateOf(false) }
+    var parkingSteer by remember(projectOwner) { mutableStateOf(false) }
     /// This computer's helper has no mid-turn note. Remembered with the peer,
     /// so a folder change on the same computer does not ask again.
-    var steerUnsupported by remember(peer) { mutableStateOf(false) }
+    var steerUnsupported by remember(projectOwner) { mutableStateOf(false) }
     /// What the pending strip draws: everything genuinely waiting, which is
     /// to say everything except the send that is in flight right now. A
     /// refused or unconfirmed send clears the filter on its way out, so it
@@ -293,7 +319,7 @@ fun ChatSection(
                 val read = withContext(Dispatchers.IO) {
                     readAttachment(context, uri, minOf(ATTACHMENT_CAP, remaining))
                 }
-                if (openId != conversation) return@launch
+                if (openId != conversation || !ownsProject()) return@launch
                 when (read) {
                     is AttachmentRead.Ok -> {
                         // Another picker result may have completed while this read suspended.
@@ -357,15 +383,56 @@ fun ChatSection(
     }
 
     suspend fun loadChats() {
+        if (!ownsProject()) return
         loading = true
+        pendingQueueKeys = runCatching { outbox.pendingKeys() }.getOrElse {
+            // An unreadable queue must not hide a row that might hold writing.
+            chats.mapNotNull { it.str("id") }.map { ChatOutboxRules.key(peer, workspace, it) }.toSet()
+        }
         val listRequest = listRequests.incrementAndGet()
         runCatching {
             model.workspaceSection(peer, "chat.list", buildJsonObject { put("workspaceId", workspace) })
         }.onSuccess {
+            if (!ownsProject()) return@onSuccess
             applyChatRows((it as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList(), listRequest)
             error = null
-        }.onFailure { error = friendlyError(it.message).message }
+        }.onFailure { if (ownsProject()) error = friendlyError(it.message).message }
         loading = false
+    }
+
+    @Composable
+    fun chatActions(chat: JsonObject) {
+        var menu by remember(chat.str("id")) { mutableStateOf(false) }
+        val id = chat.str("id") ?: return
+        Box {
+            IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Chat actions") }
+            DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(text = { Text("Rename") }, enabled = !chat.bol("running"), onClick = { menu = false; pendingRename = chat })
+                if (HostContracts.supportsChatFork(protocol)) {
+                    DropdownMenuItem(text = { Text("Fork chat") }, onClick = {
+                        menu = false
+                        scope.launch {
+                            if (!ownsProject()) return@launch
+                            runCatching { model.workspaceSection(peer, "chat.fork", buildJsonObject { put("id", id) }) as? JsonObject }
+                                .onSuccess { copied ->
+                                    if (!ownsProject()) return@onSuccess
+                                    loadChats()
+                                    copied?.str("id")?.let { openId = it }
+                                }.onFailure { actionError = TunnelCopy.display(it.message ?: "The chat could not be copied.", hostLabel) }
+                        }
+                    })
+                }
+                val pinned = homeStores.isPinned(pinIdentity, peer, workspace, PinnedWork.Kind.CONVERSATION, id)
+                DropdownMenuItem(text = { Text(if (pinned) "Unpin" else "Pin") }, onClick = {
+                    menu = false
+                    if (ownsProject() && !homeStores.togglePin(pinIdentity, peer, workspace, PinnedWork.Kind.CONVERSATION, id, chat.str("title") ?: "Chat", folderName)) {
+                        actionError = "Pinned work holds eight items. Unpin one before adding another."
+                    }
+                })
+                DropdownMenuItem(text = { Text("Project sessions") }, onClick = { menu = false; onOpenSection("Sessions") })
+                DropdownMenuItem(text = { Text("Delete chat") }, onClick = { menu = false; pendingDelete = chat })
+            }
+        }
     }
     // What the open conversation ended up set to, kept for the next new one.
     // Recorded from the record rather than from each control, so a setting
@@ -374,7 +441,7 @@ fun ChatSection(
     // the poll below runs about every 400ms while a turn is running or a
     // note is parked, and every two seconds otherwise, for as long as a
     // chat is open.
-    var lastLaunch by remember(workspace) { mutableStateOf<LaunchChoice?>(null) }
+    var lastLaunch by remember(projectOwner) { mutableStateOf<LaunchChoice?>(null) }
     fun rememberLaunch(chat: JsonObject?) {
         val backend = chat?.str("backend")?.ifBlank { null } ?: return
         val choice = LaunchChoice(
@@ -497,12 +564,13 @@ fun ChatSection(
                 LaunchDefaults.effort(saved, backend)?.let { put("effort", it) }
             }) as? JsonObject
         }.onSuccess { created ->
+            if (!ownsProject()) return@onSuccess
             val id = created?.str("id")
             loadChats()
             openId = id ?: chats.maxByOrNull {
                 (it["updatedAtMs"] as? JsonPrimitive)?.longOrNull ?: 0L
             }?.str("id")
-        }.onFailure { error = friendlyError(it.message).message }
+        }.onFailure { if (ownsProject()) error = friendlyError(it.message).message }
         creating = false
     }
     // Instant, like the Apple chase: an animated walk through a lazy list
@@ -520,20 +588,49 @@ fun ChatSection(
         follow.jump()
         scrollToEnd()
     }
-    fun outboxKey(id: String) = ChatOutboxRules.key(peer, workspace, id)
+    fun legacyOutboxKey(id: String) = ChatOutboxRules.key(peer, workspace, id)
+    fun outboxKey(id: String) = projectOwner?.conversation(id) ?: "unverified|$peer|$workspace|$id"
+    fun legacyConversationIDs(): List<String> = pendingQueueKeys.mapNotNull { key ->
+        key.split('\u0000').takeIf { it.size == 3 && it[0] == peer && it[1] == workspace }?.get(2)
+    }.distinct()
+
+    LaunchedEffect(projectOwner, legacyReviewId) {
+        val id = legacyReviewId ?: return@LaunchedEffect
+        runCatching { outbox.items(legacyOutboxKey(id)) }
+            .onSuccess { if (ownsProject() && legacyReviewId == id) legacyReviewed = it }
+            .onFailure { if (ownsProject()) legacyFailure = it.message ?: "Older pending writing could not be read." }
+    }
+
+    @Composable
+    fun legacyNotice(id: String) {
+        TsCard {
+            Column {
+                Text("Older pending writing", style = MaterialTheme.typography.titleSmall)
+                Text(chats.firstOrNull { it.str("id") == id }?.str("title") ?: "Conversation no longer listed", style = MaterialTheme.typography.bodySmall)
+                Text("These device copies predate account ownership. Review them before attaching them to this account.", style = MaterialTheme.typography.bodySmall)
+                TsSecondaryButton(label = "Review copies", icon = ActionIcon.Visibility.vector, small = true,
+                    onClick = { legacyReviewId = id })
+            }
+        }
+    }
 
     /// Save a queue change, and say so when it is refused rather than letting
     /// the list quietly disagree with what is on disk. Published only when
     /// this conversation is still the open one: a send for chat A that lands
     /// after chat B was opened must not overwrite B's strip.
-    suspend fun writeQueue(id: String, mutate: (MutableList<QueuedMessage>) -> Unit): Boolean =
-        runCatching { outbox.update(outboxKey(id), mutate) }
-            .onSuccess { if (id == openId) queued = it }
+    suspend fun writeQueue(id: String, mutate: (MutableList<QueuedMessage>) -> Unit): Boolean {
+        if (!ownsProject()) return false
+        return runCatching { outbox.update(outboxKey(id), mutate) }
+            .onSuccess {
+                pendingQueueKeys = if (it.isEmpty()) pendingQueueKeys - outboxKey(id) else pendingQueueKeys + outboxKey(id)
+                if (id == openId) queued = it
+            }
             .onFailure {
                 sendError = (it as? ChatOutboxFailure)?.message
                     ?: "Pending messages could not be saved on this device."
             }
             .isSuccess
+    }
 
     /// Put a message in the queue. Written to disk before the host is asked,
     /// so a send that is interrupted leaves the words somewhere.
@@ -551,6 +648,7 @@ fun ChatSection(
             return null
         }
         if (!writeQueue(id) { it.add(item) }) return null
+        if (!ownsProject()) return item
         // Pressing Send is the authorisation. Nothing else auto-sends.
         authorized = authorized + item.id
         return item
@@ -561,6 +659,7 @@ fun ChatSection(
     /// True when the receipt cleared the message, so the drain carries on
     /// while the host is free instead of waiting for the next poll.
     suspend fun checkReceipt(id: String, item: QueuedMessage): Boolean {
+        if (!ownsProject()) return false
         if (!HostContracts.supportsReceipt(protocol)) {
             val computer = hostLabel.ifBlank { "this computer" }
             sendError = "Update $computer to check message delivery. It speaks protocol $protocol and needs " +
@@ -578,6 +677,7 @@ fun ChatSection(
             sendError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel.ifBlank { "that computer" })
             return false
         }
+        if (!ownsProject()) return false
         when (receipt?.str("state") ?: "unknown") {
             "accepted" -> {
                 writeQueue(id) { list -> list.removeAll { it.id == item.id } }
@@ -602,6 +702,7 @@ fun ChatSection(
     /// outcome that is not a plain acceptance leaves the copy behind in a
     /// state that says what to do next. Port of `ChatModel.deliverQueued`.
     suspend fun deliver(item: QueuedMessage, stopCurrent: Boolean): Boolean {
+        if (!ownsProject()) return false
         val id = openId ?: return false
         if (!HostContracts.supportsConfirmedSend(protocol)) {
             val computer = hostLabel.ifBlank { "this computer" }
@@ -641,6 +742,7 @@ fun ChatSection(
                     retireSteer(id)
                 }
                 repeat(80) {
+                    if (!ownsProject()) return false
                     if (chats.firstOrNull { it.str("id") == id }?.bol("running") != true) return@repeat
                     refreshChats()
                     kotlinx.coroutines.delay(200)
@@ -651,6 +753,7 @@ fun ChatSection(
             // sent are the bytes saved, never the stale closure.
             val live = runCatching { outbox.items(key) }.getOrDefault(emptyList())
                 .firstOrNull { it.id == item.id } ?: item
+            if (!ownsProject()) return false
             // An edit after an attempt means the words changed, so the
             // delivery id changes with them: the old one may already have a
             // receipt on the host.
@@ -670,6 +773,7 @@ fun ChatSection(
                     }
                 }
             ) return false
+            if (!ownsProject()) return false
             val sent = runCatching {
                 model.workspaceSection(
                     peer,
@@ -690,6 +794,7 @@ fun ChatSection(
                     }
                     if (id == openId) queued = carried
                 }
+                if (!ownsProject()) return true
                 authorized = authorized - deliveryId - item.id
                 sendError = null
                 loadEvents(id)
@@ -729,9 +834,10 @@ fun ChatSection(
 
     /// Send what is waiting, oldest first, while the host will take it.
     suspend fun drainOutbox() {
+        if (!ownsProject()) return
         val id = openId ?: return
         while (true) {
-            if (sendingIds.isNotEmpty() || !hostReachable) return
+            if (sendingIds.isNotEmpty() || !hostReachable || !ownsProject()) return
             val next = queued.firstOrNull() ?: return
             if (next.id !in authorized) return
             if (chats.firstOrNull { it.str("id") == id }?.bol("running") == true) return
@@ -747,6 +853,7 @@ fun ChatSection(
     /// Hand a note the turn ended without taking to the host as the next
     /// message. The queue moves only once that note is gone.
     suspend fun deliverParked(id: String) {
+        if (!ownsProject()) return
         val captured = ChatSteer.noteOf(chats.firstOrNull { it.str("id") == id })
         val capturedVersion = steerVersions.version(id)
         if (captured.isEmpty()) {
@@ -811,6 +918,7 @@ fun ChatSection(
     /// A parked note goes out before anything waiting in the queue.
     /// `deliverNote` false is the path after the note was just handed off.
     suspend fun drainQueue(deliverNote: Boolean = true) {
+        if (!ownsProject()) return
         if (sendingIds.isNotEmpty() || clearingSteer || !hostReachable) return
         val id = openId ?: return
         val note = ChatSteer.noteOf(chats.firstOrNull { it.str("id") == id })
@@ -831,6 +939,9 @@ fun ChatSection(
     /// Park the words on the next tool step. True when this send is finished.
     /// False when the words should wait in the queue instead.
     suspend fun tryParkSteer(id: String, text: String): Boolean {
+        if (!ownsProject()) return true
+        val noteOwner = projectOwner?.conversation(id) ?: return true
+        val noteDraft = model.chatComposers.capture(noteOwner)
         val chat = chats.firstOrNull { it.str("id") == id }
         if (!ChatSteer.canAttempt(
                 chat?.bol("running") == true,
@@ -868,6 +979,8 @@ fun ChatSection(
                 showNoteSentence("The note could not be saved.", id)
                 return true
             }
+            if (!ownsProject()) return true
+            model.chatComposers.clearIfUnchanged(noteOwner, noteDraft)
             steerVersions.changed(id)
             retiredSteers = retiredSteers - id
             heldSteers = heldSteers + (id to SteerHold(id, trimmed, listRequests.get()))
@@ -875,7 +988,6 @@ fun ChatSection(
             chats = chats.map { row ->
                 if (row.str("id") == id) ChatSteer.withNote(row, trimmed) else row
             }
-            if (draft.trim() == trimmed) draft = ""
             sendError = null
             return true
         } finally {
@@ -885,6 +997,7 @@ fun ChatSection(
 
     /// Keep the note visible and the queue paused until the host drops it.
     suspend fun clearSteer(id: String) {
+        if (!ownsProject()) return
         if (clearingSteer) return
         val noteVersion = steerVersions.version(id)
         clearingSteer = true
@@ -909,6 +1022,10 @@ fun ChatSection(
 
     suspend fun send(text: String) {
         val id = openId ?: return
+        if (!ownsProject()) return
+        val sentOwner = projectOwner?.conversation(id) ?: return
+        val sentDraft = model.chatComposers.capture(sentOwner)
+        val sent = sentDraft.snapshot
         val clean = text.trim()
         if (clean.isEmpty() && staged.isEmpty()) return
         // Sending is engaging: follow is the default, so a new turn resumes
@@ -920,7 +1037,7 @@ fun ChatSection(
         // attachment stops the send with the draft intact. The ids travel on
         // the message, so a queued one cannot pick up somebody else's files.
         val files = mutableListOf<QueuedAttachment>()
-        for (attachment in staged) {
+        for (attachment in sent.attachments) {
             val uploaded = runCatching {
                 model.workspaceSection(peer, "chat.attach", buildJsonObject {
                     put("id", id)
@@ -930,6 +1047,7 @@ fun ChatSection(
                 }) as? JsonObject
             }
             val file = uploaded.getOrNull()
+            if (!ownsProject()) return
             if (uploaded.isFailure || file?.str("id") == null) {
                 attachError = TunnelCopy.display(
                     uploaded.exceptionOrNull()?.message ?: "The attachment could not be sent.",
@@ -940,8 +1058,8 @@ fun ChatSection(
             files.add(QueuedAttachment(file.str("id").orEmpty(), file.str("name") ?: attachment.name))
         }
         val item = enqueue(id, clean, files, whenConnected = false) ?: return
-        draft = ""
-        staged = emptyList()
+        model.chatComposers.clearIfUnchanged(sentOwner, sentDraft)
+        if (!ownsProject()) return
         attachError = null
         sendError = null
         // Hidden while this first attempt is in flight, the way the Apple
@@ -976,7 +1094,7 @@ fun ChatSection(
         authorized = authorized + item.id
         deliver(item, stopCurrent = true)
     }
-    LaunchedEffect(workspace) { loadChats() }
+    LaunchedEffect(projectOwner) { loadChats() }
     // A navigation that named a conversation: open exactly it, even when
     // this folder's list is already on screen.
     LaunchedEffect(initialChatId, workspace) {
@@ -1013,7 +1131,7 @@ fun ChatSection(
     // dropped beat does not let a banner through; released on the way out,
     // and expired by the host when no release ever arrives. Without this a
     // phone driving a chat buzzes about the turn on its own screen.
-    val watcherId = remember(workspace) { java.util.UUID.randomUUID().toString() }
+    val watcherId = remember(projectOwner) { java.util.UUID.randomUUID().toString() }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var foreground by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     DisposableEffect(lifecycle) {
@@ -1050,7 +1168,7 @@ fun ChatSection(
         }
     }
     // What is already waiting for this conversation, from disk.
-    LaunchedEffect(openId, peer, workspace) {
+    LaunchedEffect(openId, peer, workspace, projectOwner) {
         val id = openId
         if (id == null) {
             queued = emptyList()
@@ -1072,7 +1190,7 @@ fun ChatSection(
             .map { it.id }
             .toSet()
     }
-    ForegroundEffect(openId, peer, workspace) {
+    ForegroundEffect(openId, peer, workspace, projectOwner) {
         val id = openId ?: return@ForegroundEffect
         onChatOpened(id)
         while (true) {
@@ -1099,6 +1217,14 @@ fun ChatSection(
         // Only the list wears the section label. A conversation is a screen
         // of its own and carries its own title.
         if (openId == null) SectionLabel("Conversations")
+        if (openId == null && actionError != null) {
+            StickyErrorCard(message = actionError!!, onDismiss = { actionError = null })
+        }
+        if (openId == null) {
+            legacyConversationIDs().forEach { id -> legacyNotice(id) }
+        } else if (openId in legacyConversationIDs()) {
+            legacyNotice(openId!!)
+        }
         if (!HostContracts.supportsChat(protocol)) {
             Text("Update the host to use chat (needs protocol 4).", style = MaterialTheme.typography.bodySmall)
             return
@@ -1159,6 +1285,8 @@ fun ChatSection(
                     running = it.bol("running"),
                     id = it.str("id"),
                     openId = openId,
+                    hasWriting = model.chatComposers.hasWriting(it.str("id")?.let { id -> projectOwner?.conversation(id) }),
+                    hasPending = ChatSteer.noteOf(it).isNotEmpty() || it.str("id")?.let { id -> outboxKey(id) in pendingQueueKeys || legacyOutboxKey(id) in pendingQueueKeys } == true,
                 )
             }
             ChatStatPanels(listed)
@@ -1201,6 +1329,10 @@ fun ChatSection(
                         HorizontalDivider()
                         ChatAgentMenuItem("Recent first", !alphabetical) { alphabetical = false; filterOpen = false }
                         ChatAgentMenuItem("Title A–Z", alphabetical) { alphabetical = true; filterOpen = false }
+                        if (HostContracts.supportsChatRemoveAll(protocol)) {
+                            HorizontalDivider()
+                            DropdownMenuItem(text = { Text("Delete all chats…") }, onClick = { filterOpen = false; deleteAll = true })
+                        }
                     }
                 }
                 Text(
@@ -1238,7 +1370,10 @@ fun ChatSection(
                         },
                     ) {
                         TsCard(Modifier.fillMaxWidth().clickable { openId = chat.str("id") }) {
-                            ChatRow(chat)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.weight(1f)) { ChatRow(chat) }
+                                chatActions(chat)
+                            }
                         }
                     }
                 }
@@ -1294,12 +1429,16 @@ fun ChatSection(
                         tint = LocalTsColors.current.accent,
                     )
                 }
+                chats.firstOrNull { it.str("id") == openId }?.let { chatActions(it) }
             }
             if (actionError != null) {
                 StickyErrorCard(
                     message = actionError!!,
                     onDismiss = { actionError = null },
                 )
+            }
+            composerFailure?.takeIf { it.owner == composerKey }?.let {
+                StickyErrorCard(message = it.message, onDismiss = { model.chatComposers.dismissFailure() })
             }
             if (eventsError != null) {
                 StickyErrorCard(
@@ -1581,8 +1720,13 @@ fun ChatSection(
                     // connection, and a message that names a file the host
                     // has never seen is not a message it can take.
                     scope.launch {
-                        if (enqueue(id, draft.trim(), emptyList(), whenConnected = true) != null) {
-                            draft = ""
+                        val owner = projectOwner?.conversation(id) ?: return@launch
+                        val sentDraft = model.chatComposers.capture(owner)
+                        val sent = sentDraft.snapshot
+                        if (sent.attachments.isNotEmpty() || !ownsProject()) return@launch
+                        if (enqueue(id, sent.text.trim(), emptyList(), whenConnected = true) != null) {
+                            model.chatComposers.clearIfUnchanged(owner, sentDraft)
+                            if (!ownsProject()) return@launch
                             sendError = null
                         }
                     }
@@ -1624,16 +1768,99 @@ fun ChatSection(
                     pendingDelete = null
                     scope.launch {
                         runCatching {
+                            check(ownsProject()) { "The account changed." }
                             model.workspaceSection(peer, "chat.remove", buildJsonObject {
                                 put("id", doomed.str("id") ?: "")
                             })
-                        }
+                        }.onSuccess {
+                            model.chatComposers.update(projectOwner?.conversation(doomed.str("id").orEmpty()), ai.tokenstat.tokenstat.ui.logic.ChatComposerSessions.Snapshot())
+                            if (openId == doomed.str("id")) openId = null
+                        }.onFailure { actionError = TunnelCopy.display(it.message ?: "The chat could not be deleted.", hostLabel) }
                         loadChats()
                     }
                 }) { Text("Delete chat") }
             },
             dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Keep it") } },
         )
+    }
+    pendingRename?.let { chat ->
+        NameEditorDialog("Rename chat", chat.str("title") ?: "Chat", onDismiss = { pendingRename = null }) { title ->
+            pendingRename = null
+            scope.launch {
+                if (!ownsProject()) return@launch
+                runCatching { model.workspaceSection(peer, "chat.update", buildJsonObject { put("id", chat.str("id") ?: ""); put("title", title) }) }
+                    .onSuccess { if (ownsProject()) loadChats() }
+                    .onFailure { actionError = TunnelCopy.display(it.message ?: "The chat could not be renamed.", hostLabel) }
+            }
+        }
+    }
+    if (deleteAll) {
+        AlertDialog(onDismissRequest = { deleteAll = false }, title = { Text("Delete all chats?") },
+            text = { Text("Every chat in this project on ${hostLabel.ifBlank { "the computer" }} will be deleted. This cannot be undone.") },
+            confirmButton = { TextButton(onClick = {
+                deleteAll = false
+                scope.launch {
+                    if (!ownsProject() || !HostContracts.supportsChatRemoveAll(protocol)) return@launch
+                    val removed = chats.mapNotNull { it.str("id") }
+                    runCatching { model.workspaceSection(peer, "chat.removeAll", buildJsonObject { put("workspaceId", workspace) }) }
+                        .onSuccess {
+                            removed.forEach { id -> model.chatComposers.update(projectOwner?.conversation(id), ai.tokenstat.tokenstat.ui.logic.ChatComposerSessions.Snapshot()) }
+                            if (ownsProject()) { openId = null; loadChats() }
+                        }.onFailure { actionError = TunnelCopy.display(it.message ?: "The chats could not be deleted.", hostLabel) }
+                }
+            }) { Text("Delete all chats") } },
+            dismissButton = { TextButton(onClick = { deleteAll = false }) { Text("Cancel") } })
+    }
+    legacyReviewId?.let { id ->
+        val chat = chats.firstOrNull { it.str("id") == id }
+        Dialog(onDismissRequest = { if (!recoveringLegacy) legacyReviewId = null }) {
+            Surface(shape = RoundedCornerShape(cardRadiusDp)) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Review older pending writing", style = MaterialTheme.typography.titleLarge)
+                    Text("Only attach these copies if they belong to your current account and ${folderName.ifBlank { "this project" }} on ${hostLabel.ifBlank { "this computer" }}. Nothing is sent by attaching them.")
+                    if (chat == null) Text("This conversation is no longer listed on the computer. Its copies stay here; they cannot be attached until the conversation is available.", color = LocalTsColors.current.warning)
+                    Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        legacyReviewed.forEach { item ->
+                            TsCard {
+                                Column {
+                                    Text(item.text.ifEmpty { "Attachments only" })
+                                    item.attachments.forEach { Text(it.name, style = MaterialTheme.typography.bodySmall) }
+                                    Text(if (item.needsReceipt) "Delivery needs checking. This copy will remain receipt required." else "This copy will require review and an explicit Send now.", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                    legacyFailure?.let { Text(it, color = LocalTsColors.current.danger) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(enabled = !recoveringLegacy, onClick = { legacyReviewId = null }) { Text("Keep copies") }
+                        TextButton(enabled = !recoveringLegacy && chat != null && legacyReviewed.isNotEmpty() && ownsProject(), onClick = {
+                            val scoped = projectOwner?.conversation(id) ?: return@TextButton
+                            val reviewed = legacyReviewed.toList()
+                            recoveringLegacy = true
+                            scope.launch {
+                                try {
+                                    if (!ownsProject()) return@launch
+                                    val recovered = outbox.recoverLegacy(legacyOutboxKey(id), scoped, reviewed)
+                                    if (!ownsProject()) return@launch
+                                    // Recovered copies are never authorised by this review.
+                                    authorized = authorized - reviewed.map { it.id }.toSet()
+                                    queued = recovered
+                                    pendingQueueKeys = pendingQueueKeys - legacyOutboxKey(id) + scoped
+                                    openId = id
+                                    legacyReviewId = null
+                                } catch (failure: Exception) {
+                                    if (failure is CancellationException) throw failure
+                                    if (ownsProject()) {
+                                        legacyFailure = failure.message ?: "The copies could not be recovered."
+                                        legacyReviewed = runCatching { outbox.items(legacyOutboxKey(id)) }.getOrDefault(reviewed)
+                                    }
+                                } finally { recoveringLegacy = false }
+                            }
+                        }) { Text(if (recoveringLegacy) "Attaching…" else "Attach reviewed copies") }
+                    }
+                }
+            }
+        }
     }
     if (showingSetup) {
         val id = openId
