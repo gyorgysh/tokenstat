@@ -332,41 +332,44 @@ public sealed partial class SmokeApp : Application
                 streamer = new H264Streamer((uint)frames[0].Width, (uint)frames[0].Height);
                 var opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 string? playbackFailure = null;
-                using var player = new Windows.Media.Playback.MediaPlayer();
-                video.SetMediaPlayer(player);
-                player.MediaOpened += (_, _) => opened.TrySetResult();
-                player.MediaFailed += (_, error) =>
+                using (var player = new Windows.Media.Playback.MediaPlayer())
                 {
-                    playbackFailure = error.ErrorMessage;
-                    opened.TrySetException(new Exception(playbackFailure));
-                };
-                video.Source = MediaSource.CreateFromMediaStreamSource(streamer.Source);
-                foreach (var frame in frames) streamer.Push(frame.Payload, frame.Keyframe, TimeSpan.FromTicks((long)frame.TimestampMicroseconds * 10), frame.Sequence);
-                player.Play();
-                await opened.Task.WaitAsync(TimeSpan.FromSeconds(15));
-                await Task.Delay(500);
-                if (playbackFailure is not null) throw new Exception(playbackFailure);
-                if (player.PlaybackSession.NaturalVideoWidth != 320 || player.PlaybackSession.NaturalVideoHeight != 180)
-                    throw new Exception("Native Windows decoder did not accept the host encoder's stream");
-                Program.Log("PASS: native host H.264 opens in the production Windows player pipeline");
-                // The relay may skip frames or restart an encoder. Resume on
-                // an independent frame without passing broken references on.
-                foreach (var frame in frames)
-                    streamer.Push(frame.Payload, frame.Keyframe,
-                        TimeSpan.FromSeconds(1) + TimeSpan.FromTicks((long)frame.TimestampMicroseconds * 10), frame.Sequence + 100);
-                await Task.Delay(500);
-                if (playbackFailure is not null) throw new Exception(playbackFailure);
-                Program.Log("PASS: player accepts a stream sequence discontinuity");
-                video.SetMediaPlayer(null);
-                streamer.Close();
-                player.Source = null;
+                    video.SetMediaPlayer(player);
+                    player.MediaOpened += (_, _) => opened.TrySetResult();
+                    player.MediaFailed += (_, error) =>
+                    {
+                        playbackFailure = error.ErrorMessage;
+                        opened.TrySetException(new Exception(playbackFailure));
+                    };
+                    player.Source = MediaSource.CreateFromMediaStreamSource(streamer.Source);
+                    foreach (var frame in frames) streamer.Push(frame.Payload, frame.Keyframe, TimeSpan.FromTicks((long)frame.TimestampMicroseconds * 10), frame.Sequence);
+                    player.Play();
+                    await opened.Task.WaitAsync(TimeSpan.FromSeconds(15));
+                    await Task.Delay(500);
+                    if (playbackFailure is not null) throw new Exception(playbackFailure);
+                    if (player.PlaybackSession.NaturalVideoWidth != 320 || player.PlaybackSession.NaturalVideoHeight != 180)
+                        throw new Exception("Native Windows decoder did not accept the host encoder's stream");
+                    Program.Log("PASS: native host H.264 opens in the production Windows player pipeline");
+                    // The relay may skip frames or restart an encoder. Resume on
+                    // an independent frame without passing broken references on.
+                    foreach (var frame in frames)
+                        streamer.Push(frame.Payload, frame.Keyframe,
+                            TimeSpan.FromSeconds(1) + TimeSpan.FromTicks((long)frame.TimestampMicroseconds * 10), frame.Sequence + 100);
+                    await Task.Delay(500);
+                    if (playbackFailure is not null) throw new Exception(playbackFailure);
+                    Program.Log("PASS: player accepts a stream sequence discontinuity");
+                    video.SetMediaPlayer(null);
+                    streamer.Close();
+                    player.Source = null;
+                    // Match ScreenPage teardown: release the previous decoder before reopening.
+                }
                 for (var iteration = 0; iteration < 3; iteration++)
                 {
                     streamer = new H264Streamer((uint)frames[0].Width, (uint)frames[0].Height);
                     using var next = new Windows.Media.Playback.MediaPlayer();
                     var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                     next.MediaOpened += (_, _) => ready.TrySetResult();
-                    next.MediaFailed += (_, error) => ready.TrySetException(new Exception($"{error.Error}: {error.ErrorMessage}"));
+                    next.MediaFailed += (_, error) => ready.TrySetException(new Exception($"Reopen {iteration + 1}: {error.Error} (0x{error.ExtendedErrorCode?.HResult ?? 0:X8}): {error.ErrorMessage}"));
                     video.SetMediaPlayer(next);
                     next.Source = MediaSource.CreateFromMediaStreamSource(streamer.Source);
                     foreach (var frame in frames) streamer.Push(frame.Payload, frame.Keyframe, TimeSpan.FromTicks((long)frame.TimestampMicroseconds * 10), frame.Sequence);
