@@ -66,11 +66,11 @@ struct ClientWorkflowWorkspace: View {
                 }
         }
         .background(Theme.background)
-        .navigationTitle("Workflows")
+        .navigationTitle(L10n.text("common.workflows"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("New workflow", .create) {
+                Button(L10n.text("apple.clientworkflowworkspace.new_workflow.750c4da4"), .create) {
                     editor = WorkflowEditorRoute(
                         workspaceID: workspaceID, folderName: folderName, graph: nil
                     )
@@ -101,22 +101,22 @@ struct ClientWorkflowWorkspace: View {
             }
         }
         .confirmationDialog(
-            "Delete \(pendingDelete?.name ?? "this workflow")?",
+            L10n.text("apple.clientworkflowworkspace.delete_0.dc6c5ae4", "\(pendingDelete?.name ?? L10n.text("apple.clientworkflowworkspace.this_workflow.a7b5fc94"))"),
             isPresented: Binding(
                 get: { pendingDelete != nil },
                 set: { if !$0 { pendingDelete = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("Delete", role: .destructive) {
+            Button(L10n.text("common.delete"), role: .destructive) {
                 if let graph = pendingDelete {
                     pendingDelete = nil
                     Task { await session.remove(graph) }
                 }
             }
-            Button("Keep it", role: .cancel) { pendingDelete = nil }
+            Button(L10n.text("apple.clientworkflowworkspace.keep_it.fdce5da2"), role: .cancel) { pendingDelete = nil }
         } message: {
-            Text("The graph is removed. Past runs stay on this computer.")
+            Text(L10n.text("apple.clientworkflowworkspace.the_graph_is_removed_past_runs_stay_on_thi.63fef9bc"))
         }
         .onReceive(NotificationCenter.default.publisher(for: WorkflowEditorSession.didChange)) { _ in
             Task { await session.load() }
@@ -160,7 +160,7 @@ struct ClientWorkflowWorkspace: View {
     }
 
     private var listSummary: String {
-        "\(session.graphs.count) workflows · \(session.runs.filter(\.isLive).count) running"
+        L10n.text("apple.clientworkflowworkspace.0_workflows_1_running.3c6bc0ea", "\(session.graphs.count)", "\(session.runs.filter(\.isLive).count)")
     }
 
     private var filteredGraphs: [WorkflowGraph] {
@@ -169,10 +169,10 @@ struct ClientWorkflowWorkspace: View {
 
     private var emptyState: some View {
         ClientSectionEmpty(
-            text: "No workflows here",
+            text: L10n.text("apple.clientworkflowworkspace.no_workflows_here.e58560d8"),
             art: .workflows,
-            message: "Create a workflow for this folder. It runs on the connected computer.",
-            actionTitle: "New workflow",
+            message: L10n.text("apple.clientworkflowworkspace.create_a_workflow_for_this_folder_it_runs.b0f95793"),
+            actionTitle: L10n.text("apple.clientworkflowworkspace.new_workflow.750c4da4"),
             actionIcon: .create,
             action: {
                 editor = WorkflowEditorRoute(
@@ -193,9 +193,9 @@ struct ClientWorkflowWorkspace: View {
 
     private var compactList: some View {
         List {
-            TextField("Search workflows", text: $search)
+            TextField(L10n.text("apple.clientworkflowworkspace.search_workflows.e827cf3e"), text: $search)
                 .textFieldStyle(.themed)
-                .accessibilityLabel("Search workflows")
+                .accessibilityLabel(L10n.text("apple.clientworkflowworkspace.search_workflows.e827cf3e"))
                 .clientCardRow()
             if session.loaded, !session.graphs.isEmpty {
                 Text(listSummary)
@@ -217,7 +217,7 @@ struct ClientWorkflowWorkspace: View {
             } else if session.graphs.isEmpty {
                 emptyState.clientCardRow()
             } else if filteredGraphs.isEmpty {
-                Text("No matching workflows")
+                Text(L10n.text("apple.clientworkflowworkspace.no_matching_workflows.2b5eeb7d"))
                     .font(ClientType.body)
                     .foregroundStyle(Theme.controlGlyph)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -228,8 +228,8 @@ struct ClientWorkflowWorkspace: View {
                     graphButton(graph, showsChevron: true, isSelected: false)
                         .clientCardRow()
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button("Delete", role: .destructive) { pendingDelete = graph }
-                            Button("Edit") { openEditor(graph) }
+                            Button(L10n.text("common.delete"), role: .destructive) { pendingDelete = graph }
+                            Button(L10n.text("common.edit")) { openEditor(graph) }
                                 .tint(Theme.accent)
                         }
                 }
@@ -249,8 +249,8 @@ struct ClientWorkflowWorkspace: View {
     private var splitList: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Theme.Space.s) {
-                TextField("Search workflows", text: $search).textFieldStyle(.themed)
-                    .accessibilityLabel("Search workflows")
+                TextField(L10n.text("apple.clientworkflowworkspace.search_workflows.e827cf3e"), text: $search).textFieldStyle(.themed)
+                    .accessibilityLabel(L10n.text("apple.clientworkflowworkspace.search_workflows.e827cf3e"))
                 if session.loaded, !session.graphs.isEmpty {
                     Text(listSummary)
                         .font(ClientType.caption)
@@ -268,7 +268,7 @@ struct ClientWorkflowWorkspace: View {
                 } else if session.graphs.isEmpty {
                     emptyState
                 } else if filteredGraphs.isEmpty {
-                    Text("No matching workflows")
+                    Text(L10n.text("apple.clientworkflowworkspace.no_matching_workflows.2b5eeb7d"))
                         .font(ClientType.body)
                         .foregroundStyle(Theme.controlGlyph)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -318,8 +318,8 @@ struct ClientWorkflowWorkspace: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
-            Button("Edit workflow") { openEditor(graph) }
-            Button("Delete workflow", role: .destructive) { pendingDelete = graph }
+            Button(L10n.text("apple.clientworkflowworkspace.edit_workflow.f5dd71b2")) { openEditor(graph) }
+            Button(L10n.text("apple.clientworkflowworkspace.delete_workflow.b438c4a8"), role: .destructive) { pendingDelete = graph }
         }
     }
 
@@ -343,22 +343,22 @@ struct ClientWorkflowWorkspace: View {
                 }
             )
         } else {
-            ClientSectionEmpty(text: "Pick a workflow", message: "Its graph and its last runs open here.")
+            ClientSectionEmpty(text: L10n.text("apple.clientworkflowworkspace.pick_a_workflow.b8b2a4dd"), message: L10n.text("apple.clientworkflowworkspace.its_graph_and_its_last_runs_open_here.f62091d4"))
                 .padding(Theme.Space.m)
         }
     }
 
     private var runContent: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Run details").font(ClientType.sectionTitle)
+            Text(L10n.text("apple.clientworkflowworkspace.run_details.7bbc3690")).font(ClientType.sectionTitle)
             if let graph = session.selectedGraph {
                 HStack(spacing: Theme.Space.s) {
                     Text(graph.name)
                         .font(ClientType.sectionTitle)
                     Spacer(minLength: 0)
-                    Button("Edit", .edit) { openEditor(graph) }
+                    Button(L10n.text("common.edit"), .edit) { openEditor(graph) }
                         .buttonStyle(SecondaryButtonStyle(small: true))
-                    Button("Delete", .delete) { pendingDelete = graph }
+                    Button(L10n.text("common.delete"), .delete) { pendingDelete = graph }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                 }
                 Text(graph.schedule.summary)
@@ -369,7 +369,7 @@ struct ClientWorkflowWorkspace: View {
                     StatusPill(status: run.status, text: run.endedLabel)
                     TranscriptView(
                         text: session.transcriptText,
-                        empty: run.isLive ? "Waiting for output…" : "No readable output."
+                        empty: run.isLive ? L10n.text("apple.clientworkflowworkspace.waiting_for_output.f05fefe2") : L10n.text("apple.clientworkflowworkspace.no_readable_output.cd218ba3")
                     )
                 }
                 let history = AutomationRunHistory.preview(
@@ -377,7 +377,7 @@ struct ClientWorkflowWorkspace: View {
                     id: \.id, startedAtMs: \.startedAtMs, isLive: \.isLive
                 )
                 if !history.isEmpty {
-                    Text("Recent runs")
+                    Text(L10n.text("apple.clientworkflowworkspace.recent_runs.237112b8"))
                         .font(ClientType.caption.weight(.semibold))
                         .foregroundStyle(.tertiary)
                         .padding(.top, Theme.Space.xs)

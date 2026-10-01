@@ -83,10 +83,10 @@ struct RunHistoryStrip: View {
     }
 
     private var summary: String {
-        if shown.isEmpty { return "Never run" }
+        if shown.isEmpty { return L10n.text("apple.runvisuals.never_run.3d40a69d") }
         let failed = shown.filter { $0.status == "error" }.count
-        if failed == 0 { return "Last \(shown.count) runs, none failed" }
-        return "Last \(shown.count) runs, \(failed) failed"
+        if failed == 0 { return L10n.text("apple.runvisuals.last_0_runs_none_failed.773e87b0", "\(shown.count)") }
+        return L10n.text("apple.runvisuals.last_0_runs_1_failed.486a96be", "\(shown.count)", "\(failed)")
     }
 }
 
@@ -121,9 +121,9 @@ struct DurationBar: View {
     }
 
     private var label: String {
-        guard seconds > 0 else { return "Still running" }
-        if seconds < 60 { return "Took \(Int(seconds))s" }
-        if seconds < 3600 { return "Took \(Int(seconds / 60))m" }
+        guard seconds > 0 else { return L10n.text("apple.runvisuals.still_running.89acce55") }
+        if seconds < 60 { return L10n.text("apple.runvisuals.took_0_s.1a2d4f2a", "\(Int(seconds))") }
+        if seconds < 3600 { return L10n.text("apple.runvisuals.took_0_m.17b48b0d", "\(Int(seconds / 60))") }
         let hours = seconds / 3600
         return String(format: "Took %.1fh", hours)
     }

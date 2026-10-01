@@ -198,11 +198,11 @@ internal static class RemoteWorkspaces
     public static async Task<RemoteConnectResult> ConnectAsync(
         string peerKey, string label, bool tunnelOn, bool? online)
     {
-        var name = string.IsNullOrEmpty(label) ? "That machine" : label;
+        var name = string.IsNullOrEmpty(label) ? L10n.Text("windows.remoteworkspaces.that_machine.1c4194c9") : label;
         if (!tunnelOn)
         {
             return new RemoteConnectResult(
-                false, $"Turn on Reach devices from anywhere before connecting to {name}.", false);
+                false, L10n.Text("windows.remoteworkspaces.turn_on_reach_devices_from_anywhere_before.4930ed6e", $"{name}"), false);
         }
         try
         {
@@ -219,7 +219,7 @@ internal static class RemoteWorkspaces
             SetAutoConnect(true, peerKey);
             Changed?.Invoke();
             return new RemoteConnectResult(
-                true, $"Connected to {name}. Its workspaces are now available in the sidebar.", true);
+                true, L10n.Text("windows.remoteworkspaces.connected_to_0_its_workspaces_are_now_avai.c79dc8f5", $"{name}"), true);
         }
         catch (Exception ex)
         {
@@ -233,7 +233,7 @@ internal static class RemoteWorkspaces
             {
                 return new RemoteConnectResult(
                     true,
-                    $"{name} has been asked to let this device in. Approve it on the other device and its workspaces will appear here.",
+                    L10n.Text("windows.remoteworkspaces.approval_requested", name),
                     true);
             }
             if (IsWorkspaceRefusal(text))
@@ -249,14 +249,14 @@ internal static class RemoteWorkspaces
                 }
                 return new RemoteConnectResult(
                     true,
-                    $"{name} has been asked to let this device open its work. Approve it on that computer and its folders will appear here.",
+                    L10n.Text("windows.remoteworkspaces.workspace_approval_requested", name),
                     true);
             }
             if (text.Contains("closed before the answer arrived", StringComparison.OrdinalIgnoreCase))
             {
                 return new RemoteConnectResult(
                     false,
-                    $"The connection to {name} dropped mid-answer. It reconnects automatically. Try again in a moment.",
+                    L10n.Text("windows.remoteworkspaces.the_connection_to_0_dropped_mid_answer_it.0e22c33a", $"{name}"),
                     true);
             }
             var lower = text.ToLowerInvariant();
@@ -265,7 +265,7 @@ internal static class RemoteWorkspaces
             {
                 return new RemoteConnectResult(
                     false,
-                    $"{name} is offline or not reachable right now. Wait until it is awake, then try Connect again.",
+                    L10n.Text("windows.remoteworkspaces.0_is_offline_or_not_reachable_right_now_wa.b6a9fae4", $"{name}"),
                     false);
             }
             return new RemoteConnectResult(false, FriendlyError.Display(text), false);

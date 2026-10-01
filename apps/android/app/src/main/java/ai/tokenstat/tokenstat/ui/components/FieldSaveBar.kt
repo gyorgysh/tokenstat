@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.components
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -37,10 +39,10 @@ enum class FieldSaveState {
 /// and Not saved for a failure.
 fun saveStateLabel(state: FieldSaveState): String? = when (state) {
     FieldSaveState.Idle -> null
-    FieldSaveState.Dirty -> "Unsaved"
-    FieldSaveState.Saving -> "Saving"
-    FieldSaveState.Saved -> "Saved"
-    FieldSaveState.Failed -> "Not saved"
+    FieldSaveState.Dirty -> L10n.text("android.fieldsavebar.unsaved.6250d572")
+    FieldSaveState.Saving -> L10n.text("android.fieldsavebar.saving.096b7362")
+    FieldSaveState.Saved -> L10n.text("android.fieldsavebar.saved.b5c120b3")
+    FieldSaveState.Failed -> L10n.text("android.fieldsavebar.not_saved.22b3467c")
 }
 
 /// Whether the Save and Cancel buttons are on screen. Ported from
@@ -59,7 +61,7 @@ fun FieldSaveBar(
     onSave: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
-    saveTitle: String = "Save",
+    saveTitle: String = L10n.text("common.save"),
     canSave: Boolean = true,
 ) {
     val colors = LocalTsColors.current
@@ -71,7 +73,7 @@ fun FieldSaveBar(
         when (state) {
             FieldSaveState.Idle -> Unit
             FieldSaveState.Dirty -> Text(
-                "Unsaved",
+                L10n.text("android.fieldsavebar.unsaved.6250d572"),
                 style = TsType.caption.copy(fontWeight = FontWeight.Medium),
                 color = colors.warning,
             )
@@ -84,7 +86,7 @@ fun FieldSaveBar(
                     strokeWidth = 1.5.dp,
                     color = colors.textSecondary,
                 )
-                Text("Saving", style = TsType.caption, color = colors.textSecondary)
+                Text(L10n.text("android.fieldsavebar.saving.096b7362"), style = TsType.caption, color = colors.textSecondary)
             }
             FieldSaveState.Saved -> Row(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -92,20 +94,20 @@ fun FieldSaveBar(
             ) {
                 Icon(Icons.Filled.Check, null, tint = colors.success, modifier = Modifier.size(12.dp))
                 Text(
-                    "Saved",
+                    L10n.text("android.fieldsavebar.saved.b5c120b3"),
                     style = TsType.caption.copy(fontWeight = FontWeight.Medium),
                     color = colors.success,
                 )
             }
             FieldSaveState.Failed -> Text(
-                "Not saved",
+                L10n.text("android.fieldsavebar.not_saved.22b3467c"),
                 style = TsType.caption.copy(fontWeight = FontWeight.Medium),
                 color = colors.danger,
             )
         }
         Spacer(Modifier.weight(1f))
         if (saveBarShowsActions(state)) {
-            TsSecondaryButton(label = "Cancel", onClick = onCancel, small = true)
+            TsSecondaryButton(label = L10n.text("common.cancel"), onClick = onCancel, small = true)
             TsAccentButton(
                 label = saveTitle,
                 onClick = onSave,

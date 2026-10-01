@@ -128,12 +128,12 @@ struct ToolRow: View {
                     DiffStat(added: diffAdded, removed: diffRemoved, font: Self.diffFigure)
                 }
                 if running, !SeatStep.speaks(verb: verb) {
-                    Text("Running")
+                    Text(L10n.text("common.running"))
                         .font(Theme.mono(10))
                         .foregroundStyle(Theme.accent)
                         .fixedSize()
                 } else if failed {
-                    Text("Failed")
+                    Text(L10n.text("common.failed"))
                         .font(Theme.mono(10))
                         .foregroundStyle(Theme.danger)
                         .fixedSize()
@@ -223,8 +223,8 @@ struct ToolRow: View {
         return Theme.border
     }
 
-    private var showLabel: String { hasDiff ? "Show edit" : snippetIsOutput ? "Show output" : "Show edit" }
-    private var hideLabel: String { hasDiff ? "Hide edit" : snippetIsOutput ? "Hide output" : "Hide edit" }
+    private var showLabel: String { hasDiff ? L10n.text("apple.toolrow.show_edit.8da806e1") : snippetIsOutput ? L10n.text("apple.toolrow.show_output.9dbbb249") : L10n.text("apple.toolrow.show_edit.8da806e1") }
+    private var hideLabel: String { hasDiff ? L10n.text("apple.toolrow.hide_edit.e9dbd4f5") : snippetIsOutput ? L10n.text("apple.toolrow.hide_output.64876c47") : L10n.text("apple.toolrow.hide_edit.e9dbd4f5") }
 
     private func displaySnippet(_ line: String) -> String {
         if line.hasPrefix("| ") { return String(line.dropFirst(2)) }
@@ -259,6 +259,6 @@ struct DiffStat: View {
         .font(font)
         .monospacedDigit()
         .fixedSize()
-        .accessibilityLabel("\(added) added, \(removed) removed")
+        .accessibilityLabel(L10n.text("apple.toolrow.0_added_1_removed.b84e338d", "\(added)", "\(removed)"))
     }
 }

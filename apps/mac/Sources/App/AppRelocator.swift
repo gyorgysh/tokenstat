@@ -149,21 +149,13 @@ enum AppRelocator {
     @MainActor
     private static func ask(replacing: Bool) -> Answer {
         let alert = NSAlert()
-        alert.messageText = "Move tokenstat to your Applications folder?"
+        alert.messageText = L10n.text("apple.apprelocator.move_tokenstat_to_your_applications_folder.2bbb0939")
         alert.informativeText = replacing
-            ? """
-            There is already a copy in Applications. Replacing it keeps one \
-            application on this Mac, which is what lets tokenstat update itself \
-            and keep its host helper pointed at a path that stays put.
-            """
-            : """
-            Running from a disk image or your Downloads folder means tokenstat \
-            cannot update itself, and a second copy can end up open alongside \
-            this one. Moving it now avoids both.
-            """
-        alert.addButton(withTitle: replacing ? "Replace and Move" : "Move to Applications")
-        alert.addButton(withTitle: "Not Now")
-        alert.addButton(withTitle: "Don't Ask Again")
+            ? L10n.text("apple.apprelocator.there_is_already_a_copy_in_applications_re.b246023c")
+            : L10n.text("apple.apprelocator.running_from_a_disk_image_or_your_download.b5e7cc0f")
+        alert.addButton(withTitle: replacing ? L10n.text("apple.apprelocator.replace_and_move.6b396aa5") : L10n.text("apple.apprelocator.move_to_applications.830a1041"))
+        alert.addButton(withTitle: L10n.text("apple.apprelocator.not_now.ccb4c324"))
+        alert.addButton(withTitle: L10n.text("apple.apprelocator.don_t_ask_again.211b026c"))
         switch alert.runModal() {
         case .alertFirstButtonReturn: return .move
         case .alertThirdButtonReturn: return .decline
@@ -174,9 +166,9 @@ enum AppRelocator {
     @MainActor
     private static func report(_ error: Error) {
         let alert = NSAlert()
-        alert.messageText = "tokenstat could not be moved to Applications."
-        alert.informativeText = "\(error.localizedDescription)\n\nIt will keep running from where it is. Move it by hand when convenient."
-        alert.addButton(withTitle: "Continue")
+        alert.messageText = L10n.text("apple.apprelocator.tokenstat_could_not_be_moved_to_applicatio.fc18af79")
+        alert.informativeText = L10n.text("apple.apprelocator.0_it_will_keep_running_from_where_it_is_mo.29c705b8", "\(error.localizedDescription)")
+        alert.addButton(withTitle: L10n.text("apple.apprelocator.continue.31fbef16"))
         alert.runModal()
     }
 
@@ -243,9 +235,9 @@ enum AppRelocator {
     @MainActor
     private static func reportOpenFailure(_ error: Error) {
         let alert = NSAlert()
-        alert.messageText = "tokenstat was moved to Applications but could not be opened."
-        alert.informativeText = "\(error.localizedDescription)\n\nOpen tokenstat from your Applications folder, or quit and open it by hand."
-        alert.addButton(withTitle: "Continue")
+        alert.messageText = L10n.text("apple.apprelocator.tokenstat_was_moved_to_applications_but_co.7570eb4f")
+        alert.informativeText = L10n.text("apple.apprelocator.0_open_tokenstat_from_your_applications_fo.ceda7528", "\(error.localizedDescription)")
+        alert.addButton(withTitle: L10n.text("apple.apprelocator.continue.31fbef16"))
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
     }

@@ -33,7 +33,7 @@ final class LineNumberRuler: NSRulerView {
 
     @available(*, unavailable)
     required init(coder: NSCoder) {
-        fatalError("not loaded from a nib")
+        fatalError(L10n.text("apple.linenumberruler.not_loaded_from_a_nib.658eb5f1"))
     }
 
     /// Widen for a file with more lines than the gutter can show.

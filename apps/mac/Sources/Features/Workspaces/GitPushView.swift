@@ -14,7 +14,7 @@ struct GitPushControl: View {
     @State private var presenting = false
 
     var body: some View {
-        Button(session?.draft.submitted == nil ? (outgoing > 0 ? "Push \(outgoing)" : "Push…") : "Check push", .upload) {
+        Button(session?.draft.submitted == nil ? (outgoing > 0 ? L10n.text("apple.gitpushview.push_0.a738ad29", "\(outgoing)") : L10n.text("apple.gitpushview.push.92363252")) : L10n.text("apple.gitpushview.check_push.c821c305"), .upload) {
             presenting = true
         }
         .buttonStyle(SecondaryButtonStyle(comfortable: true))
@@ -45,29 +45,29 @@ struct GitPushView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        ThemedSheet(title: "Push branch", subtitle: [folderName, hostName].filter { !$0.isEmpty }.joined(separator: " · "),
+        ThemedSheet(title: L10n.text("apple.gitpushview.push_branch.97deb7c0"), subtitle: [folderName, hostName].filter { !$0.isEmpty }.joined(separator: " · "),
                     icon: .upload, onClose: { dismiss() }) {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     if let review = session.review ?? session.draft.submitted?.review ?? session.outcome?.review {
                         VStack(alignment: .leading, spacing: Theme.Space.s) {
                             Text(review.branchName).font(Theme.title3.weight(.semibold))
-                            Text("To \(review.destination)").font(Theme.callout).foregroundStyle(Theme.controlGlyph)
+                            Text(L10n.text("apple.gitpushview.to_0.e7bc111d", "\(review.destination)")).font(Theme.callout).foregroundStyle(Theme.controlGlyph)
                             Text(String(review.head.prefix(10))).font(Theme.monoText(12, relativeTo: .caption)).foregroundStyle(Theme.controlGlyph)
                         }
                         if review.upToDate {
-                            Text("This branch is up to date.").font(Theme.callout).foregroundStyle(Theme.accent)
+                            Text(L10n.text("apple.gitpushview.this_branch_is_up_to_date.01b49ce3")).font(Theme.callout).foregroundStyle(Theme.accent)
                         } else if review.outgoing == 0 {
-                            Text("No outgoing commits. The remote branch is ahead.").font(Theme.callout)
+                            Text(L10n.text("apple.gitpushview.no_outgoing_commits_the_remote_branch_is_a.7072ceca")).font(Theme.callout)
                         } else if review.remoteHead == nil {
-                            Text("Publish this branch to \(review.remote).").font(Theme.callout)
+                            Text(L10n.text("apple.gitpushview.publish_this_branch_to_0.e623bfa9", "\(review.remote)")).font(Theme.callout)
                         } else if let count = review.outgoing {
-                            Text("\(count) \(count == 1 ? "commit" : "commits") to push").font(Theme.callout)
+                            Text(L10n.text("apple.gitpushview.0_1_to_push.190b18e2", "\(count)", "\(count == 1 ? L10n.text("apple.gitpushview.commit.9505cacb") : "commits")")).font(Theme.callout)
                         } else {
-                            Text("The computer will check whether the remote branch can accept this commit.").font(Theme.callout)
+                            Text(L10n.text("apple.gitpushview.the_computer_will_check_whether_the_remote.2c0a07ce")).font(Theme.callout)
                         }
                         if review.setUpstream {
-                            Text("This will also set the branch's tracking destination.").font(Theme.caption).foregroundStyle(Theme.controlGlyph)
+                            Text(L10n.text("apple.gitpushview.this_will_also_set_the_branch_s_tracking_d.95dfeac0")).font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                         }
                     }
                     if let outcome = session.outcome {
@@ -79,7 +79,7 @@ struct GitPushView: View {
                         Text(error).font(Theme.callout).foregroundStyle(Theme.danger).textSelection(.enabled)
                     }
                     if session.working {
-                        ProgressView(session.draft.submitted == nil ? "Checking the branch" : "Checking push")
+                        ProgressView(session.draft.submitted == nil ? L10n.text("apple.gitpushview.checking_the_branch.3733503a") : L10n.text("apple.gitpushview.checking_push.00fa6ce0"))
                             .font(Theme.callout)
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
@@ -87,18 +87,18 @@ struct GitPushView: View {
         } actions: {
             if session.draft.submitted != nil {
                 if session.canRetry {
-                    Button("Retry same push", .upload) { Task { await session.retry(); await refreshIfPushed() } }
+                    Button(L10n.text("apple.gitpushview.retry_same_push.d4ab8f02"), .upload) { Task { await session.retry(); await refreshIfPushed() } }
                         .buttonStyle(SecondaryButtonStyle(comfortable: true)).disabled(session.working)
                 }
-                Button("Check outcome", .refresh) { Task { await session.checkOutcome(); await refreshIfPushed() } }
+                Button(L10n.text("apple.gitpushview.check_outcome.9200a2fd"), .refresh) { Task { await session.checkOutcome(); await refreshIfPushed() } }
                     .buttonStyle(AccentButtonStyle(comfortable: true)).disabled(session.working)
             } else if session.outcome?.succeeded == true || session.review?.upToDate == true || session.review?.outgoing == 0 {
-                Button("Done", .done) { dismiss() }.buttonStyle(AccentButtonStyle(comfortable: true))
+                Button(L10n.text("common.done"), .done) { dismiss() }.buttonStyle(AccentButtonStyle(comfortable: true))
             } else if session.review != nil {
-                Button(session.review?.remoteHead == nil ? "Publish branch" : "Push branch", .upload) { Task { await session.submit(); await refreshIfPushed() } }
+                Button(session.review?.remoteHead == nil ? L10n.text("apple.gitpushview.publish_branch.e1f5968c") : L10n.text("apple.gitpushview.push_branch.97deb7c0"), .upload) { Task { await session.submit(); await refreshIfPushed() } }
                     .buttonStyle(AccentButtonStyle(comfortable: true)).disabled(session.working)
             } else {
-                Button("Check branch", .refresh) { Task { await session.prepare() } }
+                Button(L10n.text("apple.gitpushview.check_branch.8128e71f"), .refresh) { Task { await session.prepare() } }
                     .buttonStyle(AccentButtonStyle(comfortable: true)).disabled(session.working)
             }
         }

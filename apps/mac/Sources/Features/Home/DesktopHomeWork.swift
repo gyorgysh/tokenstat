@@ -18,7 +18,7 @@ struct DesktopContinueSection: View {
 
     var body: some View {
         if !destinations.isEmpty {
-            Card(title: "Continue", subtitle: "The conversations you last opened",
+            Card(title: L10n.text("apple.desktophomework.continue.31fbef16"), subtitle: L10n.text("apple.desktophomework.the_conversations_you_last_opened.565f4f1f"),
                  leading: AnyView(ActionSeat(icon: .history, size: 24))) {
                 VStack(spacing: 0) {
                     ForEach(destinations) { destination in
@@ -42,7 +42,7 @@ struct DesktopContinueSection: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(destination.unavailable != nil)
-                        .help(destination.unavailable ?? "Open \(destination.title)")
+                        .help(destination.unavailable ?? L10n.text("apple.desktophomework.open_0.e71b4013", "\(destination.title)"))
                         if destination.id != destinations.last?.id { ThemeRule() }
                     }
                 }
@@ -58,7 +58,7 @@ struct DesktopHomeMachines: View {
 
     var body: some View {
         if !machines.isEmpty {
-            Card(title: "Machines", subtitle: "Devices linked to your account", mark: "mark_device") {
+            Card(title: L10n.text("apple.desktophomework.machines.c061da19"), subtitle: L10n.text("apple.desktophomework.devices_linked_to_your_account.dc6eb913"), mark: "mark_device") {
                 VStack(spacing: 0) {
                     ForEach(machines) { machine in
                         Button { onOpen(machine) } label: {
@@ -66,11 +66,11 @@ struct DesktopHomeMachines: View {
                                 Image(systemName: ClientDeviceIcon.symbol(for: machine))
                                     .foregroundStyle(Theme.accent)
                                     .frame(width: 24)
-                                Text(machine.label.flatMap { $0.isEmpty ? nil : $0 } ?? "Device")
+                                Text(machine.label.flatMap { $0.isEmpty ? nil : $0 } ?? L10n.text("apple.desktophomework.device.6ba0bdec"))
                                     .font(Theme.callout.weight(.medium))
                                     .lineLimit(2)
                                 Spacer(minLength: Theme.Space.s)
-                                Text(machine.online == true ? "Awake" : machine.online == false ? "Asleep" : "Status unknown")
+                                Text(machine.online == true ? L10n.text("apple.desktophomework.awake.9123b5f4") : machine.online == false ? L10n.text("apple.desktophomework.asleep.60135e8f") : L10n.text("apple.desktophomework.status_unknown.e412d872"))
                                     .font(Theme.caption)
                                     .foregroundStyle(.secondary)
                                 Image(systemName: ActionIcon.next.symbol).foregroundStyle(Theme.accent)
@@ -79,7 +79,7 @@ struct DesktopHomeMachines: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .help("Open this device in Devices")
+                        .help(L10n.text("apple.desktophomework.open_this_device_in_devices.24ae7e3a"))
                         if machine.id != machines.last?.id { ThemeRule() }
                     }
                 }

@@ -33,12 +33,17 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
         _inspector.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _inspector.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         var inspectorTabs = _inspectorTabs;
-        foreach (var label in new[] { "Files", "Changes", "History", "Details" })
+        foreach (var (label, title) in new[] {
+            ("Files", L10n.Text("common.files")),
+            ("Changes", L10n.Text("windows.workspacetabspage.changes.bbd4b6a8")),
+            ("History", L10n.Text("common.history")),
+            ("Details", L10n.Text("windows.workspacetabspage.details.45989de4")),
+        })
         {
             inspectorTabs.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             var button = new Button
             {
-                Content = label, Padding = new Thickness(3, 6, 3, 6), FontSize = 11,
+                Content = title, Padding = new Thickness(3, 6, 3, 6), FontSize = 11,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Center,
                 BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(6),
@@ -87,7 +92,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
         if (section == WorkspaceSection.Sessions) section = WorkspaceSection.Launcher;
         var label = section switch
         {
-            WorkspaceSection.Pulls => "Pull requests", WorkspaceSection.Todo => "Tasks",
+            WorkspaceSection.Pulls => L10n.Text("windows.workspacetabspage.pull_requests.d9e3f260"), WorkspaceSection.Todo => L10n.Text("common.tasks"),
             _ => section.ToString(),
         };
         OpenSurface("section:" + section, label,
@@ -98,7 +103,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
     public void OpenTerminal(string? sessionId)
     {
         var key = "terminal:" + (sessionId ?? Guid.NewGuid().ToString());
-        OpenSurface(key, "Terminal", () => new TerminalPage(WorkspaceId, sessionId));
+        OpenSurface(key, L10n.Text("windows.workspacetabspage.terminal.e0926fda"), () => new TerminalPage(WorkspaceId, sessionId));
     }
 
     public void OpenBrowser(string url, string host, int port, bool unlisten, string? peer)

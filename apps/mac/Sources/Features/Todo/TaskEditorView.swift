@@ -20,7 +20,7 @@ struct TaskEditorDestination: View {
                                onViewRun: onViewRun, onOpenTerminal: onOpenTerminal,
                                onReviewWorkspace: onReviewWorkspace)
             }
-            else { ProgressView("Opening task").font(Theme.callout) }
+            else { ProgressView(L10n.text("apple.taskeditorview.opening_task.e8a65aba")).font(Theme.callout) }
         }
         .task(id: TaskEditorDestinationID(target: target, cardID: card.id)) {
             session = nil
@@ -45,7 +45,7 @@ struct TaskChatLaunchView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ThemedSheet(title: card.title, subtitle: "Task chat", icon: .preview,
+        ThemedSheet(title: card.title, subtitle: L10n.text("apple.taskeditorview.task_chat.2af48e42"), icon: .preview,
                     onClose: { dismiss() }) {
             if opened {
                 ChatView(model: model, workspaceID: card.workspaceID,
@@ -54,7 +54,7 @@ struct TaskChatLaunchView: View {
                 Text(failure).font(Theme.callout).foregroundStyle(Theme.danger)
                     .textSelection(.enabled)
             } else {
-                ProgressView("Starting chat…")
+                ProgressView(L10n.text("apple.taskeditorview.starting_chat.0fbe2b51"))
             }
         }
         .modalFrame(width: 960, height: 760)
@@ -66,7 +66,7 @@ struct TaskChatLaunchView: View {
                 await model.load(workspaceID: card.workspaceID, peer: peer, selectFirst: false)
                 guard !Task.isCancelled else { return }
                 guard let backend = model.backends.first(where: { $0.id == card.backend }) else {
-                    failure = model.error ?? "This backend does not support chat on this computer. Choose another backend or run in Terminal."
+                    failure = model.error ?? L10n.text("apple.taskeditorview.this_backend_does_not_support_chat_on_this.326c2b8e")
                     return
                 }
                 let chat = try await Bridge.createChat(
@@ -85,7 +85,7 @@ struct TaskChatLaunchView: View {
             } catch {
                 // Creation is not replayed after an uncertain reply: the
                 // workspace's chat list is the place to check what was made.
-                failure = "Could not confirm the new chat. Check this workspace’s chats before starting another. \(error.localizedDescription)"
+                failure = L10n.text("apple.taskeditorview.could_not_confirm_the_new_chat_check_this.cdc6ca26", "\(error.localizedDescription)")
             }
         }
     }
@@ -109,7 +109,7 @@ struct TaskEditorView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        ThemedSheet(title: "Task", subtitle: hostName, icon: .edit, embedded: onClose != nil,
+        ThemedSheet(title: L10n.text("apple.taskeditorview.task.4bc74b21"), subtitle: hostName, icon: .edit, embedded: onClose != nil,
                     onClose: { Task { await session.flush(); if let onClose { onClose() } else { dismiss() } } }) {
             GeometryReader { geometry in
                 let wide = geometry.size.width >= 760 && !typeSize.isAccessibilitySize
@@ -122,20 +122,20 @@ struct TaskEditorView: View {
                         runSummary
                         TaskFieldsView(fields: $session.fields, backends: session.backends, folders: session.folders,
                                        wide: wide, minimumHeight: wide ? max(320, geometry.size.height - 120) : (onClose != nil ? 160 : max(220, geometry.size.height * 0.45)),
-                                       draftStatus: session.dirty ? (session.persistedFields == session.fields ? "Draft kept on this device" : "Saving draft on this device…") : "Saved on the computer")
+                                       draftStatus: session.dirty ? (session.persistedFields == session.fields ? L10n.text("apple.taskeditorview.draft_kept_on_this_device.980c4050") : L10n.text("apple.taskeditorview.saving_draft_on_this_device.40996e62")) : L10n.text("apple.taskeditorview.saved_on_the_computer.e231de2a"))
                             .disabled(!session.loaded || session.working || session.saved.pendingRun != nil)
                     }
                 }
             }
         } actions: {
             if session.saved.pending != nil {
-                Button("Check saved task", .refresh) { Task { await session.refresh(); await onSaved() } }
+                Button(L10n.text("apple.taskeditorview.check_saved_task.6d057bda"), .refresh) { Task { await session.refresh(); await onSaved() } }
                     .buttonStyle(AccentButtonStyle(comfortable: true)).disabled(session.working)
             } else if session.saved.pendingRun != nil {
                 wrappingFooter {
-                    Button("Check run", .refresh) { Task { await session.reconcileRun(); await openLastRun() } }
+                    Button(L10n.text("apple.taskeditorview.check_run.cece2401"), .refresh) { Task { await session.reconcileRun(); await openLastRun() } }
                         .buttonStyle(SecondaryButtonStyle(comfortable: true)).disabled(session.working)
-                    Button("Retry same request", .run) { Task { await open(session.retryRun()) } }
+                    Button(L10n.text("apple.taskeditorview.retry_same_request.16003a1a"), .run) { Task { await open(session.retryRun()) } }
                         .buttonStyle(AccentButtonStyle(comfortable: true)).disabled(session.working)
                 }
             } else {
@@ -194,12 +194,12 @@ struct TaskEditorView: View {
     }
 
     private var saveTaskButton: some View {
-        Button("Save task", .save) { Task { await session.save(); await onSaved() } }
+        Button(L10n.text("apple.taskeditorview.save_task.42a9eb31"), .save) { Task { await session.save(); await onSaved() } }
             .buttonStyle(AccentButtonStyle(comfortable: true)).disabled(!session.canSave)
     }
 
     private var viewLastResultButton: some View {
-        Button("View last result", .preview) {
+        Button(L10n.text("apple.taskeditorview.view_last_result.1e6894ea"), .preview) {
             if let delegate = session.saved.baseline.delegate {
                 onViewRun?(delegate.runId, session.saved.baseline.workspaceID)
             }
@@ -208,7 +208,7 @@ struct TaskEditorView: View {
     }
 
     private var viewRunButton: some View {
-        Button("View run", .preview) { Task { await openLiveRun() } }
+        Button(L10n.text("apple.taskeditorview.view_run.aaf7fccc"), .preview) { Task { await openLiveRun() } }
             .buttonStyle(AccentButtonStyle(comfortable: true))
     }
 
@@ -223,7 +223,7 @@ struct TaskEditorView: View {
     }
 
     private func stopButton(_ delegate: TodoDelegate) -> some View {
-        Button(delegate.status == "stopping" ? "Stopping…" : "Stop", .stop) {
+        Button(delegate.status == "stopping" ? L10n.text("apple.taskeditorview.stopping.bbe85741") : L10n.text("common.stop"), .stop) {
             Task { await session.stop(); await onSaved() }
         }
         .buttonStyle(SecondaryButtonStyle(comfortable: true)).disabled(!session.canStop)
@@ -263,13 +263,13 @@ struct TaskEditorView: View {
         if let error = session.errorMessage {
             Text(error).font(Theme.callout).foregroundStyle(Theme.danger).textSelection(.enabled)
             if session.saved.pending == nil {
-                Button("Reload task", .refresh) { Task { await session.load() } }
+                Button(L10n.text("apple.taskeditorview.reload_task.58d8bf39"), .refresh) { Task { await session.load() } }
                     .buttonStyle(SecondaryButtonStyle(comfortable: true)).disabled(session.working)
             }
         }
-        if session.working { ProgressView("Updating task").font(Theme.callout) }
+        if session.working { ProgressView(L10n.text("apple.taskeditorview.updating_task.5befd393")).font(Theme.callout) }
         if session.loaded && !session.supportsExecution {
-            Text("Update \(hostName)'s tokenstat to run and stop tasks from here.")
+            Text(L10n.text("apple.taskeditorview.update_0_s_tokenstat_to_run_and_stop_tasks.597ff76e", "\(hostName)"))
                 .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
         }
         if session.supportsExecution, !session.dirty, session.saved.baseline.delegate?.isRunning != true,
@@ -277,18 +277,18 @@ struct TaskEditorView: View {
             Text(reason).font(Theme.caption).foregroundStyle(Theme.controlGlyph)
         }
         if session.conflict, let current = session.current {
-            comparison(title: "Changed on the computer", draft: TaskEditorDraft(current))
+            comparison(title: L10n.text("apple.taskeditorview.changed_on_the_computer.aefb92cf"), draft: TaskEditorDraft(current))
             ViewThatFits(in: .horizontal) {
                 HStack { conflictActions }
                 VStack(alignment: .leading) { conflictActions }
             }
         }
         if let other = session.otherDraft {
-            comparison(title: "Draft from another window", draft: other.value.fields)
-            Button("Use saved draft", .restore) { Task { await session.resolveDiskConflict(keepMine: false) } }
+            comparison(title: L10n.text("apple.taskeditorview.draft_from_another_window.8b70bae9"), draft: other.value.fields)
+            Button(L10n.text("apple.taskeditorview.use_saved_draft.31f362c2"), .restore) { Task { await session.resolveDiskConflict(keepMine: false) } }
                 .buttonStyle(SecondaryButtonStyle(comfortable: true))
             if other.value.pending == nil {
-                Button("Keep my draft", .edit) { Task { await session.resolveDiskConflict(keepMine: true) } }
+                Button(L10n.text("apple.taskeditorview.keep_my_draft.cdb80bb9"), .edit) { Task { await session.resolveDiskConflict(keepMine: true) } }
                     .buttonStyle(SecondaryButtonStyle(comfortable: true))
             }
         }
@@ -302,14 +302,14 @@ struct TaskEditorView: View {
                         .foregroundStyle(runTint(run))
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(run.isRunning ? run.label : "Last run · \(run.label)")
+                        Text(run.isRunning ? run.label : L10n.text("apple.taskeditorview.last_run_0.f8973a05", "\(run.label)"))
                             .font(Theme.callout.weight(.semibold))
                         if let error = run.error, !error.isEmpty {
                             Text(error).font(Theme.caption).foregroundStyle(Theme.danger).lineLimit(3)
                         } else {
                             Text(run.isRunning
-                                 ? "This run continues on the connected computer."
-                                 : "The result remains linked to this task.")
+                                 ? L10n.text("apple.taskeditorview.this_run_continues_on_the_connected_comput.5bbf94b0")
+                                 : L10n.text("apple.taskeditorview.the_result_remains_linked_to_this_task.54407ca7"))
                                 .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                         }
                     }
@@ -347,9 +347,9 @@ struct TaskEditorView: View {
     }
 
     @ViewBuilder private var conflictActions: some View {
-        Button("Use computer version", .restore) { Task { await session.resolveConflict(keepMine: false) } }
+        Button(L10n.text("apple.taskeditorview.use_computer_version.f0d6599f"), .restore) { Task { await session.resolveConflict(keepMine: false) } }
             .buttonStyle(SecondaryButtonStyle(comfortable: true))
-        Button("Keep my draft", .edit) { Task { await session.resolveConflict(keepMine: true) } }
+        Button(L10n.text("apple.taskeditorview.keep_my_draft.cdb80bb9"), .edit) { Task { await session.resolveConflict(keepMine: true) } }
             .buttonStyle(SecondaryButtonStyle(comfortable: true))
     }
 
@@ -358,9 +358,9 @@ struct TaskEditorView: View {
             Text(title).font(Theme.callout.weight(.semibold))
             Text(draft.title).font(Theme.callout)
             Text(draft.prompt).font(Theme.callout).textSelection(.enabled)
-            Text([draft.workspaceID.isEmpty ? "Uncategorized" : session.folders.first(where: { $0.id == draft.workspaceID })?.name ?? "Unavailable folder",
+            Text([draft.workspaceID.isEmpty ? L10n.text("apple.taskeditorview.uncategorized.8d40d123") : session.folders.first(where: { $0.id == draft.workspaceID })?.name ?? L10n.text("apple.taskeditorview.unavailable_folder.6454a349"),
                   draft.priority.capitalized, draft.backend, draft.model, draft.effort,
-                  draft.noTimeLimit ? "No time limit" : "\(draft.budgetValue) \(draft.budgetUnit)"].filter { !$0.isEmpty }.joined(separator: " · "))
+                  draft.noTimeLimit ? L10n.text("apple.taskeditorview.no_time_limit.436b4b94") : "\(draft.budgetValue) \(draft.budgetUnit)"].filter { !$0.isEmpty }.joined(separator: " · "))
                 .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
         }
         .padding(Theme.Space.m)

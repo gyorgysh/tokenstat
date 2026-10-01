@@ -72,13 +72,13 @@ final class AutomationQueueSession {
         do {
             apply(try await service.setAutomationQueue(defaultBudgetSeconds: budget, maxConcurrent: count), asSaved: true)
             errorMessage = nil
-            noticeMessage = "Scheduler saved."
+            noticeMessage = L10n.text("apple.automationqueuesession.scheduler_saved.4e10688a")
             submitted = nil
             NotificationCenter.default.post(name: Self.didChange, object: nil)
         } catch {
             if await recoveredSubmitted() {
                 errorMessage = nil
-                noticeMessage = "Scheduler saved."
+                noticeMessage = L10n.text("apple.automationqueuesession.scheduler_saved.4e10688a")
                 submitted = nil
                 NotificationCenter.default.post(name: Self.didChange, object: nil)
             } else {

@@ -93,11 +93,11 @@ struct BrowserView: View {
         .background(Theme.background)
         .alert(item: $remoteURL) { item in
             Alert(
-                title: Text("Open an external site?"),
+                title: Text(L10n.text("apple.browserview.open_an_external_site.3cb08c64")),
                 message: Text(
-                    "\(item.url.host ?? item.url.absoluteString) is not a local development server. It will load inside the app's browser."
+                    L10n.text("apple.browserview.0_is_not_a_local_development_server_it_wil.6277a9a2", "\(item.url.host ?? item.url.absoluteString)")
                 ),
-                primaryButton: .default(Text("Open")) {
+                primaryButton: .default(Text(L10n.text("common.open"))) {
                     navigate(to: item.url)
                 },
                 secondaryButton: .cancel()
@@ -126,29 +126,29 @@ struct BrowserView: View {
             Button { send(.back) } label: {
                 Image(systemName: "chevron.left")
             }
-            .help("Back")
-            .accessibilityLabel("Back")
+            .help(L10n.text("common.back"))
+            .accessibilityLabel(L10n.text("common.back"))
             .disabled(!canGoBack)
             Button { send(.forward) } label: {
                 Image(systemName: "chevron.right")
             }
-            .help("Forward")
-            .accessibilityLabel("Forward")
+            .help(L10n.text("apple.browserview.forward.f1c65e14"))
+            .accessibilityLabel(L10n.text("apple.browserview.forward.f1c65e14"))
             .disabled(!canGoForward)
             Button { send(isLoading ? .stop : .reload) } label: {
                 Image(systemName: isLoading ? "xmark" : "arrow.clockwise")
             }
-            .help(isLoading ? "Stop loading" : "Reload")
-            .accessibilityLabel(isLoading ? "Stop loading" : "Reload")
+            .help(isLoading ? L10n.text("apple.browserview.stop_loading.e7852dcd") : L10n.text("apple.browserview.reload.bdc090ec"))
+            .accessibilityLabel(isLoading ? L10n.text("apple.browserview.stop_loading.e7852dcd") : L10n.text("apple.browserview.reload.bdc090ec"))
             .disabled(loadedURL.isEmpty)
             if isLoading {
                 ProgressView()
                     .controlSize(.small)
                     .padding(.horizontal, Theme.Space.xs)
-                    .accessibilityLabel("Loading")
+                    .accessibilityLabel(L10n.text("apple.browserview.loading.dc380888"))
             }
 
-            TextField("Enter a URL, for example localhost:8000", text: $text)
+            TextField(L10n.text("apple.browserview.enter_a_url_for_example_localhost_8000.634e4c22"), text: $text)
                 .textFieldStyle(.themed)
                 .font(Theme.mono(11))
                 .onSubmit { commit(text) }
@@ -162,11 +162,11 @@ struct BrowserView: View {
                     Image(systemName: "clock.arrow.circlepath")
                 }
                 .menuStyle(.borderlessButton)
-                .help("Recent ports for this project")
-                .accessibilityLabel("Recent project ports")
+                .help(L10n.text("apple.browserview.recent_ports_for_this_project.7cc56b69"))
+                .accessibilityLabel(L10n.text("apple.browserview.recent_project_ports.b18529b8"))
             }
 
-            Button("Go", .next) { commit(text) }
+            Button(L10n.text("apple.browserview.go.6cc8519b"), .next) { commit(text) }
                 .buttonStyle(AccentButtonStyle(small: true))
                 .controlSize(.small)
             Button {
@@ -175,8 +175,8 @@ struct BrowserView: View {
                 Image(systemName: "arrow.up.right.square")
             }
             .disabled(loadedURL.isEmpty)
-            .help("Open in default browser")
-            .accessibilityLabel("Open in default browser")
+            .help(L10n.text("apple.browserview.open_in_default_browser.d1f5a889"))
+            .accessibilityLabel(L10n.text("apple.browserview.open_in_default_browser.d1f5a889"))
         }
         .padding(.horizontal, Theme.Space.s)
         .padding(.vertical, Theme.Space.xs)
@@ -196,7 +196,7 @@ struct BrowserView: View {
             return
         }
         if candidate.allSatisfy({ $0.isASCII && $0.isNumber }) {
-            loadError = "Choose a port from 1 to 65535."
+            loadError = L10n.text("apple.browserview.choose_a_port_from_1_to_65535.437b8a87")
             return
         }
         if !candidate.contains("://") {
@@ -259,9 +259,9 @@ private extension BrowserView {
             Image(systemName: "globe")
                 .font(Theme.font(34, weight: .light))
                 .foregroundStyle(Theme.accent.opacity(0.7))
-            Text("Open a project preview")
+            Text(L10n.text("apple.browserview.open_a_project_preview.7249ee28"))
                 .font(Theme.title3.weight(.medium))
-            Text("Enter a local development server or any URL above.")
+            Text(L10n.text("apple.browserview.enter_a_local_development_server_or_any_ur.b3312e2e"))
                 .font(Theme.callout)
                 .foregroundStyle(.secondary)
             Spacer()
@@ -351,8 +351,7 @@ private struct WebBrowser: NSViewRepresentable {
 
     /// Matches the current macOS Safari so the site negotiates with a browser
     /// it recognises rather than a WebKit shell.
-    static let safariUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        + "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
+    static let safariUserAgent = L10n.text("apple.browserview.mozilla_5_0_macintosh_intel_mac_os_x_10_15.89f5ca26")
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         let allowsExternalNavigation: Bool
@@ -465,7 +464,7 @@ private struct WebBrowser: NSViewRepresentable {
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
             onLoadingChange(false)
-            onError("The page stopped responding. Reload to try again.")
+            onError(L10n.text("apple.browserview.the_page_stopped_responding_reload_to_try.9832b72e"))
         }
     }
 }

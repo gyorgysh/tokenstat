@@ -95,7 +95,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         {
             trailing.Add(Buttons.ToolbarIcon(
                 ActionIcon.Refresh,
-                "Sync now",
+                L10n.Text("common.sync_now"),
                 async (_, _) =>
                 {
                     LogoRefresh.Began();
@@ -111,9 +111,9 @@ internal sealed class AccountPage : Page, IToolbarItems
     {
         var tabs = new List<(string Value, string Label, ActionIcon? Glyph)>
         {
-            ("account", "Account", ActionIcon.Account),
-            ("limits", "Plan limits", ActionIcon.Plan),
-            ("pc", "This PC", ActionIcon.Device),
+            ("account", L10n.Text("common.account"), ActionIcon.Account),
+            ("limits", L10n.Text("windows.accountpage.plan_limits.925788cd"), ActionIcon.Plan),
+            ("pc", L10n.Text("windows.accountpage.this_pc.638a348b"), ActionIcon.Device),
         };
         _tabSlot.Content = TabStrip.View(
             tabs,
@@ -265,31 +265,29 @@ internal sealed class AccountPage : Page, IToolbarItems
         var body = new StackPanel { Spacing = Theme.SpaceM };
         body.Children.Add(new TextBlock
         {
-            Text = "An account lets you publish a profile page and see usage from "
-                + "all your machines in one place. Only aggregate counters are "
-                + "eligible to be sent.",
+            Text = L10n.Text("windows.accountpage.an_account_lets_you_publish_a_profile_page.d28d80da"),
             Opacity = 0.7,
             TextWrapping = TextWrapping.Wrap,
         });
         body.Children.Add(ActionIconGlyph.PrimaryButton(
-            "Sign in to tokenstat.ai", ActionIcon.SignIn,
+            L10n.Text("windows.accountpage.sign_in_to_tokenstat_ai.6276dc4d"), ActionIcon.SignIn,
             async (_, _) => await SignInFlow.RunAsync(this, _signSlot, LoadAsync)));
         return Chrome.Card(
-            "Not signed in",
+            L10n.Text("windows.accountpage.not_signed_in.491fc91c"),
             body,
-            "Everything works without an account. Signing in only adds the option to publish.");
+            L10n.Text("windows.accountpage.everything_works_without_an_account_signin.77323e45"));
     }
 
     private UIElement LimitsSignedOutCard()
     {
         var body = new StackPanel { Spacing = Theme.SpaceM };
         body.Children.Add(ActionIconGlyph.PrimaryButton(
-            "Sign in to tokenstat.ai", ActionIcon.SignIn,
+            L10n.Text("windows.accountpage.sign_in_to_tokenstat_ai.6276dc4d"), ActionIcon.SignIn,
             async (_, _) => await SignInFlow.RunAsync(this, _signSlot, LoadAsync)));
         return Chrome.Card(
-            "Plan limits",
+            L10n.Text("windows.accountpage.plan_limits.925788cd"),
             body,
-            "Sign in to see how much of each tool's subscription is left on this PC, and to share that with your other devices.");
+            L10n.Text("windows.accountpage.sign_in_to_see_how_much_of_each_tool_s_sub.2b26b3eb"));
     }
 
     /// <summary>Who you are, at the size a profile deserves.</summary>
@@ -299,7 +297,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         var name = Format.Text(account, "displayName", handle);
         if (string.IsNullOrEmpty(name))
         {
-            name = "Signed in";
+            name = L10n.Text("windows.accountpage.signed_in.ca566c89");
         }
         var tier = Format.Text(account, "tier", "");
         var host = Format.Text(account, "host");
@@ -335,9 +333,9 @@ internal sealed class AccountPage : Page, IToolbarItems
             // app that knows its address.
             var url = host.TrimEnd('/') + "/" + handle;
             body.Children.Add(ActionIconGlyph.Button(
-                "View profile", ActionIcon.External, (_, _) => Open(url)));
+                L10n.Text("windows.accountpage.view_profile.d4788f25"), ActionIcon.External, (_, _) => Open(url)));
         }
-        return Chrome.Card("Account", body);
+        return Chrome.Card(L10n.Text("common.account"), body);
     }
 
     /// <summary>
@@ -349,25 +347,25 @@ internal sealed class AccountPage : Page, IToolbarItems
         var body = new StackPanel { Spacing = Theme.SpaceM };
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceM };
         var last = Format.Text(account, "lastSyncAt");
-        row.Children.Add(new TextBlock { Text = "Last sync", Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center });
+        row.Children.Add(new TextBlock { Text = L10n.Text("windows.accountpage.last_sync.71967fca"), Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center });
         row.Children.Add(new TextBlock
         {
-            Text = string.IsNullOrEmpty(last) ? "Never" : Format.Relative(last),
+            Text = string.IsNullOrEmpty(last) ? L10n.Text("common.never") : Format.Relative(last),
             FontFamily = Fonts.Mono,
             VerticalAlignment = VerticalAlignment.Center,
         });
-        row.Children.Add(ActionIconGlyph.Button("Sync now", ActionIcon.Refresh, async (_, _) =>
+        row.Children.Add(ActionIconGlyph.Button(L10n.Text("common.sync_now"), ActionIcon.Refresh, async (_, _) =>
         {
             await SyncNowAsync();
         }));
         body.Children.Add(row);
-        body.Children.Add(ActionIconGlyph.Button("Sign out", ActionIcon.SignOut, async (_, _) =>
+        body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.sign_out"), ActionIcon.SignOut, async (_, _) =>
         {
             try { await AppServices.Host.CallAsync("account.logout"); AppServices.NotifyAccountChanged(); }
             catch { /* stay on the page */ }
             await LoadAsync();
         }));
-        return Chrome.Card("Sync", body, "Only aggregate counters are eligible");
+        return Chrome.Card(L10n.Text("windows.accountpage.sync.8d261a37"), body, L10n.Text("windows.accountpage.only_aggregate_counters_are_eligible.141802f7"));
     }
 
     private async Task SyncNowAsync()
@@ -398,30 +396,30 @@ internal sealed class AccountPage : Page, IToolbarItems
         var machines = account["machines"] as JsonArray;
         var used = machines?.Count ?? 0;
         var limitNode = account["machineLimit"];
-        var subtitle = "Every device that has synced to this account";
+        var subtitle = L10n.Text("windows.accountpage.every_device_that_has_synced_to_this_accou.cdc060e6");
         if (machines is not null && used > 0)
         {
             if (limitNode is not null)
             {
-                subtitle = $"{used} of {Format.Long(account, "machineLimit")} devices";
+                subtitle = L10n.Text("windows.accountpage.0_of_1_devices.bd266bff", $"{used}", $"{Format.Long(account, "machineLimit")}");
                 if (account["canRemote"] is JsonValue noRemote
                     && noRemote.GetValueKind() == System.Text.Json.JsonValueKind.False)
                 {
-                    subtitle += ". No remote control on this plan.";
+                    subtitle += L10n.Text("windows.accountpage.no_remote_control_on_this_plan.278f9ff0");
                 }
             }
             else
             {
-                subtitle = $"{used} linked";
+                subtitle = L10n.Text("windows.accountpage.0_linked.6897cc07", $"{used}");
             }
         }
         if (used == 0)
         {
             return Chrome.Card(
-                "Devices",
+                L10n.Text("common.devices"),
                 EmptyState.View(
-                    "Nothing linked yet",
-                    "Free includes two devices. Sync now to put this PC on the account.",
+                    L10n.Text("windows.accountpage.nothing_linked_yet.2e60783b"),
+                    L10n.Text("windows.accountpage.free_includes_two_devices_sync_now_to_put.e9a61412"),
                     EmptyArtKind.Devices),
                 subtitle);
         }
@@ -438,12 +436,12 @@ internal sealed class AccountPage : Page, IToolbarItems
         }
         body.Children.Add(new TextBlock
         {
-            Text = "Rename, reach, or remove a device on the Devices page.",
+            Text = L10n.Text("windows.accountpage.rename_reach_or_remove_a_device_on_the_dev.09b11869"),
             Opacity = 0.7,
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
         });
-        return Chrome.Card("Devices", body, subtitle);
+        return Chrome.Card(L10n.Text("common.devices"), body, subtitle);
     }
 
     private static UIElement MachineRow(JsonNode machine, string id, bool isThis)
@@ -482,7 +480,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         {
             head.Children.Add(new TextBlock
             {
-                Text = "Unnamed device",
+                Text = L10n.Text("windows.accountpage.unnamed_device.6aba593f"),
                 Opacity = 0.7,
                 VerticalAlignment = VerticalAlignment.Center,
             });
@@ -497,7 +495,7 @@ internal sealed class AccountPage : Page, IToolbarItems
                 VerticalAlignment = VerticalAlignment.Center,
                 Child = new TextBlock
                 {
-                    Text = "THIS PC",
+                    Text = L10n.Text("windows.accountpage.this_pc.66f5aa0b"),
                     FontSize = 9,
                     FontWeight = Microsoft.UI.Text.FontWeights.Bold,
                     Foreground = Theme.AccentBrush,
@@ -526,7 +524,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         if (string.IsNullOrEmpty(stamp))
         {
             seen = Format.Text(machine, "lastSeenAt");
-            stamp = string.IsNullOrEmpty(seen) ? "never synced" : "last used " + Format.Relative(seen);
+            stamp = string.IsNullOrEmpty(seen) ? L10n.Text("windows.accountpage.never_synced.ee394cab") : L10n.Text("windows.accountpage.last_used_0.acf5f8f5", $"{Format.Relative(seen)}");
         }
         var right = new TextBlock
         {
@@ -560,7 +558,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         {
             body.Children.Add(Chrome.Banner(
                 FriendlyError.Display(ex.Message), Theme.Warning, Symbol.Important));
-            return Chrome.Card("Plan limits", body);
+            return Chrome.Card(L10n.Text("windows.accountpage.plan_limits.925788cd"), body);
         }
         var enabled = state["enabled"]?.GetValue<bool>() ?? false;
         var skip = new HashSet<string>(StringComparer.Ordinal);
@@ -584,15 +582,12 @@ internal sealed class AccountPage : Page, IToolbarItems
         }
         body.Children.Add(new TextBlock
         {
-            Text = "Shows how much of each tool's subscription is left on your other devices, "
-                + "including while this PC is asleep. Percentages and reset "
-                + "times only, never a credential. Turning a tool off below "
-                + "also stops tracking it on this PC.",
+            Text = L10n.Text("windows.accountpage.shows_how_much_of_each_tool_s_subscription.d271be32"),
             Opacity = 0.7,
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
         });
-        body.Children.Add(Chrome.ToggleChip("Share with my devices", enabled, async on =>
+        body.Children.Add(Chrome.ToggleChip(L10n.Text("windows.accountpage.share_with_my_devices.44aa4fc8"), enabled, async on =>
         {
             try
             {
@@ -613,7 +608,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         {
             body.Children.Add(new TextBlock
             {
-                Text = "No readings yet. Open Home, or wait for the hourly pass, then come back.",
+                Text = L10n.Text("windows.accountpage.no_readings_yet_open_home_or_wait_for_the.6d2835f0"),
                 Opacity = 0.7,
                 FontSize = 12,
                 TextWrapping = TextWrapping.Wrap,
@@ -623,14 +618,14 @@ internal sealed class AccountPage : Page, IToolbarItems
         {
             foreach (var provider in providers.OfType<JsonNode>())
             {
-                var source = Format.Text(provider, "source", "Plan");
+                var source = Format.Text(provider, "source", L10n.Text("windows.accountpage.plan.fa8ed0bd"));
                 body.Children.Add(PlanLimitRow(provider, source, !skip.Contains(source)));
             }
         }
         return Chrome.Card(
-            "Plan limits",
+            L10n.Text("windows.accountpage.plan_limits.925788cd"),
             body,
-            "How much of each tool's subscription is left. Off means this PC does not read that tool and does not show it on Home.");
+            L10n.Text("windows.accountpage.how_much_of_each_tool_s_subscription_is_le.72953050"));
     }
 
     private UIElement PlanLimitRow(JsonNode provider, string source, bool shared)
@@ -676,7 +671,7 @@ internal sealed class AccountPage : Page, IToolbarItems
             }
             await LoadAsync();
         };
-        ToolTipService.SetToolTip(toggle, "Track " + HarnessName(source));
+        ToolTipService.SetToolTip(toggle, L10n.Text("windows.accountpage.track_0.7cd9419b", $"{HarnessName(source)}"));
         Grid.SetColumn(toggle, 1);
         row.Children.Add(toggle);
         return row;
@@ -726,7 +721,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         {
             // A missing flag is not stale.
         }
-        return parts.Count == 0 ? "No windows reported" : string.Join(" · ", parts);
+        return parts.Count == 0 ? L10n.Text("windows.accountpage.no_windows_reported.6e652c80") : string.Join(" · ", parts);
     }
 
     private static double WindowPercent(JsonNode window)
@@ -761,14 +756,14 @@ internal sealed class AccountPage : Page, IToolbarItems
         {
             body.Children.Add(new TextBlock
             {
-                Text = "The host helper has not answered yet.",
+                Text = L10n.Text("windows.accountpage.the_host_helper_has_not_answered_yet.ed11e9fb"),
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
             });
             return Chrome.Card(
-                "This PC",
+                L10n.Text("windows.accountpage.this_pc.638a348b"),
                 body,
-                "Whether the host helper stays up after you quit");
+                L10n.Text("windows.accountpage.whether_the_host_helper_stays_up_after_you.dd1619f2"));
         }
         var alwaysOn = policy["alwaysOn"]?.GetValue<bool>() ?? false;
         var hasBattery = policy["hasInternalBattery"]?.GetValue<bool>() ?? false;
@@ -776,12 +771,12 @@ internal sealed class AccountPage : Page, IToolbarItems
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var left = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-        left.Children.Add(new TextBlock { Text = "Always-on host" });
+        left.Children.Add(new TextBlock { Text = L10n.Text("windows.accountpage.always_on_host.f7990642") });
         left.Children.Add(new TextBlock
         {
             Text = alwaysOn
-                ? "The host helper keeps running after you quit tokenstat, so other devices can reach this PC. This PC will not idle-sleep. A laptop still sleeps when you close the lid."
-                : "The host helper stops when you quit tokenstat, so this PC can sleep. Other devices cannot open folders or terminals here until you open the app again.",
+                ? L10n.Text("windows.accountpage.the_host_helper_keeps_running_after_you_qu.a283800a")
+                : L10n.Text("windows.accountpage.the_host_helper_stops_when_you_quit_tokens.d6e04c9b"),
             Opacity = 0.7,
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
@@ -816,7 +811,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         {
             body.Children.Add(new TextBlock
             {
-                Text = "Uses more power.",
+                Text = L10n.Text("windows.accountpage.uses_more_power.a24adb34"),
                 Opacity = 0.7,
                 FontSize = 12,
             });
@@ -825,15 +820,15 @@ internal sealed class AccountPage : Page, IToolbarItems
         {
             body.Children.Add(new TextBlock
             {
-                Text = "Automations run only while tokenstat is open.",
+                Text = L10n.Text("windows.accountpage.automations_run_only_while_tokenstat_is_op.72980d54"),
                 Opacity = 0.7,
                 FontSize = 12,
             });
         }
         return Chrome.Card(
-            "This PC",
+            L10n.Text("windows.accountpage.this_pc.638a348b"),
             body,
-            "Whether the host helper stays up after you quit");
+            L10n.Text("windows.accountpage.whether_the_host_helper_stays_up_after_you.dd1619f2"));
     }
 
     /// <summary>
@@ -849,13 +844,13 @@ internal sealed class AccountPage : Page, IToolbarItems
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.Children.Add(new TextBlock
         {
-            Text = "Nothing is sent to tokenstat. These checks use loopback only. Start the app, load a model, then refresh.",
+            Text = L10n.Text("windows.accountpage.nothing_is_sent_to_tokenstat_these_checks.0b0d8242"),
             Opacity = 0.7,
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
             VerticalAlignment = VerticalAlignment.Center,
         });
-        var refresh = ActionIconGlyph.Button("Refresh", ActionIcon.Refresh, async (_, _) =>
+        var refresh = ActionIconGlyph.Button(L10n.Text("common.refresh"), ActionIcon.Refresh, async (_, _) =>
         {
             await RenderPaneAsync();
         });
@@ -878,31 +873,31 @@ internal sealed class AccountPage : Page, IToolbarItems
                 TextWrapping = TextWrapping.Wrap,
             });
             return Chrome.Card(
-                "Local models",
+                L10n.Text("windows.accountpage.local_models.8e4bf436"),
                 body,
-                "LM Studio on port 1234, Ollama on port 11434");
+                L10n.Text("windows.accountpage.lm_studio_on_port_1234_ollama_on_port_1143.9fad3f80"));
         }
         if (providers.Count == 0)
         {
             body.Children.Add(new TextBlock
             {
-                Text = "LM Studio (port 1234) and Ollama (port 11434) could not be checked. Start one and tap refresh.",
+                Text = L10n.Text("windows.accountpage.lm_studio_port_1234_and_ollama_port_11434.a765442f"),
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
             });
             return Chrome.Card(
-                "Local models",
+                L10n.Text("windows.accountpage.local_models.8e4bf436"),
                 body,
-                "LM Studio on port 1234, Ollama on port 11434");
+                L10n.Text("windows.accountpage.lm_studio_on_port_1234_ollama_on_port_1143.9fad3f80"));
         }
         foreach (var provider in providers.OfType<JsonNode>())
         {
             body.Children.Add(LocalProviderRow(provider));
         }
         return Chrome.Card(
-            "Local models",
+            L10n.Text("windows.accountpage.local_models.8e4bf436"),
             body,
-            "LM Studio on port 1234, Ollama on port 11434");
+            L10n.Text("windows.accountpage.lm_studio_on_port_1234_ollama_on_port_1143.9fad3f80"));
     }
 
     private UIElement LocalProviderRow(JsonNode provider)
@@ -955,7 +950,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         {
             stack.Children.Add(new TextBlock
             {
-                Text = "Disabled for local model selection",
+                Text = L10n.Text("windows.accountpage.disabled_for_local_model_selection.8bd93638"),
                 Opacity = 0.7,
                 FontSize = 12,
             });
@@ -968,8 +963,8 @@ internal sealed class AccountPage : Page, IToolbarItems
                 stack.Children.Add(new TextBlock
                 {
                     Text = id == "lmstudio"
-                        ? "Server is up. Load a model in LM Studio to use it here."
-                        : "Server is up. Pull or run a model in Ollama to use it here.",
+                        ? L10n.Text("windows.accountpage.server_is_up_load_a_model_in_lm_studio_to.45657b3c")
+                        : L10n.Text("windows.accountpage.server_is_up_pull_or_run_a_model_in_ollama.d3666ac5"),
                     Opacity = 0.7,
                     FontSize = 12,
                     TextWrapping = TextWrapping.Wrap,
@@ -1025,8 +1020,8 @@ internal sealed class AccountPage : Page, IToolbarItems
         if (raw == "not running" || raw.StartsWith("not running", StringComparison.Ordinal))
         {
             return id == "lmstudio"
-                ? "Not running. Open LM Studio and turn on the local server (port 1234)."
-                : "Not running. Start Ollama (port 11434).";
+                ? L10n.Text("windows.accountpage.not_running_open_lm_studio_and_turn_on_the.d9dc45d4")
+                : L10n.Text("windows.accountpage.not_running_start_ollama_port_11434.2f65e946");
         }
         return raw;
     }
@@ -1087,11 +1082,9 @@ internal sealed class AccountPage : Page, IToolbarItems
     /// </summary>
     private static UIElement PrivacyNote()
     {
-        return Chrome.Card("What syncing sends", new TextBlock
+        return Chrome.Card(L10n.Text("windows.accountpage.what_syncing_sends.6540deb3"), new TextBlock
         {
-            Text = "Aggregate counts per day, tool and model, and project names replaced "
-                + "by salted hashes. Prompts, replies, file contents, file paths and "
-                + "session ids are never eligible.",
+            Text = L10n.Text("windows.accountpage.aggregate_counts_per_day_tool_and_model_an.4f196b00"),
             Opacity = 0.7,
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
@@ -1109,19 +1102,18 @@ internal sealed class AccountPage : Page, IToolbarItems
         var body = new StackPanel { Spacing = Theme.SpaceM };
         body.Children.Add(new TextBlock
         {
-            Text = "Deletion happens on the website, where you confirm it. This removes "
-                + "the account and its uploaded history.",
+            Text = L10n.Text("windows.accountpage.deletion_happens_on_the_website_where_you.2b90d7e2"),
             Opacity = 0.7,
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
         });
         body.Children.Add(ActionIconGlyph.Button(
-            "Open data settings", ActionIcon.External,
+            L10n.Text("windows.accountpage.open_data_settings.ad95c620"), ActionIcon.External,
             (_, _) => Open(host.TrimEnd('/') + "/settings/data#delete")));
         return Chrome.Card(
-            "Delete this account",
+            L10n.Text("windows.accountpage.delete_this_account.5e78b966"),
             body,
-            "Permanent. Confirmed on the website's data settings.");
+            L10n.Text("windows.accountpage.permanent_confirmed_on_the_website_s_data.68431d9f"));
     }
 
     private UIElement RelayUsageCard(JsonNode? account)
@@ -1135,18 +1127,18 @@ internal sealed class AccountPage : Page, IToolbarItems
         {
             body.Children.Add(new TextBlock
             {
-                Text = "Relay usage details are not available from this server yet.",
+                Text = L10n.Text("windows.accountpage.relay_usage_details_are_not_available_from.84fc7e91"),
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
             });
-            return Chrome.Card("Relay usage", body, "One allowance across your devices");
+            return Chrome.Card(L10n.Text("windows.accountpage.relay_usage.1addb713"), body, L10n.Text("windows.accountpage.one_allowance_across_your_devices.608bfc41"));
         }
         var used = Format.Long(usage, "usedBytes");
         var limit = Format.Long(usage, "limitBytes");
         var remaining = Format.Long(usage, "remainingBytes");
         body.Children.Add(new TextBlock
         {
-            Text = Format.DataSize(used) + " of " + Format.DataSize(limit) + " used",
+            Text = Format.DataSize(used) + L10n.Text("windows.accountpage.of.a4282e4b") + Format.DataSize(limit) + L10n.Text("windows.accountpage.used.f194a918"),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         body.Children.Add(new ProgressBar
@@ -1157,15 +1149,15 @@ internal sealed class AccountPage : Page, IToolbarItems
         });
         body.Children.Add(new TextBlock
         {
-            Text = Format.DataSize(remaining) + " remaining",
+            Text = Format.DataSize(remaining) + L10n.Text("windows.accountpage.remaining.62fc42d5"),
             Opacity = 0.7,
         });
-        body.Children.Add(UsageRow("Today (UTC)", Format.Long(usage, "todayBytes")));
-        body.Children.Add(UsageRow("This calendar month (UTC)", Format.Long(usage, "monthBytes")));
-        body.Children.Add(UsageRow("Rolling 30 days, used for your limit", used));
+        body.Children.Add(UsageRow(L10n.Text("windows.accountpage.today_utc"), Format.Long(usage, "todayBytes")));
+        body.Children.Add(UsageRow(L10n.Text("windows.accountpage.this_calendar_month_utc.379dc97f"), Format.Long(usage, "monthBytes")));
+        body.Children.Add(UsageRow(L10n.Text("windows.accountpage.rolling_30_days_used_for_your_limit.290548eb"), used));
         body.Children.Add(new TextBlock
         {
-            Text = "All relayed traffic shares this allowance. Direct connections do not count. The limit includes today and the previous 29 UTC days. Each day, older usage leaves the window. This is not a daily refill or a calendar-month reset.",
+            Text = L10n.Text("windows.accountpage.all_relayed_traffic_shares_this_allowance.a652388b"),
             Opacity = 0.7,
             TextWrapping = TextWrapping.Wrap,
             FontSize = 12,
@@ -1176,8 +1168,7 @@ internal sealed class AccountPage : Page, IToolbarItems
             var day = unlock.Length >= 10 ? unlock[..10] : unlock;
             body.Children.Add(new TextBlock
             {
-                Text = "Next usage to expire: " + Format.DataSize(Format.Long(usage, "nextUnlockBytes"))
-                    + " on " + day + " at 00:00 UTC.",
+                Text = L10n.Text("windows.accountpage.next_usage_to_expire_0_on_1_at_00_00_utc.1b64d175", $"{Format.DataSize(Format.Long(usage, "nextUnlockBytes"))}", $"{day}"),
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
                 FontSize = 12,
@@ -1188,14 +1179,14 @@ internal sealed class AccountPage : Page, IToolbarItems
             var usedDays = days.OfType<JsonNode>().Where(day => Format.Long(day, "bytes") > 0).ToList();
             body.Children.Add(new TextBlock
             {
-                Text = "Daily usage (UTC)",
+                Text = L10n.Text("windows.accountpage.daily_usage_utc.520a8261"),
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             });
             if (usedDays.Count == 0)
             {
                 body.Children.Add(new TextBlock
                 {
-                    Text = "No relayed traffic in this window.",
+                    Text = L10n.Text("windows.accountpage.no_relayed_traffic_in_this_window.a3f245c1"),
                     Opacity = 0.7,
                     FontSize = 12,
                 });
@@ -1213,13 +1204,13 @@ internal sealed class AccountPage : Page, IToolbarItems
         var stamp = asOf.Length >= 10 ? asOf[..10] : asOf;
         body.Children.Add(new TextBlock
         {
-            Text = "As of " + stamp + ". Relay reporting can lag by about " + delay + " seconds.",
+            Text = L10n.Text("windows.accountpage.as_of_0_relay_reporting_can_lag_by_about_1.f028d9ec", $"{stamp}", $"{delay}"),
             Opacity = 0.7,
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
         });
-        body.Children.Add(ActionIconGlyph.Button("Refresh usage", ActionIcon.Refresh, async (_, _) => await LoadAsync()));
-        return Chrome.Card("Relay usage", body, "One allowance across your devices");
+        body.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.accountpage.refresh_usage.8d3a136d"), ActionIcon.Refresh, async (_, _) => await LoadAsync()));
+        return Chrome.Card(L10n.Text("windows.accountpage.relay_usage.1addb713"), body, L10n.Text("windows.accountpage.one_allowance_across_your_devices.608bfc41"));
     }
 
     private static UIElement UsageRow(string label, long bytes)
@@ -1246,18 +1237,18 @@ internal sealed class AccountPage : Page, IToolbarItems
             {
                 body.Children.Add(new TextBlock
                 {
-                    Text = "This computer does not report local traffic yet.",
+                    Text = L10n.Text("windows.accountpage.this_computer_does_not_report_local_traffi.c31505cb"),
                     Opacity = 0.7,
                     TextWrapping = TextWrapping.Wrap,
                 });
             }
             else
             {
-                body.Children.Add(UsageRow("Direct", Format.Long(traffic, "directBytes")));
-                body.Children.Add(UsageRow("Relayed", Format.Long(traffic, "relayBytes")));
+                body.Children.Add(UsageRow(L10n.Text("windows.accountpage.direct.002c7c68"), Format.Long(traffic, "directBytes")));
+                body.Children.Add(UsageRow(L10n.Text("windows.accountpage.relayed.feb39b70"), Format.Long(traffic, "relayBytes")));
                 body.Children.Add(new TextBlock
                 {
-                    Text = "Counted on this device since tokenstat started. Direct traffic does not use the account relay allowance. The relayed figure is this machine only, not the account total.",
+                    Text = L10n.Text("windows.accountpage.counted_on_this_device_since_tokenstat_sta.0fc360a7"),
                     Opacity = 0.7,
                     FontSize = 12,
                     TextWrapping = TextWrapping.Wrap,
@@ -1287,7 +1278,7 @@ internal sealed class AccountPage : Page, IToolbarItems
                 {
                     body.Children.Add(new TextBlock
                     {
-                        Text = "No live connections right now.",
+                        Text = L10n.Text("windows.accountpage.no_live_connections_right_now.a7f971c5"),
                         Opacity = 0.7,
                         FontSize = 12,
                     });
@@ -1298,8 +1289,8 @@ internal sealed class AccountPage : Page, IToolbarItems
         {
             body.Children.Add(Chrome.Banner(FriendlyError.Display(ex.Message), Theme.Warning, Symbol.Important));
         }
-        body.Children.Add(ActionIconGlyph.Button("Refresh traffic", ActionIcon.Refresh, async (_, _) => await LoadAsync()));
-        return Chrome.Card("This device", body, "How connections leave this machine");
+        body.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.accountpage.refresh_traffic.9e5ac8c2"), ActionIcon.Refresh, async (_, _) => await LoadAsync()));
+        return Chrome.Card(L10n.Text("windows.accountpage.this_device.d052579c"), body, L10n.Text("windows.accountpage.how_connections_leave_this_machine.a5ac544a"));
     }
 
     private async Task<UIElement> PullConnectionCardAsync()
@@ -1325,12 +1316,12 @@ internal sealed class AccountPage : Page, IToolbarItems
             var words = new StackPanel { Spacing = 2 };
             words.Children.Add(new TextBlock
             {
-                Text = state == "ready" && !string.IsNullOrEmpty(login) ? "@" + login : "Not connected",
+                Text = state == "ready" && !string.IsNullOrEmpty(login) ? "@" + login : L10n.Text("windows.accountpage.not_connected.0303e182"),
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             });
             words.Children.Add(new TextBlock
             {
-                Text = "github.com · " + PullSourceLabel(source),
+                Text = L10n.Text("windows.accountpage.github_com_0.2d9757a6", $"{PullSourceLabel(source)}"),
                 FontSize = 12,
                 Opacity = 0.68,
                 TextWrapping = TextWrapping.Wrap,
@@ -1341,10 +1332,10 @@ internal sealed class AccountPage : Page, IToolbarItems
             {
                 Text = source switch
                 {
-                    "tokenstat" => "Connected with the tokenstat GitHub App. Pull requests are limited to repositories you choose on GitHub.",
-                    "gitCredential" or "environment" => "Pull requests work through a credential owned by another tool. Connect the tokenstat GitHub App to choose exactly which repositories tokenstat may access.",
-                    "pasted" => "A token saved by tokenstat is active. You can replace it with the tokenstat GitHub App and selected-repository access.",
-                    _ => "Connect the tokenstat GitHub App, then choose the repositories tokenstat may open.",
+                    "tokenstat" => L10n.Text("windows.accountpage.connected_with_the_tokenstat_github_app_pu.408c2b35"),
+                    "gitCredential" or "environment" => L10n.Text("windows.accountpage.pull_requests_work_through_a_credential_ow.304f9738"),
+                    "pasted" => L10n.Text("windows.accountpage.a_token_saved_by_tokenstat_is_active_you_c.574bdb58"),
+                    _ => L10n.Text("windows.accountpage.connect_the_tokenstat_github_app_then_choo.0a205707"),
                 },
                 FontSize = 12,
                 Opacity = 0.68,
@@ -1353,27 +1344,27 @@ internal sealed class AccountPage : Page, IToolbarItems
             if (source != "tokenstat")
             {
                 body.Children.Add(ActionIconGlyph.PrimaryButton(
-                    "Connect tokenstat GitHub App",
+                    L10n.Text("windows.accountpage.connect_tokenstat_github_app.f936ff5f"),
                     ActionIcon.Connect,
                     async (_, _) => await StartPullLoginAsync()));
             }
             else
             {
                 body.Children.Add(ActionIconGlyph.Button(
-                    "Choose repositories",
+                    L10n.Text("windows.accountpage.choose_repositories.df6de593"),
                     ActionIcon.External,
                     (_, _) => Open("https://github.com/apps/tokenstat/installations/new")));
             }
             if (source is "tokenstat" or "pasted")
             {
-                body.Children.Add(ActionIconGlyph.Button("Sign out", ActionIcon.SignOut, async (_, _) =>
+                body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.sign_out"), ActionIcon.SignOut, async (_, _) =>
                 {
                     var dialog = new ContentDialog
                     {
-                        Title = "Sign out of GitHub pull requests?",
-                        Content = "The GitHub token saved by tokenstat will be removed. A credential already managed by git or your login environment may still be used.",
-                        PrimaryButtonText = "Sign out",
-                        CloseButtonText = "Cancel",
+                        Title = L10n.Text("windows.accountpage.sign_out_of_github_pull_requests.9aed016d"),
+                        Content = L10n.Text("windows.accountpage.the_github_token_saved_by_tokenstat_will_b.182fb193"),
+                        PrimaryButtonText = L10n.Text("common.sign_out"),
+                        CloseButtonText = L10n.Text("common.cancel"),
                         DefaultButton = ContentDialogButton.Close,
                     };
                     if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary) return;
@@ -1391,26 +1382,26 @@ internal sealed class AccountPage : Page, IToolbarItems
                 }));
             }
             return Chrome.Card(
-                "GitHub pull requests",
+                L10n.Text("windows.accountpage.github_pull_requests.0973f247"),
                 body,
-                "Checked only when you open pull requests or this Account screen");
+                L10n.Text("windows.accountpage.checked_only_when_you_open_pull_requests_o.6c9f4103"));
         }
         catch (Exception ex)
         {
             return Chrome.Card(
-                "GitHub pull requests",
+                L10n.Text("windows.accountpage.github_pull_requests.0973f247"),
                 Chrome.Banner(FriendlyError.Display(ex.Message), Theme.Warning, Symbol.Important),
-                "The connection could not be checked");
+                L10n.Text("windows.accountpage.the_connection_could_not_be_checked.7599ac82"));
         }
     }
 
     private static string PullSourceLabel(string source) => source switch
     {
-        "gitCredential" => "using the credential git already has",
-        "environment" => "using GH_TOKEN or GITHUB_TOKEN from your login environment",
-        "pasted" => "using a token saved by tokenstat",
-        "tokenstat" => "connected through tokenstat",
-        _ => "no GitHub credential found",
+        "gitCredential" => L10n.Text("windows.accountpage.using_the_credential_git_already_has.6aad5a87"),
+        "environment" => L10n.Text("windows.accountpage.using_gh_token_or_github_token_from_your_l.33077193"),
+        "pasted" => L10n.Text("windows.accountpage.using_a_token_saved_by_tokenstat.c1e203e4"),
+        "tokenstat" => L10n.Text("windows.accountpage.connected_through_tokenstat.2d13dbe0"),
+        _ => L10n.Text("windows.accountpage.no_github_credential_found.56851452"),
     };
 
     private async Task StartPullLoginAsync()
@@ -1428,7 +1419,7 @@ internal sealed class AccountPage : Page, IToolbarItems
             var content = new StackPanel { Spacing = Theme.SpaceM };
             content.Children.Add(new TextBlock
             {
-                Text = "Enter this one-time code in the GitHub page that just opened.",
+                Text = L10n.Text("windows.accountpage.enter_this_one_time_code_in_the_github_pag.2babe0df"),
                 TextWrapping = TextWrapping.Wrap,
                 Opacity = 0.72,
             });
@@ -1455,7 +1446,7 @@ internal sealed class AccountPage : Page, IToolbarItems
             waiting.Children.Add(new ProgressRing { Width = 18, Height = 18, IsActive = true });
             waiting.Children.Add(new TextBlock
             {
-                Text = "Waiting for GitHub…",
+                Text = L10n.Text("windows.accountpage.waiting_for_github.d3f403f4"),
                 VerticalAlignment = VerticalAlignment.Center,
                 Opacity = 0.72,
             });
@@ -1463,9 +1454,9 @@ internal sealed class AccountPage : Page, IToolbarItems
 
             var dialog = new ContentDialog
             {
-                Title = "Connect tokenstat GitHub App",
+                Title = L10n.Text("windows.accountpage.connect_tokenstat_github_app.f936ff5f"),
                 Content = content,
-                CloseButtonText = "Cancel",
+                CloseButtonText = L10n.Text("common.cancel"),
             };
             _pullPoll = new CancellationTokenSource();
             var token = _pullPoll.Token;
@@ -1517,7 +1508,7 @@ internal sealed class AccountPage : Page, IToolbarItems
     {
         var body = new StackPanel { Spacing = Theme.SpaceM };
         body.Children.Add(Chrome.ToggleChip(
-            "Tell me when work needs attention",
+            L10n.Text("windows.accountpage.tell_me_when_work_needs_attention.016eb3de"),
             RunNotifications.Shared.IsOn,
             async on =>
             {
@@ -1526,8 +1517,7 @@ internal sealed class AccountPage : Page, IToolbarItems
             }));
         body.Children.Add(new TextBlock
         {
-            Text = "Automations and workflows on this computer. Nothing leaves "
-                + "the machine: this computer watches its own work.",
+            Text = L10n.Text("windows.accountpage.automations_and_workflows_on_this_computer.5d221a8b"),
             FontSize = 12,
             Opacity = 0.68,
             TextWrapping = TextWrapping.Wrap,
@@ -1535,37 +1525,37 @@ internal sealed class AccountPage : Page, IToolbarItems
         if (RunNotifications.Shared.IsOn)
         {
             body.Children.Add(ActionIconGlyph.Button(
-                "Send a test", ActionIcon.Preview,
+                L10n.Text("windows.accountpage.send_a_test.edc01436"), ActionIcon.Preview,
                 (_, _) => RunNotifications.Shared.SendTest()));
         }
         return Chrome.Card(
-            "Notifications",
+            L10n.Text("windows.accountpage.notifications.78801183"),
             body,
-            "When an agent run finishes, or stops for a question.");
+            L10n.Text("windows.accountpage.when_an_agent_run_finishes_or_stops_for_a.62ef2fd8"));
     }
 
     private UIElement UpdateCard()
     {
         var update = AppServices.Update;
         var body = new StackPanel { Spacing = Theme.SpaceS };
-        body.Children.Add(new TextBlock { Text = "Installed " + update.CurrentVersion });
+        body.Children.Add(new TextBlock { Text = L10n.Text("windows.accountpage.installed_0.1bf9d96f", $"{update.CurrentVersion}") });
         if (update.IsReady)
         {
-            body.Children.Add(new TextBlock { Text = $"v{update.Latest} is ready." });
-            body.Children.Add(ActionIconGlyph.Button("Relaunch", ActionIcon.Refresh, (_, _) => update.Relaunch()));
+            body.Children.Add(new TextBlock { Text = L10n.Text("windows.accountpage.v_0_is_ready.3e648cdc", $"{update.Latest}") });
+            body.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.accountpage.relaunch.8bd85e54"), ActionIcon.Refresh, (_, _) => update.Relaunch()));
         }
         else if (update.Current == AppUpdateModel.Stage.Failed)
         {
             body.Children.Add(new TextBlock
             {
-                Text = update.Failure ?? "The update could not install itself.",
+                Text = update.Failure ?? L10n.Text("windows.accountpage.the_update_could_not_install_itself.a696796e"),
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = Theme.Brush(static () => Theme.Danger),
             });
-            body.Children.Add(ActionIconGlyph.Button("Retry", ActionIcon.Refresh, async (_, _) => await update.RetryAsync()));
+            body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.retry"), ActionIcon.Refresh, async (_, _) => await update.RetryAsync()));
             if (!string.IsNullOrEmpty(update.HtmlUrl))
             {
-                body.Children.Add(ActionIconGlyph.Button("Manual", ActionIcon.External, (_, _) =>
+                body.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.accountpage.manual.b0b9fe24"), ActionIcon.External, (_, _) =>
                     Open(update.HtmlUrl)));
             }
         }
@@ -1579,9 +1569,9 @@ internal sealed class AccountPage : Page, IToolbarItems
             {
                 body.Children.Add(new TextBlock { Text = update.CheckNotice, Opacity = 0.8 });
             }
-            body.Children.Add(ActionIconGlyph.Button("Check", ActionIcon.Refresh, async (_, _) => await update.CheckNowAsync()));
+            body.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.accountpage.check.9d60841e"), ActionIcon.Refresh, async (_, _) => await update.CheckNowAsync()));
         }
-        return Chrome.Card("Updates", body, "SHA-256 against the release. Publisher check only when this build is signed.");
+        return Chrome.Card(L10n.Text("windows.accountpage.updates.22e2bada"), body, L10n.Text("windows.accountpage.sha_256_against_the_release_publisher_chec.2ded308f"));
     }
 
     private static UIElement AboutBlurb()
@@ -1589,7 +1579,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         var body = new StackPanel { Spacing = Theme.SpaceS };
         body.Children.Add(new TextBlock { Text = AppInfo.Copyright, Opacity = 0.8 });
         body.Children.Add(ActionIconGlyph.Button(AppInfo.WebsiteLabel, ActionIcon.External, (_, _) => Open(AppInfo.Website)));
-        return Chrome.Card("tokenstat", body, AppInfo.Company);
+        return Chrome.Card(L10n.Text("windows.accountpage.tokenstat.63d30539"), body, AppInfo.Company);
     }
 
     /// <summary>
@@ -1605,26 +1595,26 @@ internal sealed class AccountPage : Page, IToolbarItems
         }
         return HarnessCanonicalId(id) switch
         {
-            "claude_code" => "Claude Code",
-            "claude_code_rollup" or "claude_code_estimate" => "Claude Code (recovered)",
+            "claude_code" => L10n.Text("windows.accountpage.claude_code.246ef8c1"),
+            "claude_code_rollup" or "claude_code_estimate" => L10n.Text("windows.accountpage.claude_code_recovered.93f5e6b2"),
             "codex" => "Codex",
-            "grok" => "Grok Build",
+            "grok" => L10n.Text("windows.accountpage.grok_build.fd3bf01a"),
             "opencode" => "OpenCode",
             "cline" => "Cline",
             "openclaw" => "OpenClaw",
             "muse" => "Muse",
-            "devin" => "Devin CLI",
+            "devin" => L10n.Text("windows.accountpage.devin_cli.29247d05"),
             "pi" => "Pi",
-            "dsh" => "DeepSeek Harness",
+            "dsh" => L10n.Text("windows.accountpage.deepseek_harness.e562a9c5"),
             "zed" => "Zed",
-            "copilot" => "Copilot CLI",
+            "copilot" => L10n.Text("windows.accountpage.copilot_cli.c73e38d4"),
             "antigravity" => "Antigravity",
             "cursor" => "Cursor",
             "gemini" => "Gemini",
-            "hermes" => "Hermes Agent",
-            "kilo" => "Kilo Code",
-            "kimi" => "Kimi Code",
-            "qwen" => "Qwen Code",
+            "hermes" => L10n.Text("windows.accountpage.hermes_agent.873e989a"),
+            "kilo" => L10n.Text("windows.accountpage.kilo_code.83abecfd"),
+            "kimi" => L10n.Text("windows.accountpage.kimi_code.0c486180"),
+            "qwen" => L10n.Text("windows.accountpage.qwen_code.47487dbd"),
             "" => "unknown",
             var canonical => canonical,
         };

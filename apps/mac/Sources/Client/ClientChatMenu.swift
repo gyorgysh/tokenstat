@@ -14,9 +14,9 @@ struct ClientChatMenu: View {
     @State private var owner = WorkSessionContext.shared.scope
     var body: some View {
         Menu {
-            Button("Rename chat", .edit) { rename = true }.disabled(conversation.running)
+            Button(L10n.text("apple.clientchatmenu.rename_chat.26076241"), .edit) { rename = true }.disabled(conversation.running)
             if supportsFork {
-                Button("Fork chat", .copy) {
+                Button(L10n.text("apple.clientchatmenu.fork_chat.dfbcbb35"), .copy) {
                     copying = true
                     Task {
                         defer { copying = false }
@@ -30,10 +30,10 @@ struct ClientChatMenu: View {
                     }
                 }.disabled(copying)
             }
-        } label: { ActionIcon.more.label("Chat actions") }
+        } label: { ActionIcon.more.label(L10n.text("apple.clientchatmenu.chat_actions.8ba35bb8")) }
         .task(id: peer) { supportsFork = await RemoteHostFeature.chatFork.isSupported(peer: peer) }
         .sheet(isPresented: $rename) {
-            ClientNameEditor(title: "Rename chat", initial: conversation.title) { title in
+            ClientNameEditor(title: L10n.text("apple.clientchatmenu.rename_chat.26076241"), initial: conversation.title) { title in
                 guard owner != nil, owner == WorkSessionContext.shared.scope else { throw ClientActionOwnership.changed }
                 try await model.rename(conversation, in: workspaceID, to: title, peer: peer)
             }

@@ -116,16 +116,16 @@ internal static class EmptyState
         };
         text.Inlines.Add(new Run
         {
-            Text = "Older history is locked. ",
+            Text = L10n.Text("windows.emptystate.older_history_is_locked.8ef6b29a"),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         text.Inlines.Add(new Run
         {
-            Text = $"Free shows the last {days} days in full. Older days keep the year shape only.",
+            Text = L10n.Text("windows.emptystate.free_shows_the_last_0_days_in_full_older_d.2a97306a", $"{days}"),
         });
         var link = new Button
         {
-            Content = "Upgrade to see the year",
+            Content = L10n.Text("windows.emptystate.upgrade_to_see_the_year.7918f544"),
             Background = new SolidColorBrush(Color.FromArgb(0, 0, 0, 0)),
             BorderThickness = new Thickness(0),
             Padding = new Thickness(0),

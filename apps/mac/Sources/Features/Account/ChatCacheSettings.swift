@@ -32,7 +32,7 @@ struct ChatCacheSettings: View {
     private var card: some View {
         #if os(macOS)
         Card(
-            title: "tokenstat cache",
+            title: L10n.text("apple.chatcachesettings.tokenstat_cache.697429b6"),
             subtitle: usageLabel,
             mark: "mark_cache",
             accessory: statusAccessory
@@ -42,7 +42,7 @@ struct ChatCacheSettings: View {
         #else
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .center, spacing: Theme.Space.s) {
-                ClientSectionTitle(title: "tokenstat cache", mark: "mark_cache")
+                ClientSectionTitle(title: L10n.text("apple.chatcachesettings.tokenstat_cache.697429b6"), mark: "mark_cache")
                 Spacer(minLength: 0)
                 if let statusAccessory { statusAccessory }
             }
@@ -62,17 +62,17 @@ struct ChatCacheSettings: View {
             containsRow
             ThemeRule()
             pickerRow(
-                "Maximum size",
+                L10n.text("apple.chatcachesettings.maximum_size.5a9f1ffe"),
                 selection: $maxGB,
                 values: ChatCachePreferences.sizes
             ) { "\($0) GB" }
             ThemeRule()
             pickerRow(
-                "Remove unused files after",
+                L10n.text("apple.chatcachesettings.remove_unused_files_after.e5209ea0"),
                 selection: $days,
                 values: ChatCachePreferences.days
-            ) { $0 == 1 ? "1 day" : "\($0) days" }
-            Text("Oldest downloads are removed when the cache is full. This includes local preview copies. Originals stay on the computer that owns the file.")
+            ) { $0 == 1 ? "1 day" : L10n.text("apple.chatcachesettings.0_days.af78beb0", "\($0)") }
+            Text(L10n.text("apple.chatcachesettings.oldest_downloads_are_removed_when_the_cach.d16a8169"))
                 #if os(macOS)
                 .font(Theme.caption)
                 #else
@@ -96,14 +96,14 @@ struct ChatCacheSettings: View {
 
     private var containsRow: some View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
-            Text("Currently contains")
+            Text(L10n.text("apple.chatcachesettings.currently_contains.dae0b1be"))
                 #if os(macOS)
                 .font(Theme.callout)
                 #else
                 .font(ClientType.label)
                 #endif
             Spacer(minLength: Theme.Space.m)
-            Text("Chat files")
+            Text(L10n.text("apple.chatcachesettings.chat_files.c826719c"))
                 #if os(macOS)
                 .font(Theme.callout)
                 #else
@@ -150,7 +150,7 @@ struct ChatCacheSettings: View {
     @ViewBuilder
     private var purgeButton: some View {
         #if os(macOS)
-        Button("Purge cache", .delete) {
+        Button(L10n.text("apple.chatcachesettings.purge_cache.6d8332d5"), .delete) {
             Task { await purge() }
         }
         .buttonStyle(SecondaryButtonStyle())
@@ -159,7 +159,7 @@ struct ChatCacheSettings: View {
         Button {
             Task { await purge() }
         } label: {
-            ActionIcon.delete.label(clearing ? "Purging…" : "Purge cache")
+            ActionIcon.delete.label(clearing ? L10n.text("apple.chatcachesettings.purging.347a864f") : L10n.text("apple.chatcachesettings.purge_cache.6d8332d5"))
                 .labelStyle(ActionLabelStyle())
                 .font(ClientType.label.weight(.semibold))
                 .foregroundStyle(Theme.accent)
@@ -170,7 +170,7 @@ struct ChatCacheSettings: View {
         }
         .buttonStyle(.plain)
         .disabled(clearing)
-        .accessibilityHint("Removes downloaded Chat files from this device. Originals stay on the computer that owns the file.")
+        .accessibilityHint(L10n.text("apple.chatcachesettings.removes_downloaded_chat_files_from_this_de.aa34a0e4"))
         #endif
     }
 
@@ -183,15 +183,15 @@ struct ChatCacheSettings: View {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(Theme.accent)
                     .transition(.opacity)
-                    .accessibilityLabel("Cache cleared")
+                    .accessibilityLabel(L10n.text("apple.chatcachesettings.cache_cleared.61a13722"))
             )
         }
         return nil
     }
 
     private var usageLabel: String {
-        if cleared { return "Cache cleared" }
-        return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file) + " on this device"
+        if cleared { return L10n.text("apple.chatcachesettings.cache_cleared.61a13722") }
+        return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file) + L10n.text("apple.chatcachesettings.on_this_device.f913ae1c")
     }
 
     private func refresh() async {
@@ -200,7 +200,7 @@ struct ChatCacheSettings: View {
             cleared = false
             message = nil
         } catch {
-            message = "Some cached files could not be removed. Try again."
+            message = L10n.text("apple.chatcachesettings.some_cached_files_could_not_be_removed_try.9111b244")
         }
     }
 
@@ -218,7 +218,7 @@ struct ChatCacheSettings: View {
         } catch {
             NotificationCenter.default.post(name: .chatAttachmentCachePurged, object: nil)
             bytes = await ChatAttachmentCache.shared.usedBytes()
-            message = "Some cached files could not be removed. Try again."
+            message = L10n.text("apple.chatcachesettings.some_cached_files_could_not_be_removed_try.9111b244")
         }
         clearing = false
     }

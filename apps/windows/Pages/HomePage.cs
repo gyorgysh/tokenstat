@@ -27,6 +27,15 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
     private readonly Dictionary<string, UIElement> _sectionViews = new();
     private readonly List<string> _sectionOrder = ["Continue", "Activity", "Plan limits", "Machines", "Today and this week"];
     private readonly HashSet<string> _hiddenSections = ["Today and this week"];
+    private static string HomeSectionLabel(string name) => name switch
+    {
+        "Continue" => L10n.Text("windows.homepage.continue.31fbef16"),
+        "Activity" => L10n.Text("windows.homepage.activity.38da1505"),
+        "Plan limits" => L10n.Text("windows.homepage.plan_limits.925788cd"),
+        "Machines" => L10n.Text("windows.homepage.machines.c061da19"),
+        "Today and this week" => L10n.Text("windows.homepage.today_and_this_week.2cb0c4ae"),
+        _ => name,
+    };
     private static string LayoutPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "home-layout.json");
 
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceS };
@@ -133,10 +142,10 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
     {
         return new List<UIElement>
         {
-            Buttons.ToolbarIcon(ActionIcon.Layout, "Customize Home", async (_, _) => await CustomizeHomeAsync()),
+            Buttons.ToolbarIcon(ActionIcon.Layout, L10n.Text("windows.homepage.customize_home.642cec6e"), async (_, _) => await CustomizeHomeAsync()),
             Buttons.ToolbarIcon(
                 ActionIcon.Refresh,
-                "Re-read the archive for this device's activity and plan usage",
+                L10n.Text("windows.homepage.re_read_the_archive_for_this_device_s_acti.34b970ce"),
                 async (_, _) => await RefreshAsync()),
         };
     }
@@ -147,7 +156,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         foreach (var name in _sectionOrder)
             if (!_hiddenSections.Contains(name) && _sectionViews.TryGetValue(name, out var view)) _sections.Children.Add(view);
         if (_sections.Children.Count == 0)
-            _sections.Children.Add(new TextBlock { Text = "Your Home is clear. Use Customize Home to choose what appears here.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(16) });
+            _sections.Children.Add(new TextBlock { Text = L10n.Text("windows.homepage.your_home_is_clear_use_customize_home_to_c.a5f735b7"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(16) });
     }
 
     private async Task CustomizeHomeAsync()
@@ -162,14 +171,14 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                var enabled = new CheckBox { Content = name, IsChecked = !_hiddenSections.Contains(name) };
+                var enabled = new CheckBox { Content = HomeSectionLabel(name), IsChecked = !_hiddenSections.Contains(name) };
                 enabled.Click += (_, _) => { if (enabled.IsChecked == true) _hiddenSections.Remove(name); else _hiddenSections.Add(name); ArrangeSections(); };
                 row.Children.Add(enabled);
                 foreach (var delta in new[] { -1, 1 })
                 {
                     var index = _sectionOrder.IndexOf(name);
                     var move = new Button { Content = delta < 0 ? "↑" : "↓", IsEnabled = index + delta >= 0 && index + delta < _sectionOrder.Count };
-                    ToolTipService.SetToolTip(move, delta < 0 ? "Move up" : "Move down");
+                    ToolTipService.SetToolTip(move, delta < 0 ? L10n.Text("windows.homepage.move_up.c66feb5e") : L10n.Text("windows.homepage.move_down.40bb50da"));
                     move.Click += (_, _) => { _sectionOrder.RemoveAt(index); _sectionOrder.Insert(index + delta, name); ArrangeSections(); Render(); };
                     Grid.SetColumn(move, delta < 0 ? 1 : 2);
                     row.Children.Add(move);
@@ -178,7 +187,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             }
         }
         Render();
-        await Chrome.ShowDialog(this, new ContentDialog { Title = "Customize Home", Content = rows, CloseButtonText = "Done" });
+        await Chrome.ShowDialog(this, new ContentDialog { Title = L10n.Text("windows.homepage.customize_home.642cec6e"), Content = rows, CloseButtonText = L10n.Text("common.done") });
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(LayoutPath)!);
@@ -190,7 +199,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             File.WriteAllText(LayoutPath + ".tmp", json.ToJsonString());
             File.Move(LayoutPath + ".tmp", LayoutPath, true);
         }
-        catch (Exception ex) { _status.Text = "Could not save Home layout: " + FriendlyError.Display(ex.Message); }
+        catch (Exception ex) { _status.Text = L10n.Text("windows.homepage.could_not_save_home_layout_0.c56055d3", $"{FriendlyError.Display(ex.Message)}"); }
     }
 
     /// <summary>
@@ -262,7 +271,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             return;
         }
         _scanning = true;
-        _status.Text = "Scanning local logs…";
+        _status.Text = L10n.Text("windows.homepage.scanning_local_logs.efac0264");
         try
         {
             await AppServices.Host.CallAsync("scan", patience: TimeSpan.FromMinutes(10));
@@ -310,7 +319,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         {
             _root.Children.RemoveAt(1);
         }
-        _status.Text = "Loading…";
+        _status.Text = L10n.Text("windows.homepage.loading.ba3bbbe1");
         // A wireframe shaped like the cards coming, with a light pulse so the
         // wait does not feel frozen. Real content replaces it with an arrival.
         var skeleton = Motion.SkeletonCard();
@@ -521,12 +530,12 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         row.Children.Add(new TextBlock
         {
-            Text = "All devices needs your tokenstat.ai account.",
+            Text = L10n.Text("windows.homepage.all_devices_needs_your_tokenstat_ai_accoun.128130cf"),
             VerticalAlignment = VerticalAlignment.Center,
             TextWrapping = TextWrapping.Wrap,
         });
         row.Children.Add(ActionIconGlyph.Button(
-            signedIn ? "Reconnect" : "Sign in",
+            signedIn ? L10n.Text("windows.homepage.reconnect.bf8a9eab") : L10n.Text("common.sign_in"),
             ActionIcon.SignIn,
             async (_, _) => await SignInFlow.RunAsync(this, _signSlot, async () => await LoadAsync(force: true))));
         var banner = new Border
@@ -588,7 +597,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         }
         else if (!(account?["signedIn"]?.GetValue<bool>() ?? false))
         {
-            who.Children.Add(new TextBlock { Text = "Working locally", Opacity = 0.7 });
+            who.Children.Add(new TextBlock { Text = L10n.Text("windows.homepage.working_locally.da99af57"), Opacity = 0.7 });
         }
         head.Children.Add(who);
         var profile = new Grid { ColumnSpacing = Theme.SpaceL, RowSpacing = Theme.SpaceM };
@@ -600,9 +609,9 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         if (calendar is not null)
         {
             var stats = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceL };
-            stats.Children.Add(Chrome.Stat("Streak", Format.Long(calendar, "streakCurrent").ToString(), "days", accent: true));
-            stats.Children.Add(Chrome.Stat("Best", Format.Long(calendar, "streakBest").ToString(), "days"));
-            stats.Children.Add(Chrome.Stat("Active", Format.Long(calendar, "activeDays").ToString(), "days"));
+            stats.Children.Add(Chrome.Stat(L10n.Text("windows.homepage.streak.41db983f"), Format.Long(calendar, "streakCurrent").ToString(), "days", accent: true));
+            stats.Children.Add(Chrome.Stat(L10n.Text("windows.homepage.best.c47d21c6"), Format.Long(calendar, "streakBest").ToString(), "days"));
+            stats.Children.Add(Chrome.Stat(L10n.Text("common.active"), Format.Long(calendar, "activeDays").ToString(), "days"));
             Grid.SetColumn(stats, 1);
             profile.Children.Add(stats);
             profile.SizeChanged += (_, e) =>
@@ -633,7 +642,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         if (string.IsNullOrEmpty(title))
         {
             var signedIn = account?["signedIn"]?.GetValue<bool>() ?? false;
-            return signedIn ? GreetingPhrase(hasHistory) : "Not signed in";
+            return signedIn ? GreetingPhrase(hasHistory) : L10n.Text("windows.homepage.not_signed_in.491fc91c");
         }
         return GreetingPhrase(hasHistory) + ", " + FirstName(title);
     }
@@ -648,18 +657,18 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         var now = DateTime.Now;
         string timed = now.Hour switch
         {
-            >= 5 and < 12 => "Good morning",
-            >= 12 and < 17 => "Good afternoon",
-            >= 17 and < 22 => "Good evening",
-            _ => "Hello",
+            >= 5 and < 12 => L10n.Text("windows.homepage.good_morning.90a90a48"),
+            >= 12 and < 17 => L10n.Text("windows.homepage.good_afternoon.d325e1bb"),
+            >= 17 and < 22 => L10n.Text("windows.homepage.good_evening.15a421e4"),
+            _ => L10n.Text("windows.homepage.hello.185f8db3"),
         };
         string[] pool =
         [
             timed,
-            "Hello",
-            "What's up",
-            hasHistory ? "Welcome back" : "Welcome",
-            hasHistory ? "Back at it" : timed,
+            L10n.Text("windows.homepage.hello.185f8db3"),
+            L10n.Text("windows.homepage.what_s_up.11ec53bc"),
+            hasHistory ? L10n.Text("windows.homepage.welcome_back.66212495") : L10n.Text("windows.homepage.welcome.0e2226b5"),
+            hasHistory ? L10n.Text("windows.homepage.back_at_it.9ce858b7") : timed,
         ];
         return pool[now.DayOfYear % pool.Length];
     }
@@ -682,7 +691,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         var list = new StackPanel { Spacing = Theme.SpaceS };
         foreach (var item in recent)
         {
-            var title = Format.Text(item, "title", "Conversation");
+            var title = Format.Text(item, "title", L10n.Text("windows.homepage.conversation.ccca1817"));
             var texts = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
             texts.Children.Add(new TextBlock
             {
@@ -731,7 +740,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             open.Click += (_, _) => AppServices.OpenConversation?.Invoke(workspaceId, id);
             list.Children.Add(open);
         }
-        return Chrome.Card("Continue", list, "The conversations you last opened", mark: Chrome.CardMark(ActionIcon.History));
+        return Chrome.Card(L10n.Text("windows.homepage.continue.31fbef16"), list, L10n.Text("windows.homepage.the_conversations_you_last_opened.565f4f1f"), mark: Chrome.CardMark(ActionIcon.History));
     }
 
     private static string ContinueSubtitle(JsonNode? item)
@@ -755,7 +764,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         {
             parts.Add("waiting on you");
         }
-        return parts.Count == 0 ? "Recently active" : string.Join(" · ", parts);
+        return parts.Count == 0 ? L10n.Text("windows.homepage.recently_active.f2e4cdc5") : string.Join(" · ", parts);
     }
 
     /// <summary>
@@ -776,26 +785,26 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             }
             var busiest = calendar["busiest"];
             var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceL };
-            row.Children.Add(Chrome.Stat("Today", Format.ListRate(today?.Value ?? 0)));
-            row.Children.Add(Chrome.Stat("Last 7 days", Format.ListRate(week)));
+            row.Children.Add(Chrome.Stat(L10n.Text("common.today"), Format.ListRate(today?.Value ?? 0)));
+            row.Children.Add(Chrome.Stat(L10n.Text("windows.homepage.last_7_days.0603deca"), Format.ListRate(week)));
             if (busiest is not null)
             {
                 row.Children.Add(Chrome.Stat(
-                    "Busiest",
+                    L10n.Text("windows.homepage.busiest.5192c2fb"),
                     Format.ListRate(Format.Long(busiest, "value")),
                     Format.Text(busiest, "date")));
             }
-            return Chrome.Card("Today and this week", row);
+            return Chrome.Card(L10n.Text("windows.homepage.today_and_this_week.2cb0c4ae"), row);
         }
         var body = new TextBlock
         {
             Text = error is null
-                ? "Nothing counted yet. Run the first scan below."
-                : "Usage could not be read. See the message above.",
+                ? L10n.Text("windows.homepage.nothing_counted_yet_run_the_first_scan_bel.deca13a9")
+                : L10n.Text("windows.homepage.usage_could_not_be_read_see_the_message_ab.e05837aa"),
             Opacity = 0.7,
             TextWrapping = TextWrapping.Wrap,
         };
-        return Chrome.Card("Today and this week", body);
+        return Chrome.Card(L10n.Text("windows.homepage.today_and_this_week.2cb0c4ae"), body);
     }
 
     private sealed record DatedCell(string Date, long Value);
@@ -877,21 +886,21 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
                 return GettingStarted(signedIn);
             }
             return Chrome.Card(
-                "Activity",
+                L10n.Text("windows.homepage.activity.38da1505"),
                 new TextBlock
                 {
-                    Text = "The activity could not be read. See the message above.",
+                    Text = L10n.Text("windows.homepage.the_activity_could_not_be_read_see_the_mes.595eb6b5"),
                     Opacity = 0.7,
                     TextWrapping = TextWrapping.Wrap,
                 },
-                "What each day was worth at API list price");
+                L10n.Text("windows.homepage.what_each_day_was_worth_at_api_list_price.c29a2633"));
         }
         var total = Format.ListRate(Format.Long(calendar, "total"));
         var active = Format.Long(calendar, "activeDays");
         var source = _delivered == "account"
-            ? ", across every device on your account"
-            : ", on this device";
-        var subtitle = $"{total} at API list price over {active} active days" + source;
+            ? L10n.Text("windows.homepage.across_every_device_on_your_account.de7d54ab")
+            : L10n.Text("windows.homepage.on_this_device.7e93bd3f");
+        var subtitle = L10n.Text("windows.homepage.0_at_api_list_price_over_1_active_days_2.81210563", $"{total}", $"{active}", $"{source}");
         var notice = Format.Text(calendar, "notice");
         if (!string.IsNullOrEmpty(notice) && Format.Text(calendar, "noticeCode") != "auth")
         {
@@ -902,7 +911,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             _selectedDate,
             onSelect: day => SelectDay(day),
             onHover: day => HoverDay(day));
-        return Chrome.Card("Activity", _heatmap, subtitle, mark: Chrome.CardMark(ActionIcon.Layout));
+        return Chrome.Card(L10n.Text("windows.homepage.activity.38da1505"), _heatmap, subtitle, mark: Chrome.CardMark(ActionIcon.Layout));
     }
 
     /// <summary>
@@ -915,7 +924,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         var body = new StackPanel { Spacing = Theme.SpaceM };
         body.Children.Add(new TextBlock
         {
-            Text = "It reads the logs the tools you already use leave on this PC, and turns them into a year you can read.",
+            Text = L10n.Text("windows.homepage.it_reads_the_logs_the_tools_you_already_us.b5ac9bf6"),
             Opacity = 0.7,
             TextWrapping = TextWrapping.Wrap,
         });
@@ -932,7 +941,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             VerticalAlignment = VerticalAlignment.Center,
         });
         scanRow.Children.Add(ActionIconGlyph.Button(
-            _scanning ? "Scanning…" : "Scan now", ActionIcon.Run, async (_, _) => await ScanAsync()));
+            _scanning ? L10n.Text("windows.homepage.scanning.38d96da6") : L10n.Text("windows.homepage.scan_now.c01d65df"), ActionIcon.Run, async (_, _) => await ScanAsync()));
         body.Children.Add(scanRow);
         var signRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         signRow.Children.Add(new TextBlock
@@ -946,11 +955,11 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         if (!signedIn)
         {
             signRow.Children.Add(ActionIconGlyph.Button(
-                "Sign in", ActionIcon.SignIn,
+                L10n.Text("common.sign_in"), ActionIcon.SignIn,
                 async (_, _) => await SignInFlow.RunAsync(this, _signSlot, async () => await LoadAsync(force: true))));
         }
         body.Children.Add(signRow);
-        return Chrome.Card("Get tokenstat counting", body);
+        return Chrome.Card(L10n.Text("windows.homepage.get_tokenstat_counting.331454ea"), body);
     }
 
     /// <summary>
@@ -1005,16 +1014,16 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         var lower = note.ToLowerInvariant();
         string[] absent =
         [
-            "not found",
-            "not running",
-            "no sessions",
-            "no cursor session",
-            "no opencode",
-            "no antigravity",
-            "no codex",
-            "not signed in",
-            "no claude code",
-            "no home directory",
+            L10n.Text("windows.homepage.not_found.907ba78b"),
+            L10n.Text("windows.homepage.not_running.415ed734"),
+            L10n.Text("windows.homepage.no_sessions.2e94a473"),
+            L10n.Text("windows.homepage.no_cursor_session.87ee6fb8"),
+            L10n.Text("windows.homepage.no_opencode.15483a3e"),
+            L10n.Text("windows.homepage.no_antigravity.461aac7a"),
+            L10n.Text("windows.homepage.no_codex.4d9c54eb"),
+            L10n.Text("windows.homepage.not_signed_in.7fb9b38a"),
+            L10n.Text("windows.homepage.no_claude_code.bd40a735"),
+            L10n.Text("windows.homepage.no_home_directory.ad4872fc"),
         ];
         foreach (var marker in absent)
         {
@@ -1032,7 +1041,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
     /// </summary>
     private static UIElement PlanLimitPanel(JsonNode? provider)
     {
-        var source = Format.Text(provider, "source", "Plan");
+        var source = Format.Text(provider, "source", L10n.Text("windows.homepage.plan.fa8ed0bd"));
         var body = new StackPanel { Spacing = Theme.SpaceS };
         if (provider?["windows"] is JsonArray { Count: > 0 } windows)
         {
@@ -1065,7 +1074,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             // are different answers and must not look the same.
             body.Children.Add(new TextBlock
             {
-                Text = Format.Text(provider, "note", "The vendor could not be read."),
+                Text = Format.Text(provider, "note", L10n.Text("windows.homepage.the_vendor_could_not_be_read.7eb01313")),
                 FontSize = 12,
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
@@ -1143,7 +1152,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         {
             var when = new TextBlock
             {
-                Text = "· resets " + FutureIn(reset.Value),
+                Text = L10n.Text("windows.homepage.resets_0.7a4480e9", $"{FutureIn(reset.Value)}"),
                 FontSize = 11,
                 Opacity = 0.6,
                 VerticalAlignment = VerticalAlignment.Center,
@@ -1190,11 +1199,11 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         }
         return scope.ToLowerInvariant() switch
         {
-            "secondary" => $"{label} (all models)",
-            "primary" => $"{label} (primary)",
+            "secondary" => L10n.Text("windows.homepage.0_all_models.31683c25", $"{label}"),
+            "primary" => L10n.Text("windows.homepage.0_primary.57ab87b8", $"{label}"),
             // A small model's own allowance: secondary, never bare beside the
             // account's week.
-            "current model" => $"{label} (secondary)",
+            "current model" => L10n.Text("windows.homepage.0_secondary.6cd2b67a", $"{label}"),
             // The account's own allowance reads as written. Anything else
             // vendor-named stays qualified rather than translated, which is
             // what hid an exhausted account limit.
@@ -1237,7 +1246,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             line.Children.Add(tokens);
             var unit = new TextBlock
             {
-                Text = "tokens",
+                Text = L10n.Text("windows.homepage.tokens.c51e455b"),
                 FontSize = 11,
                 Opacity = 0.6,
                 VerticalAlignment = VerticalAlignment.Center,
@@ -1249,9 +1258,9 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             list.Children.Add(line);
         }
         return Chrome.Card(
-            "Plan usage",
+            L10n.Text("windows.homepage.plan_usage.eb55e923"),
             list,
-            "Subscription-covered usage recorded in the archive", mark: Chrome.CardMark(ActionIcon.Plans));
+            L10n.Text("windows.homepage.subscription_covered_usage_recorded_in_the.e96aa3c3"), mark: Chrome.CardMark(ActionIcon.Plans));
     }
 
     private static UIElement MachinesCard(JsonNode? account)
@@ -1260,8 +1269,8 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         var limit = Format.Long(account, "machineLimit");
         var count = machines?.Count ?? 0;
         string subtitle = machines is null || count == 0
-            ? "Devices linked to your account"
-            : limit > 0 ? $"{count} of {limit} devices" : $"{count} linked";
+            ? L10n.Text("windows.homepage.devices_linked_to_your_account.dc6eb913")
+            : limit > 0 ? L10n.Text("windows.homepage.0_of_1_devices.bd266bff", $"{count}", $"{limit}") : L10n.Text("windows.homepage.0_linked.6897cc07", $"{count}");
         var list = new StackPanel { Spacing = Theme.SpaceS };
         if (machines is not null)
         {
@@ -1291,7 +1300,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
                 var status = new TextBlock
                 {
                     Text = machine?["online"] is JsonValue online && online.TryGetValue<bool>(out var awake)
-                        ? awake ? "Awake" : "Asleep" : "Status unknown",
+                        ? awake ? L10n.Text("windows.homepage.awake.9123b5f4") : L10n.Text("windows.homepage.asleep.60135e8f") : L10n.Text("windows.homepage.status_unknown.e412d872"),
                     Opacity = 0.7, FontSize = 12, VerticalAlignment = VerticalAlignment.Center,
                 };
                 Grid.SetColumn(status, 2);
@@ -1302,7 +1311,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
                     HorizontalContentAlignment = HorizontalAlignment.Stretch,
                     Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = Theme.PanelBrush,
                 };
-                ToolTipService.SetToolTip(open, "Open this device in Devices");
+                ToolTipService.SetToolTip(open, L10n.Text("windows.homepage.open_this_device_in_devices.24ae7e3a"));
                 open.Click += (_, _) => AppServices.OpenMachine?.Invoke(id);
                 list.Children.Add(open);
             }
@@ -1311,12 +1320,12 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         {
             list.Children.Add(new TextBlock
             {
-                Text = "Nothing linked yet. Sync from Account to put this PC on the account.",
+                Text = L10n.Text("windows.homepage.nothing_linked_yet_sync_from_account_to_pu.2aabc613"),
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
             });
         }
-        return Chrome.Card("Machines", list, subtitle, mark: Chrome.CardMark(ActionIcon.Device));
+        return Chrome.Card(L10n.Text("windows.homepage.machines.c061da19"), list, subtitle, mark: Chrome.CardMark(ActionIcon.Device));
     }
 
     /// <summary>
@@ -1327,39 +1336,39 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
     {
         if (isSelf)
         {
-            return "This device";
+            return L10n.Text("windows.homepage.this_device.d052579c");
         }
         var kind = Format.Text(machine, "kind");
         if (kind == "client")
         {
             if (Format.Flag(machine, "online"))
             {
-                return "Phone · in the app now";
+                return L10n.Text("windows.homepage.phone_in_the_app_now.49897ae2");
             }
             var seen = Format.Text(machine, "lastSeenAt");
             if (!string.IsNullOrEmpty(seen))
             {
-                return "Phone · last used " + Format.Relative(seen);
+                return L10n.Text("windows.homepage.phone_last_used_0.555b7a23", $"{Format.Relative(seen)}");
             }
-            return "Phone · signed in on this account";
+            return L10n.Text("windows.homepage.phone_signed_in_on_this_account.58d549b8");
         }
         if (string.IsNullOrEmpty(Format.Text(machine, "publicIdentity")))
         {
-            return "No connection key yet";
+            return L10n.Text("windows.homepage.no_connection_key_yet.86015bb4");
         }
         if (!Format.Flag(machine, "online") && machine?["online"] is not null)
         {
             var seen = Format.Text(machine, "lastSeenAt");
             return string.IsNullOrEmpty(seen)
-                ? "Offline"
-                : "Offline · last seen " + Format.Relative(seen);
+                ? L10n.Text("common.offline")
+                : L10n.Text("windows.homepage.offline_last_seen_0.52d14c6d", $"{Format.Relative(seen)}");
         }
         var synced = Format.Text(machine, "lastSyncAt");
         if (!string.IsNullOrEmpty(synced))
         {
-            return "Last synced " + Format.Relative(synced);
+            return L10n.Text("windows.homepage.last_synced_0.789aa5cd", $"{Format.Relative(synced)}");
         }
-        return "No sync recorded";
+        return L10n.Text("windows.homepage.no_sync_recorded.e74abceb");
     }
 
     /// <summary>
@@ -1373,20 +1382,18 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         var body = new StackPanel { Spacing = 2 };
         body.Children.Add(new TextBlock
         {
-            Text = "Your other devices cannot see these numbers",
+            Text = L10n.Text("windows.homepage.your_other_devices_cannot_see_these_number.464ea976"),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
         });
         body.Children.Add(new TextBlock
         {
-            Text = "Account has a Plan limits card for how much of each tool's subscription is left, "
-                + "including while this PC is asleep. "
-                + "Turn a tool off there if you do not want it shared.",
+            Text = L10n.Text("windows.homepage.account_has_a_plan_limits_card_for_how_muc.9e40b93f"),
             Opacity = 0.7,
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
         });
-        return Chrome.Card("Share plan usage", body);
+        return Chrome.Card(L10n.Text("windows.homepage.share_plan_usage.d8cf783b"), body);
     }
 
     /// <summary>
@@ -1530,19 +1537,19 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         _inspectorFooter.Child = null;
         _inspectorFooter.Visibility = Visibility.Collapsed;
         _inspectorRoot.Children.Add(Fonts.Text(
-            "Day", 15, Microsoft.UI.Text.FontWeights.SemiBold));
+            L10n.Text("windows.homepage.day.8f2364e1"), 15, Microsoft.UI.Text.FontWeights.SemiBold));
         var date = _hoverDate ?? _selectedDate;
         if (date is null)
         {
             _inspectorRoot.Children.Add(new TextBlock
             {
-                Text = "Today opens here.",
+                Text = L10n.Text("windows.homepage.today_opens_here.cd756fce"),
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 TextWrapping = TextWrapping.Wrap,
             });
             _inspectorRoot.Children.Add(new TextBlock
             {
-                Text = "The heatmap is still loading. Hover a day for a glance, or click another day to pin it.",
+                Text = L10n.Text("windows.homepage.the_heatmap_is_still_loading_hover_a_day_f.566fb595"),
                 Opacity = 0.7,
                 FontSize = 12,
                 TextWrapping = TextWrapping.Wrap,
@@ -1555,7 +1562,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             {
                 _inspectorRoot.Children.Add(new TextBlock
                 {
-                    Text = "Loading day…",
+                    Text = L10n.Text("windows.homepage.loading_day.758e26f6"),
                     Opacity = 0.7,
                     FontSize = 12,
                 });
@@ -1570,7 +1577,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         {
             _inspectorRoot.Children.Add(new TextBlock
             {
-                Text = "Nothing recorded on this day.",
+                Text = L10n.Text("windows.homepage.nothing_recorded_on_this_day.5ad77ba8"),
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -1590,7 +1597,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         // The footer action, like the Mac: the pinned day opened as a full
         // report in Insights.
         var open = ActionIconGlyph.Button(
-            "Open in Insights",
+            L10n.Text("windows.homepage.open_in_insights.5529d386"),
             ActionIcon.Next,
             (_, _) => AppServices.OpenInsightsDay?.Invoke(date));
         open.HorizontalAlignment = HorizontalAlignment.Stretch;
@@ -1611,15 +1618,14 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         var value = (Format.Flag(detail, "estimated") ? "~" : "")
             + Format.ListRate(Format.Long(detail, "valueMicros"));
         children.Add(Chrome.Stat(
-            "API list price",
+            L10n.Text("windows.homepage.api_list_price.060458ef"),
             value,
-            Format.Flag(detail, "estimated") ? "estimated" : "not an extra bill", accent: true));
+            Format.Flag(detail, "estimated") ? "estimated" : L10n.Text("windows.homepage.not_an_extra_bill.79d2c7ad"), accent: true));
         var sessions = OptLong(extra?.Totals, "sessions");
-        var headline = $"{Format.Tokens(Format.Long(detail, "tokens"))} tokens · "
-            + $"{Format.Long(detail, "events").ToString("N0")} requests";
+        var headline = L10n.Text("windows.homepage.0_tokens_1_requests.02bc82f3", $"{Format.Tokens(Format.Long(detail, "tokens"))}", $"{Format.Long(detail, "events").ToString("N0")}");
         if (sessions is not null)
         {
-            headline += $" · {sessions.Value.ToString("N0")} sessions";
+            headline += L10n.Text("windows.homepage.0_sessions.9f39b904", $"{sessions.Value.ToString("N0")}");
         }
         children.Add(new TextBlock
         {
@@ -1635,10 +1641,10 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             children.Add(split);
         }
         children.Add(GroupCard(
-            "Models", "API list price", PricedModelRows(detail, extra), showsValue: true));
+            L10n.Text("windows.homepage.models.d17d2d78"), L10n.Text("windows.homepage.api_list_price.060458ef"), PricedModelRows(detail, extra), showsValue: true));
         children.Add(GroupCard(
-            "Coding tools",
-            "Which agent produced the tokens",
+            L10n.Text("windows.homepage.coding_tools.6032f740"),
+            L10n.Text("windows.homepage.which_agent_produced_the_tokens.d4a409e3"),
             HarnessRows(detail, extra),
             showsValue: false));
         if (extra?.ByProject is { Count: > 0 } projects)
@@ -1649,7 +1655,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
                 rows.Add(BucketRow(bucket, Format.Text(bucket, "key"), monospaced: true));
             }
             children.Add(GroupCard(
-                "Projects", "Where the work happened", rows, showsValue: false));
+                L10n.Text("common.projects"), L10n.Text("windows.homepage.where_the_work_happened.250180a6"), rows, showsValue: false));
         }
         if (extra?.BySession is { Count: > 0 } bySession)
         {
@@ -1659,14 +1665,14 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
                 rows.Add(BucketRow(bucket, Format.Text(bucket, "key"), monospaced: true));
             }
             children.Add(GroupCard(
-                "Sessions", "This device", rows, showsValue: false));
+                L10n.Text("windows.homepage.sessions.6fa3cbf4"), L10n.Text("windows.homepage.this_device.d052579c"), rows, showsValue: false));
         }
         var unpriced = UnpricedModelRows(detail, extra);
         if (unpriced.Count > 0)
         {
             children.Add(GroupCard(
-                "Unpriced / local models",
-                "No API price. Tokens still counted.",
+                L10n.Text("windows.homepage.unpriced_local_models.620f0ccf"),
+                L10n.Text("windows.homepage.no_api_price_tokens_still_counted.9fd4e18e"),
                 unpriced,
                 showsValue: false));
         }
@@ -1674,7 +1680,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         {
             children.Add(new TextBlock
             {
-                Text = "Loading breakdown…",
+                Text = L10n.Text("windows.homepage.loading_breakdown.98c86f22"),
                 Opacity = 0.6,
                 FontSize = 12,
             });
@@ -1686,11 +1692,11 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
     {
         var rows = detail["rows"] as JsonArray;
         var stack = new StackPanel { Spacing = 2 };
-        stack.Children.Add(CounterRow("Fresh input", SumCounter(rows, "fresh")));
-        stack.Children.Add(CounterRow("Cache read", SumCounter(rows, "cacheRead")));
-        stack.Children.Add(CounterRow("Cache write 5m", SumCounter(rows, "cacheWrite5m")));
-        stack.Children.Add(CounterRow("Cache write 1h", SumCounter(rows, "cacheWrite1h")));
-        stack.Children.Add(CounterRow("Output", SumCounter(rows, "output")));
+        stack.Children.Add(CounterRow(L10n.Text("windows.homepage.fresh_input.a5156480"), SumCounter(rows, "fresh")));
+        stack.Children.Add(CounterRow(L10n.Text("windows.homepage.cache_read.0008ce30"), SumCounter(rows, "cacheRead")));
+        stack.Children.Add(CounterRow(L10n.Text("windows.homepage.cache_write_5m.bf7e82f8"), SumCounter(rows, "cacheWrite5m")));
+        stack.Children.Add(CounterRow(L10n.Text("windows.homepage.cache_write_1h.80055f01"), SumCounter(rows, "cacheWrite1h")));
+        stack.Children.Add(CounterRow(L10n.Text("windows.homepage.output.b2439bcb"), SumCounter(rows, "output")));
         return stack;
     }
 
@@ -1764,10 +1770,10 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         }
         (string Label, long Value, Windows.UI.Color Tint)[] segments =
         [
-            ("cache read", read, Theme.HeatLevel(1)),
-            ("cache write", write, Theme.HeatLevel(2)),
+            (L10n.Text("windows.homepage.cache_read.e16dda7a"), read, Theme.HeatLevel(1)),
+            (L10n.Text("windows.homepage.cache_write.e2bcc9d6"), write, Theme.HeatLevel(2)),
             ("output", output, Theme.HeatLevel(4)),
-            ("fresh in", fresh, Theme.Accent),
+            (L10n.Text("windows.homepage.fresh_in.28475ebb"), fresh, Theme.Accent),
         ];
         var stack = new StackPanel { Spacing = 2 };
         var bar = new Grid { Height = 4, ColumnSpacing = 2 };
@@ -1814,7 +1820,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         {
             body.Children.Add(new TextBlock
             {
-                Text = "Nothing recorded yet.",
+                Text = L10n.Text("windows.homepage.nothing_recorded_yet.17f000e0"),
                 FontSize = 12,
                 Opacity = 0.6,
             });
@@ -1858,7 +1864,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             {
                 body.Children.Add(new TextBlock
                 {
-                    Text = $"and {rows.Count - listLimit} more",
+                    Text = L10n.Text("windows.homepage.and_0_more.938c3a14", $"{rows.Count - listLimit}"),
                     FontSize = 12,
                     Opacity = 0.6,
                 });
@@ -2009,7 +2015,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         {
             var label = display(raw);
             rows.Add(new DayGroupRow(
-                raw, string.IsNullOrEmpty(label) ? "unknown" : label, tokens, null, monospaced));
+                raw, string.IsNullOrEmpty(label) ? L10n.Text("windows.homepage.unknown.b23a6a84") : label, tokens, null, monospaced));
         }
         return rows;
     }
@@ -2027,26 +2033,26 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         }
         return HarnessCanonicalId(id) switch
         {
-            "claude_code" => "Claude Code",
-            "claude_code_rollup" or "claude_code_estimate" => "Claude Code (recovered)",
+            "claude_code" => L10n.Text("windows.homepage.claude_code.246ef8c1"),
+            "claude_code_rollup" or "claude_code_estimate" => L10n.Text("windows.homepage.claude_code_recovered.93f5e6b2"),
             "codex" => "Codex",
-            "grok" => "Grok Build",
+            "grok" => L10n.Text("windows.homepage.grok_build.fd3bf01a"),
             "opencode" => "OpenCode",
             "cline" => "Cline",
             "openclaw" => "OpenClaw",
             "muse" => "Muse",
-            "devin" => "Devin CLI",
+            "devin" => L10n.Text("windows.homepage.devin_cli.29247d05"),
             "pi" => "Pi",
-            "dsh" => "DeepSeek Harness",
+            "dsh" => L10n.Text("windows.homepage.deepseek_harness.e562a9c5"),
             "zed" => "Zed",
-            "copilot" => "Copilot CLI",
+            "copilot" => L10n.Text("windows.homepage.copilot_cli.c73e38d4"),
             "antigravity" => "Antigravity",
             "cursor" => "Cursor",
             "gemini" => "Gemini",
-            "hermes" => "Hermes Agent",
-            "kilo" => "Kilo Code",
-            "kimi" => "Kimi Code",
-            "qwen" => "Qwen Code",
+            "hermes" => L10n.Text("windows.homepage.hermes_agent.873e989a"),
+            "kilo" => L10n.Text("windows.homepage.kilo_code.83abecfd"),
+            "kimi" => L10n.Text("windows.homepage.kimi_code.0c486180"),
+            "qwen" => L10n.Text("windows.homepage.qwen_code.47487dbd"),
             "" => "unknown",
             var canonical => canonical,
         };
@@ -2134,22 +2140,22 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         var age = DateTimeOffset.Now - moment;
         if (age < TimeSpan.FromMinutes(1))
         {
-            return "just now";
+            return L10n.Text("windows.homepage.just_now.7ddb44d8");
         }
         if (age < TimeSpan.FromHours(1))
         {
             var minutes = Math.Max(1, (int)age.TotalMinutes);
-            return minutes == 1 ? "1 minute ago" : $"{minutes} minutes ago";
+            return minutes == 1 ? L10n.Text("windows.homepage.1_minute_ago.0f450bad") : L10n.Text("windows.homepage.0_minutes_ago.e33faefc", $"{minutes}");
         }
         if (age < TimeSpan.FromDays(1))
         {
             var hours = Math.Max(1, (int)age.TotalHours);
-            return hours == 1 ? "1 hour ago" : $"{hours} hours ago";
+            return hours == 1 ? L10n.Text("windows.homepage.1_hour_ago.e4bc2973") : L10n.Text("windows.homepage.0_hours_ago.d8431d4e", $"{hours}");
         }
         if (age < TimeSpan.FromDays(30))
         {
             var days = Math.Max(1, (int)age.TotalDays);
-            return days == 1 ? "1 day ago" : $"{days} days ago";
+            return days == 1 ? L10n.Text("windows.homepage.1_day_ago.961f4ea2") : L10n.Text("windows.homepage.0_days_ago.bef5eece", $"{days}");
         }
         return moment.LocalDateTime.ToString("d");
     }
@@ -2160,20 +2166,20 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         var wait = DateTimeOffset.FromUnixTimeMilliseconds(epochMs) - DateTimeOffset.Now;
         if (wait < TimeSpan.FromMinutes(1))
         {
-            return "in a moment";
+            return L10n.Text("windows.homepage.in_a_moment.453a67d7");
         }
         if (wait < TimeSpan.FromHours(1))
         {
             var minutes = Math.Max(1, (int)wait.TotalMinutes);
-            return minutes == 1 ? "in 1 minute" : $"in {minutes} minutes";
+            return minutes == 1 ? "in 1 minute" : L10n.Text("windows.homepage.in_0_minutes.f10e22e6", $"{minutes}");
         }
         if (wait < TimeSpan.FromDays(1))
         {
             var hours = Math.Max(1, (int)wait.TotalHours);
-            return hours == 1 ? "in 1 hour" : $"in {hours} hours";
+            return hours == 1 ? "in 1 hour" : L10n.Text("windows.homepage.in_0_hours.f583918e", $"{hours}");
         }
         var days = Math.Max(1, (int)wait.TotalDays);
-        return days == 1 ? "in 1 day" : $"in {days} days";
+        return days == 1 ? "in 1 day" : L10n.Text("windows.homepage.in_0_days.331efcd2", $"{days}");
     }
 
     private static string FriendlyDate(string iso)

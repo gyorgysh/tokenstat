@@ -151,10 +151,10 @@ struct ClientRecentChatsSection: View {
         if !visible.isEmpty {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 HStack(alignment: .center) {
-                    ClientSectionTitle(title: "Recent chats", mark: "mark_activity")
+                    ClientSectionTitle(title: L10n.text("apple.clientrecentchats.recent_chats.2ccfecbc"), mark: "mark_activity")
                     Spacer(minLength: Theme.Space.s)
                     if onNewChat != nil, !folders.isEmpty {
-                        Button("New chat", .create) { onNewChat?() }
+                        Button(L10n.text("apple.clientrecentchats.new_chat.db18382a"), .create) { onNewChat?() }
                             .font(ClientType.caption.weight(.semibold))
                     }
                 }
@@ -186,8 +186,8 @@ struct ClientRecentChatsSection: View {
                     } label: {
                         Label(
                             expanded
-                                ? "Show less"
-                                : "Show more (\(visible.count - Self.collapsedLimit) more)",
+                                ? L10n.text("apple.clientrecentchats.show_less.94ea9b1d")
+                                : L10n.text("apple.clientrecentchats.show_more_0_more.c732a4ba", "\(visible.count - Self.collapsedLimit)"),
                             systemImage: expanded ? "chevron.up" : "chevron.down"
                         )
                         .font(ClientType.caption.weight(.semibold))
@@ -196,8 +196,8 @@ struct ClientRecentChatsSection: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, 2)
                     .accessibilityHint(expanded
-                        ? "Shows only the five newest chats"
-                        : "Shows every recent chat")
+                        ? L10n.text("apple.clientrecentchats.shows_only_the_five_newest_chats.24f080fa")
+                        : L10n.text("apple.clientrecentchats.shows_every_recent_chat.6212a490"))
                 }
             }
         }
@@ -206,7 +206,7 @@ struct ClientRecentChatsSection: View {
     private func folderName(for workspaceID: String) -> String {
         folders.first {
             (ClientRemote.rawWorkspaceID(of: $0) ?? $0.id) == workspaceID
-        }?.name ?? "Project"
+        }?.name ?? L10n.text("apple.clientrecentchats.project.98595978")
     }
 }
 
@@ -242,10 +242,10 @@ private struct ClientRecentChatRow: View {
                         ))
                     }
                     if chat.needsAttention {
-                        Text("· Needs approval")
+                        Text(L10n.text("apple.clientrecentchats.needs_approval.0c66fee1"))
                             .foregroundStyle(Theme.warning)
                     } else if chat.running {
-                        Text("· Working")
+                        Text(L10n.text("apple.clientrecentchats.working.3d237298"))
                             .foregroundStyle(Theme.accent)
                     }
                 }
@@ -266,9 +266,9 @@ private struct ClientRecentChatRow: View {
     }
 
     private var accessibilityValue: String {
-        if chat.needsAttention, unread { return "Needs approval, unread" }
-        if chat.needsAttention { return "Needs approval" }
-        if unread { return "Unread" }
+        if chat.needsAttention, unread { return L10n.text("apple.clientrecentchats.needs_approval_unread.7b204884") }
+        if chat.needsAttention { return L10n.text("apple.clientrecentchats.needs_approval.db0e960b") }
+        if unread { return L10n.text("apple.clientrecentchats.unread.1b9f384c") }
         return ""
     }
 }
@@ -306,8 +306,7 @@ struct ClientRecentChatView: View {
     /// Shown when there is no account scope to open a conversation under,
     /// which is what a signed-in account with no handle has.
     private static let noAccountScopeMessage =
-        "This conversation cannot open until the account has a handle. "
-        + "Sign out and sign in again."
+        L10n.text("apple.clientrecentchats.this_conversation_cannot_open_until_the_ac.75c921ed")
 
     private var machine: Machine? {
         account.account?.machines.first { $0.publicIdentity == peer }
@@ -331,9 +330,9 @@ struct ClientRecentChatView: View {
     var body: some View {
         Group {
             if availability == .accessRequired, account.signedIn, accessAllowed == false {
-                ClientEmptyState(kind: .unreachable, title: "Project access is required",
-                    message: "Allow this device on \(hostName), then check again to return to this conversation.",
-                    actionTitle: "Check again", actionIcon: .refresh,
+                ClientEmptyState(kind: .unreachable, title: L10n.text("apple.clientrecentchats.project_access_is_required.9b1a0b35"),
+                    message: L10n.text("apple.clientrecentchats.allow_this_device_on_0_then_check_again_to.722aec0d", "\(hostName)"),
+                    actionTitle: L10n.text("apple.clientrecentchats.check_again.fb7099ad"), actionIcon: .refresh,
                     action: { retry() })
                     .padding(Theme.Space.m)
             } else if availability == .unsupportedHost, let hostProtocol {
@@ -383,15 +382,15 @@ struct ClientRecentChatView: View {
                 .padding(Theme.Space.m)
             } else if savedUnavailable {
                 ClientEmptyState(
-                    kind: .unreachable, title: "Saved copy unavailable",
-                    message: "This conversation is not available to read offline on this device. Open it while \(hostName) is reachable to keep a copy for later."
+                    kind: .unreachable, title: L10n.text("apple.clientrecentchats.saved_copy_unavailable.ca325085"),
+                    message: L10n.text("apple.clientrecentchats.this_conversation_is_not_available_to_read.6c6a4920", "\(hostName)")
                 )
                 .padding(Theme.Space.m)
             } else if loaded {
                 ClientEmptyState(
                     kind: .nothingYet,
-                    title: "This chat is gone",
-                    message: "It may have been deleted on \(hostName).",
+                    title: L10n.text("apple.clientrecentchats.this_chat_is_gone.8a6de141"),
+                    message: L10n.text("apple.clientrecentchats.it_may_have_been_deleted_on_0.9a58ffc5", "\(hostName)"),
                     art: .chat(seed: model.defaultFaceSeed)
                 )
                 .padding(Theme.Space.m)
@@ -550,7 +549,7 @@ struct ClientFolderChooserSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", role: .cancel) { dismiss() }
+                    Button(L10n.text("common.cancel"), role: .cancel) { dismiss() }
                 }
             }
         }

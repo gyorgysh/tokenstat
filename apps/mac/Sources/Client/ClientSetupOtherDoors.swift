@@ -33,11 +33,10 @@ struct ClientSetupMacDoor: View {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 VStack(spacing: Theme.Space.s) {
                     ClientEmptyArt(kind: .macDoor)
-                    Text("Your computer")
+                    Text(L10n.text("apple.clientsetupotherdoors.your_computer.49361195"))
                         .font(Theme.title.weight(.semibold))
                     Text(
-                        "Three things, all of them on the computer. This screen watches your "
-                        + "account and ticks each one off as it happens."
+                        L10n.text("apple.clientsetupotherdoors.three_things_all_of_them_on_the_computer_t.63c1a537")
                     )
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
@@ -51,8 +50,7 @@ struct ClientSetupMacDoor: View {
                 // copy of it was dead weight on the screen.
                 if arrived != nil {
                     Text(
-                        "One step is left and it happens on the computer: when this device asks "
-                        + "to open a folder, say yes there."
+                        L10n.text("apple.clientsetupotherdoors.one_step_is_left_and_it_happens_on_the_com.6a5d8111")
                     )
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
@@ -64,7 +62,7 @@ struct ClientSetupMacDoor: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.background)
-        .navigationTitle("On my Mac")
+        .navigationTitle(L10n.text("apple.clientsetupotherdoors.on_my_mac.8282732a"))
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $sharing) {
             ClientShareSheet(items: [Self.address])
@@ -78,26 +76,24 @@ struct ClientSetupMacDoor: View {
         [
             GettingStartedStep(
                 number: 1,
-                title: "Install tokenstat on the computer",
-                body: "Send the download link to the computer. AirDrop it or message it to "
-                    + "yourself, then open it there.",
+                title: L10n.text("apple.clientsetupotherdoors.install_tokenstat_on_the_computer.8d9833fb"),
+                body: L10n.text("apple.clientsetupotherdoors.send_the_download_link_to_the_computer_air.dd5ff111"),
                 state: arrived == nil ? .now : .done,
-                actionTitle: arrived == nil ? "Send it to my computer" : nil,
+                actionTitle: arrived == nil ? L10n.text("apple.clientsetupotherdoors.send_it_to_my_computer.3260803b") : nil,
                 actionIcon: .send,
                 action: arrived == nil ? { sharing = true } : nil
             ),
             GettingStartedStep(
                 number: 2,
-                title: "Sign in to this account",
-                body: arrived.map { "\($0.label ?? "It") is on your account." }
-                    ?? "Open it there and sign in with the same account this device uses.",
+                title: L10n.text("apple.clientsetupotherdoors.sign_in_to_this_account.d3d7f116"),
+                body: arrived.map { L10n.text("apple.clientsetupotherdoors.0_is_on_your_account.5704eab4", "\($0.label ?? L10n.text("apple.clientsetupotherdoors.it.555c7b8b"))") }
+                    ?? L10n.text("apple.clientsetupotherdoors.open_it_there_and_sign_in_with_the_same_ac.d3ddaa5f"),
                 state: arrived == nil ? .next : .done
             ),
             GettingStartedStep(
                 number: 3,
-                title: "Let this device in",
-                body: "Folders and terminals are only open to devices that computer has "
-                    + "allowed. Ask from Projects, and say yes on the computer.",
+                title: L10n.text("apple.clientsetupotherdoors.let_this_device_in.35808989"),
+                body: L10n.text("apple.clientsetupotherdoors.folders_and_terminals_are_only_open_to_dev.e9f4d10a"),
                 state: arrived == nil ? .next : .now
             ),
         ]
@@ -166,11 +162,10 @@ struct ClientSetupCloudDoor: View {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 VStack(spacing: Theme.Space.s) {
                     ClientEmptyArt(kind: .cloudDoor)
-                    Text("A cloud machine")
+                    Text(L10n.text("apple.clientsetupotherdoors.a_cloud_machine.e66ba82a"))
                         .font(Theme.title.weight(.semibold))
                     Text(
-                        "Import an existing server from your provider, then connect over SSH. "
-                        + "No servers are created and nothing is purchased."
+                        L10n.text("apple.clientsetupotherdoors.import_an_existing_server_from_your_provid.24352ead")
                     )
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
@@ -192,35 +187,35 @@ struct ClientSetupCloudDoor: View {
                     SegmentedTabs(options: providers, selection: $provider)
                         .disabled(working)
                     if provider == .digitalOcean {
-                        Text("Read-only API token")
+                        Text(L10n.text("apple.clientsetupotherdoors.read_only_api_token.8a4f07c1"))
                             .font(ClientType.caption).foregroundStyle(.secondary)
-                        SecureField("Paste your DigitalOcean token", text: $token)
+                        SecureField(L10n.text("apple.clientsetupotherdoors.paste_your_digitalocean_token.2e2aa61f"), text: $token)
                             .textFieldStyle(.themed)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                         if let tokens = URL(string: "https://cloud.digitalocean.com/account/api/tokens") {
-                            Link("Where to find the token", destination: tokens)
+                            Link(L10n.text("apple.clientsetupotherdoors.where_to_find_the_token.625cfc6d"), destination: tokens)
                                 .font(ClientType.caption)
                         }
                     } else {
-                        Label("Connect with your server’s address", systemImage: "server.rack")
+                        Label(L10n.text("apple.clientsetupotherdoors.connect_with_your_server_s_address.cfcd220c"), systemImage: "server.rack")
                             .font(ClientType.body)
-                        Text("Find the public address in your AWS console. On the next screen, enter it with your SSH username and key. AWS inventory import requires the desktop app.")
+                        Text(L10n.text("apple.clientsetupotherdoors.find_the_public_address_in_your_aws_consol.4549ae4e"))
                             .font(ClientType.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if provider == .digitalOcean {
-                        Text("SSH username")
+                        Text(L10n.text("apple.clientsetupotherdoors.ssh_username.04940ab1"))
                             .font(ClientType.caption).foregroundStyle(.secondary)
-                        TextField("SSH username", text: $username)
+                        TextField(L10n.text("apple.clientsetupotherdoors.ssh_username.04940ab1"), text: $username)
                             .textFieldStyle(.themed)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                     }
                     Text(provider == .digitalOcean
-                        ? "Only the droplet list is read. The token is used once and is not saved."
-                        : "Use ec2-user for Amazon Linux, or ubuntu for Ubuntu.")
+                        ? L10n.text("apple.clientsetupotherdoors.only_the_droplet_list_is_read_the_token_is.d730f946")
+                        : L10n.text("apple.clientsetupotherdoors.use_ec2_user_for_amazon_linux_or_ubuntu_fo.bf59c231"))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -230,28 +225,28 @@ struct ClientSetupCloudDoor: View {
                 .cardSurface()
                 if let imported {
                     Text(imported == 1
-                        ? "One server is in your library. Pick it on the next screen."
-                        : "\(imported) servers are in your library. Pick one on the next screen.")
+                        ? L10n.text("apple.clientsetupotherdoors.one_server_is_in_your_library_pick_it_on_t.3984faae")
+                        : L10n.text("apple.clientsetupotherdoors.0_servers_are_in_your_library_pick_one_on.85b3ca0e", "\(imported)"))
                         .font(ClientType.label)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 SetupActions {
                     if provider == .aws {
-                        Button("Enter server address", .next) {
+                        Button(L10n.text("apple.clientsetupotherdoors.enter_server_address.da02e13e"), .next) {
                             model.pickedHostID = nil
-                            model.host.username = "ec2-user"
+                            model.host.username = L10n.text("apple.clientsetupotherdoors.ec2_user.4346840f")
                             path.append(.where)
                         }
                         .setupPrimaryStyle()
                     } else if imported == nil {
-                        Button(working ? "Reading the list…" : "Read my servers", .download) {
+                        Button(working ? L10n.text("apple.clientsetupotherdoors.reading_the_list.0fd8ea35") : L10n.text("apple.clientsetupotherdoors.read_my_servers.0e3c3c94"), .download) {
                             Task { await load() }
                         }
                         .setupPrimaryStyle()
                         .disabled(working || (provider == .digitalOcean && token.isEmpty)
                             || username.trimmingCharacters(in: .whitespaces).isEmpty)
                     } else {
-                        Button("Pick a server", .next) { path.append(.where) }
+                        Button(L10n.text("apple.clientsetupotherdoors.pick_a_server.3ff63c9e"), .next) { path.append(.where) }
                             .setupPrimaryStyle()
                     }
                 }
@@ -261,7 +256,7 @@ struct ClientSetupCloudDoor: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.background)
-        .navigationTitle("Cloud")
+        .navigationTitle(L10n.text("apple.clientsetupotherdoors.cloud.b977b950"))
         .navigationBarTitleDisplayMode(.inline)
         .onDisappear {
             generation = UUID()
@@ -287,10 +282,9 @@ struct ClientSetupCloudDoor: View {
                     .background(Theme.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 12))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    Text("I do not have one yet")
+                    Text(L10n.text("apple.clientsetupotherdoors.i_do_not_have_one_yet.1bfb41c7"))
                         .font(ClientType.body.weight(.medium))
-                    Text("What a machine has to be, who bills you for it, and where people "
-                        + "rent one. Nothing there spends money.")
+                    Text(L10n.text("apple.clientsetupotherdoors.what_a_machine_has_to_be_who_bills_you_for.b01df46d"))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -336,7 +330,7 @@ struct ClientSetupCloudDoor: View {
             guard isCurrent() else { return }
             guard !result.hosts.isEmpty else {
                 throw BridgeError.core(code: "no_servers",
-                    message: "No servers were found. Check the account token or enter a server address instead.")
+                    message: L10n.text("apple.clientsetupotherdoors.no_servers_were_found_check_the_account_to.e590f2d6"))
             }
             // The token was a credential and its job is done. It is never
             // written to the archive and is not eligible for sync.

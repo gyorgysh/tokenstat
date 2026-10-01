@@ -40,11 +40,10 @@ struct ClientSetupByHand: View {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 VStack(spacing: Theme.Space.s) {
                     ClientEmptyArt(kind: .byHand)
-                    Text("Run it yourself")
+                    Text(L10n.text("apple.clientsetupbyhand.run_it_yourself.b3ab2275"))
                         .font(Theme.title.weight(.semibold))
                     Text(
-                        "Paste this into a terminal on the server. tokenstat waits here for "
-                        + "the machine to appear on your account."
+                        L10n.text("apple.clientsetupbyhand.paste_this_into_a_terminal_on_the_server_t.f90ccb47")
                     )
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
@@ -61,26 +60,25 @@ struct ClientSetupByHand: View {
                 if let line {
                     commandCard(line)
                 } else if working {
-                    Text("Preparing the command…")
+                    Text(L10n.text("apple.clientsetupbyhand.preparing_the_command.dc40c381"))
                         .font(ClientType.label)
                         .foregroundStyle(.secondary)
                 }
                 Text(
-                    "The machine signs itself in with that code, and lets this device open "
-                    + "its work. Nothing about it goes through a browser."
+                    L10n.text("apple.clientsetupbyhand.the_machine_signs_itself_in_with_that_code.63c89f28")
                 )
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 SetupActions {
-                    Button(copied ? "Copied" : "Copy the command", copied ? ActionIcon.done : .copy) {
+                    Button(copied ? L10n.text("apple.clientsetupbyhand.copied.8d525e5f") : L10n.text("apple.clientsetupbyhand.copy_the_command.5a677843"), copied ? ActionIcon.done : .copy) {
                         guard let line else { return }
                         UIPasteboard.general.string = line.oneLine
                         copied = true
                     }
                     .setupPrimaryStyle()
                     .disabled(line == nil || working)
-                    Button("Generate a new code", .refresh) {
+                    Button(L10n.text("apple.clientsetupbyhand.generate_a_new_code.01dcaf62"), .refresh) {
                         line = nil
                         code = nil
                         copied = false
@@ -88,7 +86,7 @@ struct ClientSetupByHand: View {
                     }
                     .font(ClientType.label)
                     .disabled(working)
-                    Button("I ran it, check my account", .next) {
+                    Button(L10n.text("apple.clientsetupbyhand.i_ran_it_check_my_account.db748611"), .next) {
                         model.manualInstall = true
                         model.expectedPeer = nil
                         path.append(.finish)
@@ -101,7 +99,7 @@ struct ClientSetupByHand: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.background)
-        .navigationTitle("By hand")
+        .navigationTitle(L10n.text("apple.clientsetupbyhand.by_hand.573ad125"))
         .navigationBarTitleDisplayMode(.inline)
 
         .task { await prepare() }
@@ -113,15 +111,14 @@ struct ClientSetupByHand: View {
 
     private func codeCard(_ code: PairingCode) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Your pairing code")
+            Text(L10n.text("apple.clientsetupbyhand.your_pairing_code.4385c97f"))
                 .font(ClientType.label.weight(.semibold))
                 .foregroundStyle(.secondary)
             Text(code.code)
                 .font(Theme.monoText(22, weight: .semibold, relativeTo: .title2))
                 .textSelection(.enabled)
             Text(
-                "Good for \(code.expiresIn / 60) minutes and for one machine. It is already "
-                + "in the command below."
+                L10n.text("apple.clientsetupbyhand.good_for_0_minutes_and_for_one_machine_it.ee887227", "\(code.expiresIn / 60)")
             )
             .font(ClientType.caption)
             .foregroundStyle(.secondary)
@@ -135,7 +132,7 @@ struct ClientSetupByHand: View {
     /// The annotated form, because this one is read as well as run.
     private func commandCard(_ line: InstallLine) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("On the server")
+            Text(L10n.text("apple.clientsetupbyhand.on_the_server.3f5514e0"))
                 .font(ClientType.label.weight(.semibold))
                 .foregroundStyle(.secondary)
             ScrollView(.horizontal, showsIndicators: false) {

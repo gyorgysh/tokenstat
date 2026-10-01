@@ -17,9 +17,9 @@ private enum AccountSettingsPane: String, CaseIterable, Hashable {
 
     var label: String {
         switch self {
-        case .account: return "Account"
-        case .planLimits: return "Plan limits"
-        case .thisMac: return "This Mac"
+        case .account: return L10n.text("common.account")
+        case .planLimits: return L10n.text("apple.accountview.plan_limits.925788cd")
+        case .thisMac: return L10n.text("apple.accountview.this_mac.79a4aefc")
         }
     }
 
@@ -65,7 +65,7 @@ struct AccountView: View {
                 if model.signedIn {
                     ToolbarIconButton(
                         systemImage: "arrow.triangle.2.circlepath",
-                        help: "Sync now",
+                        help: L10n.text("common.sync_now"),
                         isBusy: model.isSyncing,
                         isEnabled: !model.isSyncing && model.syncCooldownUntil == nil
                     ) {
@@ -124,7 +124,7 @@ struct AccountView: View {
             #endif
         }
         .background(Theme.background)
-        .navigationTitle("Account")
+        .navigationTitle(L10n.text("common.account"))
         .sheet(isPresented: $showLicenses) {
             LicensesSheet()
         }
@@ -160,20 +160,16 @@ struct AccountView: View {
 
     private var signedOut: some View {
         Card(
-            title: "Not signed in",
-            subtitle: "Everything works without an account. Signing in only adds the option to publish.",
+            title: L10n.text("apple.accountview.not_signed_in.491fc91c"),
+            subtitle: L10n.text("apple.accountview.everything_works_without_an_account_signin.77323e45"),
             mark: "mark_account"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                Text("""
-                An account lets you publish a profile page and see usage from \
-                all your machines in one place. Only aggregate counters are \
-                eligible to be sent.
-                """)
+                Text(L10n.text("apple.accountview.an_account_lets_you_publish_a_profile_page.d28d80da"))
                 .font(Theme.callout)
                 .foregroundStyle(.secondary)
 
-                Button("Sign in to tokenstat.ai", .signIn) {
+                Button(L10n.text("apple.accountview.sign_in_to_tokenstat_ai.6276dc4d"), .signIn) {
                     model.signIn()
                 }
                 .buttonStyle(.borderedProminent)
@@ -229,11 +225,11 @@ struct AccountView: View {
             planLimitsCard
         } else if model.account != nil {
             Card(
-                title: "Plan limits",
-                subtitle: "Sign in to see how much of each tool's subscription is left on this Mac, and to share that with your other devices.",
+                title: L10n.text("apple.accountview.plan_limits.925788cd"),
+                subtitle: L10n.text("apple.accountview.sign_in_to_see_how_much_of_each_tool_s_sub.13fb7823"),
                 mark: "mark_plan"
             ) {
-                Button("Sign in to tokenstat.ai", .signIn) {
+                Button(L10n.text("apple.accountview.sign_in_to_tokenstat_ai.6276dc4d"), .signIn) {
                     model.signIn()
                 }
                 .buttonStyle(.borderedProminent)
@@ -276,7 +272,7 @@ struct AccountView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: Theme.Space.s) {
-                    Text(account.title ?? "Signed in")
+                    Text(account.title ?? L10n.text("apple.accountview.signed_in.ca566c89"))
                         .font(Theme.font(22, weight: .semibold))
                     if let tier = account.tier, !tier.isEmpty {
                         TierMark(tier: tier, size: 17)
@@ -299,7 +295,7 @@ struct AccountView: View {
                 // The profile is a public page and this is the only place in
                 // the app that knows its address.
                 Link(destination: url) {
-                    ActionIcon.external.label("View profile")
+                    ActionIcon.external.label(L10n.text("apple.accountview.view_profile.d4788f25"))
                 }
                 .buttonStyle(.plain)
                 .font(Theme.callout)
@@ -320,23 +316,23 @@ struct AccountView: View {
         // has no archive: it only reads what other devices published. Offering
         // Sync now there is a button whose honest outcome is a refusal.
         Card(
-            title: "Sync",
-            subtitle: "Only aggregate counters are eligible",
+            title: L10n.text("apple.accountview.sync.8d261a37"),
+            subtitle: L10n.text("apple.accountview.only_aggregate_counters_are_eligible.141802f7"),
             mark: "mark_sync"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 HStack(alignment: .center, spacing: Theme.Space.m) {
                     HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-                        Text("Last sync")
+                        Text(L10n.text("apple.accountview.last_sync.71967fca"))
                             .foregroundStyle(.secondary)
-                        Text(formatRelativeDate(account.lastSyncAt) ?? "Never")
+                        Text(formatRelativeDate(account.lastSyncAt) ?? L10n.text("common.never"))
                             .monospacedDigit()
                     }
                     .font(Theme.callout)
-                    .help(formatServerDate(account.lastSyncAt) ?? "This account has never synced")
+                    .help(formatServerDate(account.lastSyncAt) ?? L10n.text("apple.accountview.this_account_has_never_synced.cbcf0a75"))
 
                     #if os(macOS)
-                    Button(model.isSyncing ? "Syncing…" : "Sync now", .refresh) {
+                    Button(model.isSyncing ? L10n.text("apple.accountview.syncing.8a046cc9") : L10n.text("common.sync_now"), .refresh) {
                         Task { await model.sync() }
                     }
                     .disabled(model.isSyncing || model.syncCooldownUntil != nil)
@@ -345,7 +341,7 @@ struct AccountView: View {
 
                 #if os(macOS)
                 if model.syncCooldownUntil != nil {
-                    Text("Syncing again is available shortly.")
+                    Text(L10n.text("apple.accountview.syncing_again_is_available_shortly.9c4ed55f"))
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                 }
@@ -356,7 +352,7 @@ struct AccountView: View {
                     if model.isSigningOut {
                         ProgressView().controlSize(.small)
                     } else {
-                        ActionIcon.signOut.label("Sign out")
+                        ActionIcon.signOut.label(L10n.text("common.sign_out"))
                     }
                 }
                 .buttonStyle(SecondaryButtonStyle())
@@ -371,7 +367,7 @@ struct AccountView: View {
                     if model.isSigningOut {
                         ProgressView().controlSize(.small)
                     } else {
-                        ActionIcon.signOut.label("Sign out")
+                        ActionIcon.signOut.label(L10n.text("common.sign_out"))
                             .frame(maxWidth: .infinity)
                     }
                 }
@@ -387,27 +383,26 @@ struct AccountView: View {
         let limit = account.machineLimit
         let subtitle: String = {
             if account.machines.isEmpty {
-                return "Every device that has synced to this account"
+                return L10n.text("apple.accountview.every_device_that_has_synced_to_this_accou.cdc060e6")
             }
             if let limit {
-                return "\(used) of \(limit) devices"
-                    + (account.canRemote == false ? ". No remote control on this plan." : "")
+                return L10n.text("apple.accountview.0_of_1_devices_2.6a9bb1c9", "\(used)", "\(limit)", "\((account.canRemote == false ? L10n.text("apple.accountview.no_remote_control_on_this_plan.278f9ff0") : ""))")
             }
-            return "\(account.machines.count) linked"
+            return L10n.text("apple.accountview.0_linked.6897cc07", "\(account.machines.count)")
         }()
-        return Card(title: "Devices", subtitle: subtitle, mark: "mark_device") {
+        return Card(title: L10n.text("common.devices"), subtitle: subtitle, mark: "mark_device") {
             if account.machines.isEmpty {
                 #if os(macOS)
                 EmptyState(
                     symbol: "laptopcomputer.and.iphone",
-                    title: "Nothing linked yet",
-                    message: "Free includes two devices. Sync now to put this Mac on the account."
+                    title: L10n.text("apple.accountview.nothing_linked_yet.2e60783b"),
+                    message: L10n.text("apple.accountview.free_includes_two_devices_sync_now_to_put.9752d041")
                 )
                 #else
                 EmptyState(
                     symbol: "laptopcomputer.and.iphone",
-                    title: "No devices yet",
-                    message: "Install tokenstat on a computer and sign in there. This device uses one of the two Free slots."
+                    title: L10n.text("apple.accountview.no_devices_yet.a149f2bd"),
+                    message: L10n.text("apple.accountview.install_tokenstat_on_a_computer_and_sign_i.5852db8a")
                 )
                 #endif
             } else {
@@ -455,7 +450,7 @@ struct AccountView: View {
                             .foregroundStyle(.secondary)
                     }
                     if isThisMachine {
-                        Text("THIS MAC")
+                        Text(L10n.text("apple.accountview.this_mac.41bc3866"))
                             .font(Theme.font(9, weight: .bold))
                             .tracking(0.5)
                             .foregroundStyle(Theme.accent)
@@ -477,12 +472,12 @@ struct AccountView: View {
             Spacer()
 
             if machine.reportsArchiveSync {
-                Text(formatRelativeDate(machine.lastSyncAt) ?? "never synced")
+                Text(formatRelativeDate(machine.lastSyncAt) ?? L10n.text("apple.accountview.never_synced.ee394cab"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
-                    .help(formatServerDate(machine.lastSyncAt) ?? "never synced")
+                    .help(formatServerDate(machine.lastSyncAt) ?? L10n.text("apple.accountview.never_synced.ee394cab"))
             } else if let seen = formatRelativeDate(machine.lastSeenAt) {
-                Text("last used \(seen)")
+                Text(L10n.text("apple.accountview.last_used_0.acf5f8f5", "\(seen)"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
             }
@@ -493,12 +488,8 @@ struct AccountView: View {
     /// The claim, stated where someone is deciding whether to connect an
     /// account. This is the moment it matters, not the marketing page.
     private var privacyNote: some View {
-        Card(title: "What syncing sends", subtitle: nil, mark: "mark_sync") {
-            Text("""
-            Aggregate counts per day, tool and model, and project names replaced \
-            by salted hashes. Prompts, replies, file contents, file paths and \
-            session ids are never eligible.
-            """)
+        Card(title: L10n.text("apple.accountview.what_syncing_sends.6540deb3"), subtitle: nil, mark: "mark_sync") {
+            Text(L10n.text("apple.accountview.aggregate_counts_per_day_tool_and_model_an.4f196b00"))
             .font(Theme.caption)
             .foregroundStyle(.secondary)
         }
@@ -512,14 +503,14 @@ struct AccountView: View {
     /// subscription or a tool they do not want on the phone.
     private var planLimitsCard: some View {
         Card(
-            title: "Plan limits",
-            subtitle: "How much of each tool's subscription is left. Off means this Mac does not read that tool and does not show it on Home.",
+            title: L10n.text("apple.accountview.plan_limits.925788cd"),
+            subtitle: L10n.text("apple.accountview.how_much_of_each_tool_s_subscription_is_le.6ff3d4cb"),
             mark: "mark_plan"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 toggleRow(
-                    "Share with my devices",
-                    detail: "Shows how much of each tool's subscription is left on an iPhone or iPad, including while this Mac is asleep. Percentages and reset times only, never a credential. Turning a tool off below also stops tracking it on this Mac.",
+                    L10n.text("apple.accountview.share_with_my_devices.44aa4fc8"),
+                    detail: L10n.text("apple.accountview.shows_how_much_of_each_tool_s_subscription.0a16d097"),
                     isOn: Binding(
                         get: { model.limitsSyncEnabled },
                         set: { on in Task { await model.setLimitsSync(on) } }
@@ -527,8 +518,8 @@ struct AccountView: View {
                 )
                 if model.limitsProviders.isEmpty {
                     Text(model.isLoadingLimits
-                         ? "Looking for vendor readings…"
-                         : "No readings yet. Open Home, or wait for the hourly pass, then come back.")
+                         ? L10n.text("apple.accountview.looking_for_vendor_readings.09bcadbb")
+                         : L10n.text("apple.accountview.no_readings_yet_open_home_or_wait_for_the.6d2835f0"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -564,7 +555,7 @@ struct AccountView: View {
             ))
             .toggleStyle(.switch)
             .labelsHidden()
-            .accessibilityLabel("Track \(harnessName(provider.source))")
+            .accessibilityLabel(L10n.text("apple.accountview.track_0.7cd9419b", "\(harnessName(provider.source))"))
             .fixedSize()
         }
         .padding(.vertical, Theme.Space.xs)
@@ -584,24 +575,24 @@ struct AccountView: View {
             parts.append(note)
         }
         if provider.isStale {
-            parts.append("last reading is old")
+            parts.append(L10n.text("apple.accountview.last_reading_is_old.d86fcd39"))
         }
         if parts.isEmpty {
-            return "No windows reported"
+            return L10n.text("apple.accountview.no_windows_reported.6e652c80")
         }
         return parts.joined(separator: " · ")
     }
 
     private var hostCard: some View {
         Card(
-            title: "This Mac",
-            subtitle: "Whether the host helper stays up after you quit",
+            title: L10n.text("apple.accountview.this_mac.79a4aefc"),
+            subtitle: L10n.text("apple.accountview.whether_the_host_helper_stays_up_after_you.dd1619f2"),
             mark: "mark_host"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let policy = model.hostPolicy {
                     toggleRow(
-                        "Always-on host",
+                        L10n.text("apple.accountview.always_on_host.f7990642"),
                         detail: alwaysOnDetail(policy),
                         isOn: Binding(
                             get: { policy.alwaysOn },
@@ -610,17 +601,17 @@ struct AccountView: View {
                     )
                     .disabled(model.isSavingHostPolicy)
                     if policy.alwaysOn && policy.hasInternalBattery {
-                        Text("Uses more power.")
+                        Text(L10n.text("apple.accountview.uses_more_power.a24adb34"))
                             .font(Theme.caption)
                             .foregroundStyle(.secondary)
                     }
                     if !policy.alwaysOn {
-                        Text("Automations run only while tokenstat is open.")
+                        Text(L10n.text("apple.accountview.automations_run_only_while_tokenstat_is_op.72980d54"))
                             .font(Theme.caption)
                             .foregroundStyle(.secondary)
                     }
                 } else {
-                    Text("The host helper has not answered yet.")
+                    Text(L10n.text("apple.accountview.the_host_helper_has_not_answered_yet.ed11e9fb"))
                         .font(Theme.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -630,24 +621,24 @@ struct AccountView: View {
 
     private func alwaysOnDetail(_ policy: HostPolicy) -> String {
         if policy.alwaysOn {
-            return "The host helper keeps running after you quit tokenstat, so other devices can reach this Mac. This Mac will not idle-sleep. A laptop still sleeps when you close the lid."
+            return L10n.text("apple.accountview.the_host_helper_keeps_running_after_you_qu.8da69cf5")
         }
-        return "The host helper stops when you quit tokenstat, so this Mac can sleep. Other devices cannot open folders or terminals here until you open the app again."
+        return L10n.text("apple.accountview.the_host_helper_stops_when_you_quit_tokens.3285420e")
     }
     #endif
 
     private var terminalCard: some View {
         Card(
-            title: "Terminal",
-            subtitle: "How terminal sessions behave",
+            title: L10n.text("apple.accountview.terminal.e0926fda"),
+            subtitle: L10n.text("apple.accountview.how_terminal_sessions_behave.66c55446"),
             mark: "mark_terminal"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 // These describe terminals, and a client has none.
                 #if os(macOS)
                 toggleRow(
-                    "Expose terminal output to VoiceOver",
-                    detail: "Lets VoiceOver read the terminal as a text area. Applies when a terminal appears.",
+                    L10n.text("apple.accountview.expose_terminal_output_to_voiceover.a2c1bd2f"),
+                    detail: L10n.text("apple.accountview.lets_voiceover_read_the_terminal_as_a_text.626da51c"),
                     isOn: Binding(
                         get: { TerminalPreferences.exposesToVoiceOver },
                         set: { TerminalPreferences.exposesToVoiceOver = $0 }
@@ -655,8 +646,8 @@ struct AccountView: View {
                 )
                 ThemeRule()
                 toggleRow(
-                    "Disable colours",
-                    detail: "New terminals start with NO_COLOR, for apps that switch to monochrome when it is set.",
+                    L10n.text("apple.accountview.disable_colours.856a1e98"),
+                    detail: L10n.text("apple.accountview.new_terminals_start_with_no_color_for_apps.6b8caec0"),
                     isOn: Binding(
                         get: { TerminalPreferences.disablesColor },
                         set: { TerminalPreferences.disablesColor = $0 }
@@ -670,13 +661,13 @@ struct AccountView: View {
     #if os(macOS)
     private var localModelsCard: some View {
         Card(
-            title: "Local models",
-            subtitle: "LM Studio on port 1234, Ollama on port 11434",
+            title: L10n.text("apple.accountview.local_models.8e4bf436"),
+            subtitle: L10n.text("apple.accountview.lm_studio_on_port_1234_ollama_on_port_1143.9fad3f80"),
             mark: "mark_local"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 HStack {
-                    Text("Nothing is sent to tokenstat. These checks use loopback only. Start the app, load a model, then refresh.")
+                    Text(L10n.text("apple.accountview.nothing_is_sent_to_tokenstat_these_checks.0b0d8242"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -690,7 +681,7 @@ struct AccountView: View {
                         }
                     }
                     .buttonStyle(.borderless)
-                    .help("Check LM Studio and Ollama again")
+                    .help(L10n.text("apple.accountview.check_lm_studio_and_ollama_again.abfeb0ad"))
                     .disabled(localModels.isLoading)
                 }
 
@@ -699,7 +690,7 @@ struct AccountView: View {
                         .font(Theme.caption)
                         .foregroundStyle(Theme.danger)
                 } else if localModels.providers.isEmpty && !localModels.isLoading {
-                    Text("LM Studio (port 1234) and Ollama (port 11434) could not be checked. Start one and tap refresh.")
+                    Text(L10n.text("apple.accountview.lm_studio_port_1234_and_ollama_port_11434.a765442f"))
                         .font(Theme.callout)
                         .foregroundStyle(.secondary)
                 } else {
@@ -716,8 +707,8 @@ struct AccountView: View {
 
     private var forgeCard: some View {
         Card(
-            title: "GitHub pull requests",
-            subtitle: "Checked only when you open pull requests or this Account screen",
+            title: L10n.text("apple.accountview.github_pull_requests.0973f247"),
+            subtitle: L10n.text("apple.accountview.checked_only_when_you_open_pull_requests_o.6c9f4103"),
             mark: "mark_account"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -730,7 +721,7 @@ struct AccountView: View {
                     HStack(alignment: .center, spacing: Theme.Space.m) {
                         ActionSeat(icon: .account, size: 36)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(forgeConnection.login.map { "@\($0)" } ?? "Not connected")
+                            Text(forgeConnection.login.map { "@\($0)" } ?? L10n.text("apple.accountview.not_connected.0303e182"))
                                 .font(Theme.callout.weight(.semibold))
                             Text(forgeConnectionDetail(forgeConnection))
                                 .font(Theme.caption)
@@ -747,7 +738,7 @@ struct AccountView: View {
                             Task { await beginForgeLogin() }
                         } label: {
                             ActionIcon.connect.label(
-                                forgeConnecting ? "Opening GitHub…" : "Connect tokenstat GitHub App"
+                                forgeConnecting ? L10n.text("apple.accountview.opening_github.efb4ce38") : L10n.text("apple.accountview.connect_tokenstat_github_app.f936ff5f")
                             )
                         }
                         .buttonStyle(AccentButtonStyle(small: true))
@@ -755,16 +746,16 @@ struct AccountView: View {
                     }
                     HStack(spacing: Theme.Space.s) {
                         if forgeConnection.source == "tokenstat" {
-                            Button("Choose repositories", .external) {
+                            Button(L10n.text("apple.accountview.choose_repositories.df6de593"), .external) {
                                 openURL(Self.githubInstallationURL)
                             }
                             .buttonStyle(SecondaryButtonStyle(small: true))
                         }
-                        Button("Refresh", .refresh) { Task { await loadForgeConnection() } }
+                        Button(L10n.text("common.refresh"), .refresh) { Task { await loadForgeConnection() } }
                             .buttonStyle(SecondaryButtonStyle(small: true))
                             .disabled(forgeBusy)
                         if canSignOutForge(forgeConnection) {
-                            Button("Sign out", .signOut) { confirmingForgeSignOut = true }
+                            Button(L10n.text("common.sign_out"), .signOut) { confirmingForgeSignOut = true }
                                 .buttonStyle(SecondaryButtonStyle(small: true))
                                 .disabled(forgeBusy)
                         }
@@ -772,7 +763,7 @@ struct AccountView: View {
                 } else if forgeError == nil {
                     HStack(spacing: Theme.Space.s) {
                         ProgressView().controlSize(.small)
-                        Text("Checking the GitHub connection…")
+                        Text(L10n.text("apple.accountview.checking_the_github_connection.4258cc8b"))
                             .font(Theme.callout)
                             .foregroundStyle(.secondary)
                     }
@@ -780,14 +771,14 @@ struct AccountView: View {
             }
         }
         .confirmationDialog(
-            "Sign out of GitHub pull requests?",
+            L10n.text("apple.accountview.sign_out_of_github_pull_requests.9aed016d"),
             isPresented: $confirmingForgeSignOut,
             titleVisibility: .visible
         ) {
-            Button("Sign out", role: .destructive) { Task { await signOutForge() } }
-            Button("Cancel", role: .cancel) {}
+            Button(L10n.text("common.sign_out"), role: .destructive) { Task { await signOutForge() } }
+            Button(L10n.text("common.cancel"), role: .cancel) {}
         } message: {
-            Text("The GitHub token saved by tokenstat will be removed. A credential already managed by git or your login environment may still be used.")
+            Text(L10n.text("apple.accountview.the_github_token_saved_by_tokenstat_will_b.182fb193"))
         }
     }
 
@@ -829,8 +820,8 @@ struct AccountView: View {
     private var forgeLoginSheet: some View {
         if let login = forgeLogin {
             ThemedSheet(
-                title: "Connect tokenstat GitHub App",
-                subtitle: "Enter this one-time code in the GitHub page that just opened.",
+                title: L10n.text("apple.accountview.connect_tokenstat_github_app.f936ff5f"),
+                subtitle: L10n.text("apple.accountview.enter_this_one_time_code_in_the_github_pag.2babe0df"),
                 icon: .connect,
                 onClose: { Task { await cancelForgeLogin() } }
             ) {
@@ -852,7 +843,7 @@ struct AccountView: View {
                         ProgressView()
                             .controlSize(.small)
                             .tint(Theme.accent)
-                        Text("Waiting for GitHub…")
+                        Text(L10n.text("apple.accountview.waiting_for_github.d3f403f4"))
                             .font(Theme.callout)
                             .foregroundStyle(Theme.controlGlyph)
                     }
@@ -864,7 +855,7 @@ struct AccountView: View {
                     }
                 }
             } actions: {
-                Button("Cancel", .dismiss) { Task { await cancelForgeLogin() } }
+                Button(L10n.text("common.cancel"), .dismiss) { Task { await cancelForgeLogin() } }
                     .buttonStyle(SecondaryButtonStyle())
                     .keyboardShortcut(.cancelAction)
                 Spacer()
@@ -923,11 +914,11 @@ struct AccountView: View {
 
     private func forgeConnectionDetail(_ connection: PullForgeConnection) -> String {
         let source = switch connection.source {
-        case "gitCredential": "Using the credential git already has"
-        case "environment": "Using GH_TOKEN or GITHUB_TOKEN from your login environment"
-        case "pasted": "Using a token saved by tokenstat"
-        case "tokenstat": "Connected through tokenstat"
-        default: "No GitHub credential found"
+        case "gitCredential": L10n.text("apple.accountview.using_the_credential_git_already_has.b61df8b4")
+        case "environment": L10n.text("apple.accountview.using_gh_token_or_github_token_from_your_l.419f60ee")
+        case "pasted": L10n.text("apple.accountview.using_a_token_saved_by_tokenstat.88f552ef")
+        case "tokenstat": L10n.text("apple.accountview.connected_through_tokenstat.04f82237")
+        default: L10n.text("apple.accountview.no_github_credential_found.cb62e9ec")
         }
         return "\(connection.host) · \(source)"
     }
@@ -935,13 +926,13 @@ struct AccountView: View {
     private func forgeConnectionMessage(_ connection: PullForgeConnection) -> String {
         switch connection.source {
         case "tokenstat":
-            return "Connected with the tokenstat GitHub App. Pull requests are limited to repositories you choose on GitHub."
+            return L10n.text("apple.accountview.connected_with_the_tokenstat_github_app_pu.408c2b35")
         case "gitCredential", "environment":
-            return "Pull requests work through a credential owned by another tool. Connect the tokenstat GitHub App to choose exactly which repositories tokenstat may access."
+            return L10n.text("apple.accountview.pull_requests_work_through_a_credential_ow.304f9738")
         case "pasted":
-            return "A token saved by tokenstat is active. You can replace it with the tokenstat GitHub App and selected-repository access."
+            return L10n.text("apple.accountview.a_token_saved_by_tokenstat_is_active_you_c.574bdb58")
         default:
-            return "Connect the tokenstat GitHub App, then choose the repositories tokenstat may open."
+            return L10n.text("apple.accountview.connect_the_tokenstat_github_app_then_choo.0a205707")
         }
     }
 
@@ -967,14 +958,14 @@ struct AccountView: View {
                 .controlSize(.small)
             }
             if !localModels.isEnabled(provider.id) {
-                Text("Disabled for local model selection")
+                Text(L10n.text("apple.accountview.disabled_for_local_model_selection.8bd93638"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
             } else if provider.available {
                 if provider.models.isEmpty {
                     Text(provider.id == "lmstudio"
-                         ? "Server is up. Load a model in LM Studio to use it here."
-                         : "Server is up. Pull or run a model in Ollama to use it here.")
+                         ? L10n.text("apple.accountview.server_is_up_load_a_model_in_lm_studio_to.45657b3c")
+                         : L10n.text("apple.accountview.server_is_up_pull_or_run_a_model_in_ollama.d3666ac5"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -1004,11 +995,11 @@ struct AccountView: View {
     }
 
     private func localProviderHint(_ provider: LocalProvider) -> String {
-        let raw = provider.error ?? "not running"
+        let raw = provider.error ?? L10n.text("apple.accountview.not_running.415ed734")
         if raw == "not running" || raw.hasPrefix("not running") {
             return provider.id == "lmstudio"
-                ? "Not running. Open LM Studio and turn on the local server (port 1234)."
-                : "Not running. Start Ollama (port 11434)."
+                ? L10n.text("apple.accountview.not_running_open_lm_studio_and_turn_on_the.d9dc45d4")
+                : L10n.text("apple.accountview.not_running_start_ollama_port_11434.2f65e946")
         }
         return raw
     }
@@ -1036,15 +1027,15 @@ struct AccountView: View {
     /// one does not.
     private var notificationsCard: some View {
         Card(
-            title: "Notifications",
-            subtitle: "When an agent run or a chat finishes, or stops for a question.",
+            title: L10n.text("apple.accountview.notifications.78801183"),
+            subtitle: L10n.text("apple.accountview.when_an_agent_run_or_a_chat_finishes_or_st.cc37c85b"),
             mark: "mark_device"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 #if os(macOS)
                 toggleRow(
-                    "Tell me when work needs attention",
-                    detail: "Chats, automations, and workflows on this Mac. Nothing leaves the machine: this Mac watches its own work.",
+                    L10n.text("apple.accountview.tell_me_when_work_needs_attention.016eb3de"),
+                    detail: L10n.text("apple.accountview.chats_automations_and_workflows_on_this_ma.a29d8d24"),
                     isOn: Binding(
                         get: { RunNotifications.shared.isOn },
                         set: { RunNotifications.shared.isOn = $0 }
@@ -1058,14 +1049,14 @@ struct AccountView: View {
                 if RunNotifications.shared.isOn {
                     HStack {
                         Spacer()
-                        Button("Send a test", .preview) { RunNotifications.shared.sendTest() }
+                        Button(L10n.text("apple.accountview.send_a_test.edc01436"), .preview) { RunNotifications.shared.sendTest() }
                             .buttonStyle(AccentButtonStyle(small: true))
                     }
                 }
                 #else
                 toggleRow(
-                    "Notify this device",
-                    detail: "Sent through Apple, so it arrives with the app closed. The notification says which machine and that a run or a chat ended, and carries nothing about the work.",
+                    L10n.text("apple.accountview.notify_this_device.961006a8"),
+                    detail: L10n.text("apple.accountview.sent_through_apple_so_it_arrives_with_the.a5aaf308"),
                     isOn: Binding(
                         get: { PushRegistrar.shared.isOn },
                         set: { on in
@@ -1087,7 +1078,7 @@ struct AccountView: View {
                 if PushRegistrar.shared.isOn {
                     HStack {
                         Spacer()
-                        Button("Send a test", .preview) {
+                        Button(L10n.text("apple.accountview.send_a_test.edc01436"), .preview) {
                             Task { await PushRegistrar.shared.sendTest() }
                         }
                         .buttonStyle(AccentButtonStyle(small: true))
@@ -1104,20 +1095,20 @@ struct AccountView: View {
 
     private var licensesCard: some View {
         Card(
-            title: "Open source licenses",
-            subtitle: "Third-party notices for the bundled dependencies.",
+            title: L10n.text("apple.accountview.open_source_licenses.1a1b83db"),
+            subtitle: L10n.text("apple.accountview.third_party_notices_for_the_bundled_depend.d7c3ebf2"),
             mark: "mark_license"
         ) {
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: "doc.text.magnifyingglass")
                     .foregroundStyle(.secondary)
-                Text("tokenstat links open source libraries, each under its own licence. The notices are generated from the resolved dependency graph at build time.")
+                Text(L10n.text("apple.accountview.tokenstat_links_open_source_libraries_each.3b43a49c"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("View", .preview) { showLicenses = true }
+                Button(L10n.text("apple.accountview.view.dcc839a4"), .preview) { showLicenses = true }
                     .buttonStyle(AccentButtonStyle(small: true))
-                    .help("Show the licence and notice for every bundled dependency")
+                    .help(L10n.text("apple.accountview.show_the_licence_and_notice_for_every_bund.0a70437c"))
             }
         }
     }
@@ -1130,28 +1121,24 @@ struct AccountView: View {
     /// in or to log in first.
     private var deleteAccountCard: some View {
         Card(
-            title: "Delete this account",
-            subtitle: "Permanent. Confirmed on the website's data settings.",
+            title: L10n.text("apple.accountview.delete_this_account.5e78b966"),
+            subtitle: L10n.text("apple.accountview.permanent_confirmed_on_the_website_s_data.68431d9f"),
             mark: "mark_delete",
             markTint: Theme.danger
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                Text("""
-                Deleting is immediate and permanent: the account, its linked \
-                providers, its sessions, and any usage data are removed \
-                outright, not flagged as gone. There is no undo.
-                """)
+                Text(L10n.text("apple.accountview.deleting_is_immediate_and_permanent_the_ac.1d0bba5c"))
                 .font(Theme.callout)
                 .foregroundStyle(.secondary)
 
                 Button {
                     openAccountDeletion()
                 } label: {
-                    ActionIcon.delete.label("Delete on website…")
+                    ActionIcon.delete.label(L10n.text("apple.accountview.delete_on_website.22e9668a"))
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.danger)
-                .help("Opens the data settings where deletion is confirmed")
+                .help(L10n.text("apple.accountview.opens_the_data_settings_where_deletion_is.9e4c16d5"))
             }
         }
     }
@@ -1212,8 +1199,8 @@ private struct LicensesSheet: View {
 
     var body: some View {
         ThemedSheet(
-            title: "Third-party notices",
-            subtitle: "Licences for the software bundled with tokenstat.",
+            title: L10n.text("apple.accountview.third_party_notices.8fadbc8d"),
+            subtitle: L10n.text("apple.accountview.licences_for_the_software_bundled_with_tok.09bbae43"),
             icon: .docs,
             onClose: { dismiss() }
         ) {
@@ -1222,7 +1209,7 @@ private struct LicensesSheet: View {
                     #if os(macOS)
                     NoticesTextPane(text: text)
                     #else
-                    Text("Open licenses from the account sheet.")
+                    Text(L10n.text("apple.accountview.open_licenses_from_the_account_sheet.6396b141"))
                         .font(Theme.callout)
                         .foregroundStyle(Theme.controlGlyph)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1230,7 +1217,7 @@ private struct LicensesSheet: View {
                 } else if loadFailed {
                     // A development build that ran without the generating
                     // build phase, or a bundle that lost the file.
-                    Text("The third-party notices are generated at build time and were not found in this build.")
+                    Text(L10n.text("apple.accountview.the_third_party_notices_are_generated_at_b.4594fa7d"))
                         .font(Theme.callout)
                         .foregroundStyle(Theme.controlGlyph)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1334,8 +1321,8 @@ private struct SignInCode: View {
 
     var body: some View {
         Card(
-            title: "Confirm in your browser",
-            subtitle: "A page should have opened at \(device.verificationURI)",
+            title: L10n.text("apple.accountview.confirm_in_your_browser.d3ed543d"),
+            subtitle: L10n.text("apple.accountview.a_page_should_have_opened_at_0.8fba8da9", "\(device.verificationURI)"),
             mark: "mark_account"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -1349,17 +1336,17 @@ private struct SignInCode: View {
                         in: RoundedRectangle(cornerRadius: Theme.Space.s)
                     )
 
-                Text("Check that the page shows this code, then approve it there.")
+                Text(L10n.text("apple.accountview.check_that_the_page_shows_this_code_then_a.758f4c22"))
                     .font(Theme.callout)
                     .foregroundStyle(.secondary)
 
                 HStack(spacing: Theme.Space.s) {
                     ProgressView().controlSize(.small)
-                    Text("Waiting for confirmation…")
+                    Text(L10n.text("apple.accountview.waiting_for_confirmation.a6fb491f"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Button("Cancel", .dismiss, action: onCancel)
+                    Button(L10n.text("common.cancel"), .dismiss, action: onCancel)
                 }
             }
         }

@@ -43,7 +43,7 @@ struct SSHSectionView: View {
             // with a spacer after it, this was the one search field in the app
             // that stopped halfway across its column and left a strip of empty
             // background beside itself.
-            SearchField(text: $model.search, prompt: "Search \(section.label.lowercased())")
+            SearchField(text: $model.search, prompt: L10n.text("apple.sshsectionview.search_0.09ee1648", "\(section.label.lowercased())"))
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.bottom, Theme.Space.s)
             // The vault belongs to hosts and keys, not to a fingerprint list,
@@ -57,7 +57,7 @@ struct SSHSectionView: View {
                 // it read as "your server was not saved", which was never true.
                 if let vaultError = model.vaultError {
                     let friendly = FriendlyError.from(vaultError)
-                    InlineBanner(text: "Saved on this Mac, but not synced. \(friendly.message)") {
+                    InlineBanner(text: L10n.text("apple.sshsectionview.saved_on_this_mac_but_not_synced_0.0300d4b9", "\(friendly.message)")) {
                         model.vaultError = nil
                     }
                     .padding(.horizontal, Theme.Space.m)
@@ -98,13 +98,13 @@ struct SSHSectionView: View {
     private var addMenu: some View {
         if case .hosts = section {
             Menu {
-                Button("Add host", .create) { model.selection = .newHost(folder: section.folderID) }
-                Button("Add folder", .create) { model.selection = .newFolder(parent: section.folderID) }
+                Button(L10n.text("apple.sshsectionview.add_host.7da3f6f4"), .create) { model.selection = .newHost(folder: section.folderID) }
+                Button(L10n.text("apple.sshsectionview.add_folder.5bbfc5a6"), .create) { model.selection = .newFolder(parent: section.folderID) }
                 ThemeRule()
-                Button("Import from ssh config", .download) { model.selection = .importConfig }
-                Button("Import cloud servers", .download) { model.selection = .importCloud }
+                Button(L10n.text("apple.sshsectionview.import_from_ssh_config.1b6e8c38"), .download) { model.selection = .importConfig }
+                Button(L10n.text("apple.sshsectionview.import_cloud_servers.34d6891a"), .download) { model.selection = .importCloud }
             } label: {
-                Label("Add", systemImage: "plus")
+                Label(L10n.text("common.add"), systemImage: "plus")
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
@@ -132,10 +132,10 @@ struct SSHSectionView: View {
         } else if searchedOut {
             EmptyState(
                 symbol: "magnifyingglass",
-                title: "Nothing matched",
-                message: "No \(section.label.lowercased()) match \u{201c}\(model.search)\u{201d}."
+                title: L10n.text("apple.sshsectionview.nothing_matched.ddc7629c"),
+                message: L10n.text("apple.sshsectionview.no_0_match_1.4602a1ef", "\(section.label.lowercased())", "\(model.search)")
             ) {
-                Button("Clear search", .dismiss) { model.search = "" }
+                Button(L10n.text("apple.sshsectionview.clear_search.3b7ea517"), .dismiss) { model.search = "" }
                     .buttonStyle(SecondaryButtonStyle())
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -143,9 +143,9 @@ struct SSHSectionView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Theme.Space.s) {
                     HStack {
-                        Text("Saved commands").font(Theme.headline)
+                        Text(L10n.text("apple.sshsectionview.saved_commands.dadf29f0")).font(Theme.headline)
                         Spacer()
-                        Text("\(model.visibleSnippets.count) snippets").font(Theme.caption).foregroundStyle(.secondary)
+                        Text(L10n.text("apple.sshsectionview.0_snippets.bff110dd", "\(model.visibleSnippets.count)")).font(Theme.caption).foregroundStyle(.secondary)
                     }
                     .padding(.bottom, Theme.Space.s)
                     ForEach(model.visibleSnippets) { snippet in snippetRow(snippet) }
@@ -183,11 +183,11 @@ struct SSHSectionView: View {
         // The handful somebody actually returns to, above the tree. Skipped
         // while searching: a search has already said what it wants.
         if !model.searching, !recentHosts.isEmpty {
-            SwiftUI.Section("Recent") {
+            SwiftUI.Section(L10n.text("apple.sshsectionview.recent.690dbe9d")) {
                 ForEach(recentHosts) { host in hostRow(host, depth: 0) }
             }
         }
-        SwiftUI.Section(model.searching ? "Results" : sectionTitle) {
+        SwiftUI.Section(model.searching ? L10n.text("apple.sshsectionview.results.219c4a6c") : sectionTitle) {
             ForEach(rows) { row in
                 switch row.kind {
                 case let .folder(folder):
@@ -203,8 +203,8 @@ struct SSHSectionView: View {
     /// list is filtered to it and a heading saying "All servers" over one
     /// folder's worth of them is a heading that lies.
     private var sectionTitle: String {
-        guard let folderID = section.folderID else { return "All servers" }
-        return model.folderName(folderID) ?? "Folder"
+        guard let folderID = section.folderID else { return L10n.text("apple.sshsectionview.all_servers.3205261a") }
+        return model.folderName(folderID) ?? L10n.text("apple.sshsectionview.folder.74ccd433")
     }
 
     /// Favourites first, then most recently connected. Scoped to the folder
@@ -291,12 +291,12 @@ struct SSHSectionView: View {
             if expanded.contains(folder.id) { expanded.remove(folder.id) } else { expanded.insert(folder.id) }
         }
         .contextMenu {
-            Button("Open folder") { onOpenFolder(folder.id) }
-            Button("Rename folder") { model.selection = .folder(folder.id) }
-            Button("Add server here") { model.selection = .newHost(folder: folder.id) }
-            Button("Add sub-folder") { model.selection = .newFolder(parent: folder.id) }
+            Button(L10n.text("apple.sshsectionview.open_folder.6a908402")) { onOpenFolder(folder.id) }
+            Button(L10n.text("apple.sshsectionview.rename_folder.7249f19c")) { model.selection = .folder(folder.id) }
+            Button(L10n.text("apple.sshsectionview.add_server_here.a85b2f00")) { model.selection = .newHost(folder: folder.id) }
+            Button(L10n.text("apple.sshsectionview.add_sub_folder.768dadd9")) { model.selection = .newFolder(parent: folder.id) }
             ThemeRule()
-            Button("Delete folder", role: .destructive) {
+            Button(L10n.text("apple.sshsectionview.delete_folder.39f35f2d"), role: .destructive) {
                 Task { await model.delete(folder: folder) }
             }
         }
@@ -317,17 +317,17 @@ struct SSHSectionView: View {
             // single one swallows every click before it can count to two.
             .onTapGesture(count: 2) { model.connectRequest = host }
             .onTapGesture { model.selection = .host(host.id) }
-        .accessibilityAction(named: "Open details") { model.selection = .host(host.id) }
+        .accessibilityAction(named: L10n.text("apple.sshsectionview.open_details.67d16bb1")) { model.selection = .host(host.id) }
             .contextMenu {
-                Button("Connect") { model.connectRequest = host }
-                Button(host.favorite ? "Remove from favourites" : "Add to favourites") {
+                Button(L10n.text("common.connect")) { model.connectRequest = host }
+                Button(host.favorite ? L10n.text("apple.sshsectionview.remove_from_favourites.a5bdeced") : L10n.text("apple.sshsectionview.add_to_favourites.9e619bff")) {
                     var updated = host
                     updated.favorite.toggle()
                     Task { _ = await model.save(host: updated) }
                 }
-                Button("Edit") { model.selection = .host(host.id) }
+                Button(L10n.text("common.edit")) { model.selection = .host(host.id) }
                 ThemeRule()
-                Button("Delete", role: .destructive) { Task { await model.delete(host: host) } }
+                Button(L10n.text("common.delete"), role: .destructive) { Task { await model.delete(host: host) } }
             }
     }
 
@@ -338,7 +338,7 @@ struct SSHSectionView: View {
                 Text(key.fingerprint.isEmpty ? key.algorithm : key.fingerprint)
                     .font(Theme.mono(11)).foregroundStyle(.secondary).lineLimit(1)
                 if SSHSecretStore.requiresBiometrics(key.secretRef) {
-                    Text("Touch ID · This device only · Not synced")
+                    Text(L10n.text("apple.sshsectionview.touch_id_this_device_only_not_synced.221d3d91"))
                         .font(Theme.caption2).foregroundStyle(Theme.accent)
                 }
             }
@@ -350,9 +350,9 @@ struct SSHSectionView: View {
         .listRowBackground(rowBackground(selected: model.selection == .key(key.id)))
         .contentShape(.rect)
         .onTapGesture { model.selection = .key(key.id) }
-        .accessibilityAction(named: "Open details") { model.selection = .key(key.id) }
+        .accessibilityAction(named: L10n.text("apple.sshsectionview.open_details.67d16bb1")) { model.selection = .key(key.id) }
         .contextMenu {
-            Button("Delete", role: .destructive) { Task { await model.delete(key: key) } }
+            Button(L10n.text("common.delete"), role: .destructive) { Task { await model.delete(key: key) } }
         }
     }
 
@@ -369,7 +369,7 @@ struct SSHSectionView: View {
                         Text(snippet.title).font(Theme.body.weight(.medium)).foregroundStyle(.primary)
                         Spacer(minLength: Theme.Space.s)
                         if snippet.runOnConnect {
-                            Label("On connect", systemImage: "bolt")
+                            Label(L10n.text("apple.sshsectionview.on_connect.e32909a7"), systemImage: "bolt")
                                 .font(Theme.caption2).foregroundStyle(Theme.warning)
                         }
                     }
@@ -392,13 +392,13 @@ struct SSHSectionView: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityHint("Open this saved command for editing. Does not run it.")
+        .accessibilityHint(L10n.text("apple.sshsectionview.open_this_saved_command_for_editing_does_n.e50141e1"))
         .contextMenu {
-            Button("Copy command", .copy) {
+            Button(L10n.text("apple.sshsectionview.copy_command.9a01feec"), .copy) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(snippet.command, forType: .string)
             }
-            Button("Delete", role: .destructive) { Task { await model.delete(snippet: snippet) } }
+            Button(L10n.text("common.delete"), role: .destructive) { Task { await model.delete(snippet: snippet) } }
         }
     }
 
@@ -412,9 +412,9 @@ struct SSHSectionView: View {
         .listRowBackground(rowBackground(selected: model.selection == .knownHost(known.id)))
         .contentShape(.rect)
         .onTapGesture { model.selection = .knownHost(known.id) }
-        .accessibilityAction(named: "Open details") { model.selection = .knownHost(known.id) }
+        .accessibilityAction(named: L10n.text("apple.sshsectionview.open_details.67d16bb1")) { model.selection = .knownHost(known.id) }
         .contextMenu {
-            Button("Forget", role: .destructive) {
+            Button(L10n.text("apple.sshsectionview.forget.a6bd489d"), role: .destructive) {
                 Task { await model.forgetKnownHost(known) }
             }
         }
@@ -478,30 +478,30 @@ struct SSHSectionView: View {
 
     private var emptyTitle: String {
         switch section {
-        case .hosts: "No servers yet"
-        case .keys: "No keys yet"
-        case .snippets: "No snippets yet"
-        case .knownHosts: "No trusted servers yet"
+        case .hosts: L10n.text("apple.sshsectionview.no_servers_yet.7846930c")
+        case .keys: L10n.text("apple.sshsectionview.no_keys_yet.3e5039d1")
+        case .snippets: L10n.text("apple.sshsectionview.no_snippets_yet.6e213185")
+        case .knownHosts: L10n.text("apple.sshsectionview.no_trusted_servers_yet.c7540d35")
         }
     }
 
     private var emptyMessage: String {
         switch section {
-        case .hosts: "Add a server once, then connect without retyping its address and username."
-        case .keys: "Generate or import an SSH key to authenticate without a password."
-        case .snippets: "Save commands you use often and run them from a terminal."
-        case .knownHosts: "The first time you connect to a server you confirm its fingerprint. Confirmed servers are listed here."
+        case .hosts: L10n.text("apple.sshsectionview.add_a_server_once_then_connect_without_ret.ceca4076")
+        case .keys: L10n.text("apple.sshsectionview.generate_or_import_an_ssh_key_to_authentic.406e6d7d")
+        case .snippets: L10n.text("apple.sshsectionview.save_commands_you_use_often_and_run_them_f.a621eb59")
+        case .knownHosts: L10n.text("apple.sshsectionview.the_first_time_you_connect_to_a_server_you.379e18b6")
         }
     }
 
     private var vaultUpgrade: some View {
         EmptyState(
             symbol: "lock.shield",
-            title: "Sync SSH between your devices",
-            message: "An encrypted vault keeps hosts and keys on every device signed in to this account. Supporter and above.",
+            title: L10n.text("apple.sshsectionview.sync_ssh_between_your_devices.8bd160ae"),
+            message: L10n.text("apple.sshsectionview.an_encrypted_vault_keeps_hosts_and_keys_on.75c5e63a"),
             mark: "mark_plan"
         ) {
-            Link("See plans", destination: URL(string: "https://tokenstat.ai/pricing")!)
+            Link(L10n.text("apple.sshsectionview.see_plans.d9898933"), destination: URL(string: "https://tokenstat.ai/pricing")!)
                 .buttonStyle(AccentButtonStyle())
         }
         .padding(Theme.Space.m)

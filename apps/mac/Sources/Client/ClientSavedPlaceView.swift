@@ -31,24 +31,24 @@ struct ClientPlaceAvailability<Content: View>: View {
                 content()
             case .hostRemoved:
                 ClientEmptyState(
-                    kind: .unreachable, title: "This machine is no longer linked",
-                    message: "You can find the machines on your account in Devices."
+                    kind: .unreachable, title: L10n.text("apple.clientsavedplaceview.this_machine_is_no_longer_linked.b502d162"),
+                    message: L10n.text("apple.clientsavedplaceview.you_can_find_the_machines_on_your_account.4c403c3f")
                 )
                 .padding(Theme.Space.m)
             case .accessRequired:
                 ClientEmptyState(
-                    kind: .unreachable, title: "Verify your account",
-                    message: "Verify your account before returning to this machine. Your place is kept on this device."
+                    kind: .unreachable, title: L10n.text("apple.clientsavedplaceview.verify_your_account.5f06da5b"),
+                    message: L10n.text("apple.clientsavedplaceview.verify_your_account_before_returning_to_th.2329f791")
                 )
                 .padding(Theme.Space.m)
             default:
                 ClientEmptyState(
                     kind: .unreachable,
-                    title: connectivity.isOffline ? "You are offline" : "\(hostName) is asleep",
+                    title: connectivity.isOffline ? L10n.text("apple.clientsavedplaceview.you_are_offline.4d5c9439") : L10n.text("apple.clientsavedplaceview.0_is_asleep.99e9fc66", "\(hostName)"),
                     message: connectivity.isOffline
-                        ? "Your place is saved. Connect to the internet to pick it up again."
-                        : "Your place is saved. When this machine is awake and running tokenstat, you can return here.",
-                    actionTitle: connectivity.isOffline ? nil : "Check again",
+                        ? L10n.text("apple.clientsavedplaceview.your_place_is_saved_connect_to_the_interne.1b3085ea")
+                        : L10n.text("apple.clientsavedplaceview.your_place_is_saved_when_this_machine_is_a.833d1aae"),
+                    actionTitle: connectivity.isOffline ? nil : L10n.text("apple.clientsavedplaceview.check_again.fb7099ad"),
                     actionIcon: .refresh,
                     action: connectivity.isOffline ? nil : { Task { await account.load() } }
                 )
@@ -79,7 +79,7 @@ struct ClientSavedPlaceView: View {
     @State private var needsAccess = false
 
     private var hostName: String {
-        account.account?.machines.first { $0.publicIdentity == place.id.peer }?.displayName ?? "Machine"
+        account.account?.machines.first { $0.publicIdentity == place.id.peer }?.displayName ?? L10n.text("apple.clientsavedplaceview.machine.8f1cc42d")
     }
 
     var body: some View {
@@ -128,9 +128,9 @@ struct ClientSavedPlaceView: View {
         } else if loaded {
             ClientEmptyState(
                 kind: .nothingYet,
-                title: terminal == nil ? "This terminal has ended" : "Terminal",
-                message: terminal == nil ? "The session is no longer running on \(hostName)." : "Return to your session on \(hostName).",
-                actionTitle: terminal == nil ? nil : "Open terminal",
+                title: terminal == nil ? L10n.text("apple.clientsavedplaceview.this_terminal_has_ended.0a28dfb5") : L10n.text("apple.clientsavedplaceview.terminal.e0926fda"),
+                message: terminal == nil ? L10n.text("apple.clientsavedplaceview.the_session_is_no_longer_running_on_0.12e3f3d6", "\(hostName)") : L10n.text("apple.clientsavedplaceview.return_to_your_session_on_0.df4dfa21", "\(hostName)"),
+                actionTitle: terminal == nil ? nil : L10n.text("apple.clientsavedplaceview.open_terminal.acb1f43d"),
                 actionIcon: .reopen,
                 action: terminal == nil ? nil : { retry(reopen: true) }
             )

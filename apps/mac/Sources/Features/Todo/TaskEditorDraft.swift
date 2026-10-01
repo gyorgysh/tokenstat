@@ -54,12 +54,12 @@ struct TaskEditorDraft: Codable, Equatable, Sendable {
     }
 
     var validation: String? {
-        if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Give this task a title." }
-        if title.utf8.count > 4096 { return "Shorten the title to 4 KiB or less." }
-        if prompt.utf8.count > 1024 * 1024 { return "Shorten the prompt to 1 MiB or less." }
-        if budgetSeconds == nil { return "Enter a positive time limit, or choose No limit." }
-        if !["minutes", "seconds"].contains(budgetUnit) { return "Choose minutes or seconds for the time limit." }
-        if !["low", "normal", "high"].contains(priority) { return "Choose a task priority." }
+        if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return L10n.text("apple.taskeditordraft.give_this_task_a_title.30531d14") }
+        if title.utf8.count > 4096 { return L10n.text("apple.taskeditordraft.shorten_the_title_to_4_kib_or_less.f40e37a7") }
+        if prompt.utf8.count > 1024 * 1024 { return L10n.text("apple.taskeditordraft.shorten_the_prompt_to_1_mib_or_less.dba63070") }
+        if budgetSeconds == nil { return L10n.text("apple.taskeditordraft.enter_a_positive_time_limit_or_choose_no_l.3b7996e8") }
+        if !["minutes", "seconds"].contains(budgetUnit) { return L10n.text("apple.taskeditordraft.choose_minutes_or_seconds_for_the_time_lim.18aaf5a6") }
+        if !["low", "normal", "high"].contains(priority) { return L10n.text("apple.taskeditordraft.choose_a_task_priority.d4cee784") }
         return nil
     }
 
@@ -72,7 +72,7 @@ struct TaskEditorDraft: Codable, Equatable, Sendable {
     }
 
     func parameters(id: String, revision: UInt64) throws -> [String: Any] {
-        guard validation == nil, let budgetSeconds else { throw Invalid.fields(validation ?? "Check this task's settings.") }
+        guard validation == nil, let budgetSeconds else { throw Invalid.fields(validation ?? L10n.text("apple.taskeditordraft.check_this_task_s_settings.087e8f02")) }
         return ["id": id, "expectedRevision": revision, "title": title.trimmingCharacters(in: .whitespacesAndNewlines),
                 "notes": prompt, "workspaceId": workspaceID, "priority": priority, "backend": backend,
                 "model": model, "effort": effort, "budgetSeconds": budgetSeconds]

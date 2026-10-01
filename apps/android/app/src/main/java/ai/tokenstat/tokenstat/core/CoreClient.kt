@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.core
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -59,7 +61,7 @@ object CoreClient {
 
     suspend fun call(method: String, params: JsonObject = buildJsonObject {}): JsonElement =
         withContext(Dispatchers.IO) {
-            check(initialized) { "tokenstat core was not initialized" }
+            check(initialized) { L10n.text("android.coreclient.tokenstat_core_was_not_initialized.9a9100ab") }
             val peer = (params["peer"] as? JsonPrimitive)?.contentOrNull
             CoreObserver.precheck?.invoke(method)?.let { refusal ->
                 CoreObserver.note(method, peer, refusal)
@@ -90,7 +92,7 @@ object CoreClient {
         val error = envelope["error"]?.jsonObject
         throw CoreFailure(
             error?.get("code")?.jsonPrimitive?.content ?: "core",
-            error?.get("message")?.jsonPrimitive?.content ?: "The tokenstat core rejected the call.",
+            error?.get("message")?.jsonPrimitive?.content ?: L10n.text("android.coreclient.the_tokenstat_core_rejected_the_call.0e4909c6"),
         )
     }
 }

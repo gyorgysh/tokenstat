@@ -81,7 +81,7 @@ struct ClientDiffView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button("Edit file", .edit) {
+                Button(L10n.text("apple.clientdiffview.edit_file.9608dd14"), .edit) {
                     Task { await openEditor() }
                 }
                 .labelStyle(.iconOnly)
@@ -148,16 +148,16 @@ struct ClientDiffView: View {
                 .padding(.top, Theme.Space.xl)
         } else if let diff {
             if diff.binary {
-                note("This is a binary file. There is nothing to show line by line.")
+                note(L10n.text("apple.clientdiffview.this_is_a_binary_file_there_is_nothing_to.6573d54c"))
             } else if diff.hunks.isEmpty {
                 note(diff.untracked
-                     ? "This file is not tracked yet and is empty."
-                     : "No changes against HEAD.")
+                     ? L10n.text("apple.clientdiffview.this_file_is_not_tracked_yet_and_is_empty.7354c94b")
+                     : L10n.text("apple.clientdiffview.no_changes_against_head.84a982f2"))
             } else {
                 hunks(of: diff)
             }
         } else if errorMessage == nil {
-            note("That file is not in this folder any more.")
+            note(L10n.text("apple.clientdiffview.that_file_is_not_in_this_folder_any_more.da5bd527"))
         }
     }
 
@@ -204,12 +204,12 @@ struct ClientDiffView: View {
             .cardSurface()
             if cut > 0 {
                 if total <= Self.fullRenderLimit {
-                    Button("Show all \(total) lines", .reveal) {
+                    Button(L10n.text("apple.clientdiffview.show_all_0_lines.8c1a7690", "\(total)"), .reveal) {
                         showAll = true
                     }
                     .buttonStyle(SecondaryButtonStyle(comfortable: true))
                 } else {
-                    note("Showing the first \(total - cut) of \(total) lines. The rest is on \(hostName.isEmpty ? "the computer" : hostName).")
+                    note(L10n.text("apple.clientdiffview.showing_the_first_0_of_1_lines_the_rest_is.fb1dbaa3", "\(total - cut)", "\(total)", "\(hostName.isEmpty ? L10n.text("apple.clientdiffview.the_computer.da52d93a") : hostName)"))
                 }
             }
         }

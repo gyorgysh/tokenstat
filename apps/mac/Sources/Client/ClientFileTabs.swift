@@ -20,7 +20,7 @@ struct ClientFileTabs<Files: View>: View {
         VStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: Theme.Space.s) {
-                    Button("Files", .source) { editors.showFiles(peer: peer, workspace: workspace) }
+                    Button(L10n.text("common.files"), .source) { editors.showFiles(peer: peer, workspace: workspace) }
                         .padding(Theme.Space.s)
                         .background(selected == nil ? Theme.accent.opacity(0.12) : .clear, in: Capsule())
                     ForEach(tabs) { tab in
@@ -29,7 +29,7 @@ struct ClientFileTabs<Files: View>: View {
                                 Label((tab.id.path as NSString).lastPathComponent, systemImage: "doc.text")
                                     .lineLimit(1)
                             }
-                            .accessibilityLabel(tab.id.path + (tab.document.isDirty ? ", unsaved changes" : ""))
+                            .accessibilityLabel(tab.id.path + (tab.document.isDirty ? L10n.text("apple.clientfiletabs.unsaved_changes.1a0f14bf") : ""))
                             .accessibilityAddTraits(selected?.id == tab.id ? .isSelected : [])
                             if tab.document.isDirty {
                                 Circle().fill(Theme.accent).frame(width: 6, height: 6)
@@ -39,7 +39,7 @@ struct ClientFileTabs<Files: View>: View {
                                 Image(systemName: "xmark")
                                     .frame(minWidth: 32, minHeight: 32)
                             }
-                            .accessibilityLabel("Close \(tab.id.path)")
+                            .accessibilityLabel(L10n.text("apple.clientfiletabs.close_0.59546c79", "\(tab.id.path)"))
                             .disabled(tab.isSaving)
                         }
                         .padding(.leading, Theme.Space.s)
@@ -64,36 +64,36 @@ struct ClientFileTabs<Files: View>: View {
         .toolbar {
             if let tab = selected {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Files") { editors.showFiles(peer: peer, workspace: workspace) }
+                    Button(L10n.text("common.files")) { editors.showFiles(peer: peer, workspace: workspace) }
                 }
                 ToolbarItem {
-                    Button("Find in file", .search) { find.showing.toggle() }
+                    Button(L10n.text("apple.clientfiletabs.find_in_file.214c422e"), .search) { find.showing.toggle() }
                         .labelStyle(.iconOnly)
                         .keyboardShortcut("f", modifiers: .command)
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button(tab.isSaving ? "Saving…" : "Save") { Task { await editors.save(tab) } }
+                    Button(tab.isSaving ? L10n.text("apple.clientfiletabs.saving.23e39291") : L10n.text("common.save")) { Task { await editors.save(tab) } }
                         .keyboardShortcut("s", modifiers: .command)
                         .disabled(tab.isSaving || !tab.document.isDirty || tab.conflictHostContent != nil)
                 }
                 ToolbarItem(placement: .secondaryAction) {
-                    Button("Close file") { requestClose(tab) }
+                    Button(L10n.text("apple.clientfiletabs.close_file.bd9c76ec")) { requestClose(tab) }
                         .keyboardShortcut("w", modifiers: .command)
                         .disabled(tab.isSaving)
                 }
             }
         }
-        .confirmationDialog("Discard changes?", isPresented: Binding(
+        .confirmationDialog(L10n.text("apple.clientfiletabs.discard_changes.85bcf416"), isPresented: Binding(
             get: { closing != nil },
             set: { if !$0 { closing = nil } }
         ), titleVisibility: .visible) {
-            Button("Discard", role: .destructive) {
+            Button(L10n.text("apple.clientfiletabs.discard.eb1a70e3"), role: .destructive) {
                 if let closing { editors.close(closing, discard: true) }
                 closing = nil
             }
-            Button("Keep editing", role: .cancel) { closing = nil }
+            Button(L10n.text("apple.clientfiletabs.keep_editing.e76fd2ad"), role: .cancel) { closing = nil }
         } message: {
-            Text("\(closing?.id.path ?? "This file") has edits that are not saved on that computer.")
+            Text(L10n.text("apple.clientfiletabs.0_has_edits_that_are_not_saved_on_that_com.97573681", "\(closing?.id.path ?? L10n.text("apple.clientfiletabs.this_file.eb43df97"))"))
         }
         // Next/previous match stay discoverable when the bar is hidden: the
         // same chord opens the bar, and navigates once it is open with
@@ -109,7 +109,7 @@ struct ClientFileTabs<Files: View>: View {
             findShowing: find.showing
         )
         return [
-            .workbench(.findNext, id: "find-next", title: "Find Next",
+            .workbench(.findNext, id: "find-next", title: L10n.text("apple.clientfiletabs.find_next.664d6cdf"),
                        enabled: WorkbenchShortcutPolicy.canFindNext(state)) {
                 if find.showing {
                     find.goNext()
@@ -117,7 +117,7 @@ struct ClientFileTabs<Files: View>: View {
                     find.showing = true
                 }
             },
-            .workbench(.findPrevious, id: "find-previous", title: "Find Previous",
+            .workbench(.findPrevious, id: "find-previous", title: L10n.text("apple.clientfiletabs.find_previous.bf0e5179"),
                        enabled: WorkbenchShortcutPolicy.canFindPrevious(state)) {
                 if find.showing {
                     find.goPrevious()
@@ -137,16 +137,16 @@ struct ClientFileTabs<Files: View>: View {
                     .lineLimit(1)
                     .truncationMode(.head)
                 if tab.document.isDirty {
-                    Label("Unsaved", systemImage: "circle.fill")
+                    Label(L10n.text("apple.clientfiletabs.unsaved.6250d572"), systemImage: "circle.fill")
                         .font(ClientType.caption)
                         .foregroundStyle(Theme.warning)
                 } else if let savedAt = tab.document.savedAt {
-                    Text("Saved \(savedAt.formatted(date: .omitted, time: .shortened))")
+                    Text(L10n.text("apple.clientfiletabs.saved_0.4f0424e4", "\(savedAt.formatted(date: .omitted, time: .shortened))"))
                         .font(ClientType.caption)
                         .foregroundStyle(Theme.controlGlyph)
                 }
                 if !tab.document.changedLines.isEmpty {
-                    Text("\(tab.document.changedLines.count) changed")
+                    Text(L10n.text("apple.clientfiletabs.0_changed.d85c3eae", "\(tab.document.changedLines.count)"))
                         .font(ClientType.caption.monospacedDigit())
                         .foregroundStyle(.tertiary)
                 }

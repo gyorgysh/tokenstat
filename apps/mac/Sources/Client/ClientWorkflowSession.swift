@@ -178,7 +178,7 @@ final class ClientWorkflowSession {
         guard !working, let graph = selectedGraph else { return }
         // The host would refuse an invalid graph. Say so before starting.
         if let issue = graph.stepsIssue {
-            errorMessage = "\(issue) Fix it in the editor before running."
+            errorMessage = L10n.text("apple.clientworkflowsession.0_fix_it_in_the_editor_before_running.4e7debe8", "\(issue)")
             return
         }
         working = true

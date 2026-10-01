@@ -38,16 +38,16 @@ struct WorkspacesOverviewView: View {
     }
 
     private var scopes: [MachineScope] {
-        var scopes = [MachineScope(id: nil, label: "All")]
+        var scopes = [MachineScope(id: nil, label: L10n.text("apple.workspacesoverviewview.all.a52ace42"))]
         if folders.contains(where: { !$0.isRemote }) {
-            scopes.append(MachineScope(id: "local", label: "This Mac"))
+            scopes.append(MachineScope(id: "local", label: L10n.text("apple.workspacesoverviewview.this_mac.79a4aefc")))
         }
         let remote = Dictionary(grouping: folders.filter(\.isRemote), by: \.machineID)
         for key in remote.keys.sorted(by: { ($0 ?? "") < ($1 ?? "") }) {
             let label = remote[key]?.first?.machineLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
             scopes.append(MachineScope(
                 id: key ?? "remote",
-                label: (label?.isEmpty == false) ? label! : "Remote machine"
+                label: (label?.isEmpty == false) ? label! : L10n.text("apple.workspacesoverviewview.remote_machine.d9dd1af3")
             ))
         }
         return scopes
@@ -72,10 +72,10 @@ struct WorkspacesOverviewView: View {
         // One row: find a folder, pick a machine, order, add. The summary
         // tiles that stood here counted what the grid below already shows.
         HStack(spacing: Theme.Space.s) {
-            SearchField(text: $search, prompt: "Search projects")
+            SearchField(text: $search, prompt: L10n.text("apple.workspacesoverviewview.search_projects.9e079c7d"))
                 .frame(maxWidth: 300)
             if scopes.count > 2 {
-                Picker("Machine", selection: $scope) {
+                Picker(L10n.text("apple.workspacesoverviewview.machine.8f1cc42d"), selection: $scope) {
                     ForEach(scopes, id: \.id) { scope in
                         Text(scope.label).tag(scope.id as String?)
                     }
@@ -84,17 +84,17 @@ struct WorkspacesOverviewView: View {
                 .labelsHidden()
                 .fixedSize()
             }
-            Picker("Sort", selection: $alphabetical) {
-                Text("Your order").tag(false)
-                Text("Name A–Z").tag(true)
+            Picker(L10n.text("apple.workspacesoverviewview.sort.bec69036"), selection: $alphabetical) {
+                Text(L10n.text("apple.workspacesoverviewview.your_order.f159e18f")).tag(false)
+                Text(L10n.text("apple.workspacesoverviewview.name_a_z.7ed96629")).tag(true)
             }
             .pickerStyle(.menu)
             .labelsHidden()
             .fixedSize()
             Spacer(minLength: Theme.Space.s)
             ToolbarIconButton(systemImage: gridLayout ? "list.bullet" : "square.grid.2x2",
-                help: gridLayout ? "Show workspaces as a list" : "Show workspaces as cards") { gridLayout.toggle() }
-            Button("Add project", .create) { onAdd() }
+                help: gridLayout ? L10n.text("apple.workspacesoverviewview.show_workspaces_as_a_list.deeb9b94") : L10n.text("apple.workspacesoverviewview.show_workspaces_as_cards.45515189")) { gridLayout.toggle() }
+            Button(L10n.text("common.add_project"), .create) { onAdd() }
                 .buttonStyle(AccentButtonStyle(small: true))
         }
         .padding(.horizontal, Theme.Space.m)
@@ -141,20 +141,20 @@ struct WorkspacesOverviewView: View {
     private var summaryLine: String {
         let remote = folders.filter(\.isRemote).count
         switch (folders.count, remote) {
-        case (0, _): return "Nothing registered yet"
-        case let (all, 0): return "\(all) on this Mac"
-        case let (all, _) where all == remote: return "\(all) on remote machines"
-        case let (all, r): return "\(all - r) here · \(r) remote"
+        case (0, _): return L10n.text("apple.workspacesoverviewview.nothing_registered_yet.84c3bf04")
+        case let (all, 0): return L10n.text("apple.workspacesoverviewview.0_on_this_mac.bb17ca22", "\(all)")
+        case let (all, _) where all == remote: return L10n.text("apple.workspacesoverviewview.0_on_remote_machines.a32076a4", "\(all)")
+        case let (all, r): return L10n.text("apple.workspacesoverviewview.0_here_1_remote.fb100df4", "\(all - r)", "\(r)")
         }
     }
 
     private var emptyState: some View {
         Card(
-            title: "Add your first project",
-            subtitle: "Pick a folder on this Mac or on a paired computer, or clone a repository.",
+            title: L10n.text("apple.workspacesoverviewview.add_your_first_project.1a7a66c0"),
+            subtitle: L10n.text("apple.workspacesoverviewview.pick_a_folder_on_this_mac_or_on_a_paired_c.4228c461"),
             mark: "mark_archive"
         ) {
-            Button("Add project", .create) { onAdd() }
+            Button(L10n.text("common.add_project"), .create) { onAdd() }
                 .buttonStyle(AccentButtonStyle(small: true))
         }
     }
@@ -170,14 +170,14 @@ struct WorkspacesOverviewView: View {
                         .font(Theme.caption).foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle)
                     if !folder.exists {
-                        Text("Folder missing").font(Theme.caption).foregroundStyle(Theme.warning)
+                        Text(L10n.text("apple.workspacesoverviewview.folder_missing.f06c68a6")).font(Theme.caption).foregroundStyle(Theme.warning)
                     } else if let activity = activityLine(for: folder) {
                         Text(activity).font(Theme.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
                 Spacer(minLength: Theme.Space.s)
                 if let summary = summaries[folder.id] {
-                    Text("\(summary.tasks) task\(summary.tasks == 1 ? "" : "s")")
+                    Text((summary.tasks == 1 ? L10n.text("apple.workspacesoverviewview.0_task_1.d478181b.one", "\(summary.tasks)") : L10n.text("apple.workspacesoverviewview.0_task_1.d478181b.other", "\(summary.tasks)")))
                         .font(Theme.caption).foregroundStyle(.secondary).fixedSize()
                 }
                 Image(systemName: "chevron.right")
@@ -209,7 +209,7 @@ struct WorkspacesOverviewView: View {
                         .help(folder.path)
                         .padding(.bottom, Theme.Space.s)
                     if !folder.exists {
-                        Text("Folder missing")
+                        Text(L10n.text("apple.workspacesoverviewview.folder_missing.f06c68a6"))
                             .font(Theme.callout.weight(.medium))
                             .foregroundStyle(Theme.warning)
                     } else if let gitLine = gitLine(for: folder) {
@@ -234,9 +234,9 @@ struct WorkspacesOverviewView: View {
                     }
                     if let summary = summaries[folder.id] {
                         HStack(spacing: Theme.Space.m) {
-                            Label("\(summary.tasks) tasks", systemImage: "checklist")
+                            Label(L10n.text("apple.workspacesoverviewview.0_tasks.5076ea6e", "\(summary.tasks)"), systemImage: "checklist")
                             if let notes = summary.notes {
-                                Label("\(notes) notes", systemImage: "note.text")
+                                Label(L10n.text("apple.workspacesoverviewview.0_notes.8da860e0", "\(notes)"), systemImage: "note.text")
                             }
                         }
                         .font(Theme.caption).foregroundStyle(.secondary)
@@ -245,11 +245,11 @@ struct WorkspacesOverviewView: View {
                     ThemeRule().padding(.vertical, Theme.Space.s)
                     HStack {
                         if let changed = summaries[folder.id]?.changed {
-                            Text(changed == 0 ? "No pending changes" : "\(changed) changed files")
+                            Text(changed == 0 ? L10n.text("apple.workspacesoverviewview.no_pending_changes.069d0076") : L10n.text("apple.workspacesoverviewview.0_changed_files.dd8411f2", "\(changed)"))
                                 .foregroundStyle(changed == 0 ? Theme.accent : Theme.secondary)
                         }
                         Spacer(minLength: 0)
-                        Label("Open workspace", systemImage: "arrow.up.right")
+                        Label(L10n.text("apple.workspacesoverviewview.open_workspace.b3e34b18"), systemImage: "arrow.up.right")
                             .foregroundStyle(Theme.accent)
                     }.font(Theme.caption.weight(.medium))
                 }
@@ -257,15 +257,15 @@ struct WorkspacesOverviewView: View {
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(folder.name), \(machineLine(for: folder) ?? "folder")")
+        .accessibilityLabel("\(folder.name), \(machineLine(for: folder) ?? L10n.text("apple.workspacesoverviewview.folder.034a0062"))")
     }
 
     private func machineLine(for folder: WorkspaceFolder) -> String? {
         if folder.isRemote {
             let label = folder.machineLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
-            return (label?.isEmpty == false) ? label : "Remote machine"
+            return (label?.isEmpty == false) ? label : L10n.text("apple.workspacesoverviewview.remote_machine.d9dd1af3")
         }
-        return "This Mac"
+        return L10n.text("apple.workspacesoverviewview.this_mac.79a4aefc")
     }
 
     private func hasBranch(_ folder: WorkspaceFolder) -> Bool {
@@ -289,10 +289,10 @@ struct WorkspacesOverviewView: View {
         let chats = summaries[folder.id]?.chats
         var parts: [String] = []
         if sessions > 0 {
-            parts.append("\(sessions) session\(sessions == 1 ? "" : "s")")
+            parts.append((sessions == 1 ? L10n.text("apple.workspacesoverviewview.0_session_1.aa4d5aa6.one", "\(sessions)") : L10n.text("apple.workspacesoverviewview.0_session_1.aa4d5aa6.other", "\(sessions)")))
         }
         if let chats, chats > 0 {
-            parts.append("\(chats) chat\(chats == 1 ? "" : "s")")
+            parts.append((chats == 1 ? L10n.text("apple.workspacesoverviewview.0_chat_1.2838f969.one", "\(chats)") : L10n.text("apple.workspacesoverviewview.0_chat_1.2838f969.other", "\(chats)")))
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
@@ -307,10 +307,10 @@ struct WorkspacesOverviewPlaceholder: View {
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
-                InspectorTitle(title: "Project", symbol: "folder")
+                InspectorTitle(title: L10n.text("apple.workspacesoverviewview.project.98595978"), symbol: "folder")
                 Spacer(minLength: 0)
             }
-            InspectorEmptyState(mark: "mark_archive", title: "Pick a folder", subtitle: "Open a workspace to see its details and tools here.")
+            InspectorEmptyState(mark: "mark_archive", title: L10n.text("apple.workspacesoverviewview.pick_a_folder.2226bfe1"), subtitle: L10n.text("apple.workspacesoverviewview.open_a_workspace_to_see_its_details_and_to.63f8fdb0"))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

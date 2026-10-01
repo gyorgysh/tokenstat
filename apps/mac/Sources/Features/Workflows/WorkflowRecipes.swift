@@ -145,43 +145,43 @@ enum WorkflowRecipes {
         if !short {
             stages.append(stage(
                 id: "refine",
-                verb: "Refine",
-                title: "Refine prompt",
+                verb: L10n.text("apple.workflowrecipes.refine.1e7f34ee"),
+                title: L10n.text("apple.workflowrecipes.refine_prompt.cbab4873"),
                 pick: refinePick,
-                prompt: "Rewrite this starting prompt so it is clear and ready to plan.\n\n{{input}}"
+                prompt: L10n.text("apple.workflowrecipes.rewrite_this_starting_prompt_so_it_is_clea.6b67cfe2")
             ))
         }
         if let planPick, distinct(planPick, from: stages.last) {
             stages.append(stage(
                 id: "plan",
-                verb: "Plan",
-                title: "Plan",
+                verb: L10n.text("apple.workflowrecipes.plan.fa8ed0bd"),
+                title: L10n.text("apple.workflowrecipes.plan.fa8ed0bd"),
                 pick: planPick,
-                prompt: "Write a short plan for this work.\n\n\(priorToken(stages.last?.id))"
+                prompt: L10n.text("apple.workflowrecipes.write_a_short_plan_for_this_work_0.d30fbc18", "\(priorToken(stages.last?.id))")
             ))
         }
         if let buildPick {
             stages.append(stage(
                 id: "build",
-                verb: "Build",
-                title: "Build",
+                verb: L10n.text("apple.workflowrecipes.build.bdd254b6"),
+                title: L10n.text("apple.workflowrecipes.build.bdd254b6"),
                 pick: buildPick,
-                prompt: "Implement the plan.\n\n\(priorToken(stages.last?.id))"
+                prompt: L10n.text("apple.workflowrecipes.implement_the_plan_0.1bcd9971", "\(priorToken(stages.last?.id))")
             ))
         }
         if !short, let reviewPick, distinct(reviewPick, from: stages.last) {
             stages.append(stage(
                 id: "review",
-                verb: "Review",
-                title: "Review",
+                verb: L10n.text("apple.workflowrecipes.review.aff0766a"),
+                title: L10n.text("apple.workflowrecipes.review.aff0766a"),
                 pick: reviewPick,
-                prompt: "Review the work. List issues first.\n\n\(priorToken(stages.last?.id))"
+                prompt: L10n.text("apple.workflowrecipes.review_the_work_list_issues_first_0.6279f6f0", "\(priorToken(stages.last?.id))")
             ))
         }
         guard !stages.isEmpty else { return nil }
 
         var nodes: [WorkflowNode] = [
-            WorkflowNode(id: "in", kind: .input, title: "Start"),
+            WorkflowNode(id: "in", kind: .input, title: L10n.text("common.start")),
         ]
         var edges: [WorkflowEdge] = []
         var previous = "in"
@@ -202,25 +202,23 @@ enum WorkflowRecipes {
         nodes.append(WorkflowNode(
             id: "done",
             kind: .command,
-            title: "Done",
+            title: L10n.text("common.done"),
             command: "afplay /System/Library/Sounds/Glass.aiff"
         ))
         edges.append(WorkflowEdge(from: previous, to: "done", when: .ok))
 
-        let labelParts = ["Start"] + stages.map(label(for:)) + ["Done"]
+        let labelParts = [L10n.text("common.start")] + stages.map(label(for:)) + [L10n.text("common.done")]
         let label = labelParts.joined(separator: " → ")
-        let prompt = "Starting prompt, then "
-            + stages.map { part in
+        let prompt = L10n.text("apple.workflowrecipes.starting_prompt_then_0_then_play_the_syste.5a7a8b91", String(describing: stages.map { part in
                 var bits = [part.verb.lowercased(), "on", part.backend.label]
                 if let model = part.model, !model.isEmpty { bits.append(model) }
                 if let effort = part.effort, !effort.isEmpty { bits.append("(\(effort))") }
                 return bits.joined(separator: " ")
             }
-            .joined(separator: ", then ")
-            + ", then play the system done sound."
+            .joined(separator: ", then ")))
         return WorkflowRecipe(
             id: id,
-            name: short ? "Plan then build" : "Plan, build, review",
+            name: short ? L10n.text("apple.workflowrecipes.plan_then_build.9b157ea7") : L10n.text("apple.workflowrecipes.plan_build_review.f00c084c"),
             label: label,
             prompt: prompt,
             nodes: nodes,
@@ -390,15 +388,15 @@ struct WorkflowDesignPickers: View {
             HStack(alignment: .bottom, spacing: Theme.Space.s) {
                 if !agents.isEmpty {
                     AppMenuPicker(
-                        title: "Agent",
+                        title: L10n.text("apple.workflowrecipes.agent.11b39c93"),
                         options: agents.map { (value: $0.id, label: $0.label) },
                         selection: $backendID
                     )
                 }
                 if folders.count > 1 {
                     AppMenuPicker(
-                        title: "Folder",
-                        options: [(value: "", label: "No folder")]
+                        title: L10n.text("apple.workflowrecipes.folder.74ccd433"),
+                        options: [(value: "", label: L10n.text("apple.workflowrecipes.no_folder.ca98f4c7"))]
                             + folders.map { (value: $0.id, label: $0.name) },
                         selection: $workspaceID
                     )
@@ -415,8 +413,8 @@ struct WorkflowDesignPickers: View {
                 }
                 if !backend.efforts.isEmpty {
                     AppMenuPicker(
-                        title: "Effort",
-                        options: [(value: "", label: "Default")]
+                        title: L10n.text("apple.workflowrecipes.effort.4387e5d3"),
+                        options: [(value: "", label: L10n.text("apple.workflowrecipes.default.21b111cb"))]
                             + backend.efforts.map { (value: $0, label: $0) },
                         selection: $effort
                     )

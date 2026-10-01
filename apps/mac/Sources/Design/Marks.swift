@@ -363,7 +363,7 @@ struct AuthorHoverCard: View {
                         .lineLimit(1)
                 }
                 if mine {
-                    Text("You")
+                    Text(L10n.text("apple.marks.you.08b04193"))
                         .font(Theme.font(11, weight: .medium))
                         .foregroundStyle(Theme.accent)
                 }
@@ -532,7 +532,7 @@ struct LogoMark: View {
             }
         }
         .frame(width: size, height: size)
-        .accessibilityLabel("tokenstat")
+        .accessibilityLabel(L10n.text("apple.marks.tokenstat.63d30539"))
         .onAppear { if animated { raised = true } }
         // A refresh somebody asked for dips the bars and lets them back up,
         // once. The mark sits in the sidebar on the Mac and in the top bar
@@ -591,9 +591,9 @@ struct Wordmark: View {
                 LogoMark(size: size)
             }
             HStack(spacing: 0) {
-                Text("token")
+                Text(L10n.text("apple.marks.token.3c469e9d"))
                     .foregroundStyle(.primary)
-                Text("stat")
+                Text(L10n.text("apple.marks.stat.40460da8"))
                     .foregroundStyle(Theme.accent)
             }
             .font(Theme.fixed(size * 0.88, weight: .bold))
@@ -641,8 +641,8 @@ struct TierMark: View {
                     )
                 )
                 .frame(width: size, height: size)
-                .help("\(tier.capitalized) tier")
-                .accessibilityLabel("\(tier.capitalized) tier")
+                .help(L10n.text("apple.marks.0_tier.c75a2e12", "\(tier.capitalized)"))
+                .accessibilityLabel(L10n.text("apple.marks.0_tier.c75a2e12", "\(tier.capitalized)"))
         }
     }
 }

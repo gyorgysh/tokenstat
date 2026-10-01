@@ -33,7 +33,7 @@ internal static class SelfInstall
     public static string InstallDirectory =>
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Programs",
+            L10n.Text("windows.selfinstall.programs.b6747064"),
             "tokenstat");
 
     public static string InstalledExe => Path.Combine(InstallDirectory, "Tokenstat.exe");
@@ -146,7 +146,7 @@ internal static class SelfInstall
             if (!File.Exists(Path.Combine(staging, "Tokenstat.exe"))
                 || !File.Exists(Path.Combine(staging, "tokenstat-hostd.exe")))
             {
-                throw new IOException("The download is incomplete. Extract the entire tokenstat zip and try again.");
+                throw new IOException(L10n.Text("windows.selfinstall.the_download_is_incomplete_extract_the_ent.2dd71042"));
             }
             stopProcesses();
             if (Directory.Exists(dest))
@@ -302,7 +302,7 @@ internal static class SelfInstall
                 using var registration = Process.Start(new ProcessStartInfo
                 {
                     FileName = "powershell.exe",
-                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Bin \"{hostdExe}\"",
+                    Arguments = L10n.Text("windows.selfinstall.noprofile_executionpolicy_bypass_file_0_bi.46ca77c6", $"{script}", $"{hostdExe}"),
                     UseShellExecute = false,
                     CreateNoWindow = true,
                 });
@@ -396,7 +396,7 @@ internal static class SelfInstall
             Process.Start(new ProcessStartInfo
             {
                 FileName = "powershell.exe",
-                Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + helper + "\"",
+                Arguments = L10n.Text("windows.selfinstall.noprofile_windowstyle_hidden_executionpoli.2b2e6915", $"{helper}"),
                 UseShellExecute = false,
                 CreateNoWindow = true,
             });
@@ -601,7 +601,7 @@ internal static class SelfInstall
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = "powershell.exe",
-                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Uninstall",
+                    Arguments = L10n.Text("windows.selfinstall.noprofile_executionpolicy_bypass_file_0_un.733698be", $"{script}"),
                     UseShellExecute = false,
                     CreateNoWindow = true,
                 })?.WaitForExit(10000);

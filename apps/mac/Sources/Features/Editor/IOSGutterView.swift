@@ -35,7 +35,7 @@ final class IOSGutterView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        fatalError(L10n.text("apple.iosgutterview.init_coder_has_not_been_implemented.bc93e5bb"))
     }
 
     override func draw(_ rect: CGRect) {

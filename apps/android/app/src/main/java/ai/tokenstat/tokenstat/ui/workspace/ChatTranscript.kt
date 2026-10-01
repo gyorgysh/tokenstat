@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -80,7 +82,7 @@ data class ChatToolState(
                 if (isDiff && isDiffLine(shown)) shown else "| $shown"
             }
             return if (lines.size > SnippetLineCap) {
-                out + "| … (${lines.size - SnippetLineCap} more)"
+                out + L10n.text("android.chattranscript.0_more.8bfcca49", "${lines.size - SnippetLineCap}")
             } else {
                 out
             }
@@ -138,7 +140,7 @@ data class ChatEditState(
         }
 
     /// Nil on the first change of a file in a turn. Later ones name themselves.
-    val changeLabel: String? get() = if (revision >= 2) "${ChatClock.ordinal(revision)} change" else null
+    val changeLabel: String? get() = if (revision >= 2) L10n.text("android.chattranscript.0_change.d4ef778c", "${ChatClock.ordinal(revision)}") else null
 
     fun applyPatch(added: Int, removed: Int, patch: String): ChatEditState {
         return copy(
@@ -354,7 +356,7 @@ fun coalesceTranscript(
             flushThinking()
             // A new user turn bounds any tools left open by an interrupted
             // older turn, including histories recorded by older hosts.
-            closeRunningTools(failed = false, at = atMsOf(ev, inner), detail = "Interrupted")
+            closeRunningTools(failed = false, at = atMsOf(ev, inner), detail = L10n.text("android.chattranscript.interrupted.132d124d"))
             editRevisions.clear()
             items.add(
                 ChatDisplayItem.User(
@@ -444,7 +446,7 @@ fun coalesceTranscript(
                 // already finished; only true starts run open.
                 val isStart = (inner.str("kind") ?: "").lowercase() != "tool"
                 if (ChatToolState.isFileEditVerb(verb)) {
-                    val path = target.ifEmpty { "File" }
+                    val path = target.ifEmpty { L10n.text("android.chattranscript.file.50009ce1") }
                     items.add(
                         ChatDisplayItem.Edit(
                             rowID,
@@ -515,7 +517,7 @@ fun coalesceTranscript(
                         else -> Unit
                     }
                 } else if (ChatToolState.isFileEditVerb(inner.str("verb") ?: "")) {
-                    val path = ChatToolState.clip(inner.str("target") ?: "").ifEmpty { "File" }
+                    val path = ChatToolState.clip(inner.str("target") ?: "").ifEmpty { L10n.text("android.chattranscript.file.50009ce1") }
                     var state = ChatEditState(
                         path = path,
                         added = 0,
@@ -565,7 +567,7 @@ fun coalesceTranscript(
                 flushText()
                 flushThinking()
                 val callId = inner.str("callId") ?: inner.str("call_id") ?: ""
-                val path = inner.str("path") ?: "File"
+                val path = inner.str("path") ?: L10n.text("android.chattranscript.file.50009ce1")
                 val added = inner.safeInt("added")
                 val removed = inner.safeInt("removed")
                 val patch = inner.str("patch") ?: ""
@@ -629,7 +631,7 @@ fun coalesceTranscript(
                         ChatDisplayItem.Attachment(
                             "attachment-$id",
                             attachmentId = id,
-                            name = inner.str("name")?.ifEmpty { null } ?: "Attachment",
+                            name = inner.str("name")?.ifEmpty { null } ?: L10n.text("android.chattranscript.attachment.040d2b36"),
                             mediaType = inner.str("mediaType") ?: inner.str("media_type"),
                             size = inner.safeLong("size"),
                         ),
@@ -657,7 +659,7 @@ fun coalesceTranscript(
                 items.add(
                     ChatDisplayItem.Failed(
                         "failed-${stamp(ev, items.size)}",
-                        inner.str("text") ?: "The turn failed",
+                        inner.str("text") ?: L10n.text("android.chattranscript.the_turn_failed.45783181"),
                     ),
                 )
             }
@@ -676,7 +678,7 @@ fun coalesceTranscript(
     flushThinking()
     // Tool logs are history; only the host knows whether a process lives.
     if (!running) {
-        closeRunningTools(failed = false, at = null, detail = "Ended without a tool result")
+        closeRunningTools(failed = false, at = null, detail = L10n.text("android.chattranscript.ended_without_a_tool_result.da8d3680"))
     }
     return items
 }

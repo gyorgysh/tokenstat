@@ -37,17 +37,17 @@ enum ClientLayoutPreference: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .automatic: return "Automatic"
-        case .sidebar: return "Sidebar"
-        case .tabs: return "Tabs"
+        case .automatic: return L10n.text("apple.clientlayout.automatic.d461a493")
+        case .sidebar: return L10n.text("apple.clientlayout.sidebar.f7efa7bc")
+        case .tabs: return L10n.text("apple.clientlayout.tabs.8e5ea509")
         }
     }
 
     var detail: String {
         switch self {
-        case .automatic: return "Sidebar when a keyboard or trackpad is attached and there is room."
-        case .sidebar: return "Always the sidebar, on this iPad."
-        case .tabs: return "Always the tab bar."
+        case .automatic: return L10n.text("apple.clientlayout.sidebar_when_a_keyboard_or_trackpad_is_att.936c310e")
+        case .sidebar: return L10n.text("apple.clientlayout.always_the_sidebar_on_this_ipad.b8da017a")
+        case .tabs: return L10n.text("apple.clientlayout.always_the_tab_bar.4c8a527c")
         }
     }
 }

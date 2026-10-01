@@ -683,9 +683,9 @@ struct ScopeChip: View {
         .padding(.horizontal, Theme.Space.s)
         .padding(.vertical, 3)
         .background(Theme.accentSoft, in: Capsule())
-        .help("Showing \(label)")
+        .help(L10n.text("apple.theme.showing_0.ee1f5b6a", "\(label)"))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Showing \(label)")
+        .accessibilityLabel(L10n.text("apple.theme.showing_0.ee1f5b6a", "\(label)"))
     }
 }
 
@@ -995,7 +995,7 @@ struct BusySpinner: View {
             .progressViewStyle(.circular)
             .controlSize(size)
             .frame(width: Self.side(size), height: Self.side(size))
-            .accessibilityLabel("Loading")
+            .accessibilityLabel(L10n.text("apple.theme.loading.dc380888"))
     }
 
     private static func side(_ size: ControlSize) -> CGFloat {
@@ -1015,14 +1015,14 @@ struct NoticeDismissButton: View {
     var action: () -> Void
 
     var body: some View {
-        Button("Dismiss notification", .dismiss, action: action)
+        Button(L10n.text("apple.theme.dismiss_notification.b7bb3f34"), .dismiss, action: action)
             .labelStyle(.iconOnly)
             .buttonStyle(.plain)
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
             .frame(width: 28, height: 28)
             .contentShape(Rectangle())
-            .help("Dismiss notification")
+            .help(L10n.text("apple.theme.dismiss_notification.b7bb3f34"))
     }
 }
 
@@ -1178,7 +1178,7 @@ enum FieldSaveState: Equatable {
 /// keystroke, then reverts later, is worse than a button that says it wrote.
 struct FieldSaveBar: View {
     var state: FieldSaveState
-    var saveTitle: String = "Save"
+    var saveTitle: String = L10n.text("common.save")
     var canSave: Bool = true
     var onSave: () -> Void
     var onCancel: () -> Void
@@ -1188,7 +1188,7 @@ struct FieldSaveBar: View {
             status
             Spacer(minLength: 0)
             if state == .dirty || state == .failed {
-                Button("Cancel", .dismiss, action: onCancel)
+                Button(L10n.text("common.cancel"), .dismiss, action: onCancel)
                     .buttonStyle(SecondaryButtonStyle())
                 Button(saveTitle, .save, action: onSave)
                     .buttonStyle(AccentButtonStyle())
@@ -1203,23 +1203,23 @@ struct FieldSaveBar: View {
         case .idle:
             EmptyView()
         case .dirty:
-            Text("Unsaved")
+            Text(L10n.text("apple.theme.unsaved.6250d572"))
                 .font(.caption.weight(.medium))
                 .foregroundStyle(Theme.warning)
         case .saving:
             HStack(spacing: 6) {
                 ProgressView()
                     .controlSize(.mini)
-                Text("Saving")
+                Text(L10n.text("apple.theme.saving.096b7362"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         case .saved:
-            Label("Saved", systemImage: "checkmark")
+            Label(L10n.text("apple.theme.saved.b5c120b3"), systemImage: "checkmark")
                 .font(.caption.weight(.medium))
                 .foregroundStyle(Theme.success)
         case .failed:
-            Text("Not saved")
+            Text(L10n.text("apple.theme.not_saved.22b3467c"))
                 .font(.caption.weight(.medium))
                 .foregroundStyle(Theme.danger)
         }
@@ -1406,7 +1406,7 @@ struct ToolbarIconButton: View {
 /// thing it is a bar of.
 struct ToolbarMenuButton<Content: View>: View {
     var systemImage: String = "ellipsis"
-    var help: String = "More"
+    var help: String = L10n.text("apple.theme.more.d47d7cb0")
     @ViewBuilder var content: () -> Content
 
     @State private var isHovering = false
@@ -1477,7 +1477,7 @@ struct InspectorChromeBar<Content: View, Accessory: View>: View {
 
     init(
         onClose: @escaping () -> Void,
-        closeLabel: String = "Close the inspector",
+        closeLabel: String = L10n.text("apple.theme.close_the_inspector.eddd7e3c"),
         @ViewBuilder accessory: @escaping () -> Accessory,
         @ViewBuilder content: @escaping () -> Content
     ) {
@@ -1530,7 +1530,7 @@ struct InspectorTitle: View {
 }
 
 extension InspectorChromeBar where Accessory == EmptyView {
-    init(onClose: @escaping () -> Void, closeLabel: String = "Close the inspector", @ViewBuilder content: @escaping () -> Content) {
+    init(onClose: @escaping () -> Void, closeLabel: String = L10n.text("apple.theme.close_the_inspector.eddd7e3c"), @ViewBuilder content: @escaping () -> Content) {
         self.init(onClose: onClose, closeLabel: closeLabel, accessory: { EmptyView() }, content: content)
     }
 }
@@ -1544,8 +1544,8 @@ struct InspectorCloseButton: View {
     let action: () -> Void
     /// Tooltip and VoiceOver label. Defaults to the inspector copy; a sheet
     /// passes its own so "Close" never announces as "close the inspector".
-    var help: String = "Close the inspector"
-    var label: String = "Close the inspector"
+    var help: String = L10n.text("apple.theme.close_the_inspector.eddd7e3c")
+    var label: String = L10n.text("apple.theme.close_the_inspector.eddd7e3c")
 
     @State private var isHovering = false
 
@@ -1955,7 +1955,7 @@ struct BrandCheckboxStyle: ToggleStyle {
         // value here somebody using VoiceOver could only learn the state by
         // changing it. `BrandToggleChip` in this file already says it.
         .accessibilityAddTraits(configuration.isOn ? [.isSelected] : [])
-        .accessibilityValue(configuration.isOn ? "On" : "Off")
+        .accessibilityValue(configuration.isOn ? L10n.text("apple.theme.on.13001175") : L10n.text("apple.theme.off.ca7981b4"))
     }
 }
 
@@ -2032,7 +2032,7 @@ struct SegmentedTabs<Value: Hashable>: View {
 extension SegmentedTabs where Value: RawRepresentable, Value.RawValue == String {
     /// The common case: an enum whose raw value is already the label.
     init(options: [Value], selection: Binding<Value>, comfortable: Bool = false) {
-        self.init(options: options, selection: selection, title: { $0.rawValue }, comfortable: comfortable)
+        self.init(options: options, selection: selection, title: { L10n.enumLabel($0) }, comfortable: comfortable)
     }
 }
 
@@ -2056,7 +2056,7 @@ struct BrandToggleChip: View {
             }
         }
         .accessibilityAddTraits(isOn ? [.isSelected] : [])
-        .accessibilityValue(isOn ? "On" : "Off")
+        .accessibilityValue(isOn ? L10n.text("apple.theme.on.13001175") : L10n.text("apple.theme.off.ca7981b4"))
     }
 }
 
@@ -2107,7 +2107,7 @@ struct TimeLimitChips: View {
                     onChange()
                 }
             }
-            ChoiceChip(title: "No limit", isSelected: noLimit) {
+            ChoiceChip(title: L10n.text("apple.theme.no_limit.f7fcff0d"), isSelected: noLimit) {
                 noLimit = true
                 onChange()
             }
@@ -2139,7 +2139,7 @@ struct ConcurrentChips: View {
                     onChange()
                 }
             }
-            ChoiceChip(title: "No cap", isSelected: isUncapped) {
+            ChoiceChip(title: L10n.text("apple.theme.no_cap.59db2115"), isSelected: isUncapped) {
                 countText = "0"
                 onChange()
             }
@@ -2244,12 +2244,12 @@ struct AppMenuPicker<Option: Hashable>: View {
     }
 
     private var panel: some View {
-        PickerPanel(title: title.isEmpty ? "Choose" : title, isPresented: $isPresented) {
+        PickerPanel(title: title.isEmpty ? L10n.text("apple.theme.choose.c7f93783") : title, isPresented: $isPresented) {
             PickerOptionList(
                 choices: options.map { PickerChoice(value: $0.value, label: $0.label) },
                 isSelected: { $0 == selection },
-                prompt: title.isEmpty ? "Filter" : "Filter \(title.lowercased())",
-                emptyMessage: "Nothing to choose from",
+                prompt: title.isEmpty ? L10n.text("apple.theme.filter.638e249f") : L10n.text("apple.theme.filter_0.50ee55cd", "\(title.lowercased())"),
+                emptyMessage: L10n.text("apple.theme.nothing_to_choose_from.8bc6d972"),
                 monospaced: false,
                 refresh: refresh,
                 pick: { value in
@@ -2274,7 +2274,7 @@ struct AppMenuPicker<Option: Hashable>: View {
                 Button {
                     Task { await refresh?() }
                 } label: {
-                    Label("Refresh list", systemImage: "arrow.clockwise")
+                    Label(L10n.text("apple.theme.refresh_list.3cf8d662"), systemImage: "arrow.clockwise")
                 }
             }
         } label: {

@@ -20,7 +20,7 @@ internal sealed class ChatOutbox(string directory)
 
     public List<QueuedChatMessage> Update(string key, Action<List<QueuedChatMessage>> change)
     {
-        if (key.Length != 64 || key.Any(c => !Uri.IsHexDigit(c))) throw new ArgumentException("Invalid outbox scope.");
+        if (key.Length != 64 || key.Any(c => !Uri.IsHexDigit(c))) throw new ArgumentException(L10n.Text("windows.chatoutbox.invalid_outbox_scope.a185ee16"));
         Directory.CreateDirectory(directory);
         using var gate = new FileStream(Path.Combine(directory, key + ".lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         var path = Path.Combine(directory, key + ".json");
@@ -28,16 +28,16 @@ internal sealed class ChatOutbox(string directory)
         string? original = null;
         if (File.Exists(path))
         {
-            if (new FileInfo(path).Length > 2 * 1024 * 1024) throw new IOException("Pending messages exceed the storage limit.");
+            if (new FileInfo(path).Length > 2 * 1024 * 1024) throw new IOException(L10n.Text("windows.chatoutbox.pending_messages_exceed_the_storage_limit.96844017"));
             original = File.ReadAllText(path);
             items = JsonSerializer.Deserialize<List<QueuedChatMessage>>(original)
-                ?? throw new IOException("Pending messages could not be read.");
+                ?? throw new IOException(L10n.Text("windows.chatoutbox.pending_messages_could_not_be_read.a95af222"));
         }
         change(items);
         if (items.Count > 20 || items.Select(item => item.Id).Distinct().Count() != items.Count)
-            throw new IOException("At most 20 messages can be queued in a conversation.");
+            throw new IOException(L10n.Text("windows.chatoutbox.at_most_20_messages_can_be_queued_in_a_con.12d25f8e"));
         var serialized = JsonSerializer.Serialize(items);
-        if (Encoding.UTF8.GetByteCount(serialized) > 2 * 1024 * 1024) throw new IOException("Pending messages exceed the storage limit.");
+        if (Encoding.UTF8.GetByteCount(serialized) > 2 * 1024 * 1024) throw new IOException(L10n.Text("windows.chatoutbox.pending_messages_exceed_the_storage_limit.96844017"));
         if (serialized != original)
         {
             var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -64,7 +64,7 @@ internal sealed class ChatOutbox(string directory)
             if (current is null || current.Id != expected.Id || current.AttemptedAt.HasValue ||
                 current.Text != expected.Text || current.Revision != expected.Revision ||
                 !current.Attachments.SequenceEqual(expected.Attachments))
-                throw new InvalidOperationException("The pending message changed in another window.");
+                throw new InvalidOperationException(L10n.Text("windows.chatoutbox.the_pending_message_changed_in_another_win.a82490bc"));
             items[0] = staged;
         });
         return staged;

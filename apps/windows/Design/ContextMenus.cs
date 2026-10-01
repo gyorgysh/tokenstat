@@ -41,7 +41,7 @@ internal static class ContextMenus
                 if (root is null) return;
                 try
                 {
-                    await new ContentDialog { XamlRoot = root, Title = "Action could not finish", Content = ex.Message, CloseButtonText = "Close" }.ShowAsync();
+                    await new ContentDialog { XamlRoot = root, Title = L10n.Text("windows.contextmenus.action_could_not_finish.4f7f3c7c"), Content = ex.Message, CloseButtonText = L10n.Text("common.close") }.ShowAsync();
                 }
                 catch { /* The owning window may have closed while the action was running. */ }
             }

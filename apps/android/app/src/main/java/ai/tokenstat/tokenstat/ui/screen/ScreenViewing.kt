@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.screen
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -27,14 +29,14 @@ object ScreenViewing {
         ) return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL, "Screen viewing", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CHANNEL, L10n.text("android.screenviewing.screen_viewing.8cc15f2a"), NotificationManager.IMPORTANCE_LOW)
         )
         manager.notify(
             ID,
             NotificationCompat.Builder(context, CHANNEL)
                 .setSmallIcon(R.drawable.ic_notification)
-                .setContentTitle("Watching $hostLabel")
-                .setContentText("The screen session is live and using data.")
+                .setContentTitle(L10n.text("android.screenviewing.watching_0.816f94dd", "${hostLabel}"))
+                .setContentText(L10n.text("android.screenviewing.the_screen_session_is_live_and_using_data.5f595ae6"))
                 .setOngoing(true)
                 .build(),
         )

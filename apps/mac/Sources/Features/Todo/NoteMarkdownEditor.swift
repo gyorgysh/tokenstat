@@ -11,7 +11,7 @@ struct NoteMarkdownEditor: View {
             #if os(macOS)
             LegacyMacNoteEditor(text: $text)
             #else
-            TextEditor(text: $text).accessibilityLabel("Note body")
+            TextEditor(text: $text).accessibilityLabel(L10n.text("apple.notemarkdowneditor.note_body.39ff9bdc"))
             #endif
         }
     }
@@ -32,15 +32,15 @@ private struct SelectedNoteEditor: View {
                     Button(style.title, .edit) { apply(style) }
                 }
             } label: {
-                Label("Format", systemImage: "textformat")
+                Label(L10n.text("apple.notemarkdowneditor.format.2f343666"), systemImage: "textformat")
             }
             .fixedSize()
             TextEditor(text: $text, selection: $selection)
                 .focused($writing)
-                .accessibilityLabel("Note body")
+                .accessibilityLabel(L10n.text("apple.notemarkdowneditor.note_body.39ff9bdc"))
                 .overlay(alignment: .topLeading) {
                     if text.isEmpty {
-                        Text("Note").foregroundStyle(.tertiary)
+                        Text(L10n.text("apple.notemarkdowneditor.note.d8da2c49")).foregroundStyle(.tertiary)
                             .padding(.horizontal, Theme.Space.xs)
                             .padding(.vertical, Theme.Space.s)
                             .allowsHitTesting(false)
@@ -72,7 +72,7 @@ private struct SelectedNoteEditor: View {
         }
         let edit = style.edit(text, selection: range)
         history.replace((text as NSString).replacingCharacters(in: edit.range, with: edit.replacement), manager: undoManager)
-        undoManager?.setActionName("Format Note")
+        undoManager?.setActionName(L10n.text("apple.notemarkdowneditor.format_note.20003a9e"))
         if let selected = Range(edit.selection, in: text) {
             selection = TextSelection(range: selected)
         }
@@ -111,7 +111,7 @@ private struct LegacyMacNoteEditor: View {
                     Button(style.title, .edit) { target.apply(style) }
                 }
             } label: {
-                Label("Format", systemImage: "textformat")
+                Label(L10n.text("apple.notemarkdowneditor.format.2f343666"), systemImage: "textformat")
             }
             .fixedSize()
             LegacyMacNoteSurface(text: $text, target: target)
@@ -130,7 +130,7 @@ final class MacNoteFormattingTarget {
         editor.textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
         editor.didChangeText()
         editor.setSelectedRange(edit.selection)
-        editor.undoManager?.setActionName("Format Note")
+        editor.undoManager?.setActionName(L10n.text("apple.notemarkdowneditor.format_note.20003a9e"))
         editor.window?.makeFirstResponder(editor)
     }
 }
@@ -150,7 +150,7 @@ private struct LegacyMacNoteSurface: NSViewRepresentable {
         editor.textContainerInset = NSSize(width: 4, height: 8)
         editor.isHorizontallyResizable = false
         editor.textContainer?.widthTracksTextView = true
-        editor.setAccessibilityLabel("Note body")
+        editor.setAccessibilityLabel(L10n.text("apple.notemarkdowneditor.note_body.39ff9bdc"))
         scroll.drawsBackground = false
         editor.string = text
         editor.delegate = context.coordinator

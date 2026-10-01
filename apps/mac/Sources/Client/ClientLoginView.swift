@@ -35,7 +35,7 @@ struct ClientLoginView: View {
             VStack(spacing: Theme.Space.m) {
                 LogoMark(size: 52)
                 Wordmark(size: 28, fills: false, showsMark: false)
-                Text("Your coding agents, projects, and AI usage. Together, wherever you are.")
+                Text(L10n.text("apple.clientloginview.your_coding_agents_projects_and_ai_usage_t.6cfcf32f"))
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -50,7 +50,7 @@ struct ClientLoginView: View {
                 } else {
                     if account.deletionConfirmed {
                         Label {
-                            Text("Your account was deleted. This device is signed out, and there is no data left to restore.")
+                            Text(L10n.text("apple.clientloginview.your_account_was_deleted_this_device_is_si.8720581b"))
                         } icon: {
                             Image(systemName: "trash")
                         }
@@ -67,14 +67,13 @@ struct ClientLoginView: View {
                     Button {
                         account.signIn()
                     } label: {
-                        ActionIcon.signIn.label("Sign in")
+                        ActionIcon.signIn.label(L10n.text("common.sign_in"))
                             .labelStyle(ActionLabelStyle())
                             .frame(maxWidth: .infinity)
                     }
                     .clientProminentStyle()
                     .controlSize(.large)
-                    Text("No password to make. Signing in with GitHub, Google, X or Apple "
-                        + "creates your account the first time.")
+                    Text(L10n.text("apple.clientloginview.no_password_to_make_signing_in_with_github.06825264"))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -86,7 +85,7 @@ struct ClientLoginView: View {
                     // all, and saying which is what stops somebody trying a
                     // password they never typed.
                     Text(connectivity?.isOffline == true
-                        ? "This device is offline. Sign in once it is back on the internet."
+                        ? L10n.text("apple.clientloginview.this_device_is_offline_sign_in_once_it_is.cd1bb1f0")
                         : message)
                         .font(ClientType.caption)
                         .foregroundStyle(Theme.danger)
@@ -96,17 +95,17 @@ struct ClientLoginView: View {
                 // A way back to the intro, for anyone who skipped it and then
                 // wondered what this is. Cheap, and it means Skip is not a
                 // one-way door.
-                Button("What is tokenstat?", .help) { hasOnboarded = false }
+                Button(L10n.text("apple.clientloginview.what_is_tokenstat.b2e003ed"), .help) { hasOnboarded = false }
                     .font(ClientType.label)
                     .padding(.top, Theme.Space.xs)
 
                 // Signing in creates the account, so the two documents that
                 // govern it belong on this screen and not only in Settings.
                 HStack(spacing: 4) {
-                    Text("By signing in you accept the")
-                    legal("Terms", url: ClientWebPages.terms())
-                    Text("and")
-                    legal("Privacy policy", url: ClientWebPages.privacy())
+                    Text(L10n.text("apple.clientloginview.by_signing_in_you_accept_the.ba0bbbf2"))
+                    legal(L10n.text("apple.clientloginview.terms.ede54899"), url: ClientWebPages.terms())
+                    Text(L10n.text("apple.clientloginview.and.6201111b"))
+                    legal(L10n.text("apple.clientloginview.privacy_policy.ba445cff"), url: ClientWebPages.privacy())
                 }
                 .font(ClientType.caption)
                 .foregroundStyle(.tertiary)
@@ -147,12 +146,12 @@ struct ClientLoginView: View {
     private func waiting(_ pending: DeviceLogin) -> some View {
         VStack(spacing: Theme.Space.s) {
             ProgressView()
-            Text("Waiting for approval")
+            Text(L10n.text("apple.clientloginview.waiting_for_approval.10c5739b"))
                 .font(ClientType.screenTitle)
             // The network notice replaces the instruction rather than stacking
             // under it: while there is no connection, "approve on the website"
             // is advice that cannot be followed.
-            Text(account.signInNotice ?? "Approve this device on tokenstat.ai. This screen updates by itself.")
+            Text(account.signInNotice ?? L10n.text("apple.clientloginview.approve_this_device_on_tokenstat_ai_this_s.bad8690a"))
                 .font(ClientType.label)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -163,11 +162,11 @@ struct ClientLoginView: View {
                 .padding(.vertical, Theme.Space.s)
                 .padding(.horizontal, Theme.Space.m)
                 .background(Theme.accentSoft, in: .rect(cornerRadius: 10))
-                .accessibilityLabel("Code \(pending.userCode.map(String.init).joined(separator: " "))")
+                .accessibilityLabel(L10n.text("apple.clientloginview.code_0.e5813712", "\(pending.userCode.map(String.init).joined(separator: " "))"))
             HStack(spacing: Theme.Space.s) {
-                Button("Open the page", .external) { account.presentSignInPage() }
+                Button(L10n.text("apple.clientloginview.open_the_page.911fa06e"), .external) { account.presentSignInPage() }
                     .clientGlassStyle()
-                Button("Cancel", .dismiss) { account.cancelSignIn() }
+                Button(L10n.text("common.cancel"), .dismiss) { account.cancelSignIn() }
                     .clientGlassStyle()
             }
             .padding(.top, 2)

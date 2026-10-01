@@ -235,14 +235,14 @@ enum RailPlace: String, CaseIterable, Identifiable, Hashable {
 
     var label: String {
         switch self {
-        case .home: return "Home"
-        case .projects: return "Projects"
-        case .tasks: return "Tasks"
-        case .notes: return "Notes"
-        case .automations: return "Automations"
-        case .insights: return "Insights"
-        case .devices: return "Devices"
-        case .ssh: return "SSH"
+        case .home: return L10n.text("common.home")
+        case .projects: return L10n.text("common.projects")
+        case .tasks: return L10n.text("common.tasks")
+        case .notes: return L10n.text("common.notes")
+        case .automations: return L10n.text("common.automations")
+        case .insights: return L10n.text("common.insights")
+        case .devices: return L10n.text("common.devices")
+        case .ssh: return L10n.text("apple.shellchrome.ssh.01c4d3c2")
         }
     }
 
@@ -336,7 +336,7 @@ struct ColumnResizeHandle: View {
     @Binding var liveWidth: Double?
     let range: ClosedRange<Double>
     var showsLine: Bool = true
-    var help: String = "Drag to resize"
+    var help: String = L10n.text("apple.shellchrome.drag_to_resize.31b2f1cd")
 
     @State private var start: Double?
     @State private var cursorPushed = false
@@ -440,14 +440,14 @@ struct ProjectHeader: View {
             Image(systemName: folder.isRemote ? "network" : "folder.fill")
                 .font(Theme.fixed(11, weight: .semibold))
                 .foregroundStyle(Theme.accent)
-            Text(folder.isRemote ? "\(folder.machineLabel ?? "Remote") / \(folder.name)" : folder.name)
+            Text(folder.isRemote ? "\(folder.machineLabel ?? L10n.text("apple.shellchrome.remote.ffa98e02")) / \(folder.name)" : folder.name)
                 .font(Theme.fit(13, weight: .semibold))
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
         .frame(maxWidth: 160, alignment: .leading)
         .fixedSize(horizontal: true, vertical: false)
-        .help(folder.isRemote ? "\(folder.machineLabel ?? "Remote machine") · \(folder.path)" : folder.path)
+        .help(folder.isRemote ? "\(folder.machineLabel ?? L10n.text("apple.shellchrome.remote_machine.d9dd1af3")) · \(folder.path)" : folder.path)
     }
 
     private var tabs: [ChromeTab] {
@@ -539,7 +539,7 @@ struct ChromeTabStrip: View, Equatable {
                 .accessibilityAddTraits(tab.id == selected ? .isSelected : [])
             }
         } label: {
-            Label(current?.label ?? "More", systemImage: current?.symbol ?? "ellipsis")
+            Label(current?.label ?? L10n.text("apple.shellchrome.more.d47d7cb0"), systemImage: current?.symbol ?? "ellipsis")
                 .font(Theme.fit(12, weight: .medium))
                 .foregroundStyle(current == nil ? Theme.controlGlyph : Theme.accent)
         }
@@ -548,8 +548,8 @@ struct ChromeTabStrip: View, Equatable {
         .padding(.horizontal, 7)
         .frame(height: 26)
         .background(Capsule().fill(current == nil ? Color.clear : Theme.rowSelected))
-        .help("Switch section")
-        .accessibilityLabel(current.map { "\($0.label), switch section" } ?? "More sections")
+        .help(L10n.text("apple.shellchrome.switch_section.936d958d"))
+        .accessibilityLabel(current.map { L10n.text("apple.shellchrome.0_switch_section.dac85de8", "\($0.label)") } ?? L10n.text("apple.shellchrome.more_sections.a8e35e36"))
     }
 
     private func strip(counts: Bool, labelled: @escaping (Int, Bool) -> Bool) -> some View {

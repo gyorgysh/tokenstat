@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.editor
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -188,7 +190,7 @@ class EditorStore {
                 }) as JsonObject
             }.getOrNull()?.optStr("content")
             if (host == null) {
-                tab.error = "Could not re-read this file on that computer, so the save waits. Your edits are kept."
+                tab.error = L10n.text("android.codeeditor.could_not_re_read_this_file_on_that_comput.dacb7165")
                 return
             }
             val draft = tab.text
@@ -210,7 +212,7 @@ class EditorStore {
             tab.markSaved(draft)
             onSavedFile()
         } catch (e: Exception) {
-            tab.error = TunnelCopy.display(e.message ?: "The request failed.", hostLabel)
+            tab.error = TunnelCopy.display(e.message ?: L10n.text("android.codeeditor.the_request_failed.db4fb447"), hostLabel)
         } finally {
             tab.saving = false
         }
@@ -235,7 +237,7 @@ class EditorStore {
                 tab.markSaved(sent)
                 onSavedFile()
             } catch (e: Exception) {
-                tab.error = TunnelCopy.display(e.message ?: "The request failed.", hostLabel)
+                tab.error = TunnelCopy.display(e.message ?: L10n.text("android.codeeditor.the_request_failed.db4fb447"), hostLabel)
             } finally {
                 tab.saving = false
             }
@@ -281,7 +283,7 @@ fun EditorDialog(
             if (content != null) {
                 store.adoptSaved(EditorKey(peer, workspace, open.path), content)
             } else {
-                loadError = TunnelCopy.display("The request failed.", hostLabel)
+                loadError = TunnelCopy.display(L10n.text("android.codeeditor.the_request_failed.db4fb447"), hostLabel)
             }
         }
         loading = false
@@ -302,7 +304,7 @@ fun EditorDialog(
             if (loading) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     CircularProgressIndicator()
-                    Text("Opening file", color = LocalTsColors.current.textSecondary)
+                    Text(L10n.text("android.codeeditor.opening_file.ea83b20f"), color = LocalTsColors.current.textSecondary)
                 }
             } else if (selected != null) {
                 EditorPane(
@@ -315,7 +317,7 @@ fun EditorDialog(
                 )
             } else {
                 Text(
-                    "No file open. Open one from the file list or a diff.",
+                    L10n.text("android.codeeditor.no_file_open_open_one_from_the_file_list_o.bb794e6b"),
                     style = TsType.caption,
                     color = LocalTsColors.current.textSecondary,
                 )
@@ -335,7 +337,7 @@ private fun EditorTabStrip(
 ) {
     var confirming: EditorTab? by remember { mutableStateOf(null) }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-        TsSecondaryButton(label = "Files", small = true, onClick = onFiles)
+        TsSecondaryButton(label = L10n.text("common.files"), small = true, onClick = onFiles)
         tabs.forEach { tab ->
             ChoiceChip(
                 (if (tab.isDirty) "· " else "") + tab.name.ifBlank { tab.key.path },
@@ -351,15 +353,15 @@ private fun EditorTabStrip(
     if (closing != null) {
         AlertDialog(
             onDismissRequest = { confirming = null },
-            title = { Text("Discard changes?") },
-            text = { Text("${closing.key.path} has edits that are not saved on that computer.") },
+            title = { Text(L10n.text("android.codeeditor.discard_changes.85bcf416")) },
+            text = { Text(L10n.text("android.codeeditor.0_has_edits_that_are_not_saved_on_that_com.97573681", "${closing.key.path}")) },
             confirmButton = {
                 TextButton(onClick = {
                     onClose(closing)
                     confirming = null
-                }) { Text("Discard") }
+                }) { Text(L10n.text("android.codeeditor.discard.eb1a70e3")) }
             },
-            dismissButton = { TextButton(onClick = { confirming = null }) { Text("Keep editing") } },
+            dismissButton = { TextButton(onClick = { confirming = null }) { Text(L10n.text("android.codeeditor.keep_editing.e76fd2ad")) } },
         )
     }
 }
@@ -414,7 +416,7 @@ private fun EditorPane(
             // Colour is not worth an error banner. The file is still
             // editable and still saveable without it.
             tab.spans = emptyList()
-            tab.highlightNote = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+            tab.highlightNote = TunnelCopy.display(it.message ?: L10n.text("android.codeeditor.the_request_failed.db4fb447"), hostLabel)
             tab.spansVersion += 1
         }
     }
@@ -447,7 +449,7 @@ private fun EditorPane(
             Column(Modifier.weight(1f)) {
                 Text(fileName, style = TsType.mono(13), color = colors.textPrimary, maxLines = 1)
                 Text(
-                    folderName.ifBlank { "Back" },
+                    folderName.ifBlank { L10n.text("common.back") },
                     style = TsType.caption,
                     color = colors.accent,
                     maxLines = 1,
@@ -458,9 +460,9 @@ private fun EditorPane(
             } else {
                 Text(
                     when {
-                        tab.error != null -> "Not saved"
-                        tab.savedTick -> "Saved"
-                        tab.isDirty -> "Unsaved"
+                        tab.error != null -> L10n.text("android.codeeditor.not_saved.22b3467c")
+                        tab.savedTick -> L10n.text("android.codeeditor.saved.b5c120b3")
+                        tab.isDirty -> L10n.text("android.codeeditor.unsaved.6250d572")
                         else -> ""
                     },
                     style = TsType.caption,
@@ -473,7 +475,7 @@ private fun EditorPane(
                 )
             }
             IconButton(onClick = { showFind = !showFind }) {
-                Icon(ActionIcon.Search.vector, "Find in file", tint = colors.controlGlyph)
+                Icon(ActionIcon.Search.vector, L10n.text("android.codeeditor.find_in_file.214c422e"), tint = colors.controlGlyph)
             }
         }
         if (tab.error != null) Banner(tab.error!!, BannerSeverity.DANGER)
@@ -568,7 +570,7 @@ private fun EditorPane(
                 find.refresh(tab.text)
                 syncField(tab.text)
             },
-            saveTitle = "Save",
+            saveTitle = L10n.text("common.save"),
             canSave = tab.isDirty && !tab.saving && tab.conflictHost == null,
         )
     }
@@ -627,7 +629,7 @@ private fun EditorFindBar(
                         find.query = it
                     },
                     modifier = Modifier.weight(1f),
-                    label = { Text("Find in file") },
+                    label = { Text(L10n.text("android.codeeditor.find_in_file.214c422e")) },
                     singleLine = true,
                 )
                 find.countLabel?.let {
@@ -635,16 +637,16 @@ private fun EditorFindBar(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-                TsSecondaryButton(label = "Previous", small = true, enabled = find.canNavigate, onClick = {
+                TsSecondaryButton(label = L10n.text("android.codeeditor.previous.a57b08a4"), small = true, enabled = find.canNavigate, onClick = {
                     find.goPrevious()
                     onNavigate(find.current)
                 })
-                TsSecondaryButton(label = "Next", small = true, enabled = find.canNavigate, onClick = {
+                TsSecondaryButton(label = L10n.text("common.next"), small = true, enabled = find.canNavigate, onClick = {
                     find.goNext()
                     onNavigate(find.current)
                 })
                 TsSecondaryButton(
-                    label = if (replacing) "Hide replace" else "Replace",
+                    label = if (replacing) L10n.text("android.codeeditor.hide_replace.7d07b712") else L10n.text("android.codeeditor.replace.95e15439"),
                     small = true,
                     onClick = {
                         replacing = !replacing
@@ -652,7 +654,7 @@ private fun EditorFindBar(
                     },
                 )
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = onClose) { Text("Close") }
+                TextButton(onClick = onClose) { Text(L10n.text("common.close")) }
             }
             if (replacing) {
                 OutlinedTextField(
@@ -662,14 +664,14 @@ private fun EditorFindBar(
                         find.replaceText = it
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Replace with") },
+                    label = { Text(L10n.text("android.codeeditor.replace_with.8382d317")) },
                     singleLine = true,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                    TsSecondaryButton(label = "Replace", small = true, enabled = find.canReplace, onClick = onReplaceCurrent)
-                    TsSecondaryButton(label = "Replace all", small = true, enabled = find.canReplace, onClick = onReplaceAll)
+                    TsSecondaryButton(label = L10n.text("android.codeeditor.replace.95e15439"), small = true, enabled = find.canReplace, onClick = onReplaceCurrent)
+                    TsSecondaryButton(label = L10n.text("android.codeeditor.replace_all.2ebcba96"), small = true, enabled = find.canReplace, onClick = onReplaceAll)
                     Text(
-                        "Replace all is one undo, in this file only.",
+                        L10n.text("android.codeeditor.replace_all_is_one_undo_in_this_file_only.f9398675"),
                         style = TsType.caption,
                         color = colors.textSecondary,
                     )
@@ -693,21 +695,21 @@ private fun EditorConflictCard(
     TsCard {
         Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             Text(
-                "This file changed on that computer.",
+                L10n.text("android.codeeditor.this_file_changed_on_that_computer.c4576a6e"),
                 style = TsType.body.copy(fontWeight = FontWeight.SemiBold),
                 color = colors.textPrimary,
             )
             Text(
                 buildString {
-                    append("Yours has $mineLines lines, that computer has $hostLines. Saving is off until you choose.")
-                    if (firstDifference != null) append(" First difference: line $firstDifference.")
+                    append(L10n.text("android.codeeditor.yours_has_0_lines_that_computer_has_1_savi.66339948", "${mineLines}", "${hostLines}"))
+                    if (firstDifference != null) append(L10n.text("android.codeeditor.first_difference_line_0.42e7b04c", "${firstDifference}"))
                 },
                 style = TsType.caption,
                 color = colors.textSecondary,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                TsSecondaryButton(label = "Reload computer", small = true, onClick = onReload)
-                TsAccentButton(label = "Keep my draft", small = true, onClick = onKeep)
+                TsSecondaryButton(label = L10n.text("android.codeeditor.reload_computer.2bdc7487"), small = true, onClick = onReload)
+                TsAccentButton(label = L10n.text("android.codeeditor.keep_my_draft.cdb80bb9"), small = true, onClick = onKeep)
             }
         }
     }

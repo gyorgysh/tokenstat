@@ -134,8 +134,7 @@ internal sealed class WorkspacePushSession
         }
         catch (Exception ex)
         {
-            Error = "The push outcome has not been confirmed. "
-                + "Check its outcome before starting another. " + ex.Message;
+            Error = L10n.Text("windows.workspacepush.the_push_outcome_has_not_been_confirmed_ch.128c6a9f", $"{ex.Message}");
         }
         finally
         {
@@ -164,8 +163,7 @@ internal sealed class WorkspacePushSession
             if (receipt is null)
             {
                 CanRetry = true;
-                Error = "This computer has no receipt for the submitted push. "
-                    + "You can retry the same submission.";
+                Error = L10n.Text("windows.workspacepush.this_computer_has_no_receipt_for_the_submi.cadba34a");
             }
             else if (!IsFinished(Format.Text(receipt, "state")))
             {
@@ -220,8 +218,7 @@ internal sealed class WorkspacePushSession
         }
         catch (Exception ex)
         {
-            Error = "The push outcome has not been confirmed. "
-                + "Check its outcome before starting another. " + ex.Message;
+            Error = L10n.Text("windows.workspacepush.the_push_outcome_has_not_been_confirmed_ch.128c6a9f", $"{ex.Message}");
         }
         finally
         {
@@ -283,31 +280,31 @@ internal static class WorkspacePushDialog
             string primary;
             if (submitted)
             {
-                primary = "Check outcome";
+                primary = L10n.Text("windows.workspacepush.check_outcome.9200a2fd");
             }
             else if (done)
             {
-                primary = "Done";
+                primary = L10n.Text("common.done");
             }
             else if (session.Review is null)
             {
-                primary = "Check branch";
+                primary = L10n.Text("windows.workspacepush.check_branch.8128e71f");
             }
             else
             {
-                primary = session.RemoteHead is null ? "Publish branch" : "Push branch";
+                primary = session.RemoteHead is null ? L10n.Text("windows.workspacepush.publish_branch.e1f5968c") : L10n.Text("windows.workspacepush.push_branch.97deb7c0");
             }
             var dialog = new ContentDialog
             {
-                Title = "Push branch",
+                Title = L10n.Text("windows.workspacepush.push_branch.97deb7c0"),
                 Content = BuildBody(folderName, session),
                 PrimaryButtonText = primary,
-                CloseButtonText = (succeeded || session.IsDone) && !submitted ? null : "Close",
+                CloseButtonText = (succeeded || session.IsDone) && !submitted ? null : L10n.Text("common.close"),
                 DefaultButton = ContentDialogButton.Primary,
             };
             if (submitted && session.CanRetry)
             {
-                dialog.SecondaryButtonText = "Retry same push";
+                dialog.SecondaryButtonText = L10n.Text("windows.workspacepush.retry_same_push.d4ab8f02");
             }
             var result = await Chrome.ShowDialog(owner, dialog);
             if (result == ContentDialogResult.None)
@@ -366,7 +363,7 @@ internal static class WorkspacePushDialog
             {
                 stack.Children.Add(new TextBlock
                 {
-                    Text = "To " + session.Destination,
+                    Text = L10n.Text("windows.workspacepush.to_0.e7bc111d", $"{session.Destination}"),
                     Opacity = 0.7,
                     TextWrapping = TextWrapping.Wrap,
                 });
@@ -386,7 +383,7 @@ internal static class WorkspacePushDialog
             {
                 stack.Children.Add(new TextBlock
                 {
-                    Text = "This branch is up to date.",
+                    Text = L10n.Text("windows.workspacepush.this_branch_is_up_to_date.01b49ce3"),
                     Foreground = Theme.AccentBrush,
                     TextWrapping = TextWrapping.Wrap,
                 });
@@ -395,7 +392,7 @@ internal static class WorkspacePushDialog
             {
                 stack.Children.Add(new TextBlock
                 {
-                    Text = "No outgoing commits. The remote branch is ahead.",
+                    Text = L10n.Text("windows.workspacepush.no_outgoing_commits_the_remote_branch_is_a.7072ceca"),
                     TextWrapping = TextWrapping.Wrap,
                 });
             }
@@ -403,7 +400,7 @@ internal static class WorkspacePushDialog
             {
                 stack.Children.Add(new TextBlock
                 {
-                    Text = $"Publish this branch to {Format.Text(session.Review, "remote")}.",
+                    Text = L10n.Text("windows.workspacepush.publish_this_branch_to_0.e623bfa9", $"{Format.Text(session.Review, "remote")}"),
                     TextWrapping = TextWrapping.Wrap,
                 });
             }
@@ -411,7 +408,7 @@ internal static class WorkspacePushDialog
             {
                 stack.Children.Add(new TextBlock
                 {
-                    Text = $"{count} {(count == 1 ? "commit" : "commits")} to push",
+                    Text = L10n.Text("windows.workspacepush.0_1_to_push.190b18e2", $"{count}", $"{(count == 1 ? L10n.Text("windows.workspacepush.commit.9505cacb") : L10n.Text("windows.workspacepush.commits.02686016"))}"),
                     TextWrapping = TextWrapping.Wrap,
                 });
             }
@@ -419,7 +416,7 @@ internal static class WorkspacePushDialog
             {
                 stack.Children.Add(new TextBlock
                 {
-                    Text = "The computer will check whether the remote branch can accept this commit.",
+                    Text = L10n.Text("windows.workspacepush.the_computer_will_check_whether_the_remote.2c0a07ce"),
                     TextWrapping = TextWrapping.Wrap,
                 });
             }
@@ -427,7 +424,7 @@ internal static class WorkspacePushDialog
             {
                 stack.Children.Add(new TextBlock
                 {
-                    Text = "This will also set the branch's tracking destination.",
+                    Text = L10n.Text("windows.workspacepush.this_will_also_set_the_branch_s_tracking_d.95dfeac0"),
                     FontSize = 12,
                     Opacity = 0.7,
                     TextWrapping = TextWrapping.Wrap,
@@ -448,7 +445,7 @@ internal static class WorkspacePushDialog
         {
             stack.Children.Add(new TextBlock
             {
-                Text = session.SubmittedOperationId is null ? "Checking the branch" : "Checking push",
+                Text = session.SubmittedOperationId is null ? L10n.Text("windows.workspacepush.checking_the_branch.3733503a") : L10n.Text("windows.workspacepush.checking_push.00fa6ce0"),
                 Opacity = 0.7,
             });
             stack.Children.Add(new ProgressRing { IsActive = true });

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.automations
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
 import ai.tokenstat.tokenstat.ui.chrome.OwnSectionHeader
 
@@ -186,7 +188,7 @@ fun AutomationsScreen(
             loaded = true
             error = null
         }.onFailure {
-            error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+            error = TunnelCopy.display(it.message ?: L10n.text("android.automations.the_request_failed.db4fb447"), hostLabel)
         }
         runCatching {
             model.workspaceSection(peer, "automation.runs", buildJsonObject {})
@@ -213,22 +215,22 @@ fun AutomationsScreen(
                 put("id", job.id)
             })
         }.onSuccess { load() }
-            .onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+            .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.automations.the_request_failed.db4fb447"), hostLabel) }
         working = false
     }
 
     suspend fun confirmRun(outcome: AutomationRunOutcome, job: AutomationJob): Boolean {
         if (outcome.operationID != pendingLaunches[job.id]) {
-            error = "The computer returned a different run. Check this job again."
+            error = L10n.text("android.automations.the_computer_returned_a_different_run_chec.56b93a0a")
             return false
         }
         if (outcome.run == null) {
-            error = "The computer accepted this request but has not recorded its run yet. Check again or retry the same request."
+            error = L10n.text("android.automations.the_computer_accepted_this_request_but_has.582c4fe2")
             return false
         }
         pendingLaunches = pendingLaunches - job.id
         retryableLaunches = retryableLaunches - job.id
-        notice = "Started ${job.name}."
+        notice = L10n.text("android.automations.started_0.8f95ec71", "${job.name}")
         error = null
         load()
         return true
@@ -252,7 +254,7 @@ fun AutomationsScreen(
             }
             retryableLaunches = retryableLaunches + job.id
             error = TunnelCopy.display(
-                "The computer did not confirm this run. Check it before starting another. ${e.message ?: ""}".trim(),
+                L10n.text("android.automations.the_computer_did_not_confirm_this_run_chec.562edaf9", "${e.message ?: ""}").trim(),
                 hostLabel,
             )
         } finally {
@@ -266,11 +268,11 @@ fun AutomationsScreen(
             working = true
             try {
                 model.workspaceSection(peer, "automation.run", buildJsonObject { put("id", job.id) })
-                notice = "Started ${job.name}."
+                notice = L10n.text("android.automations.started_0.8f95ec71", "${job.name}")
                 error = null
                 load()
             } catch (e: Exception) {
-                error = TunnelCopy.display(e.message ?: "The request failed.", hostLabel)
+                error = TunnelCopy.display(e.message ?: L10n.text("android.automations.the_request_failed.db4fb447"), hostLabel)
             } finally {
                 working = false
             }
@@ -293,12 +295,12 @@ fun AutomationsScreen(
             if (element is JsonNull) {
                 retryableLaunches = retryableLaunches + job.id
                 error = null
-                notice = "The computer has no run receipt yet. Retry run uses the same request."
+                notice = L10n.text("android.automations.the_computer_has_no_run_receipt_yet_retry.bb1e0fd1")
             } else {
                 confirmRun(AutomationRunOutcome.parse(element as JsonObject), job)
             }
         } catch (e: Exception) {
-            error = TunnelCopy.display(e.message ?: "The request failed.", hostLabel)
+            error = TunnelCopy.display(e.message ?: L10n.text("android.automations.the_request_failed.db4fb447"), hostLabel)
         } finally {
             working = false
         }
@@ -317,11 +319,11 @@ fun AutomationsScreen(
         runCatching {
             model.workspaceSection(peer, "automation.kill", buildJsonObject { put("id", run.id) })
         }.onSuccess {
-            notice = "Stopped ${run.name}."
+            notice = L10n.text("android.automations.stopped_0.6cebd065", "${run.name}")
             error = null
             load()
         }.onFailure {
-            error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+            error = TunnelCopy.display(it.message ?: L10n.text("android.automations.the_request_failed.db4fb447"), hostLabel)
         }
         working = false
     }
@@ -333,11 +335,11 @@ fun AutomationsScreen(
             model.workspaceSection(peer, "automation.remove", buildJsonObject { put("id", job.id) })
         }.onSuccess {
             dropJob(job.id)
-            notice = "Deleted ${job.name}."
+            notice = L10n.text("android.automations.deleted_0.4118427c", "${job.name}")
             error = null
             load()
         }.onFailure {
-            error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+            error = TunnelCopy.display(it.message ?: L10n.text("android.automations.the_request_failed.db4fb447"), hostLabel)
         }
         working = false
     }
@@ -354,11 +356,11 @@ fun AutomationsScreen(
             queue = AutomationQueue.parse(element)
             queueDraft = QueueDraft.fromQueue(queue)
             justSavedQueue = true
-            notice = "Scheduler saved."
+            notice = L10n.text("android.automations.scheduler_saved.4e10688a")
             error = null
         }.onFailure {
             justSavedQueue = false
-            error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+            error = TunnelCopy.display(it.message ?: L10n.text("android.automations.the_request_failed.db4fb447"), hostLabel)
         }
         working = false
     }
@@ -530,28 +532,28 @@ fun AutomationsScreen(
             }
         }
         val targetRun = if (pending is AutomationConfirm.Stop) runs.firstOrNull { it.id == pending.runID } else null
-        val name = job?.name?.ifBlank { "this job" } ?: "this job"
-        val place = folderName.ifBlank { "this folder" }
+        val name = job?.name?.ifBlank { L10n.text("android.automations.this_job.c627fafe") } ?: L10n.text("android.automations.this_job.c627fafe")
+        val place = folderName.ifBlank { L10n.text("android.automations.this_folder.9d6325c8") }
         when (pending) {
             is AutomationConfirm.Run -> if (job != null) JobConfirmDialog(
-                title = "Run $name?",
+                title = L10n.text("android.automations.run_0.52ecce8a", "${name}"),
                 message = JobCopy.run(name, place, hostLabel),
-                confirmLabel = "Run",
+                confirmLabel = L10n.text("common.run"),
                 onConfirm = { scope.launch { run(job) } },
                 onDismiss = { confirm = null },
             )
             is AutomationConfirm.Stop -> if (targetRun != null) JobConfirmDialog(
-                title = "Stop $name?",
+                title = L10n.text("android.automations.stop_0.0d85fcc3", "${name}"),
                 message = JobCopy.stop(name, place, hostLabel),
-                confirmLabel = "Stop",
+                confirmLabel = L10n.text("common.stop"),
                 destructive = true,
                 onConfirm = { scope.launch { stop(targetRun) } },
                 onDismiss = { confirm = null },
             )
             is AutomationConfirm.Delete -> if (job != null) JobConfirmDialog(
-                title = "Delete $name?",
-                message = "The schedule goes with it. Runs it already produced stay.",
-                confirmLabel = "Delete",
+                title = L10n.text("android.automations.delete_0.dc6c5ae4", "${name}"),
+                message = L10n.text("android.automations.the_schedule_goes_with_it_runs_it_already.a4efc8fe"),
+                confirmLabel = L10n.text("common.delete"),
                 destructive = true,
                 onConfirm = { scope.launch { remove(job) } },
                 onDismiss = { confirm = null },
@@ -604,21 +606,21 @@ private fun AutomationListPage(
     }
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Space.s)) {
         JobScreenHeader(
-            title = "Automations",
+            title = L10n.text("common.automations"),
             subtitle = folderCaption,
             onBack = onBack,
             actions = {
                 Box {
-                    IconButton(onClick = { newMenu = true }) { Icon(ActionIcon.Create.vector, "New automation", tint = LocalTsColors.current.accent) }
+                    IconButton(onClick = { newMenu = true }) { Icon(ActionIcon.Create.vector, L10n.text("android.automations.new_automation.db87a63d"), tint = LocalTsColors.current.accent) }
                     androidx.compose.material3.DropdownMenu(newMenu, onDismissRequest = { newMenu = false }) {
-                        androidx.compose.material3.DropdownMenuItem(text = { Text("Blank automation") }, onClick = { newMenu = false; onCreate() })
+                        androidx.compose.material3.DropdownMenuItem(text = { Text(L10n.text("android.automations.blank_automation.642aebac")) }, onClick = { newMenu = false; onCreate() })
                         AutomationTemplates.suggested.forEach { template ->
                             androidx.compose.material3.DropdownMenuItem(text = { Text(template.title) }, onClick = { newMenu = false; onTemplate(template) })
                         }
                     }
                 }
                 Box {
-                    IconButton(onClick = { sortMenu = true }) { Icon(ActionIcon.Filter.vector, "Sort automations", tint = LocalTsColors.current.accent) }
+                    IconButton(onClick = { sortMenu = true }) { Icon(ActionIcon.Filter.vector, L10n.text("android.automations.sort_automations.449f1e2d"), tint = LocalTsColors.current.accent) }
                     androidx.compose.material3.DropdownMenu(sortMenu, onDismissRequest = { sortMenu = false }) {
                         AutomationMobileOrder.entries.forEach { choice ->
                             androidx.compose.material3.DropdownMenuItem(text = { Text(choice.label + if (choice == order) " ✓" else "") }, onClick = { order = choice; sortMenu = false })
@@ -629,16 +631,16 @@ private fun AutomationListPage(
         )
         if (error != null) {
             Banner(error, BannerSeverity.DANGER)
-            TsSecondaryButton(label = "Reload", small = true, onClick = onReload)
+            TsSecondaryButton(label = L10n.text("android.automations.reload.bdc090ec"), small = true, onClick = onReload)
         }
         if (notice != null) {
             Text(notice, style = TsType.caption, color = LocalTsColors.current.textSecondary)
         }
-        TsSearchField(prompt = "Search automations", query = search, onQueryChange = onSearch)
+        TsSearchField(prompt = L10n.text("android.automations.search_automations.bdff71b2"), query = search, onQueryChange = onSearch)
         if (loading && !loaded) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 CircularProgressIndicator()
-                Text("Loading automations", color = LocalTsColors.current.textSecondary)
+                Text(L10n.text("android.automations.loading_automations.4237f5f4"), color = LocalTsColors.current.textSecondary)
             }
         }
         PullToRefreshBox(isRefreshing = loading && loaded, onRefresh = onReload, modifier = Modifier.weight(1f)) {
@@ -666,18 +668,18 @@ private fun AutomationListPage(
                     item {
                         EmptyState(
                             ActionIcon.Scheduled.vector,
-                            "Nothing scheduled here",
-                            "Create a job for this folder. It runs on the connected computer.",
+                            L10n.text("android.automations.nothing_scheduled_here.911c1a9b"),
+                            L10n.text("android.automations.create_a_job_for_this_folder_it_runs_on_th.96a56e05"),
                             art = { EmptyArt(EmptyArtKind.Automations) },
                             action = {
-                                TsAccentButton(label = "New automation", icon = ActionIcon.Create.vector, small = true, onClick = onCreate)
+                                TsAccentButton(label = L10n.text("android.automations.new_automation.db87a63d"), icon = ActionIcon.Create.vector, small = true, onClick = onCreate)
                             },
                         )
                     }
                 } else if (loaded && filtered.isEmpty()) {
                     item {
                         Text(
-                            "No matching automations",
+                            L10n.text("android.automations.no_matching_automations.7358d7d9"),
                             style = TsType.body,
                             color = LocalTsColors.current.textSecondary,
                         )
@@ -722,12 +724,12 @@ private fun SchedulerCard(hostLabel: String, folderName: String, queue: Automati
             Icon(ActionIcon.Scheduled.vector, null, tint = colors.accent, modifier = Modifier.size(28.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
-                    "Scheduler",
+                    L10n.text("android.automations.scheduler.d3a27d96"),
                     style = TsType.subheadline.copy(fontWeight = FontWeight.Medium),
                     color = colors.textPrimary,
                 )
                 Text(
-                    if (queue == null) "How queued jobs run on this computer"
+                    if (queue == null) L10n.text("android.automations.how_queued_jobs_run_on_this_computer.8038f73a")
                     else QueueCopy.summary(queue.defaultBudgetSeconds, queue.maxConcurrent),
                     style = TsType.caption,
                     color = colors.textSecondary,
@@ -776,7 +778,7 @@ private fun AutomationJobRow(
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    job.name.ifBlank { "Untitled" },
+                    job.name.ifBlank { L10n.text("android.automations.untitled.f59ab8d1") },
                     style = TsType.subheadline.copy(fontWeight = FontWeight.Medium),
                     color = colors.textPrimary,
                     maxLines = 2,
@@ -787,19 +789,19 @@ private fun AutomationJobRow(
                 if (isLive) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                         Canvas(Modifier.size(7.dp)) { drawCircle(colors.stateWorking) }
-                        Text("Running", style = TsType.caption, color = colors.stateWorking)
+                        Text(L10n.text("common.running"), style = TsType.caption, color = colors.stateWorking)
                     }
                 } else if (isPaused) {
-                    Text("Paused", style = TsType.caption, color = colors.textTertiary)
+                    Text(L10n.text("common.paused"), style = TsType.caption, color = colors.textTertiary)
                 }
                 Box {
                     IconButton(onClick = { menu = true }, enabled = !working) {
-                        Icon(ActionIcon.More.vector, "Automation actions", tint = colors.controlGlyph)
+                        Icon(ActionIcon.More.vector, L10n.text("android.automations.automation_actions.8c429252"), tint = colors.controlGlyph)
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Open") }, onClick = { menu = false; onOpen() })
-                        DropdownMenuItem(text = { Text("Edit") }, onClick = { menu = false; onEdit() })
-                        DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; onDelete() })
+                        DropdownMenuItem(text = { Text(L10n.text("common.open")) }, onClick = { menu = false; onOpen() })
+                        DropdownMenuItem(text = { Text(L10n.text("common.edit")) }, onClick = { menu = false; onEdit() })
+                        DropdownMenuItem(text = { Text(L10n.text("common.delete")) }, onClick = { menu = false; onDelete() })
                     }
                 }
             }
@@ -837,16 +839,16 @@ private fun AutomationDetailPage(
 ) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Space.s)) {
         JobScreenHeader(
-            title = job?.name?.ifBlank { "Automation" } ?: "Automation",
+            title = job?.name?.ifBlank { L10n.text("android.automations.automation.d909750b") } ?: L10n.text("android.automations.automation.d909750b"),
             subtitle = folderName.ifBlank { hostLabel },
             onBack = onBack,
             actions = {
                 if (job != null) {
                     IconButton(onClick = onEdit) {
-                        Icon(ActionIcon.Edit.vector, "Edit", tint = LocalTsColors.current.controlGlyph)
+                        Icon(ActionIcon.Edit.vector, L10n.text("common.edit"), tint = LocalTsColors.current.controlGlyph)
                     }
                     IconButton(onClick = onDelete) {
-                        Icon(ActionIcon.Delete.vector, "Delete", tint = LocalTsColors.current.danger)
+                        Icon(ActionIcon.Delete.vector, L10n.text("common.delete"), tint = LocalTsColors.current.danger)
                     }
                 }
             },
@@ -860,14 +862,14 @@ private fun AutomationDetailPage(
             ) {
                 if (error != null) {
                     Banner(error, BannerSeverity.DANGER)
-                    TsSecondaryButton(label = "Reload", small = true, onClick = onReload)
+                    TsSecondaryButton(label = L10n.text("android.automations.reload.bdc090ec"), small = true, onClick = onReload)
                 }
                 if (notice != null) {
                     Text(notice, style = TsType.caption, color = LocalTsColors.current.textSecondary)
                 }
                 if (job == null) {
                     if (loaded) {
-                        JobGoneCard("This job is gone", "It is not in the folder any more.")
+                        JobGoneCard(L10n.text("android.automations.this_job_is_gone.b3e6a44a"), L10n.text("android.automations.it_is_not_in_the_folder_any_more.ff5d54d4"))
                     } else {
                         CircularProgressIndicator()
                     }
@@ -886,17 +888,17 @@ private fun AutomationDetailPage(
                             Text(hostLabel, style = TsType.caption, color = LocalTsColors.current.textSecondary)
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                            JobFactRow("Agent", job.backend, Modifier.weight(1f))
-                            JobFactRow("Schedule", job.schedule.summary, Modifier.weight(1f))
+                            JobFactRow(L10n.text("android.automations.agent.11b39c93"), job.backend, Modifier.weight(1f))
+                            JobFactRow(L10n.text("android.automations.schedule.f4830a1d"), job.schedule.summary, Modifier.weight(1f))
                         }
                         if (!job.model.isNullOrEmpty()) {
-                            JobFactRow("Model", job.model!!)
+                            JobFactRow(L10n.text("android.automations.model.5e2c614c"), job.model!!)
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                            JobFactRow("Time limit", JobCopy.budget(job.budgetSeconds), Modifier.weight(1f))
+                            JobFactRow(L10n.text("android.automations.time_limit.e592a9ca"), JobCopy.budget(job.budgetSeconds), Modifier.weight(1f))
                             val place = HostScheduleClock.place(queueTimezone)
                             if (place != null) {
-                                JobFactRow("Time zone", place, Modifier.weight(1f))
+                                JobFactRow(L10n.text("android.automations.time_zone.b9fe1464"), place, Modifier.weight(1f))
                             } else {
                                 Spacer(Modifier.weight(1f))
                             }
@@ -904,13 +906,13 @@ private fun AutomationDetailPage(
                         Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                             val next = job.nextRunAtMs
                             if (next != null && job.enabled) {
-                                JobFactRow("Next", HostScheduleClock.nextRun(next, queueTimezone), Modifier.weight(1f))
+                                JobFactRow(L10n.text("common.next"), HostScheduleClock.nextRun(next, queueTimezone), Modifier.weight(1f))
                             } else {
                                 Spacer(Modifier.weight(1f))
                             }
                             val lastStarted = lastAutomationRun(runs, job)?.startedAtMs?.takeIf { it > 0 }
                                 ?: job.lastRunAtMs?.takeIf { it > 0 }
-                            JobFactRow("Last", JobCopy.lastRunWhen(lastStarted), Modifier.weight(1f))
+                            JobFactRow(L10n.text("android.automations.last.eb970eb0"), JobCopy.lastRunWhen(lastStarted), Modifier.weight(1f))
                         }
                     }
                 }
@@ -927,21 +929,21 @@ private fun AutomationDetailPage(
                         Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                             if (live != null) {
                                 TsSecondaryButton(
-                                    label = "Stop",
+                                    label = L10n.text("common.stop"),
                                     icon = ActionIcon.Stop.vector,
                                     enabled = !working,
                                     onClick = { onStop(live.id) },
                                 )
                             } else if (hasPendingLaunch) {
                                 TsSecondaryButton(
-                                    label = "Check run",
+                                    label = L10n.text("android.automations.check_run.cece2401"),
                                     icon = ActionIcon.Refresh.vector,
                                     enabled = !working,
                                     onClick = { onCheckRun(job) },
                                 )
                                 if (canRetryLaunch) {
                                     TsAccentButton(
-                                        label = "Retry run",
+                                        label = L10n.text("android.automations.retry_run.2f9c439b"),
                                         icon = ActionIcon.Run.vector,
                                         enabled = !working,
                                         onClick = { onRetryRun(job) },
@@ -949,19 +951,19 @@ private fun AutomationDetailPage(
                                 }
                             } else {
                                 TsAccentButton(
-                                    label = if (working) "Starting" else "Run now",
+                                    label = if (working) L10n.text("android.automations.starting.aeed4d26") else L10n.text("android.automations.run_now.09913977"),
                                     icon = ActionIcon.Run.vector,
                                     enabled = !working,
                                     onClick = onRun,
                                 )
                             }
                             if (job.schedule.repeats) {
-                                BrandToggleChip(if (job.enabled) "On" else "Off", job.enabled, { onToggle(job) })
+                                BrandToggleChip(if (job.enabled) L10n.text("android.automations.on.13001175") else L10n.text("android.automations.off.ca7981b4"), job.enabled, { onToggle(job) })
                             }
                         }
                         if (live == null && hasPendingLaunch) {
                             Text(
-                                "This run is not confirmed yet. Check it before starting another.",
+                                L10n.text("android.automations.this_run_is_not_confirmed_yet_check_it_bef.46c377ae"),
                                 style = TsType.caption,
                                 color = LocalTsColors.current.textSecondary,
                             )
@@ -972,7 +974,7 @@ private fun AutomationDetailPage(
                 val preview = remember(ordered) { ordered.take(RunHistory.PREVIEW_COUNT) }
                 if (preview.isNotEmpty()) {
                     Text(
-                        "Recent runs",
+                        L10n.text("android.automations.recent_runs.237112b8"),
                         style = TsType.caption.copy(fontWeight = FontWeight.SemiBold),
                         color = LocalTsColors.current.textTertiary,
                     )
@@ -1012,7 +1014,7 @@ private fun AutomationHistoryPage(
 ) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Space.s)) {
         JobScreenHeader(
-            title = "Runs",
+            title = L10n.text("android.automations.runs.848f54e8"),
             subtitle = job?.name.orEmpty(),
             onBack = onBack,
         )
@@ -1030,8 +1032,8 @@ private fun AutomationHistoryPage(
                 if (runs.isEmpty()) {
                     EmptyState(
                         ActionIcon.History.vector,
-                        "Nothing has run yet",
-                        "When this job runs, the output lands here.",
+                        L10n.text("android.automations.nothing_has_run_yet.45d9f27c"),
+                        L10n.text("android.automations.when_this_job_runs_the_output_lands_here.201139c3"),
                     )
                     return@Column
                 }
@@ -1045,7 +1047,7 @@ private fun AutomationHistoryPage(
                 )
                 if (leftover > 0) {
                     Text(
-                        "Showing the ${visible.size} newest of ${runs.size}.",
+                        L10n.text("android.automations.showing_the_0_newest_of_1.4b456919", "${visible.size}", "${runs.size}"),
                         style = TsType.caption,
                         color = LocalTsColors.current.textSecondary,
                     )
@@ -1060,7 +1062,7 @@ private fun AutomationHistoryPage(
                     )
                 }
                 if (leftover > 0) {
-                    TsSecondaryButton(label = "Earlier runs", icon = ActionIcon.History.vector, small = true, onClick = onMore)
+                    TsSecondaryButton(label = L10n.text("android.automations.earlier_runs.04ab162c"), icon = ActionIcon.History.vector, small = true, onClick = onMore)
                 }
             }
         }
@@ -1087,7 +1089,7 @@ private fun AutomationRunPage(
 ) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Space.s)) {
         JobScreenHeader(
-            title = run?.name?.ifBlank { "Run" } ?: "Run",
+            title = run?.name?.ifBlank { L10n.text("common.run") } ?: L10n.text("common.run"),
             subtitle = hostLabel,
             onBack = onBack,
         )
@@ -1100,11 +1102,11 @@ private fun AutomationRunPage(
             ) {
                 if (error != null) {
                     Banner(error, BannerSeverity.DANGER)
-                    TsSecondaryButton(label = "Reload", small = true, onClick = onReload)
+                    TsSecondaryButton(label = L10n.text("android.automations.reload.bdc090ec"), small = true, onClick = onReload)
                 }
                 if (run == null) {
                     if (loaded) {
-                        JobGoneCard("This run is unavailable", "It is no longer in this folder's run history.")
+                        JobGoneCard(L10n.text("android.automations.this_run_is_unavailable.5bef28b2"), L10n.text("android.automations.it_is_no_longer_in_this_folder_s_run_histo.0960f968"))
                     } else {
                         CircularProgressIndicator()
                     }
@@ -1121,12 +1123,12 @@ private fun AutomationRunPage(
                                 color = LocalTsColors.current.textSecondary,
                             )
                         }
-                        JobFactRow("Agent", run.backend)
+                        JobFactRow(L10n.text("android.automations.agent.11b39c93"), run.backend)
                     }
                 }
                 if (liveRunID != null && liveRunID != run.id) {
                     Text(
-                        "A run is going. This is an earlier one.",
+                        L10n.text("android.automations.a_run_is_going_this_is_an_earlier_one.c004db24"),
                         style = TsType.caption,
                         color = LocalTsColors.current.textSecondary,
                     )
@@ -1134,7 +1136,7 @@ private fun AutomationRunPage(
                 if (run.isRunning) {
                     TsCard {
                         TsSecondaryButton(
-                            label = "Stop",
+                            label = L10n.text("common.stop"),
                             icon = ActionIcon.Stop.vector,
                             enabled = !working,
                             onClick = onStop,
@@ -1178,7 +1180,7 @@ private fun SchedulerPage(
     onSave: (budget: Long, max: Long) -> Unit,
 ) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        JobScreenHeader(title = "Scheduler", subtitle = hostLabel, onBack = onBack)
+        JobScreenHeader(title = L10n.text("android.automations.scheduler.d3a27d96"), subtitle = hostLabel, onBack = onBack)
         Column(
             Modifier
                 .weight(1f)
@@ -1188,23 +1190,23 @@ private fun SchedulerPage(
             if (working) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     CircularProgressIndicator()
-                    Text("Saving scheduler", color = LocalTsColors.current.textSecondary)
+                    Text(L10n.text("android.automations.saving_scheduler.82aa4bfc"), color = LocalTsColors.current.textSecondary)
                 }
             }
             if (error != null) {
                 Text(error, style = TsType.callout, color = LocalTsColors.current.danger)
                 if (draft == null) {
-                    TsSecondaryButton(label = "Try again", icon = ActionIcon.Refresh.vector, small = true, enabled = !working, onClick = onReload)
+                    TsSecondaryButton(label = L10n.text("android.automations.try_again.d8b8392e"), icon = ActionIcon.Refresh.vector, small = true, enabled = !working, onClick = onReload)
                 }
             }
             if (draft == null) {
                 if (loaded && error == null) {
                     Text(
-                        "The scheduler did not answer. Try again in a moment.",
+                        L10n.text("android.automations.the_scheduler_did_not_answer_try_again_in.90535449"),
                         style = TsType.caption,
                         color = LocalTsColors.current.textSecondary,
                     )
-                    TsSecondaryButton(label = "Try again", icon = ActionIcon.Refresh.vector, small = true, enabled = !working, onClick = onReload)
+                    TsSecondaryButton(label = L10n.text("android.automations.try_again.d8b8392e"), icon = ActionIcon.Refresh.vector, small = true, enabled = !working, onClick = onReload)
                 }
                 return@Column
             }
@@ -1225,7 +1227,7 @@ private fun SchedulerPage(
                 color = LocalTsColors.current.textPrimary,
             )
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                Text("Time limit", style = TsType.subheadline.copy(fontWeight = FontWeight.Medium), color = LocalTsColors.current.textPrimary)
+                Text(L10n.text("android.automations.time_limit.e592a9ca"), style = TsType.subheadline.copy(fontWeight = FontWeight.Medium), color = LocalTsColors.current.textPrimary)
                 TimeLimitChips(
                     minutesText = draft.budgetMinutes,
                     noLimit = draft.noLimit,
@@ -1237,12 +1239,12 @@ private fun SchedulerPage(
                         draft.budgetMinutes,
                         { onDraft(draft.copy(budgetMinutes = it.filter(Char::isDigit))) },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Minutes") },
+                        label = { Text(L10n.text("android.automations.minutes.4f846a84")) },
                     )
                 }
                 Text(
-                    if (draft.noLimit) "New jobs are not stopped by a timer. A job can still set its own."
-                    else "New jobs inherit this. A job can still set its own.",
+                    if (draft.noLimit) L10n.text("android.automations.new_jobs_are_not_stopped_by_a_timer_a_job.a97a5725")
+                    else L10n.text("android.automations.new_jobs_inherit_this_a_job_can_still_set.9e62e04e"),
                     style = TsType.caption,
                     color = LocalTsColors.current.textSecondary,
                 )
@@ -1250,7 +1252,7 @@ private fun SchedulerPage(
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     Text(
-                        "Jobs at once",
+                        L10n.text("android.automations.jobs_at_once.66276ffd"),
                         style = TsType.subheadline.copy(fontWeight = FontWeight.Medium),
                         color = LocalTsColors.current.textPrimary,
                         modifier = Modifier.weight(1f),
@@ -1271,12 +1273,12 @@ private fun SchedulerPage(
                         draft.maxConcurrent,
                         { onDraft(draft.copy(maxConcurrent = it.filter(Char::isDigit))) },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Jobs at once") },
+                        label = { Text(L10n.text("android.automations.jobs_at_once.66276ffd")) },
                     )
                 }
                 Text(
-                    if (draft.maxConcurrent.trim() == "0") "No limit on how many jobs run together."
-                    else "Extra jobs wait until a place is free.",
+                    if (draft.maxConcurrent.trim() == "0") L10n.text("android.automations.no_limit_on_how_many_jobs_run_together.483e4a96")
+                    else L10n.text("android.automations.extra_jobs_wait_until_a_place_is_free.862f1074"),
                     style = TsType.caption,
                     color = LocalTsColors.current.textSecondary,
                 )
@@ -1288,13 +1290,13 @@ private fun SchedulerPage(
             )
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 if (dirty) {
-                    Text("Unsaved", style = TsType.caption.copy(fontWeight = FontWeight.Medium), color = LocalTsColors.current.warning)
+                    Text(L10n.text("android.automations.unsaved.6250d572"), style = TsType.caption.copy(fontWeight = FontWeight.Medium), color = LocalTsColors.current.warning)
                 } else if (justSaved) {
-                    Text("Saved", style = TsType.caption.copy(fontWeight = FontWeight.Medium), color = LocalTsColors.current.success)
+                    Text(L10n.text("android.automations.saved.b5c120b3"), style = TsType.caption.copy(fontWeight = FontWeight.Medium), color = LocalTsColors.current.success)
                 }
                 Spacer(Modifier.weight(1f))
                 TsAccentButton(
-                    label = if (working) "Saving" else "Save scheduler",
+                    label = if (working) L10n.text("android.automations.saving.096b7362") else L10n.text("android.automations.save_scheduler.24ffd545"),
                     icon = ActionIcon.Save.vector,
                     small = true,
                     enabled = !working && dirty && budgetError == null && maxError == null,
@@ -1344,7 +1346,7 @@ fun RunTranscript(model: AppViewModel, peer: String, runID: String, live: Boolea
                 }) as JsonObject
             }.getOrNull()
             if (chunk == null) {
-                error = "Output is unavailable right now."
+                error = L10n.text("android.automations.output_is_unavailable_right_now.8b0840d6")
                 break
             }
             builder.append(chunk.optStr("text") ?: "")
@@ -1367,7 +1369,7 @@ fun RunTranscript(model: AppViewModel, peer: String, runID: String, live: Boolea
             Text(error!!, style = TsType.caption, color = LocalTsColors.current.danger)
         }
         Text(
-            text.ifBlank { if (live) "Waiting for output…" else "No readable output." },
+            text.ifBlank { if (live) L10n.text("android.automations.waiting_for_output.f05fefe2") else L10n.text("android.automations.no_readable_output.cd218ba3") },
             style = TsType.mono(12),
             color = LocalTsColors.current.textPrimary,
         )

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.logic
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
@@ -108,16 +110,31 @@ object HostContracts {
     /// state, mirroring `RemoteHostFeatureGate`.
     fun updateMessage(feature: String, hostName: String, hostProtocol: Long?, minimum: Long): String? {
         if (hostProtocol == null || hostProtocol >= minimum) return null
-        val computer = hostName.ifBlank { "this computer" }
-        return "Update $computer to use $feature. It speaks protocol $hostProtocol and needs $minimum or later."
+        val computer = hostName.ifBlank { L10n.text("android.hostcontracts.this_computer.058bf37c") }
+        return L10n.text("android.hostcontracts.update_0_to_use_1_it_speaks_protocol_2_and.1240aa62", "${computer}", "${feature}", "${hostProtocol}", "${minimum}")
     }
 }
 
 /// Relative time, port of Apple `RelativeTimeText.swift` (single 15s tick).
 /// Returns a short string; callers re-compose on a 15s ticker.
 object RelativeClock {
-    private fun unit(count: Long, singular: String): String =
-        "$count $singular${if (count == 1L) "" else "s"}"
+    private fun unit(count: Long, unit: String): String = when (unit) {
+        "second" -> if (count == 1L) L10n.text("android.hostcontracts.second_one", count)
+            else L10n.text("android.hostcontracts.second_other", count)
+        "minute" -> if (count == 1L) L10n.text("android.hostcontracts.minute_one", count)
+            else L10n.text("android.hostcontracts.minute_other", count)
+        "hour" -> if (count == 1L) L10n.text("android.hostcontracts.hour_one", count)
+            else L10n.text("android.hostcontracts.hour_other", count)
+        "day" -> if (count == 1L) L10n.text("android.hostcontracts.day_one", count)
+            else L10n.text("android.hostcontracts.day_other", count)
+        "week" -> if (count == 1L) L10n.text("android.hostcontracts.week_one", count)
+            else L10n.text("android.hostcontracts.week_other", count)
+        "month" -> if (count == 1L) L10n.text("android.hostcontracts.month_one", count)
+            else L10n.text("android.hostcontracts.month_other", count)
+        "year" -> if (count == 1L) L10n.text("android.hostcontracts.year_one", count)
+            else L10n.text("android.hostcontracts.year_other", count)
+        else -> error("Unknown relative time unit: $unit")
+    }
 
     /// "3 days ago", in full words the way Foundation's numeric relative
     /// style phrases it: seconds, minutes, hours, days, then weeks to months
@@ -125,17 +142,17 @@ object RelativeClock {
     /// 2.8 days out reads "in 3 days" here and on the Apple client alike.
     fun label(epochMillis: Long, nowMillis: Long = System.currentTimeMillis()): String {
         val delta = ((nowMillis - epochMillis) / 1000).coerceAtLeast(0)
-        if (delta < 5) return "now"
-        if (delta < 60) return "${unit(delta, "second")} ago"
+        if (delta < 5) return L10n.text("android.hostcontracts.now.ed5eb9a3")
+        if (delta < 60) return L10n.text("android.hostcontracts.0_ago.cace2682", "${unit(delta, "second")}")
         val minutes = (delta + 30) / 60
-        if (minutes < 60) return "${unit(minutes, "minute")} ago"
+        if (minutes < 60) return L10n.text("android.hostcontracts.0_ago.cace2682", "${unit(minutes, "minute")}")
         val hours = (delta + 1800) / 3600
-        if (hours < 24) return "${unit(hours, "hour")} ago"
+        if (hours < 24) return L10n.text("android.hostcontracts.0_ago.cace2682", "${unit(hours, "hour")}")
         val days = (delta + 43200) / 86400
-        if (days < 7) return "${unit(days, "day")} ago"
-        if (days < 30) return "${unit((days + 3) / 7, "week")} ago"
-        if (days < 365) return "${unit((days + 15) / 30, "month")} ago"
-        return "${unit((days + 182) / 365, "year")} ago"
+        if (days < 7) return L10n.text("android.hostcontracts.0_ago.cace2682", "${unit(days, "day")}")
+        if (days < 30) return L10n.text("android.hostcontracts.0_ago.cace2682", "${unit((days + 3) / 7, "week")}")
+        if (days < 365) return L10n.text("android.hostcontracts.0_ago.cace2682", "${unit((days + 15) / 30, "month")}")
+        return L10n.text("android.hostcontracts.0_ago.cace2682", "${unit((days + 182) / 365, "year")}")
     }
 
     /// "4h ago", the tightest form, for a row that already carries a title
@@ -146,14 +163,14 @@ object RelativeClock {
         val delta = ((nowMillis - epochMillis) / 1000).coerceAtLeast(0)
         if (delta < 60) return "now"
         val minutes = (delta + 30) / 60
-        if (minutes < 60) return "${minutes}m ago"
+        if (minutes < 60) return L10n.text("android.hostcontracts.0_m_ago.80e8bfb2", "${minutes}")
         val hours = (delta + 1800) / 3600
-        if (hours < 24) return "${hours}h ago"
+        if (hours < 24) return L10n.text("android.hostcontracts.0_h_ago.4dcb4701", "${hours}")
         val days = (delta + 43200) / 86400
-        if (days < 7) return "${days}d ago"
-        if (days < 30) return "${(days + 3) / 7}w ago"
-        if (days < 365) return "${(days + 15) / 30}mo ago"
-        return "${(days + 182) / 365}y ago"
+        if (days < 7) return L10n.text("android.hostcontracts.0_d_ago.1fccd42c", "${days}")
+        if (days < 30) return L10n.text("android.hostcontracts.0_w_ago.ac944c0b", "${(days + 3) / 7}")
+        if (days < 365) return L10n.text("android.hostcontracts.0_mo_ago.cff21a7f", "${(days + 15) / 30}")
+        return L10n.text("android.hostcontracts.0_y_ago.cd926fc6", "${(days + 182) / 365}")
     }
 
     /// "3 min ago", for chat rows and run times. The same abbreviated
@@ -161,47 +178,47 @@ object RelativeClock {
     /// hours shorten, days stay written out, weeks and up shorten again.
     fun abbreviated(epochMillis: Long, nowMillis: Long = System.currentTimeMillis()): String {
         val delta = (nowMillis - epochMillis) / 1000
-        if (delta >= 0 && delta < 1) return "just now"
+        if (delta >= 0 && delta < 1) return L10n.text("android.hostcontracts.just_now.7ddb44d8")
         if (delta < 0) return abbreviatedFuture(-delta)
-        if (delta < 60) return "$delta sec ago"
+        if (delta < 60) return L10n.text("android.hostcontracts.0_sec_ago.c7378507", "${delta}")
         val minutes = (delta + 30) / 60
-        if (minutes < 60) return "$minutes min ago"
+        if (minutes < 60) return L10n.text("android.hostcontracts.0_min_ago.dcf6607f", "${minutes}")
         val hours = (delta + 1800) / 3600
-        if (hours < 24) return "$hours hr ago"
+        if (hours < 24) return L10n.text("android.hostcontracts.0_hr_ago.b7fe402d", "${hours}")
         val days = (delta + 43200) / 86400
-        if (days < 7) return "${unit(days, "day")} ago"
-        if (days < 30) return "${(days + 3) / 7} wk ago"
-        if (days < 365) return "${(days + 15) / 30} mo ago"
-        return "${(days + 182) / 365} yr ago"
+        if (days < 7) return L10n.text("android.hostcontracts.0_ago.cace2682", "${unit(days, "day")}")
+        if (days < 30) return L10n.text("android.hostcontracts.0_wk_ago.fab70bb9", "${(days + 3) / 7}")
+        if (days < 365) return L10n.text("android.hostcontracts.0_mo_ago.04b80750", "${(days + 15) / 30}")
+        return L10n.text("android.hostcontracts.0_yr_ago.74473101", "${(days + 182) / 365}")
     }
 
     private fun abbreviatedFuture(delta: Long): String {
-        if (delta < 60) return "in $delta sec"
+        if (delta < 60) return L10n.text("android.hostcontracts.in_0_sec.f5785258", "${delta}")
         val minutes = (delta + 30) / 60
-        if (minutes < 60) return "in $minutes min"
+        if (minutes < 60) return L10n.text("android.hostcontracts.in_0_min.c07b3a18", "${minutes}")
         val hours = (delta + 1800) / 3600
-        if (hours < 24) return "in $hours hr"
+        if (hours < 24) return L10n.text("android.hostcontracts.in_hours", hours)
         val days = (delta + 43200) / 86400
-        if (days < 7) return "in ${unit(days, "day")}"
-        if (days < 30) return "in ${(days + 3) / 7} wk"
-        if (days < 365) return "in ${(days + 15) / 30} mo"
-        return "in ${(days + 182) / 365} yr"
+        if (days < 7) return L10n.text("android.hostcontracts.in_unit", unit(days, "day"))
+        if (days < 30) return L10n.text("android.hostcontracts.in_weeks", (days + 3) / 7)
+        if (days < 365) return L10n.text("android.hostcontracts.in_months", (days + 15) / 30)
+        return L10n.text("android.hostcontracts.in_years", (days + 182) / 365)
     }
 
     /// Future mirror of `label`: "in 3 days", for limit reset dates.
     fun until(epochMillis: Long, nowMillis: Long = System.currentTimeMillis()): String {
         val delta = (epochMillis - nowMillis) / 1000
         if (delta < 0) return label(epochMillis, nowMillis)
-        if (delta < 5) return "now"
-        if (delta < 60) return "in ${unit(delta, "second")}"
+        if (delta < 5) return L10n.text("android.hostcontracts.now.ed5eb9a3")
+        if (delta < 60) return L10n.text("android.hostcontracts.in_unit", unit(delta, "second"))
         val minutes = (delta + 30) / 60
-        if (minutes < 60) return "in ${unit(minutes, "minute")}"
+        if (minutes < 60) return L10n.text("android.hostcontracts.in_unit", unit(minutes, "minute"))
         val hours = (delta + 1800) / 3600
-        if (hours < 24) return "in ${unit(hours, "hour")}"
+        if (hours < 24) return L10n.text("android.hostcontracts.in_unit", unit(hours, "hour"))
         val days = (delta + 43200) / 86400
-        if (days < 7) return "in ${unit(days, "day")}"
-        if (days < 30) return "in ${unit((days + 3) / 7, "week")}"
-        if (days < 365) return "in ${unit((days + 15) / 30, "month")}"
-        return "in ${unit((days + 182) / 365, "year")}"
+        if (days < 7) return L10n.text("android.hostcontracts.in_unit", unit(days, "day"))
+        if (days < 30) return L10n.text("android.hostcontracts.in_unit", unit((days + 3) / 7, "week"))
+        if (days < 365) return L10n.text("android.hostcontracts.in_unit", unit((days + 15) / 30, "month"))
+        return L10n.text("android.hostcontracts.in_unit", unit((days + 182) / 365, "year"))
     }
 }

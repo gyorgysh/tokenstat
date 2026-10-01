@@ -28,12 +28,10 @@ struct ClientSetupServerGuide: View {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 VStack(spacing: Theme.Space.s) {
                     ClientEmptyArt(kind: .rentServer)
-                    Text("Renting a server")
+                    Text(L10n.text("apple.clientsetupserverguide.renting_a_server.f1a1e2a6"))
                         .font(Theme.title.weight(.semibold))
                     Text(
-                        "This device is where you work. The machine is what runs the "
-                        + "agent, holds your projects and stays on when you close this. A "
-                        + "small rented Linux server is the usual way to have one."
+                        L10n.text("apple.clientsetupserverguide.this_device_is_where_you_work_the_machine.2bf93b68")
                     )
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
@@ -42,63 +40,48 @@ struct ClientSetupServerGuide: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
 
-                section("What it has to be") {
-                    requirement("Linux with systemd", "Setup uses systemd to keep the "
-                        + "helper running, including after a reboot.")
-                    requirement("64-bit Intel or AMD", "The standard server image at "
-                        + "any provider.")
-                    requirement("SSH access", "A login setup can use: a password or an "
-                        + "SSH key. Root works, and so does an ordinary user that can "
-                        + "write to its own home directory.")
+                section(L10n.text("apple.clientsetupserverguide.what_it_has_to_be.db0d043b")) {
+                    requirement(L10n.text("apple.clientsetupserverguide.linux_with_systemd.02486325"), L10n.text("apple.clientsetupserverguide.setup_uses_systemd_to_keep_the_helper_runn.08263b69"))
+                    requirement(L10n.text("apple.clientsetupserverguide.64_bit_intel_or_amd.6b85ad70"), L10n.text("apple.clientsetupserverguide.the_standard_server_image_at_any_provider.0a8d231e"))
+                    requirement(L10n.text("apple.clientsetupserverguide.ssh_access.4755492e"), L10n.text("apple.clientsetupserverguide.a_login_setup_can_use_a_password_or_an_ssh.0805316c"))
                 }
 
-                section("What size is enough") {
-                    Text("The coding agent, your project and any local models determine "
-                        + "how much memory, disk space and processing power you need.")
+                section(L10n.text("apple.clientsetupserverguide.what_size_is_enough.3ea0c00a")) {
+                    Text(L10n.text("apple.clientsetupserverguide.the_coding_agent_your_project_and_any_loca.ea37ed75"))
                         .font(ClientType.label)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    bullet("Check the agent's system requirements and leave room for "
-                        + "your project's builds and tests.")
-                    bullet("Grow when the projects do. Disk and memory follow "
-                        + "your checkouts and models, not us.")
+                    bullet(L10n.text("apple.clientsetupserverguide.check_the_agent_s_system_requirements_and.9af69248"))
+                    bullet(L10n.text("apple.clientsetupserverguide.grow_when_the_projects_do_disk_and_memory.29b9c033"))
                 }
 
-                section("Who takes the money") {
-                    Text("Three separate things, and only one of them is ours.")
+                section(L10n.text("apple.clientsetupserverguide.who_takes_the_money.7df75402")) {
+                    Text(L10n.text("apple.clientsetupserverguide.three_separate_things_and_only_one_of_them.08df69a7"))
                         .font(ClientType.label)
                         .fixedSize(horizontal: false, vertical: true)
-                    bullet("The provider bills you for the server, monthly or by the hour, "
-                        + "until you delete it. Deleting the machine is how the charge "
-                        + "stops, and that happens in their console, not here.")
-                    bullet("The coding agent is billed by whoever makes it, through the "
-                        + "account you sign in to on the machine.")
-                    bullet("tokenstat charges for its own plan. Nothing here buys a server "
-                        + "and nothing here includes agent usage.")
+                    bullet(L10n.text("apple.clientsetupserverguide.the_provider_bills_you_for_the_server_mont.429cf30a"))
+                    bullet(L10n.text("apple.clientsetupserverguide.the_coding_agent_is_billed_by_whoever_make.efc06607"))
+                    bullet(L10n.text("apple.clientsetupserverguide.tokenstat_charges_for_its_own_plan_nothing.6a1be7f0"))
                 }
 
-                section("Where to get one") {
-                    Text("Choose a provider with a server that meets the requirements above. "
-                        + "Setup can import DigitalOcean servers on this device, and any "
-                        + "other server works with its SSH address. You create and manage "
-                        + "the server in the provider's own account.")
+                section(L10n.text("apple.clientsetupserverguide.where_to_get_one.dead684a")) {
+                    Text(L10n.text("apple.clientsetupserverguide.choose_a_provider_with_a_server_that_meets.67e8b16b"))
                         .font(ClientType.label)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     provider("DigitalOcean", "https://m.do.co/c/638545628ff0")
-                    Text("The DigitalOcean link is a referral link. Same price for you, credit for the project.")
+                    Text(L10n.text("apple.clientsetupserverguide.the_digitalocean_link_is_a_referral_link_s.b3c5c9a2"))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Text("Come back here when the server exists and you have its address. "
-                    + "Nothing on this screen has to be finished in one sitting.")
+                Text(L10n.text("apple.clientsetupserverguide.come_back_here_when_the_server_exists_and.d77e7d9e"))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 SetupActions {
-                    Button("I have a server now", .next) { path = [.where] }
+                    Button(L10n.text("apple.clientsetupserverguide.i_have_a_server_now.7af0bb61"), .next) { path = [.where] }
                         .setupPrimaryStyle()
                         .accessibilityIdentifier("setup.serverGuide.continue")
                 }
@@ -107,7 +90,7 @@ struct ClientSetupServerGuide: View {
             .setupColumn()
         }
         .background(Theme.background)
-        .navigationTitle("I need a server")
+        .navigationTitle(L10n.text("apple.clientsetupserverguide.i_need_a_server.e6c65b43"))
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("setup.serverGuide")
 

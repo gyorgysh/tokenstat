@@ -33,15 +33,15 @@ struct AutomationQueueDraft: Equatable, Sendable {
         if !noLimit {
             let trimmed = budgetMinutes.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let minutes = UInt64(trimmed), minutes > 0, minutes <= UInt64.max / 60 else {
-                return "Enter a positive time limit, or choose No limit."
+                return L10n.text("apple.automationqueuedraft.enter_a_positive_time_limit_or_choose_no_l.3b7996e8")
             }
         }
         let trimmed = maxConcurrent.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let count = UInt32(trimmed) else {
-            return "Jobs at once must be a whole number, or No cap."
+            return L10n.text("apple.automationqueuedraft.jobs_at_once_must_be_a_whole_number_or_no.a18bbfc5")
         }
         if count > Self.hostCap {
-            return "At most \(Self.hostCap) jobs can run at once."
+            return L10n.text("apple.automationqueuedraft.at_most_0_jobs_can_run_at_once.c6cd6b67", "\(Self.hostCap)")
         }
         return nil
     }
@@ -83,19 +83,19 @@ struct AutomationQueueDraft: Equatable, Sendable {
     static func summary(budgetSeconds: UInt64, maxConcurrent: UInt32) -> String {
         let budget: String
         if budgetSeconds == 0 {
-            budget = "No time limit"
+            budget = L10n.text("apple.automationqueuedraft.no_time_limit.436b4b94")
         } else {
             let minutes = max(1, budgetSeconds / 60)
             switch minutes {
-            case 15: budget = "15m per job"
-            case 30: budget = "30m per job"
-            case 60: budget = "1h per job"
-            case 180: budget = "3h per job"
-            case 480: budget = "8h per job"
-            default: budget = "\(minutes) min per job"
+            case 15: budget = L10n.text("apple.automationqueuedraft.15m_per_job.518ce0c3")
+            case 30: budget = L10n.text("apple.automationqueuedraft.30m_per_job.540c908c")
+            case 60: budget = L10n.text("apple.automationqueuedraft.1h_per_job.d3a13f70")
+            case 180: budget = L10n.text("apple.automationqueuedraft.3h_per_job.cabf928e")
+            case 480: budget = L10n.text("apple.automationqueuedraft.8h_per_job.62ad336f")
+            default: budget = L10n.text("apple.automationqueuedraft.0_min_per_job.60b07c42", "\(minutes)")
             }
         }
-        let slots = maxConcurrent == 0 ? "No cap" : "\(maxConcurrent) at once"
+        let slots = maxConcurrent == 0 ? L10n.text("apple.automationqueuedraft.no_cap.59db2115") : L10n.text("apple.automationqueuedraft.0_at_once.4e557f9f", "\(maxConcurrent)")
         return "\(budget) · \(slots)"
     }
 }

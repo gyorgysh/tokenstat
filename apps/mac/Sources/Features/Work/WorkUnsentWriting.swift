@@ -37,34 +37,34 @@ struct WorkSignOutReview: View {
     }
 
     var body: some View {
-        ThemedSheet(title: "Sign out of this device?", subtitle: "Your unsent writing stays here", icon: .signOut,
+        ThemedSheet(title: L10n.text("apple.workunsentwriting.sign_out_of_this_device.5c5bf797"), subtitle: L10n.text("apple.workunsentwriting.your_unsent_writing_stays_here.4b64f583"), icon: .signOut,
                     scrolls: true, onClose: { if !model.isSigningOut { dismiss() } }) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                Text("Saved work copies will be removed from this device. Unsent drafts and pending messages stay with their original account and will not send while you are signed out.")
+                Text(L10n.text("apple.workunsentwriting.saved_work_copies_will_be_removed_from_thi.c722dcc6"))
                     .font(Theme.callout).foregroundStyle(Theme.controlGlyph)
-                Text("\(draftCount) drafts · \(queuedCount) pending messages")
+                Text(L10n.text("apple.workunsentwriting.0_drafts_1_pending_messages.118b42f3", "\(draftCount)", "\(queuedCount)"))
                     .font(Theme.body.weight(.semibold))
                 if draftCount + queuedCount > 0 {
-                    Button("Export unsent writing", .download) { prepareExport(); exporting = document != nil }
+                    Button(L10n.text("apple.workunsentwriting.export_unsent_writing.3d041a56"), .download) { prepareExport(); exporting = document != nil }
                         .buttonStyle(SecondaryButtonStyle())
-                    Text("The export contains text and attachment details. Attachment file contents are not included.")
+                    Text(L10n.text("apple.workunsentwriting.the_export_contains_text_and_attachment_de.f3c68b07"))
                         .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                 }
-                Text("Account usage stays. You will need to approve this device again when signing back in.")
+                Text(L10n.text("apple.workunsentwriting.account_usage_stays_you_will_need_to_appro.59351d7b"))
                     .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                 if let message { Text(message).font(Theme.caption).foregroundStyle(Theme.controlGlyph) }
             }
             .disabled(model.isSigningOut)
         } actions: {
-            Button("Keep working", .back) { dismiss() }
+            Button(L10n.text("apple.workunsentwriting.keep_working.5ed03f22"), .back) { dismiss() }
                 .buttonStyle(SecondaryButtonStyle()).disabled(model.isSigningOut)
             Spacer()
-            Button(model.isSigningOut ? "Signing out…" : "Sign out", .signOut) {
+            Button(model.isSigningOut ? L10n.text("apple.workunsentwriting.signing_out.08c6bd35") : L10n.text("common.sign_out"), .signOut) {
                 Task {
                     guard scope == WorkSessionContext.shared.scope else { dismiss(); return }
                     await model.signOut()
                     if !model.signedIn { dismiss() }
-                    else { message = model.errorMessage ?? "Sign-out could not be completed. Your writing stays here." }
+                    else { message = model.errorMessage ?? L10n.text("apple.workunsentwriting.sign_out_could_not_be_completed_your_writi.bffeaeea") }
                 }
             }
             .buttonStyle(DestructiveButtonStyle()).disabled(model.isSigningOut)
@@ -79,8 +79,8 @@ struct WorkSignOutReview: View {
         .fileExporter(isPresented: $exporting, document: document, contentType: .json,
                       defaultFilename: "tokenstat-unsent-writing") { result in
             switch result {
-            case .success: message = "Unsent writing exported. Originals stay on this device."
-            case .failure: message = "The export could not be saved. Your writing stays on this device."
+            case .success: message = L10n.text("apple.workunsentwriting.unsent_writing_exported_originals_stay_on.1c9cf197")
+            case .failure: message = L10n.text("apple.workunsentwriting.the_export_could_not_be_saved_your_writing.9f996c66")
             }
         }
     }
@@ -97,7 +97,7 @@ struct WorkSignOutReview: View {
             document = WorkUnsentDocument(data: try encoder.encode(Export(drafts: drafts, queues: queues)))
         } catch {
             document = nil
-            message = "Some pending writing could not be read for export. It remains on this device; cancel sign-out and try again after unlocking."
+            message = L10n.text("apple.workunsentwriting.some_pending_writing_could_not_be_read_for.3d5ca2ae")
         }
     }
 }
@@ -110,20 +110,20 @@ struct WorkLegacyDraftsSheet: View {
     @State private var message: String?
 
     var body: some View {
-        ThemedSheet(title: "Older pending drafts", subtitle: "Unassigned writing on this device", icon: .history,
+        ThemedSheet(title: L10n.text("apple.workunsentwriting.older_pending_drafts.9f27153b"), subtitle: L10n.text("apple.workunsentwriting.unassigned_writing_on_this_device.1152f514"), icon: .history,
                     scrolls: true, onClose: { dismiss() }) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                Text("These drafts were saved before queues recorded their account and machine. They will never send automatically. Copy text only after choosing and reviewing the correct conversation.")
+                Text(L10n.text("apple.workunsentwriting.these_drafts_were_saved_before_queues_reco.e0a60039"))
                     .font(Theme.callout).foregroundStyle(Theme.controlGlyph)
                 if listing.drafts.isEmpty && listing.unreadable == 0 {
-                    Text("There are no older pending drafts on this device.").font(Theme.callout)
+                    Text(L10n.text("apple.workunsentwriting.there_are_no_older_pending_drafts_on_this.8fe823f7")).font(Theme.callout)
                 }
                 ForEach(Array(listing.drafts.prefix(limit))) { draft in
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
-                        Text(draft.message.text.isEmpty ? "Attachment draft" : draft.message.text)
+                        Text(draft.message.text.isEmpty ? L10n.text("apple.workunsentwriting.attachment_draft.9f5dcc06") : draft.message.text)
                             .font(Theme.callout).textSelection(.enabled).lineLimit(8)
                         if !draft.message.attachments.isEmpty {
-                            Text("Attachments: \(draft.message.attachments.map(\.name).joined(separator: ", ")). Recover files from the original conversation.")
+                            Text(L10n.text("apple.workunsentwriting.attachments_0_recover_files_from_the_origi.89169949", "\(draft.message.attachments.map(\.name).joined(separator: ", "))"))
                                 .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                         }
                         ViewThatFits(in: .horizontal) {
@@ -135,10 +135,10 @@ struct WorkLegacyDraftsSheet: View {
                     .background(Theme.sidebar, in: RoundedRectangle(cornerRadius: 12))
                 }
                 if listing.drafts.count > limit {
-                    Button("Show more drafts", .more) { limit += 30 }.buttonStyle(SecondaryButtonStyle())
+                    Button(L10n.text("apple.workunsentwriting.show_more_drafts.f5562a49"), .more) { limit += 30 }.buttonStyle(SecondaryButtonStyle())
                 }
                 if listing.unreadable > 0 {
-                    Text("Some older records could not be read. They have been left untouched.")
+                    Text(L10n.text("apple.workunsentwriting.some_older_records_could_not_be_read_they.db6fbff3"))
                         .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                 }
                 if let message { Text(message).font(Theme.caption).foregroundStyle(Theme.controlGlyph) }
@@ -148,29 +148,29 @@ struct WorkLegacyDraftsSheet: View {
         .presentationBackground(Theme.background)
         .presentationDetents([.large])
         .task { listing = ChatLegacyQueueStore.list() }
-        .confirmationDialog("Remove this older draft from this device?", isPresented: Binding(
+        .confirmationDialog(L10n.text("apple.workunsentwriting.remove_this_older_draft_from_this_device.cc93372f"), isPresented: Binding(
             get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }
         )) {
-            Button("Remove local copy", role: .destructive) {
+            Button(L10n.text("apple.workunsentwriting.remove_local_copy.4d26e9f5"), role: .destructive) {
                 guard let draft = pendingRemoval else { return }
                 do { try ChatLegacyQueueStore.remove(draft); listing = ChatLegacyQueueStore.list() }
-                catch { message = "The draft changed or could not be removed. Close and reopen to see its latest copy." }
+                catch { message = L10n.text("apple.workunsentwriting.the_draft_changed_or_could_not_be_removed.e031b20d") }
                 pendingRemoval = nil
             }
-        } message: { Text("Copy any writing you want to keep first. Nothing on that computer will be changed.") }
+        } message: { Text(L10n.text("apple.workunsentwriting.copy_any_writing_you_want_to_keep_first_no.5ea88885")) }
     }
 
     @ViewBuilder private func actions(_ draft: ChatLegacyQueueStore.Draft) -> some View {
-        Button("Copy text", .copy) {
+        Button(L10n.text("apple.workunsentwriting.copy_text.b0ac9cea"), .copy) {
             #if os(macOS)
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(draft.message.text, forType: .string)
             #else
             UIPasteboard.general.string = draft.message.text
             #endif
-            message = "Text copied. Review the destination before using it."
+            message = L10n.text("apple.workunsentwriting.text_copied_review_the_destination_before.76f954fb")
         }.buttonStyle(SecondaryButtonStyle(small: true))
-        Button("Remove local copy", .delete) { pendingRemoval = draft }
+        Button(L10n.text("apple.workunsentwriting.remove_local_copy.4d26e9f5"), .delete) { pendingRemoval = draft }
             .buttonStyle(SecondaryButtonStyle(small: true))
     }
 }

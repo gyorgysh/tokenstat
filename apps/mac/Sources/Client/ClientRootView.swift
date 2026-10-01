@@ -205,7 +205,7 @@ struct ClientRootView: View {
                 }
                 return BridgeError.core(
                     code: "offline",
-                    message: "This device is offline."
+                    message: L10n.text("apple.clientrootview.this_device_is_offline.84b7cf97")
                 )
             }
             // Sign-in presents over the app rather than handing the URL to
@@ -310,7 +310,7 @@ struct ClientRootView: View {
                 )
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Close") { navigation.presentedChat = nil }
+                        Button(L10n.text("common.close")) { navigation.presentedChat = nil }
                     }
                 }
             }
@@ -323,7 +323,7 @@ struct ClientRootView: View {
                 ClientTaskBoardDestination(peer: target.peer, hostName: target.hostName)
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
-                            Button("Close") { navigation.presentedTaskBoard = nil }
+                            Button(L10n.text("common.close")) { navigation.presentedTaskBoard = nil }
                         }
                     }
             }
@@ -447,11 +447,11 @@ enum ClientTab: String, CaseIterable, Identifiable, Hashable {
 
     var label: String {
         switch self {
-        case .home: return "Home"
-        case .workspaces: return "Projects"
-        case .insights: return "Insights"
-        case .machines: return "Devices"
-        case .ssh: return "SSH"
+        case .home: return L10n.text("common.home")
+        case .workspaces: return L10n.text("common.projects")
+        case .insights: return L10n.text("common.insights")
+        case .machines: return L10n.text("common.devices")
+        case .ssh: return L10n.text("apple.clientrootview.ssh.01c4d3c2")
         }
     }
 
@@ -468,11 +468,11 @@ enum ClientTab: String, CaseIterable, Identifiable, Hashable {
     /// One line in the tab editor, saying what the tab is for.
     var editorDetail: String {
         switch self {
-        case .home: return "Spend, activity and limits"
-        case .workspaces: return "Folders and sessions on your machines"
-        case .insights: return "Breakdowns by model and project"
-        case .machines: return "Computers on your account"
-        case .ssh: return "Saved servers and keys"
+        case .home: return L10n.text("apple.clientrootview.spend_activity_and_limits.c9d9e601")
+        case .workspaces: return L10n.text("apple.clientrootview.folders_and_sessions_on_your_machines.4b93afd1")
+        case .insights: return L10n.text("apple.clientrootview.breakdowns_by_model_and_project.9846e926")
+        case .machines: return L10n.text("apple.clientrootview.computers_on_your_account.232226fe")
+        case .ssh: return L10n.text("apple.clientrootview.saved_servers_and_keys.47db8e47")
         }
     }
 
@@ -520,10 +520,10 @@ private struct ClientAuthRetryView: View {
             Spacer()
             VStack(spacing: Theme.Space.m) {
                 LogoMark(size: 46)
-                Text(friendly?.title ?? "Could not reach your account")
+                Text(friendly?.title ?? L10n.text("apple.clientrootview.could_not_reach_your_account.5e7a4b20"))
                     .font(Theme.title.weight(.semibold))
                     .multilineTextAlignment(.center)
-                Text(friendly?.message ?? message ?? "Check the connection and try again.")
+                Text(friendly?.message ?? message ?? L10n.text("apple.clientrootview.check_the_connection_and_try_again.5ffff6c5"))
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -538,14 +538,14 @@ private struct ClientAuthRetryView: View {
                         ProgressView()
                             .frame(maxWidth: .infinity)
                     } else {
-                        ActionIcon.refresh.label("Try again").frame(maxWidth: .infinity)
+                        ActionIcon.refresh.label(L10n.text("apple.clientrootview.try_again.d8b8392e")).frame(maxWidth: .infinity)
                     }
                 }
                 .clientProminentStyle()
                 .controlSize(.large)
                 .disabled(isLoading)
                 if let onSavedWork {
-                    Button("Open saved work", .archive, action: onSavedWork)
+                    Button(L10n.text("apple.clientrootview.open_saved_work.513b0142"), .archive, action: onSavedWork)
                         .buttonStyle(SecondaryButtonStyle())
                 }
             }

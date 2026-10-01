@@ -95,9 +95,9 @@ struct HeatmapView: View {
         .accessibilityChildren {
             ForEach(accessibleDays, id: \.day.date) { item in
                 Button { onSelect?(item.day) } label: {
-                    Text("\(item.day.date): \(formatSpend(item.day.value)) at API list price")
+                    Text(L10n.text("apple.heatmapview.0_1_at_api_list_price.1a0524d3", "\(item.day.date)", "\(formatSpend(item.day.value))"))
                 }
-                .accessibilityHint("Pins this day in the inspector")
+                .accessibilityHint(L10n.text("apple.heatmapview.pins_this_day_in_the_inspector.f1c6b2a5"))
             }
         }
         #endif
@@ -313,7 +313,7 @@ struct HeatmapView: View {
                     Text(formatSpend(day.value))
                         .font(Theme.numeric(11, weight: .medium))
                 } else {
-                    Text("\(calendar.first) to \(calendar.last)")
+                    Text(L10n.text("apple.heatmapview.0_to_1.c1e3e989", "\(calendar.first)", "\(calendar.last)"))
                         .font(Theme.numeric(11))
                         .foregroundStyle(.tertiary)
                     if let freshness = calendar.freshness {
@@ -325,7 +325,7 @@ struct HeatmapView: View {
 
                 Spacer()
 
-                Text("Less")
+                Text(L10n.text("apple.heatmapview.less.ae5239ec"))
                     .font(Theme.font(10))
                     .foregroundStyle(.tertiary)
                 ForEach(0 ..< Theme.heat.count, id: \.self) { level in
@@ -333,7 +333,7 @@ struct HeatmapView: View {
                         .fill(Theme.heat[level])
                         .frame(width: 9, height: 9)
                 }
-                Text("More")
+                Text(L10n.text("apple.heatmapview.more.d47d7cb0"))
                     .font(Theme.font(10))
                     .foregroundStyle(.tertiary)
             }
@@ -344,9 +344,9 @@ struct HeatmapView: View {
     /// the CLI makes.
     private static func rowLabel(_ row: Int) -> String {
         switch row {
-        case 0: return "Mon"
-        case 2: return "Wed"
-        case 4: return "Fri"
+        case 0: return L10n.text("apple.heatmapview.mon.f40d7f51")
+        case 2: return L10n.text("apple.heatmapview.wed.58339f45")
+        case 4: return L10n.text("apple.heatmapview.fri.66dab40c")
         default: return ""
         }
     }

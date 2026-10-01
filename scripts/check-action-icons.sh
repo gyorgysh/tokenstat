@@ -15,6 +15,9 @@ cd "$(dirname "$0")/.."
 
 python3 - <<'PY'
 import os, re, sys
+sys.dont_write_bytecode = True
+sys.path.insert(0, "scripts")
+from localized_source import read_source
 
 SRC = "apps/mac/Sources"
 
@@ -531,7 +534,7 @@ for root, _, files in os.walk(SRC):
         if not f.endswith(".swift"):
             continue
         p = os.path.join(root, f)
-        src = open(p).read()
+        src = read_source(p)
         ranges = skip_ranges(src)
         for start in button_starts(src):
             end = consume_call(src, start)

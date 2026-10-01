@@ -25,8 +25,8 @@ struct SyncCard: View {
     var body: some View {
         if account.isSyncing {
             status(
-                title: "Syncing…",
-                subtitle: "Uploading sealed counters",
+                title: L10n.text("apple.synccard.syncing.8a046cc9"),
+                subtitle: L10n.text("apple.synccard.uploading_sealed_counters.127c8ba5"),
                 symbol: "arrow.triangle.2.circlepath",
                 tint: Theme.accent,
                 spinner: true
@@ -34,21 +34,21 @@ struct SyncCard: View {
         } else if let notice = account.syncNotice, !account.syncNoticeDismissed {
             if account.isRateLimited {
                 status(
-                    title: "Rate limited",
+                    title: L10n.text("apple.synccard.rate_limited.a06130a5"),
                     subtitle: notice,
                     symbol: "exclamationmark.triangle.fill",
                     tint: Theme.warning
                 )
             } else if account.syncNoticeIsError {
                 status(
-                    title: "Sync failed",
+                    title: L10n.text("apple.synccard.sync_failed.abf3e80b"),
                     subtitle: notice,
                     symbol: "xmark.circle.fill",
                     tint: Theme.danger
                 )
             } else {
                 status(
-                    title: "Synced just now",
+                    title: L10n.text("apple.synccard.synced_just_now.1326132c"),
                     subtitle: notice,
                     symbol: "checkmark.seal.fill",
                     tint: Theme.accent
@@ -59,8 +59,8 @@ struct SyncCard: View {
             // warning until the remembered wait elapses. A success cooldown
             // does not come through here.
             status(
-                title: "Rate limited",
-                subtitle: "This plan allows a sync every few minutes. Try again shortly.",
+                title: L10n.text("apple.synccard.rate_limited.a06130a5"),
+                subtitle: L10n.text("apple.synccard.this_plan_allows_a_sync_every_few_minutes.3f3fb97d"),
                 symbol: "exclamationmark.triangle.fill",
                 tint: Theme.warning
             )

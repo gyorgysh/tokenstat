@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.ssh
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -53,9 +55,9 @@ object SshSecrets {
 
     private fun open(ref: String, encoded: String): String {
         val parts = encoded.split(':')
-        require(parts.size == 3 && parts[0] == "v2") { "Invalid encrypted SSH key" }
+        require(parts.size == 3 && parts[0] == "v2") { L10n.text("android.sshsecrets.invalid_encrypted_ssh_key.6058b050") }
         val iv = Base64.decode(parts[1], Base64.NO_WRAP)
-        require(iv.size == 12) { "Invalid SSH key nonce" }
+        require(iv.size == 12) { L10n.text("android.sshsecrets.invalid_ssh_key_nonce.f065bee6") }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv))
         cipher.updateAAD(ref.toByteArray(Charsets.UTF_8))
@@ -81,7 +83,7 @@ object SshSecrets {
             try {
                 // The legacy entry is authoritative until its deletion commits.
                 val encrypted = seal(ref, value)
-                check(open(ref, encrypted) == value) { "Could not verify encrypted SSH key" }
+                check(open(ref, encrypted) == value) { L10n.text("android.sshsecrets.could_not_verify_encrypted_ssh_key.32cd1ad2") }
                 edit.putString(ref, encrypted)
                 migrated += ref
             } catch (e: Exception) {
@@ -89,12 +91,12 @@ object SshSecrets {
             }
         }
         if (migrated.isEmpty()) return
-        check(edit.commit()) { "Could not save encrypted SSH keys" }
+        check(edit.commit()) { L10n.text("android.sshsecrets.could_not_save_encrypted_ssh_keys.e813fbe7") }
         // Only remove the entries that migrated; quarantine the rest for a
         // later retry instead of dropping or blocking on them.
         val cleanup = old.edit()
         for (ref in migrated) cleanup.remove(ref)
-        check(cleanup.commit()) { "Could not remove legacy SSH keys" }
+        check(cleanup.commit()) { L10n.text("android.sshsecrets.could_not_remove_legacy_ssh_keys.0989da38") }
     }
 
     @Synchronized
@@ -109,13 +111,13 @@ object SshSecrets {
         val sealed = seal(ref, pem)
         // Round-trip before committing so an unreadable value never replaces
         // a good one.
-        check(open(ref, sealed) == pem) { "Could not verify SSH key" }
+        check(open(ref, sealed) == pem) { L10n.text("android.sshsecrets.could_not_verify_ssh_key.efc089b9") }
         check(context.getSharedPreferences(STORE, Context.MODE_PRIVATE).edit()
-            .putString(ref, sealed).commit()) { "Could not save SSH key" }
+            .putString(ref, sealed).commit()) { L10n.text("android.sshsecrets.could_not_save_ssh_key.80038ca7") }
         // A legacy copy left by an earlier failed migration must not overwrite
         // this replacement on the next get(). Only delete after the new save.
         check(context.getSharedPreferences(LEGACY, Context.MODE_PRIVATE).edit()
-            .remove(ref).commit()) { "Could not retire legacy SSH key" }
+            .remove(ref).commit()) { L10n.text("android.sshsecrets.could_not_retire_legacy_ssh_key.ca966ae0") }
     }
 
     @Synchronized
@@ -140,8 +142,8 @@ object SshSecrets {
     fun delete(context: Context, ref: String) {
         // Remove the legacy copy too, or the next migration resurrects the key.
         check(context.getSharedPreferences(LEGACY, Context.MODE_PRIVATE).edit()
-            .remove(ref).commit()) { "Could not remove legacy SSH key" }
+            .remove(ref).commit()) { L10n.text("android.sshsecrets.could_not_remove_legacy_ssh_key.feed516e") }
         check(context.getSharedPreferences(STORE, Context.MODE_PRIVATE).edit()
-            .remove(ref).commit()) { "Could not remove SSH key" }
+            .remove(ref).commit()) { L10n.text("android.sshsecrets.could_not_remove_ssh_key.55c5decd") }
     }
 }

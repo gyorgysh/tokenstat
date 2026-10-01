@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.tasks
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
 import ai.tokenstat.tokenstat.ui.chrome.OwnSectionHeader
 import ai.tokenstat.tokenstat.ui.chrome.TabBarChrome
@@ -75,9 +77,9 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 private val BOARD_COLUMNS = listOf(
-    Triple("backlog", "To Do", "backlog"),
-    Triple("doing", "In progress", "doing"),
-    Triple("done", "Done", "done"),
+    Triple("backlog", L10n.text("android.taskboard.to_do.150d92c4"), "backlog"),
+    Triple("doing", L10n.text("android.taskboard.in_progress.c1f88e9d"), "doing"),
+    Triple("done", L10n.text("common.done"), "done"),
 )
 
 /// The full task board behind the workspace Tasks tab: compact list,
@@ -173,7 +175,7 @@ fun TaskBoardScreen(
             error = null
         }.onFailure {
             if (request != generation) return
-            error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+            error = TunnelCopy.display(it.message ?: L10n.text("android.taskboard.the_request_failed.db4fb447"), hostLabel)
         }
         if (includeOptions) {
             runCatching { model.workspaceSection(peer, "workspace.list", buildJsonObject {}) }
@@ -206,7 +208,7 @@ fun TaskBoardScreen(
         if (!listOf("backlog", "doing", "done", "archive").contains(column)) return
         val revision = card.revision
         if (revision == null) {
-            error = "Reload the board before moving this task."
+            error = L10n.text("android.taskboard.reload_the_board_before_moving_this_task.a24349b8")
             return
         }
         working = true
@@ -229,11 +231,11 @@ fun TaskBoardScreen(
                 if (order != null) put("order", order)
             })
             if (order != null) filter = filter.copy(newestFirst = false)
-            showNotice(if (column == "archive") "Task archived" else "Task moved")
+            showNotice(if (column == "archive") L10n.text("android.taskboard.task_archived.0e7819fb") else L10n.text("android.taskboard.task_moved.c7ea8625"))
             error = null
             load(includeOptions = false)
         } catch (e: Exception) {
-            error = "The move was not confirmed. Reload the board before trying again. ${TunnelCopy.display(e.message ?: "", hostLabel)}"
+            error = L10n.text("android.taskboard.the_move_was_not_confirmed_reload_the_boar.ca497030", "${TunnelCopy.display(e.message ?: "", hostLabel)}")
         } finally {
             working = false
         }
@@ -243,7 +245,7 @@ fun TaskBoardScreen(
         if (working || !canDelete) return
         val revision = card.revision
         if (revision == null) {
-            error = "Reload the board before deleting this task."
+            error = L10n.text("android.taskboard.reload_the_board_before_deleting_this_task.7c0b8c41")
             return
         }
         working = true
@@ -254,10 +256,10 @@ fun TaskBoardScreen(
             })
             cards = cards.filter { it.id != card.id }
             deleting = null
-            showNotice("Task deleted")
+            showNotice(L10n.text("android.taskboard.task_deleted.d986a85e"))
             error = null
         } catch (e: Exception) {
-            error = "The deletion was not confirmed. Reload the board to check the task. ${TunnelCopy.display(e.message ?: "", hostLabel)}"
+            error = L10n.text("android.taskboard.the_deletion_was_not_confirmed_reload_the.bef65da3", "${TunnelCopy.display(e.message ?: "", hostLabel)}")
         } finally {
             working = false
         }
@@ -337,11 +339,11 @@ fun TaskBoardScreen(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) {
-                    Icon(ActionIcon.Back.vector, "Back", tint = LocalTsColors.current.controlGlyph)
+                    Icon(ActionIcon.Back.vector, L10n.text("common.back"), tint = LocalTsColors.current.controlGlyph)
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
-                        if (fixedFolder == null) "All tasks" else "Tasks",
+                        if (fixedFolder == null) L10n.text("android.taskboard.all_tasks.cb664823") else L10n.text("common.tasks"),
                         style = TsType.cardTitle,
                         color = LocalTsColors.current.textPrimary,
                     )
@@ -352,18 +354,18 @@ fun TaskBoardScreen(
                     )
                 }
                 IconButton(onClick = { composing = true }, enabled = !composing && editing == null) {
-                    Icon(ActionIcon.Create.vector, "New task", tint = LocalTsColors.current.accent)
+                    Icon(ActionIcon.Create.vector, L10n.text("android.taskboard.new_task.3e992276"), tint = LocalTsColors.current.accent)
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 TsSecondaryButton(
-                    label = "Filters",
+                    label = L10n.text("android.taskboard.filters.546ebb8e"),
                     icon = ActionIcon.Filter.vector,
                     small = true,
                     onClick = { showFilters = !showFilters },
                 )
                 TsSecondaryButton(
-                    label = if (filter.archived) "Open tasks" else "Archive",
+                    label = if (filter.archived) L10n.text("android.taskboard.open_tasks.87cfa1a5") else L10n.text("common.archive"),
                     icon = if (filter.archived) ActionIcon.Restore.vector else ActionIcon.Archive.vector,
                     small = true,
                     onClick = { filter = filter.copy(archived = !filter.archived) },
@@ -371,7 +373,7 @@ fun TaskBoardScreen(
             }
             Spacer(Modifier.padding(top = Space.s))
             TsSearchField(
-                prompt = "Search tasks",
+                prompt = L10n.text("android.taskboard.search_tasks.46c6f1de"),
                 query = filter.query,
                 onQueryChange = { filter = filter.copy(query = it) },
             )
@@ -379,15 +381,15 @@ fun TaskBoardScreen(
                 Spacer(Modifier.padding(top = Space.s))
                 if (fixedFolder == null) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-                        ChoiceChip("All projects", filter.folder is TaskBoardFolder.All, { filter = filter.copy(folder = TaskBoardFolder.All) })
-                        ChoiceChip("Uncategorized", filter.folder is TaskBoardFolder.Uncategorized, { filter = filter.copy(folder = TaskBoardFolder.Uncategorized) })
+                        ChoiceChip(L10n.text("android.taskboard.all_projects.4b87271b"), filter.folder is TaskBoardFolder.All, { filter = filter.copy(folder = TaskBoardFolder.All) })
+                        ChoiceChip(L10n.text("android.taskboard.uncategorized.8d40d123"), filter.folder is TaskBoardFolder.Uncategorized, { filter = filter.copy(folder = TaskBoardFolder.Uncategorized) })
                         folders.forEach { folder ->
                             ChoiceChip(folder.name.ifBlank { folder.id }, filter.folder == TaskBoardFolder.Folder(folder.id), { filter = filter.copy(folder = TaskBoardFolder.Folder(folder.id)) })
                         }
                     }
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-                    ChoiceChip("All agents", filter.backend.isEmpty(), { filter = filter.copy(backend = "") })
+                    ChoiceChip(L10n.text("android.taskboard.all_agents.54c32d3e"), filter.backend.isEmpty(), { filter = filter.copy(backend = "") })
                     agentIds.forEach { id ->
                         ChoiceChip(backends.firstOrNull { it.id == id }?.label ?: id, filter.backend == id, { filter = filter.copy(backend = id) })
                     }
@@ -396,22 +398,22 @@ fun TaskBoardScreen(
                     TaskBoardAttention.entries.forEach { attention ->
                         ChoiceChip(attention.label, filter.attention == attention, { filter = filter.copy(attention = attention) })
                     }
-                    ChoiceChip("Board order", !filter.newestFirst, { filter = filter.copy(newestFirst = false) })
-                    ChoiceChip("Newest first", filter.newestFirst, { filter = filter.copy(newestFirst = true) })
+                    ChoiceChip(L10n.text("android.taskboard.board_order.a919c850"), !filter.newestFirst, { filter = filter.copy(newestFirst = false) })
+                    ChoiceChip(L10n.text("android.taskboard.newest_first.ffb6f576"), filter.newestFirst, { filter = filter.copy(newestFirst = true) })
                 }
             }
             val summary = remember(filter, folders, backends, fixedFolder) {
                 buildList {
                     if (fixedFolder == null) {
                         when (val folder = filter.folder) {
-                            is TaskBoardFolder.Folder -> add(folders.firstOrNull { it.id == folder.id }?.name ?: "Unavailable folder")
-                            is TaskBoardFolder.Uncategorized -> add("Uncategorized")
+                            is TaskBoardFolder.Folder -> add(folders.firstOrNull { it.id == folder.id }?.name ?: L10n.text("android.taskboard.unavailable_folder.6454a349"))
+                            is TaskBoardFolder.Uncategorized -> add(L10n.text("android.taskboard.uncategorized.8d40d123"))
                             is TaskBoardFolder.All -> Unit
                         }
                     }
                     if (filter.backend.isNotEmpty()) add(backends.firstOrNull { it.id == filter.backend }?.label ?: filter.backend)
                     if (filter.attention != TaskBoardAttention.ALL) add(filter.attention.label)
-                    if (filter.newestFirst) add("Newest first")
+                    if (filter.newestFirst) add(L10n.text("android.taskboard.newest_first.ffb6f576"))
                 }.joinToString(" · ")
             }
             if (summary.isNotEmpty()) {
@@ -424,16 +426,16 @@ fun TaskBoardScreen(
                             attention = TaskBoardAttention.ALL,
                             newestFirst = false,
                         )
-                    }) { Text("Clear filters") }
+                    }) { Text(L10n.text("android.taskboard.clear_filters.7179ea00")) }
                 }
             }
             if (error != null) {
                 Banner(error!!, BannerSeverity.DANGER)
-                TsSecondaryButton(label = "Reload", small = true, onClick = { scope.launch { load() } })
+                TsSecondaryButton(label = L10n.text("android.taskboard.reload.bdc090ec"), small = true, onClick = { scope.launch { load() } })
             }
             if (!canEdit) {
                 Text(
-                    "Update $hostLabel's tokenstat to use all task editing and board actions.",
+                    L10n.text("android.taskboard.update_0_s_tokenstat_to_use_all_task_editi.824b204a", "${hostLabel}"),
                     style = TsType.caption,
                     color = LocalTsColors.current.textSecondary,
                 )
@@ -444,14 +446,14 @@ fun TaskBoardScreen(
             if (loading && !loaded) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     CircularProgressIndicator()
-                    Text("Loading tasks", color = LocalTsColors.current.textSecondary)
+                    Text(L10n.text("android.taskboard.loading_tasks.cad82c71"), color = LocalTsColors.current.textSecondary)
                 }
             }
             if (loaded && visible.isEmpty()) {
                 EmptyState(
                     ActionIcon.Create.vector,
-                    if (filter.archived) "No archived tasks" else "No tasks here",
-                    "Create a task or adjust the filters to see more work.",
+                    if (filter.archived) L10n.text("android.taskboard.no_archived_tasks.5cad3e05") else L10n.text("android.taskboard.no_tasks_here.befb28ae"),
+                    L10n.text("android.taskboard.create_a_task_or_adjust_the_filters_to_see.50174b52"),
                     art = { EmptyArt(EmptyArtKind.Tasks) },
                 )
             }
@@ -468,7 +470,7 @@ fun TaskBoardScreen(
                     contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset),
                     verticalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
-                    val columns = if (filter.archived) listOf(Triple("archive", "Archive", "archive")) else BOARD_COLUMNS.filter { it.first == selectedStage }
+                    val columns = if (filter.archived) listOf(Triple("archive", L10n.text("common.archive"), "archive")) else BOARD_COLUMNS.filter { it.first == selectedStage }
                     columns.forEach { (id, title, _) ->
                         item(key = "header-$id") {
                             val count = visible.count { it.column == id }
@@ -478,10 +480,10 @@ fun TaskBoardScreen(
                         if (columnCards.isEmpty()) {
                             item(key = "empty-$id") {
                                 Text(when (id) {
-                                    "backlog" -> "Ready for your next task"
-                                    "doing" -> "Nothing in progress"
-                                    "done" -> "Completed tasks appear here"
-                                    else -> "No archived tasks"
+                                    "backlog" -> L10n.text("android.taskboard.ready_for_your_next_task.838d6e4b")
+                                    "doing" -> L10n.text("android.taskboard.nothing_in_progress.44a3cc77")
+                                    "done" -> L10n.text("android.taskboard.completed_tasks_appear_here.6d7064fc")
+                                    else -> L10n.text("android.taskboard.no_archived_tasks.5cad3e05")
                                 }, style = TsType.caption, color = LocalTsColors.current.textSecondary)
                             }
                         }
@@ -490,7 +492,7 @@ fun TaskBoardScreen(
                                 card = card,
                                 showFolder = fixedFolder == null,
                                 folderName = folders.firstOrNull { it.id == card.workspaceID }?.name
-                                    ?: if (card.workspaceID.isEmpty()) "Uncategorized" else "Unavailable folder",
+                                    ?: if (card.workspaceID.isEmpty()) L10n.text("android.taskboard.uncategorized.8d40d123") else L10n.text("android.taskboard.unavailable_folder.6454a349"),
                                 backendLabel = backends.firstOrNull { it.id == card.backend }?.label ?: card.backend,
                                 working = working,
                                 canEdit = canEdit,
@@ -513,12 +515,12 @@ fun TaskBoardScreen(
     if (deletingCard != null) {
         AlertDialog(
             onDismissRequest = { deleting = null },
-            title = { Text("Delete task?") },
-            text = { Text("Delete \"${deletingCard.title}\"? This removes the task from this computer's board.") },
+            title = { Text(L10n.text("android.taskboard.delete_task.6f2142f0")) },
+            text = { Text(L10n.text("android.taskboard.delete_0_this_removes_the_task_from_this_c.615625b6", "${deletingCard.title}")) },
             confirmButton = {
-                Button(onClick = { scope.launch { delete(deletingCard) } }) { Text("Delete task") }
+                Button(onClick = { scope.launch { delete(deletingCard) } }) { Text(L10n.text("android.taskboard.delete_task.3baf5547")) }
             },
-            dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text(L10n.text("common.cancel")) } },
         )
     }
 }
@@ -584,28 +586,28 @@ private fun TaskRow(
                     Text(backendLabel, style = TsType.caption, color = LocalTsColors.current.textSecondary)
                 }
                 if (card.priority == "high") {
-                    Text("High priority", style = TsType.caption, color = LocalTsColors.current.accent)
+                    Text(L10n.text("android.taskboard.high_priority.b699a8c8"), style = TsType.caption, color = LocalTsColors.current.accent)
                 }
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = { menu = true }, enabled = !working && canEdit) {
-                    Text("Move")
+                    Text(L10n.text("android.taskboard.move.6ecc3df6"))
                 }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     BOARD_COLUMNS.forEach { (id, title, _) ->
                         if (card.column != id) {
                             DropdownMenuItem(
-                                text = { Text("Move to $title") },
+                                text = { Text(L10n.text("android.taskboard.move_to_0.699bb2f5", "${title}")) },
                                 onClick = { menu = false; onMove(id, null, false) },
                             )
                         }
                     }
                     if (card.column != "archive") {
-                        DropdownMenuItem(text = { Text("Archive") }, onClick = { menu = false; onArchive() })
+                        DropdownMenuItem(text = { Text(L10n.text("common.archive")) }, onClick = { menu = false; onArchive() })
                     } else {
-                        DropdownMenuItem(text = { Text("Restore") }, onClick = { menu = false; onRestore() })
+                        DropdownMenuItem(text = { Text(L10n.text("common.restore")) }, onClick = { menu = false; onRestore() })
                     }
                     DropdownMenuItem(
-                        text = { Text("Move earlier") },
+                        text = { Text(L10n.text("android.taskboard.move_earlier.736612d4")) },
                         enabled = canEarlier,
                         onClick = {
                             menu = false
@@ -613,7 +615,7 @@ private fun TaskRow(
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("Move later") },
+                        text = { Text(L10n.text("android.taskboard.move_later.d6e85608")) },
                         enabled = canLater,
                         onClick = {
                             menu = false
@@ -625,7 +627,7 @@ private fun TaskRow(
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("Delete") },
+                        text = { Text(L10n.text("common.delete")) },
                         enabled = card.delegate?.isRunning != true && canDelete,
                         onClick = { menu = false; onDelete() },
                     )

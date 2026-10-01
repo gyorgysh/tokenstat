@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.notifications
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.annotation.VisibleForTesting
@@ -131,9 +133,9 @@ object PushRegistrar {
         val signedIn = answer["signedIn"]?.jsonPrimitive?.booleanOrNull ?: true
         val enabled = answer["enabled"]?.jsonPrimitive?.booleanOrNull ?: true
         val sent = answer["sent"]?.jsonPrimitive?.longOrNull ?: 1
-        if (!signedIn) return "Sign in first. A notification has to reach this device from your account."
-        if (!enabled) return "Notifications are not switched on for the service yet. Nothing is wrong with this device."
-        if (sent == 0L) return "The account has no device to notify yet."
+        if (!signedIn) return L10n.text("android.pushregistrar.sign_in_first_a_notification_has_to_reach.c1314d42")
+        if (!enabled) return L10n.text("android.pushregistrar.notifications_are_not_switched_on_for_the.b82ba3c6")
+        if (sent == 0L) return L10n.text("android.pushregistrar.the_account_has_no_device_to_notify_yet.bf208fe3")
         return null
     }
 

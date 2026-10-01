@@ -36,7 +36,7 @@ struct DeviceAccessRequestSheet: View {
                 DeviceAccessScene(kind: request.kind, reduceMotion: reduceMotion)
                     .frame(maxWidth: .infinity)
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    Text("Approve only a device you recognise. Everything it reaches is encrypted between the two of them, and you can take this back in Devices at any time.")
+                    Text(L10n.text("apple.deviceaccessrequestsheet.approve_only_a_device_you_recognise_everyt.97e32c7d"))
                         .font(Theme.callout)
                         .foregroundStyle(Theme.controlGlyph)
                         .fixedSize(horizontal: false, vertical: true)
@@ -67,15 +67,15 @@ struct DeviceAccessRequestSheet: View {
     private var scope: String {
         switch request.kind {
         case .screen:
-            return "Capture runs in the app, so tokenstat has to be open for this screen to be shared. The always-on helper keeps terminals and files working, not the screen."
+            return L10n.text("apple.deviceaccessrequestsheet.capture_runs_in_the_app_so_tokenstat_has_t.e2be3644")
         case .workspace:
-            return "It will be able to read and change files in your workspaces, start terminals and agents, and commit and push. It cannot reach anything outside the folders you have added."
+            return L10n.text("apple.deviceaccessrequestsheet.it_will_be_able_to_read_and_change_files_i.511878d6")
         }
     }
 
     private var answers: some View {
         HStack(spacing: Theme.Space.s) {
-            Button("Deny", .revoke, role: .destructive) { answer(view: false, control: false) }
+            Button(L10n.text("apple.deviceaccessrequestsheet.deny.05a2d733"), .revoke, role: .destructive) { answer(view: false, control: false) }
                 .buttonStyle(SecondaryButtonStyle())
             Spacer(minLength: Theme.Space.s)
             // Both answers, always, for a screen. Offering only what the
@@ -85,12 +85,12 @@ struct DeviceAccessRequestSheet: View {
             // The person at this machine is the one deciding, so they get the
             // whole decision.
             if request.kind == .screen {
-                Button("View only", .preview) { answer(view: true, control: false) }
+                Button(L10n.text("apple.deviceaccessrequestsheet.view_only.9b4c6c85"), .preview) { answer(view: true, control: false) }
                     .buttonStyle(SecondaryButtonStyle())
-                Button("Full access", .approve) { answer(view: true, control: true) }
+                Button(L10n.text("apple.deviceaccessrequestsheet.full_access.f19611c6"), .approve) { answer(view: true, control: true) }
                     .buttonStyle(AccentButtonStyle())
             } else {
-                Button("Allow", .approve) { answer(view: true, control: false) }
+                Button(L10n.text("apple.deviceaccessrequestsheet.allow.e213c161"), .approve) { answer(view: true, control: false) }
                     .buttonStyle(AccentButtonStyle())
             }
         }

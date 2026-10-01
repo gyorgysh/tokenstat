@@ -29,6 +29,7 @@ fi
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
+cp -R "$root/apps/localization" "$work/localization"
 
 failed=0
 ran=0
@@ -55,6 +56,9 @@ for test in "$tests"/*Tests.swift; do
     echo "FAIL $name: no sources named" >&2
     failed=1
     continue
+  fi
+  if [[ " $wanted " != *"L10n.swift"* ]]; then
+    paths+=("$sources/Design/L10n.swift")
   fi
   echo "== $name"
   if ! swiftc -parse-as-library -swift-version 5 -o "$work/$name" \

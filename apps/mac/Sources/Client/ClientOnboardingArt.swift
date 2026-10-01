@@ -69,13 +69,13 @@ private struct IntroArt: View {
         VStack(spacing: Theme.Space.m) {
             HStack(spacing: Theme.Space.s) {
                 LogoMark(size: 32, animated: !reduceMotion, loops: false)
-                Text("Your work, together")
+                Text(L10n.text("apple.clientonboardingart.your_work_together.89923b0a"))
                     .font(ClientType.label.weight(.semibold))
             }
             HStack(spacing: Theme.Space.s) {
-                tile("Agents", symbol: "bubble.left.and.bubble.right", delay: 0)
-                tile("Projects", symbol: "folder", delay: 0.08)
-                tile("Usage", symbol: "chart.bar", delay: 0.16)
+                tile(L10n.text("apple.clientonboardingart.agents.279b44d2"), symbol: "bubble.left.and.bubble.right", delay: 0)
+                tile(L10n.text("common.projects"), symbol: "folder", delay: 0.08)
+                tile(L10n.text("apple.clientonboardingart.usage.8d59829c"), symbol: "chart.bar", delay: 0.16)
             }
         }
         .frame(maxWidth: 320)
@@ -108,11 +108,11 @@ private struct AgentsArt: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: "folder").foregroundStyle(Theme.accent)
-                Text("Your project").font(ClientType.caption.weight(.semibold))
+                Text(L10n.text("apple.clientonboardingart.your_project.131a8553")).font(ClientType.caption.weight(.semibold))
                 Spacer()
                 Image(systemName: "bubble.left.and.bubble.right").foregroundStyle(Theme.accent)
             }
-            Text("Let’s work on the next idea.")
+            Text(L10n.text("apple.clientonboardingart.let_s_work_on_the_next_idea.5c39b8ef"))
                 .font(ClientType.label)
                 .padding(Theme.Space.s)
                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -120,8 +120,8 @@ private struct AgentsArt: View {
             HStack(alignment: .top, spacing: Theme.Space.s) {
                 Image(systemName: "sparkles").foregroundStyle(Theme.accent)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Ready for your review").font(ClientType.label.weight(.semibold))
-                    Text("Read the changes. Decide what comes next.")
+                    Text(L10n.text("apple.clientonboardingart.ready_for_your_review.cfe3b835")).font(ClientType.label.weight(.semibold))
+                    Text(L10n.text("apple.clientonboardingart.read_the_changes_decide_what_comes_next.536244e6"))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -195,9 +195,9 @@ private struct DevicesArt: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: Theme.Space.m) {
-            device(icon: "desktopcomputer", label: "Mac", wide: 86, tall: 58, delay: 0)
-            device(icon: "ipad", label: "iPad", wide: 52, tall: 70, delay: 0.08)
-            device(icon: "iphone", label: "Phone", wide: 34, tall: 62, delay: 0.16)
+            device(icon: "desktopcomputer", label: L10n.text("apple.clientonboardingart.mac.8b3795aa"), wide: 86, tall: 58, delay: 0)
+            device(icon: "ipad", label: L10n.text("apple.clientonboardingart.ipad.23cbcfc3"), wide: 52, tall: 70, delay: 0.08)
+            device(icon: "iphone", label: L10n.text("apple.clientonboardingart.phone.63dceb88"), wide: 34, tall: 62, delay: 0.16)
         }
         .onAppear { shown = true }
     }
@@ -284,7 +284,7 @@ private struct RemainingArt: View {
             VStack(spacing: 2) {
                 Text("70%")
                     .font(ClientType.figureSmall)
-                Text("left")
+                Text(L10n.text("apple.clientonboardingart.left.360f8403"))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
             }
@@ -352,8 +352,8 @@ private struct SessionsArt: View {
 
     private let script = [
         "$ claude",
-        "reading src/main.rs",
-        "patched the parser",
+        L10n.text("apple.clientonboardingart.reading_src_main_rs.1c0ca90b"),
+        L10n.text("apple.clientonboardingart.patched_the_parser.e440392f"),
     ]
 
     var body: some View {
@@ -494,9 +494,9 @@ private struct ControlArt: View {
     @State private var shown = false
 
     private let rows: [(String, Bool)] = [
-        ("Private account", true),
-        ("Sync totals", false),
-        ("Remote reach", false),
+        (L10n.text("apple.clientonboardingart.private_account.8f4de740"), true),
+        (L10n.text("apple.clientonboardingart.sync_totals.c2db3b0c"), false),
+        (L10n.text("apple.clientonboardingart.remote_reach.07ae736b"), false),
     ]
 
     var body: some View {

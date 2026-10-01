@@ -26,7 +26,7 @@ struct SSHInspector: View {
                 // nowhere else, so the screen with the whole server on it had
                 // no way to reach the server.
                 if let host = selectedHost {
-                    Button("Connect", .connect) { model.connectRequest = host }
+                    Button(L10n.text("common.connect"), .connect) { model.connectRequest = host }
                         .buttonStyle(AccentButtonStyle(small: true))
                         .padding(.trailing, Theme.Space.xs)
                         .keyboardShortcut(.return, modifiers: [])
@@ -104,7 +104,7 @@ struct SSHInspector: View {
                             .font(Theme.caption).foregroundStyle(.secondary)
                     }
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                        Text("Fingerprints").font(Theme.caption).foregroundStyle(.secondary)
+                        Text(L10n.text("apple.sshinspector.fingerprints.a9171032")).font(Theme.caption).foregroundStyle(.secondary)
                         ForEach(known.fingerprints, id: \.self) { print in
                             Text(print)
                                 .font(Theme.mono(10))
@@ -112,10 +112,10 @@ struct SSHInspector: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    Text("Forgetting makes the next connection ask you to confirm this server's fingerprint again. Nothing on the server changes.")
+                    Text(L10n.text("apple.sshinspector.forgetting_makes_the_next_connection_ask_y.d132cb06"))
                         .font(Theme.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Button("Forget", .revoke) {
+                    Button(L10n.text("apple.sshinspector.forget.a6bd489d"), .revoke) {
                         Task {
                             await model.forgetKnownHost(known)
                             clear()
@@ -142,36 +142,36 @@ struct SSHInspector: View {
 
     private var title: String {
         switch model.selection {
-        case let .host(id): return model.hosts.first { $0.id == id }?.label ?? "Server"
-        case .newHost: return "Add server"
-        case let .key(id): return model.keys.first { $0.id == id }?.label ?? "Key"
-        case .newKey: return "Add key"
-        case let .snippet(id): return model.snippets.first { $0.id == id }?.title ?? "Snippet"
-        case .newSnippet: return "Add snippet"
-        case let .folder(id): return model.folderName(id) ?? "Folder"
-        case .newFolder: return "Add folder"
-        case let .knownHost(id): return model.knownHosts.first { $0.id == id }?.label ?? "Trusted server"
-        case .importConfig: return "Import from ssh config"
-        case .importCloud: return "Import cloud servers"
+        case let .host(id): return model.hosts.first { $0.id == id }?.label ?? L10n.text("apple.sshinspector.server.aef7de28")
+        case .newHost: return L10n.text("apple.sshinspector.add_server.1099b2a9")
+        case let .key(id): return model.keys.first { $0.id == id }?.label ?? L10n.text("apple.sshinspector.key.99a52df3")
+        case .newKey: return L10n.text("apple.sshinspector.add_key.12626d65")
+        case let .snippet(id): return model.snippets.first { $0.id == id }?.title ?? L10n.text("apple.sshinspector.snippet.48f55cb8")
+        case .newSnippet: return L10n.text("apple.sshinspector.add_snippet.a1f802b9")
+        case let .folder(id): return model.folderName(id) ?? L10n.text("apple.sshinspector.folder.74ccd433")
+        case .newFolder: return L10n.text("apple.sshinspector.add_folder.5bbfc5a6")
+        case let .knownHost(id): return model.knownHosts.first { $0.id == id }?.label ?? L10n.text("apple.sshinspector.trusted_server.bb00bacb")
+        case .importConfig: return L10n.text("apple.sshinspector.import_from_ssh_config.1b6e8c38")
+        case .importCloud: return L10n.text("apple.sshinspector.import_cloud_servers.34d6891a")
         case .knownHosts, nil: return section.label
         }
     }
 
     private var emptyTitle: String {
         switch section {
-        case .hosts: "Pick a server"
-        case .keys: "Pick a key"
-        case .snippets: "Pick a snippet"
-        case .knownHosts: "Pick a server"
+        case .hosts: L10n.text("apple.sshinspector.pick_a_server.3ff63c9e")
+        case .keys: L10n.text("apple.sshinspector.pick_a_key.a89ea346")
+        case .snippets: L10n.text("apple.sshinspector.pick_a_snippet.95d104fd")
+        case .knownHosts: L10n.text("apple.sshinspector.pick_a_server.3ff63c9e")
         }
     }
 
     private var emptySubtitle: String {
         switch section {
-        case .hosts: "Its address, authentication and settings open here."
-        case .keys: "Its fingerprint and public half open here."
-        case .snippets: "The command opens here, with room to write it."
-        case .knownHosts: "Its fingerprint, and the button that forgets it, open here."
+        case .hosts: L10n.text("apple.sshinspector.its_address_authentication_and_settings_op.e552620c")
+        case .keys: L10n.text("apple.sshinspector.its_fingerprint_and_public_half_open_here.0e876c4c")
+        case .snippets: L10n.text("apple.sshinspector.the_command_opens_here_with_room_to_write.79e23a9b")
+        case .knownHosts: L10n.text("apple.sshinspector.its_fingerprint_and_the_button_that_forget.4e77e07c")
         }
     }
 }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.components
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -154,7 +156,7 @@ fun TsPickerSheet(
                     color = colors.textPrimary,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = onDismiss) { Text("Done") }
+                TextButton(onClick = onDismiss) { Text(L10n.text("common.done")) }
             }
             content()
         }
@@ -231,7 +233,7 @@ fun <T> TsPickerOptionList(
                     style = TsType.callout,
                     color = colors.textSecondary,
                     modifier = Modifier.semantics {
-                        contentDescription = "Current selection: $selectionSummary"
+                        contentDescription = L10n.text("android.tspicker.current_selection_0.a744cd0f", "${selectionSummary}")
                     },
                 )
             }
@@ -251,7 +253,7 @@ fun <T> TsPickerOptionList(
                 if (onRefresh != null) {
                     Icon(
                         ActionIcon.Refresh.vector,
-                        "Ask this computer to read the agent's model list again",
+                        L10n.text("android.tspicker.ask_this_computer_to_read_the_agent_s_mode.a3d03fd8"),
                         tint = if (refreshing) colors.textTertiary else colors.accent,
                         modifier = Modifier
                             .size(44.dp)
@@ -269,7 +271,7 @@ fun <T> TsPickerOptionList(
                     Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    TsPickerSectionTab("All", selectedSection.isEmpty()) {
+                    TsPickerSectionTab(L10n.text("android.tspicker.all.a52ace42"), selectedSection.isEmpty()) {
                         selectedSection = ""
                         query = ""
                     }
@@ -290,13 +292,13 @@ fun <T> TsPickerOptionList(
                 verticalArrangement = Arrangement.spacedBy(Space.xs),
             ) {
                 Text(
-                    if (query.isEmpty()) emptyMessage else "Nothing matches",
+                    if (query.isEmpty()) emptyMessage else L10n.text("android.tspicker.nothing_matches.965b516d"),
                     style = TsType.callout,
                     color = colors.textSecondary,
                 )
                 if (query.isNotEmpty()) {
                     Text(
-                        "Try another part of the name.",
+                        L10n.text("android.tspicker.try_another_part_of_the_name.168c7783"),
                         style = TsType.caption,
                         color = colors.textTertiary,
                     )

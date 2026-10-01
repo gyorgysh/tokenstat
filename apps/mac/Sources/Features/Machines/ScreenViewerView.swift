@@ -93,7 +93,7 @@ struct ScreenViewerView: View {
             if !isCompactHeight, !isImmersive {
                 HStack(spacing: 6) {
                     Circle().fill(model.transport == "direct" ? Theme.success : Theme.warning).frame(width: 7, height: 7)
-                    Text(model.transport == "direct" ? "Direct connection" : "Encrypted relay")
+                    Text(model.transport == "direct" ? L10n.text("apple.screenviewerview.direct_connection.28d0ad54") : L10n.text("apple.screenviewerview.encrypted_relay.153d7b1c"))
                 }
                 .font(Theme.caption).foregroundStyle(.secondary).padding(.vertical, 4)
             }
@@ -105,12 +105,12 @@ struct ScreenViewerView: View {
             // one job in a row that had no space to spare.
             #if os(macOS)
             ToolbarItem(placement: .cancellationAction) {
-                InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close screen viewer")
+                InspectorCloseButton(action: { dismiss() }, help: L10n.text("common.close"), label: L10n.text("apple.screenviewerview.close_screen_viewer.fec23bc8"))
             }
             #endif
             if model.displays.count > 1 {
                 ToolbarItem {
-                    Picker("Display", selection: Binding(
+                    Picker(L10n.text("apple.screenviewerview.display.34e108c0"), selection: Binding(
                         get: { model.selectedDisplay ?? 0 },
                         set: { model.selectDisplay($0) }
                     )) {
@@ -124,22 +124,22 @@ struct ScreenViewerView: View {
             ToolbarItem {
                 if controlling {
                     if model.transferProgress == nil {
-                        Button("Send file", .upload) { importingFile = true }
+                        Button(L10n.text("apple.screenviewerview.send_file.cb4bef0b"), .upload) { importingFile = true }
                     } else {
-                        Button("Cancel transfer", .stop) { model.cancelTransfer() }
+                        Button(L10n.text("apple.screenviewerview.cancel_transfer.f48e8dc7"), .stop) { model.cancelTransfer() }
                     }
                 }
             }
             ToolbarItem {
-                Toggle(isOn: $muted) { Label("Mute", systemImage: muted ? "speaker.slash" : "speaker.wave.2") }
+                Toggle(isOn: $muted) { Label(L10n.text("apple.screenviewerview.mute.8dd6857b"), systemImage: muted ? "speaker.slash" : "speaker.wave.2") }
                     .onChange(of: muted) { _, value in model.audio.muted = value }
             }
             ToolbarItem {
-                Toggle(isOn: $controlling) { Label("Control", systemImage: "cursorarrow.motionlines") }
+                Toggle(isOn: $controlling) { Label(L10n.text("apple.screenviewerview.control.32d7e820"), systemImage: "cursorarrow.motionlines") }
                     .disabled(model.state == .connecting)
             }
             ToolbarItem {
-                Picker("Quality", selection: Binding(
+                Picker(L10n.text("apple.screenviewerview.quality.1b2c08a8"), selection: Binding(
                     get: { model.quality },
                     set: { choice in Task { await model.setQuality(choice) } }
                 )) {
@@ -148,11 +148,11 @@ struct ScreenViewerView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .help("How much of the connection this picture may use")
+                .help(L10n.text("apple.screenviewerview.how_much_of_the_connection_this_picture_ma.191b5e79"))
             }
             if controlling {
                 ToolbarItem {
-                    Picker("Pointer", selection: $mode) {
+                    Picker(L10n.text("apple.screenviewerview.pointer.d00f1e4d"), selection: $mode) {
                         ForEach(ScreenPointerMode.allCases) { option in
                             Label(option.title, systemImage: option.symbol).tag(option)
                         }
@@ -162,7 +162,7 @@ struct ScreenViewerView: View {
             }
             if zoom > 1.01 {
                 ToolbarItem {
-                    Button("Fit", .collapse) {
+                    Button(L10n.text("apple.screenviewerview.fit.9f872ed4"), .collapse) {
                         withAnimation {
                             zoom = 1
                             viewOffset = .zero
@@ -179,7 +179,7 @@ struct ScreenViewerView: View {
                 // it. The title stays as the help tag and the accessibility
                 // label, which is where a word belongs on a Mac toolbar.
                 Button(
-                    viewerIsFullScreen ? "Exit full screen" : "Full screen",
+                    viewerIsFullScreen ? L10n.text("apple.screenviewerview.exit_full_screen.897e0cf7") : L10n.text("apple.screenviewerview.full_screen.674fe2ac"),
                     viewerIsFullScreen ? .exitFullScreen : .enterFullScreen
                 ) {
                     // The viewer's window, not the key window. A sheet's
@@ -187,7 +187,7 @@ struct ScreenViewerView: View {
                     (viewerWindow ?? NSApp.keyWindow)?.toggleFullScreen(nil)
                 }
                 .labelStyle(.iconOnly)
-                .help(viewerIsFullScreen ? "Return this viewer to its window" : "Fill this display")
+                .help(viewerIsFullScreen ? L10n.text("apple.screenviewerview.return_this_viewer_to_its_window.aa6bd450") : L10n.text("apple.screenviewerview.fill_this_display.e5ca2ad4"))
             }
             #else
             ToolbarItem {
@@ -196,17 +196,17 @@ struct ScreenViewerView: View {
                 // the screen with the least room to spare is the one place a
                 // label cannot afford to be a word. The title stays as the
                 // accessibility label and the iPad tooltip.
-                Button("Full screen", .enterFullScreen) {
+                Button(L10n.text("apple.screenviewerview.full_screen.674fe2ac"), .enterFullScreen) {
                     withAnimation { immersive = true }
                 }
                 .labelStyle(.iconOnly)
-                .accessibilityLabel("Full screen")
+                .accessibilityLabel(L10n.text("apple.screenviewerview.full_screen.674fe2ac"))
             }
             #endif
             #if !os(macOS)
             if controlling {
                 ToolbarItem {
-                    Toggle(isOn: $keyboardWanted) { Label("Keyboard", systemImage: "keyboard") }
+                    Toggle(isOn: $keyboardWanted) { Label(L10n.text("apple.screenviewerview.keyboard.2316810a"), systemImage: "keyboard") }
                 }
             }
             #endif
@@ -260,8 +260,8 @@ struct ScreenViewerView: View {
         .overlay(alignment: .bottom) {
             if dragLatched, !showsKeyBar {
                 HStack(spacing: Theme.Space.s) {
-                    Text("Holding the left button")
-                    Button("Release", .move) {
+                    Text(L10n.text("apple.screenviewerview.holding_the_left_button.fcaabf2e"))
+                    Button(L10n.text("apple.screenviewerview.release.e020e3c6"), .move) {
                         model.press(false)
                         dragLatched = false
                     }
@@ -308,7 +308,7 @@ struct ScreenViewerView: View {
         // always in the same corner.
         .overlay(alignment: .topTrailing) {
             if immersive {
-                Button("Exit full screen", .exitFullScreen) {
+                Button(L10n.text("apple.screenviewerview.exit_full_screen.897e0cf7"), .exitFullScreen) {
                     withAnimation { immersive = false }
                 }
                 .buttonStyle(SecondaryButtonStyle(small: true))
@@ -436,19 +436,19 @@ struct ScreenViewerView: View {
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
                 VStack(alignment: .leading, spacing: 8) {
-                    readiness("Legend plan", ready: tier?.lowercased() == "legend")
-                    readiness("Signed in and paired", ready: true)
-                    readiness("Computer online", ready: !model.message.localizedCaseInsensitiveContains("offline"))
-                    readiness("Per-device screen permission", ready: !model.needsPermission)
+                    readiness(L10n.text("apple.screenviewerview.legend_plan.1160a70f"), ready: tier?.lowercased() == "legend")
+                    readiness(L10n.text("apple.screenviewerview.signed_in_and_paired.0cf50cf8"), ready: true)
+                    readiness(L10n.text("apple.screenviewerview.computer_online.3793e57b"), ready: !model.message.localizedCaseInsensitiveContains("offline"))
+                    readiness(L10n.text("apple.screenviewerview.per_device_screen_permission.2a9f7a46"), ready: !model.needsPermission)
                     readiness(
-                        controlling ? "Screen Recording and Accessibility" : "Screen Recording on that computer",
+                        controlling ? L10n.text("apple.screenviewerview.screen_recording_and_accessibility.d2a661df") : L10n.text("apple.screenviewerview.screen_recording_on_that_computer.9102c9a7"),
                         ready: !model.message.localizedCaseInsensitiveContains("recording")
                     )
                 }
                 .padding(Theme.Space.m)
                 .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
                 if model.needsPermission {
-                    Button("Request access", .approve) { Task { await model.requestAccess() } }
+                    Button(L10n.text("apple.screenviewerview.request_access.b06f1662"), .approve) { Task { await model.requestAccess() } }
                         .buttonStyle(AccentButtonStyle())
                         .disabled(model.isRequesting)
                     if let notice = model.requestNotice {
@@ -459,7 +459,7 @@ struct ScreenViewerView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                Button("Try again", .refresh) { Task { await start() } }
+                Button(L10n.text("apple.screenviewerview.try_again.d8b8392e"), .refresh) { Task { await start() } }
                     .buttonStyle(SecondaryButtonStyle())
             }
         }
@@ -480,10 +480,10 @@ struct ScreenViewerView: View {
             #else
             ClientEmptyArt(kind: .screen)
             #endif
-            Text("Screen access is on Legend")
+            Text(L10n.text("apple.screenviewerview.screen_access_is_on_legend.6cb112d2"))
                 .font(Theme.title3.weight(.semibold))
                 .foregroundStyle(.white)
-            Text("Mouse and keyboard never travel without the picture, and the picture is end-to-end encrypted between your devices. Legend is the plan that includes it.")
+            Text(L10n.text("apple.screenviewerview.mouse_and_keyboard_never_travel_without_th.b97a2ef8"))
                 .font(Theme.callout)
                 .foregroundStyle(Color.white.opacity(0.72))
                 .multilineTextAlignment(.center)
@@ -494,10 +494,10 @@ struct ScreenViewerView: View {
     @ViewBuilder
     private var plansButton: some View {
         #if os(macOS)
-        Link("See plans", destination: URL(string: "https://tokenstat.ai/pricing")!)
+        Link(L10n.text("apple.screenviewerview.see_plans.d9898933"), destination: URL(string: "https://tokenstat.ai/pricing")!)
             .buttonStyle(AccentButtonStyle())
         #else
-        Button("See plans", .plans) { store.showPaywall = true }
+        Button(L10n.text("apple.screenviewerview.see_plans.d9898933"), .plans) { store.showPaywall = true }
             .buttonStyle(AccentButtonStyle())
         #endif
     }
@@ -661,7 +661,7 @@ struct ScreenViewerView: View {
                     }
                 }
         )
-        .accessibilityLabel(keysRevealed ? "Hide the key row" : "Show the key row")
+        .accessibilityLabel(keysRevealed ? L10n.text("apple.screenviewerview.hide_the_key_row.e589377c") : L10n.text("apple.screenviewerview.show_the_key_row.0fa3f684"))
         .accessibilityAddTraits(.isButton)
     }
     #endif
@@ -690,7 +690,7 @@ struct ScreenViewerView: View {
 private final class ScreenViewerModel {
     enum State { case idle, connecting, streaming, failed }
     var state: State = .idle
-    var message = "Connecting…"
+    var message = L10n.text("apple.screenviewerview.connecting.72021eb7")
     var aspectRatio: CGFloat = 16 / 9
     var displays: [ScreenDisplay] = []
     var selectedDisplay: UInt32?
@@ -775,10 +775,10 @@ private final class ScreenViewerModel {
                 answer = try await Bridge.askScreenAccess(peer: peer, control: true)
             }
             if answer.granted == true {
-                requestNotice = "This device already has access. Press Try again."
+                requestNotice = L10n.text("apple.screenviewerview.this_device_already_has_access_press_try_a.fd1aee06")
                 return
             }
-            requestNotice = "Asked. Approve this device on that computer."
+            requestNotice = L10n.text("apple.screenviewerview.asked_approve_this_device_on_that_computer.f8ffae43")
         } catch {
             requestNotice = error.localizedDescription
             return
@@ -786,7 +786,7 @@ private final class ScreenViewerModel {
         // Best effort, and never the reason the request failed. Somebody with
         // no phone registered has still asked the computer itself.
         if let sent = try? await Bridge.requestScreenAccess(), sent.signedIn, sent.enabled, sent.sent > 0 {
-            requestNotice = "Asked. A notification went to your other devices."
+            requestNotice = L10n.text("apple.screenviewerview.asked_a_notification_went_to_your_other_de.3be993ac")
         }
     }
 
@@ -800,7 +800,7 @@ private final class ScreenViewerModel {
         reconnectAttempts = 0
         requestNotice = nil
         state = .connecting
-        message = "Connecting…"
+        message = L10n.text("apple.screenviewerview.connecting.72021eb7")
         await connect()
     }
 
@@ -812,7 +812,7 @@ private final class ScreenViewerModel {
         let control = requestedControl
         guard tier?.lowercased() == "legend" else {
             state = .failed
-            message = "Screen access requires the Legend plan."
+            message = L10n.text("apple.screenviewerview.screen_access_requires_the_legend_plan.66173f1c")
             return
         }
         do {
@@ -837,7 +837,7 @@ private final class ScreenViewerModel {
             // hid the overlay and left a black rectangle that still accepted
             // mouse and keyboard, because input is a side channel.
             state = .connecting
-            message = "Waiting for the first picture…"
+            message = L10n.text("apple.screenviewerview.waiting_for_the_first_picture.be8d50cf")
             task = Task { [weak self] in await self?.readLoop(session.id) }
         } catch {
             let reason = error.localizedDescription
@@ -939,14 +939,14 @@ private final class ScreenViewerModel {
                     connectedSince = nil
                     streamingSince = nil
                     state = .failed
-                    message = "Connected, but no picture has arrived yet. That computer may not have Screen Recording, or tokenstat may not be open on that Mac."
+                    message = L10n.text("apple.screenviewerview.connected_but_no_picture_has_arrived_yet_t.ded4562c")
                     return
                 }
                 if let encoded = read.audio, let data = Data(base64Encoded: encoded) {
                     audio.play(data)
                 }
                 if !read.active {
-                    let reason = read.error ?? "The screen session ended."
+                    let reason = read.error ?? L10n.text("apple.screenviewerview.the_screen_session_ended.c37a27b0")
                     if actionable(reason) { state = .failed; message = reason }
                     else { reconnect(after: reason) }
                     return
@@ -969,14 +969,14 @@ private final class ScreenViewerModel {
         reconnectAttempts += 1
         guard reconnectAttempts <= 3 else {
             state = .failed
-            message = "Connection could not recover. \(reason)"
+            message = L10n.text("apple.screenviewerview.connection_could_not_recover_0.7c8ca1d2", "\(reason)")
             return
         }
         state = .connecting
         // Say why. The reason used to be kept back until the third failure,
         // so the whole visible story of a session that could not stay up was
         // "Reconnecting…", which names nothing anybody can act on.
-        message = "Reconnecting, attempt \(reconnectAttempts) of 3. \(reason)"
+        message = L10n.text("apple.screenviewerview.reconnecting_attempt_0_of_3_1.8f4f26ac", "\(reconnectAttempts)", "\(reason)")
         let delay = reconnectAttempts
         task = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
@@ -1057,7 +1057,7 @@ private final class ScreenViewerModel {
         requestedControl = wanted
         reconnectAttempts = 0
         state = .connecting
-        message = wanted ? "Asking for control…" : "Switching to view only…"
+        message = wanted ? L10n.text("apple.screenviewerview.asking_for_control.50c714d1") : L10n.text("apple.screenviewerview.switching_to_view_only.d67a2762")
         requestedTier = tier
         await connect()
         if state != .streaming && state != .connecting {

@@ -87,6 +87,16 @@ jobs:
       - name: No generated file may be tracked
         run: bash scripts/check-no-artifacts.sh
 
+  localization:
+    name: native language catalogs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check resource keys and translation placeholders
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_localization*.py'
+          python3 scripts/check-localization.py
+
   # Same job shape as the other source-text gates: a formatting failure must
   # not hide a bare button, and the red check should name the rule.
   action-icons:

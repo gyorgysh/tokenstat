@@ -38,7 +38,7 @@ struct NotesView: View {
             DetailChromeBar(scope: nil) {
                 ToolbarIconButton(
                     systemImage: "plus",
-                    help: "Write a note"
+                    help: L10n.text("apple.notesview.write_a_note.ab0f8406")
                 ) {
                     showingArchive = false
                     showingComposer = true
@@ -46,15 +46,15 @@ struct NotesView: View {
                 }
                 ToolbarIconButton(
                     systemImage: gridLayout ? "list.bullet" : "square.grid.2x2",
-                    help: gridLayout ? "Show notes as a list" : "Show notes as cards"
+                    help: gridLayout ? L10n.text("apple.notesview.show_notes_as_a_list.e7a6867e") : L10n.text("apple.notesview.show_notes_as_cards.b66b5ddb")
                 ) { gridLayout.toggle() }
                 ToolbarIconButton(
                     systemImage: showingArchive ? "archivebox.fill" : "archivebox",
                     help: showingArchive
-                        ? "Show current notes"
+                        ? L10n.text("apple.notesview.show_current_notes.ed6f9c49")
                         : (archivedCount == 0
-                            ? "Nothing archived"
-                            : "Show \(archivedCount) archived"),
+                            ? L10n.text("apple.notesview.nothing_archived.cd084fd7")
+                            : L10n.text("apple.notesview.show_0_archived.a024d673", "\(archivedCount)")),
                     isAccent: showingArchive,
                     showsBadge: false
                 ) {
@@ -94,7 +94,7 @@ struct NotesView: View {
             #endif
         }
         .background(Theme.background)
-        .navigationTitle("Notes")
+        .navigationTitle(L10n.text("common.notes"))
         .overlay(alignment: .bottomTrailing) {
             TransientToast(message: $model.noticeMessage, severity: .success)
                 .padding(Theme.Space.l)
@@ -131,12 +131,12 @@ struct NotesView: View {
 
     private var noteFilters: some View {
         HStack(spacing: Theme.Space.s) {
-            SearchField(text: $search, prompt: "Search notes")
+            SearchField(text: $search, prompt: L10n.text("apple.notesview.search_notes.6e7a2179"))
                 .frame(minWidth: 160, maxWidth: 260)
             if workspaceID == nil {
                 AppMenuPicker(options: [
-                    (value: "", label: "All projects"),
-                    (value: "__unassigned__", label: "Unassigned")
+                    (value: "", label: L10n.text("apple.notesview.all_projects.4b87271b")),
+                    (value: "__unassigned__", label: L10n.text("apple.notesview.unassigned.14d33bd0"))
                 ] + folders.map { (value: $0.id, label: $0.name) }, selection: Binding(
                     get: {
                         switch picked {
@@ -150,7 +150,7 @@ struct NotesView: View {
                     }
                 ))
                 .frame(width: 160)
-                .help("Filter notes by project")
+                .help(L10n.text("apple.notesview.filter_notes_by_project.e770faa3"))
             }
         }
     }
@@ -159,13 +159,13 @@ struct NotesView: View {
         HStack(spacing: Theme.Space.s) {
             sortPicker
             ToolbarIconButton(systemImage: gridLayout ? "list.bullet" : "square.grid.2x2",
-                help: gridLayout ? "Show notes as a list" : "Show notes as cards") { gridLayout.toggle() }
-            Button(showingArchive ? "Current notes" : "Archive", showingArchive ? .back : .archive) {
+                help: gridLayout ? L10n.text("apple.notesview.show_notes_as_a_list.e7a6867e") : L10n.text("apple.notesview.show_notes_as_cards.b66b5ddb")) { gridLayout.toggle() }
+            Button(showingArchive ? L10n.text("apple.notesview.current_notes.5cc684e5") : L10n.text("common.archive"), showingArchive ? .back : .archive) {
                 showingArchive.toggle()
             }
             .buttonStyle(SecondaryButtonStyle(small: true))
             .disabled(archivedCount == 0 && !showingArchive)
-            Button("New note", .create) {
+            Button(L10n.text("apple.notesview.new_note.76ea482f"), .create) {
                 showingArchive = false
                 showingComposer = true
                 writing = true
@@ -198,9 +198,9 @@ struct NotesView: View {
 
     private var destinationName: String {
         if case let .workspace(id) = scope {
-            return folders.first { $0.id == id }?.name ?? "this folder"
+            return folders.first { $0.id == id }?.name ?? L10n.text("apple.notesview.this_folder.9d6325c8")
         }
-        return "Unassigned"
+        return L10n.text("apple.notesview.unassigned.14d33bd0")
     }
 
     private var shownNotes: [TodoCard] {
@@ -232,7 +232,7 @@ struct NotesView: View {
 
     private var libraryTitle: some View {
         HStack(spacing: Theme.Space.s) {
-            Text(showingArchive ? "Archived notes" : "Your notes")
+            Text(showingArchive ? L10n.text("apple.notesview.archived_notes.27a341f0") : L10n.text("apple.notesview.your_notes.55576676"))
                 .font(Theme.headline)
             Text("\(shownNotes.count)")
                 .font(Theme.numeric(11, weight: .medium))
@@ -245,10 +245,10 @@ struct NotesView: View {
     private var searchField: some View {
         HStack(spacing: Theme.Space.s) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Search notes", text: $search).textFieldStyle(.plain)
+            TextField(L10n.text("apple.notesview.search_notes.6e7a2179"), text: $search).textFieldStyle(.plain)
             if !search.isEmpty {
                 Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
-                    .buttonStyle(.plain).foregroundStyle(.secondary).help("Clear note search")
+                    .buttonStyle(.plain).foregroundStyle(.secondary).help(L10n.text("apple.notesview.clear_note_search.77682b50"))
             }
         }
         .font(Theme.callout).padding(8)
@@ -258,9 +258,9 @@ struct NotesView: View {
     }
 
     private var sortPicker: some View {
-        AppMenuPicker(options: [(value: false, label: "Newest first"), (value: true, label: "Title A–Z")],
+        AppMenuPicker(options: [(value: false, label: L10n.text("apple.notesview.newest_first.ffb6f576")), (value: true, label: L10n.text("apple.notesview.title_a_z.ab217de6"))],
                       selection: $sortByTitle)
-            .frame(width: 130).help("Sort notes")
+            .frame(width: 130).help(L10n.text("apple.notesview.sort_notes.ea06e19b"))
     }
 
     /// Opened from New note; closing it keeps the draft for next time.
@@ -268,27 +268,27 @@ struct NotesView: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(spacing: Theme.Space.s) {
                 FeatureMark(name: "mark_note", tint: Theme.secondary, size: 22)
-                Text("Quick note").font(Theme.callout.weight(.semibold))
+                Text(L10n.text("apple.notesview.quick_note.b7fc4717")).font(Theme.callout.weight(.semibold))
                 Spacer()
-                Button("Close", .dismiss) { showingComposer = false; writing = false }
+                Button(L10n.text("common.close"), .dismiss) { showingComposer = false; writing = false }
                     .buttonStyle(SecondaryButtonStyle(small: true))
-                    .help("Close the composer; your draft stays here")
+                    .help(L10n.text("apple.notesview.close_the_composer_your_draft_stays_here.6b5ddd82"))
                 Label(destinationName, systemImage: "folder")
                     .font(Theme.caption).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
             }
             HStack(spacing: Theme.Space.s) {
-                TextField("Capture an idea, a decision, or something to follow up…", text: $draft)
+                TextField(L10n.text("apple.notesview.capture_an_idea_a_decision_or_something_to.242ec14e"), text: $draft)
                     .textFieldStyle(.plain)
                     .font(Theme.fit(14))
                     .focused($writing)
                     .onSubmit { save() }
                 if saving { ProgressView().controlSize(.small) }
-                Button("Save note", .create) { save() }
+                Button(L10n.text("apple.notesview.save_note.6501e1ce"), .create) { save() }
                     .buttonStyle(AccentButtonStyle())
                     .disabled(saving || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            Text("Return to save · Select a note to edit its full text")
+            Text(L10n.text("apple.notesview.return_to_save_select_a_note_to_edit_its_f.bfe179a8"))
                 .font(Theme.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -301,10 +301,10 @@ struct NotesView: View {
     private var scopeBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                ChoiceChip(title: "All · \(count(in: .all))", isSelected: picked == .all) {
+                ChoiceChip(title: L10n.text("apple.notesview.all_0.b435ae5c", "\(count(in: .all))"), isSelected: picked == .all) {
                     picked = .all
                 }
-                ChoiceChip(title: "Unassigned · \(count(in: .unassigned))", isSelected: picked == .unassigned) {
+                ChoiceChip(title: L10n.text("apple.notesview.unassigned_0.20ea9540", "\(count(in: .unassigned))"), isSelected: picked == .unassigned) {
                     picked = .unassigned
                 }
                 ForEach(folders) { folder in
@@ -339,14 +339,14 @@ struct NotesView: View {
                 Image(systemName: "note.text")
                     .font(Theme.font(30, weight: .light))
                     .foregroundStyle(Theme.accent.opacity(0.5))
-                Text(search.isEmpty ? emptyTitle : "No matching notes")
+                Text(search.isEmpty ? emptyTitle : L10n.text("apple.notesview.no_matching_notes.5a859d10"))
                     .font(Theme.callout)
                     .foregroundStyle(.secondary)
                 if !search.isEmpty {
-                    Button("Clear search", .dismiss) { search = "" }
+                    Button(L10n.text("apple.notesview.clear_search.3b7ea517"), .dismiss) { search = "" }
                         .buttonStyle(.plain).foregroundStyle(Theme.accent)
                 } else if !showingArchive {
-                    Text("Choose New note to capture an idea. You can turn it into a task later.")
+                    Text(L10n.text("apple.notesview.choose_new_note_to_capture_an_idea_you_can.36202a14"))
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                 }
@@ -369,11 +369,11 @@ struct NotesView: View {
     }
 
     private var emptyTitle: String {
-        if showingArchive { return "Nothing archived." }
+        if showingArchive { return L10n.text("apple.notesview.nothing_archived.7de17b49") }
         switch scope {
-        case .all: return "No notes yet."
-        case .unassigned: return "No unassigned notes."
-        case .workspace: return "No notes in \(destinationName)."
+        case .all: return L10n.text("apple.notesview.no_notes_yet.57bde4de")
+        case .unassigned: return L10n.text("apple.notesview.no_unassigned_notes.e3947e02")
+        case .workspace: return L10n.text("apple.notesview.no_notes_in_0.b429da46", "\(destinationName)")
         }
     }
 
@@ -402,10 +402,10 @@ struct NotesView: View {
         .buttonStyle(.plain)
         .contextMenu {
             if showingArchive {
-                Button("Restore", .restore) { Task { await model.archiveNote(note, archived: false) } }
+                Button(L10n.text("common.restore"), .restore) { Task { await model.archiveNote(note, archived: false) } }
             } else {
-                Button("Make a task", .move) { converting = note }
-                Button("Archive", .archive) { Task { await model.archiveNote(note, archived: true) } }
+                Button(L10n.text("apple.notesview.make_a_task.0cfbd102"), .move) { converting = note }
+                Button(L10n.text("common.archive"), .archive) { Task { await model.archiveNote(note, archived: true) } }
             }
         }
     }
@@ -420,19 +420,19 @@ struct NotesView: View {
                     .lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 0)
                 Menu {
-                    Button("Open note", .edit) { model.selectCard(note.id) }
+                    Button(L10n.text("apple.notesview.open_note.cf463c69"), .edit) { model.selectCard(note.id) }
                     if showingArchive {
-                        Button("Restore", .restore) { Task { await model.archiveNote(note, archived: false) } }
+                        Button(L10n.text("common.restore"), .restore) { Task { await model.archiveNote(note, archived: false) } }
                     } else {
-                        Button("Make a task", .move) { converting = note }
+                        Button(L10n.text("apple.notesview.make_a_task.0cfbd102"), .move) { converting = note }
                         Divider()
-                        Button("Archive", .archive) { Task { await model.archiveNote(note, archived: true) } }
+                        Button(L10n.text("common.archive"), .archive) { Task { await model.archiveNote(note, archived: true) } }
                     }
                 } label: {
                     Image(systemName: "ellipsis").foregroundStyle(Theme.accent)
                 }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .help("Note actions")
+                .help(L10n.text("apple.notesview.note_actions.13f010d3"))
             }
             HStack(alignment: .top, spacing: Theme.Space.s) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -467,10 +467,10 @@ struct NotesView: View {
                 .help(Date(timeIntervalSince1970: Double(note.createdAtMs) / 1000).formatted(date: .long, time: .shortened))
                 Spacer()
                 if showingArchive {
-                    Button("Restore", .restore) { Task { await model.archiveNote(note, archived: false) } }
+                    Button(L10n.text("common.restore"), .restore) { Task { await model.archiveNote(note, archived: false) } }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                 } else {
-                    Button("Make a task", .move) { converting = note }
+                    Button(L10n.text("apple.notesview.make_a_task.0cfbd102"), .move) { converting = note }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                 }
             }
@@ -491,12 +491,12 @@ struct NotesView: View {
         .contentShape(.rect)
         .onTapGesture { model.selectCard(note.id) }
         .accessibilityElement(children: .contain)
-        .accessibilityAction(named: "Open note") { model.selectCard(note.id) }
+        .accessibilityAction(named: L10n.text("apple.notesview.open_note.cf463c69")) { model.selectCard(note.id) }
     }
 
     private func placeName(for note: TodoCard) -> String {
-        if note.workspaceID.isEmpty { return "Unassigned" }
-        return folders.first { $0.id == note.workspaceID }?.name ?? "Folder"
+        if note.workspaceID.isEmpty { return L10n.text("apple.notesview.unassigned.14d33bd0") }
+        return folders.first { $0.id == note.workspaceID }?.name ?? L10n.text("apple.notesview.folder.74ccd433")
     }
 
     private func save() {
@@ -532,8 +532,8 @@ struct ConvertNoteSheet: View {
 
     var body: some View {
         ThemedSheet(
-            title: "Make a task",
-            subtitle: "This note becomes a card on the board. Pick a folder, or leave it unassigned.",
+            title: L10n.text("apple.notesview.make_a_task.0cfbd102"),
+            subtitle: L10n.text("apple.notesview.this_note_becomes_a_card_on_the_board_pick.74875568"),
             icon: .move,
             onClose: onCancel
         ) {
@@ -550,11 +550,11 @@ struct ConvertNoteSheet: View {
                     }
 
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    Text("Folder")
+                    Text(L10n.text("apple.notesview.folder.74ccd433"))
                         .font(Theme.caption)
                         .foregroundStyle(Theme.controlGlyph)
                     FlowLayout(spacing: 6, rowSpacing: 6) {
-                        ChoiceChip(title: "Unassigned", isSelected: folderID.isEmpty) {
+                        ChoiceChip(title: L10n.text("apple.notesview.unassigned.14d33bd0"), isSelected: folderID.isEmpty) {
                             folderID = ""
                         }
                         ForEach(folders) { folder in
@@ -569,11 +569,11 @@ struct ConvertNoteSheet: View {
                 }
             }
         } actions: {
-            Button("Cancel", .dismiss, role: .cancel) { onCancel() }
+            Button(L10n.text("common.cancel"), .dismiss, role: .cancel) { onCancel() }
                 .buttonStyle(SecondaryButtonStyle())
                 .keyboardShortcut(.cancelAction)
             Spacer()
-            Button("Make a task", .move) { onConvert(folderID) }
+            Button(L10n.text("apple.notesview.make_a_task.0cfbd102"), .move) { onConvert(folderID) }
                 .buttonStyle(AccentButtonStyle())
                 .keyboardShortcut(.defaultAction)
         }

@@ -53,7 +53,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
     private bool _refreshing;
     private enum DevicePage { Devices, Access, Settings }
     private DevicePage _devicePage;
-    private readonly TextBox _deviceSearch = new() { PlaceholderText = "Search devices", MinHeight = 36 };
+    private readonly TextBox _deviceSearch = new() { PlaceholderText = L10n.Text("windows.machinespage.search_devices.3aebaefc"), MinHeight = 36 };
     private readonly StackPanel _deviceInventory = new() { Spacing = Theme.SpaceM };
     private ScrollViewer? _scroll;
 
@@ -68,7 +68,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
     public MachinesPage(string? selectedId = null)
     {
         _selectedId = selectedId;
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_deviceSearch, "Search devices");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_deviceSearch, L10n.Text("windows.machinespage.search_devices.3aebaefc"));
         _deviceSearch.TextChanged += (_, _) => RenderDeviceInventory();
         _scroll = new ScrollViewer
         {
@@ -212,7 +212,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         {
             Buttons.ToolbarIcon(
                 ActionIcon.Refresh,
-                "Re-read this PC and its devices",
+                L10n.Text("windows.machinespage.re_read_this_pc_and_its_devices.baa9a7c3"),
                 async (_, _) =>
                 {
                     LogoRefresh.Began();
@@ -223,7 +223,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         {
             trailing.Add(Buttons.ToolbarIcon(
                 ActionIcon.Create,
-                "Paste a key from another device to pair it",
+                L10n.Text("windows.machinespage.paste_a_key_from_another_device_to_pair_it.1a851164"),
                 async (_, _) => await PairAsync()));
         }
         return trailing;
@@ -421,8 +421,8 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         if (!(account["signedIn"]?.GetValue<bool>() ?? false))
         {
             _root.Children.Add(Chrome.Empty(
-                "Sign in to see devices",
-                "Devices live on the account, so a closed laptop still counts. Open Account in the sidebar to link this machine.",
+                L10n.Text("windows.machinespage.sign_in_to_see_devices.5e009c71"),
+                L10n.Text("windows.machinespage.devices_live_on_the_account_so_a_closed_la.2f29b3f0"),
                 ActionIcon.Device));
             Restore();
             return;
@@ -457,7 +457,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 sections.Children.Add(tab);
             }
             navigation.Children.Add(sections);
-            var add = Buttons.Primary("Add device", ActionIcon.Create, async (_, _) => await PairAsync());
+            var add = Buttons.Primary(L10n.Text("common.add_device"), ActionIcon.Create, async (_, _) => await PairAsync());
             Grid.SetColumn(add, 1);
             navigation.Children.Add(add);
             _root.Children.Add(navigation);
@@ -470,14 +470,14 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                     RenderDeviceInventory();
                     break;
                 case DevicePage.Access:
-                    _root.Children.Add(new TextBlock { Text = "Choose what connected devices can do on this PC.",
+                    _root.Children.Add(new TextBlock { Text = L10n.Text("windows.machinespage.choose_what_connected_devices_can_do_on_th.3b0521a4"),
                         TextWrapping = TextWrapping.Wrap, Opacity = 0.7 });
                     var approved = ApprovedPeers();
                     if (approved.Count > 0)
                         _root.Children.Add(DevicePermissionsCard(approved));
                     else
-                        _root.Children.Add(EmptyState.View("No access granted",
-                            "Pair a device first. Its access controls will appear here.", EmptyArtKind.Devices));
+                        _root.Children.Add(EmptyState.View(L10n.Text("windows.machinespage.no_access_granted.a6972918"),
+                            L10n.Text("windows.machinespage.pair_a_device_first_its_access_controls_wi.3d1f4240"), EmptyArtKind.Devices));
                     _root.Children.Add(EncryptionNote());
                     break;
                 case DevicePage.Settings:
@@ -512,24 +512,24 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         bool Matches(params string[] fields) => query.Length == 0
             || fields.Any(field => field.Contains(query, StringComparison.OrdinalIgnoreCase));
         var shownMachines = machines.Where(machine => Matches(DeviceTitle(machine), MachineId(machine),
-            Format.Text(machine, "platform"), Format.Text(machine, "kind") == "client" ? "Phone tablet" : "Computer",
+            Format.Text(machine, "platform"), Format.Text(machine, "kind") == "client" ? L10n.Text("windows.machinespage.phone_tablet.e6922f86") : L10n.Text("windows.machinespage.computer.76ed42d2"),
             StatusLine(machine, IsSelf(machine)))).ToList();
         var shownPeers = peers.Where(peer => Matches(Format.Text(peer, "label"), Format.Text(peer, "words"),
             Format.Text(peer, "platform"), Format.Text(peer, "trust"),
-            Format.Text(peer, "trust") == "approved" ? "Access allowed" : "Access removed")).ToList();
+            Format.Text(peer, "trust") == "approved" ? L10n.Text("windows.machinespage.access_allowed.f5058646") : L10n.Text("windows.machinespage.access_removed.dcdce51f"))).ToList();
         var total = machines.Count + peers.Count;
         var shown = shownMachines.Count + shownPeers.Count;
         if (query.Length > 0)
-            _deviceInventory.Children.Add(new TextBlock { Text = $"{shown} of {total} devices", Opacity = 0.7 });
+            _deviceInventory.Children.Add(new TextBlock { Text = L10n.Text("windows.machinespage.0_of_1_devices.bd266bff", $"{shown}", $"{total}"), Opacity = 0.7 });
         if (shownMachines.Count > 0)
             _deviceInventory.Children.Add(AccountDevicesCard(account, shownMachines, showScreenHint: query.Length == 0));
         if (shownPeers.Count > 0)
             _deviceInventory.Children.Add(OtherApprovedCard(shownPeers));
         if (shown == 0)
             _deviceInventory.Children.Add(EmptyState.View(
-                total == 0 ? "No devices yet" : "No matching devices",
-                total == 0 ? "Add a device to connect to its projects and terminals."
-                    : "Search by device name, platform, status or code. Clear the search to see every device.",
+                total == 0 ? L10n.Text("windows.machinespage.no_devices_yet.a149f2bd") : L10n.Text("windows.machinespage.no_matching_devices.7bad272d"),
+                total == 0 ? L10n.Text("windows.machinespage.add_a_device_to_connect_to_its_projects_an.511b0e32")
+                    : L10n.Text("windows.machinespage.search_by_device_name_platform_status_or_c.6a59cb34"),
                 EmptyArtKind.Devices));
     }
 
@@ -673,7 +673,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 return known;
             }
         }
-        return Format.Text(machine, "kind") == "client" ? "Unnamed device" : "Unnamed computer";
+        return Format.Text(machine, "kind") == "client" ? L10n.Text("windows.machinespage.unnamed_device.6aba593f") : L10n.Text("windows.machinespage.unnamed_computer.810da0c7");
     }
 
     /// <summary>
@@ -691,7 +691,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             var row = new StackPanel { Spacing = Theme.SpaceS };
             row.Children.Add(new TextBlock
             {
-                Text = string.IsNullOrEmpty(label) ? "Unnamed device" : label,
+                Text = string.IsNullOrEmpty(label) ? L10n.Text("windows.machinespage.unnamed_device.6aba593f") : label,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -710,12 +710,12 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 Orientation = Orientation.Horizontal,
                 Spacing = Theme.SpaceS,
             };
-            var name = string.IsNullOrEmpty(label) ? "this device" : label;
+            var name = string.IsNullOrEmpty(label) ? L10n.Text("windows.machinespage.this_device.cf3cc23e") : label;
             actions.Children.Add(Buttons.Primary(
-                "Approve", ActionIcon.Approve, async (_, _) => await ApproveAsync(key, name)));
+                L10n.Text("windows.machinespage.approve.6007acbe"), ActionIcon.Approve, async (_, _) => await ApproveAsync(key, name)));
             actions.Children.Add(ActionIconGlyph.Button(
-                "Forget", ActionIcon.Delete, async (_, _) => await ConfirmForgetAsync(key, name)));
-            actions.Children.Add(ActionIconGlyph.Button("Details", ActionIcon.Reveal, (_, _) =>
+                L10n.Text("windows.machinespage.forget.a6bd489d"), ActionIcon.Delete, async (_, _) => await ConfirmForgetAsync(key, name)));
+            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.machinespage.details.45989de4"), ActionIcon.Reveal, (_, _) =>
             {
                 _selectThis = false;
                 _selectedId = null;
@@ -729,15 +729,15 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         }
         body.Children.Add(new TextBlock
         {
-            Text = "Approve only devices you recognize. You can revoke access later.",
+            Text = L10n.Text("windows.machinespage.approve_only_devices_you_recognize_you_can.e599993b"),
             Opacity = 0.7,
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
         });
         return Chrome.Card(
-            "Needs your approval",
+            L10n.Text("windows.machinespage.needs_your_approval.635ea5c1"),
             body,
-            "Nothing can run here until you approve it.");
+            L10n.Text("windows.machinespage.nothing_can_run_here_until_you_approve_it.1dbb95eb"));
     }
 
     private List<JsonNode> ApprovedPeers()
@@ -770,13 +770,13 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             var name = !string.IsNullOrEmpty(label)
                 ? label
                 : peerId.Length > 0
-                    ? "Device " + peerId[..Math.Min(8, peerId.Length)]
-                    : "An unknown device";
+                    ? L10n.Text("windows.machinespage.device_0.625b47c6", $"{peerId[..Math.Min(8, peerId.Length)]}")
+                    : L10n.Text("windows.machinespage.an_unknown_device.767525fc");
             var control = Format.Flag(row, "control");
             var line = new StackPanel { Spacing = Theme.SpaceS };
             line.Children.Add(new TextBlock
             {
-                Text = screen ? $"{name} wants to see this screen" : $"{name} wants to open your work",
+                Text = screen ? L10n.Text("windows.machinespage.0_wants_to_see_this_screen.a07f03f2", $"{name}") : L10n.Text("windows.machinespage.0_wants_to_open_your_work.24c50659", $"{name}"),
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -784,9 +784,9 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             {
                 Text = screen
                     ? control
-                        ? "It asked for the picture, and for mouse and keyboard."
-                        : "It asked for the picture only."
-                    : "Folders, files, terminals and the agents running in them.",
+                        ? L10n.Text("windows.machinespage.it_asked_for_the_picture_and_for_mouse_and.d24fdc88")
+                        : L10n.Text("windows.machinespage.it_asked_for_the_picture_only.b6be05b5")
+                    : L10n.Text("windows.machinespage.folders_files_terminals_and_the_agents_run.5abdd984"),
                 Opacity = 0.7,
                 FontSize = 12,
                 TextWrapping = TextWrapping.Wrap,
@@ -803,28 +803,28 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 // device happened to ask for left no way to hand over the
                 // mouse without making somebody go back to their phone.
                 actions.Children.Add(ActionIconGlyph.Button(
-                    "View only", ActionIcon.Preview, async (_, _) =>
+                    L10n.Text("windows.machinespage.view_only.9b4c6c85"), ActionIcon.Preview, async (_, _) =>
                         await AnswerRequestAsync(captured, true, true, false, name)));
                 actions.Children.Add(Buttons.Primary(
-                    "Full access", ActionIcon.Approve, async (_, _) =>
+                    L10n.Text("windows.machinespage.full_access.f19611c6"), ActionIcon.Approve, async (_, _) =>
                         await AnswerRequestAsync(captured, true, true, true, name)));
             }
             else
             {
                 actions.Children.Add(Buttons.Primary(
-                    "Allow", ActionIcon.Approve, async (_, _) =>
+                    L10n.Text("windows.machinespage.allow.e213c161"), ActionIcon.Approve, async (_, _) =>
                         await AnswerRequestAsync(captured, false, true, false, name)));
             }
             actions.Children.Add(Buttons.Destructive(
-                "Deny", ActionIcon.Revoke, async (_, _) =>
+                L10n.Text("windows.machinespage.deny.05a2d733"), ActionIcon.Revoke, async (_, _) =>
                     await AnswerRequestAsync(captured, screen, false, false, name)));
             line.Children.Add(actions);
             body.Children.Add(line);
         }
         return Chrome.Card(
-            "Waiting for you",
+            L10n.Text("windows.machinespage.waiting_for_you.9f760ab2"),
             body,
-            "Approve only a device you recognise. You can take it back below.");
+            L10n.Text("windows.machinespage.approve_only_a_device_you_recognise_you_ca.69c0725e"));
     }
 
     private async Task AnswerRequestAsync(JsonNode row, bool screen, bool view, bool control, string name)
@@ -845,10 +845,10 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                     new JsonObject { ["peerId"] = peerId, ["allow"] = view });
             }
             _notice = !view
-                ? $"{name} was not let in."
+                ? L10n.Text("windows.machinespage.0_was_not_let_in.5acb6aae", $"{name}")
                 : screen
-                    ? control ? $"{name} can see this screen and drive it." : $"{name} can see this screen."
-                    : $"{name} may now open your work.";
+                    ? control ? L10n.Text("windows.machinespage.0_can_see_this_screen_and_drive_it.4ab9505f", $"{name}") : L10n.Text("windows.machinespage.0_can_see_this_screen.3ec8249b", $"{name}")
+                    : L10n.Text("windows.machinespage.0_may_now_open_your_work.36fad4b9", $"{name}");
         }
         catch (Exception ex)
         {
@@ -871,7 +871,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         {
             body.Children.Add(new TextBlock
             {
-                Text = "The host helper has not answered yet.",
+                Text = L10n.Text("windows.machinespage.the_host_helper_has_not_answered_yet.ed11e9fb"),
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -880,7 +880,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         {
             var alwaysOn = Format.Flag(_hostPolicy, "alwaysOn");
             var battery = Format.Flag(_hostPolicy, "hasInternalBattery");
-            body.Children.Add(Chrome.SettingSwitch("Keep this PC reachable", alwaysOn, async on =>
+            body.Children.Add(Chrome.SettingSwitch(L10n.Text("windows.machinespage.keep_this_pc_reachable.34cbc0f8"), alwaysOn, async on =>
             {
                 try
                 {
@@ -894,15 +894,15 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                     return;
                 }
                 _notice = on
-                    ? "The host helper stays up after you quit."
-                    : "The host helper stops when you quit.";
+                    ? L10n.Text("windows.machinespage.the_host_helper_stays_up_after_you_quit.6db32069")
+                    : L10n.Text("windows.machinespage.the_host_helper_stops_when_you_quit.be7c7ee9");
                 await LoadAsync();
             }));
             body.Children.Add(new TextBlock
             {
                 Text = alwaysOn
-                    ? "The host helper keeps running after you quit tokenstat, so other devices can reach this PC. This PC will not idle-sleep. A laptop still sleeps when you close the lid."
-                    : "The host helper stops when you quit tokenstat, so this PC can sleep. Other devices cannot open folders or terminals here until you open the app again.",
+                    ? L10n.Text("windows.machinespage.the_host_helper_keeps_running_after_you_qu.a283800a")
+                    : L10n.Text("windows.machinespage.the_host_helper_stops_when_you_quit_tokens.d6e04c9b"),
                 Opacity = 0.7,
                 FontSize = 12,
                 TextWrapping = TextWrapping.Wrap,
@@ -911,7 +911,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             {
                 body.Children.Add(new TextBlock
                 {
-                    Text = "Uses more power.",
+                    Text = L10n.Text("windows.machinespage.uses_more_power.a24adb34"),
                     Opacity = 0.7,
                     FontSize = 12,
                 });
@@ -920,16 +920,16 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             {
                 body.Children.Add(new TextBlock
                 {
-                    Text = "Automations run only while tokenstat is open.",
+                    Text = L10n.Text("windows.machinespage.automations_run_only_while_tokenstat_is_op.72980d54"),
                     Opacity = 0.7,
                     FontSize = 12,
                 });
             }
         }
         return Chrome.Card(
-            "Always-on host",
+            L10n.Text("windows.machinespage.always_on_host.f7990642"),
             body,
-            "Whether the host helper stays up after you quit");
+            L10n.Text("windows.machinespage.whether_the_host_helper_stays_up_after_you.dd1619f2"));
     }
 
     /// <summary>
@@ -944,7 +944,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         {
             var key = Format.Text(peer, "key");
             var label = Format.Text(peer, "label");
-            var name = string.IsNullOrEmpty(label) ? "Approved device" : label;
+            var name = string.IsNullOrEmpty(label) ? L10n.Text("windows.machinespage.approved_device.3170ef88") : label;
             var row = new StackPanel { Spacing = Theme.SpaceS };
             row.Children.Add(new TextBlock
             {
@@ -971,7 +971,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             var screen = _screenPermissions.TryGetValue(key, out var held)
                 ? held : (View: false, Control: false);
             switches.Children.Add(PermissionSwitch(
-                "Projects", _workspaceAllowed.Contains(key), async on =>
+                L10n.Text("common.projects"), _workspaceAllowed.Contains(key), async on =>
                 {
                     await AppServices.Host.CallAsync(
                         "workspace.access.set",
@@ -985,7 +985,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                         _workspaceAllowed.Remove(captured);
                     }
                 }));
-            var viewSwitch = PermissionSwitch("View", screen.View, async on =>
+            var viewSwitch = PermissionSwitch(L10n.Text("windows.machinespage.view.dcc839a4"), screen.View, async on =>
             {
                 var control = on && _screenPermissions.TryGetValue(captured, out var current) && current.Control;
                 await AppServices.Host.CallAsync(
@@ -994,7 +994,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 _screenPermissions[captured] = (on, control);
             });
             switches.Children.Add(viewSwitch);
-            var controlSwitch = PermissionSwitch("Control", screen.Control, async on =>
+            var controlSwitch = PermissionSwitch(L10n.Text("windows.machinespage.control.32d7e820"), screen.Control, async on =>
             {
                 await AppServices.Host.CallAsync(
                     "screen.policy.set",
@@ -1002,22 +1002,22 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 _screenPermissions[captured] = (true, on);
             });
             controlSwitch.IsEnabled = screen.View;
-            ToolTipService.SetToolTip(controlSwitch, "Control requires screen viewing access");
+            ToolTipService.SetToolTip(controlSwitch, L10n.Text("windows.machinespage.control_requires_screen_viewing_access.bf319cd9"));
             switches.Children.Add(controlSwitch);
             row.Children.Add(switches);
             body.Children.Add(row);
         }
         body.Children.Add(new TextBlock
         {
-            Text = "Control requires View. Devices can also request access; pending requests appear at the top of this page.",
+            Text = L10n.Text("windows.machinespage.control_requires_view_devices_can_also_req.b5c3c672"),
             Opacity = 0.7,
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
         });
         return Chrome.Card(
-            "Device permissions",
+            L10n.Text("windows.machinespage.device_permissions.8b91be20"),
             body,
-            "Choose what each approved device can access on this PC");
+            L10n.Text("windows.machinespage.choose_what_each_approved_device_can_acces.1fdcbc41"));
     }
 
     private ToggleSwitch PermissionSwitch(string title, bool isOn, Func<bool, Task> set)
@@ -1066,7 +1066,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         {
             var key = Format.Text(peer, "key");
             var label = Format.Text(peer, "label");
-            var name = string.IsNullOrEmpty(label) ? "Unnamed device" : label;
+            var name = string.IsNullOrEmpty(label) ? L10n.Text("windows.machinespage.unnamed_device.6aba593f") : label;
             var row = new StackPanel { Spacing = Theme.SpaceS };
             row.Children.Add(new TextBlock
             {
@@ -1076,7 +1076,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             });
             row.Children.Add(new TextBlock
             {
-                Text = Format.Text(peer, "trust") == "approved" ? "Access allowed" : "Access removed",
+                Text = Format.Text(peer, "trust") == "approved" ? L10n.Text("windows.machinespage.access_allowed.f5058646") : L10n.Text("windows.machinespage.access_removed.dcdce51f"),
                 Opacity = 0.7, FontSize = 12,
             });
             var words = Format.Text(peer, "words");
@@ -1094,7 +1094,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 Orientation = Orientation.Horizontal,
                 Spacing = Theme.SpaceS,
             };
-            actions.Children.Add(ActionIconGlyph.Button("Details", ActionIcon.Reveal, (_, _) =>
+            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.machinespage.details.45989de4"), ActionIcon.Reveal, (_, _) =>
             {
                 _selectThis = false;
                 _selectedId = null;
@@ -1107,21 +1107,21 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             var manage = new MenuFlyout();
             if (Format.Text(peer, "trust") == "approved")
             {
-                ContextMenus.AddAsync(manage, "Revoke access", () => ConfirmRevokeAsync(key, name));
+                ContextMenus.AddAsync(manage, L10n.Text("windows.machinespage.revoke_access.ab292ddb"), () => ConfirmRevokeAsync(key, name));
             }
             else
             {
-                ContextMenus.AddAsync(manage, "Approve", () => ApproveAsync(key, name));
+                ContextMenus.AddAsync(manage, L10n.Text("windows.machinespage.approve.6007acbe"), () => ApproveAsync(key, name));
             }
-            ContextMenus.AddAsync(manage, "Forget", () => ConfirmForgetAsync(key, name));
-            actions.Children.Add(ActionIconGlyph.MoreButton("Manage " + name, manage));
+            ContextMenus.AddAsync(manage, L10n.Text("windows.machinespage.forget.a6bd489d"), () => ConfirmForgetAsync(key, name));
+            actions.Children.Add(ActionIconGlyph.MoreButton(L10n.Text("windows.machinespage.manage_0.d77d63f8", $"{name}"), manage));
             row.Children.Add(actions);
             body.Children.Add(row);
         }
         return Chrome.Card(
-            "Other devices",
+            L10n.Text("windows.machinespage.other_devices.4e027dbb"),
             body,
-            "Devices known to this PC outside your account. Manage their access here.");
+            L10n.Text("windows.machinespage.devices_known_to_this_pc_outside_your_acco.ca54a043"));
     }
 
     private UIElement AccountDevicesCard(JsonNode account, IEnumerable<JsonNode> machines, bool showScreenHint = true)
@@ -1139,15 +1139,15 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             list.Children.Add(DeviceRow(machine, id, tier, ref viewable));
         }
         var card = Chrome.Card(
-            "Your devices",
+            L10n.Text("windows.machinespage.your_devices.555eaa22"),
             list,
-            "Select a device for connection details. Phones and tablets connect to this PC.");
+            L10n.Text("windows.machinespage.select_a_device_for_connection_details_pho.274a6b8e"));
         if (viewable == 0 && showScreenHint)
         {
             var wrap = new StackPanel { Spacing = Theme.SpaceM };
             wrap.Children.Add(card);
             wrap.Children.Add(Chrome.Banner(
-                "No other computer to view. Screen share is for another machine on this account.",
+                L10n.Text("windows.machinespage.no_other_computer_to_view_screen_share_is.1dbff049"),
                 Theme.Accent,
                 Symbol.View));
             return wrap;
@@ -1177,7 +1177,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             {
                 head.Children.Add(new TextBlock
                 {
-                    Text = "THIS PC",
+                    Text = L10n.Text("windows.machinespage.this_pc.66f5aa0b"),
                     Opacity = 0.6,
                     FontSize = 11,
                     VerticalAlignment = VerticalAlignment.Center,
@@ -1193,20 +1193,20 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             list.Children.Add(row);
         }
         return Chrome.Card(
-            "Devices on this account",
+            L10n.Text("windows.machinespage.devices_on_this_account.50d8cf5c"),
             list,
-            "Usage from every linked device is already here.");
+            L10n.Text("windows.machinespage.usage_from_every_linked_device_is_already.9f16ae77"));
     }
 
     private UIElement AddDeviceCard()
     {
         var body = new StackPanel { Spacing = Theme.SpaceM };
         body.Children.Add(Buttons.Primary(
-            "Add device", ActionIcon.Create, async (_, _) => await PairAsync()));
+            L10n.Text("common.add_device"), ActionIcon.Create, async (_, _) => await PairAsync()));
         return Chrome.Card(
-            "Add a device",
+            L10n.Text("windows.machinespage.add_a_device.5469d968"),
             body,
-            "Paste the key from the other machine. Everything goes through the tunnel, so it works from any network.");
+            L10n.Text("windows.machinespage.paste_the_key_from_the_other_machine_every.75ebefc4"));
     }
 
     /// <summary>
@@ -1223,15 +1223,15 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         }
         var body = new StackPanel { Spacing = Theme.SpaceM };
         var nameRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        nameRow.Children.Add(new TextBlock { Text = "Name", Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center });
+        nameRow.Children.Add(new TextBlock { Text = L10n.Text("windows.machinespage.name.dcd1d522"), Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center });
         nameRow.Children.Add(new TextBlock
         {
-            Text = string.IsNullOrEmpty(selfName) ? "This PC" : selfName,
+            Text = string.IsNullOrEmpty(selfName) ? L10n.Text("windows.machinespage.this_pc.638a348b") : selfName,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             VerticalAlignment = VerticalAlignment.Center,
         });
         nameRow.Children.Add(ActionIconGlyph.Button(
-            "Rename", ActionIcon.Edit, async (_, _) => await RenameSelfAsync(selfName)));
+            L10n.Text("common.rename"), ActionIcon.Edit, async (_, _) => await RenameSelfAsync(selfName)));
         body.Children.Add(nameRow);
         if (!string.IsNullOrEmpty(words))
         {
@@ -1239,7 +1239,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             // from a public key: there is nothing private in them, so they are
             // shown plain and selectable.
             var knownRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-            knownRow.Children.Add(new TextBlock { Text = "Known as", Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center });
+            knownRow.Children.Add(new TextBlock { Text = L10n.Text("windows.machinespage.known_as.9076e6ab"), Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center });
             knownRow.Children.Add(new TextBlock
             {
                 Text = words,
@@ -1250,7 +1250,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             });
             body.Children.Add(knownRow);
         }
-        body.Children.Add(Chrome.SettingSwitch("Enable remote access", allowed && tunnel, async on =>
+        body.Children.Add(Chrome.SettingSwitch(L10n.Text("windows.machinespage.enable_remote_access.d4c2690c"), allowed && tunnel, async on =>
         {
             if (!allowed)
             {
@@ -1271,22 +1271,22 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 return;
             }
             _notice = on
-                ? "Remote reach is on. Direct connections are preferred when available."
-                : "Remote reach is off.";
+                ? L10n.Text("windows.machinespage.remote_reach_is_on_direct_connections_are.f9aa785a")
+                : L10n.Text("windows.machinespage.remote_reach_is_off.701869a6");
             await LoadAsync();
         }));
         body.Children.Add(new TextBlock
         {
             Text = allowed && tunnel
-                ? "Remote access is on. This PC will be reachable while tokenstat is running."
-                : "Turn this on to make this PC reachable from your other devices.",
+                ? L10n.Text("windows.machinespage.remote_access_is_on_this_pc_will_be_reacha.df3d16b9")
+                : L10n.Text("windows.machinespage.turn_this_on_to_make_this_pc_reachable_fro.2b497e83"),
             Opacity = 0.7,
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
         });
         body.Children.Add(new TextBlock
         {
-            Text = "Connections are end-to-end encrypted. Screen sharing prefers a direct local route and otherwise uses the tunnel.",
+            Text = L10n.Text("windows.machinespage.connections_are_end_to_end_encrypted_scree.fca19521"),
             Opacity = 0.6,
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
@@ -1296,16 +1296,16 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             body.Children.Add(new TextBlock
             {
                 Text = (account["signedIn"]?.GetValue<bool>() ?? false)
-                    ? "This computer and another device already share the account."
-                    : "Remote reach needs a signed-in Patron account.",
+                    ? L10n.Text("windows.machinespage.this_computer_and_another_device_already_s.c3dc1438")
+                    : L10n.Text("windows.machinespage.remote_reach_needs_a_signed_in_patron_acco.7f190960"),
                 FontWeight = Microsoft.UI.Text.FontWeights.Medium,
                 TextWrapping = TextWrapping.Wrap,
             });
             body.Children.Add(new TextBlock
             {
                 Text = (account["signedIn"]?.GetValue<bool>() ?? false)
-                    ? "Free and Supporter add up usage from every device you link. Opening folders and terminals on this PC from another device is on Patron."
-                    : "Sign in with an account that includes it, then turn the switch on.",
+                    ? L10n.Text("windows.machinespage.free_and_supporter_add_up_usage_from_every.ede332b0")
+                    : L10n.Text("windows.machinespage.sign_in_with_an_account_that_includes_it_t.3e4fb59e"),
                 Opacity = 0.7,
                 FontSize = 12,
                 TextWrapping = TextWrapping.Wrap,
@@ -1316,13 +1316,13 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         {
             body.Children.Add(Chrome.Banner(
                 string.IsNullOrEmpty(tunnelError)
-                    ? "Remote reach is on, but the tunnel has not connected yet. It retries automatically."
-                    : "Remote reach is on, but the tunnel is not connected: " + tunnelError,
+                    ? L10n.Text("windows.machinespage.remote_reach_is_on_but_the_tunnel_has_not.024544f1")
+                    : L10n.Text("windows.machinespage.remote_reach_is_on_but_the_tunnel_is_not_c.c73ccbbf", $"{tunnelError}"),
                 Theme.Warning,
                 Symbol.Important));
         }
         body.Children.Add(ActionIconGlyph.Button(
-            "Details", ActionIcon.Reveal, (_, _) =>
+            L10n.Text("windows.machinespage.details.45989de4"), ActionIcon.Reveal, (_, _) =>
             {
                 _selectThis = true;
                 _selectedId = null;
@@ -1332,9 +1332,9 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 DetailsRequested?.Invoke();
             }));
         return Chrome.Card(
-            "Connection settings",
+            L10n.Text("windows.machinespage.connection_settings.b4ddb3c1"),
             body,
-            "Identity and remote access for this PC");
+            L10n.Text("windows.machinespage.identity_and_remote_access_for_this_pc.0dd7ca7d"));
     }
 
     /// <summary>
@@ -1349,14 +1349,14 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         body.Children.Add(new TextBlock
         {
             Text = signedIn
-                ? "This PC already shares the account and sees usage from every device on it. Opening folders and terminals from another device is a paid feature."
-                : "Sign in with a Patron or Legend account to open folders and terminals on this PC from another device.",
+                ? L10n.Text("windows.machinespage.this_pc_already_shares_the_account_and_see.5269c899")
+                : L10n.Text("windows.machinespage.sign_in_with_a_patron_or_legend_account_to.daf3326f"),
             Opacity = 0.7,
             TextWrapping = TextWrapping.Wrap,
         });
         body.Children.Add(ActionIconGlyph.Button(
-            "See plans", ActionIcon.Plans, (_, _) => Open("https://tokenstat.ai/pricing")));
-        return Chrome.Card("Remote is on Patron", body);
+            L10n.Text("windows.machinespage.see_plans.d9898933"), ActionIcon.Plans, (_, _) => Open("https://tokenstat.ai/pricing")));
+        return Chrome.Card(L10n.Text("windows.machinespage.remote_is_on_patron.d25dea13"), body);
     }
 
     /// <summary>
@@ -1369,17 +1369,14 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         var details = new StackPanel { Spacing = Theme.SpaceS };
         details.Children.Add(new TextBlock
         {
-            Text = "A connection between two machines carries terminal output, file contents and diffs. "
-                + "It is encrypted on one machine and decrypted on the other, with keys that never leave them. "
-                + "The tunnel relays the encrypted bytes and cannot read them, and neither can tokenstat. "
-                + "Only aggregate counters are ever eligible for sync.",
+            Text = L10n.Text("windows.machinespage.a_connection_between_two_machines_carries.aa0d4220"),
             Opacity = 0.7,
             TextWrapping = TextWrapping.Wrap,
         });
         if (_identity is not null && !string.IsNullOrEmpty(SelfKey()))
         {
             details.Children.Add(KeyLine(
-                "This PC",
+                L10n.Text("windows.machinespage.this_pc.638a348b"),
                 Format.Text(_identity, "words"),
                 Format.Text(_identity, "fingerprint")));
         }
@@ -1391,21 +1388,20 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             }
             var label = Format.Text(peer, "label");
             details.Children.Add(KeyLine(
-                string.IsNullOrEmpty(label) ? "Approved device" : label,
+                string.IsNullOrEmpty(label) ? L10n.Text("windows.machinespage.approved_device.3170ef88") : label,
                 Format.Text(peer, "words"),
                 Format.Text(peer, "fingerprint")));
         }
         details.Children.Add(new TextBlock
         {
-            Text = "Noise XX handshake, X25519 keys, ChaCha20-Poly1305. "
-                + "Two machines showing the same words for each other are talking to each other and to nothing in between.",
+            Text = L10n.Text("windows.machinespage.noise_xx_handshake_x25519_keys_chacha20_po.8025c019"),
             Opacity = 0.6,
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
         });
         return new Expander
         {
-            Header = "End to end encrypted. Keys are hidden until you choose to view them.",
+            Header = L10n.Text("windows.machinespage.end_to_end_encrypted_keys_are_hidden_until.f84da3d6"),
             Content = details,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
@@ -1449,7 +1445,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
     {
         if (isSelf)
         {
-            return "This device";
+            return L10n.Text("windows.machinespage.this_device.d052579c");
         }
         var isHost = Format.Text(machine, "kind") != "client";
         if (!isHost)
@@ -1458,40 +1454,40 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             // "offline" here means "not in the app right now", not "broken".
             if (MachineOnline(machine) == true)
             {
-                return "Phone · in the app now";
+                return L10n.Text("windows.machinespage.phone_in_the_app_now.49897ae2");
             }
             var used = RelativeOrNull(Format.Text(machine, "lastSeenAt"));
             if (used is not null)
             {
-                return "Phone · last used " + used;
+                return L10n.Text("windows.machinespage.phone_last_used_0.555b7a23", $"{used}");
             }
-            return "Phone · signed in on this account";
+            return L10n.Text("windows.machinespage.phone_signed_in_on_this_account.58d549b8");
         }
         if (string.IsNullOrEmpty(Format.Text(machine, "publicIdentity")))
         {
-            return "No connection key yet";
+            return L10n.Text("windows.machinespage.no_connection_key_yet.86015bb4");
         }
         if (MachineOnline(machine) == false)
         {
             var seen = RelativeOrNull(Format.Text(machine, "lastSeenAt"));
-            return seen is null ? "Offline" : "Offline · last seen " + seen;
+            return seen is null ? L10n.Text("common.offline") : L10n.Text("windows.machinespage.offline_last_seen_0.52d14c6d", $"{seen}");
         }
         var peer = PeerForMachine(machine);
         if (peer is not null && RemoteWorkspaces.IsConnected(Format.Text(peer, "key")))
         {
-            return "Connected · workspaces in sidebar";
+            return L10n.Text("windows.machinespage.connected_workspaces_in_sidebar.51252e72");
         }
         var lastSeen = RelativeOrNull(Format.Text(machine, "lastSeenAt"));
         if (lastSeen is not null)
         {
-            return "Seen " + lastSeen;
+            return L10n.Text("windows.machinespage.seen_0.522e2767", $"{lastSeen}");
         }
         var synced = RelativeOrNull(Format.Text(machine, "lastSyncAt"));
         if (synced is not null)
         {
-            return "Last synced " + synced;
+            return L10n.Text("windows.machinespage.last_synced_0.789aa5cd", $"{synced}");
         }
-        return "No sync recorded";
+        return L10n.Text("windows.machinespage.no_sync_recorded.e74abceb");
     }
 
     private static bool? MachineOnline(JsonNode? machine)
@@ -1572,7 +1568,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         head.Children.Add(label);
         if (isSelf)
         {
-            var here = new TextBlock { Text = "This PC", Opacity = 0.6, FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
+            var here = new TextBlock { Text = L10n.Text("windows.machinespage.this_pc.638a348b"), Opacity = 0.6, FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(here, 3);
             head.Children.Add(here);
         }
@@ -1602,12 +1598,12 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             viewable++;
             var peerKey = key;
             var deviceName = title;
-            actions.Children.Add(ActionIconGlyph.Button("View screen", ActionIcon.Preview, (_, _) =>
+            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.machinespage.view_screen.56dea3b5"), ActionIcon.Preview, (_, _) =>
             {
                 if (string.IsNullOrEmpty(peerKey))
                 {
                     _root.Children.Insert(0, Chrome.Banner(
-                        "No other computer to view. Screen share is for another machine on this account.",
+                        L10n.Text("windows.machinespage.no_other_computer_to_view_screen_share_is.1dbff049"),
                         Theme.Accent,
                         Symbol.View));
                     return;
@@ -1616,7 +1612,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 if (open is null)
                 {
                     _root.Children.Insert(0, Chrome.Banner(
-                        "Screen share is not wired in this window.",
+                        L10n.Text("windows.machinespage.screen_share_is_not_wired_in_this_window.d1b86e44"),
                         Theme.Danger,
                         Symbol.Important));
                     return;
@@ -1627,14 +1623,14 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             {
                 TextWrapping = TextWrapping.Wrap,
                 Text = Format.IsLegend(tier)
-                    ? "End-to-end encrypted from this device."
-                    : "Requires Legend",
+                    ? L10n.Text("windows.machinespage.end_to_end_encrypted_from_this_device.54caee7b")
+                    : L10n.Text("windows.machinespage.requires_legend.a630be5b"),
                 Opacity = 0.7,
                 FontSize = 12,
                 VerticalAlignment = VerticalAlignment.Center,
             });
         }
-        actions.Children.Add(ActionIconGlyph.Button("Details", ActionIcon.Reveal, (_, _) =>
+        actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.machinespage.details.45989de4"), ActionIcon.Reveal, (_, _) =>
         {
             _selectThis = false;
             _selectedPeer = null;
@@ -1646,12 +1642,12 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         // Rename and Unlink are rare, so they share one menu instead of two
         // buttons on every row.
         var manage = new MenuFlyout();
-        ContextMenus.AddAsync(manage, "Rename", () => RenameAsync(id, Format.Text(machine, "label"), isSelf));
+        ContextMenus.AddAsync(manage, L10n.Text("common.rename"), () => RenameAsync(id, Format.Text(machine, "label"), isSelf));
         if (!isSelf)
         {
-            ContextMenus.AddAsync(manage, "Remove from account", () => UnlinkAsync(id, title));
+            ContextMenus.AddAsync(manage, L10n.Text("windows.machinespage.remove_from_account.6bfa319e"), () => UnlinkAsync(id, title));
         }
-        actions.Children.Add(ActionIconGlyph.MoreButton("Manage " + title, manage));
+        actions.Children.Add(ActionIconGlyph.MoreButton(L10n.Text("windows.machinespage.manage_0.d77d63f8", $"{title}"), manage));
         var row = new Grid { ColumnSpacing = Theme.SpaceM, RowSpacing = Theme.SpaceS };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -1710,7 +1706,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             if (RemoteWorkspaces.IsConnected(peerKey))
             {
                 actions.Children.Add(ActionIconGlyph.Button(
-                    "Disconnect", ActionIcon.Disconnect, async (_, _) =>
+                    L10n.Text("common.disconnect"), ActionIcon.Disconnect, async (_, _) =>
                         await DisconnectPeerAsync(peerKey, name)));
                 return;
             }
@@ -1718,23 +1714,23 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             {
                 case "pending":
                     actions.Children.Add(Buttons.Primary(
-                        "Approve", ActionIcon.Approve, async (_, _) =>
+                        L10n.Text("windows.machinespage.approve.6007acbe"), ActionIcon.Approve, async (_, _) =>
                             await ApproveAsync(peerKey, name)));
                     break;
                 case "approved":
                     if (CanConnect(machine))
                     {
                         actions.Children.Add(Buttons.Primary(
-                            "Connect", ActionIcon.Connect, async (_, _) =>
+                            L10n.Text("common.connect"), ActionIcon.Connect, async (_, _) =>
                                 await ConnectPeerAsync(peerKey, name, MachineOnline(machine))));
                     }
                     actions.Children.Add(ActionIconGlyph.Button(
-                        "Revoke", ActionIcon.Revoke, async (_, _) =>
+                        L10n.Text("windows.machinespage.revoke.87e6d00b"), ActionIcon.Revoke, async (_, _) =>
                             await ConfirmRevokeAsync(peerKey, name)));
                     break;
                 default:
                     actions.Children.Add(ActionIconGlyph.Button(
-                        "Approve", ActionIcon.Approve, async (_, _) =>
+                        L10n.Text("windows.machinespage.approve.6007acbe"), ActionIcon.Approve, async (_, _) =>
                             await ApproveAsync(peerKey, name)));
                     break;
             }
@@ -1744,7 +1740,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         {
             var captured = machine;
             actions.Children.Add(Buttons.Primary(
-                "Connect", ActionIcon.Connect, async (_, _) =>
+                L10n.Text("common.connect"), ActionIcon.Connect, async (_, _) =>
                     await ConnectMachineAsync(captured)));
         }
     }
@@ -1764,7 +1760,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         };
         row.Children.Add(new TextBlock
         {
-            Text = "Auto-connect",
+            Text = L10n.Text("windows.machinespage.auto_connect.45b6d201"),
             FontSize = 12,
             Opacity = 0.7,
             VerticalAlignment = VerticalAlignment.Center,
@@ -1776,7 +1772,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             OffContent = "",
             VerticalAlignment = VerticalAlignment.Center,
         };
-        ToolTipService.SetToolTip(toggle, "Auto-connect " + Format.Text(peer, "label", "this device"));
+        ToolTipService.SetToolTip(toggle, L10n.Text("windows.machinespage.auto_connect_0.3bbf847e", $"{Format.Text(peer, "label", "this device")}"));
         toggle.Toggled += (_, _) => SetAutoConnect(toggle.IsOn, peerKey, machine);
         row.Children.Add(toggle);
         return row;
@@ -1810,7 +1806,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         if (string.IsNullOrEmpty(key))
         {
             _root.Children.Insert(0, Chrome.Banner(
-                $"{title} has no connection key on this account record yet. Open the Devices screen on that device so it registers one, then try again.",
+                L10n.Text("windows.machinespage.0_has_no_connection_key_on_this_account_re.9e4e975a", $"{title}"),
                 Theme.Warning,
                 Symbol.Important));
             return;
@@ -1844,7 +1840,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         // Connected set after revoke made the row offer Disconnect for a
         // machine that could no longer answer. Disconnect itself keeps trust:
         // it only drops the folders from the sidebar.
-        _notice = $"Disconnected from {name}. Its workspaces are no longer in the sidebar.";
+        _notice = L10n.Text("windows.machinespage.disconnected_from_0_its_workspaces_are_no.3ecfb24d", $"{name}");
         await LoadAsync();
     }
 
@@ -1923,7 +1919,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         _inspectorRoot.Children.Clear();
         _inspectorRoot.Children.Add(new TextBlock
         {
-            Text = "Device",
+            Text = L10n.Text("windows.machinespage.device.6ba0bdec"),
             FontSize = 15,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
@@ -1941,7 +1937,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         if (machine is null)
         {
             _inspectorRoot.Children.Add(Chrome.InspectorField(
-                "Device", "Pick a device", "Connection details and actions appear here."));
+                L10n.Text("windows.machinespage.device.6ba0bdec"), L10n.Text("windows.machinespage.pick_a_device.de6694f3"), L10n.Text("windows.machinespage.connection_details_and_actions_appear_here.2f1411a1")));
             return;
         }
         AccountMachineInspector(machine);
@@ -1969,7 +1965,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         var name = Format.Text(_identity, "label");
         body.Children.Add(new TextBlock
         {
-            Text = string.IsNullOrEmpty(name) ? "This PC" : name,
+            Text = string.IsNullOrEmpty(name) ? L10n.Text("windows.machinespage.this_pc.638a348b") : name,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
         });
@@ -1980,22 +1976,22 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         }
         if (!string.IsNullOrEmpty(words))
         {
-            body.Children.Add(Labeled("Known as", words));
+            body.Children.Add(Labeled(L10n.Text("windows.machinespage.known_as.9076e6ab"), words));
         }
         body.Children.Add(Buttons.Primary(
-            "Copy invite", ActionIcon.Copy, (_, _) => CopyInvite()));
+            L10n.Text("windows.machinespage.copy_invite.953ed058"), ActionIcon.Copy, (_, _) => CopyInvite()));
         body.Children.Add(new TextBlock
         {
-            Text = "Paste this in the other machine's Add device box.",
+            Text = L10n.Text("windows.machinespage.paste_this_in_the_other_machine_s_add_devi.014fee4c"),
             Opacity = 0.7,
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
         });
         body.Children.Add(Labeled(
-            "Reachability",
+            L10n.Text("windows.machinespage.reachability.66f0f432"),
             _status?["tunnelOnline"]?.GetValue<bool>() == true
-                ? "Tunnel up"
-                : "Not reachable from elsewhere"));
+                ? L10n.Text("windows.machinespage.tunnel_up.77a2eaee")
+                : L10n.Text("windows.machinespage.not_reachable_from_elsewhere.1f54e85a")));
         body.Children.Add(HostStatsCard(null));
         body.Children.Add(HostUpdateCard(null, local: true));
         _inspectorRoot.Children.Add(body);
@@ -2005,7 +2001,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
     {
         var key = Format.Text(peer, "key");
         var label = Format.Text(peer, "label");
-        var name = string.IsNullOrEmpty(label) ? "Unnamed device" : label;
+        var name = string.IsNullOrEmpty(label) ? L10n.Text("windows.machinespage.unnamed_device.6aba593f") : label;
         var body = new StackPanel { Spacing = Theme.SpaceM };
         body.Children.Add(new TextBlock
         {
@@ -2016,15 +2012,15 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         var words = Format.Text(peer, "words");
         if (!string.IsNullOrEmpty(words))
         {
-            body.Children.Add(Labeled("Known as", words));
+            body.Children.Add(Labeled(L10n.Text("windows.machinespage.known_as.9076e6ab"), words));
         }
-        body.Children.Add(Labeled("Trust", TrustLabel(Format.Text(peer, "trust"))));
+        body.Children.Add(Labeled(L10n.Text("windows.machinespage.trust.ade9248e"), TrustLabel(Format.Text(peer, "trust"))));
         var connected = RemoteWorkspaces.IsConnected(key);
         if (connected)
         {
             body.Children.Add(new TextBlock
             {
-                Text = "Projects from this device are in the sidebar.",
+                Text = L10n.Text("windows.machinespage.projects_from_this_device_are_in_the_sideb.a1c36b35"),
                 Opacity = 0.7,
                 FontSize = 12,
                 TextWrapping = TextWrapping.Wrap,
@@ -2038,28 +2034,28 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             if (connected)
             {
                 actions.Children.Add(ActionIconGlyph.Button(
-                    "Disconnect", ActionIcon.Disconnect, async (_, _) =>
+                    L10n.Text("common.disconnect"), ActionIcon.Disconnect, async (_, _) =>
                         await DisconnectPeerAsync(key, name)));
             }
             else
             {
                 actions.Children.Add(Buttons.Primary(
-                    "Connect", ActionIcon.Connect, async (_, _) =>
+                    L10n.Text("common.connect"), ActionIcon.Connect, async (_, _) =>
                         await ConnectPeerAsync(key, name, online: null)));
             }
             actions.Children.Add(AutoConnectRow(peer, machine: null));
             actions.Children.Add(ActionIconGlyph.Button(
-                "Revoke", ActionIcon.Revoke, async (_, _) =>
+                L10n.Text("windows.machinespage.revoke.87e6d00b"), ActionIcon.Revoke, async (_, _) =>
                     await ConfirmRevokeAsync(key, name)));
         }
         else
         {
             actions.Children.Add(Buttons.Primary(
-                "Approve", ActionIcon.Approve, async (_, _) =>
+                L10n.Text("windows.machinespage.approve.6007acbe"), ActionIcon.Approve, async (_, _) =>
                     await ApproveAsync(key, name)));
         }
         actions.Children.Add(ActionIconGlyph.Button(
-            "Forget", ActionIcon.Delete, async (_, _) =>
+            L10n.Text("windows.machinespage.forget.a6bd489d"), ActionIcon.Delete, async (_, _) =>
                 await ConfirmForgetAsync(key, name)));
         body.Children.Add(actions);
         _inspectorRoot.Children.Add(body);
@@ -2067,9 +2063,9 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
 
     private static string TrustLabel(string trust) => trust switch
     {
-        "pending" => "Waiting for approval",
-        "approved" => "Approved",
-        "revoked" => "Revoked",
+        "pending" => L10n.Text("windows.machinespage.waiting_for_approval.10c5739b"),
+        "approved" => L10n.Text("windows.machinespage.approved.87b42e40"),
+        "revoked" => L10n.Text("windows.machinespage.revoked.f6f738d0"),
         _ => trust,
     };
 
@@ -2085,17 +2081,17 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
         });
-        body.Children.Add(Labeled("Code", id));
+        body.Children.Add(Labeled(L10n.Text("windows.machinespage.code.340f4630"), id));
         var platform = Format.Text(machine, "platform");
         if (!string.IsNullOrEmpty(platform))
         {
-            body.Children.Add(Labeled("Platform", platform));
+            body.Children.Add(Labeled(L10n.Text("windows.machinespage.platform.c78ffe19"), platform));
         }
-        body.Children.Add(Labeled("Status", StatusLine(machine, isSelf)));
+        body.Children.Add(Labeled(L10n.Text("windows.machinespage.status.920e413c"), StatusLine(machine, isSelf)));
         var words = Format.Text(PeerForMachine(machine), "words");
         if (!string.IsNullOrEmpty(words))
         {
-            body.Children.Add(Labeled("Known as", words));
+            body.Children.Add(Labeled(L10n.Text("windows.machinespage.known_as.9076e6ab"), words));
         }
         var actions = new StackPanel { Spacing = Theme.SpaceS };
         var isHost = Format.Text(machine, "kind") != "client";
@@ -2104,7 +2100,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         {
             body.Children.Add(new TextBlock
             {
-                Text = "This device.",
+                Text = L10n.Text("windows.machinespage.this_device.3b5031a9"),
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -2115,7 +2111,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         {
             body.Children.Add(new TextBlock
             {
-                Text = "This phone or tablet connects to your computers. Open tokenstat on it to choose a computer and project.",
+                Text = L10n.Text("windows.machinespage.this_phone_or_tablet_connects_to_your_comp.c99a1b87"),
                 Opacity = 0.7, TextWrapping = TextWrapping.Wrap,
             });
         }
@@ -2132,13 +2128,13 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             if (RemoteWorkspaces.IsConnected(linkedKey))
             {
                 actions.Children.Add(ActionIconGlyph.Button(
-                    "Disconnect", ActionIcon.Disconnect, async (_, _) =>
+                    L10n.Text("common.disconnect"), ActionIcon.Disconnect, async (_, _) =>
                         await DisconnectPeerAsync(linkedKey, name)));
             }
             else
             {
                 actions.Children.Add(Buttons.Primary(
-                    "Connect", ActionIcon.Connect, async (_, _) =>
+                    L10n.Text("common.connect"), ActionIcon.Connect, async (_, _) =>
                         await ConnectPeerAsync(linkedKey, name, MachineOnline(machine))));
             }
             actions.Children.Add(AutoConnectRow(linked, machine));
@@ -2150,19 +2146,19 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 body.Children.Add(HostStatsCard(peerKey));
             }
             actions.Children.Add(Buttons.Primary(
-                "Connect", ActionIcon.Connect, async (_, _) =>
+                L10n.Text("common.connect"), ActionIcon.Connect, async (_, _) =>
                     await ConnectMachineAsync(machine)));
         }
         if (isHost && !isSelf)
         {
             var deviceName = title;
             actions.Children.Add(ActionIconGlyph.Button(
-                "View screen", ActionIcon.Preview, (_, _) =>
+                L10n.Text("windows.machinespage.view_screen.56dea3b5"), ActionIcon.Preview, (_, _) =>
                 {
                     var open = AppServices.OpenScreen;
                     if (string.IsNullOrEmpty(peerKey) || open is null)
                     {
-                        _notice = "Open Devices on that computer so it registers its connection key, then refresh this list.";
+                        _notice = L10n.Text("windows.machinespage.open_devices_on_that_computer_so_it_regist.9f7244ac");
                         _ = LoadAsync();
                         return;
                     }
@@ -2170,14 +2166,14 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 }));
         }
         actions.Children.Add(ActionIconGlyph.Button(
-            "Rename", ActionIcon.Edit, async (_, _) =>
+            L10n.Text("common.rename"), ActionIcon.Edit, async (_, _) =>
             {
                 await RenameAsync(id, Format.Text(machine, "label"), isSelf);
             }));
         if (!isSelf)
         {
             actions.Children.Add(ActionIconGlyph.Button(
-                "Remove from account", ActionIcon.Delete, async (_, _) =>
+                L10n.Text("windows.machinespage.remove_from_account.6bfa319e"), ActionIcon.Delete, async (_, _) =>
                 {
                     await UnlinkAsync(id, title);
                 }));
@@ -2222,19 +2218,19 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         row.Children.Clear();
         if (stats is null)
         {
-            row.Children.Add(Chrome.InspectorField("Power", "n/a"));
-            row.Children.Add(Chrome.InspectorField("CPU", "n/a"));
+            row.Children.Add(Chrome.InspectorField(L10n.Text("windows.machinespage.power.848e9656"), "n/a"));
+            row.Children.Add(Chrome.InspectorField(L10n.Text("windows.machinespage.cpu.db9a4c7d"), L10n.Text("windows.machinespage.n_a.a683c5c5")));
             return;
         }
-        row.Children.Add(Chrome.InspectorField("Power", PowerLabel(stats)));
+        row.Children.Add(Chrome.InspectorField(L10n.Text("windows.machinespage.power.848e9656"), PowerLabel(stats)));
         if (stats["cpu"] is not null)
         {
-            row.Children.Add(Chrome.InspectorField("CPU", CpuLabel(Format.Number(stats, "cpu"))));
+            row.Children.Add(Chrome.InspectorField(L10n.Text("windows.machinespage.cpu.db9a4c7d"), CpuLabel(Format.Number(stats, "cpu"))));
         }
         if (stats["ramTotalBytes"] is not null)
         {
             row.Children.Add(Chrome.InspectorField(
-                "Memory",
+                L10n.Text("windows.machinespage.memory.c3963aed"),
                 RamLabel(Format.Long(stats, "ramUsedBytes"), Format.Long(stats, "ramTotalBytes"))));
         }
     }
@@ -2249,7 +2245,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         }
         if (Format.Text(stats, "power") == "ac" && !percent.HasValue)
         {
-            return "Plugged in";
+            return L10n.Text("windows.machinespage.plugged_in.edefc1f9");
         }
         if (percent.HasValue)
         {
@@ -2257,13 +2253,13 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         }
         if (Format.Text(stats, "power") == "battery")
         {
-            return "On battery";
+            return L10n.Text("windows.machinespage.on_battery.51d53044");
         }
         if (Format.Text(stats, "power") == "ac")
         {
-            return "Plugged in";
+            return L10n.Text("windows.machinespage.plugged_in.edefc1f9");
         }
-        return "n/a";
+        return L10n.Text("windows.machinespage.n_a.a683c5c5");
     }
 
     private static string CpuLabel(double cpu) => $"{(int)Math.Round(cpu * 100)}%";
@@ -2273,7 +2269,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         const double g = 1024d * 1024 * 1024;
         var u = used / g;
         var t = total / g;
-        return t >= 10 ? $"{u:0} / {t:0} GB" : $"{u:0.0} / {t:0.0} GB";
+        return t >= 10 ? L10n.Text("windows.machinespage.0_1_gb.12e92d23", $"{u:0}", $"{t:0}") : L10n.Text("windows.machinespage.0_1_gb.12e92d23", $"{u:0.0}", $"{t:0.0}");
     }
 
     /// <summary>
@@ -2285,7 +2281,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         var body = new StackPanel { Spacing = Theme.SpaceS };
         body.Children.Add(new TextBlock
         {
-            Text = "Software",
+            Text = L10n.Text("windows.machinespage.software.9b3289a3"),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         var state = new StackPanel { Spacing = Theme.SpaceS };
@@ -2299,7 +2295,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         state.Children.Clear();
         state.Children.Add(new TextBlock
         {
-            Text = "Looking for a newer release",
+            Text = L10n.Text("windows.machinespage.looking_for_a_newer_release.7e1ada06"),
             Opacity = 0.7,
             FontSize = 12,
         });
@@ -2321,7 +2317,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 TextWrapping = TextWrapping.Wrap,
             });
             state.Children.Add(ActionIconGlyph.Button(
-                "Check again", ActionIcon.Refresh, async (_, _) =>
+                L10n.Text("windows.machinespage.check_again.fb7099ad"), ActionIcon.Refresh, async (_, _) =>
                     await FillHostUpdateAsync(state, peerKey, local)));
             return;
         }
@@ -2336,7 +2332,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         state.Children.Add(new TextBlock
         {
             Text = restartPending
-                ? $"Running {version}"
+                ? L10n.Text("windows.machinespage.running_0.015ef2e2", $"{version}")
                 : newer ? $"{version} → {latest}" : version,
             FontFamily = Fonts.Mono,
             FontSize = 12,
@@ -2344,33 +2340,33 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         if (restartPending)
         {
             state.Children.Add(UpdateNote(
-                local ? "Installed. Restart the helper to use it." : "Installed. Restart it there to use it."));
+                local ? L10n.Text("windows.machinespage.installed_restart_the_helper_to_use_it.f04732fb") : L10n.Text("windows.machinespage.installed_restart_it_there_to_use_it.54cbadd3")));
         }
         else if (newer)
         {
-            state.Children.Add(UpdateNote($"Version {latest} is available."));
+            state.Children.Add(UpdateNote(L10n.Text("windows.machinespage.version_0_is_available.874abce6", $"{latest}")));
         }
         else
         {
-            state.Children.Add(UpdateNote("Up to date."));
+            state.Children.Add(UpdateNote(L10n.Text("windows.machinespage.up_to_date.50620fd9")));
         }
         if (appManaged)
         {
             state.Children.Add(UpdateNote(
                 local
-                    ? "The tokenstat application owns this helper and replaces it when it updates itself."
-                    : "The tokenstat application there owns its helper and replaces it when it updates itself."));
+                    ? L10n.Text("windows.machinespage.the_tokenstat_application_owns_this_helper.d5e8bbb9")
+                    : L10n.Text("windows.machinespage.the_tokenstat_application_there_owns_its_h.c214574e")));
         }
         else
         {
             if (newer && !canRestart)
             {
                 state.Children.Add(UpdateNote(
-                    "It installs but cannot restart itself, so it keeps running the version it started with until it is restarted."));
+                    L10n.Text("windows.machinespage.it_installs_but_cannot_restart_itself_so_i.f14f8d70")));
             }
             if (autoApply)
             {
-                state.Children.Add(UpdateNote("Checks daily on its own."));
+                state.Children.Add(UpdateNote(L10n.Text("windows.machinespage.checks_daily_on_its_own.bfd7c539")));
             }
         }
         var actions = new StackPanel
@@ -2385,24 +2381,24 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             if (canRestart)
             {
                 actions.Children.Add(Buttons.Primary(
-                    "Restart", ActionIcon.Refresh, async (_, _) =>
+                    L10n.Text("windows.machinespage.restart.6b983a81"), ActionIcon.Refresh, async (_, _) =>
                         await ApplyHostUpdateAsync(state, peerKey, local, restartNow: true)));
             }
         }
         else if (newer && !appManaged)
         {
             actions.Children.Add(Buttons.Primary(
-                "Install", ActionIcon.Download, async (_, _) =>
+                L10n.Text("windows.machinespage.install.569ca49f"), ActionIcon.Download, async (_, _) =>
                     await ApplyHostUpdateAsync(state, peerKey, local, restartNow: false)));
         }
         else if (appManaged && newer)
         {
             actions.Children.Add(Buttons.Primary(
-                local ? "Download" : "Fetch", ActionIcon.Download, async (_, _) =>
+                local ? L10n.Text("windows.machinespage.download.d6eafe82") : L10n.Text("windows.machinespage.fetch.cd7d61bf"), ActionIcon.Download, async (_, _) =>
                     await ApplyHostUpdateAsync(state, peerKey, local, restartNow: false)));
         }
         actions.Children.Add(ActionIconGlyph.Button(
-            "Check again", ActionIcon.Refresh, async (_, _) =>
+            L10n.Text("windows.machinespage.check_again.fb7099ad"), ActionIcon.Refresh, async (_, _) =>
                 await FillHostUpdateAsync(state, peerKey, local)));
         state.Children.Add(actions);
     }
@@ -2413,7 +2409,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         state.Children.Clear();
         state.Children.Add(new TextBlock
         {
-            Text = "Downloading, checking and installing. This takes a minute.",
+            Text = L10n.Text("windows.machinespage.downloading_checking_and_installing_this_t.c0e97360"),
             Opacity = 0.7,
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
@@ -2437,7 +2433,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 TextWrapping = TextWrapping.Wrap,
             });
             state.Children.Add(ActionIconGlyph.Button(
-                "Check again", ActionIcon.Refresh, async (_, _) =>
+                L10n.Text("windows.machinespage.check_again.fb7099ad"), ActionIcon.Refresh, async (_, _) =>
                     await FillHostUpdateAsync(state, peerKey, local)));
             return;
         }
@@ -2451,26 +2447,26 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         {
             var to = Format.Text(applied, "to", "the new version");
             state.Children.Add(UpdateNote(
-                $"Installed {to}. Restarting on it now, so this may go quiet for a moment."));
+                L10n.Text("windows.machinespage.installed_0_restarting_on_it_now_so_this_m.4a3fb7f6", $"{to}")));
         }
         else if (!string.IsNullOrEmpty(Format.Text(applied, "appImage"))
             && Format.Flag(applied, "appManaged"))
         {
-            state.Children.Add(UpdateNote("The application's download is ready on that machine."));
+            state.Children.Add(UpdateNote(L10n.Text("windows.machinespage.the_application_s_download_is_ready_on_tha.bc948717")));
         }
         else
         {
             state.Children.Add(UpdateNote(
-                local ? "Installed. Restart the helper to use it." : "Installed. Restart it there to use it."));
+                local ? L10n.Text("windows.machinespage.installed_restart_the_helper_to_use_it.f04732fb") : L10n.Text("windows.machinespage.installed_restart_it_there_to_use_it.54cbadd3")));
         }
         if (Format.Flag(applied, "restartPending") && Format.Flag(applied, "canRestart"))
         {
             state.Children.Add(Buttons.Primary(
-                "Restart", ActionIcon.Refresh, async (_, _) =>
+                L10n.Text("windows.machinespage.restart.6b983a81"), ActionIcon.Refresh, async (_, _) =>
                     await ApplyHostUpdateAsync(state, peerKey, local, restartNow: true)));
         }
         state.Children.Add(ActionIconGlyph.Button(
-            "Check again", ActionIcon.Refresh, async (_, _) =>
+            L10n.Text("windows.machinespage.check_again.fb7099ad"), ActionIcon.Refresh, async (_, _) =>
                 await FillHostUpdateAsync(state, peerKey, local)));
     }
 
@@ -2544,12 +2540,12 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         catch
         {
             _root.Children.Insert(0, Chrome.Banner(
-                "The invite could not reach the clipboard.",
+                L10n.Text("windows.machinespage.the_invite_could_not_reach_the_clipboard.4a53dacd"),
                 Theme.Warning,
                 Symbol.Important));
             return;
         }
-        _notice = "Invite copied. On the other device, choose Add device and paste it there.";
+        _notice = L10n.Text("windows.machinespage.invite_copied_on_the_other_device_choose_a.ff13a35e");
         Render();
     }
 
@@ -2559,19 +2555,19 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
     /// </summary>
     private async Task PairAsync()
     {
-        var keyBox = new TextBox { PlaceholderText = "Key from the other machine" };
-        var labelBox = new TextBox { PlaceholderText = "Name for the list" };
-        var addressBox = new TextBox { PlaceholderText = "Address (optional)" };
+        var keyBox = new TextBox { PlaceholderText = L10n.Text("windows.machinespage.key_from_the_other_machine.4a191927") };
+        var labelBox = new TextBox { PlaceholderText = L10n.Text("windows.machinespage.name_for_the_list.5df29eeb") };
+        var addressBox = new TextBox { PlaceholderText = L10n.Text("windows.machinespage.address_optional.8cb13162") };
         var form = new StackPanel { Spacing = Theme.SpaceS };
         form.Children.Add(keyBox);
         form.Children.Add(labelBox);
         form.Children.Add(addressBox);
         var dialog = new ContentDialog
         {
-            Title = "Add a device",
+            Title = L10n.Text("windows.machinespage.add_a_device.5469d968"),
             Content = form,
-            PrimaryButtonText = "Pair",
-            CloseButtonText = "Cancel",
+            PrimaryButtonText = L10n.Text("windows.machinespage.pair.989da04b"),
+            CloseButtonText = L10n.Text("common.cancel"),
             DefaultButton = ContentDialogButton.Primary,
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
@@ -2595,7 +2591,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         if (key == SelfKey())
         {
             _root.Children.Insert(0, Chrome.Banner(
-                "That is this device. It is already here and does not need to be added.",
+                L10n.Text("windows.machinespage.that_is_this_device_it_is_already_here_and.6ca9f067"),
                 Theme.Warning,
                 Symbol.Important));
             return;
@@ -2612,8 +2608,8 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 });
             var name = Format.Text(peer, "label");
             _notice = string.IsNullOrEmpty(name)
-                ? "Paired. It will not answer until somebody approves this machine over there too."
-                : $"Paired with {name}. It will not answer until somebody approves this machine over there too.";
+                ? L10n.Text("windows.machinespage.paired_it_will_not_answer_until_somebody_a.9fa23091")
+                : L10n.Text("windows.machinespage.paired_with_0_it_will_not_answer_until_som.653a0611", $"{name}");
         }
         catch (Exception ex)
         {
@@ -2629,7 +2625,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         try
         {
             await AppServices.Host.CallAsync("machine.approve", new JsonObject { ["key"] = key });
-            _notice = $"{name} may now reach this device.";
+            _notice = L10n.Text("windows.machinespage.0_may_now_reach_this_device.cef66588", $"{name}");
         }
         catch (Exception ex)
         {
@@ -2644,14 +2640,14 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
     {
         var dialog = new ContentDialog
         {
-            Title = "Revoke access?",
+            Title = L10n.Text("windows.machinespage.revoke_access.8138e6ff"),
             Content = new TextBlock
             {
-                Text = "That device can no longer reach this machine until you approve it again.",
+                Text = L10n.Text("windows.machinespage.that_device_can_no_longer_reach_this_machi.e0406f8e"),
                 TextWrapping = TextWrapping.Wrap,
             },
-            PrimaryButtonText = "Revoke",
-            CloseButtonText = "Keep access",
+            PrimaryButtonText = L10n.Text("windows.machinespage.revoke.87e6d00b"),
+            CloseButtonText = L10n.Text("windows.machinespage.keep_access.68cfc92d"),
             DefaultButton = ContentDialogButton.Close,
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
@@ -2663,7 +2659,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             await AppServices.Host.CallAsync("machine.revoke", new JsonObject { ["key"] = key });
             // Revoke ends trust and any workspace listing for this peer.
             RemoteWorkspaces.Disconnect(key);
-            _notice = $"{name} can no longer reach this device.";
+            _notice = L10n.Text("windows.machinespage.0_can_no_longer_reach_this_device.e6993257", $"{name}");
         }
         catch (Exception ex)
         {
@@ -2678,14 +2674,14 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
     {
         var dialog = new ContentDialog
         {
-            Title = "Forget this device?",
+            Title = L10n.Text("windows.machinespage.forget_this_device.6bddebb5"),
             Content = new TextBlock
             {
-                Text = "It is removed from this machine's peer list. You can approve it again later if it connects.",
+                Text = L10n.Text("windows.machinespage.it_is_removed_from_this_machine_s_peer_lis.0fe4b5c8"),
                 TextWrapping = TextWrapping.Wrap,
             },
-            PrimaryButtonText = "Forget",
-            CloseButtonText = "Keep it",
+            PrimaryButtonText = L10n.Text("windows.machinespage.forget.a6bd489d"),
+            CloseButtonText = L10n.Text("windows.machinespage.keep_it.fdce5da2"),
             DefaultButton = ContentDialogButton.Close,
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
@@ -2695,7 +2691,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         try
         {
             await AppServices.Host.CallAsync("machine.forget", new JsonObject { ["key"] = key });
-            _notice = $"{name} is forgotten. It will arrive as a stranger next time.";
+            _notice = L10n.Text("windows.machinespage.0_is_forgotten_it_will_arrive_as_a_strange.c48a4600", $"{name}");
         }
         catch (Exception ex)
         {
@@ -2712,13 +2708,13 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
     /// </summary>
     private async Task RenameSelfAsync(string current)
     {
-        var box = new TextBox { Text = current, PlaceholderText = "Device name" };
+        var box = new TextBox { Text = current, PlaceholderText = L10n.Text("windows.machinespage.device_name.155106be") };
         var dialog = new ContentDialog
         {
-            Title = "Rename this PC",
+            Title = L10n.Text("windows.machinespage.rename_this_pc.60611f8e"),
             Content = box,
-            PrimaryButtonText = "Save",
-            CloseButtonText = "Cancel",
+            PrimaryButtonText = L10n.Text("common.save"),
+            CloseButtonText = L10n.Text("common.cancel"),
             DefaultButton = ContentDialogButton.Primary,
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
@@ -2739,8 +2735,8 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             return;
         }
         _notice = renamed.Length == 0
-            ? "Back to the name this computer already had."
-            : $"Other devices will see this one as {renamed}.";
+            ? L10n.Text("windows.machinespage.back_to_the_name_this_computer_already_had.574b11b2")
+            : L10n.Text("windows.machinespage.other_devices_will_see_this_one_as_0.e25cb345", $"{renamed}");
         await LoadAsync();
     }
 
@@ -2751,13 +2747,13 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
     /// </summary>
     private async Task RenameAsync(string id, string current, bool isSelf)
     {
-        var box = new TextBox { Text = current, PlaceholderText = "Device name" };
+        var box = new TextBox { Text = current, PlaceholderText = L10n.Text("windows.machinespage.device_name.155106be") };
         var dialog = new ContentDialog
         {
-            Title = isSelf ? "Rename this PC" : "Rename device",
+            Title = isSelf ? L10n.Text("windows.machinespage.rename_this_pc.60611f8e") : L10n.Text("windows.machinespage.rename_device.e378076e"),
             Content = box,
-            PrimaryButtonText = "Save",
-            CloseButtonText = "Cancel",
+            PrimaryButtonText = L10n.Text("common.save"),
+            CloseButtonText = L10n.Text("common.cancel"),
             DefaultButton = ContentDialogButton.Primary,
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
@@ -2790,8 +2786,8 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             return;
         }
         _notice = name.Length == 0
-            ? "Back to the name that device gives itself."
-            : $"Every screen on this account calls it {name} now.";
+            ? L10n.Text("windows.machinespage.back_to_the_name_that_device_gives_itself.ef51c3b6")
+            : L10n.Text("windows.machinespage.every_screen_on_this_account_calls_it_0_no.d72bed77", $"{name}");
         await LoadAsync();
     }
 
@@ -2804,15 +2800,14 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
     {
         var dialog = new ContentDialog
         {
-            Title = "Remove from account?",
+            Title = L10n.Text("windows.machinespage.remove_from_account.a3010e43"),
             Content = new TextBlock
             {
-                Text = $"{name} will be removed from this account and its uploaded history deleted. "
-                    + "Use this for a device id that no longer exists, for example after a reinstall.",
+                Text = L10n.Text("windows.machinespage.0_will_be_removed_from_this_account_and_it.d003b06e", $"{name}"),
                 TextWrapping = TextWrapping.Wrap,
             },
-            PrimaryButtonText = "Remove",
-            CloseButtonText = "Cancel",
+            PrimaryButtonText = L10n.Text("common.remove"),
+            CloseButtonText = L10n.Text("common.cancel"),
             DefaultButton = ContentDialogButton.Close,
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
@@ -2835,7 +2830,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         {
             _selectedId = null;
         }
-        _notice = $"{name} removed from the account.";
+        _notice = L10n.Text("windows.machinespage.0_removed_from_the_account.008c6cc8", $"{name}");
         await LoadAsync();
     }
 

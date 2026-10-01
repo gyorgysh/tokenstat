@@ -96,9 +96,9 @@ internal static class Format
     /// </summary>
     public static string Transport(string raw) => raw switch
     {
-        "direct" => "Direct connection",
-        "relay" => "Encrypted relay",
-        _ => string.IsNullOrEmpty(raw) ? "Unknown" : raw,
+        "direct" => L10n.Text("windows.format.direct_connection.28d0ad54"),
+        "relay" => L10n.Text("windows.format.encrypted_relay.153d7b1c"),
+        _ => string.IsNullOrEmpty(raw) ? L10n.Text("common.unknown") : raw,
     };
 
     public static string Text(JsonNode? node, string name, string fallback = "")
@@ -223,31 +223,31 @@ internal static class Format
         if (string.IsNullOrEmpty(value)
             || !DateTimeOffset.TryParse(value, out var moment))
         {
-            return "Never";
+            return L10n.Text("common.never");
         }
         var age = DateTimeOffset.Now - moment;
         if (age < TimeSpan.Zero)
         {
-            return "just now";
+            return L10n.Text("windows.format.just_now.7ddb44d8");
         }
         if (age < TimeSpan.FromMinutes(1))
         {
-            return "just now";
+            return L10n.Text("windows.format.just_now.7ddb44d8");
         }
         if (age < TimeSpan.FromHours(1))
         {
             var minutes = Math.Max(1, (int)age.TotalMinutes);
-            return minutes == 1 ? "1 minute ago" : $"{minutes} minutes ago";
+            return minutes == 1 ? L10n.Text("windows.format.1_minute_ago.0f450bad") : L10n.Text("windows.format.0_minutes_ago.e33faefc", $"{minutes}");
         }
         if (age < TimeSpan.FromDays(1))
         {
             var hours = Math.Max(1, (int)age.TotalHours);
-            return hours == 1 ? "1 hour ago" : $"{hours} hours ago";
+            return hours == 1 ? L10n.Text("windows.format.1_hour_ago.e4bc2973") : L10n.Text("windows.format.0_hours_ago.d8431d4e", $"{hours}");
         }
         if (age < TimeSpan.FromDays(30))
         {
             var days = Math.Max(1, (int)age.TotalDays);
-            return days == 1 ? "1 day ago" : $"{days} days ago";
+            return days == 1 ? L10n.Text("windows.format.1_day_ago.961f4ea2") : L10n.Text("windows.format.0_days_ago.bef5eece", $"{days}");
         }
         return moment.LocalDateTime.ToString("d");
     }
@@ -268,11 +268,11 @@ internal static class Format
         return kind switch
         {
             "interval" => IntervalLabel(Long(schedule, "everySeconds")),
-            "daily" => "daily at " + time,
-            "weekdays" => "weekdays at " + time,
+            "daily" => L10n.Text("windows.format.daily_at_0.c0d8484c", $"{time}"),
+            "weekdays" => L10n.Text("windows.format.weekdays_at_0.6459d30a", $"{time}"),
             "weekly" => WeeklyLabel(schedule, time),
             "custom" => CustomLabel(schedule, time),
-            _ => "once, when you run it",
+            _ => L10n.Text("windows.format.once_when_you_run_it.cbb9301d"),
         };
     }
 
@@ -282,9 +282,9 @@ internal static class Format
         if (minutes >= 60 && minutes % 60 == 0)
         {
             var hours = minutes / 60;
-            return hours == 1 ? "every 1 hour" : $"every {hours} hours";
+            return hours == 1 ? L10n.Text("windows.format.every_1_hour.065e6b96") : L10n.Text("windows.format.every_0_hours.7412648e", $"{hours}");
         }
-        return minutes == 1 ? "every 1 minute" : $"every {minutes} minutes";
+        return minutes == 1 ? L10n.Text("windows.format.every_1_minute.20023e7b") : L10n.Text("windows.format.every_0_minutes.e1530902", $"{minutes}");
     }
 
     private static string WeeklyLabel(JsonNode? schedule, string time)
@@ -292,23 +292,23 @@ internal static class Format
         var mask = Long(schedule, "weekdays");
         if (mask != 0)
         {
-            return DayList(mask) + " at " + time;
+            return DayList(mask) + L10n.Text("windows.format.at.086a519f") + time;
         }
-        var names = new[] { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday" };
+        var names = new[] { L10n.Text("windows.format.monday.6a00dfc1"), L10n.Text("windows.format.tuesday.7d8af1de"), L10n.Text("windows.format.wednesday.c0a6cc82"), L10n.Text("windows.format.thursday.fc266206"), L10n.Text("windows.format.friday.e21f3f37"), L10n.Text("windows.format.saturday.dbe35c73"), L10n.Text("windows.format.sunday.873fef76") };
         var day = (int)Long(schedule, "weekday");
         var name = day >= 0 && day < names.Length ? names[day] : "?";
-        return name + " at " + time;
+        return name + L10n.Text("windows.format.at.086a519f") + time;
     }
 
     private static string CustomLabel(JsonNode? schedule, string time)
     {
         var days = DayList(Long(schedule, "weekdays"));
-        return string.IsNullOrEmpty(days) ? "custom at " + time : days + " at " + time;
+        return string.IsNullOrEmpty(days) ? L10n.Text("windows.format.custom_at_0.55fdfc5a", $"{time}") : days + L10n.Text("windows.format.at.086a519f") + time;
     }
 
     private static string DayList(long mask)
     {
-        var shortNames = new[] { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
+        var shortNames = new[] { L10n.Text("windows.format.mon.f40d7f51"), L10n.Text("windows.format.tue.d1eb39b0"), L10n.Text("windows.format.wed.58339f45"), L10n.Text("windows.format.thu.7da11212"), L10n.Text("windows.format.fri.66dab40c"), L10n.Text("windows.format.sat.fdeb71b5"), L10n.Text("windows.format.sun.db18f17f") };
         var parts = new List<string>();
         for (var bit = 0; bit < 7; bit++)
         {

@@ -43,8 +43,8 @@ internal static class WorkspaceRemoteHistory
         if (array is null || array.Count == 0)
         {
             return EmptyState.View(
-                "No commits yet",
-                "Make your first commit and it will appear here.",
+                L10n.Text("windows.workspaceremotehistory.no_commits_yet.f17a8736"),
+                L10n.Text("windows.workspaceremotehistory.make_your_first_commit_and_it_will_appear.2ac31904"),
                 EmptyArtKind.Changes);
         }
         var hasUpstream = false;
@@ -71,7 +71,7 @@ internal static class WorkspaceRemoteHistory
             }
             var captured = id;
             var capturedRemote = remoteId;
-            var subject = Format.Text(commit, "subject", "(no message)");
+            var subject = Format.Text(commit, "subject", L10n.Text("windows.workspaceremotehistory.no_message.c480160e"));
             var author = Format.Text(commit, "author");
             var moment = RelativeTime(Format.Long(commit, "timestamp"));
             var second = string.Join(" · ", new[]
@@ -113,7 +113,7 @@ internal static class WorkspaceRemoteHistory
             body.Children.Add(new TextBlock { Text = second, FontSize = 11, Opacity = 0.65, TextWrapping = TextWrapping.Wrap });
             body.Children.Add(new TextBlock
             {
-                Text = unpushed ? "↑ Not pushed" : hasUpstream ? "✓ On upstream" : "Local history",
+                Text = unpushed ? L10n.Text("windows.workspaceremotehistory.not_pushed.d1b9b5a1") : hasUpstream ? L10n.Text("windows.workspaceremotehistory.on_upstream.2d70acd3") : L10n.Text("windows.workspaceremotehistory.local_history.151e228b"),
                 FontSize = 11,
                 Foreground = unpushed ? Theme.AccentBrush : Theme.Brush(static () => Theme.DefaultText),
                 Opacity = unpushed ? 1 : 0.65,
@@ -161,7 +161,7 @@ internal static class WorkspaceRemoteHistory
                 Title = WorkspaceGit.ShortId(commitId),
                 Content = Chrome.Banner(
                     FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important),
-                CloseButtonText = "Close",
+                CloseButtonText = L10n.Text("common.close"),
             };
             await Chrome.ShowDialog(owner, failed);
             return;

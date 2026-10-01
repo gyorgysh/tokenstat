@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
 import ai.tokenstat.tokenstat.ui.components.TsDangerButton
@@ -95,7 +97,7 @@ fun ChatQueueStrip(
             )
             if (items.size > 1) {
                 TsSecondaryButton(
-                    label = "View pending",
+                    label = L10n.text("android.chatqueuestrip.view_pending.ed59515e"),
                     icon = ActionIcon.More.vector,
                     small = true,
                     onClick = { showingQueue = true },
@@ -153,15 +155,15 @@ private fun ChatPendingSheet(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Pending messages",
+                    L10n.text("android.chatqueuestrip.pending_messages.d71048f1"),
                     style = TsType.headline,
                     color = colors.textPrimary,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = onDismiss) { Text("Done") }
+                TextButton(onClick = onDismiss) { Text(L10n.text("common.done")) }
             }
             Text(
-                "These wait for this turn. Messages marked Send when connected keep that choice.",
+                L10n.text("android.chatqueuestrip.these_wait_for_this_turn_messages_marked_s.dbd6b117"),
                 style = TsType.caption,
                 color = colors.textSecondary,
             )
@@ -186,7 +188,7 @@ private fun ChatPendingSheet(
                             ) {
                                 Icon(
                                     Icons.Default.KeyboardArrowUp,
-                                    "Move up",
+                                    L10n.text("android.chatqueuestrip.move_up.c66feb5e"),
                                     tint = if (index > 0) colors.textSecondary else colors.textTertiary,
                                 )
                             }
@@ -197,7 +199,7 @@ private fun ChatPendingSheet(
                             ) {
                                 Icon(
                                     Icons.Default.KeyboardArrowDown,
-                                    "Move down",
+                                    L10n.text("android.chatqueuestrip.move_down.40bb50da"),
                                     tint = if (index < items.lastIndex) colors.textSecondary else colors.textTertiary,
                                 )
                             }
@@ -215,7 +217,7 @@ private fun ChatPendingSheet(
                 }
             }
             Text(
-                "Send now stops the current turn. Check delivery never resends a message.",
+                L10n.text("android.chatqueuestrip.send_now_stops_the_current_turn_check_deli.e8ba1f87"),
                 style = TsType.caption,
                 color = colors.textSecondary,
             )
@@ -250,30 +252,29 @@ private fun ChatQueueRow(
             },
             enabled = item.canEdit,
             textStyle = TsType.body,
-            placeholder = { Text("Message") },
+            placeholder = { Text(L10n.text("android.chatqueuestrip.message.2f77668a")) },
             maxLines = if (compact) 2 else 6,
             modifier = Modifier.fillMaxWidth(),
         )
         if (item.attachments.isNotEmpty()) {
             Text(
                 if (item.attachments.size == 1) item.attachments[0].name
-                else "${item.attachments.size} attached",
+                else L10n.text("android.chatqueuestrip.0_attached.62e5c2f9", "${item.attachments.size}"),
                 style = TsType.caption,
                 color = colors.textSecondary,
             )
         }
         val note = when {
             offline ->
-                "Reconnect to send or check delivery. You can still copy, edit unsent text, or remove the local copy."
+                L10n.text("android.chatqueuestrip.reconnect_to_send_or_check_delivery_you_ca.418c13de")
             item.needsReceipt ->
-                "That computer has not confirmed this message. Check delivery, or copy its text after reviewing the " +
-                    "conversation. Removing this copy does not cancel a message already sent."
+                L10n.text("android.chatqueuestrip.that_computer_has_not_confirmed_this_messa.143c63eb")
             item.delivery == ChatDelivery.NeedsReview ->
-                "Review the live conversation first. Use latest context prepares this message without sending it."
+                L10n.text("android.chatqueuestrip.review_the_live_conversation_first_use_lat.92fd9e6f")
             item.delivery == ChatDelivery.Ready ->
-                "Ready with the conversation context you last opened. Send when you are ready."
+                L10n.text("android.chatqueuestrip.ready_with_the_conversation_context_you_la.c69bb317")
             item.delivery == ChatDelivery.Failed ->
-                "The last attempt was refused. Your message is still here."
+                L10n.text("android.chatqueuestrip.the_last_attempt_was_refused_your_message.4ef87f5b")
             else -> null
         }
         note?.let { Text(it, style = TsType.caption, color = colors.textSecondary) }
@@ -283,16 +284,16 @@ private fun ChatQueueRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TsSecondaryButton(
-                label = "Copy",
+                label = L10n.text("common.copy"),
                 icon = ActionIcon.Copy.vector,
                 small = true,
                 onClick = { copyToClipboard(context, item.text) },
             )
             TsAccentButton(
                 label = when {
-                    item.needsReceipt -> "Check delivery"
-                    item.delivery == ChatDelivery.NeedsReview -> "Use latest context"
-                    else -> "Send now"
+                    item.needsReceipt -> L10n.text("android.chatqueuestrip.check_delivery.b8e3662d")
+                    item.delivery == ChatDelivery.NeedsReview -> L10n.text("android.chatqueuestrip.use_latest_context.a29959ec")
+                    else -> L10n.text("android.chatqueuestrip.send_now.58803287")
                 },
                 icon = if (item.delivery == ChatDelivery.NeedsReview) {
                     ActionIcon.Refresh.vector
@@ -304,7 +305,7 @@ private fun ChatQueueRow(
                 onClick = onSendNow,
             )
             TsDangerButton(
-                label = if (item.needsReceipt) "Remove copy" else "Remove",
+                label = if (item.needsReceipt) L10n.text("android.chatqueuestrip.remove_copy.63d1aef0") else L10n.text("common.remove"),
                 icon = ActionIcon.Delete.vector,
                 small = true,
                 onClick = onRemove,
@@ -342,12 +343,12 @@ fun ChatSteerNoteBanner(
             Modifier
                 .weight(1f)
                 .semantics(mergeDescendants = false) {
-                    contentDescription = "On the next step. $note"
+                    contentDescription = L10n.text("android.chatqueuestrip.on_the_next_step_0.81127e40", "${note}")
                 },
             verticalArrangement = Arrangement.spacedBy(Space.xs),
         ) {
             Text(
-                "On the next step",
+                L10n.text("android.chatqueuestrip.on_the_next_step.78ea7972"),
                 style = TsType.caption.copy(fontWeight = FontWeight.Medium),
                 color = colors.accent,
             )
@@ -360,7 +361,7 @@ fun ChatSteerNoteBanner(
             )
         }
         TsSecondaryButton(
-            label = "Remove",
+            label = L10n.text("common.remove"),
             icon = ActionIcon.Delete.vector,
             small = true,
             onClick = onRemove,

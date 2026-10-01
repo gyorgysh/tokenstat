@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.components
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -55,7 +57,7 @@ fun BrandCheckbox(
             )
             .padding(vertical = Space.xs)
             .heightIn(min = 44.dp)
-            .semantics { contentDescription = "$label, ${if (checked) "On" else "Off"}" },
+            .semantics { contentDescription = "$label, ${if (checked) L10n.text("android.brandtoggles.on.13001175") else L10n.text("android.brandtoggles.off.ca7981b4")}" },
         horizontalArrangement = Arrangement.spacedBy(Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {

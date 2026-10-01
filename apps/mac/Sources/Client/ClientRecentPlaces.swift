@@ -94,7 +94,7 @@ final class ClientRecentPlaces {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !trimmed.contains("/"), !trimmed.contains("\\"),
               trimmed.rangeOfCharacter(from: .controlCharacters) == nil
-        else { return "Project" }
+        else { return L10n.text("apple.clientrecentplaces.project.98595978") }
         return String(trimmed.prefix(80))
     }
 }

@@ -22,7 +22,7 @@ struct EditorFindBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(spacing: Theme.Space.s) {
-                TextField("Find in file", text: $find.query)
+                TextField(L10n.text("apple.editorfindbar.find_in_file.214c422e"), text: $find.query)
                     .textFieldStyle(.themed)
                     #if os(macOS)
                     .disableAutocorrection(true)
@@ -31,13 +31,13 @@ struct EditorFindBar: View {
                     .autocorrectionDisabled()
                     #endif
                     .focused($queryFocused)
-                    .accessibilityLabel("Find in file")
+                    .accessibilityLabel(L10n.text("apple.editorfindbar.find_in_file.214c422e"))
                     .onSubmit { find.goNext() }
                 if let count = find.countLabel {
                     Text(count)
                         .font(Theme.caption.monospacedDigit())
                         .foregroundStyle(Theme.controlGlyph)
-                        .accessibilityLabel("\(count) matches")
+                        .accessibilityLabel(L10n.text("apple.editorfindbar.0_matches.498d34a5", "\(count)"))
                 }
             }
             HStack(spacing: Theme.Space.xs) {
@@ -49,7 +49,7 @@ struct EditorFindBar: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.controlGlyph)
-                .accessibilityLabel("Previous match")
+                .accessibilityLabel(L10n.text("apple.editorfindbar.previous_match.daa2f8c3"))
                 .keyboardShortcut("g", modifiers: [.command, .shift])
                 .disabled(!find.canNavigate)
                 Button {
@@ -60,12 +60,12 @@ struct EditorFindBar: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.controlGlyph)
-                .accessibilityLabel("Next match")
+                .accessibilityLabel(L10n.text("apple.editorfindbar.next_match.825e5abd"))
                 .keyboardShortcut("g", modifiers: .command)
                 .disabled(!find.canNavigate)
-                Button(find.replacing ? "Hide replace" : "Replace") { find.replacing.toggle() }
+                Button(find.replacing ? L10n.text("apple.editorfindbar.hide_replace.7d07b712") : L10n.text("apple.editorfindbar.replace.95e15439")) { find.replacing.toggle() }
                     .buttonStyle(SecondaryButtonStyle(small: true))
-                    .accessibilityLabel(find.replacing ? "Hide replace" : "Show replace")
+                    .accessibilityLabel(find.replacing ? L10n.text("apple.editorfindbar.hide_replace.7d07b712") : L10n.text("apple.editorfindbar.show_replace.1ac21ac1"))
                 Spacer(minLength: 0)
                 Button {
                     find.showing = false
@@ -75,10 +75,10 @@ struct EditorFindBar: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.controlGlyph)
-                .accessibilityLabel("Close find")
+                .accessibilityLabel(L10n.text("apple.editorfindbar.close_find.eb903c9f"))
             }
             if find.replacing {
-                TextField("Replace with", text: $find.replaceText)
+                TextField(L10n.text("apple.editorfindbar.replace_with.8382d317"), text: $find.replaceText)
                     .textFieldStyle(.themed)
                     #if os(macOS)
                     .disableAutocorrection(true)
@@ -86,20 +86,20 @@ struct EditorFindBar: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     #endif
-                    .accessibilityLabel("Replace with")
+                    .accessibilityLabel(L10n.text("apple.editorfindbar.replace_with.8382d317"))
                 HStack(spacing: Theme.Space.s) {
-                    Button("Replace") { find.replaceCurrent() }
+                    Button(L10n.text("apple.editorfindbar.replace.95e15439")) { find.replaceCurrent() }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                         .disabled(!find.canReplace)
-                    Button("Replace all") { find.replaceAll() }
+                    Button(L10n.text("apple.editorfindbar.replace_all.2ebcba96")) { find.replaceAll() }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                         .disabled(!find.canReplace)
                     if find.composing {
-                        Text("Finish the current word first.")
+                        Text(L10n.text("apple.editorfindbar.finish_the_current_word_first.a438c4fc"))
                             .font(Theme.caption)
                             .foregroundStyle(Theme.controlGlyph)
                     } else {
-                        Text("Replace all is one undo, in this file only.")
+                        Text(L10n.text("apple.editorfindbar.replace_all_is_one_undo_in_this_file_only.f9398675"))
                             .font(Theme.caption)
                             .foregroundStyle(Theme.controlGlyph)
                     }

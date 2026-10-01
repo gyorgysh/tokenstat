@@ -56,10 +56,9 @@ struct ClientGettingStarted: View {
             ClientEmptyArt(kind: .getCounting)
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, 2)
-            ClientSectionTitle(title: "Get tokenstat counting", mark: "mark_activity")
+            ClientSectionTitle(title: L10n.text("apple.clientgettingstarted.get_tokenstat_counting.331454ea"), mark: "mark_activity")
             Text(
-                "tokenstat counts on the computers you work on. This device shows "
-                + "what they counted, with every laptop shut."
+                L10n.text("apple.clientgettingstarted.tokenstat_counts_on_the_computers_you_work.9e9d0969")
             )
             .font(ClientType.label)
             .foregroundStyle(.secondary)
@@ -71,19 +70,17 @@ struct ClientGettingStarted: View {
         [
             GettingStartedStep(
                 number: 1,
-                title: "Signed in",
-                body: phoneName.map { "This device is on your account as \($0)." }
-                    ?? "This device is on your account.",
+                title: L10n.text("apple.clientgettingstarted.signed_in.ca566c89"),
+                body: phoneName.map { L10n.text("apple.clientgettingstarted.this_device_is_on_your_account_as_0.852b249c", "\($0)") }
+                    ?? L10n.text("apple.clientgettingstarted.this_device_is_on_your_account.0d089d05"),
                 state: .done
             ),
             GettingStartedStep(
                 number: 2,
-                title: "Connect a machine",
-                body: "A Mac you already work on, or a server tokenstat sets up "
-                    + "for you over SSH. Free includes two devices, so a machine "
-                    + "and this device fit.",
+                title: L10n.text("apple.clientgettingstarted.connect_a_machine.d4f654b6"),
+                body: L10n.text("apple.clientgettingstarted.a_mac_you_already_work_on_or_a_server_toke.d55e3d18"),
                 state: .now,
-                actionTitle: "Set up a machine",
+                actionTitle: L10n.text("apple.clientgettingstarted.set_up_a_machine.43e10e13"),
                 actionIcon: .connect,
                 action: { showSetup = true }
             ),
@@ -96,9 +93,9 @@ struct ClientGettingStarted: View {
     private var waiting: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             ThemeRule()
-            Text("Then there is nothing left to run")
+            Text(L10n.text("apple.clientgettingstarted.then_there_is_nothing_left_to_run.9a5af1d1"))
                 .font(ClientType.label.weight(.semibold))
-            Text("The first usage update arrives on its own and fills this screen.")
+            Text(L10n.text("apple.clientgettingstarted.the_first_usage_update_arrives_on_its_own.771c0d1b"))
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

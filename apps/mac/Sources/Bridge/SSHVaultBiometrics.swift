@@ -11,8 +11,8 @@ enum SSHVaultBiometrics {
         let context = LAContext()
         guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil) else { return nil }
         switch context.biometryType {
-        case .touchID: return "Touch ID"
-        case .faceID: return "Face ID"
+        case .touchID: return L10n.text("apple.sshvaultbiometrics.touch_id.34c9675f")
+        case .faceID: return L10n.text("apple.sshvaultbiometrics.face_id.33811c75")
         default: return nil
         }
     }
@@ -20,10 +20,10 @@ enum SSHVaultBiometrics {
     static func accountKey() async throws -> String {
         let account = try await Bridge.account()
         guard account.signedIn, let machine = account.thisMachineID else {
-            throw failure("Sign in before enabling biometric vault unlock.")
+            throw failure(L10n.text("apple.sshvaultbiometrics.sign_in_before_enabling_biometric_vault_un.933f845b"))
         }
         guard let identity = WorkReference.Scope.accountIdentity(handle: account.handle, id: account.accountId) else {
-            throw failure("The account did not answer with an identity. Try again.")
+            throw failure(L10n.text("apple.sshvaultbiometrics.the_account_did_not_answer_with_an_identit.3d868047"))
         }
         return [account.host, identity, machine].joined(separator: "\n")
     }
@@ -71,7 +71,7 @@ enum SSHVaultBiometrics {
             var error: Unmanaged<CFError>?
             guard let access = SecAccessControlCreateWithFlags(nil,
                 kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly, .biometryCurrentSet, &error) else {
-                throw error?.takeRetainedValue() as Error? ?? failure("Biometric unlock is unavailable.")
+                throw error?.takeRetainedValue() as Error? ?? failure(L10n.text("apple.sshvaultbiometrics.biometric_unlock_is_unavailable.77815eb1"))
             }
             try remove(account: account)
             var query = query(account)
@@ -80,10 +80,10 @@ enum SSHVaultBiometrics {
             let result = SecItemAdd(query as CFDictionary, nil)
             guard result == errSecSuccess else {
                 if result == errSecMissingEntitlement {
-                    throw failure("This build is missing the signing configuration required for biometric unlock. Use your vault password until the app is rebuilt with its Keychain entitlement and provisioning profile. (Keychain \(result))")
+                    throw failure(L10n.text("apple.sshvaultbiometrics.this_build_is_missing_the_signing_configur.d07d1aa5", "\(result)"))
                 }
-                let reason = SecCopyErrorMessageString(result, nil) as String? ?? "Unknown Keychain error"
-                throw failure("Could not enable biometric unlock: \(reason) (Keychain \(result)). Your vault password still works.")
+                let reason = SecCopyErrorMessageString(result, nil) as String? ?? L10n.text("apple.sshvaultbiometrics.unknown_keychain_error.b420987d")
+                throw failure(L10n.text("apple.sshvaultbiometrics.could_not_enable_biometric_unlock_0_keycha.caab6d3a", "\(reason)", "\(result)"))
             }
         }.value
     }
@@ -91,7 +91,7 @@ enum SSHVaultBiometrics {
     static func load(account: String) async throws -> String {
         try await Task.detached {
             let context = LAContext()
-            context.localizedReason = "Unlock your SSH vault"
+            context.localizedReason = L10n.text("apple.sshvaultbiometrics.unlock_your_ssh_vault.fbfedbb2")
             context.localizedFallbackTitle = ""
             defer { context.invalidate() }
             var query = query(account)
@@ -102,7 +102,7 @@ enum SSHVaultBiometrics {
             let status = SecItemCopyMatching(query as CFDictionary, &result)
             guard status == errSecSuccess, let data = result as? Data,
                   let password = String(data: data, encoding: .utf8) else {
-                throw failure("Biometric unlock did not complete. Try again or enter your vault password.")
+                throw failure(L10n.text("apple.sshvaultbiometrics.biometric_unlock_did_not_complete_try_agai.791fe7fa"))
             }
             return password
         }.value
@@ -114,7 +114,7 @@ enum SSHVaultBiometrics {
         // Keychain. They cannot enroll a password either; ordinary sign-out,
         // password changes and vault deletion must remain usable in those builds.
         guard status == errSecSuccess || status == errSecItemNotFound || status == errSecMissingEntitlement else {
-            throw failure("Could not remove the saved biometric vault password. Try again.")
+            throw failure(L10n.text("apple.sshvaultbiometrics.could_not_remove_the_saved_biometric_vault.e004979d"))
         }
     }
 

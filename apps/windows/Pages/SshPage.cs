@@ -60,13 +60,13 @@ internal sealed class SshPage : Page, IToolbarItems
             Spacing = Theme.SpaceS,
             Padding = new Thickness(Theme.SpaceS),
         };
-        sessionChrome.Children.Add(ActionIconGlyph.Button("Close", ActionIcon.Disconnect, async (_, _) =>
+        sessionChrome.Children.Add(ActionIconGlyph.Button(L10n.Text("common.close"), ActionIcon.Disconnect, async (_, _) =>
         {
             await CloseSessionAsync();
             ShowList();
             await LoadAsync();
         }));
-        sessionChrome.Children.Add(ActionIconGlyph.Button("Suggest", ActionIcon.Search, async (_, _) =>
+        sessionChrome.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.sshpage.suggest.4effad82"), ActionIcon.Search, async (_, _) =>
         {
             await SuggestAsync();
         }));
@@ -149,7 +149,7 @@ internal sealed class SshPage : Page, IToolbarItems
         {
             Buttons.ToolbarIcon(
                 ActionIcon.Refresh,
-                "Reload the library",
+                L10n.Text("windows.sshpage.reload_the_library.3d55401d"),
                 async (_, _) =>
                 {
                     LogoRefresh.Began();
@@ -291,8 +291,8 @@ internal sealed class SshPage : Page, IToolbarItems
         if (array is null || array.Count == 0)
         {
             _listRoot.Children.Add(EmptyState.View(
-                "No saved hosts",
-                "Add a host below, then connect with a password or a key.",
+                L10n.Text("windows.sshpage.no_saved_hosts.7632514a"),
+                L10n.Text("windows.sshpage.add_a_host_below_then_connect_with_a_passw.8a35d943"),
                 EmptyArtKind.WorkspaceAccess));
         }
         else
@@ -312,7 +312,7 @@ internal sealed class SshPage : Page, IToolbarItems
                 var subtitle = $"{username}@{hostname}:{port}";
                 if (!string.IsNullOrEmpty(keyHint))
                 {
-                    subtitle += " · key";
+                    subtitle += L10n.Text("windows.sshpage.key.a0986327");
                 }
                 var open = new Button
                 {
@@ -324,7 +324,7 @@ internal sealed class SshPage : Page, IToolbarItems
                         Children =
                         {
                             new TextBlock { Text = label, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
-                            new TextBlock { Text = string.IsNullOrEmpty(keyHint) ? "SSH server" : "SSH server · key", Opacity = 0.7 },
+                            new TextBlock { Text = string.IsNullOrEmpty(keyHint) ? L10n.Text("windows.sshpage.ssh_server.964a76f5") : L10n.Text("windows.sshpage.ssh_server_key.b0b1b51d"), Opacity = 0.7 },
                         },
                     },
                 };
@@ -346,23 +346,23 @@ internal sealed class SshPage : Page, IToolbarItems
                     VerticalAlignment = VerticalAlignment.Center,
                 };
                 tools.Children.Add(ActionIconGlyph.Button(
-                    "Edit", ActionIcon.Edit, async (_, _) => await EditHostAsync(record)));
+                    L10n.Text("common.edit"), ActionIcon.Edit, async (_, _) => await EditHostAsync(record)));
                 tools.Children.Add(ActionIconGlyph.Button(
-                    "Delete", ActionIcon.Delete, async (_, _) => await DeleteHostAsync(record)));
+                    L10n.Text("common.delete"), ActionIcon.Delete, async (_, _) => await DeleteHostAsync(record)));
                 Grid.SetColumn(tools, 1);
                 row.Children.Add(tools);
                 var menu = ContextMenus.Menu(row);
-                ContextMenus.AddButton(menu, open, "Connect");
+                ContextMenus.AddButton(menu, open, L10n.Text("common.connect"));
                 ContextMenus.AddButtons(menu, tools);
-                ContextMenus.AddAsync(menu, Format.Flag(record, "favorite") ? "Remove from favourites" : "Add to favourites", async () =>
+                ContextMenus.AddAsync(menu, Format.Flag(record, "favorite") ? L10n.Text("windows.sshpage.remove_from_favourites.a5bdeced") : L10n.Text("windows.sshpage.add_to_favourites.9e619bff"), async () =>
                     await SaveLibraryFlagAsync("ssh.host.save", record, "favorite", !Format.Flag(record, "favorite")));
-                ContextMenus.Copy(menu, "Copy connection address", () => subtitle);
+                ContextMenus.Copy(menu, L10n.Text("windows.sshpage.copy_connection_address.3f3f67d7"), () => subtitle);
                 list.Children.Add(row);
             }
-            _listRoot.Children.Add(Chrome.Card("Hosts", list));
+            _listRoot.Children.Add(Chrome.Card(L10n.Text("windows.sshpage.hosts.bba9af13"), list));
         }
         _listRoot.Children.Add(ActionIconGlyph.Button(
-            "Add host", ActionIcon.Create, async (_, _) => await EditHostAsync(null)));
+            L10n.Text("windows.sshpage.add_host.7da3f6f4"), ActionIcon.Create, async (_, _) => await EditHostAsync(null)));
     }
 
     /// <summary>
@@ -380,8 +380,8 @@ internal sealed class SshPage : Page, IToolbarItems
             Spacing = Theme.SpaceS,
             Children =
             {
-                ActionIconGlyph.Button("Generate", ActionIcon.Create, async (_, _) => await AddKeyAsync(generate: true)),
-                ActionIconGlyph.Button("Import", ActionIcon.Upload, async (_, _) => await AddKeyAsync(generate: false)),
+                ActionIconGlyph.Button(L10n.Text("windows.sshpage.generate.49e49bb4"), ActionIcon.Create, async (_, _) => await AddKeyAsync(generate: true)),
+                ActionIconGlyph.Button(L10n.Text("windows.sshpage.import.2cff9baa"), ActionIcon.Upload, async (_, _) => await AddKeyAsync(generate: false)),
             },
         });
         var onThisPc = 0;
@@ -399,10 +399,10 @@ internal sealed class SshPage : Page, IToolbarItems
         body.Children.Add(new TextBlock
         {
             Text = keys is null
-                ? "The key list is unavailable, so the vault cannot be counted."
+                ? L10n.Text("windows.sshpage.the_key_list_is_unavailable_so_the_vault_c.8657cf97")
                 : total == 0
-                    ? "No keys yet. Import one to stop typing passwords."
-                    : $"{onThisPc} of {total} key secrets on this PC, in the Windows credential store.",
+                    ? L10n.Text("windows.sshpage.no_keys_yet_import_one_to_stop_typing_pass.5c065b4a")
+                    : L10n.Text("windows.sshpage.0_of_1_key_secrets_on_this_pc_in_the_windo.b20bd242", $"{onThisPc}", $"{total}"),
             TextWrapping = TextWrapping.Wrap,
             Opacity = 0.8,
         });
@@ -410,7 +410,7 @@ internal sealed class SshPage : Page, IToolbarItems
         {
             foreach (var key in keys)
             {
-                var label = Format.Text(key, "label", Format.Text(key, "fingerprint", "Key"));
+                var label = Format.Text(key, "label", Format.Text(key, "fingerprint", L10n.Text("windows.sshpage.key.99a52df3")));
                 var id = Format.Text(key, "id");
                 var secretRef = Format.Text(key, "secretRef");
                 var ready = SshSecrets.Has(secretRef);
@@ -419,7 +419,7 @@ internal sealed class SshPage : Page, IToolbarItems
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 var name = new TextBlock
                 {
-                    Text = ready ? label : $"{label} · not on this PC",
+                    Text = ready ? label : L10n.Text("windows.sshpage.0_not_on_this_pc.77bd83b2", $"{label}"),
                     TextWrapping = TextWrapping.Wrap,
                     VerticalAlignment = VerticalAlignment.Center,
                 };
@@ -429,24 +429,24 @@ internal sealed class SshPage : Page, IToolbarItems
                 {
                     var record = key;
                     var remove = ActionIconGlyph.Button(
-                        "Remove", ActionIcon.Delete, async (_, _) => await RemoveKeyAsync(record));
+                        L10n.Text("common.remove"), ActionIcon.Delete, async (_, _) => await RemoveKeyAsync(record));
                     Grid.SetColumn(remove, 1);
                     row.Children.Add(remove);
                     var menu = ContextMenus.Menu(row);
                     ContextMenus.AddButton(menu, remove);
-                    ContextMenus.Copy(menu, "Copy public key", () => Format.Text(record, "publicKey"));
-                    ContextMenus.Copy(menu, "Copy fingerprint", () => Format.Text(record, "fingerprint"));
+                    ContextMenus.Copy(menu, L10n.Text("windows.sshpage.copy_public_key.5f2f4548"), () => Format.Text(record, "publicKey"));
+                    ContextMenus.Copy(menu, L10n.Text("windows.sshpage.copy_fingerprint.71ab1ba9"), () => Format.Text(record, "fingerprint"));
                 }
                 body.Children.Add(row);
             }
         }
-        _listRoot.Children.Add(Chrome.Card("Keys on this PC", body));
+        _listRoot.Children.Add(Chrome.Card(L10n.Text("windows.sshpage.keys_on_this_pc.45056cb4"), body));
     }
 
     private async Task RemoveKeyAsync(JsonNode? key)
     {
         var id = Format.Text(key, "id");
-        var label = Format.Text(key, "label", Format.Text(key, "fingerprint", "Key"));
+        var label = Format.Text(key, "label", Format.Text(key, "fingerprint", L10n.Text("windows.sshpage.key.99a52df3")));
         var secretRef = Format.Text(key, "secretRef");
         if (string.IsNullOrEmpty(id))
         {
@@ -454,10 +454,10 @@ internal sealed class SshPage : Page, IToolbarItems
         }
         var dialog = new ContentDialog
         {
-            Title = "Remove key",
-            Content = $"Remove {label} from this PC and the account vault, if configured? Saved hosts that use it will ask for a password or a pasted key.",
-            PrimaryButtonText = "Remove",
-            CloseButtonText = "Cancel",
+            Title = L10n.Text("windows.sshpage.remove_key.81c45fd9"),
+            Content = L10n.Text("windows.sshpage.remove_0_from_this_pc_and_the_account_vaul.64721b17", $"{label}"),
+            PrimaryButtonText = L10n.Text("common.remove"),
+            CloseButtonText = L10n.Text("common.cancel"),
             DefaultButton = ContentDialogButton.Primary,
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
@@ -500,15 +500,15 @@ internal sealed class SshPage : Page, IToolbarItems
             Spacing = Theme.SpaceS,
             Children =
             {
-                ActionIconGlyph.Button("Generate", ActionIcon.Create, async (_, _) => await AddKeyAsync(generate: true)),
-                ActionIconGlyph.Button("Import", ActionIcon.Upload, async (_, _) => await AddKeyAsync(generate: false)),
+                ActionIconGlyph.Button(L10n.Text("windows.sshpage.generate.49e49bb4"), ActionIcon.Create, async (_, _) => await AddKeyAsync(generate: true)),
+                ActionIconGlyph.Button(L10n.Text("windows.sshpage.import.2cff9baa"), ActionIcon.Upload, async (_, _) => await AddKeyAsync(generate: false)),
             },
         });
         if (array is not null)
         {
             foreach (var key in array)
             {
-                var label = Format.Text(key, "label", Format.Text(key, "fingerprint", "Key"));
+                var label = Format.Text(key, "label", Format.Text(key, "fingerprint", L10n.Text("windows.sshpage.key.99a52df3")));
                 var algo = Format.Text(key, "algorithm");
                 var ready = SshSecrets.Has(Format.Text(key, "secretRef"));
                 body.Children.Add(new TextBlock
@@ -520,29 +520,29 @@ internal sealed class SshPage : Page, IToolbarItems
                 {
                     body.Children.Add(new TextBlock
                     {
-                        Text = "Private material is not on this PC. Import the PEM to use this key here.",
+                        Text = L10n.Text("windows.sshpage.private_material_is_not_on_this_pc_import.ea88fcf3"),
                         Opacity = 0.7,
                         TextWrapping = TextWrapping.Wrap,
                     });
                 }
             }
         }
-        _listRoot.Children.Add(Chrome.Card("Keys", body));
+        _listRoot.Children.Add(Chrome.Card(L10n.Text("windows.sshpage.keys.f0d66a79"), body));
     }
 
     private async Task AddKeyAsync(bool generate)
     {
-        var labelBox = new TextBox { PlaceholderText = "Label" };
+        var labelBox = new TextBox { PlaceholderText = L10n.Text("windows.sshpage.label.0e66373f") };
         var pemBox = new TextBox
         {
-            PlaceholderText = "Paste PEM",
+            PlaceholderText = L10n.Text("windows.sshpage.paste_pem.656449da"),
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             Height = 140,
             MinWidth = 420,
             Visibility = generate ? Visibility.Collapsed : Visibility.Visible,
         };
-        var pass = new PasswordBox { PlaceholderText = "Passphrase, if any" };
+        var pass = new PasswordBox { PlaceholderText = L10n.Text("windows.sshpage.passphrase_if_any.654cfbaa") };
         var form = new StackPanel { Spacing = Theme.SpaceS, MinWidth = 420 };
         form.Children.Add(labelBox);
         if (!generate)
@@ -552,10 +552,10 @@ internal sealed class SshPage : Page, IToolbarItems
         }
         var dialog = new ContentDialog
         {
-            Title = generate ? "Generate a key" : "Import a key",
+            Title = generate ? L10n.Text("windows.sshpage.generate_a_key.e798fa1b") : L10n.Text("windows.sshpage.import_a_key.19cb49d8"),
             Content = form,
-            PrimaryButtonText = generate ? "Generate" : "Import",
-            CloseButtonText = "Cancel",
+            PrimaryButtonText = generate ? L10n.Text("windows.sshpage.generate.49e49bb4") : L10n.Text("windows.sshpage.import.2cff9baa"),
+            CloseButtonText = L10n.Text("common.cancel"),
             DefaultButton = ContentDialogButton.Primary,
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
@@ -566,7 +566,7 @@ internal sealed class SshPage : Page, IToolbarItems
         if (label.Length == 0)
         {
             _listRoot.Children.Insert(1, Chrome.Banner(
-                "A label is required.",
+                L10n.Text("windows.sshpage.a_label_is_required.f7d3ad0d"),
                 Theme.Danger,
                 Symbol.Important));
             return;
@@ -584,7 +584,7 @@ internal sealed class SshPage : Page, IToolbarItems
                 if (pem.Length == 0)
                 {
                     _listRoot.Children.Insert(1, Chrome.Banner(
-                        "Paste a PEM to import.",
+                        L10n.Text("windows.sshpage.paste_a_pem_to_import.a2e44e08"),
                         Theme.Danger,
                         Symbol.Important));
                     return;
@@ -600,7 +600,7 @@ internal sealed class SshPage : Page, IToolbarItems
             if (string.IsNullOrEmpty(privateKey))
             {
                 _listRoot.Children.Insert(1, Chrome.Banner(
-                    "The key had no private material.",
+                    L10n.Text("windows.sshpage.the_key_had_no_private_material.a3963eb0"),
                     Theme.Danger,
                     Symbol.Important));
                 return;
@@ -610,7 +610,7 @@ internal sealed class SshPage : Page, IToolbarItems
             if (!SshSecrets.Put(secretRef, privateKey))
             {
                 _listRoot.Children.Insert(1, Chrome.Banner(
-                    "The key could not be stored in the Windows credential store.",
+                    L10n.Text("windows.sshpage.the_key_could_not_be_stored_in_the_windows.20039228"),
                     Theme.Danger,
                     Symbol.Important));
                 return;
@@ -650,7 +650,7 @@ internal sealed class SshPage : Page, IToolbarItems
         }
 
         var keyId = HostKeyId(record);
-        var keys = new ComboBox { Header = "Saved key", HorizontalAlignment = HorizontalAlignment.Stretch };
+        var keys = new ComboBox { Header = L10n.Text("windows.sshpage.saved_key.85ec79d9"), HorizontalAlignment = HorizontalAlignment.Stretch };
         try
         {
             var listed = Format.Items(await AppServices.Host.CallAsync("ssh.key.list"));
@@ -660,7 +660,7 @@ internal sealed class SshPage : Page, IToolbarItems
                     var available = SshSecrets.Has(Format.Text(key, "secretRef"));
                     var item = new ComboBoxItem
                     {
-                        Content = Format.Text(key, "label", Format.Text(key, "fingerprint", Format.Text(key, "id"))) + (available ? "" : " · unavailable on this PC"),
+                        Content = Format.Text(key, "label", Format.Text(key, "fingerprint", Format.Text(key, "id"))) + (available ? "" : L10n.Text("windows.sshpage.unavailable_on_this_pc.eab660db")),
                         Tag = key,
                         IsEnabled = available,
                     };
@@ -672,15 +672,15 @@ internal sealed class SshPage : Page, IToolbarItems
         {
             _listRoot.Children.Insert(1, Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
         }
-        var method = new ComboBox { Header = "Sign in with", HorizontalAlignment = HorizontalAlignment.Stretch };
+        var method = new ComboBox { Header = L10n.Text("windows.sshpage.sign_in_with.11aaa142"), HorizontalAlignment = HorizontalAlignment.Stretch };
         method.Items.Add("Saved key");
         method.Items.Add("Password");
         method.Items.Add("Paste private key");
         method.SelectedIndex = keys.SelectedItem is null ? 1 : 0;
-        var password = new PasswordBox { Header = "Password", PlaceholderText = "Password" };
-        var pemBox = new TextBox { Header = "Private key", PlaceholderText = "Paste PEM or OpenSSH private key",
+        var password = new PasswordBox { Header = L10n.Text("windows.sshpage.password.e7cf3ef4"), PlaceholderText = L10n.Text("windows.sshpage.password.e7cf3ef4") };
+        var pemBox = new TextBox { Header = L10n.Text("windows.sshpage.private_key.477bf990"), PlaceholderText = L10n.Text("windows.sshpage.paste_pem_or_openssh_private_key.2228ef2f"),
             AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 120, FontFamily = Fonts.Mono };
-        var passphrase = new PasswordBox { Header = "Key passphrase", PlaceholderText = "Only for an encrypted private key" };
+        var passphrase = new PasswordBox { Header = L10n.Text("windows.sshpage.key_passphrase.2510031c"), PlaceholderText = L10n.Text("windows.sshpage.only_for_an_encrypted_private_key.9f122b8a") };
         var validation = new TextBlock { Foreground = Theme.Brush(static () => Theme.Danger), TextWrapping = TextWrapping.Wrap };
         var form = new StackPanel { Spacing = Theme.SpaceM, MinWidth = 360 };
         form.Children.Add(new TextBlock { Text = $"{username}@{hostname}:{port}", Opacity = 0.8 });
@@ -703,13 +703,13 @@ internal sealed class SshPage : Page, IToolbarItems
         string SelectedPem() => method.SelectedIndex == 2 ? pemBox.Text.Trim()
             : method.SelectedIndex == 0 && keys.SelectedItem is ComboBoxItem item && item.Tag is JsonNode key
                 ? SshSecrets.Get(Format.Text(key, "secretRef")) ?? "" : "";
-        var dialog = new ContentDialog { Title = "Connect to " + hostname, Content = form,
-            PrimaryButtonText = "Connect", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary };
+        var dialog = new ContentDialog { Title = L10n.Text("windows.sshpage.connect_to_0.fee15415", $"{hostname}"), Content = form,
+            PrimaryButtonText = L10n.Text("common.connect"), CloseButtonText = L10n.Text("common.cancel"), DefaultButton = ContentDialogButton.Primary };
         dialog.PrimaryButtonClick += (_, e) =>
         {
             if (method.SelectedIndex == 1 ? password.Password.Length == 0 : SelectedPem().Length == 0)
             {
-                validation.Text = method.SelectedIndex == 1 ? "Enter the password." : "Choose an available key or paste its private material.";
+                validation.Text = method.SelectedIndex == 1 ? L10n.Text("windows.sshpage.enter_the_password.80f52e0d") : L10n.Text("windows.sshpage.choose_an_available_key_or_paste_its_priva.a7071429");
                 e.Cancel = true;
             }
         };
@@ -782,7 +782,7 @@ internal sealed class SshPage : Page, IToolbarItems
         if (string.IsNullOrEmpty(_sessionId))
         {
             _listRoot.Children.Insert(1, Chrome.Banner(
-                "The host did not return a session id.",
+                L10n.Text("windows.sshpage.the_host_did_not_return_a_session_id.834cef2f"),
                 Theme.Danger,
                 Symbol.Important));
             return;
@@ -816,31 +816,31 @@ internal sealed class SshPage : Page, IToolbarItems
         var savedPort = Format.Long(host, "port");
         var labelBox = new TextBox
         {
-            PlaceholderText = "Label",
+            PlaceholderText = L10n.Text("windows.sshpage.label.0e66373f"),
             Text = Format.Text(host, "label"),
             MinWidth = 360,
         };
         var hostnameBox = new TextBox
         {
-            PlaceholderText = "Hostname",
+            PlaceholderText = L10n.Text("windows.sshpage.hostname.2db53355"),
             Text = Format.Text(host, "hostname"),
             MinWidth = 360,
         };
         var portBox = new TextBox
         {
-            PlaceholderText = "Port",
+            PlaceholderText = L10n.Text("windows.sshpage.port.72e9a59f"),
             Text = savedPort > 0 ? savedPort.ToString() : "22",
             MinWidth = 120,
         };
         var usernameBox = new TextBox
         {
-            PlaceholderText = "Username",
+            PlaceholderText = L10n.Text("windows.sshpage.username.e3b89e9d"),
             Text = Format.Text(host, "username"),
             MinWidth = 360,
         };
         var directoryBox = new TextBox
         {
-            PlaceholderText = "Starting directory, for example ~",
+            PlaceholderText = L10n.Text("windows.sshpage.starting_directory_for_example.024d0a89"),
             Text = Format.Text(host, "initialDirectory", "~"),
             MinWidth = 360,
         };
@@ -852,10 +852,10 @@ internal sealed class SshPage : Page, IToolbarItems
         form.Children.Add(directoryBox);
         var dialog = new ContentDialog
         {
-            Title = editing ? "Edit host" : "Add host",
+            Title = editing ? L10n.Text("windows.sshpage.edit_host.82ebfdd8") : L10n.Text("windows.sshpage.add_host.7da3f6f4"),
             Content = form,
-            PrimaryButtonText = editing ? "Save" : "Add",
-            CloseButtonText = "Cancel",
+            PrimaryButtonText = editing ? L10n.Text("common.save") : L10n.Text("common.add"),
+            CloseButtonText = L10n.Text("common.cancel"),
             DefaultButton = ContentDialogButton.Primary,
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
@@ -864,7 +864,7 @@ internal sealed class SshPage : Page, IToolbarItems
         }
         if (!ushort.TryParse(portBox.Text.Trim(), out var port) || port == 0)
         {
-            LibraryBanner("Port must be between 1 and 65535.");
+            LibraryBanner(L10n.Text("windows.sshpage.port_must_be_between_1_and_65535.89117fc4"));
             return;
         }
         try
@@ -916,10 +916,10 @@ internal sealed class SshPage : Page, IToolbarItems
         var label = Format.Text(host, "label", Format.Text(host, "hostname", "this host"));
         var dialog = new ContentDialog
         {
-            Title = "Delete host",
-            Content = $"Delete {label}? Saved snippets stay.",
-            PrimaryButtonText = "Delete",
-            CloseButtonText = "Cancel",
+            Title = L10n.Text("windows.sshpage.delete_host.5628b14a"),
+            Content = L10n.Text("windows.sshpage.delete_0_saved_snippets_stay.e33e9045", $"{label}"),
+            PrimaryButtonText = L10n.Text("common.delete"),
+            CloseButtonText = L10n.Text("common.cancel"),
             DefaultButton = ContentDialogButton.Primary,
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
@@ -962,7 +962,7 @@ internal sealed class SshPage : Page, IToolbarItems
         var fingerprint = Format.Text(probed, "fingerprint");
         if (string.IsNullOrEmpty(fingerprint))
         {
-            throw new InvalidOperationException("The server did not offer a fingerprint.");
+            throw new InvalidOperationException(L10n.Text("windows.sshpage.the_server_did_not_offer_a_fingerprint.14e28318"));
         }
 
         JsonObject save;
@@ -1034,7 +1034,7 @@ internal sealed class SshPage : Page, IToolbarItems
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var name = new TextBlock
             {
-                Text = alive ? label : $"{label} · closed",
+                Text = alive ? label : L10n.Text("windows.sshpage.0_closed.892c70b5", $"{label}"),
                 VerticalAlignment = VerticalAlignment.Center,
                 TextWrapping = TextWrapping.Wrap,
             };
@@ -1043,16 +1043,16 @@ internal sealed class SshPage : Page, IToolbarItems
             if (!string.IsNullOrEmpty(id) && alive)
             {
                 var adopt = ActionIconGlyph.Button(
-                    "Open", ActionIcon.Next, async (_, _) => await AdoptSessionAsync(id));
+                    L10n.Text("common.open"), ActionIcon.Next, async (_, _) => await AdoptSessionAsync(id));
                 Grid.SetColumn(adopt, 1);
                 row.Children.Add(adopt);
             }
             list.Children.Add(row);
         }
         _listRoot.Children.Add(Chrome.Card(
-            "Running sessions",
+            L10n.Text("windows.sshpage.running_sessions.bed2f30d"),
             list,
-            "Shells this PC left open. Opening one picks up where it left off."));
+            L10n.Text("windows.sshpage.shells_this_pc_left_open_opening_one_picks.1966c794")));
     }
 
     private async Task AdoptSessionAsync(string id)
@@ -1105,8 +1105,8 @@ internal sealed class SshPage : Page, IToolbarItems
             _suggestRoot.Children.Add(new TextBlock
             {
                 Text = Format.Flag(answer, "pending")
-                    ? "Asking the server for names. Type on and try again."
-                    : "Nothing saved matches this line.",
+                    ? L10n.Text("windows.sshpage.asking_the_server_for_names_type_on_and_tr.921048e5")
+                    : L10n.Text("windows.sshpage.nothing_saved_matches_this_line.ad1e723e"),
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -1145,12 +1145,12 @@ internal sealed class SshPage : Page, IToolbarItems
             pick.Click += (_, _) => InsertSuggestion(record);
             list.Children.Add(pick);
         }
-        _suggestRoot.Children.Add(Chrome.Card("Suggestions", list));
+        _suggestRoot.Children.Add(Chrome.Card(L10n.Text("windows.sshpage.suggestions.16c1d601"), list));
         if (Format.Flag(answer, "pending"))
         {
             _suggestRoot.Children.Add(new TextBlock
             {
-                Text = "Still asking the server for names. These are the saved ones.",
+                Text = L10n.Text("windows.sshpage.still_asking_the_server_for_names_these_ar.867234b8"),
                 Opacity = 0.7,
             });
         }
@@ -1210,7 +1210,7 @@ internal sealed class SshPage : Page, IToolbarItems
         }
         var body = new StackPanel { Spacing = Theme.SpaceS };
         body.Children.Add(ActionIconGlyph.Button(
-            "Add snippet", ActionIcon.Create, async (_, _) => await EditSnippetAsync(null)));
+            L10n.Text("windows.sshpage.add_snippet.a1f802b9"), ActionIcon.Create, async (_, _) => await EditSnippetAsync(null)));
         var sessionOpen = !string.IsNullOrEmpty(_sessionId);
         var ordered = new List<(JsonNode Node, bool Scoped)>();
         if (snippets is not null)
@@ -1228,10 +1228,10 @@ internal sealed class SshPage : Page, IToolbarItems
         }
         foreach (var (snippet, scoped) in ordered)
         {
-            var title = Format.Text(snippet, "title", "Snippet");
+            var title = Format.Text(snippet, "title", L10n.Text("windows.sshpage.snippet.48f55cb8"));
             if (scoped)
             {
-                title += " · for this server";
+                title += L10n.Text("windows.sshpage.for_this_server.ffda7ba2");
             }
             var command = Format.Text(snippet, "command");
             var row = new Grid();
@@ -1264,18 +1264,18 @@ internal sealed class SshPage : Page, IToolbarItems
             if (sessionOpen && !string.IsNullOrEmpty(command))
             {
                 tools.Children.Add(ActionIconGlyph.Button(
-                    "Run", ActionIcon.Run, async (_, _) => await SendSnippetAsync(record)));
+                    L10n.Text("common.run"), ActionIcon.Run, async (_, _) => await SendSnippetAsync(record)));
             }
             tools.Children.Add(ActionIconGlyph.Button(
-                "Edit", ActionIcon.Edit, async (_, _) => await EditSnippetAsync(record)));
+                L10n.Text("common.edit"), ActionIcon.Edit, async (_, _) => await EditSnippetAsync(record)));
             tools.Children.Add(ActionIconGlyph.Button(
-                "Delete", ActionIcon.Delete, async (_, _) => await DeleteSnippetAsync(record)));
+                L10n.Text("common.delete"), ActionIcon.Delete, async (_, _) => await DeleteSnippetAsync(record)));
             Grid.SetColumn(tools, 1);
             row.Children.Add(tools);
             var menu = ContextMenus.Menu(row);
             ContextMenus.AddButtons(menu, tools);
-            ContextMenus.Copy(menu, "Copy command", () => command);
-            ContextMenus.AddAsync(menu, Format.Flag(record, "runOnConnect") ? "Do not run on connect" : "Run on connect", async () =>
+            ContextMenus.Copy(menu, L10n.Text("windows.sshpage.copy_command.9a01feec"), () => command);
+            ContextMenus.AddAsync(menu, Format.Flag(record, "runOnConnect") ? L10n.Text("windows.sshpage.do_not_run_on_connect.7917a1db") : L10n.Text("windows.sshpage.run_on_connect.185c4e03"), async () =>
                 await SaveLibraryFlagAsync("ssh.snippet.save", record, "runOnConnect", !Format.Flag(record, "runOnConnect")));
             body.Children.Add(row);
         }
@@ -1283,28 +1283,28 @@ internal sealed class SshPage : Page, IToolbarItems
         {
             body.Children.Add(new TextBlock
             {
-                Text = "No snippets yet. Save the commands you retype.",
+                Text = L10n.Text("windows.sshpage.no_snippets_yet_save_the_commands_you_rety.c30fd2a2"),
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
             });
         }
         _listRoot.Children.Add(Chrome.Card(
-            "Snippets",
+            L10n.Text("windows.sshpage.snippets.ff717209"),
             body,
-            sessionOpen ? "Run types a snippet into the open session." : "Open a session to run a snippet."));
+            sessionOpen ? L10n.Text("windows.sshpage.run_types_a_snippet_into_the_open_session.5beb3b08") : L10n.Text("windows.sshpage.open_a_session_to_run_a_snippet.9ebf1341")));
     }
 
     private async Task EditSnippetAsync(JsonNode? snippet)
     {
         var titleBox = new TextBox
         {
-            PlaceholderText = "Title",
+            PlaceholderText = L10n.Text("windows.sshpage.title.7e8cd205"),
             Text = Format.Text(snippet, "title"),
             MinWidth = 360,
         };
         var commandBox = new TextBox
         {
-            PlaceholderText = "Command, with {{placeholders}} for values asked at run time",
+            PlaceholderText = L10n.Text("windows.sshpage.command_with_placeholders_for_values_asked.c37866c0"),
             Text = Format.Text(snippet, "command"),
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
@@ -1314,7 +1314,7 @@ internal sealed class SshPage : Page, IToolbarItems
         };
         var tagsBox = new TextBox
         {
-            PlaceholderText = "Tags, comma separated",
+            PlaceholderText = L10n.Text("windows.sshpage.tags_comma_separated.cc9a2d97"),
             Text = TagsText(snippet?["tags"]),
             MinWidth = 360,
         };
@@ -1324,10 +1324,10 @@ internal sealed class SshPage : Page, IToolbarItems
         form.Children.Add(tagsBox);
         var dialog = new ContentDialog
         {
-            Title = snippet is null ? "Add snippet" : "Edit snippet",
+            Title = snippet is null ? L10n.Text("windows.sshpage.add_snippet.a1f802b9") : L10n.Text("windows.sshpage.edit_snippet.3bb69add"),
             Content = form,
-            PrimaryButtonText = snippet is null ? "Add" : "Save",
-            CloseButtonText = "Cancel",
+            PrimaryButtonText = snippet is null ? L10n.Text("common.add") : L10n.Text("common.save"),
+            CloseButtonText = L10n.Text("common.cancel"),
             DefaultButton = ContentDialogButton.Primary,
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
@@ -1371,10 +1371,10 @@ internal sealed class SshPage : Page, IToolbarItems
         }
         var dialog = new ContentDialog
         {
-            Title = "Delete snippet",
-            Content = $"Delete {Format.Text(snippet, "title", "this snippet")}?",
-            PrimaryButtonText = "Delete",
-            CloseButtonText = "Cancel",
+            Title = L10n.Text("windows.sshpage.delete_snippet.9ab0158f"),
+            Content = L10n.Text("windows.sshpage.delete_0.dc6c5ae4", $"{Format.Text(snippet, "title", "this snippet")}"),
+            PrimaryButtonText = L10n.Text("common.delete"),
+            CloseButtonText = L10n.Text("common.cancel"),
             DefaultButton = ContentDialogButton.Primary,
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
@@ -1398,7 +1398,7 @@ internal sealed class SshPage : Page, IToolbarItems
         var id = _sessionId;
         if (string.IsNullOrEmpty(id))
         {
-            LibraryBanner("Open a session first, then run the snippet into it.");
+            LibraryBanner(L10n.Text("windows.sshpage.open_a_session_first_then_run_the_snippet.edcd0405"));
             return;
         }
         var command = Format.Text(snippet, "command");
@@ -1415,10 +1415,10 @@ internal sealed class SshPage : Page, IToolbarItems
             }
             var dialog = new ContentDialog
             {
-                Title = Format.Text(snippet, "title", "Run snippet"),
+                Title = Format.Text(snippet, "title", L10n.Text("windows.sshpage.run_snippet.9fba9773")),
                 Content = form,
-                PrimaryButtonText = "Run",
-                CloseButtonText = "Cancel",
+                PrimaryButtonText = L10n.Text("common.run"),
+                CloseButtonText = L10n.Text("common.cancel"),
                 DefaultButton = ContentDialogButton.Primary,
             };
             if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
@@ -1527,7 +1527,7 @@ internal sealed class SshPage : Page, IToolbarItems
         }
         var body = new StackPanel { Spacing = Theme.SpaceS };
         body.Children.Add(ActionIconGlyph.Button(
-            "Add folder", ActionIcon.Create, async (_, _) => await AddFolderAsync()));
+            L10n.Text("windows.sshpage.add_folder.5bbfc5a6"), ActionIcon.Create, async (_, _) => await AddFolderAsync()));
         if (folders is not null)
         {
             foreach (var folder in folders)
@@ -1542,7 +1542,7 @@ internal sealed class SshPage : Page, IToolbarItems
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 var name = new TextBlock
                 {
-                    Text = Format.Text(folder, "name", "Folder"),
+                    Text = Format.Text(folder, "name", L10n.Text("windows.sshpage.folder.74ccd433")),
                     VerticalAlignment = VerticalAlignment.Center,
                 };
                 Grid.SetColumn(name, 0);
@@ -1550,30 +1550,30 @@ internal sealed class SshPage : Page, IToolbarItems
                 if (!string.IsNullOrEmpty(id))
                 {
                     var remove = ActionIconGlyph.Button(
-                        "Delete", ActionIcon.Delete, async (_, _) => await DeleteFolderAsync(id));
+                        L10n.Text("common.delete"), ActionIcon.Delete, async (_, _) => await DeleteFolderAsync(id));
                     Grid.SetColumn(remove, 1);
                     row.Children.Add(remove);
                     var menu = ContextMenus.Menu(row);
-                    ContextMenus.AddAsync(menu, "Rename folder", async () => await AddFolderAsync(folder));
-                    ContextMenus.AddAsync(menu, "Add server here", async () => await EditHostAsync(null, id));
-                    ContextMenus.AddAsync(menu, "Add sub-folder", async () => await AddFolderAsync(parentId: id));
+                    ContextMenus.AddAsync(menu, L10n.Text("windows.sshpage.rename_folder.7249f19c"), async () => await AddFolderAsync(folder));
+                    ContextMenus.AddAsync(menu, L10n.Text("windows.sshpage.add_server_here.a85b2f00"), async () => await EditHostAsync(null, id));
+                    ContextMenus.AddAsync(menu, L10n.Text("windows.sshpage.add_sub_folder.768dadd9"), async () => await AddFolderAsync(parentId: id));
                     ContextMenus.AddButton(menu, remove);
                 }
                 body.Children.Add(row);
             }
         }
-        _listRoot.Children.Add(Chrome.Card("Folders", body));
+        _listRoot.Children.Add(Chrome.Card(L10n.Text("windows.sshpage.folders.c4d6bb20"), body));
     }
 
     private async Task AddFolderAsync(JsonNode? folder = null, string? parentId = null)
     {
-        var nameBox = new TextBox { PlaceholderText = "Folder name", Text = Format.Text(folder, "name"), MinWidth = 320 };
+        var nameBox = new TextBox { PlaceholderText = L10n.Text("windows.sshpage.folder_name.14d34edf"), Text = Format.Text(folder, "name"), MinWidth = 320 };
         var dialog = new ContentDialog
         {
-            Title = folder is null ? "Add folder" : "Rename folder",
+            Title = folder is null ? L10n.Text("windows.sshpage.add_folder.5bbfc5a6") : L10n.Text("windows.sshpage.rename_folder.7249f19c"),
             Content = nameBox,
-            PrimaryButtonText = "Add",
-            CloseButtonText = "Cancel",
+            PrimaryButtonText = L10n.Text("common.add"),
+            CloseButtonText = L10n.Text("common.cancel"),
             DefaultButton = ContentDialogButton.Primary,
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
@@ -1599,10 +1599,10 @@ internal sealed class SshPage : Page, IToolbarItems
     {
         var dialog = new ContentDialog
         {
-            Title = "Delete folder",
-            Content = "Delete this folder? Hosts inside it move up one level.",
-            PrimaryButtonText = "Delete",
-            CloseButtonText = "Cancel",
+            Title = L10n.Text("windows.sshpage.delete_folder.39f35f2d"),
+            Content = L10n.Text("windows.sshpage.delete_this_folder_hosts_inside_it_move_up.c649e8e3"),
+            PrimaryButtonText = L10n.Text("common.delete"),
+            CloseButtonText = L10n.Text("common.cancel"),
             DefaultButton = ContentDialogButton.Primary,
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
@@ -1650,7 +1650,7 @@ internal sealed class SshPage : Page, IToolbarItems
                 continue;
             }
             var hostId = Format.Text(row, "hostId");
-            var label = Format.Text(row, "label", Format.Text(row, "hostname", "Server"));
+            var label = Format.Text(row, "label", Format.Text(row, "hostname", L10n.Text("windows.sshpage.server.aef7de28")));
             var prints = row["fingerprints"] as JsonArray;
             var detail = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
             detail.Children.Add(new TextBlock { Text = label, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
@@ -1682,7 +1682,7 @@ internal sealed class SshPage : Page, IToolbarItems
             if (!string.IsNullOrEmpty(hostId))
             {
                 var forget = ActionIconGlyph.Button(
-                    "Forget", ActionIcon.Delete, async (_, _) => await ForgetKnownHostAsync(hostId));
+                    L10n.Text("windows.sshpage.forget.a6bd489d"), ActionIcon.Delete, async (_, _) => await ForgetKnownHostAsync(hostId));
                 Grid.SetColumn(forget, 1);
                 line.Children.Add(forget);
                 ContextMenus.AddButton(ContextMenus.Menu(line), forget);
@@ -1690,9 +1690,9 @@ internal sealed class SshPage : Page, IToolbarItems
             body.Children.Add(line);
         }
         _listRoot.Children.Add(Chrome.Card(
-            "Known servers",
+            L10n.Text("windows.sshpage.known_servers.7beadf43"),
             body,
-            "Forgetting a server asks about its key on the next connection."));
+            L10n.Text("windows.sshpage.forgetting_a_server_asks_about_its_key_on.0aad8cb6")));
     }
 
     private async Task ForgetKnownHostAsync(string hostId)
@@ -1742,13 +1742,13 @@ internal sealed class SshPage : Page, IToolbarItems
         var body = new StackPanel { Spacing = Theme.SpaceS };
         body.Children.Add(new TextBlock
         {
-            Text = $"{fresh} host{(fresh == 1 ? "" : "s")} in the SSH config {(fresh == 1 ? "is" : "are")} not saved here yet.",
+            Text = (fresh == 1 ? L10n.Text("windows.sshpage.0_host_1_in_the_ssh_config_2_not_saved_her.72bddd39.one", fresh) : L10n.Text("windows.sshpage.0_host_1_in_the_ssh_config_2_not_saved_her.72bddd39.other", fresh)),
             TextWrapping = TextWrapping.Wrap,
             Opacity = 0.8,
         });
         body.Children.Add(ActionIconGlyph.Button(
-            "Import from SSH config", ActionIcon.Download, async (_, _) => await ImportConfigAsync()));
-        _listRoot.Children.Add(Chrome.Card("SSH config", body));
+            L10n.Text("windows.sshpage.import_from_ssh_config.b2a13af6"), ActionIcon.Download, async (_, _) => await ImportConfigAsync()));
+        _listRoot.Children.Add(Chrome.Card(L10n.Text("windows.sshpage.ssh_config.2328237a"), body));
     }
 
     private async Task ImportConfigAsync()
@@ -1757,7 +1757,7 @@ internal sealed class SshPage : Page, IToolbarItems
         {
             var imported = await AppServices.Host.CallAsync("ssh.config.import", new JsonObject());
             _listRoot.Children.Insert(1, Chrome.Banner(
-                $"Imported {Format.Long(imported, "imported")} hosts from the SSH config.",
+                L10n.Text("windows.sshpage.imported_0_hosts_from_the_ssh_config.af55790d", $"{Format.Long(imported, "imported")}"),
                 Theme.Success,
                 Symbol.Accept));
         }
@@ -1790,7 +1790,7 @@ internal sealed class SshPage : Page, IToolbarItems
         }
         catch (Exception ex)
         {
-            if (!token.IsCancellationRequested) SessionBanner("Terminal could not open: " + ex.Message);
+            if (!token.IsCancellationRequested) SessionBanner(L10n.Text("windows.sshpage.terminal_could_not_open_0.f69d7575", $"{ex.Message}"));
             return;
         }
         while (!token.IsCancellationRequested)
@@ -1831,7 +1831,7 @@ internal sealed class SshPage : Page, IToolbarItems
             if (Format.Flag(chunk, "closed"))
             {
                 var error = Format.Text(chunk, "error");
-                SessionBanner(string.IsNullOrEmpty(error) ? "The SSH session closed." : error);
+                SessionBanner(string.IsNullOrEmpty(error) ? L10n.Text("windows.sshpage.the_ssh_session_closed.33fb25f6") : error);
                 return;
             }
             try

@@ -66,10 +66,10 @@ final class EditorFindSession {
 
     var countLabel: String? {
         guard hasQuery else { return nil }
-        if matches.isEmpty { return "No results" }
+        if matches.isEmpty { return L10n.text("apple.editorfindsession.no_results.a43619f3") }
         let position = (currentIndex % matches.count) + 1
-        if truncated { return "\(position) of \(matches.count)+" }
-        return "\(position) of \(matches.count)"
+        if truncated { return L10n.text("apple.editorfindsession.0_of_1.0c082b77", "\(position)", "\(matches.count)") }
+        return L10n.text("apple.editorfindsession.0_of_1.9fea8201", "\(position)", "\(matches.count)")
     }
 
     var canNavigate: Bool { hasQuery && matches.count > 1 }

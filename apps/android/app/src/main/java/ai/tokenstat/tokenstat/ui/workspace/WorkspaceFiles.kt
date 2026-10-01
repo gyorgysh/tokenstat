@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.chrome.TabBarChrome
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -86,7 +88,7 @@ fun FilesSection(
         }.onSuccess {
             entries = asObjects(it).ifEmpty { asObjects((it as? JsonObject)?.get("entries")) }
             error = null
-        }.onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+        }.onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacefiles.the_request_failed.db4fb447"), hostLabel) }
         loading = false
     }
     LaunchedEffect(path) { load(path) }
@@ -112,11 +114,11 @@ fun FilesSection(
         // pushed header above already shows as its subtitle. It earns its row
         // once you are inside something.
         if (path.isNotEmpty()) {
-            item { Breadcrumb(folderName.ifBlank { "Files" }, path, onJump = { path = it }) }
+            item { Breadcrumb(folderName.ifBlank { L10n.text("common.files") }, path, onJump = { path = it }) }
         }
         if (path.isNotEmpty()) {
             item {
-                TsSecondaryButton(label = "Up", small = true, onClick = {
+                TsSecondaryButton(label = L10n.text("android.workspacefiles.up.55490a4b"), small = true, onClick = {
                     path = path.trimEnd('/').substringBeforeLast('/', "")
                 })
             }
@@ -126,8 +128,8 @@ fun FilesSection(
             item {
                 EmptyState(
                     Icons.Default.Folder,
-                    "Nothing in this folder",
-                    "Files an agent writes here show up as it works.",
+                    L10n.text("android.workspacefiles.nothing_in_this_folder.3316d855"),
+                    L10n.text("android.workspacefiles.files_an_agent_writes_here_show_up_as_it_w.20c94c7c"),
                     art = { EmptyArt(EmptyArtKind.Files) },
                 )
             }
@@ -153,14 +155,14 @@ fun FilesSection(
                 ) {
                     Icon(
                         fileIcon(name, dir),
-                        if (dir) "Open folder $name" else "Open file $name",
+                        if (dir) L10n.text("android.workspacefiles.open_folder_0.38274579", "${name}") else L10n.text("android.workspacefiles.open_file_0.bf6a548c", "${name}"),
                         tint = if (dir) LocalTsColors.current.accent else LocalTsColors.current.textSecondary,
                     )
                     Column(Modifier.weight(1f)) {
                         Text(name, style = TsType.mono(12), color = LocalTsColors.current.textPrimary, maxLines = 1)
                         if (dir) {
                             Text(
-                                "Folder",
+                                L10n.text("android.workspacefiles.folder.74ccd433"),
                                 style = TextStyle(fontSize = 11.sp),
                                 color = LocalTsColors.current.textTertiary,
                             )

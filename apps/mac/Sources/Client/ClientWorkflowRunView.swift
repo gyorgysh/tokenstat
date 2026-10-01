@@ -34,7 +34,7 @@ struct ClientWorkflowRunView: View {
                     steps(run)
                     transcript(run)
                 } else if session.loaded {
-                    ClientSectionEmpty(text: "This run is unavailable", message: "It is no longer in this folder's run history.")
+                    ClientSectionEmpty(text: L10n.text("apple.clientworkflowrunview.this_run_is_unavailable.5bef28b2"), message: L10n.text("apple.clientworkflowrunview.it_is_no_longer_in_this_folder_s_run_histo.0960f968"))
                 }
             }
             .padding(.horizontal, Theme.Space.m)
@@ -42,7 +42,7 @@ struct ClientWorkflowRunView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        .navigationTitle(run?.name ?? "Run")
+        .navigationTitle(run?.name ?? L10n.text("common.run"))
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
             await ClientRefresh.pull("workflow-run-\(runID)") { await session.load() }
@@ -71,7 +71,7 @@ struct ClientWorkflowRunView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            ClientFactRow(label: "Budget", value: ClientJobCopy.budget(run.budgetSeconds))
+            ClientFactRow(label: L10n.text("apple.clientworkflowrunview.budget.1c6225ec"), value: ClientJobCopy.budget(run.budgetSeconds))
         }
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -81,7 +81,7 @@ struct ClientWorkflowRunView: View {
     @ViewBuilder
     private func steps(_ run: WorkflowRunRecord) -> some View {
         if !run.steps.isEmpty {
-            Text("Steps")
+            Text(L10n.text("apple.clientworkflowrunview.steps.1de3df70"))
                 .font(ClientType.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
             ForEach(run.steps) { step in
@@ -116,12 +116,12 @@ struct ClientWorkflowRunView: View {
 
     private func transcript(_ run: WorkflowRunRecord) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Transcript")
+            Text(L10n.text("apple.clientworkflowrunview.transcript.721164f0"))
                 .font(ClientType.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
             TranscriptView(
                 text: session.transcriptText,
-                empty: run.isLive ? "Waiting for output…" : "No readable output."
+                empty: run.isLive ? L10n.text("apple.clientworkflowrunview.waiting_for_output.f05fefe2") : L10n.text("apple.clientworkflowrunview.no_readable_output.cd218ba3")
             )
             .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)

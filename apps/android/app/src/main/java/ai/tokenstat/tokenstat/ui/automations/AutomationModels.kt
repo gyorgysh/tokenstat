@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.automations
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.tasks.RunHistory
 import ai.tokenstat.tokenstat.ui.tasks.RunRef
 import java.time.Instant
@@ -29,12 +31,12 @@ internal fun JsonObject.optInt(key: String): Int? =
 const val WEEKDAYS_MASK = 0b0001_1111
 
 enum class ScheduleKind(val label: String) {
-    ONCE("Once"),
-    INTERVAL("Interval"),
-    DAILY("Daily"),
-    WEEKDAYS("Weekdays"),
-    WEEKLY("Weekly"),
-    CUSTOM("Custom"),
+    ONCE(L10n.text("android.automationmodels.once.d88f6d83")),
+    INTERVAL(L10n.text("android.automationmodels.interval.6f45b000")),
+    DAILY(L10n.text("android.automationmodels.daily.b36c2611")),
+    WEEKDAYS(L10n.text("android.automationmodels.weekdays.6f4b602b")),
+    WEEKLY(L10n.text("android.automationmodels.weekly.29751324")),
+    CUSTOM(L10n.text("android.automationmodels.custom.494ca78f")),
     ;
 
     companion object {
@@ -67,7 +69,7 @@ data class AutomationSchedule(
             )
         }
 
-        private val dayShort = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+        private val dayShort = listOf(L10n.text("android.automationmodels.mon.f40d7f51"), L10n.text("android.automationmodels.tue.d1eb39b0"), L10n.text("android.automationmodels.wed.58339f45"), L10n.text("android.automationmodels.thu.7da11212"), L10n.text("android.automationmodels.fri.66dab40c"), L10n.text("android.automationmodels.sat.fdeb71b5"), L10n.text("android.automationmodels.sun.db18f17f"))
 
         fun dayList(mask: Int): String =
             (0..6).filter { (mask and (1 shl it)) != 0 }.map { dayShort[it] }.joinToString(", ")
@@ -77,28 +79,28 @@ data class AutomationSchedule(
     val summary: String get() {
         val time = "$hour:${minute.toString().padStart(2, '0')}"
         return when (kind) {
-            ScheduleKind.ONCE -> "once, when you run it"
+            ScheduleKind.ONCE -> L10n.text("android.automationmodels.once_when_you_run_it.cbb9301d")
             ScheduleKind.INTERVAL -> {
                 val minutes = (everySeconds / 60).toInt()
                 if (minutes >= 60 && minutes % 60 == 0) {
                     val hours = minutes / 60
-                    "every $hours hour${if (hours == 1) "" else "s"}"
+                    (if (hours == 1) L10n.text("android.automationmodels.every_0_hour_1.ed193624.one", hours) else L10n.text("android.automationmodels.every_0_hour_1.ed193624.other", hours))
                 } else {
-                    "every $minutes minute${if (minutes == 1) "" else "s"}"
+                    (if (minutes == 1) L10n.text("android.automationmodels.every_0_minute_1.fd623530.one", minutes) else L10n.text("android.automationmodels.every_0_minute_1.fd623530.other", minutes))
                 }
             }
-            ScheduleKind.DAILY -> "daily at $time"
-            ScheduleKind.WEEKDAYS -> "weekdays at $time"
+            ScheduleKind.DAILY -> L10n.text("android.automationmodels.daily_at_0.c0d8484c", "${time}")
+            ScheduleKind.WEEKDAYS -> L10n.text("android.automationmodels.weekdays_at_0.6459d30a", "${time}")
             ScheduleKind.WEEKLY -> {
-                if (weekdays and 0b0111_1111 != 0) "${dayList(weekdays)} at $time"
+                if (weekdays and 0b0111_1111 != 0) L10n.text("android.automationmodels.0_at_1.f0a220c8", "${dayList(weekdays)}", "${time}")
                 else {
-                    val names = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
-                    "${if (weekday in 0..6) names[weekday] else "?"} at $time"
+                    val names = listOf(L10n.text("android.automationmodels.monday.6a00dfc1"), L10n.text("android.automationmodels.tuesday.7d8af1de"), L10n.text("android.automationmodels.wednesday.c0a6cc82"), L10n.text("android.automationmodels.thursday.fc266206"), L10n.text("android.automationmodels.friday.e21f3f37"), L10n.text("android.automationmodels.saturday.dbe35c73"), L10n.text("android.automationmodels.sunday.873fef76"))
+                    L10n.text("android.automationmodels.0_at_1.f0a220c8", "${if (weekday in 0..6) names[weekday] else "?"}", "${time}")
                 }
             }
             ScheduleKind.CUSTOM -> {
                 val days = dayList(weekdays)
-                if (days.isEmpty()) "custom at $time" else "$days at $time"
+                if (days.isEmpty()) L10n.text("android.automationmodels.custom_at_0.55fdfc5a", "${time}") else L10n.text("android.automationmodels.0_at_1.f0a220c8", "${days}", "${time}")
             }
         }
     }
@@ -119,20 +121,20 @@ data class AutomationSchedule(
 /// Labels shared by automation and workflow schedule pickers.
 /// Port of `JobScheduleCopy`.
 object JobScheduleCopy {
-    val weekdayNames = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
-    val weekdayShort = listOf("Mo", "Tu", "We", "Th", "Fr", "Sa", "Su")
+    val weekdayNames = listOf(L10n.text("android.automationmodels.monday.6a00dfc1"), L10n.text("android.automationmodels.tuesday.7d8af1de"), L10n.text("android.automationmodels.wednesday.c0a6cc82"), L10n.text("android.automationmodels.thursday.fc266206"), L10n.text("android.automationmodels.friday.e21f3f37"), L10n.text("android.automationmodels.saturday.dbe35c73"), L10n.text("android.automationmodels.sunday.873fef76"))
+    val weekdayShort = listOf(L10n.text("android.automationmodels.mo.d23e867e"), L10n.text("android.automationmodels.tu.62afcc74"), L10n.text("android.automationmodels.we.f3fe997b"), L10n.text("android.automationmodels.th.3bff939c"), L10n.text("android.automationmodels.fr.eed8f901"), L10n.text("android.automationmodels.sa.a951efc7"), L10n.text("android.automationmodels.su.2d88a3a2"))
     val intervalPresets = listOf(15, 30, 60, 120, 360, 720, 1440)
 
     fun intervalPresetLabel(minutes: Int): String {
         if (minutes >= 60 && minutes % 60 == 0) {
             val hours = minutes / 60
-            return if (hours == 1) "1 hour" else "$hours hours"
+            return if (hours == 1) L10n.text("android.automationmodels.1_hour.f8b8883f") else L10n.text("android.automationmodels.0_hours.4d0aa096", "${hours}")
         }
-        return if (minutes == 1) "1 minute" else "$minutes minutes"
+        return if (minutes == 1) L10n.text("android.automationmodels.1_minute.e67b6f61") else L10n.text("android.automationmodels.0_minutes.87086105", "${minutes}")
     }
 
     fun intervalLabel(seconds: Long): String {
-        if (seconds % 60 != 0L) return "$seconds seconds"
+        if (seconds % 60 != 0L) return L10n.text("android.automationmodels.0_seconds.e549e94b", "${seconds}")
         return intervalPresetLabel((seconds / 60).toInt())
     }
 }
@@ -208,7 +210,7 @@ data class ScheduleFields(
             return (0..6).filter { (weeklyDays and (1 shl it)) != 0 }
                 .map { JobScheduleCopy.weekdayNames[it] }.joinToString(", ")
         }
-        if (weekday !in 0..6) return "Day"
+        if (weekday !in 0..6) return L10n.text("android.automationmodels.day.8f2364e1")
         return JobScheduleCopy.weekdayNames[weekday]
     }
 
@@ -220,13 +222,13 @@ data class ScheduleFields(
 
     val validation: String? get() {
         if (scheduleKind == ScheduleKind.CUSTOM && (customDays and 0b0111_1111) == 0) {
-            return "Pick at least one day for a custom schedule."
+            return L10n.text("android.automationmodels.pick_at_least_one_day_for_a_custom_schedul.0c926625")
         }
         if (scheduleKind == ScheduleKind.INTERVAL && intervalCurrentSeconds < 60) {
-            return "An interval must be at least a minute."
+            return L10n.text("android.automationmodels.an_interval_must_be_at_least_a_minute.91844e44")
         }
         if (hour !in 0..23 || minute !in 0..59) {
-            return "Choose a real hour and minute."
+            return L10n.text("android.automationmodels.choose_a_real_hour_and_minute.13e11fdc")
         }
         return null
     }
@@ -251,7 +253,7 @@ data class BudgetFields(val budgetMinutes: String = "180", val noTimeLimit: Bool
     }
 
     val validation: String? get() =
-        if (budgetSeconds == null) "Enter a positive time limit, or choose No limit." else null
+        if (budgetSeconds == null) L10n.text("android.automationmodels.enter_a_positive_time_limit_or_choose_no_l.3b7996e8") else null
 }
 
 /// Wall-clock copy for jobs that fire on a connected computer.
@@ -274,7 +276,7 @@ object HostScheduleClock {
         return id.substring(slash + 1).replace('_', ' ')
     }
 
-    private val months = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+    private val months = listOf(L10n.text("android.automationmodels.jan.5c5db120"), L10n.text("android.automationmodels.feb.caf71b3f"), L10n.text("android.automationmodels.mar.b4b7d381"), L10n.text("android.automationmodels.apr.617531b4"), L10n.text("android.automationmodels.may.8c78fe5b"), L10n.text("android.automationmodels.jun.b27fd46e"), L10n.text("android.automationmodels.jul.c43f56b9"), L10n.text("android.automationmodels.aug.41e1d82a"), L10n.text("android.automationmodels.sep.451e2b71"), L10n.text("android.automationmodels.oct.6877e849"), L10n.text("android.automationmodels.nov.3e630d29"), L10n.text("android.automationmodels.dec.f2a0cfbc"))
 
     private fun civil(epochMs: Long, timezone: String?): ZonedDateTime? {
         val id = resolved(timezone) ?: return null
@@ -306,7 +308,7 @@ object HostScheduleClock {
     }
 
     fun nextRun(epochMs: Long, timezone: String?): String {
-        val wall = wallClock(epochMs, timezone) ?: return "on the connected computer"
+        val wall = wallClock(epochMs, timezone) ?: return L10n.text("android.automationmodels.on_the_connected_computer.982b489d")
         val place = place(timezone)
         return if (place != null) "$wall in $place" else wall
     }
@@ -319,20 +321,20 @@ object HostScheduleClock {
     }
 
     fun timeCaption(hostName: String, timezone: String?): String =
-        clockOwnership(hostName, timezone, "This time is")
+        clockOwnership(hostName, timezone, L10n.text("android.automationmodels.this_time_is.e63a9d6e"))
 
     fun timesCaption(hostName: String, timezone: String?): String =
-        clockOwnership(hostName, timezone, "Times are")
+        clockOwnership(hostName, timezone, L10n.text("android.automationmodels.times_are.e9a3f2bc"))
 
     private fun clockOwnership(hostName: String, timezone: String?, subject: String): String {
         val host = hostName.trim()
         val place = place(timezone)
         if (place != null) {
-            if (host.isEmpty()) return "$subject on the connected computer ($place)."
+            if (host.isEmpty()) return L10n.text("android.automationmodels.0_on_the_connected_computer_1.856ab0a3", "${subject}", "${place}")
             return "$subject on $host ($place)."
         }
-        if (host.isEmpty()) return "$subject on the connected computer, not this device."
-        return "$subject on $host, not this device."
+        if (host.isEmpty()) return L10n.text("android.automationmodels.0_on_the_connected_computer_not_this_devic.444e2648", "${subject}")
+        return L10n.text("android.automationmodels.0_on_1_not_this_device.4df70e6c", "${subject}", "${host}")
     }
 }
 
@@ -342,28 +344,28 @@ object HostScheduleClock {
 /// differently. Port of `ClientJobCopy`.
 object JobCopy {
     fun run(name: String, folder: String, host: String): String =
-        "Starts $name in $folder on $host."
+        L10n.text("android.automationmodels.starts_0_in_1_on_2.c720825d", "${name}", "${folder}", "${host}")
 
     fun stop(name: String, folder: String, host: String): String =
-        "Stops the run of $name in $folder on $host."
+        L10n.text("android.automationmodels.stops_the_run_of_0_in_1_on_2.4717028b", "${name}", "${folder}", "${host}")
 
     fun continueGate(name: String, folder: String, host: String): String =
-        "Lets $name continue in $folder on $host."
+        L10n.text("android.automationmodels.lets_0_continue_in_1_on_2.4962fc94", "${name}", "${folder}", "${host}")
 
     fun budget(seconds: Long): String {
-        if (seconds == 0L) return "No time limit"
+        if (seconds == 0L) return L10n.text("android.automationmodels.no_time_limit.436b4b94")
         val minutes = seconds / 60
         if (minutes >= 60 && minutes % 60 == 0L) {
             val hours = minutes / 60
-            return "$hours hour${if (hours == 1L) "" else "s"}"
+            return L10n.text("android.automationmodels.0_hour_1.0df4dd9a", "${hours}", "${if (hours == 1L) "" else "s"}")
         }
-        return "$minutes minute${if (minutes == 1L) "" else "s"}"
+        return L10n.text("android.automationmodels.0_minute_1.ef3d336c", "${minutes}", "${if (minutes == 1L) "" else "s"}")
     }
 
     /// Fact-row value. The label is already "Last", so no prefix.
     /// Port of `ClientJobCopy.lastRunWhen`.
     fun lastRunWhen(epochMs: Long?, nowMs: Long = System.currentTimeMillis()): String {
-        if (epochMs == null || epochMs <= 0) return "Never run"
+        if (epochMs == null || epochMs <= 0) return L10n.text("android.automationmodels.never_run.3d40a69d")
         return ai.tokenstat.tokenstat.ui.logic.RelativeClock.abbreviated(epochMs, nowMs)
     }
 }
@@ -373,19 +375,19 @@ object JobCopy {
 object QueueCopy {
     fun summary(budgetSeconds: Long, maxConcurrent: Long): String {
         val budget = if (budgetSeconds == 0L) {
-            "No time limit"
+            L10n.text("android.automationmodels.no_time_limit.436b4b94")
         } else {
             val minutes = maxOf(1, budgetSeconds / 60)
             when (minutes) {
-                15L -> "15m per job"
-                30L -> "30m per job"
-                60L -> "1h per job"
-                180L -> "3h per job"
-                480L -> "8h per job"
-                else -> "$minutes min per job"
+                15L -> L10n.text("android.automationmodels.15m_per_job.518ce0c3")
+                30L -> L10n.text("android.automationmodels.30m_per_job.540c908c")
+                60L -> L10n.text("android.automationmodels.1h_per_job.d3a13f70")
+                180L -> L10n.text("android.automationmodels.3h_per_job.cabf928e")
+                480L -> L10n.text("android.automationmodels.8h_per_job.62ad336f")
+                else -> L10n.text("android.automationmodels.0_min_per_job.60b07c42", "${minutes}")
             }
         }
-        val slots = if (maxConcurrent == 0L) "No cap" else "$maxConcurrent at once"
+        val slots = if (maxConcurrent == 0L) L10n.text("android.automationmodels.no_cap.59db2115") else L10n.text("android.automationmodels.0_at_once.4e557f9f", "${maxConcurrent}")
         return "$budget · $slots"
     }
 
@@ -394,44 +396,44 @@ object QueueCopy {
         val host = hostName.trim()
         val folder = folderName.trim()
         if (compact) {
-            if (host.isEmpty()) return "Every folder"
-            return "Every folder on $host"
+            if (host.isEmpty()) return L10n.text("android.automationmodels.every_folder.9836340c")
+            return L10n.text("android.automationmodels.every_folder_on_0.158c4469", "${host}")
         }
-        if (host.isEmpty() && folder.isEmpty()) return "Every folder on the connected computer"
-        if (folder.isEmpty()) return "Every folder on $host"
-        if (host.isEmpty()) return "Every folder, not just $folder"
-        return "On $host, not just $folder"
+        if (host.isEmpty() && folder.isEmpty()) return L10n.text("android.automationmodels.every_folder_on_the_connected_computer.14a3d916")
+        if (folder.isEmpty()) return L10n.text("android.automationmodels.every_folder_on_0.158c4469", "${host}")
+        if (host.isEmpty()) return L10n.text("android.automationmodels.every_folder_not_just_0.0c11b65f", "${folder}")
+        return L10n.text("android.automationmodels.on_0_not_just_1.dd74bb64", "${host}", "${folder}")
     }
 
     fun editorScope(hostName: String, folderName: String): String {
         val host = hostName.trim()
         val folder = folderName.trim()
         if (host.isEmpty() && folder.isEmpty()) {
-            return "How queued jobs run on the connected computer. This applies to every folder."
+            return L10n.text("android.automationmodels.how_queued_jobs_run_on_the_connected_compu.0d28db88")
         }
         if (folder.isEmpty()) {
-            return "How queued jobs run on $host. This applies to every folder."
+            return L10n.text("android.automationmodels.how_queued_jobs_run_on_0_this_applies_to_e.09927d15", "${host}")
         }
         if (host.isEmpty()) {
-            return "How queued jobs run on the connected computer, not just $folder."
+            return L10n.text("android.automationmodels.how_queued_jobs_run_on_the_connected_compu.993795e3", "${folder}")
         }
-        return "How queued jobs run on $host, not just $folder."
+        return L10n.text("android.automationmodels.how_queued_jobs_run_on_0_not_just_1.a7cb9842", "${host}", "${folder}")
     }
 
     fun clockCaption(hostName: String, timezone: String?): String {
         val host = hostName.trim()
         val place = HostScheduleClock.place(timezone)
         if (place != null) {
-            if (host.isEmpty()) return "The clock on the connected computer is $place."
-            return "The clock on $host is $place."
+            if (host.isEmpty()) return L10n.text("android.automationmodels.the_clock_on_the_connected_computer_is_0.12b427b3", "${place}")
+            return L10n.text("android.automationmodels.the_clock_on_0_is_1.021f9b37", "${host}", "${place}")
         }
-        if (host.isEmpty()) return "The clock is on the connected computer, not this device."
-        return "The clock is on $host, not this device."
+        if (host.isEmpty()) return L10n.text("android.automationmodels.the_clock_is_on_the_connected_computer_not.eb1dfcf7")
+        return L10n.text("android.automationmodels.the_clock_is_on_0_not_this_device.730d6f0a", "${host}")
     }
 }
 
 /// "2 enabled · 1 running", the automations library summary.
-fun automationListSummary(enabled: Int, running: Int): String = "$enabled enabled · $running running"
+fun automationListSummary(enabled: Int, running: Int): String = L10n.text("android.automationmodels.0_enabled_1_running.6a231a0e", "${enabled}", "${running}")
 
 /// Library search covers the name and the prompt, like the Apple client.
 fun jobMatchesQuery(job: AutomationJob, query: String): Boolean {
@@ -538,12 +540,12 @@ data class AutomationEditorDraft(
     }
 
     val validation: String? get() {
-        if (name.trim().isEmpty()) return "Give this job a name."
-        if (name.toByteArray().size > 4096) return "Shorten the name to 4 KiB or less."
-        if (prompt.trim().isEmpty()) return "Write what the agent should do."
-        if (prompt.toByteArray().size > 1024 * 1024) return "Shorten the prompt to 1 MiB or less."
-        if (workspaceID.trim().isEmpty()) return "Choose a folder for this job."
-        if (backend.trim().isEmpty()) return "Choose an agent for this job."
+        if (name.trim().isEmpty()) return L10n.text("android.automationmodels.give_this_job_a_name.8453c6c7")
+        if (name.toByteArray().size > 4096) return L10n.text("android.automationmodels.shorten_the_name_to_4_kib_or_less.5579d8cf")
+        if (prompt.trim().isEmpty()) return L10n.text("android.automationmodels.write_what_the_agent_should_do.308a8211")
+        if (prompt.toByteArray().size > 1024 * 1024) return L10n.text("android.automationmodels.shorten_the_prompt_to_1_mib_or_less.dba63070")
+        if (workspaceID.trim().isEmpty()) return L10n.text("android.automationmodels.choose_a_folder_for_this_job.62a1a81c")
+        if (backend.trim().isEmpty()) return L10n.text("android.automationmodels.choose_an_agent_for_this_job.d585332f")
         schedule.validation?.let { return it }
         budget.validation?.let { return it }
         return null
@@ -561,7 +563,7 @@ data class AutomationEditorDraft(
 
     fun makeJob(id: String, enabled: Boolean, lastRunAtMs: Long? = null, lastRunID: String? = null, revision: Long = 0): AutomationJob {
         val budgetSeconds = budget.budgetSeconds
-            ?: throw IllegalArgumentException(validation ?: "Check this job's settings.")
+            ?: throw IllegalArgumentException(validation ?: L10n.text("android.automationmodels.check_this_job_s_settings.3b738ad9"))
         if (validation != null) throw IllegalArgumentException(validation)
         val cleaned = ai.tokenstat.tokenstat.ui.tasks.cleanModelID(model)
         return AutomationJob(
@@ -614,15 +616,15 @@ object QueueValidation {
     }
 
     fun budgetError(noLimit: Boolean, minutesText: String): String? =
-        if (budgetSeconds(noLimit, minutesText) == null) "Enter a positive time limit, or choose No limit." else null
+        if (budgetSeconds(noLimit, minutesText) == null) L10n.text("android.automationmodels.enter_a_positive_time_limit_or_choose_no_l.3b7996e8") else null
 
     fun maxConcurrent(countText: String): Long? =
         countText.trim().toLongOrNull()?.takeIf { it in 0..HOST_CAP }
 
     fun maxConcurrentError(countText: String): String? {
         val count = countText.trim().toLongOrNull()
-        if (count == null || count < 0) return "Jobs at once must be a whole number, or No cap."
-        if (count > HOST_CAP) return "At most $HOST_CAP jobs can run at once."
+        if (count == null || count < 0) return L10n.text("android.automationmodels.jobs_at_once_must_be_a_whole_number_or_no.a18bbfc5")
+        if (count > HOST_CAP) return L10n.text("android.automationmodels.at_most_0_jobs_can_run_at_once.c6cd6b67", "${HOST_CAP}")
         return null
     }
 
@@ -650,14 +652,14 @@ data class AutomationRun(
     val isRunning: Boolean get() = status in setOf("starting", "queued", "running", "stopping")
 
     val endedLabel: String get() = when (status) {
-        "starting" -> "Starting"
-        "queued" -> "Queued"
-        "running" -> "Running"
-        "stopping" -> "Stopping"
-        "ok" -> "Done"
-        "stopped" -> "Stopped"
-        "error" -> "Failed"
-        "interrupted" -> "Interrupted by restart"
+        "starting" -> L10n.text("android.automationmodels.starting.aeed4d26")
+        "queued" -> L10n.text("common.queued")
+        "running" -> L10n.text("common.running")
+        "stopping" -> L10n.text("android.automationmodels.stopping.a71ee1d4")
+        "ok" -> L10n.text("common.done")
+        "stopped" -> L10n.text("android.automationmodels.stopped.1a4f630a")
+        "error" -> L10n.text("common.failed")
+        "interrupted" -> L10n.text("android.automationmodels.interrupted_by_restart.012812fe")
         else -> status
     }
 

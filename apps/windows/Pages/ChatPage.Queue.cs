@@ -17,7 +17,7 @@ internal sealed partial class ChatPage
         var account = status["account"] ?? status;
         var identity = Format.Flag(account, "signedIn")
             ? Format.Text(account, "accountId", Format.Text(account, "handle")) : "local";
-        if (identity.Length == 0) throw new InvalidOperationException("Sign in again before queuing messages.");
+        if (identity.Length == 0) throw new InvalidOperationException(L10n.Text("windows.chatpage_queue.sign_in_again_before_queuing_messages.622d70dc"));
         return ChatOutbox.Key(Format.Text(account, "host") + ":" + identity, _workspaceId, chat);
     }
 
@@ -29,26 +29,26 @@ internal sealed partial class ChatPage
         {
             var items = ChatOutbox.Shared.Read(key);
             if (items.Count == 0) return body;
-            body.Children.Add(new TextBlock { Text = $"Pending messages ({items.Count})", FontSize = 12, Foreground = Theme.AccentBrush });
+            body.Children.Add(new TextBlock { Text = L10n.Text("windows.chatpage_queue.pending_messages_0.c3f22136", $"{items.Count}"), FontSize = 12, Foreground = Theme.AccentBrush });
             foreach (var item in items)
             {
                 var row = new StackPanel { Spacing = 4 };
-                row.Children.Add(new TextBlock { Text = item.Text.Length == 0 ? "Attached files" : item.Text,
+                row.Children.Add(new TextBlock { Text = item.Text.Length == 0 ? L10n.Text("windows.chatpage_queue.attached_files.ecc5a28d") : item.Text,
                     TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 2, TextWrapping = TextWrapping.Wrap });
-                row.Children.Add(Muted(item.AttemptedAt.HasValue ? "Delivery needs checking" :
-                    _authorizedQueue.Contains(item.Id) ? "Queued after the current turn" : "Paused — review before sending"));
+                row.Children.Add(Muted(item.AttemptedAt.HasValue ? L10n.Text("windows.chatpage_queue.delivery_needs_checking.62805e9a") :
+                    _authorizedQueue.Contains(item.Id) ? L10n.Text("windows.chatpage_queue.queued_after_the_current_turn.bdddd9f5") : L10n.Text("windows.chatpage_queue.paused_review_before_sending.2e920ca8")));
                 var actions = new FlowPanel { Spacing = Theme.SpaceS };
                 if (item.AttemptedAt.HasValue)
                 {
-                    actions.Children.Add(ActionIconGlyph.Button("Check delivery", ActionIcon.Refresh, async (_, _) =>
+                    actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.chatpage_queue.check_delivery.b8e3662d"), ActionIcon.Refresh, async (_, _) =>
                     {
                         try
                         {
                             if (_openId is not string currentChat || await OutboxKeyAsync(currentChat) != key)
-                                throw new InvalidOperationException("Reopen this conversation with its original account to check delivery.");
+                                throw new InvalidOperationException(L10n.Text("windows.chatpage_queue.reopen_this_conversation_with_its_original.bb0e73dd"));
                             var receipt = await CallChatAsync("chat.receipt", new JsonObject { ["id"] = _openId, ["clientMessageId"] = item.Id });
                             if (Format.Text(receipt, "state") == "accepted") ChatOutbox.Shared.Accept(key, item, null);
-                            else Banner("Delivery is not confirmed. Review the conversation before removing this pending copy; it will not be resent automatically.");
+                            else Banner(L10n.Text("windows.chatpage_queue.delivery_is_not_confirmed_review_the_conve.8a519f20"));
                             PaintConversation();
                         }
                         catch (Exception ex) { Banner(ex.Message); }
@@ -56,7 +56,7 @@ internal sealed partial class ChatPage
                 }
                 else
                 {
-                    actions.Children.Add(ActionIconGlyph.Button("Use latest context", ActionIcon.Run, async (_, _) =>
+                    actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.chatpage_queue.use_latest_context.a29959ec"), ActionIcon.Run, async (_, _) =>
                     {
                         try
                         {
@@ -74,7 +74,7 @@ internal sealed partial class ChatPage
                         catch (Exception ex) { Banner(ex.Message); }
                     }));
                     if (items.IndexOf(item) > 0 && !items[items.IndexOf(item) - 1].AttemptedAt.HasValue)
-                        actions.Children.Add(ActionIconGlyph.Button("Move up", ActionIcon.Move, (_, _) =>
+                        actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.chatpage_queue.move_up.c66feb5e"), ActionIcon.Move, (_, _) =>
                         {
                             try
                             {
@@ -88,10 +88,10 @@ internal sealed partial class ChatPage
                             }
                             catch (Exception ex) { Banner(ex.Message); }
                         }));
-                    actions.Children.Add(ActionIconGlyph.Button("Edit", ActionIcon.Edit, async (_, _) =>
+                    actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.edit"), ActionIcon.Edit, async (_, _) =>
                     {
                         var edit = new TextBox { Text = item.Text, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 100 };
-                        var dialog = new ContentDialog { Title = "Edit pending message", Content = edit, PrimaryButtonText = "Save", CloseButtonText = "Cancel" };
+                        var dialog = new ContentDialog { Title = L10n.Text("windows.chatpage_queue.edit_pending_message.7567a871"), Content = edit, PrimaryButtonText = L10n.Text("common.save"), CloseButtonText = L10n.Text("common.cancel") };
                         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary) return;
                         try
                         {
@@ -101,7 +101,7 @@ internal sealed partial class ChatPage
                         catch (Exception ex) { Banner(ex.Message); }
                     }));
                 }
-                actions.Children.Add(ActionIconGlyph.Button("Remove", ActionIcon.Delete, (_, _) =>
+                actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.remove"), ActionIcon.Delete, (_, _) =>
                 {
                     try { ChatOutbox.Shared.Update(key, rows => rows.RemoveAll(row => row.Id == item.Id)); _authorizedQueue.Remove(item.Id); PaintConversation(); }
                     catch (Exception ex) { Banner(ex.Message); }
@@ -155,16 +155,16 @@ internal sealed partial class ChatPage
         _sending = true;
         try
         {
-            if (await OutboxKeyAsync(chat) != key) throw new InvalidOperationException("The signed-in account changed. Pending messages remain with the original account.");
+            if (await OutboxKeyAsync(chat) != key) throw new InvalidOperationException(L10n.Text("windows.chatpage_queue.the_signed_in_account_changed_pending_mess.54c18f45"));
             await RefreshCatalogAsync();
             if (!IsLoaded || _openId != chat) return;
             var live = _chats.FirstOrDefault(row => Format.Text(row, "id") == chat)
-                ?? throw new InvalidOperationException("This conversation is no longer available.");
+                ?? throw new InvalidOperationException(L10n.Text("windows.chatpage_queue.this_conversation_is_no_longer_available.07f8c47b"));
             if (Format.Flag(live, "running")) return;
             if (live["sendRevision"] is null || Format.Long(live, "sendRevision") != candidate.Revision)
             {
                 _authorizedQueue.Remove(candidate.Id);
-                Banner("The conversation settings changed. Review the pending message and choose Use latest context.");
+                Banner(L10n.Text("windows.chatpage_queue.the_conversation_settings_changed_review_t.6038328c"));
                 return;
             }
             var attempted = ChatOutbox.Shared.Stage(key, candidate, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
@@ -183,7 +183,7 @@ internal sealed partial class ChatPage
         catch (Exception ex)
         {
             _authorizedQueue.Remove(candidate.Id);
-            if (IsLoaded && _openId == chat) Banner("The pending copy is saved. " + ex.Message);
+            if (IsLoaded && _openId == chat) Banner(L10n.Text("windows.chatpage_queue.the_pending_copy_is_saved_0.215c8440", $"{ex.Message}"));
         }
         finally { _sending = false; }
     }

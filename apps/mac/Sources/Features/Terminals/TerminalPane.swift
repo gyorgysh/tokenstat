@@ -205,34 +205,34 @@ struct TerminalPane: View {
         // different answers and a two-button dialog forces one of them to mean
         // both.
         .confirmationDialog(
-            "Save changes before closing?",
+            L10n.text("apple.terminalpane.save_changes_before_closing.6239f0dc"),
             isPresented: closingUnsaved,
             titleVisibility: .visible,
             presenting: workspaces.pendingClose
         ) { pending in
-            Button("Save") { Task { await workspaces.saveAndClosePending() } }
-            Button("Don't Save", role: .destructive) { workspaces.discardAndClosePending() }
-            Button("Cancel", role: .cancel) { workspaces.pendingClose = nil }
+            Button(L10n.text("common.save")) { Task { await workspaces.saveAndClosePending() } }
+            Button(L10n.text("apple.terminalpane.don_t_save.20961bde"), role: .destructive) { workspaces.discardAndClosePending() }
+            Button(L10n.text("common.cancel"), role: .cancel) { workspaces.pendingClose = nil }
         } message: { pending in
-            Text("\(pending.path) has changes that are not written to disk.")
+            Text(L10n.text("apple.terminalpane.0_has_changes_that_are_not_written_to_disk.e072f51f", "\(pending.path)"))
         }
         .confirmationDialog(
-            "Stop this session?",
+            L10n.text("apple.terminalpane.stop_this_session.5efe50c8"),
             isPresented: Binding(
                 get: { closingSession != nil },
                 set: { if !$0 { closingSession = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("Stop and close", role: .destructive) {
+            Button(L10n.text("apple.terminalpane.stop_and_close.52b40c33"), role: .destructive) {
                 if let session = closingSession {
                     closingSession = nil
                     Task { await terminals.close(session) }
                 }
             }
-            Button("Cancel", role: .cancel) { closingSession = nil }
+            Button(L10n.text("common.cancel"), role: .cancel) { closingSession = nil }
         } message: {
-            Text("The process will be killed. A stopped session can still close in one click.")
+            Text(L10n.text("apple.terminalpane.the_process_will_be_killed_a_stopped_sessi.bf3e9249"))
         }
     }
 
@@ -435,8 +435,8 @@ struct TerminalPane: View {
 
     private var browserPane: some View {
         VStack(spacing: 0) {
-            InspectorChromeBar(onClose: { browserWorkspaces.remove(folder.id) }, closeLabel: "Close browser") {
-                InspectorTitle(title: "Browser", symbol: "globe")
+            InspectorChromeBar(onClose: { browserWorkspaces.remove(folder.id) }, closeLabel: L10n.text("apple.terminalpane.close_browser.dd33033e")) {
+                InspectorTitle(title: L10n.text("common.browser"), symbol: "globe")
                 Spacer(minLength: 0)
             }
             ProjectBrowserView(workspaceID: folder.id, initialURL: browserURLs[folder.id] ?? "", allowsExternalNavigation: true) {
@@ -455,7 +455,7 @@ struct TerminalPane: View {
     private func reading(_ what: String) -> some View {
         VStack {
             Spacer()
-            Text("Reading \(what)…")
+            Text(L10n.text("apple.terminalpane.reading_0.f5d364f3", "\(what)"))
                 .font(Theme.callout)
                 .foregroundStyle(.secondary)
             Spacer()
@@ -543,12 +543,12 @@ struct TerminalPane: View {
                 Button {
                     _ = workspaces.showBrowser(in: folder.id)
                 } label: {
-                    Label("Browser", systemImage: "globe")
+                    Label(L10n.text("common.browser"), systemImage: "globe")
                 }
                 Button {
                     workspaces.showFiles(in: folder.id)
                 } label: {
-                    Label("Files", systemImage: "folder")
+                    Label(L10n.text("common.files"), systemImage: "folder")
                 }
                 ThemeRule()
                 ForEach(launcherProfiles) { profile in
@@ -570,49 +570,49 @@ struct TerminalPane: View {
                     Button {
                         showingPort = true
                     } label: {
-                        Label("Browse local port…", systemImage: "network")
+                        Label(L10n.text("apple.terminalpane.browse_local_port.490dc71d"), systemImage: "network")
                     }
                 }
             } label: {
-                Label("New terminal", systemImage: "plus")
+                Label(L10n.text("apple.terminalpane.new_terminal.fe544556"), systemImage: "plus")
                     .font(Theme.font(12))
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .help("Launch a shell or an agent CLI in this folder")
+            .help(L10n.text("apple.terminalpane.launch_a_shell_or_an_agent_cli_in_this_fol.c2d4b278"))
 
             if let error = active?.transportError {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(Theme.font(11))
                     .foregroundStyle(Theme.warning)
-                    .help("Input cannot reach this session: \(error)")
+                    .help(L10n.text("apple.terminalpane.input_cannot_reach_this_session_0.021e871f", "\(error)"))
             }
 
-            ToolbarIconButton(systemImage: "globe", help: "Browser, open a web preview beside sessions", isAccent: showsBrowser) {
+            ToolbarIconButton(systemImage: "globe", help: L10n.text("apple.terminalpane.browser_open_a_web_preview_beside_sessions.ba1ba6cf"), isAccent: showsBrowser) {
                 if showsBrowser { browserWorkspaces.remove(folder.id) }
                 else { browserWorkspaces.insert(folder.id) }
             }
-            .accessibilityLabel("Browser beside sessions")
+            .accessibilityLabel(L10n.text("apple.terminalpane.browser_beside_sessions.523dad6e"))
 
             if !sessions.isEmpty {
                 Menu {
-                    Button("Single", .layout) {
+                    Button(L10n.text("apple.terminalpane.single.8888a029"), .layout) {
                         terminals.setLayout(.single, for: folder.id)
                     }
-                    Button("Side by side", .compare) {
+                    Button(L10n.text("apple.terminalpane.side_by_side.a3d7b387"), .compare) {
                         terminals.setLayout(.side, for: folder.id)
                     }
-                    Button("Stacked", .compare) {
+                    Button(L10n.text("apple.terminalpane.stacked.c2fed746"), .compare) {
                         terminals.setLayout(.stacked, for: folder.id)
                     }
                 } label: {
-                    ActionIcon.compare.label("Split")
+                    ActionIcon.compare.label(L10n.text("apple.terminalpane.split.32afaa78"))
                         .font(Theme.font(12))
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .help("Show one session, or two side by side or stacked")
-                .accessibilityLabel("Split terminals")
+                .help(L10n.text("apple.terminalpane.show_one_session_or_two_side_by_side_or_st.d8049d2d"))
+                .accessibilityLabel(L10n.text("apple.terminalpane.split_terminals.d4e7a34f"))
             }
 
             // What the next launch will do, on the row that launches it. Both
@@ -714,7 +714,7 @@ struct TerminalPane: View {
             FileChip(
                 path: folder.path,
                 symbol: "folder",
-                label: "Files",
+                label: L10n.text("common.files"),
                 isSelected: selected
             ) {
                 workspaces.showFiles(in: folder.id)
@@ -740,7 +740,7 @@ struct TerminalPane: View {
             FileChip(
                 path: "Uncommitted changes in \(folder.name)",
                 symbol: "plusminus",
-                label: "Changes",
+                label: L10n.text("apple.terminalpane.changes.bbd4b6a8"),
                 isSelected: selected
             ) {
                 workspaces.reviewWorkingTree(in: folder.id)
@@ -792,7 +792,7 @@ struct TerminalPane: View {
     private var missingFolder: some View {
         VStack(spacing: Theme.Space.m) {
             Spacer()
-            Label("This folder is missing. It is kept in case it comes back.",
+            Label(L10n.text("apple.terminalpane.this_folder_is_missing_it_is_kept_in_case.fe3bde5c"),
                   systemImage: "exclamationmark.triangle")
                 .font(Theme.callout)
                 .foregroundStyle(Theme.warning)
@@ -853,7 +853,7 @@ private struct LaunchChip: View {
                 Image(systemName: "square.grid.2x2")
                     .font(Theme.font(11, weight: .medium))
                     .frame(width: 16, height: 16)
-                Text("Launch")
+                Text(L10n.text("apple.terminalpane.launch.ccf56ef5"))
                     .font(Theme.font(12, weight: isSelected ? .medium : .regular))
                     .lineLimit(1)
             }
@@ -869,8 +869,8 @@ private struct LaunchChip: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
-        .help("Back to the launcher. Pick a tool to start in this folder.")
-        .accessibilityLabel("Launch")
+        .help(L10n.text("apple.terminalpane.back_to_the_launcher_pick_a_tool_to_start.9a5e79a7"))
+        .accessibilityLabel(L10n.text("apple.terminalpane.launch.ccf56ef5"))
         .opacity(isHovering && !isSelected ? 0.85 : 1)
     }
 }
@@ -910,7 +910,7 @@ private struct SessionChip: View {
             .help(session.cwd)
 
             if isSelected || isHovering {
-                TabCloseButton(help: "Close this session", action: onClose)
+                TabCloseButton(help: L10n.text("apple.terminalpane.close_this_session.fa2af1b6"), action: onClose)
             } else {
                 // Holds the width the button would take, so a tab does not
                 // change size when the pointer crosses it and shove every tab
@@ -939,9 +939,9 @@ private struct SessionChip: View {
         .onHover { isHovering = $0 }
         .contextMenu {
             if let onSplit {
-                Button("Open in split", .compare) { onSplit() }
+                Button(L10n.text("apple.terminalpane.open_in_split.6b36cec3"), .compare) { onSplit() }
             }
-            Button("Close", .delete) { onClose() }
+            Button(L10n.text("common.close"), .delete) { onClose() }
         }
     }
 
@@ -997,7 +997,7 @@ private struct FileChip: View {
             .help(path)
 
             if isSelected || isHovering {
-                TabCloseButton(help: "Close this file", action: onClose)
+                TabCloseButton(help: L10n.text("apple.terminalpane.close_this_file.6f1ca61c"), action: onClose)
             } else {
                 Color.clear.frame(width: 20, height: 20)
             }
@@ -1012,7 +1012,7 @@ private struct FileChip: View {
         )
         .onHover { isHovering = $0 }
         .contextMenu {
-            Button("Close", .delete) { onClose() }
+            Button(L10n.text("common.close"), .delete) { onClose() }
         }
     }
 }
@@ -1029,14 +1029,14 @@ private struct SessionStartingView: View {
     private var label: String {
         let base = URL(fileURLWithPath: command).lastPathComponent
         switch base {
-        case "claude": return "Claude Code"
-        case "codex": return "Codex"
-        case "grok": return "Grok"
-        case "opencode": return "OpenCode"
-        case "opencode2": return "OpenCode 2"
-        case "agent": return "Cursor Agent"
-        case "agy": return "Antigravity"
-        case "zsh", "bash", "fish", "sh": return "Shell"
+        case "claude": return L10n.text("apple.terminalpane.claude_code.246ef8c1")
+        case "codex": return L10n.text("apple.terminalpane.codex.616efbe9")
+        case "grok": return L10n.text("apple.terminalpane.grok.dca61d32")
+        case "opencode": return L10n.text("apple.terminalpane.opencode.3af0e55c")
+        case "opencode2": return L10n.text("apple.terminalpane.opencode_2.5185d124")
+        case "agent": return L10n.text("apple.terminalpane.cursor_agent.f2b703ad")
+        case "agy": return L10n.text("apple.terminalpane.antigravity.4da276f5")
+        case "zsh", "bash", "fish", "sh": return L10n.text("apple.terminalpane.shell.a7332854")
         default: return base
         }
     }
@@ -1045,9 +1045,9 @@ private struct SessionStartingView: View {
         VStack(spacing: Theme.Space.m) {
             ProgressView()
                 .controlSize(.regular)
-            Text("Starting \(label)")
+            Text(L10n.text("apple.terminalpane.starting_0.099752ea", "\(label)"))
                 .font(Theme.title3.weight(.medium))
-            Text("The session is up. Waiting for the program to draw.")
+            Text(L10n.text("apple.terminalpane.the_session_is_up_waiting_for_the_program.2a36333d"))
                 .font(Theme.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -1088,7 +1088,7 @@ struct TerminalHost: View {
             Image(systemName: code == 0 ? "checkmark.circle.fill" : "xmark.circle.fill")
                 .font(Theme.font(11))
                 .foregroundStyle(code == 0 ? .green : .red)
-            Text(code == 0 ? "Process exited" : "Process exited with code \(code)")
+            Text(code == 0 ? L10n.text("apple.terminalpane.process_exited.077e5ee0") : L10n.text("apple.terminalpane.process_exited_with_code_0.619a6ae7", "\(code)"))
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
             Spacer()
@@ -1147,7 +1147,7 @@ private struct TerminalNotice: View {
                     // Plain words for what a person actually sees: a gap in
                     // the scrollback. "The reader fell behind its buffer" is
                     // how this end thinks about it, not how it reads.
-                    Text("Some lines are missing here.")
+                    Text(L10n.text("apple.terminalpane.some_lines_are_missing_here.5f8ee2b3"))
                         .font(Theme.caption)
                         .foregroundStyle(.primary)
                 }
@@ -1161,7 +1161,7 @@ private struct TerminalNotice: View {
             } else if session.outputPaused, pauseHasHeld {
                 pill {
                     ProgressView().controlSize(.small)
-                    Text("Output paused while the terminal catches up.")
+                    Text(L10n.text("apple.terminalpane.output_paused_while_the_terminal_catches_u.c3cbbc1c"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1296,44 +1296,44 @@ private struct LaunchSurface: View {
                     .font(Theme.font(34, weight: .light))
                     .foregroundStyle(Theme.accent.opacity(0.65))
                     .padding(.top, Theme.Space.m)
-                Text("What do you want to do in \(folder.name)?")
+                Text(L10n.text("apple.terminalpane.what_do_you_want_to_do_in_0.d6c232de", "\(folder.name)"))
                     .font(Theme.title3.weight(.medium))
-                Text("Open the project where you left it, or start an agent that keeps running on its own.")
+                Text(L10n.text("apple.terminalpane.open_the_project_where_you_left_it_or_star.4f0ed092"))
                     .font(Theme.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 380)
 
-                launcherHeading("Open")
+                launcherHeading(L10n.text("common.open"))
 
                 LazyVGrid(
                     columns: [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: Theme.Space.m)],
                     spacing: Theme.Space.m
                 ) {
                     chatButton
-                    utilityButton("Files", symbol: WorkspaceSection.files.symbol) {
+                    utilityButton(L10n.text("common.files"), symbol: WorkspaceSection.files.symbol) {
                         onOpenSection(.files)
                     }
-                    utilityButton("Browser", symbol: WorkspaceSection.browser.symbol) {
+                    utilityButton(L10n.text("common.browser"), symbol: WorkspaceSection.browser.symbol) {
                         onOpenSection(.browser)
                     }
-                    utilityButton("Changes", symbol: WorkspaceSection.changes.symbol) {
+                    utilityButton(L10n.text("apple.terminalpane.changes.bbd4b6a8"), symbol: WorkspaceSection.changes.symbol) {
                         onOpenSection(.changes)
                     }
                     utilityButton(
-                        "Pull requests",
+                        L10n.text("apple.terminalpane.pull_requests.d9e3f260"),
                         symbol: WorkspaceSection.pulls.symbol,
                         count: pullCounts.count(workspaceID: folder.id) ?? 0
                     ) {
                         onOpenSection(.pulls)
                     }
-                    utilityButton("Tasks", symbol: WorkspaceSection.todo.symbol) {
+                    utilityButton(L10n.text("common.tasks"), symbol: WorkspaceSection.todo.symbol) {
                         onOpenSection(.todo)
                     }
                 }
                 .frame(maxWidth: 620)
 
-                launcherHeading("Run an agent")
+                launcherHeading(L10n.text("apple.terminalpane.run_an_agent.b7046310"))
 
                 // Both settings live in the strip above, where they stay
                 // reachable once a session is running. This line is what is
@@ -1386,40 +1386,40 @@ private struct LaunchSurface: View {
             previewChats = list
         }
         .confirmationDialog(
-            pendingInstall.map { "Install \($0.name) on this machine?" } ?? "Install this tool?",
+            pendingInstall.map { L10n.text("apple.terminalpane.install_0_on_this_machine.05182120", "\($0.name)") } ?? L10n.text("apple.terminalpane.install_this_tool.c9c5635e"),
             isPresented: Binding(
                 get: { pendingInstall != nil },
                 set: { if !$0 { pendingInstall = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("Install") {
+            Button(L10n.text("apple.terminalpane.install.569ca49f")) {
                 if let profile = pendingInstall {
                     runInstall(profile)
                 }
                 pendingInstall = nil
             }
-            Button("Not now", role: .cancel) { pendingInstall = nil }
+            Button(L10n.text("apple.terminalpane.not_now.a0e63d7c"), role: .cancel) { pendingInstall = nil }
         } message: {
-            Text("This runs its official installer.")
+            Text(L10n.text("apple.terminalpane.this_runs_its_official_installer.0cbae9fd"))
         }
         .confirmationDialog(
-            pendingHide.map { "Remove \($0.name) from the launcher?" } ?? "Remove this tool?",
+            pendingHide.map { L10n.text("apple.terminalpane.remove_0_from_the_launcher.c6685e92", "\($0.name)") } ?? L10n.text("apple.terminalpane.remove_this_tool.fcc2e23e"),
             isPresented: Binding(
                 get: { pendingHide != nil },
                 set: { if !$0 { pendingHide = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("Remove", role: .destructive) {
+            Button(L10n.text("common.remove"), role: .destructive) {
                 if let profile = pendingHide {
                     Task { await LaunchCatalog.shared.hide(profile.id, peer: modelPeer) }
                 }
                 pendingHide = nil
             }
-            Button("Keep", role: .cancel) { pendingHide = nil }
+            Button(L10n.text("apple.terminalpane.keep.183f00f4"), role: .cancel) { pendingHide = nil }
         } message: {
-            Text("The tool stays on this machine. You can add it again from +.")
+            Text(L10n.text("apple.terminalpane.the_tool_stays_on_this_machine_you_can_add.708f1c8d"))
         }
     }
 
@@ -1480,7 +1480,7 @@ private struct LaunchSurface: View {
                             .foregroundStyle(Theme.accent)
                             .frame(height: 34)
                     }
-                    Text(openingChat ? "Opening…" : "Chat")
+                    Text(openingChat ? L10n.text("apple.terminalpane.opening.c926c2c5") : L10n.text("apple.terminalpane.chat.460b3a7d"))
                         .font(Theme.font(13, weight: .medium))
                         .lineLimit(1)
                 }
@@ -1507,17 +1507,17 @@ private struct LaunchSurface: View {
         .buttonStyle(.plain)
         .disabled(openingChat)
         .help(conversationCount == 0
-              ? "Start a conversation in this workspace."
-              : "Open the most recent of \(conversationCount) conversations.")
-        .accessibilityLabel(conversationCount == 0 ? "Chat" : "Chat, \(conversationCount) conversations")
+              ? L10n.text("apple.terminalpane.start_a_conversation_in_this_workspace.4add13f7")
+              : L10n.text("apple.terminalpane.open_the_most_recent_of_0_conversations.6e60b8dd", "\(conversationCount)"))
+        .accessibilityLabel(conversationCount == 0 ? L10n.text("apple.terminalpane.chat.460b3a7d") : L10n.text("apple.terminalpane.chat_0_conversations.bd13c4c3", "\(conversationCount)"))
     }
 
     /// Where the launch settings went, in one line.
     private var settingsHint: some View {
         Label(
             modelProfiles.isEmpty
-                ? "Permission bypass is in the bar above."
-                : "Model and permission bypass are in the bar above.",
+                ? L10n.text("apple.terminalpane.permission_bypass_is_in_the_bar_above.2c50d7ad")
+                : L10n.text("apple.terminalpane.model_and_permission_bypass_are_in_the_bar.f3148a99"),
             systemImage: "arrow.up"
         )
         .font(Theme.caption)
@@ -1529,12 +1529,12 @@ private struct LaunchSurface: View {
     private var runningSessionsBanner: some View {
         HStack(spacing: Theme.Space.s) {
             Label(
-                "Sessions are still running. Launch another tool or go back.",
+                L10n.text("apple.terminalpane.sessions_are_still_running_launch_another.060224e8"),
                 systemImage: "terminal.fill"
             )
             .foregroundStyle(.secondary)
             Spacer(minLength: Theme.Space.s)
-            Button("Back to session", .back) {
+            Button(L10n.text("apple.terminalpane.back_to_session.dea785db"), .back) {
                 workspaces.showTerminal(in: folder.id)
             }
             .controlSize(.small)
@@ -1575,7 +1575,7 @@ private struct LaunchSurface: View {
                     .font(Theme.font(18, weight: .medium))
                     .foregroundStyle(.tertiary)
                     .frame(height: 34)
-                Text(showingCatalog ? "Hide" : "More")
+                Text(showingCatalog ? L10n.text("apple.terminalpane.hide.ac20a57b") : L10n.text("apple.terminalpane.more.d47d7cb0"))
                     .font(Theme.font(13, weight: .medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -1591,9 +1591,9 @@ private struct LaunchSurface: View {
         }
         .buttonStyle(.plain)
         .help(showingCatalog
-              ? "Hide tools that are not on the launcher."
-              : "Show tools you can install or add back.")
-        .accessibilityLabel(showingCatalog ? "Hide extra tools" : "Show more tools")
+              ? L10n.text("apple.terminalpane.hide_tools_that_are_not_on_the_launcher.d2554f18")
+              : L10n.text("apple.terminalpane.show_tools_you_can_install_or_add_back.95b8421f"))
+        .accessibilityLabel(showingCatalog ? L10n.text("apple.terminalpane.hide_extra_tools.6063173b") : L10n.text("apple.terminalpane.show_more_tools.fd6e5f9f"))
     }
 
     /// A muted tile that runs the tool's official installer, then flips to a
@@ -1613,7 +1613,7 @@ private struct LaunchSurface: View {
             isInstalling: false,
             onInstall: { Task { await LaunchCatalog.shared.show(profile.id, peer: modelPeer) } }
         )
-        .help("\(profile.name) is installed. Click to add it back to the launcher.")
+        .help(L10n.text("apple.terminalpane.0_is_installed_click_to_add_it_back_to_the.0d1c03c2", "\(profile.name)"))
     }
 
     private func runInstall(_ profile: LaunchProfile) {
@@ -1621,7 +1621,7 @@ private struct LaunchSurface: View {
         Task {
             let message = await LaunchCatalog.shared.install(profile, peer: modelPeer)
             if let message {
-                installError = "\(profile.name) could not be installed: \(message)"
+                installError = L10n.text("apple.terminalpane.0_could_not_be_installed_1.aef9e3b1", "\(profile.name)", "\(message)")
             }
         }
     }
@@ -1652,7 +1652,7 @@ private struct LaunchSurface: View {
             RoundedRectangle(cornerRadius: Theme.cardRadius)
                 .strokeBorder(Theme.border.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
         )
-        .help("No bundled installer for \(profile.name) yet.")
+        .help(L10n.text("apple.terminalpane.no_bundled_installer_for_0_yet.6827f4d4", "\(profile.name)"))
     }
 
     private func launchButton(_ profile: LaunchProfile) -> some View {
@@ -1774,7 +1774,7 @@ private struct LaunchTile: View {
                             .foregroundStyle(Theme.accent)
                             .frame(height: 34)
                     }
-                    Text(isLaunching ? "Starting…" : profile.name)
+                    Text(isLaunching ? L10n.text("apple.terminalpane.starting.bbe5fc3b") : profile.name)
                         .font(Theme.font(13, weight: .medium))
                         .lineLimit(1)
                 }
@@ -1804,7 +1804,7 @@ private struct LaunchTile: View {
         }
         .contextMenu {
             if let onHide {
-                Button("Remove from launcher", .delete) { onHide() }
+                Button(L10n.text("apple.terminalpane.remove_from_launcher.b107a73b"), .delete) { onHide() }
             }
         }
     }
@@ -1828,8 +1828,8 @@ private struct LaunchTile: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .help("Configure \(profile.name)")
-        .accessibilityLabel("Configure \(profile.name)")
+        .help(L10n.text("apple.terminalpane.configure_0.76d41ce7", "\(profile.name)"))
+        .accessibilityLabel(L10n.text("apple.terminalpane.configure_0.76d41ce7", "\(profile.name)"))
         .accessibilityValue(profile.command)
     }
 }
@@ -1863,7 +1863,7 @@ private struct LaunchInstallTile: View {
                         .foregroundStyle(.tertiary)
                         .frame(height: 34)
                 }
-                Text(isInstalling ? "Installing…" : profile.name)
+                Text(isInstalling ? L10n.text("apple.terminalpane.installing.530bcc35") : profile.name)
                     .font(Theme.font(13, weight: .medium))
                     .foregroundStyle(isInstalling ? .primary : .secondary)
                     .lineLimit(1)
@@ -1885,7 +1885,7 @@ private struct LaunchInstallTile: View {
         }
         .buttonStyle(.plain)
         .disabled(isInstalling)
-        .help("\(profile.name) is not installed. Click to run its official installer.")
+        .help(L10n.text("apple.terminalpane.0_is_not_installed_click_to_run_its_offici.e78df0fc", "\(profile.name)"))
     }
 }
 
@@ -1903,17 +1903,17 @@ private struct RemotePortForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Browse a local port on \(folder.machineLabel ?? "the other machine")")
+            Text(L10n.text("apple.terminalpane.browse_a_local_port_on_0.e9fe39dc", "\(folder.machineLabel ?? L10n.text("apple.terminalpane.the_other_machine.1a59f693"))"))
                 .font(Theme.callout.weight(.medium))
-            Text("View a service running on that device's own localhost, like a webserver, a dev server or a dashboard, right here in the app.")
+            Text(L10n.text("apple.terminalpane.view_a_service_running_on_that_device_s_ow.bc48a8b0"))
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
-            TextField("Port", text: $port)
+            TextField(L10n.text("apple.terminalpane.port.72e9a59f"), text: $port)
                 .textFieldStyle(.themed)
                 .frame(width: 120)
             HStack {
                 Spacer()
-                Button("Browse", .reveal) {
+                Button(L10n.text("apple.terminalpane.browse.3227aa96"), .reveal) {
                     if let value = Int(port.trimmingCharacters(in: .whitespaces)),
                        value > 0, value <= 65_535 {
                         Task { await workspaces.openRemotePort(value, in: folder) }

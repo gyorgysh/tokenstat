@@ -35,7 +35,7 @@ struct WorkflowEditorDestination: View {
             if let session, session.target == target, session.workspaceID == workspaceID {
                 WorkflowEditorView(session: session, hostName: hostName, onFinished: onFinished)
             } else {
-                ProgressView(existing == nil ? "Opening new workflow" : "Opening workflow")
+                ProgressView(existing == nil ? L10n.text("apple.workfloweditorview.opening_new_workflow.2abc73fe") : L10n.text("apple.workfloweditorview.opening_workflow.82d1c28f"))
                     .font(Theme.callout)
             }
         }
@@ -273,12 +273,12 @@ struct WorkflowEditorView: View {
     private func stepChrome(id: String) -> some View {
         let node = session.fields.nodes.first { $0.id == id }
         return HStack(alignment: .center, spacing: Theme.Space.s) {
-            Button("Steps", .back) {
+            Button(L10n.text("apple.workfloweditorview.steps.1de3df70"), .back) {
                 session.endGroupedStepEdit()
                 if !stepPath.isEmpty { stepPath.removeLast() }
             }
             .buttonStyle(SecondaryButtonStyle(small: true))
-            Text(node?.displayTitle ?? "Step")
+            Text(node?.displayTitle ?? L10n.text("apple.workfloweditorview.step.8e6a6cca"))
                 .font(Theme.callout.weight(.semibold))
                 .lineLimit(1)
             Spacer(minLength: 0)
@@ -305,13 +305,13 @@ struct WorkflowEditorView: View {
     }
 
     private var title: String {
-        if session.saved.created != nil { return "Workflow saved" }
-        return session.isCreate ? "New workflow" : "Edit workflow"
+        if session.saved.created != nil { return L10n.text("apple.workfloweditorview.workflow_saved.077e94fd") }
+        return session.isCreate ? L10n.text("apple.workfloweditorview.new_workflow.750c4da4") : L10n.text("apple.workfloweditorview.edit_workflow.f5dd71b2")
     }
 
     private var draftStatus: String {
-        if session.persistedFields == session.fields { return "Draft kept on this device" }
-        return "Saving draft on this device…"
+        if session.persistedFields == session.fields { return L10n.text("apple.workfloweditorview.draft_kept_on_this_device.980c4050") }
+        return L10n.text("apple.workfloweditorview.saving_draft_on_this_device.40996e62")
     }
 
     private var showValidation: Bool {
@@ -323,15 +323,15 @@ struct WorkflowEditorView: View {
         if session.isCreate || session.dirty { return nil }
         let graph = session.current ?? session.saved.baseline
         if graph?.enabled == false {
-            return "Paused. It will not fire on its own."
+            return L10n.text("apple.workfloweditorview.paused_it_will_not_fire_on_its_own.84765e76")
         }
         guard let next = graph?.nextRun else { return nil }
-        return "Next \(HostScheduleClock.nextRun(next, timezone: session.schedulerTimezone))."
+        return L10n.text("apple.workfloweditorview.next_0.383f019f", "\(HostScheduleClock.nextRun(next, timezone: session.schedulerTimezone))")
     }
 
     @ViewBuilder private var notices: some View {
         if session.working {
-            ProgressView(session.creating ? "Creating workflow" : "Saving workflow")
+            ProgressView(session.creating ? L10n.text("apple.workfloweditorview.creating_workflow.3af3eab9") : L10n.text("apple.workfloweditorview.saving_workflow.3f9c4e68"))
                 .font(Theme.callout)
         }
         if let message = session.noticeMessage {
@@ -340,12 +340,12 @@ struct WorkflowEditorView: View {
                 .foregroundStyle(Theme.controlGlyph)
         }
         if session.loaded, session.saved.created == nil, !session.isCreate, !session.supportsEdits {
-            Text("This computer cannot protect concurrent edits yet. Saving overwrites the workflow as it is now.")
+            Text(L10n.text("apple.workfloweditorview.this_computer_cannot_protect_concurrent_ed.d8da54db"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
         }
         if session.liveRun, session.saved.created == nil {
-            Text("A run is going. This save is for the next one.")
+            Text(L10n.text("apple.workfloweditorview.a_run_is_going_this_save_is_for_the_next_o.82358bf1"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
         }
@@ -355,33 +355,33 @@ struct WorkflowEditorView: View {
                 .foregroundStyle(Theme.danger)
                 .textSelection(.enabled)
             if !session.creating, session.saved.created == nil {
-                Button("Reload options", .refresh) { Task { await session.load() } }
+                Button(L10n.text("apple.workfloweditorview.reload_options.e9ed25ed"), .refresh) { Task { await session.load() } }
                     .buttonStyle(SecondaryButtonStyle(comfortable: true))
                     .disabled(session.working)
             }
         }
         if session.backends.isEmpty, session.loaded, session.isCreate, session.saved.created == nil, !session.creating {
-            Text("No supported agent CLI is installed on this computer yet. You can still save a blank Start graph.")
+            Text(L10n.text("apple.workfloweditorview.no_supported_agent_cli_is_installed_on_thi.9b9a42fa"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
         }
         if let other = session.otherDraft {
-            comparison(title: "Draft from another window", draft: other.value.fields)
-            Text("Choose which draft to continue. A creation already sent must be checked first.")
+            comparison(title: L10n.text("apple.workfloweditorview.draft_from_another_window.8b70bae9"), draft: other.value.fields)
+            Text(L10n.text("apple.workfloweditorview.choose_which_draft_to_continue_a_creation.6be102c4"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
-            Button("Use saved draft", .restore) { Task { await session.resolveDiskConflict(keepMine: false) } }
+            Button(L10n.text("apple.workfloweditorview.use_saved_draft.31f362c2"), .restore) { Task { await session.resolveDiskConflict(keepMine: false) } }
                 .buttonStyle(SecondaryButtonStyle(comfortable: true))
                 .disabled(session.working)
             if other.value.pendingCreate == false, other.value.pendingID == nil {
-                Button("Keep my draft", .edit) { Task { await session.resolveDiskConflict(keepMine: true) } }
+                Button(L10n.text("apple.workfloweditorview.keep_my_draft.cdb80bb9"), .edit) { Task { await session.resolveDiskConflict(keepMine: true) } }
                     .buttonStyle(SecondaryButtonStyle(comfortable: true))
                     .disabled(session.working)
             }
         }
         if session.conflict, let computer = session.current {
-            comparison(title: "Computer version", draft: WorkflowEditorDraft(computer))
-            Text("This workflow changed on the computer. Choose which copy continues. Saving is off until you choose.")
+            comparison(title: L10n.text("apple.workfloweditorview.computer_version.33acfb2b"), draft: WorkflowEditorDraft(computer))
+            Text(L10n.text("apple.workfloweditorview.this_workflow_changed_on_the_computer_choo.123691fb"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
         }
@@ -392,7 +392,7 @@ struct WorkflowEditorView: View {
             Text(title).font(Theme.callout.weight(.semibold))
             Text(draft.name).font(Theme.callout)
             WorkflowStepStrip(nodes: draft.nodes, edges: draft.edges)
-            Text("\(draft.builtSchedule.summary) · \(draft.nodes.count) steps")
+            Text(L10n.text("apple.workfloweditorview.0_1_steps.d251d63a", "\(draft.builtSchedule.summary)", "\(draft.nodes.count)"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
         }
@@ -414,15 +414,15 @@ struct WorkflowEditorView: View {
                 edges: session.saved.created?.edges ?? session.fields.edges
             )
             if let created = session.saved.created, created.enabled, let next = created.nextRun {
-                Text("Next \(HostScheduleClock.nextRun(next, timezone: session.schedulerTimezone)).")
+                Text(L10n.text("apple.workfloweditorview.next_0.383f019f", "\(HostScheduleClock.nextRun(next, timezone: session.schedulerTimezone))"))
                     .font(Theme.callout)
                     .foregroundStyle(Theme.controlGlyph)
             }
-            Text("It runs on \(hostName), in \(session.folderName).")
+            Text(L10n.text("apple.workfloweditorview.it_runs_on_0_in_1.8d815fb3", "\(hostName)", "\(session.folderName)"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
             if let place = HostScheduleClock.place(session.schedulerTimezone) {
-                Text("Times are \(place) time.")
+                Text(L10n.text("apple.workfloweditorview.times_are_0_time.3e5f6eb5", "\(place)"))
                     .font(Theme.caption)
                     .foregroundStyle(Theme.controlGlyph)
             }
@@ -432,7 +432,7 @@ struct WorkflowEditorView: View {
 
     @ViewBuilder private var footer: some View {
         if session.saved.created != nil {
-            Button("Done", .done) {
+            Button(L10n.text("common.done"), .done) {
                 Task {
                     let created = await session.finishCreated() ?? session.saved.created
                     await onFinished(created)
@@ -442,27 +442,27 @@ struct WorkflowEditorView: View {
             .buttonStyle(AccentButtonStyle(comfortable: true))
             .disabled(session.working)
         } else if session.conflict {
-            Button("Use computer version", .restore) { Task { await session.resolveConflict(keepMine: false) } }
+            Button(L10n.text("apple.workfloweditorview.use_computer_version.f0d6599f"), .restore) { Task { await session.resolveConflict(keepMine: false) } }
                 .buttonStyle(SecondaryButtonStyle(comfortable: true))
                 .disabled(session.working)
-            Button("Keep my draft", .edit) { Task { await session.resolveConflict(keepMine: true) } }
+            Button(L10n.text("apple.workfloweditorview.keep_my_draft.cdb80bb9"), .edit) { Task { await session.resolveConflict(keepMine: true) } }
                 .buttonStyle(AccentButtonStyle(comfortable: true))
                 .disabled(session.working)
         } else if session.creating {
-            Button("Check creation", .refresh) { Task { await session.checkCreated() } }
+            Button(L10n.text("apple.workfloweditorview.check_creation.61fe51e6"), .refresh) { Task { await session.checkCreated() } }
                 .buttonStyle(SecondaryButtonStyle(comfortable: true))
                 .disabled(session.working)
             if session.canRetryCreate {
-                Button("Retry creation", .create) { Task { await session.retryCreate() } }
+                Button(L10n.text("apple.workfloweditorview.retry_creation.0bb084c1"), .create) { Task { await session.retryCreate() } }
                     .buttonStyle(AccentButtonStyle(comfortable: true))
                     .disabled(session.working || session.otherDraft != nil)
             }
         } else if session.isCreate {
-            Button("Create workflow", .create) { Task { await session.create() } }
+            Button(L10n.text("apple.workfloweditorview.create_workflow.3a5350ee"), .create) { Task { await session.create() } }
                 .buttonStyle(AccentButtonStyle(comfortable: true))
                 .disabled(!session.canCreate)
         } else {
-            Button("Save workflow", .save) { Task { await session.save() } }
+            Button(L10n.text("apple.workfloweditorview.save_workflow.e77921c8"), .save) { Task { await session.save() } }
                 .buttonStyle(AccentButtonStyle(comfortable: true))
                 .disabled(!session.canSave)
         }

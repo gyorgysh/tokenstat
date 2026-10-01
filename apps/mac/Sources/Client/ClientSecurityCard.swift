@@ -50,7 +50,7 @@ struct ClientSecurityCard: View {
                         Image(systemName: ActionIcon.security.symbol)
                             .font(ClientType.caption.weight(.semibold))
                             .foregroundStyle(Theme.accent)
-                        Text("End to end encrypted")
+                        Text(L10n.text("apple.clientsecuritycard.end_to_end_encrypted.e3ac807e"))
                             .font(ClientType.caption.weight(.medium))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -69,27 +69,22 @@ struct ClientSecurityCard: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("End to end encrypted")
-            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+            .accessibilityLabel(L10n.text("apple.clientsecuritycard.end_to_end_encrypted.e3ac807e"))
+            .accessibilityValue(isExpanded ? L10n.text("apple.clientsecuritycard.expanded.e72d5d8d") : L10n.text("apple.clientsecuritycard.collapsed.b322b652"))
             .accessibilityHint(isExpanded
-                ? "Hides the encryption keys"
-                : "Shows the encryption keys. Keys are hidden until you choose to view them.")
+                ? L10n.text("apple.clientsecuritycard.hides_the_encryption_keys.d8fa35b1")
+                : L10n.text("apple.clientsecuritycard.shows_the_encryption_keys_keys_are_hidden.1d8406ea"))
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    Text("""
-                    A connection between your devices is encrypted on one and decrypted \
-                    on the other, with keys that never leave them. The relay forwards \
-                    the bytes and cannot read them, and neither can tokenstat. Your \
-                    folders, terminals and agents are on your own computer.
-                    """)
+                    Text(L10n.text("apple.clientsecuritycard.a_connection_between_your_devices_is_encry.b8a28ce2"))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                     if let identity {
                         keyRow(
-                            title: "This device",
+                            title: L10n.text("apple.clientsecuritycard.this_device.d052579c"),
                             words: identity.words,
                             fingerprint: identity.fingerprint,
                             key: identity.key
@@ -97,15 +92,14 @@ struct ClientSecurityCard: View {
                     }
                     if let peer {
                         keyRow(
-                            title: peerName ?? (peer.label.isEmpty ? "The other device" : peer.label),
+                            title: peerName ?? (peer.label.isEmpty ? L10n.text("apple.clientsecuritycard.the_other_device.80640982") : peer.label),
                             words: peer.words,
                             fingerprint: peer.fingerprint,
                             key: peer.key
                         )
                     }
 
-                    Text("Noise XX handshake, X25519 keys, ChaCha20-Poly1305. "
-                        + "Compare the words with the other device to be sure.")
+                    Text(L10n.text("apple.clientsecuritycard.noise_xx_handshake_x25519_keys_chacha20_po.233e27b7"))
                         .font(Theme.font(10))
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -138,7 +132,7 @@ struct ClientSecurityCard: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     if copied == key {
-                        Text("copied")
+                        Text(L10n.text("apple.clientsecuritycard.copied.fb30593c"))
                             .font(ClientType.caption)
                             .foregroundStyle(Theme.accent)
                     }
@@ -148,7 +142,7 @@ struct ClientSecurityCard: View {
             .frame(minHeight: 44, alignment: .leading)
         }
         .buttonStyle(.plain)
-        .accessibilityHint("Copies the full public key")
+        .accessibilityHint(L10n.text("apple.clientsecuritycard.copies_the_full_public_key.7c229829"))
     }
 
     private func load() async {

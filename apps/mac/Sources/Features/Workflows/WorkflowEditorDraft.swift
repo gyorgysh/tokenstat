@@ -93,7 +93,7 @@ struct WorkflowEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, Jo
     }
 
     static var blankNodes: [WorkflowNode] {
-        [WorkflowNode(id: "in", kind: .input, x: 80, y: 120, title: "Start")]
+        [WorkflowNode(id: "in", kind: .input, x: 80, y: 120, title: L10n.text("common.start"))]
     }
 
     var isBlankStarter: Bool { starterID == Self.blankStarterID }
@@ -118,16 +118,16 @@ struct WorkflowEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, Jo
 
     var validation: String? {
         if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Give this workflow a name."
+            return L10n.text("apple.workfloweditordraft.give_this_workflow_a_name.146078f2")
         }
         if name.utf8.count > 4096 {
-            return "Shorten the name to 4 KiB or less."
+            return L10n.text("apple.workfloweditordraft.shorten_the_name_to_4_kib_or_less.5579d8cf")
         }
         if workspaceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Choose a folder for this workflow."
+            return L10n.text("apple.workfloweditordraft.choose_a_folder_for_this_workflow.e6f199bc")
         }
         if nodes.isEmpty {
-            return "A workflow needs a Start step."
+            return L10n.text("apple.workfloweditordraft.a_workflow_needs_a_start_step.92d85360")
         }
         if let issue = WorkflowGraphRules.stepsIssue(nodes: nodes, edges: edges) {
             return issue
@@ -154,7 +154,7 @@ struct WorkflowEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, Jo
         lastRunID: String? = nil
     ) throws -> WorkflowGraph {
         guard validation == nil, let budgetSeconds else {
-            throw Invalid.fields(validation ?? "Check this workflow's settings.")
+            throw Invalid.fields(validation ?? L10n.text("apple.workfloweditordraft.check_this_workflow_s_settings.e97a5e74"))
         }
         var graph = WorkflowGraph(
             id: id,

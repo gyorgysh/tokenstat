@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.logic
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import java.text.NumberFormat
 import java.util.Calendar
 
@@ -19,19 +21,19 @@ object HomeGreeting {
 
     fun phrase(hour: Int, hasHistory: Boolean, dayOfYear: Int): String {
         val timed = when (hour) {
-            in 5..<12 -> "Good morning"
-            in 12..<17 -> "Good afternoon"
-            in 17..<22 -> "Good evening"
-            else -> "Hello"
+            in 5..<12 -> L10n.text("android.tslogic.good_morning.90a90a48")
+            in 12..<17 -> L10n.text("android.tslogic.good_afternoon.d325e1bb")
+            in 17..<22 -> L10n.text("android.tslogic.good_evening.15a421e4")
+            else -> L10n.text("android.tslogic.hello.185f8db3")
         }
         // Fixed length so a later hasHistory flip only changes the returning
         // slots, not which index the day lands on.
         val pool = listOf(
             timed,
-            "Hello",
-            "What's up",
-            if (hasHistory) "Welcome back" else "Welcome",
-            if (hasHistory) "Back at it" else timed,
+            L10n.text("android.tslogic.hello.185f8db3"),
+            L10n.text("android.tslogic.what_s_up.11ec53bc"),
+            if (hasHistory) L10n.text("android.tslogic.welcome_back.66212495") else L10n.text("android.tslogic.welcome.0e2226b5"),
+            if (hasHistory) L10n.text("android.tslogic.back_at_it.9ce858b7") else timed,
         )
         return pool[Math.floorMod(dayOfYear, pool.size)]
     }
@@ -94,26 +96,26 @@ fun moneyValue(micros: Long, estimated: Boolean, complete: Boolean): String {
 fun harnessName(id: String): String {
     if (id == "opencode2") return "OpenCode 2"
     return when (harnessCanonicalID(id)) {
-        "claude_code" -> "Claude Code"
-        "claude_code_rollup", "claude_code_estimate" -> "Claude Code (recovered)"
+        "claude_code" -> L10n.text("android.tslogic.claude_code.246ef8c1")
+        "claude_code_rollup", "claude_code_estimate" -> L10n.text("android.tslogic.claude_code_recovered.93f5e6b2")
         "codex" -> "Codex"
-        "grok" -> "Grok Build"
+        "grok" -> L10n.text("android.tslogic.grok_build.fd3bf01a")
         "opencode" -> "OpenCode"
         "cline" -> "Cline"
         "openclaw" -> "OpenClaw"
         "muse" -> "Muse"
-        "devin" -> "Devin CLI"
+        "devin" -> L10n.text("android.tslogic.devin_cli.29247d05")
         "pi" -> "Pi"
-        "dsh" -> "DeepSeek Harness"
+        "dsh" -> L10n.text("android.tslogic.deepseek_harness.e562a9c5")
         "zed" -> "Zed"
-        "copilot" -> "Copilot CLI"
+        "copilot" -> L10n.text("android.tslogic.copilot_cli.c73e38d4")
         "antigravity" -> "Antigravity"
         "cursor" -> "Cursor"
         "gemini" -> "Gemini"
-        "hermes" -> "Hermes Agent"
-        "kilo" -> "Kilo Code"
-        "kimi" -> "Kimi Code"
-        "qwen" -> "Qwen Code"
+        "hermes" -> L10n.text("android.tslogic.hermes_agent.873e989a")
+        "kilo" -> L10n.text("android.tslogic.kilo_code.83abecfd")
+        "kimi" -> L10n.text("android.tslogic.kimi_code.0c486180")
+        "qwen" -> L10n.text("android.tslogic.qwen_code.47487dbd")
         "" -> "unknown"
         else -> harnessCanonicalID(id).ifEmpty { "unknown" }
     }
@@ -165,9 +167,9 @@ object TunnelCopy {
     fun waiting(hostName: String?): String {
         val host = hostName?.trim().orEmpty()
         return if (host.isEmpty()) {
-            "Waiting for the computer to come back on the tunnel."
+            L10n.text("android.tslogic.waiting_for_the_computer_to_come_back_on_t.cab8d5a0")
         } else {
-            "Waiting for $host to come back on the tunnel."
+            L10n.text("android.tslogic.waiting_for_0_to_come_back_on_the_tunnel.0f402193", "${host}")
         }
     }
 
@@ -186,7 +188,7 @@ object TunnelCopy {
 data class FriendlyError(val title: String, val message: String, val canRetry: Boolean)
 
 fun friendlyError(raw: String?): FriendlyError {
-    if (raw == null) return FriendlyError("Something went wrong", "The request could not be completed.", true)
+    if (raw == null) return FriendlyError(L10n.text("android.tslogic.something_went_wrong.ab827e3f"), L10n.text("android.tslogic.the_request_could_not_be_completed.4c9681ac"), true)
     val text = raw.trim()
     val lower = text.lowercase()
     // What the relay says when a screen session is refused or ended. These
@@ -194,30 +196,29 @@ fun friendlyError(raw: String?): FriendlyError {
     // tuned, and a message naming one is wrong the week it changes.
     if (lower.contains("session_time_limit")) {
         return FriendlyError(
-            "Session ended",
-            "Screen sessions end after a while. Connect again to carry on.",
+            L10n.text("android.tslogic.session_ended.4a50e4c0"),
+            L10n.text("android.tslogic.screen_sessions_end_after_a_while_connect.1255ca00"),
             true,
         )
     }
     if (lower.contains("session_idle")) {
         return FriendlyError(
-            "Session ended while it was idle",
-            "This device went quiet, so the stream stopped. Connect again to pick it up.",
+            L10n.text("android.tslogic.session_ended_while_it_was_idle.24ad53cc"),
+            L10n.text("android.tslogic.this_device_went_quiet_so_the_stream_stopp.6bd273ae"),
             true,
         )
     }
     if (lower.contains("screen_already_open")) {
         return FriendlyError(
-            "A screen is already open",
-            "One screen at a time on an account. Close the other one and try again.",
+            L10n.text("android.tslogic.a_screen_is_already_open.fbd0ef4f"),
+            L10n.text("android.tslogic.one_screen_at_a_time_on_an_account_close_t.d76ae776"),
             false,
         )
     }
     if (lower.contains("quota_exceeded")) {
         return FriendlyError(
-            "Relay allowance used up",
-            "Check relay usage in Account to see when older traffic leaves the window. " +
-                "Direct connections do not use this allowance.",
+            L10n.text("android.tslogic.relay_allowance_used_up.d052225f"),
+            L10n.text("android.tslogic.check_relay_usage_in_account_to_see_when_o.14353728"),
             false,
         )
     }
@@ -225,18 +226,15 @@ fun friendlyError(raw: String?): FriendlyError {
     // that says nothing.
     if (lower.contains("-34018") || lower.contains("errsecmissingentitlement")) {
         return FriendlyError(
-            "This build cannot use the keychain",
-            "This copy of the app is missing the signing configuration needed for protected " +
-                "Keychain storage. Use a build signed with its Keychain entitlement and " +
-                "matching provisioning profile.",
+            L10n.text("android.tslogic.this_build_cannot_use_the_keychain.d1a5c315"),
+            L10n.text("android.tslogic.this_copy_of_the_app_is_missing_the_signin.98aa5af7"),
             false,
         )
     }
     if (lower.contains("-25300")) {
         return FriendlyError(
-            "The private key is not on this device",
-            "The record is here but the secret it points at is not, which is what a restore " +
-                "from a backup leaves behind. Import or generate the key again.",
+            L10n.text("android.tslogic.the_private_key_is_not_on_this_device.3db8a142"),
+            L10n.text("android.tslogic.the_record_is_here_but_the_secret_it_point.d27bd117"),
             false,
         )
     }
@@ -245,10 +243,8 @@ fun friendlyError(raw: String?): FriendlyError {
     // heard of. They need different advice.
     if (lower.contains("register this device before using the vault")) {
         return FriendlyError(
-            "This login is not tied to this computer",
-            "The vault lives on your account, and this sign-in predates linking the two. " +
-                "Press Try again first. If that does not clear it, sign in again from Account. " +
-                "Everything saved here still works.",
+            L10n.text("android.tslogic.this_login_is_not_tied_to_this_computer.b304b378"),
+            L10n.text("android.tslogic.the_vault_lives_on_your_account_and_this_s.e52d4845"),
             true,
         )
     }
@@ -256,25 +252,22 @@ fun friendlyError(raw: String?): FriendlyError {
         lower.contains("not registered on the account") || lower.contains("not bound to an account device")
     ) {
         return FriendlyError(
-            "This computer is not on your account",
-            "Sync needs this computer linked to your account before it can hold a copy of " +
-                "your servers. Everything still works here in the meantime.",
+            L10n.text("android.tslogic.this_computer_is_not_on_your_account.6ce371f7"),
+            L10n.text("android.tslogic.sync_needs_this_computer_linked_to_your_ac.5ece6b14"),
             true,
         )
     }
     if (lower.contains("vault already exists")) {
         return FriendlyError(
-            "There is already a vault",
-            "An account has one vault. Unlock the one you have, or reset it if you cannot " +
-                "get back into it.",
+            L10n.text("android.tslogic.there_is_already_a_vault.b9e57f99"),
+            L10n.text("android.tslogic.an_account_has_one_vault_unlock_the_one_yo.b269036b"),
             false,
         )
     }
     if (lower.contains("not enrolled") || lower.contains("did not enroll")) {
         return FriendlyError(
-            "This device cannot read the vault",
-            "It has not been let in yet. Unlock the vault here to give this device its copy " +
-                "of the key.",
+            L10n.text("android.tslogic.this_device_cannot_read_the_vault.f4b4e811"),
+            L10n.text("android.tslogic.it_has_not_been_let_in_yet_unlock_the_vaul.0e352acf"),
             true,
         )
     }
@@ -282,17 +275,15 @@ fun friendlyError(raw: String?): FriendlyError {
     // helper: the daemon outlives the app that installed it.
     if (lower.contains("unknown method") || lower.contains("unknown_method")) {
         return FriendlyError(
-            "Helper is out of date",
-            "The background helper on this machine is older than the app and does not know " +
-                "this yet. Restart the app to replace it, then try again.",
+            L10n.text("android.tslogic.helper_is_out_of_date.ff2cd175"),
+            L10n.text("android.tslogic.the_background_helper_on_this_machine_is_o.2156c337"),
             true,
         )
     }
     if (lower.contains("not approved") || lower.contains("waiting for someone to allow")) {
         return FriendlyError(
-            "Waiting for approval",
-            "The other device has to say yes to this one. Open Devices there and approve it, " +
-                "then try again.",
+            L10n.text("android.tslogic.waiting_for_approval.10c5739b"),
+            L10n.text("android.tslogic.the_other_device_has_to_say_yes_to_this_on.d2653756"),
             true,
         )
     }
@@ -301,9 +292,8 @@ fun friendlyError(raw: String?): FriendlyError {
     ) {
         // Opens plans rather than retrying, so this is not a retry row.
         return FriendlyError(
-            "Not on this plan",
-            "Reaching your devices from anywhere is part of a paid plan. Everything else " +
-                "keeps working exactly as it does now.",
+            L10n.text("android.tslogic.not_on_this_plan.92dff92e"),
+            L10n.text("android.tslogic.reaching_your_devices_from_anywhere_is_par.bfe9ca82"),
             false,
         )
     }
@@ -316,9 +306,8 @@ fun friendlyError(raw: String?): FriendlyError {
             lower.contains("device limit"))
     ) {
         return FriendlyError(
-            "Sign in again",
-            "This device's login is no longer valid. Signing in again puts it back, and " +
-                "nothing local is lost.",
+            L10n.text("android.tslogic.sign_in_again.51fbe1dc"),
+            L10n.text("android.tslogic.this_device_s_login_is_no_longer_valid_sig.e2c0cd69"),
             true,
         )
     }
@@ -326,25 +315,22 @@ fun friendlyError(raw: String?): FriendlyError {
         lower.contains("key does not match")
     ) {
         return FriendlyError(
-            "Reconnecting",
-            "The connection credential was refused, so this device is getting a new one. It " +
-                "usually comes back on its own within a minute.",
+            L10n.text("android.tslogic.reconnecting.afb118fc"),
+            L10n.text("android.tslogic.the_connection_credential_was_refused_so_t.8e2696c5"),
             true,
         )
     }
     if (wantsSignIn) {
         return FriendlyError(
-            "Sign in again",
-            "This device's login is no longer valid. Signing in again puts it back, and " +
-                "nothing local is lost.",
+            L10n.text("android.tslogic.sign_in_again.51fbe1dc"),
+            L10n.text("android.tslogic.this_device_s_login_is_no_longer_valid_sig.e2c0cd69"),
             true,
         )
     }
     if (lower.contains("already on the tunnel") || lower.contains("key_already_live")) {
         return FriendlyError(
-            "Connected somewhere else",
-            "Another copy of tokenstat is on the tunnel with this device's key. Quit it, or " +
-                "wait a moment for it to drop.",
+            L10n.text("android.tslogic.connected_somewhere_else.2da62c31"),
+            L10n.text("android.tslogic.another_copy_of_tokenstat_is_on_the_tunnel.0e092a52"),
             false,
         )
     }
@@ -353,24 +339,22 @@ fun friendlyError(raw: String?): FriendlyError {
         lower.contains("could not resolve")
     ) {
         return FriendlyError(
-            "No connection",
-            "This device cannot reach the network right now. It retries by itself as soon as " +
-                "it can.",
+            L10n.text("android.tslogic.no_connection.c9e1a200"),
+            L10n.text("android.tslogic.this_device_cannot_reach_the_network_right.663f753c"),
             true,
         )
     }
     if (lower.contains("timed out") || lower.contains("timeout")) {
         return FriendlyError(
-            "It did not answer",
-            "The other side took too long. It is usually asleep rather than broken.",
+            L10n.text("android.tslogic.it_did_not_answer.4f030967"),
+            L10n.text("android.tslogic.the_other_side_took_too_long_it_is_usually.94ae09da"),
             true,
         )
     }
     if (lower.contains("this mac is asleep") || lower.contains("host_asleep")) {
         return FriendlyError(
-            "This Mac is asleep",
-            "That Mac has its lid closed, or tokenstat is not open. Open the app, open the " +
-                "lid, or turn on Always-on host in Account to keep it reachable.",
+            L10n.text("android.tslogic.this_mac_is_asleep.ceee64e8"),
+            L10n.text("android.tslogic.that_mac_has_its_lid_closed_or_tokenstat_i.19412d9d"),
             true,
         )
     }
@@ -379,10 +363,8 @@ fun friendlyError(raw: String?): FriendlyError {
         lower.contains("host daemon") || lower.contains("hostd")
     ) {
         return FriendlyError(
-            "The helper is not running",
-            "tokenstat's background helper handles your archive and your devices. Open the " +
-                "app to start it, or turn on Always-on host to keep it running after you " +
-                "quit or close the lid.",
+            L10n.text("android.tslogic.the_helper_is_not_running.f7afe244"),
+            L10n.text("android.tslogic.tokenstat_s_background_helper_handles_your.82c596f6"),
             true,
         )
     }
@@ -390,8 +372,8 @@ fun friendlyError(raw: String?): FriendlyError {
         lower.contains("disconnected")
     ) {
         return FriendlyError(
-            "Connection dropped",
-            "The link to the other device closed. It reconnects on its own.",
+            L10n.text("android.tslogic.connection_dropped.9049f3d8"),
+            L10n.text("android.tslogic.the_link_to_the_other_device_closed_it_rec.fdda8bd3"),
             true,
         )
     }
@@ -399,9 +381,8 @@ fun friendlyError(raw: String?): FriendlyError {
         lower.contains("429")
     ) {
         return FriendlyError(
-            "Asked too often",
-            "The account is answering fewer requests for a moment. What is on screen is " +
-                "still good, and the next refresh will go through.",
+            L10n.text("android.tslogic.asked_too_often.52a8ddb1"),
+            L10n.text("android.tslogic.the_account_is_answering_fewer_requests_fo.ecb66749"),
             false,
         )
     }
@@ -410,8 +391,8 @@ fun friendlyError(raw: String?): FriendlyError {
         (lower.contains("1033") && lower.contains("tunnel"))
     ) {
         return FriendlyError(
-            "The server is unreachable",
-            "The connection could not reach the server. Try again shortly.",
+            L10n.text("android.tslogic.the_server_is_unreachable.6862e581"),
+            L10n.text("android.tslogic.the_connection_could_not_reach_the_server.b54b3470"),
             true,
         )
     }
@@ -427,17 +408,16 @@ fun friendlyError(raw: String?): FriendlyError {
             lower.contains("504") || lower.contains("530")))
     ) {
         return FriendlyError(
-            "The server could not answer",
-            "The request could not be completed. Try again shortly.",
+            L10n.text("android.tslogic.the_server_could_not_answer.ffe49c76"),
+            L10n.text("android.tslogic.the_request_could_not_be_completed_try_aga.54350986"),
             true,
         )
     }
     if (lower.contains("device limit") || lower.contains("machine_limit")) {
         // Offers device management rather than a retry.
         return FriendlyError(
-            "Device limit reached",
-            "This account is using all the devices its plan allows. Remove one you no longer " +
-                "have, or move up a plan.",
+            L10n.text("android.tslogic.device_limit_reached.9993b12e"),
+            L10n.text("android.tslogic.this_account_is_using_all_the_devices_its.b51162b6"),
             false,
         )
     }
@@ -450,19 +430,16 @@ fun friendlyError(raw: String?): FriendlyError {
             lower.contains("direct candidates") || lower.contains("relay")))
     ) {
         return FriendlyError(
-            "That computer is not reachable",
-            "It has to be awake with tokenstat running, and set up for remote reach. If this " +
-                "worked before, wake it and try again. If it never worked, on that computer " +
-                "open Devices and turn on \"Reach devices from anywhere\". Until that is on, " +
-                "it never tells the relay where it is.",
+            L10n.text("android.tslogic.that_computer_is_not_reachable.162e2c34"),
+            L10n.text("android.tslogic.it_has_to_be_awake_with_tokenstat_running.73405e61"),
             true,
         )
     }
     // Nothing matched. Say that something failed and show the words the
     // machine used, rather than inventing a cause.
     return FriendlyError(
-        "That did not work",
-        text.ifEmpty { "Something went wrong and nothing said what." },
+        L10n.text("android.tslogic.that_did_not_work.93a20328"),
+        text.ifEmpty { L10n.text("android.tslogic.something_went_wrong_and_nothing_said_what.8776f982") },
         true,
     )
 }
@@ -474,10 +451,10 @@ fun friendlyError(raw: String?): FriendlyError {
 fun vaultPasswordProblems(password: String): List<String> {
     val scalars = password.codePoints().toArray()
     val out = mutableListOf<String>()
-    if (scalars.size < 12) out += "At least 12 characters"
-    if (password.none { it.isUpperCase() }) out += "An uppercase letter"
-    if (scalars.none { it in '0'.code..'9'.code }) out += "A number"
-    if (password.none { !it.isLetterOrDigit() && !it.isWhitespace() }) out += "A special character"
+    if (scalars.size < 12) out += L10n.text("android.tslogic.at_least_12_characters.0ced89a6")
+    if (password.none { it.isUpperCase() }) out += L10n.text("android.tslogic.an_uppercase_letter.a61f4d4b")
+    if (scalars.none { it in '0'.code..'9'.code }) out += L10n.text("android.tslogic.a_number.a3c9dfa2")
+    if (password.none { !it.isLetterOrDigit() && !it.isWhitespace() }) out += L10n.text("android.tslogic.a_special_character.9b79cde5")
     return out
 }
 

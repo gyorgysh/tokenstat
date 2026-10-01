@@ -53,7 +53,7 @@ internal static class HostSplash
         word.HorizontalAlignment = HorizontalAlignment.Center;
         column.Children.Add(word);
         column.Children.Add(Status(state, error, onRetry));
-        AutomationProperties.SetName(column, "tokenstat");
+        AutomationProperties.SetName(column, L10n.Text("windows.splash.tokenstat.63d30539"));
         return new Grid
         {
             Background = Theme.BackgroundBrush,
@@ -70,7 +70,7 @@ internal static class HostSplash
         {
             return new TextBlock
             {
-                Text = "Starting the helper",
+                Text = L10n.Text("windows.splash.starting_the_helper.1e4334a0"),
                 FontSize = 13,
                 Opacity = 0.7,
                 HorizontalAlignment = HorizontalAlignment.Center,
@@ -101,7 +101,7 @@ internal static class HostSplash
             TextAlignment = TextAlignment.Center,
         });
         var retry = ActionIconGlyph.PrimaryButton(
-            "Try again", ActionIcon.Refresh, (_, _) => onRetry());
+            L10n.Text("windows.splash.try_again.d8b8392e"), ActionIcon.Refresh, (_, _) => onRetry());
         retry.HorizontalAlignment = HorizontalAlignment.Center;
         card.Children.Add(retry);
         AutomationProperties.SetName(card, info.Title);

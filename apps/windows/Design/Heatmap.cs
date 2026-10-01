@@ -194,8 +194,8 @@ internal sealed class HeatmapView : StackPanel
         if (_snap.Weeks <= 0 || _snap.Rows.Count == 0)
         {
             Children.Add(EmptyState.View(
-                "No activity yet",
-                "Scan local logs to fill the year.",
+                L10n.Text("windows.heatmap.no_activity_yet.0a12b92c"),
+                L10n.Text("windows.heatmap.scan_local_logs_to_fill_the_year.77e8b789"),
                 EmptyArtKind.FirstBars));
             return;
         }
@@ -327,8 +327,8 @@ internal sealed class HeatmapView : StackPanel
         _hitRect.Resources["ButtonBackgroundPressed"] = _hitRect.Background;
         _hitRect.Resources["ButtonBorderBrushPointerOver"] = _hitRect.Background;
         _hitRect.Resources["ButtonBorderBrushPressed"] = _hitRect.Background;
-        AutomationProperties.SetName(_hitRect, $"Activity, {_snap.First} to {_snap.Last}");
-        AutomationProperties.SetHelpText(_hitRect, "Use arrow keys to browse days, then Enter to open a day.");
+        AutomationProperties.SetName(_hitRect, L10n.Text("windows.heatmap.activity_0_to_1.830cb017", $"{_snap.First}", $"{_snap.Last}"));
+        AutomationProperties.SetHelpText(_hitRect, L10n.Text("windows.heatmap.use_arrow_keys_to_browse_days_then_enter_t.090063e5"));
         _hitRect.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(OnDayKeyDown), true);
         _hitRect.GotFocus += (_, _) => SetHovered(FindDate(_selectedDate) ?? AvailableDays().LastOrDefault());
         _hitRect.PointerMoved += OnPointerMoved;
@@ -336,7 +336,7 @@ internal sealed class HeatmapView : StackPanel
         _hitRect.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnPointerPressed), true);
         canvas.Children.Add(_hitRect);
 
-        AutomationProperties.SetName(canvas, $"Activity, {_snap.First} to {_snap.Last}");
+        AutomationProperties.SetName(canvas, L10n.Text("windows.heatmap.activity_0_to_1.830cb017", $"{_snap.First}", $"{_snap.Last}"));
         return canvas;
     }
 
@@ -367,7 +367,7 @@ internal sealed class HeatmapView : StackPanel
             Spacing = Theme.SpaceS,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        legend.Children.Add(LegendLabel("Less"));
+        legend.Children.Add(LegendLabel(L10n.Text("windows.heatmap.less.ae5239ec")));
         for (int level = 0; level < 5; level++)
         {
             var heatLevel = level;
@@ -380,7 +380,7 @@ internal sealed class HeatmapView : StackPanel
                 Fill = Theme.Brush(() => Theme.HeatLevel(heatLevel)),
             });
         }
-        legend.Children.Add(LegendLabel("More"));
+        legend.Children.Add(LegendLabel(L10n.Text("windows.heatmap.more.d47d7cb0")));
         Grid.SetColumn(legend, 2);
         row.Children.Add(legend);
         footer.Children.Add(row);
@@ -571,7 +571,7 @@ internal sealed class HeatmapView : StackPanel
         Canvas.SetLeft(_hoverRing, _hovered.Column * _stride);
         Canvas.SetTop(_hoverRing, _hovered.Row * _stride);
         _hoverRing.Visibility = Visibility.Visible;
-        string tip = $"{_hovered.Day.Date}: {ListRate(_hovered.Day.Value)} at API list price";
+        string tip = L10n.Text("windows.heatmap.0_1_at_api_list_price.1a0524d3", $"{_hovered.Day.Date}", $"{ListRate(_hovered.Day.Value)}");
         ToolTipService.SetToolTip(_hitRect, tip);
         AutomationProperties.SetName(_hitRect, tip);
     }
@@ -664,9 +664,9 @@ internal sealed class HeatmapView : StackPanel
     /// </summary>
     private static string RowLabel(int row) => row switch
     {
-        0 => "Mon",
-        2 => "Wed",
-        4 => "Fri",
+        0 => L10n.Text("windows.heatmap.mon.f40d7f51"),
+        2 => L10n.Text("windows.heatmap.wed.58339f45"),
+        4 => L10n.Text("windows.heatmap.fri.66dab40c"),
         _ => "",
     };
 
@@ -681,19 +681,19 @@ internal sealed class HeatmapView : StackPanel
             return null;
         }
         string ago = RelativeTime(_snap.FetchedAtMs);
-        return _snap.NoticeCode == "stale" ? "stale, last updated " + ago : "updated " + ago;
+        return _snap.NoticeCode == "stale" ? L10n.Text("windows.heatmap.stale_last_updated_0.72c66d79", $"{ago}") : "updated " + ago;
     }
 
     private static Border HistoryBanner(int days)
     {
         var lead = new Microsoft.UI.Xaml.Documents.Run
         {
-            Text = "Older history is locked. ",
+            Text = L10n.Text("windows.heatmap.older_history_is_locked.8ef6b29a"),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         };
         var body = new Microsoft.UI.Xaml.Documents.Run
         {
-            Text = $"Free shows the last {days} days in full. Older days keep the year shape only.",
+            Text = L10n.Text("windows.heatmap.free_shows_the_last_0_days_in_full_older_d.2a97306a", $"{days}"),
         };
         var text = new TextBlock
         {
@@ -707,7 +707,7 @@ internal sealed class HeatmapView : StackPanel
         stack.Children.Add(text);
         stack.Children.Add(new HyperlinkButton
         {
-            Content = "Upgrade to see the year",
+            Content = L10n.Text("windows.heatmap.upgrade_to_see_the_year.7918f544"),
             NavigateUri = new Uri("https://tokenstat.ai/pricing"),
             FontFamily = Fonts.Interface,
             FontSize = 12,
@@ -806,7 +806,7 @@ internal sealed class HeatmapView : StackPanel
     /// </summary>
     private static List<HeatMonth> DeriveMonths(Snapshot snap)
     {
-        string[] names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        string[] names = [L10n.Text("windows.heatmap.jan.5c5db120"), L10n.Text("windows.heatmap.feb.caf71b3f"), L10n.Text("windows.heatmap.mar.b4b7d381"), L10n.Text("windows.heatmap.apr.617531b4"), L10n.Text("windows.heatmap.may.8c78fe5b"), L10n.Text("windows.heatmap.jun.b27fd46e"), L10n.Text("windows.heatmap.jul.c43f56b9"), L10n.Text("windows.heatmap.aug.41e1d82a"), L10n.Text("windows.heatmap.sep.451e2b71"), L10n.Text("windows.heatmap.oct.6877e849"), L10n.Text("windows.heatmap.nov.3e630d29"), L10n.Text("windows.heatmap.dec.f2a0cfbc")];
         var labels = new List<HeatMonth>();
         int placedAt = -8;
         for (int c = 0; c < snap.Weeks; c++)
@@ -855,22 +855,22 @@ internal sealed class HeatmapView : StackPanel
         var age = DateTimeOffset.Now - moment;
         if (age < TimeSpan.FromMinutes(1))
         {
-            return "just now";
+            return L10n.Text("windows.heatmap.just_now.7ddb44d8");
         }
         if (age < TimeSpan.FromHours(1))
         {
             int minutes = Math.Max(1, (int)age.TotalMinutes);
-            return minutes == 1 ? "1 minute ago" : $"{minutes} minutes ago";
+            return minutes == 1 ? L10n.Text("windows.heatmap.1_minute_ago.0f450bad") : L10n.Text("windows.heatmap.0_minutes_ago.e33faefc", $"{minutes}");
         }
         if (age < TimeSpan.FromDays(1))
         {
             int hours = Math.Max(1, (int)age.TotalHours);
-            return hours == 1 ? "1 hour ago" : $"{hours} hours ago";
+            return hours == 1 ? L10n.Text("windows.heatmap.1_hour_ago.e4bc2973") : L10n.Text("windows.heatmap.0_hours_ago.d8431d4e", $"{hours}");
         }
         if (age < TimeSpan.FromDays(30))
         {
             int days = Math.Max(1, (int)age.TotalDays);
-            return days == 1 ? "1 day ago" : $"{days} days ago";
+            return days == 1 ? L10n.Text("windows.heatmap.1_day_ago.961f4ea2") : L10n.Text("windows.heatmap.0_days_ago.bef5eece", $"{days}");
         }
         return moment.LocalDateTime.ToString("d");
     }

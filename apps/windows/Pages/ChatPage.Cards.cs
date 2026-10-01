@@ -167,15 +167,15 @@ internal sealed partial class ChatPage
         Button? button = null;
         if (showJump)
         {
-            button = FollowButton("Jump to latest", ResumeFollow, "Jump to the latest messages");
+            button = FollowButton(L10n.Text("windows.chatpage_cards.jump_to_latest.86752458"), ResumeFollow, L10n.Text("windows.chatpage_cards.jump_to_the_latest_messages.4ac18a52"));
         }
         else if (busy && !_followEnd)
         {
-            button = FollowButton("Follow", ResumeFollow, "Follow new responses as they arrive");
+            button = FollowButton(L10n.Text("windows.chatpage_cards.follow.641d1ef6"), ResumeFollow, L10n.Text("windows.chatpage_cards.follow_new_responses_as_they_arrive.bc0eb314"));
         }
         else if (busy && _followEnd)
         {
-            button = FollowButton("Following", PauseFollow, "Pause auto-follow");
+            button = FollowButton(L10n.Text("windows.chatpage_cards.following.344b4271"), PauseFollow, L10n.Text("windows.chatpage_cards.pause_auto_follow.554e9318"));
         }
         if (button is null)
         {
@@ -218,7 +218,7 @@ internal sealed partial class ChatPage
     private FrameworkElement ShowEarlierButton(int hidden)
     {
         var button = Buttons.Secondary(
-            _historyLoading ? "Loading earlier messages…" : hidden > 0 ? "Show " + hidden + " earlier messages" : "Load earlier messages",
+            _historyLoading ? L10n.Text("windows.chatpage_cards.loading_earlier_messages.b8507b92") : hidden > 0 ? L10n.Text("windows.chatpage_cards.show_0_earlier_messages.2e5e4ab9", $"{hidden}") : L10n.Text("windows.chatpage_cards.load_earlier_messages.33fd46b9"),
             ActionIcon.History,
             async (_, _) => await RevealEarlierAsync(),
             small: true);
@@ -329,7 +329,7 @@ internal sealed partial class ChatPage
         {
             var running = new TextBlock
             {
-                Text = "Running",
+                Text = L10n.Text("common.running"),
                 FontFamily = Fonts.Mono,
                 FontSize = 10,
                 Foreground = Theme.AccentBrush,
@@ -350,7 +350,7 @@ internal sealed partial class ChatPage
             {
                 status.Children.Add(new TextBlock
                 {
-                    Text = "Failed",
+                    Text = L10n.Text("common.failed"),
                     FontFamily = Fonts.Mono,
                     FontSize = 10,
                     Foreground = Theme.Brush(static () => Theme.Danger),
@@ -378,10 +378,10 @@ internal sealed partial class ChatPage
         if (lines.Count > 0 && !item.Running)
         {
             var show = hasDiff
-                ? (expanded ? "Hide edit" : "Show edit")
+                ? (expanded ? L10n.Text("windows.chatpage_cards.hide_edit.e9dbd4f5") : L10n.Text("windows.chatpage_cards.show_edit.8da806e1"))
                 : snippetIsOutput
-                    ? (expanded ? "Hide output" : "Show output")
-                    : (expanded ? "Hide edit" : "Show edit");
+                    ? (expanded ? L10n.Text("windows.chatpage_cards.hide_output.64876c47") : L10n.Text("windows.chatpage_cards.show_output.9dbbb249"))
+                    : (expanded ? L10n.Text("windows.chatpage_cards.hide_edit.e9dbd4f5") : L10n.Text("windows.chatpage_cards.show_edit.8da806e1"));
             var toggle = Buttons.Primary(show, ActionIcon.Preview, (_, _) => ToggleCard(item.Id, !expanded), small: true);
             Grid.SetColumn(toggle, 5);
             header.Children.Add(toggle);
@@ -471,7 +471,7 @@ internal sealed partial class ChatPage
 
         if (!string.IsNullOrEmpty(item.Patch))
         {
-            var show = expanded ? "Hide changes" : "Show changes";
+            var show = expanded ? L10n.Text("windows.chatpage_cards.hide_changes.c960be38") : L10n.Text("windows.chatpage_cards.show_changes.b12a6ef8");
             var toggle = Buttons.Primary(show, ActionIcon.Preview, (_, _) => ToggleCard(item.Id, !expanded), small: true);
             Grid.SetColumn(toggle, 4);
             header.Children.Add(toggle);
@@ -645,7 +645,7 @@ internal sealed partial class ChatPage
         {
             stack.Children.Add(new TextBlock
             {
-                Text = "… " + cut + " more lines",
+                Text = L10n.Text("windows.chatpage_cards.0_more_lines.c352841d", $"{cut}"),
                 FontFamily = Fonts.Mono,
                 FontSize = 11,
                 Opacity = 0.55,
@@ -770,7 +770,7 @@ internal sealed partial class ChatPage
 
     private static string FileName(string path)
     {
-        if (string.IsNullOrEmpty(path)) return "File";
+        if (string.IsNullOrEmpty(path)) return L10n.Text("windows.chatpage_cards.file");
         var trimmed = path.TrimEnd('/', '\\');
         var slash = trimmed.LastIndexOf('/');
         var back = trimmed.LastIndexOf('\\');

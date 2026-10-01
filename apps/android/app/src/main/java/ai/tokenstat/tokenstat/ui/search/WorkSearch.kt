@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.search
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
 
 /// A screen or setting inside the app, offered by search beside folders.
@@ -48,22 +50,22 @@ object SearchPlaces {
 
     private fun tabs(): List<SearchPlace> = listOf(
         SearchPlace(
-            "tab:home", "Home", "Tab",
+            "tab:home", L10n.text("common.home"), L10n.text("android.worksearch.tab.90ddf196"),
             ActionIcon.Home,
             listOf("dashboard", "spend", "today", "week", "activity", "limits", "start"),
         ),
         SearchPlace(
-            "tab:workspaces", "Projects", "Tab",
+            "tab:workspaces", L10n.text("common.projects"), L10n.text("android.worksearch.tab.90ddf196"),
             ActionIcon.Reveal,
             listOf("folders", "projects", "chat", "sessions", "repos", "git", "terminal"),
         ),
         SearchPlace(
-            "tab:insights", "Insights", "Tab",
+            "tab:insights", L10n.text("common.insights"), L10n.text("android.worksearch.tab.90ddf196"),
             ActionIcon.Benchmarks,
             listOf("breakdown", "models", "projects", "reports", "charts", "cost"),
         ),
         SearchPlace(
-            "tab:devices", "Devices", "Tab",
+            "tab:devices", L10n.text("common.devices"), L10n.text("android.worksearch.tab.90ddf196"),
             ActionIcon.Device,
             listOf("computers", "laptop", "mac", "linked", "pair", "remote", "servers", "terminal", "keys", "vault", "shell"),
         ),
@@ -78,7 +80,7 @@ object SearchPlaces {
         SearchPlace(
             id = "device:$peer",
             title = name,
-            detail = "Devices · ${machinePlatforms[peer] ?: "Linked device"}",
+            detail = L10n.text("android.worksearch.devices_0.163a371d", "${machinePlatforms[peer] ?: L10n.text("android.worksearch.linked_device.a7ba6a12")}"),
             icon = ActionIcon.Device,
             keywords = listOf("machine", "computer", "device"),
         )
@@ -89,42 +91,42 @@ object SearchPlaces {
     /// heading: nobody searches for "This device", they search for "traffic".
     private fun screens(): List<SearchPlace> = listOf(
         SearchPlace(
-            "home:editor", "Customize Home", "Home",
+            "home:editor", L10n.text("android.worksearch.customize_home.642cec6e"), L10n.text("common.home"),
             ActionIcon.Layout,
             listOf("cards", "arrange", "sections", "customise", "edit", "rearrange", "hide"),
         ),
         SearchPlace(
-            "workspaces:editor", "Customize Projects", "Projects",
+            "workspaces:editor", L10n.text("android.worksearch.customize_projects.00ab91c5"), L10n.text("common.projects"),
             ActionIcon.Layout,
             listOf("folders", "chats", "sessions", "arrange", "sections", "customise", "edit", "rearrange", "hide", "order"),
         ),
         SearchPlace(
-            "account:thisDevice", "Settings", "Behind your avatar · This device",
+            "account:thisDevice", L10n.text("common.settings"), L10n.text("android.worksearch.behind_your_avatar_this_device.41f21261"),
             ActionIcon.Settings,
             listOf("preferences", "options", "config", "setup", "device"),
         ),
         SearchPlace(
-            "account:account", "Account", "Behind your avatar",
+            "account:account", L10n.text("common.account"), L10n.text("android.worksearch.behind_your_avatar.f60fd55f"),
             ActionIcon.Account,
-            listOf("profile", "handle", "sign out", "log out", "avatar", "relay", "usage"),
+            listOf("profile", "handle", L10n.text("android.worksearch.sign_out.601f2951"), L10n.text("android.worksearch.log_out.6a832af4"), "avatar", "relay", "usage"),
         ),
         SearchPlace(
-            "account:account:plans", "Plan", "Account",
+            "account:account:plans", L10n.text("android.worksearch.plan.fa8ed0bd"), L10n.text("common.account"),
             ActionIcon.Plans,
             listOf("plans", "subscription", "billing", "upgrade", "price", "tier", "pro", "renew"),
         ),
         SearchPlace(
-            "account:thisDevice:notifications", "Notifications", "Account · This device",
+            "account:thisDevice:notifications", L10n.text("android.worksearch.notifications.78801183"), L10n.text("android.worksearch.account_this_device.8bb3f277"),
             ActionIcon.Settings,
             listOf("push", "alerts", "notify", "sounds", "badge", "settings"),
         ),
         SearchPlace(
-            "account:thisDevice:traffic", "Local traffic", "Account · This device",
+            "account:thisDevice:traffic", L10n.text("android.worksearch.local_traffic.ab770f30"), L10n.text("android.worksearch.account_this_device.8bb3f277"),
             ActionIcon.Connect,
             listOf("network", "connections", "direct", "relayed", "lan", "settings"),
         ),
         SearchPlace(
-            "account:legal", "Terms and privacy", "Account · Legal",
+            "account:legal", L10n.text("android.worksearch.terms_and_privacy.8d60f3a9"), L10n.text("android.worksearch.account_legal.a5b160c5"),
             ActionIcon.Security,
             listOf("legal", "policy", "licence", "license", "conditions"),
         ),

@@ -111,7 +111,7 @@ struct ClientWorkspaceDetailView: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 if current.git?.isRepo == true {
-                    Button("Worktrees", systemImage: "arrow.triangle.branch") { showingWorktrees = true }
+                    Button(L10n.text("apple.clientworkspacesections.worktrees.aec2f93d"), systemImage: "arrow.triangle.branch") { showingWorktrees = true }
                 }
             }
             ToolbarItem(placement: .primaryAction) {
@@ -236,7 +236,7 @@ struct ClientWorkspaceDetailView: View {
                     workspaceName: folder.name,
                     workspaceIsRemote: true
                 )
-                    .navigationTitle("Pull requests")
+                    .navigationTitle(L10n.text("apple.clientworkspacesections.pull_requests.d9e3f260"))
                     .navigationBarTitleDisplayMode(.inline)
                 .rememberWorkspace(peer: peer, folder: folder, section: .pulls)
             } label: {
@@ -322,21 +322,21 @@ struct ClientWorkspaceDetailView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Port", text: $portText)
+                    TextField(L10n.text("apple.clientworkspacesections.port.72e9a59f"), text: $portText)
                         .keyboardType(.numberPad)
                     ClientRecentBrowserPorts(owner: browserOwner, portText: $portText)
                 } footer: {
-                    Text("Opens a loopback bridge to that port on \(hostName) and shows it in the in-app browser.")
+                    Text(L10n.text("apple.clientworkspacesections.opens_a_loopback_bridge_to_that_port_on_0.53f0e3cb", "\(hostName)"))
                 }
             }
-            .navigationTitle("Browse port")
+            .navigationTitle(L10n.text("apple.clientworkspacesections.browse_port.d3b57f13"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { showPort = false }
+                    Button(L10n.text("common.cancel")) { showPort = false }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Open") { Task { await openPort() } }
+                    Button(L10n.text("common.open")) { Task { await openPort() } }
                         .disabled(isOpeningPort || BrowserTarget.parsePort(portText) == nil)
                 }
             }
@@ -530,14 +530,14 @@ struct ClientWorkspaceChangesView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 HStack {
-                    Text(current.git?.branch ?? "Changes")
+                    Text(current.git?.branch ?? L10n.text("apple.clientworkspacesections.changes.bbd4b6a8"))
                         .font(ClientType.label.weight(.semibold))
                     Spacer()
                     if files.count > 1 {
                         NavigationLink {
                             ClientReviewAllView(peer: peer, workspaceID: workspaceID, hostName: hostName, files: files)
                         } label: {
-                            Text("Review all")
+                            Text(L10n.text("apple.clientworkspacesections.review_all.d05163fa"))
                                 .font(ClientType.caption.weight(.medium))
                                 .foregroundStyle(Theme.accent)
                         }
@@ -545,7 +545,7 @@ struct ClientWorkspaceChangesView: View {
                         .disabled(!session.loaded)
                     }
                     if !files.isEmpty {
-                        Button(session.draft.paths == Set(files.map(\.path)) ? "Deselect all" : "Select all", .done) {
+                        Button(session.draft.paths == Set(files.map(\.path)) ? L10n.text("apple.clientworkspacesections.deselect_all.96754949") : L10n.text("apple.clientworkspacesections.select_all.1fc9a387"), .done) {
                             session.selectAll(Set(files.map(\.path)))
                         }
                         .buttonStyle(.plain).foregroundStyle(Theme.accent)
@@ -559,20 +559,20 @@ struct ClientWorkspaceChangesView: View {
                 }
                 if files.isEmpty {
                     ClientSectionEmpty(
-                        text: "Nothing to commit",
+                        text: L10n.text("apple.clientworkspacesections.nothing_to_commit.f377a9f6"),
                         art: .changes,
-                        message: "Every file in this folder matches the last commit."
+                        message: L10n.text("apple.clientworkspacesections.every_file_in_this_folder_matches_the_last.fffbaf63")
                     )
                 } else {
                     ClientAutoCommitCard(session: autoCommit) { openedRun = $0 }
                     ForEach(files) { file in
                         HStack(spacing: Theme.Space.xs) {
-                            Toggle("Select \(file.path)", isOn: Binding(
+                            Toggle(L10n.text("apple.clientworkspacesections.select_0.5d348f18", "\(file.path)"), isOn: Binding(
                                 get: { session.draft.paths.contains(file.path) },
                                 set: { _ in session.select(file.path) }
                             ))
                             .toggleStyle(BrandCheckboxStyle(iconOnly: true))
-                            .accessibilityLabel("Select \(file.path)")
+                            .accessibilityLabel(L10n.text("apple.clientworkspacesections.select_0.5d348f18", "\(file.path)"))
                             .frame(width: 44, height: 44)
                             .disabled(!session.loaded || session.working || session.draft.submitted != nil)
                             NavigationLink {
@@ -588,16 +588,16 @@ struct ClientWorkspaceChangesView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        .modifier(ClientOptionalNavigationTitle(showsNavigationTitle ? "Changes" : nil))
+        .modifier(ClientOptionalNavigationTitle(showsNavigationTitle ? L10n.text("apple.clientworkspacesections.changes.bbd4b6a8") : nil))
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: Theme.Space.s) {
                 ThemeRule()
                 if !files.isEmpty || session.draft.submitted != nil {
                     HStack(spacing: Theme.Space.m) {
-                        Text("\(session.draft.paths.count) of \(files.count) selected")
+                        Text(L10n.text("apple.clientworkspacesections.0_of_1_selected.d06c59a5", "\(session.draft.paths.count)", "\(files.count)"))
                             .font(ClientType.caption).foregroundStyle(.secondary)
                         Spacer(minLength: 0)
-                        Button(session.draft.submitted == nil ? "Review and commit" : "Check commit", .commit) {
+                        Button(session.draft.submitted == nil ? L10n.text("apple.clientworkspacesections.review_and_commit.96f097b7") : L10n.text("apple.clientworkspacesections.check_commit.d65b2b26"), .commit) {
                             showingComposer = true
                         }
                         .buttonStyle(AccentButtonStyle(comfortable: true))
@@ -605,7 +605,7 @@ struct ClientWorkspaceChangesView: View {
                     }.padding(.horizontal, Theme.Space.m)
                 }
                 HStack(spacing: Theme.Space.m) {
-                    Text(current.git?.branch ?? "Current branch")
+                    Text(current.git?.branch ?? L10n.text("apple.clientworkspacesections.current_branch.7c5b2da1"))
                         .font(ClientType.caption).foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                     GitPushControl(target: session.target, folderName: current.name, hostName: hostName,
@@ -670,7 +670,7 @@ struct ClientFolderBranchRow: View {
     /// Named, not just valued: a bare "v1.0" beside two plain header lines
     /// never said it opens the picker.
     private var branchLabel: String {
-        "Branch \(folder.subtitle ?? "detached")"
+        L10n.text("apple.clientworkspacesections.branch_0.e742d863", "\(folder.subtitle ?? L10n.text("apple.clientworkspacesections.detached.88e34e4c"))")
     }
 
     var body: some View {
@@ -686,7 +686,7 @@ struct ClientFolderBranchRow: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: 0)
-                    Text("Switch")
+                    Text(L10n.text("apple.clientworkspacesections.switch.39921a74"))
                     Image(systemName: "chevron.right")
                 }
                 .font(ClientType.caption)
@@ -861,12 +861,12 @@ struct ClientJobRow: View {
                         Circle()
                             .fill(Theme.stateWorking)
                             .frame(width: 7, height: 7)
-                        Text("Running")
+                        Text(L10n.text("common.running"))
                             .font(ClientType.caption)
                             .foregroundStyle(Theme.stateWorking)
                     }
                 } else if isPaused {
-                    Text("Paused")
+                    Text(L10n.text("common.paused"))
                         .font(ClientType.caption)
                         .foregroundStyle(.tertiary)
                 }

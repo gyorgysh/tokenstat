@@ -39,13 +39,13 @@ final class WorkSearchLiveConnection {
     func search(query: String, kinds: Set<WorkReference.Kind> = [], cursor: String? = nil) async throws -> WorkSearchLive.Page {
         try requireCurrent()
         let parsed = try WorkSearchQuery(query)
-        guard !parsed.terms.isEmpty else { throw Unavailable(message: "Enter words to search.") }
+        guard !parsed.terms.isEmpty else { throw Unavailable(message: L10n.text("apple.worksearchliveconnection.enter_words_to_search.a02980fd")) }
         let allowed = try await transport.allowed()
         try requireCurrent()
-        guard allowed else { throw Unavailable(message: "Project access is no longer available on this computer.") }
+        guard allowed else { throw Unavailable(message: L10n.text("apple.worksearchliveconnection.project_access_is_no_longer_available_on_t.357734b8")) }
         let version = try await transport.version()
         try requireCurrent()
-        guard version >= 12 else { throw Unavailable(message: "Update tokenstat on this computer to search its work.") }
+        guard version >= 12 else { throw Unavailable(message: L10n.text("apple.worksearchliveconnection.update_tokenstat_on_this_computer_to_searc.f5cebe47")) }
         let response = try await transport.search(query, kinds, cursor)
         try requireCurrent()
         guard cursor == nil || response.nextCursor != cursor else { throw WorkSearchLive.Invalid.response }

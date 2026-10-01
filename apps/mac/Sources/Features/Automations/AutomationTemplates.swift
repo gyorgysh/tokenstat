@@ -17,41 +17,41 @@ struct AutomationTemplate: Identifiable, Hashable, Sendable {
 extension AutomationTemplate {
     static let suggested: [AutomationTemplate] = [
         AutomationTemplate(
-            title: "Daily brief",
-            subtitle: "Every morning at 8:00",
+            title: L10n.text("apple.automationtemplates.daily_brief.ba6a6869"),
+            subtitle: L10n.text("apple.automationtemplates.every_morning_at_8_00.5c6ddc01"),
             symbol: "sunrise",
-            name: "Daily brief",
-            prompt: "Summarise yesterday's usage and flag anything that needs attention.",
+            name: L10n.text("apple.automationtemplates.daily_brief.ba6a6869"),
+            prompt: L10n.text("apple.automationtemplates.summarise_yesterday_s_usage_and_flag_anyth.46ae43e4"),
             backendID: "claude",
             schedule: AutomationSchedule(kind: .daily, everySeconds: 0, hour: 8, minute: 0, weekday: 0),
             budgetSeconds: 600
         ),
         AutomationTemplate(
-            title: "System health check",
-            subtitle: "Every hour",
+            title: L10n.text("apple.automationtemplates.system_health_check.04b44a8a"),
+            subtitle: L10n.text("apple.automationtemplates.every_hour.a4bac465"),
             symbol: "heart.text.square",
-            name: "System health check",
-            prompt: "Check disk, memory and CPU, and confirm the tokenstat daemon is running. Report anything abnormal.",
+            name: L10n.text("apple.automationtemplates.system_health_check.04b44a8a"),
+            prompt: L10n.text("apple.automationtemplates.check_disk_memory_and_cpu_and_confirm_the.1eeb5edf"),
             backendID: "sh",
             schedule: AutomationSchedule(kind: .interval, everySeconds: 3600, hour: 0, minute: 0, weekday: 0),
             budgetSeconds: 120
         ),
         AutomationTemplate(
-            title: "Dependency check",
-            subtitle: "Every week",
+            title: L10n.text("apple.automationtemplates.dependency_check.cb31b5a0"),
+            subtitle: L10n.text("apple.automationtemplates.every_week.1b7e1851"),
             symbol: "shippingbox",
-            name: "Dependency check",
-            prompt: "Check for outdated or vulnerable dependencies (npm audit and the package managers this project uses) and summarise what needs a bump.",
+            name: L10n.text("apple.automationtemplates.dependency_check.cb31b5a0"),
+            prompt: L10n.text("apple.automationtemplates.check_for_outdated_or_vulnerable_dependenc.12dfb6f0"),
             backendID: "sh",
             schedule: AutomationSchedule(kind: .weekly, hour: 9, minute: 0, weekday: 0),
             budgetSeconds: 900
         ),
         AutomationTemplate(
-            title: "Weekday standup",
-            subtitle: "Weekdays at 9:00",
+            title: L10n.text("apple.automationtemplates.weekday_standup.26dadcac"),
+            subtitle: L10n.text("apple.automationtemplates.weekdays_at_9_00.745106c2"),
             symbol: "person.3",
-            name: "Weekday standup",
-            prompt: "Summarise open work and anything that blocked progress yesterday. Keep it short.",
+            name: L10n.text("apple.automationtemplates.weekday_standup.26dadcac"),
+            prompt: L10n.text("apple.automationtemplates.summarise_open_work_and_anything_that_bloc.52f7cb29"),
             backendID: "claude",
             schedule: AutomationSchedule(
                 kind: .weekdays, hour: 9, minute: 0,
@@ -60,10 +60,10 @@ extension AutomationTemplate {
             budgetSeconds: 600
         ),
         AutomationTemplate(
-            title: "Release",
-            subtitle: "Once, when you run it",
+            title: L10n.text("apple.automationtemplates.release.e020e3c6"),
+            subtitle: L10n.text("apple.automationtemplates.once_when_you_run_it.373a34a3"),
             symbol: "tag",
-            name: "Release",
+            name: L10n.text("apple.automationtemplates.release.e020e3c6"),
             prompt: releasePrompt,
             backendID: "claude",
             schedule: AutomationSchedule(kind: .once),
@@ -71,26 +71,5 @@ extension AutomationTemplate {
         ),
     ]
 
-    static let releasePrompt = """
-        Ship a release of this repository.
-
-        1. Read how this repo versions itself (workspace manifests, lockfile, \
-        app marketing version, changelog if one exists). Bump to the next \
-        version the same way the last release did. Refresh the lockfile if \
-        this project requires it.
-        2. Commit the bump only. Match this repository's commit style \
-        (CONTRIBUTING, commitlint, or recent subjects). Do not mix other \
-        work into the bump.
-        3. Push the branch to GitHub. Do not force. Do not amend published \
-        history.
-        4. Wait for CI on that commit. Poll until it finishes. If anything \
-        fails, read the failing job, fix it, commit the fix, push, and wait \
-        again. Repeat until CI is green.
-        5. Only then create an annotated version tag on that commit and push \
-        the tag. Do not tag a red commit. Do not move an existing tag.
-
-        If the working tree is dirty with unrelated changes, stop and say so. \
-        If you cannot see CI, say what you could not check and stop before \
-        the tag.
-        """
+    static let releasePrompt = L10n.text("apple.automationtemplates.ship_a_release_of_this_repository_1_read_h.ad0794e7")
 }

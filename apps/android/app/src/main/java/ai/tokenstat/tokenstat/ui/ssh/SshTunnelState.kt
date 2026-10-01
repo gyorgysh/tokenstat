@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.ssh
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
 import androidx.compose.runtime.Composable
@@ -55,14 +57,14 @@ fun tunnelStateOf(status: JsonObject?): TunnelState {
 /// answer: off and up are not warnings.
 fun TunnelState.message(): String? = when (this) {
     is TunnelState.NotConnected -> if (error != null) {
-        "Remote reach is on, but the tunnel is not connected: $error"
+        L10n.text("android.sshtunnelstate.remote_reach_is_on_but_the_tunnel_is_not_c.c73ccbbf", "${error}")
     } else {
-        "Remote reach is on, but the tunnel has not connected yet. It retries automatically."
+        L10n.text("android.sshtunnelstate.remote_reach_is_on_but_the_tunnel_has_not.024544f1")
     }
     is TunnelState.Unregistered ->
-        "This machine is on the tunnel, but the account directory does not list it yet. It will retry registration automatically."
+        L10n.text("android.sshtunnelstate.this_machine_is_on_the_tunnel_but_the_acco.7b29b022")
     is TunnelState.PlanExpired ->
-        "Your plan no longer includes remote reach. The relay is refusing this machine until the plan is restored."
+        L10n.text("android.sshtunnelstate.your_plan_no_longer_includes_remote_reach.fc6a711f")
     is TunnelState.Off, is TunnelState.Up -> null
 }
 

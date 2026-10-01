@@ -62,7 +62,7 @@ struct ClientPinnedWorkSection: View {
         let shelf = rows
         if !shelf.isEmpty {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                ClientSectionTitle(title: "Pinned", mark: "mark_pin")
+                ClientSectionTitle(title: L10n.text("apple.clientpinnedworksection.pinned.f20c8794"), mark: "mark_pin")
                 VStack(spacing: 0) {
                     ForEach(shelf) { row in
                         HStack(spacing: 0) {
@@ -75,7 +75,7 @@ struct ClientPinnedWorkSection: View {
                             Button {
                                 Task { await PinnedWorkActions.unpin(row.pin.reference) }
                             } label: {
-                                ActionIcon.pinned.label("Unpin \(row.pin.label)")
+                                ActionIcon.pinned.label(L10n.text("apple.clientpinnedworksection.unpin_0.450ccf9f", "\(row.pin.label)"))
                                     .labelStyle(.iconOnly)
                                     .font(ClientType.body)
                                     .foregroundStyle(Theme.accent)
@@ -83,8 +83,8 @@ struct ClientPinnedWorkSection: View {
                                     .contentShape(.rect)
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("Unpin \(row.pin.label)")
-                            .accessibilityHint("Removes this from Home. The conversation stays where it is.")
+                            .accessibilityLabel(L10n.text("apple.clientpinnedworksection.unpin_0.450ccf9f", "\(row.pin.label)"))
+                            .accessibilityHint(L10n.text("apple.clientpinnedworksection.removes_this_from_home_the_conversation_st.372f0dc3"))
                         }
                         if row.id != shelf.last?.id {
                             ThemeRule().padding(.horizontal, Theme.Space.m)
@@ -101,10 +101,10 @@ struct ClientPinnedWorkSection: View {
     /// target: combining the whole row would swallow it.
     private func content(_ pin: PinnedWorkStore.Pin) -> some View {
         let machine = account.account?.machines.first { $0.publicIdentity == pin.reference.hostIdentity }
-        let state = machine == nil ? "No longer linked"
-            : connectivity.isOffline ? "You are offline"
-            : machine?.online == true ? "Awake"
-            : machine?.online == false ? "Asleep" : "Status unknown"
+        let state = machine == nil ? L10n.text("apple.clientpinnedworksection.no_longer_linked.e409e8a7")
+            : connectivity.isOffline ? L10n.text("apple.clientpinnedworksection.you_are_offline.4d5c9439")
+            : machine?.online == true ? L10n.text("apple.clientpinnedworksection.awake.9123b5f4")
+            : machine?.online == false ? L10n.text("apple.clientpinnedworksection.asleep.60135e8f") : L10n.text("apple.clientpinnedworksection.status_unknown.e412d872")
         return HStack(spacing: Theme.Space.m) {
             Image(systemName: pin.reference.kind == .workspace ? "folder" : "bubble.left.and.bubble.right")
                 .font(ClientType.body)
@@ -115,8 +115,8 @@ struct ClientPinnedWorkSection: View {
                 Text(pin.label)
                     .font(ClientType.label.weight(.semibold))
                     .lineLimit(2)
-                (Text("\(pin.folderName) · \(machine?.displayName ?? "Machine") · \(state)")
-                    + Text(" · Pinned"))
+                (Text("\(pin.folderName) · \(machine?.displayName ?? L10n.text("apple.clientpinnedworksection.machine.8f1cc42d")) · \(state)")
+                    + Text(L10n.text("apple.clientpinnedworksection.pinned.9cd70bcf")))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -166,7 +166,7 @@ struct PinToggleButton: View {
                     }
                 }
             } label: {
-                (pinned ? ActionIcon.pinned : ActionIcon.pin).label(pinned ? "Pinned" : "Pin")
+                (pinned ? ActionIcon.pinned : ActionIcon.pin).label(pinned ? L10n.text("apple.clientpinnedworksection.pinned.f20c8794") : L10n.text("apple.clientpinnedworksection.pin.ff1cee74"))
                     .labelStyle(.iconOnly)
                     .font(ClientType.body)
                     .foregroundStyle(pinned ? Theme.accent : refused ? Theme.danger : .secondary)
@@ -174,8 +174,8 @@ struct PinToggleButton: View {
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(pinned ? "Unpin \(label)" : "Pin \(label)")
-            .accessibilityHint(refused ? "The shelf holds eight pins" : "Keep this on Home")
+            .accessibilityLabel(pinned ? L10n.text("apple.clientpinnedworksection.unpin_0.450ccf9f", "\(label)") : L10n.text("apple.clientpinnedworksection.pin_0.67fd141b", "\(label)"))
+            .accessibilityHint(refused ? L10n.text("apple.clientpinnedworksection.the_shelf_holds_eight_pins.5cd37254") : L10n.text("apple.clientpinnedworksection.keep_this_on_home.ee17cc72"))
         }
     }
 }

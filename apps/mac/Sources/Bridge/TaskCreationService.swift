@@ -38,7 +38,7 @@ extension TaskEditorTarget: TaskCreationService {
     func creationBackends() async throws -> [AgentBackend] { try await taskBackends() }
     func creationFolders() async throws -> [WorkspaceFolder] { try await taskFolders() }
     func createTask(_ submission: TaskCreationSubmission) async throws -> TaskCreationOutcome {
-        guard try await supportsCreation() else { throw TaskEditorDraft.Invalid.fields("Update this computer's tokenstat to create tasks from here.") }
+        guard try await supportsCreation() else { throw TaskEditorDraft.Invalid.fields(L10n.text("apple.taskcreationservice.update_this_computer_s_tokenstat_to_create.a461cefd")) }
         var params = try submission.fields.parameters(id: "", revision: 0)
         params.removeValue(forKey: "id"); params.removeValue(forKey: "expectedRevision")
         params["operationId"] = submission.operationID
@@ -47,7 +47,7 @@ extension TaskEditorTarget: TaskCreationService {
         return try await call("todo.createOnce", params, as: TaskCreationOutcome.self)
     }
     func taskCreationReceipt(operationID: String) async throws -> TaskCreationOutcome? {
-        guard try await supportsCreation() else { throw TaskEditorDraft.Invalid.fields("Update this computer's tokenstat to check task creation from here.") }
+        guard try await supportsCreation() else { throw TaskEditorDraft.Invalid.fields(L10n.text("apple.taskcreationservice.update_this_computer_s_tokenstat_to_check.e4f6a3c1")) }
         return try await call("todo.creationReceipt", ["operationId": operationID], as: TaskCreationOutcome?.self)
     }
 }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.chrome.TabBarChrome
@@ -112,9 +114,9 @@ import kotlinx.serialization.json.longOrNull
 /// this list: they are how you get here, not cards to rearrange. Port of
 /// `WorkspacesSection` in `WorkspacesLayout.swift`.
 enum class WorkSection(val key: String, val label: String, val detail: String) {
-    FOLDERS("folders", "Projects", "Projects on the connected computer"),
-    RECENT_CHATS("recent_chats", "Recent chats", "Chats opened recently"),
-    SESSIONS("sessions", "All sessions", "Terminals and agents running now"),
+    FOLDERS("folders", L10n.text("common.projects"), L10n.text("android.hostworkspaces.projects_on_the_connected_computer.458f1f5f")),
+    RECENT_CHATS("recent_chats", L10n.text("android.hostworkspaces.recent_chats.2ccfecbc"), L10n.text("android.hostworkspaces.chats_opened_recently.0953f969")),
+    SESSIONS("sessions", L10n.text("android.hostworkspaces.all_sessions.78648d4d"), L10n.text("android.hostworkspaces.terminals_and_agents_running_now.ac545246")),
 }
 
 /// How this device arranges the three work blocks once a host is connected.
@@ -182,9 +184,9 @@ fun harnessIdForCommand(command: String): String? = when (command.substringAfter
 /// One-line git summary: branch, ahead/behind, diff stat. Nil when there is
 /// nothing worth saying. Port of `WorkspaceFolder.subtitle`.
 fun folderSubtitle(folder: JsonObject): String? {
-    if ((folder["exists"] as? JsonPrimitive)?.booleanOrNull == false) return "Folder missing"
-    val git = folder["git"] as? JsonObject ?: return "Not a git repo"
-    if (git.bol("isRepo") != true) return "Not a git repo"
+    if ((folder["exists"] as? JsonPrimitive)?.booleanOrNull == false) return L10n.text("android.hostworkspaces.folder_missing.f06c68a6")
+    val git = folder["git"] as? JsonObject ?: return L10n.text("android.hostworkspaces.not_a_git_repo.86308fef")
+    if (git.bol("isRepo") != true) return L10n.text("android.hostworkspaces.not_a_git_repo.86308fef")
     val parts = mutableListOf<String>()
     git.str("branch")?.takeIf { it.isNotEmpty() }?.let { parts.add(it) }
     val ahead = (git["ahead"] as? JsonPrimitive)?.intOrNull ?: 0
@@ -369,19 +371,19 @@ fun HostCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (online == false) {
-                    Text("Offline", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                    Text(L10n.text("common.offline"), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
                 } else if (connected) {
                     // Soft accent, like iOS `.bordered`: the card already
                     // says connected three ways, the button need not shout.
                     TsAccentButton(
-                        label = "Disconnect",
+                        label = L10n.text("common.disconnect"),
                         icon = ActionIcon.Disconnect.vector,
                         small = true,
                         onClick = onDisconnect,
                     )
                 } else {
                     TsProminentButton(
-                        label = if (connecting) "Connecting…" else "Connect",
+                        label = if (connecting) L10n.text("android.hostworkspaces.connecting.72021eb7") else L10n.text("common.connect"),
                         icon = ActionIcon.Connect.vector,
                         small = true,
                         enabled = !connecting,
@@ -399,7 +401,7 @@ fun HostCard(
                     modifier = Modifier.fillMaxWidth().clickable { onOpenDevice() },
                 ) {
                     Text(
-                        "Open device",
+                        L10n.text("android.hostworkspaces.open_device.021a82bd"),
                         style = TsType.caption.copy(fontWeight = FontWeight.SemiBold),
                         color = colors.accent,
                     )
@@ -416,10 +418,10 @@ fun HostCard(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .padding(top = 4.dp)
-                        .semantics { contentDescription = "Auto-connect $name" },
+                        .semantics { contentDescription = L10n.text("android.hostworkspaces.auto_connect_0.3bbf847e", "${name}") },
                 ) {
                     Text(
-                        "Auto-connect",
+                        L10n.text("android.hostworkspaces.auto_connect.45b6d201"),
                         style = TsType.caption.copy(fontWeight = FontWeight.Medium),
                         color = colors.textSecondary,
                         modifier = Modifier.weight(1f),
@@ -516,7 +518,7 @@ fun SecurityCard(model: AppViewModel, peerKey: String?, peerName: String?) {
                     modifier = Modifier.size(12.dp),
                 )
                 Text(
-                    "End to end encrypted",
+                    L10n.text("android.hostworkspaces.end_to_end_encrypted.e3ac807e"),
                     style = TsType.caption.copy(fontWeight = FontWeight.Medium),
                     color = colors.textSecondary,
                     maxLines = 1,
@@ -524,7 +526,7 @@ fun SecurityCard(model: AppViewModel, peerKey: String?, peerName: String?) {
                 )
                 Icon(
                     if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    contentDescription = if (expanded) "Expanded" else "Collapsed",
+                    contentDescription = if (expanded) L10n.text("android.hostworkspaces.expanded.e72d5d8d") else L10n.text("android.hostworkspaces.collapsed.b322b652"),
                     tint = colors.textTertiary,
                     modifier = Modifier.size(12.dp),
                 )
@@ -544,23 +546,20 @@ fun SecurityCard(model: AppViewModel, peerKey: String?, peerName: String?) {
                 modifier = Modifier.padding(horizontal = Space.s),
             ) {
                 Text(
-                    "A connection between your devices is encrypted on one and decrypted " +
-                        "on the other, with keys that never leave them. The relay forwards " +
-                        "the bytes and cannot read them, and neither can tokenstat. Your " +
-                        "folders, terminals and agents are on your own computer.",
+                    L10n.text("android.hostworkspaces.a_connection_between_your_devices_is_encry.b8a28ce2"),
                     style = TsType.caption,
                     color = colors.textSecondary,
                 )
                 identity?.let {
                     SecurityKeyRow(
-                        title = "This device",
+                        title = L10n.text("android.hostworkspaces.this_device.d052579c"),
                         words = (it["words"] as? JsonPrimitive)?.contentOrNull,
                         fingerprint = (it["fingerprint"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
                         key = (it["key"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
                         copied = copied,
                         onCopy = { value ->
                             val manager = context.getSystemService(ClipboardManager::class.java)
-                            manager?.setPrimaryClip(ClipData.newPlainText("public key", value))
+                            manager?.setPrimaryClip(ClipData.newPlainText(L10n.text("android.hostworkspaces.public_key.f569a86d"), value))
                             copied = value
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         },
@@ -569,22 +568,21 @@ fun SecurityCard(model: AppViewModel, peerKey: String?, peerName: String?) {
                 peer?.let {
                     val label = (it["label"] as? JsonPrimitive)?.contentOrNull.orEmpty()
                     SecurityKeyRow(
-                        title = peerName ?: label.ifEmpty { "The other device" },
+                        title = peerName ?: label.ifEmpty { L10n.text("android.hostworkspaces.the_other_device.80640982") },
                         words = (it["words"] as? JsonPrimitive)?.contentOrNull,
                         fingerprint = (it["fingerprint"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
                         key = (it["key"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
                         copied = copied,
                         onCopy = { value ->
                             val manager = context.getSystemService(ClipboardManager::class.java)
-                            manager?.setPrimaryClip(ClipData.newPlainText("public key", value))
+                            manager?.setPrimaryClip(ClipData.newPlainText(L10n.text("android.hostworkspaces.public_key.f569a86d"), value))
                             copied = value
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         },
                     )
                 }
                 Text(
-                    "Noise XX handshake, X25519 keys, ChaCha20-Poly1305. " +
-                        "Compare the words with the other device to be sure.",
+                    L10n.text("android.hostworkspaces.noise_xx_handshake_x25519_keys_chacha20_po.233e27b7"),
                     style = TsType.caption.copy(fontSize = 10.sp),
                     color = colors.textTertiary,
                 )
@@ -628,7 +626,7 @@ private fun SecurityKeyRow(
                 overflow = TextOverflow.Ellipsis,
             )
             if (copied == key) {
-                Text("copied", style = TsType.caption, color = colors.accent)
+                Text(L10n.text("android.hostworkspaces.copied.fb30593c"), style = TsType.caption, color = colors.accent)
             }
         }
     }
@@ -659,7 +657,7 @@ fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> 
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                folder.str("name") ?: "Project",
+                folder.str("name") ?: L10n.text("android.hostworkspaces.project.98595978"),
                 style = TsType.subheadline.copy(fontWeight = FontWeight.Medium),
                 color = colors.textPrimary,
                 maxLines = 1,
@@ -699,7 +697,7 @@ fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> 
         }
         if (onRename != null) {
             androidx.compose.material3.IconButton(onClick = onRename) {
-                Icon(ai.tokenstat.tokenstat.ui.components.ActionIcon.Edit.vector, "Rename project", tint = colors.textTertiary)
+                Icon(ai.tokenstat.tokenstat.ui.components.ActionIcon.Edit.vector, L10n.text("android.hostworkspaces.rename_project.2a0478ee"), tint = colors.textTertiary)
             }
         }
         Icon(Icons.Default.ChevronRight, null, tint = colors.textTertiary, modifier = Modifier.size(12.dp))
@@ -713,7 +711,7 @@ fun WorkspaceSessionRow(session: JsonObject, displayName: String? = null, onOpen
     val colors = LocalTsColors.current
     val command = session.str("command").orEmpty()
     val harness = harnessIdForCommand(command)
-    val title = displayName ?: harness?.let { harnessName(it) } ?: command.substringAfterLast("/").ifEmpty { "Shell" }
+    val title = displayName ?: harness?.let { harnessName(it) } ?: command.substringAfterLast("/").ifEmpty { L10n.text("android.hostworkspaces.shell.a7332854") }
     val alive = (session["alive"] as? JsonPrimitive)?.booleanOrNull != false
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -745,7 +743,7 @@ fun WorkspaceSessionRow(session: JsonObject, displayName: String? = null, onOpen
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                if (alive) "Running · ${middleTruncate(session.str("cwd").orEmpty())}" else "Stopped · tap to open",
+                if (alive) L10n.text("android.hostworkspaces.running_0.e8f8155e", "${middleTruncate(session.str("cwd").orEmpty())}") else L10n.text("android.hostworkspaces.stopped_tap_to_open.669cde36"),
                 style = TsType.caption,
                 color = colors.textSecondary,
                 maxLines = 1,
@@ -788,7 +786,7 @@ fun WorkspaceChatRow(chat: JsonObject, folderName: String, onOpen: () -> Unit) {
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
-                chat.str("title") ?: "Chat",
+                chat.str("title") ?: L10n.text("android.hostworkspaces.chat.460b3a7d"),
                 style = TsType.subheadline.copy(
                     fontWeight = if (needsAttention) FontWeight.SemiBold else FontWeight.Medium,
                 ),
@@ -806,9 +804,9 @@ fun WorkspaceChatRow(chat: JsonObject, folderName: String, onOpen: () -> Unit) {
                     Text(RelativeClock.abbreviated(at), style = TsType.caption, color = colors.textSecondary, maxLines = 1)
                 }
                 if (needsAttention) {
-                    Text("· Needs approval", style = TsType.caption, color = colors.warning, maxLines = 1)
+                    Text(L10n.text("android.hostworkspaces.needs_approval.0c66fee1"), style = TsType.caption, color = colors.warning, maxLines = 1)
                 } else if (running) {
-                    Text("· Working", style = TsType.caption, color = colors.accent, maxLines = 1)
+                    Text(L10n.text("android.hostworkspaces.working.3d237298"), style = TsType.caption, color = colors.accent, maxLines = 1)
                 }
             }
         }
@@ -830,12 +828,12 @@ fun RequestAccessCard(
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
         EmptyState(
             icon = ActionIcon.Approve.vector,
-            title = "$hostName has not let this device in yet",
-            message = "Folders, files, terminals and the agents running in them are only open to devices that computer has allowed. This screen opens on its own once the request is answered.",
+            title = L10n.text("android.hostworkspaces.0_has_not_let_this_device_in_yet.e161eb1e", "${hostName}"),
+            message = L10n.text("android.hostworkspaces.folders_files_terminals_and_the_agents_run.22c37ee2"),
             art = { EmptyArt(EmptyArtKind.WorkspaceAccess) },
             action = {
                 TsAccentButton(
-                    label = if (requesting) "Asking…" else "Request access",
+                    label = if (requesting) L10n.text("android.hostworkspaces.asking.0b832840") else L10n.text("android.hostworkspaces.request_access.b06f1662"),
                     icon = ActionIcon.Approve.vector,
                     enabled = !requesting,
                     onClick = onRequest,
@@ -862,19 +860,19 @@ fun EmptyWorkspacesCard(
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
         EmptyState(
             icon = Icons.Default.Folder,
-            title = "Nothing to work on yet",
-            message = "Give $hostName a folder. Choose one it already has, or clone a repository onto it.",
+            title = L10n.text("android.hostworkspaces.nothing_to_work_on_yet.80d6fed9"),
+            message = L10n.text("android.hostworkspaces.give_0_a_folder_choose_one_it_already_has.bfd23a13", "${hostName}"),
             art = { EmptyArt(EmptyArtKind.NoMachine) },
         )
         TextButton(onClick = onChooseFolder) {
             Icon(ActionIcon.Reveal.vector, null, tint = colors.accent, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(Space.xs))
-            Text("Choose a folder", color = colors.accent)
+            Text(L10n.text("android.hostworkspaces.choose_a_folder.5c71b8cd"), color = colors.accent)
         }
         TextButton(onClick = onClone) {
             Icon(ActionIcon.Download.vector, null, tint = colors.accent, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(Space.xs))
-            Text("Clone a repository", color = colors.accent)
+            Text(L10n.text("android.hostworkspaces.clone_a_repository.749e5d4d"), color = colors.accent)
         }
     }
 }
@@ -904,7 +902,7 @@ fun FolderChooserDialog(
                         Icon(Icons.Default.Folder, null, tint = LocalTsColors.current.accent)
                         Spacer(Modifier.width(Space.m))
                         Column(Modifier.weight(1f)) {
-                            Text(folder.str("name") ?: "Project", fontWeight = FontWeight.Medium)
+                            Text(folder.str("name") ?: L10n.text("android.hostworkspaces.project.98595978"), fontWeight = FontWeight.Medium)
                             Text(
                                 folder.str("path") ?: "",
                                 style = MaterialTheme.typography.bodySmall,
@@ -918,7 +916,7 @@ fun FolderChooserDialog(
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(L10n.text("common.cancel")) } },
     )
 }
 
@@ -950,7 +948,7 @@ fun WorkspacesEditor(
             WorkspacesLayoutPreview(sections = visible)
         }
         item {
-            SectionLabel("Order of Folders, Recent chats and All sessions on the connected machine. Computers stay above.")
+            SectionLabel(L10n.text("android.hostworkspaces.order_of_folders_recent_chats_and_all_sess.1e31aba6"))
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
@@ -971,7 +969,7 @@ fun WorkspacesEditor(
                 }
             }
         }
-        item { SectionLabel("Visible") }
+        item { SectionLabel(L10n.text("android.hostworkspaces.visible.8411f5ab")) }
         items(visible) { section ->
             TsCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -981,14 +979,14 @@ fun WorkspacesEditor(
                     }
                     TextButton(onClick = {
                         draftHidden = draftHidden + section
-                    }) { Text("Hide", color = colors.accent) }
+                    }) { Text(L10n.text("android.hostworkspaces.hide.ac20a57b"), color = colors.accent) }
                     Icon(
-                        Icons.Default.KeyboardArrowUp, "Move up",
+                        Icons.Default.KeyboardArrowUp, L10n.text("android.hostworkspaces.move_up.c66feb5e"),
                         tint = colors.textSecondary,
                         modifier = Modifier.clickable { move(section, -1) }.padding(8.dp),
                     )
                     Icon(
-                        Icons.Default.KeyboardArrowDown, "Move down",
+                        Icons.Default.KeyboardArrowDown, L10n.text("android.hostworkspaces.move_down.40bb50da"),
                         tint = colors.textSecondary,
                         modifier = Modifier.clickable { move(section, 1) }.padding(8.dp),
                     )
@@ -996,7 +994,7 @@ fun WorkspacesEditor(
             }
         }
         if (draftHidden.isNotEmpty()) {
-            item { SectionLabel("Hidden") }
+            item { SectionLabel(L10n.text("android.hostworkspaces.hidden.7e6fefff")) }
             items(draftOrder.filter { it in draftHidden }) { section ->
                 TsCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1005,7 +1003,7 @@ fun WorkspacesEditor(
                             Text(section.detail, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
                         }
                         TextButton(onClick = { draftHidden = draftHidden - section }) {
-                            Text("Show", color = colors.accent)
+                            Text(L10n.text("android.hostworkspaces.show.0df6f1ca"), color = colors.accent)
                         }
                     }
                 }
@@ -1014,8 +1012,8 @@ fun WorkspacesEditor(
         item {
             Spacer(Modifier.height(Space.s))
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                TsAccentButton(label = "Done", onClick = { onDone(draftOrder, draftHidden) })
-                TextButton(onClick = onCancel) { Text("Cancel") }
+                TsAccentButton(label = L10n.text("common.done"), onClick = { onDone(draftOrder, draftHidden) })
+                TextButton(onClick = onCancel) { Text(L10n.text("common.cancel")) }
             }
         }
     }
@@ -1041,7 +1039,7 @@ fun WorkspacesLayoutPreview(sections: List<WorkSection>) {
         )
         if (sections.isEmpty()) {
             Text(
-                "Only computers will show",
+                L10n.text("android.hostworkspaces.only_computers_will_show.dcb66766"),
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.textSecondary,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),

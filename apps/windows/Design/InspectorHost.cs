@@ -44,8 +44,8 @@ internal static class DeviceScopeNames
 
     public static string Label(this DeviceScope scope) => scope switch
     {
-        DeviceScope.ThisDevice => "This device",
-        DeviceScope.AllDevices => "All devices",
+        DeviceScope.ThisDevice => L10n.Text("windows.inspectorhost.this_device.d052579c"),
+        DeviceScope.AllDevices => L10n.Text("windows.inspectorhost.all_devices.0594fe82"),
         _ => scope.ToString(),
     };
 
@@ -148,7 +148,7 @@ internal sealed class InspectorHost : Grid
             Width = 6, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_resizeHandle, "Resize details panel");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_resizeHandle, L10n.Text("windows.inspectorhost.resize_details_panel.e84be123"));
         _resizeHandle.DragDelta += (_, drag) =>
         {
             _inspectorWidth = Math.Clamp(_inspectorWidth - drag.HorizontalChange, 240, Math.Min(480, Math.Max(240, ActualWidth - MinimumContentWidth - 6)));

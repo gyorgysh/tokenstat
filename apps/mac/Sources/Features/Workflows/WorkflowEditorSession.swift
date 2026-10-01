@@ -136,7 +136,7 @@ final class WorkflowEditorSession {
         working = true
         defer { working = false }
         guard let storage else {
-            errorMessage = "Waiting for this account and computer to be verified before saving work."
+            errorMessage = L10n.text("apple.workfloweditorsession.waiting_for_this_account_and_computer_to_b.f97b4242")
             return
         }
         do {
@@ -213,7 +213,7 @@ final class WorkflowEditorSession {
             return
         }
         guard let current else {
-            errorMessage = "This workflow was deleted on the computer. Your draft is still here."
+            errorMessage = L10n.text("apple.workfloweditorsession.this_workflow_was_deleted_on_the_computer.ae1bafd3")
             missing = true
             return
         }
@@ -413,7 +413,7 @@ final class WorkflowEditorSession {
             scheduleSave()
         }
         designTranscript = result.transcript
-        noticeMessage = "Draft ready. Review the steps, then create the workflow. It will not run until you press Run."
+        noticeMessage = L10n.text("apple.workfloweditorsession.draft_ready_review_the_steps_then_create_t.aedb58ee")
     }
 
     func addStep(kind: WorkflowNodeKind, backend: String? = nil, automationID: String? = nil) {
@@ -575,7 +575,7 @@ final class WorkflowEditorSession {
             current = try await service.workflow(id: id)
             missing = current == nil
             if missing {
-                errorMessage = "This workflow was deleted on the computer. Your draft is still here."
+                errorMessage = L10n.text("apple.workfloweditorsession.this_workflow_was_deleted_on_the_computer.ae1bafd3")
                 conflict = false
                 return
             }
@@ -597,7 +597,7 @@ final class WorkflowEditorSession {
     private func reconcileComputerCopy(current: WorkflowGraph, baseline: WorkflowGraph) {
         guard supportsEdits else {
             if !fields.matches(baseline), !fields.matches(current) {
-                noticeMessage = "This workflow also changed on the computer. Saving overwrites that copy."
+                noticeMessage = L10n.text("apple.workfloweditorsession.this_workflow_also_changed_on_the_computer.02e4daa4")
             }
             return
         }
@@ -650,13 +650,13 @@ final class WorkflowEditorSession {
             }
             if Self.isUncertain(error) {
                 canRetryCreate = true
-                errorMessage = "The computer did not confirm this workflow. Check this folder's workflows before creating another."
+                errorMessage = L10n.text("apple.workfloweditorsession.the_computer_did_not_confirm_this_workflow.aad48a8a")
             } else if error.localizedDescription.lowercased().contains("already exists") {
                 if let existing = try? await service.workflow(id: pendingID) {
                     await confirmCreated(existing)
                 } else {
                     canRetryCreate = true
-                    errorMessage = "A workflow with this id is already on the computer. Check this folder before creating another."
+                    errorMessage = L10n.text("apple.workfloweditorsession.a_workflow_with_this_id_is_already_on_the.dbc3886e")
                 }
             } else {
                 saved.pendingCreate = false
@@ -670,7 +670,7 @@ final class WorkflowEditorSession {
 
     private func readCreation() async {
         guard let pendingID = saved.pendingID else {
-            errorMessage = "This workflow is not in the folder yet. It may still arrive, or it may never have been created. Do not create another until you have checked."
+            errorMessage = L10n.text("apple.workfloweditorsession.this_workflow_is_not_in_the_folder_yet_it.cbedf44d")
             return
         }
         do {
@@ -678,7 +678,7 @@ final class WorkflowEditorSession {
                 await confirmCreated(match)
             } else {
                 canRetryCreate = true
-                errorMessage = "This workflow is not in the folder yet. It may still arrive, or it may never have been created. Do not create another until you have checked."
+                errorMessage = L10n.text("apple.workfloweditorsession.this_workflow_is_not_in_the_folder_yet_it.cbedf44d")
             }
         } catch {
             errorMessage = Self.display(error)
@@ -704,11 +704,11 @@ final class WorkflowEditorSession {
 
     private func announceCreated(_ created: WorkflowGraph) {
         if created.schedule.repeats, let place = HostScheduleClock.place(schedulerTimezone) {
-            noticeMessage = "\(created.name) will run \(created.schedule.summary) in \(place)."
+            noticeMessage = L10n.text("apple.workfloweditorsession.0_will_run_1_in_2.9f9e0264", "\(created.name)", "\(created.schedule.summary)", "\(place)")
         } else if created.schedule.repeats {
-            noticeMessage = "\(created.name) will run \(created.schedule.summary)."
+            noticeMessage = L10n.text("apple.workfloweditorsession.0_will_run_1.0536f940", "\(created.name)", "\(created.schedule.summary)")
         } else {
-            noticeMessage = "\(created.name) is saved. It will not run until you press Run."
+            noticeMessage = L10n.text("apple.workfloweditorsession.0_is_saved_it_will_not_run_until_you_press.69fb26e6", "\(created.name)")
         }
     }
 
@@ -721,7 +721,7 @@ final class WorkflowEditorSession {
         adoptDocument()
         conflict = false
         errorMessage = nil
-        noticeMessage = "Saved \(updated.name)."
+        noticeMessage = L10n.text("apple.workfloweditorsession.saved_0.d851298f", "\(updated.name)")
         _ = await persist()
         NotificationCenter.default.post(name: Self.didChange, object: target)
     }
@@ -751,7 +751,7 @@ final class WorkflowEditorSession {
         let name = fields.name.trimmingCharacters(in: .whitespacesAndNewlines)
         return WorkflowGraph(
             id: saved.graphID ?? saved.pendingID ?? "",
-            name: name.isEmpty ? "Untitled" : name,
+            name: name.isEmpty ? L10n.text("apple.workfloweditorsession.untitled.f59ab8d1") : name,
             scope: .workspace,
             workspaceID: fields.workspaceID,
             budgetSeconds: fields.budgetSeconds ?? 10_800,

@@ -37,38 +37,33 @@ struct ClientSetupProjectStep: View {
 
     var body: some View {
         StepScaffold(
-            title: "Choose a project",
-            subtitle: "The agent works inside one folder at a time. Bring a repository "
-                + "down onto the machine, or point at a folder it already has.",
+            title: L10n.text("apple.clientsetupprojectstep.choose_a_project.8ba607b1"),
+            subtitle: L10n.text("apple.clientsetupprojectstep.the_agent_works_inside_one_folder_at_a_tim.ff4e99e5"),
             number: 7,
             failure: failure,
             onDismissError: { failure = nil }
         ) {
             route(
                 .clone,
-                title: "Clone a repository",
-                body: "tokenstat runs git on the machine and registers the folder when it "
-                    + "finishes. You watch the whole thing, so a passphrase or an unknown "
-                    + "host key is something you can answer.",
+                title: L10n.text("apple.clientsetupprojectstep.clone_a_repository.749e5d4d"),
+                body: L10n.text("apple.clientsetupprojectstep.tokenstat_runs_git_on_the_machine_and_regi.1c501f13"),
                 symbol: "arrow.down.doc"
             )
             route(
                 .existing,
-                title: "A folder already on the machine",
-                body: "Browse the machine's disk and register a folder that is there. "
-                    + "Nothing is copied and nothing is changed.",
+                title: L10n.text("apple.clientsetupprojectstep.a_folder_already_on_the_machine.d5432a67"),
+                body: L10n.text("apple.clientsetupprojectstep.browse_the_machine_s_disk_and_register_a_f.e316c912"),
                 symbol: "folder"
             )
-            Text("Whichever you choose, the machine opens with a first task written into "
-                + "the message box. Nothing is sent until you send it.")
+            Text(L10n.text("apple.clientsetupprojectstep.whichever_you_choose_the_machine_opens_wit.cc343316"))
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         } footer: {
-            Button("Not now", .next) { finish(folderID: nil) }
+            Button(L10n.text("apple.clientsetupprojectstep.not_now.a0e63d7c"), .next) { finish(folderID: nil) }
                 .buttonStyle(.bordered)
         }
-        .navigationTitle("Project")
+        .navigationTitle(L10n.text("apple.clientsetupprojectstep.project.98595978"))
         .accessibilityIdentifier("setup.project")
         .navigationDestination(item: $route) { chosen in
             if let peer {
@@ -102,8 +97,7 @@ struct ClientSetupProjectStep: View {
             // it is worth saying: leaving now would offer to continue a setup
             // that is finished.
             failure = model.failure ?? ClientSetupFailure(
-                explanation: "The saved setup could not be cleared, so leaving now would "
-                    + "offer to continue this again.",
+                explanation: L10n.text("apple.clientsetupprojectstep.the_saved_setup_could_not_be_cleared_so_le.d09c532d"),
                 action: .retry,
                 details: nil
             )
@@ -124,8 +118,7 @@ struct ClientSetupProjectStep: View {
     /// Deliberately not "fix" or "add": the first thing somebody sends should
     /// not be a change they have to review before they have seen the place.
     static let firstTask =
-        "Give me a short tour of this project: what it does, how it is laid out, "
-        + "and where you would start."
+        L10n.text("apple.clientsetupprojectstep.give_me_a_short_tour_of_this_project_what.bd63b9e4")
 
     private func route(
         _ value: ProjectRoute,

@@ -10,12 +10,12 @@ struct ChatBrowserSettings: View {
     @AppStorage(ChatBrowserPreferences.opensLinksKey) private var opensLinks = true
 
     var body: some View {
-        Card(title: "Chat browser", subtitle: "Keep previews beside your conversation", mark: "mark_local") {
+        Card(title: L10n.text("apple.chatbrowsersettings.chat_browser.d2fc9820"), subtitle: L10n.text("apple.chatbrowsersettings.keep_previews_beside_your_conversation.3df6d610"), mark: "mark_local") {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Toggle("Open chat links beside the conversation", isOn: $opensLinks)
+                Toggle(L10n.text("apple.chatbrowsersettings.open_chat_links_beside_the_conversation.c4350d58"), isOn: $opensLinks)
                     .toggleStyle(.brandCheckbox)
                     .font(Theme.callout)
-                Text("Web links open in the resizable browser pane. Turn this off to use your default browser. You can always open the pane from the chat toolbar.")
+                Text(L10n.text("apple.chatbrowsersettings.web_links_open_in_the_resizable_browser_pa.27b4b20a"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

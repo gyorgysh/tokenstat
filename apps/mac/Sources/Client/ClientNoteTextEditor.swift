@@ -44,10 +44,10 @@ final class NoteTextSurface: UIView {
         editor.backgroundColor = .clear
         editor.font = .preferredFont(forTextStyle: .body)
         editor.adjustsFontForContentSizeCategory = true
-        editor.accessibilityLabel = "Note body"
+        editor.accessibilityLabel = L10n.text("apple.clientnotetexteditor.note_body.39ff9bdc")
         editor.textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
         var configuration = UIButton.Configuration.plain()
-        configuration.title = "Format"
+        configuration.title = L10n.text("apple.clientnotetexteditor.format.2f343666")
         configuration.image = UIImage(systemName: "textformat")
         configuration.imagePadding = 6
         formatButton.configuration = configuration
@@ -72,7 +72,7 @@ final class NoteTextSurface: UIView {
         ])
     }
 
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    required init?(coder: NSCoder) { fatalError(L10n.text("apple.clientnotetexteditor.init_coder_has_not_been_implemented.bc93e5bb")) }
 
     private func apply(_ style: NoteFormatting) {
         let edit = style.edit(editor.text, selection: editor.selectedRange)

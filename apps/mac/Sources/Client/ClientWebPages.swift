@@ -17,11 +17,11 @@ enum ClientWebPages {
     static let host = "https://tokenstat.ai"
 
     static func privacy(host: String = host) -> URL {
-        withMobileFlag(url("\(host)/privacy"))
+        withMobileFlag(url(L10n.text("apple.clientwebpages.0_privacy.543e033a", "\(host)")))
     }
 
     static func terms(host: String = host) -> URL {
-        withMobileFlag(url("\(host)/terms"))
+        withMobileFlag(url(L10n.text("apple.clientwebpages.0_terms.15a96a22", "\(host)")))
     }
 
     static func publicProfile(host: String, handle: String) -> URL {

@@ -13,12 +13,12 @@ import Foundation
 enum AppInfo {
     /// Marketing version, e.g. "0.2.9".
     static var version: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? L10n.text("common.unknown")
     }
 
     /// Build number, e.g. "2".
     static var build: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown"
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? L10n.text("common.unknown")
     }
 
     /// "0.2.9 (2)".
@@ -28,7 +28,7 @@ enum AppInfo {
     /// Info.plist cannot disagree about the year or the company.
     static var copyright: String {
         Bundle.main.infoDictionary?["NSHumanReadableCopyright"] as? String
-            ?? "© pueev OÜ. All rights reserved."
+            ?? L10n.text("apple.appinfo.pueev_o_all_rights_reserved.b1734f76")
     }
 
     /// Tags outbound links to sites we own, so analytics can tell app traffic
@@ -47,8 +47,8 @@ enum AppInfo {
 
     /// Who made it, and how to reach them. Shown in the About window.
     enum Author {
-        static let name = "Gyorgy"
-        static let role = "AI-native product engineer"
+        static let name = L10n.text("apple.appinfo.gyorgy.cdb983c1")
+        static let role = L10n.text("apple.appinfo.ai_native_product_engineer.e8e5f442")
         static let site = URL(string: "https://gyorgy.sh/?ref=\(AppInfo.referrer)")!
         static let siteLabel = "gyorgy.sh"
         static let email = URL(string: "mailto:gyorgy@pueev.com")!

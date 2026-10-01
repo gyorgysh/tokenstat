@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.sample
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -72,12 +74,12 @@ fun SampleSheet(onDismiss: () -> Unit) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Sample",
+                    L10n.text("android.samplesheet.sample.95a2f1ed"),
                     style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
                     color = colors.textPrimary,
                     modifier = Modifier.weight(1f),
                 )
-                TsSecondaryButton(label = "Done", small = true, onClick = onDismiss)
+                TsSecondaryButton(label = L10n.text("common.done"), small = true, onClick = onDismiss)
             }
             Column(
                 Modifier.verticalScroll(rememberScrollState()),
@@ -85,12 +87,12 @@ fun SampleSheet(onDismiss: () -> Unit) {
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                     Text(
-                        "AN EXAMPLE, NOT YOUR DATA",
+                        L10n.text("android.samplesheet.an_example_not_your_data.5e51cd25"),
                         style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
                         color = colors.accent,
                     )
                     Text(
-                        "A small task, start to finish",
+                        L10n.text("android.samplesheet.a_small_task_start_to_finish.58a0447b"),
                         style = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.SemiBold),
                         color = colors.textPrimary,
                     )
@@ -100,25 +102,24 @@ fun SampleSheet(onDismiss: () -> Unit) {
                         color = colors.textSecondary,
                     )
                 }
-                TsCard(title = "The conversation") {
+                TsCard(title = L10n.text("android.samplesheet.the_conversation.16b401bd")) {
                     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                         SampleStore.conversation.forEach { turn -> TurnRow(turn) }
                     }
                 }
-                TsCard(title = "What changed in ${SampleStore.file}") {
+                TsCard(title = L10n.text("android.samplesheet.what_changed_in_0.27f74287", "${SampleStore.file}")) {
                     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                         Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                             SampleStore.diff.forEach { line -> DiffRow(line) }
                         }
                         Text(
-                            "One line. Nothing was committed and nothing was published: " +
-                                "that stays something you do on purpose.",
+                            L10n.text("android.samplesheet.one_line_nothing_was_committed_and_nothing.09cd6075"),
                             style = TextStyle(fontSize = 12.sp),
                             color = colors.textSecondary,
                         )
                     }
                 }
-                TsCard(title = "What it counted") {
+                TsCard(title = L10n.text("android.samplesheet.what_it_counted.bd0fa788")) {
                     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                         SampleStore.readings.forEach { reading ->
                             Row(verticalAlignment = Alignment.CenterVertically) {

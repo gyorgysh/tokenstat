@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
@@ -46,36 +48,36 @@ fun ProjectWorktrees(model: AppViewModel, peer: String, folder: JsonObject, onBu
         runCatching {
             val protocol = model.workspaceSection(peer, "protocol", buildJsonObject {}) as? JsonObject
             if ((HostContracts.protocolOf(protocol) ?: 0) < HostContracts.WORKTREES_MIN_PROTOCOL)
-                error("Update tokenstat on this project's computer to use worktrees.")
+                error(L10n.text("android.projectworktrees.update_tokenstat_on_this_project_s_compute.1dae246f"))
             trees = (model.workspaceSection(peer, "workspace.worktrees", buildJsonObject { put("id", workspace) }) as JsonArray)
                 .mapNotNull { it as? JsonObject }
             available = true
-        }.onFailure { error = it.message ?: "Could not read worktrees." }
+        }.onFailure { error = it.message ?: L10n.text("android.projectworktrees.could_not_read_worktrees.1f49011b") }
         reading = false
     }
     if (pickingParent) {
-        FolderPickerScreen(model, peer, "Project computer", onClose = { pickingParent = false }, onAdded = {},
+        FolderPickerScreen(model, peer, L10n.text("android.projectworktrees.project_computer.e5c51d2d"), onClose = { pickingParent = false }, onAdded = {},
             onPickedPath = { parent = it; pickingParent = false })
         return
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Work on another branch without interrupting this project's chats or terminals.")
+        Text(L10n.text("android.projectworktrees.work_on_another_branch_without_interruptin.c1a6919c"))
         if (reading) LinearProgressIndicator(Modifier.fillMaxWidth())
         error?.let { StickyErrorCard(it, onRetry = if (!working) ({ attempt++ }) else null) }
         if (available) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = !showingFolders, onClick = { showingFolders = false }, label = { Text("New worktree") }, enabled = !working)
-                FilterChip(selected = showingFolders, onClick = { showingFolders = true }, label = { Text("Working folders (${trees.size})") }, enabled = !working)
+                FilterChip(selected = !showingFolders, onClick = { showingFolders = false }, label = { Text(L10n.text("android.projectworktrees.new_worktree.4f210afe")) }, enabled = !working)
+                FilterChip(selected = showingFolders, onClick = { showingFolders = true }, label = { Text(L10n.text("android.projectworktrees.working_folders_0.b9b73029", "${trees.size}")) }, enabled = !working)
             }
             if (showingFolders) {
                 trees.forEach { tree ->
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(tree["branch"]?.jsonPrimitive?.contentOrNull ?: "Detached commit", style = MaterialTheme.typography.titleSmall)
+                        Text(tree["branch"]?.jsonPrimitive?.contentOrNull ?: L10n.text("android.projectworktrees.detached_commit.05f9a89e"), style = MaterialTheme.typography.titleSmall)
                         Text(tree["path"]?.jsonPrimitive?.content.orEmpty(), style = MaterialTheme.typography.bodySmall)
                         val missing = tree["prunable"]?.jsonPrimitive?.booleanOrNull == true
-                        if (missing) Text("Folder no longer available")
+                        if (missing) Text(L10n.text("android.projectworktrees.folder_no_longer_available.c06a8a39"))
                         if (!missing && tree["bare"]?.jsonPrimitive?.booleanOrNull != true) {
-                            TsSecondaryButton(label = "Open project", enabled = !working, onClick = {
+                            TsSecondaryButton(label = L10n.text("android.projectworktrees.open_project.5e5eba7f"), enabled = !working, onClick = {
                                 working = true
                                 scope.launch {
                                     runCatching { model.workspaceSection(peer, "workspace.add", buildJsonObject { put("path", tree["path"]!!) }) as JsonObject }
@@ -88,13 +90,13 @@ fun ProjectWorktrees(model: AppViewModel, peer: String, folder: JsonObject, onBu
                     }
                 }
             } else {
-                OutlinedTextField(name, { name = it }, label = { Text("Name") }, placeholder = { Text("improved-search") }, enabled = !working, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(prefix, { prefix = it }, label = { Text("Branch prefix (optional)") }, enabled = !working, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(base, { base = it }, label = { Text("Start from") }, enabled = !working, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(parent, { parent = it }, label = { Text("Parent folder on computer") }, enabled = !working, singleLine = true, modifier = Modifier.fillMaxWidth())
-                TsSecondaryButton(label = "Choose parent folder", enabled = !working, onClick = { pickingParent = true })
-                Text("Branch: ${if (prefix.isBlank()) name else "$prefix/$name"}", style = MaterialTheme.typography.bodySmall)
-                TsAccentButton(label = if (working) "Creating…" else "Create worktree", enabled = !working && name.isNotBlank() && base.isNotBlank() && parent.isNotBlank(), onClick = {
+                OutlinedTextField(name, { name = it }, label = { Text(L10n.text("android.projectworktrees.name.dcd1d522")) }, placeholder = { Text(L10n.text("android.projectworktrees.improved_search.fda070d5")) }, enabled = !working, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(prefix, { prefix = it }, label = { Text(L10n.text("android.projectworktrees.branch_prefix_optional.7797f25d")) }, enabled = !working, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(base, { base = it }, label = { Text(L10n.text("android.projectworktrees.start_from.eb3f51dc")) }, enabled = !working, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(parent, { parent = it }, label = { Text(L10n.text("android.projectworktrees.parent_folder_on_computer.daa66b09")) }, enabled = !working, singleLine = true, modifier = Modifier.fillMaxWidth())
+                TsSecondaryButton(label = L10n.text("android.projectworktrees.choose_parent_folder.c1b4bfea"), enabled = !working, onClick = { pickingParent = true })
+                Text(L10n.text("android.projectworktrees.branch_0.1262f157", "${if (prefix.isBlank()) name else "$prefix/$name"}"), style = MaterialTheme.typography.bodySmall)
+                TsAccentButton(label = if (working) L10n.text("android.projectworktrees.creating.c79ed949") else L10n.text("android.projectworktrees.create_worktree.fdedbce2"), enabled = !working && name.isNotBlank() && base.isNotBlank() && parent.isNotBlank(), onClick = {
                     working = true
                     error = null
                     scope.launch {
@@ -104,7 +106,7 @@ fun ProjectWorktrees(model: AppViewModel, peer: String, folder: JsonObject, onBu
                         }) as JsonObject }.onSuccess {
                             preferences.edit().putString("worktree.namespace", prefix.trim()).apply()
                             onOpen(it)
-                        }.onFailure { error = it.message ?: "Could not create worktree." }
+                        }.onFailure { error = it.message ?: L10n.text("android.projectworktrees.could_not_create_worktree.0777d062") }
                         working = false
                     }
                 })

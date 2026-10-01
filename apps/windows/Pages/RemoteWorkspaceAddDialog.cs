@@ -15,15 +15,15 @@ internal sealed class RemoteWorkspaceAddDialog
 {
     private readonly ContentDialog _dialog = new()
     {
-        Title = "On another machine",
-        PrimaryButtonText = "Register this folder",
-        CloseButtonText = "Cancel",
+        Title = L10n.Text("windows.remoteworkspaceadddialog.on_another_machine.4b887bce"),
+        PrimaryButtonText = L10n.Text("windows.remoteworkspaceadddialog.register_this_folder.e273b524"),
+        CloseButtonText = L10n.Text("common.cancel"),
         IsPrimaryButtonEnabled = false,
     };
-    private readonly ComboBox _machine = new() { Header = "Computer", HorizontalAlignment = HorizontalAlignment.Stretch };
-    private readonly ComboBox _route = new() { Header = "Add", ItemsSource = new[] { "An existing folder", "Clone a repository" }, SelectedIndex = 0 };
-    private readonly TextBox _url = new() { Header = "Repository address", PlaceholderText = "https://github.com/owner/project.git" };
-    private readonly TextBox _name = new() { Header = "Folder name (optional)" };
+    private readonly ComboBox _machine = new() { Header = L10n.Text("windows.remoteworkspaceadddialog.computer.76ed42d2"), HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly ComboBox _route = new() { Header = L10n.Text("common.add"), ItemsSource = new[] { L10n.Text("windows.remoteworkspaceadddialog.an_existing_folder.d02dd1f1"), L10n.Text("windows.remoteworkspaceadddialog.clone_a_repository.749e5d4d") }, SelectedIndex = 0 };
+    private readonly TextBox _url = new() { Header = L10n.Text("windows.remoteworkspaceadddialog.repository_address.790657b9"), PlaceholderText = "https://github.com/owner/project.git" };
+    private readonly TextBox _name = new() { Header = L10n.Text("windows.remoteworkspaceadddialog.folder_name_optional.1c606620") };
     private readonly StackPanel _cloneFields = new() { Spacing = Theme.SpaceS, Visibility = Visibility.Collapsed };
     private readonly TextBlock _path = new() { FontFamily = Fonts.Mono, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
     private readonly StackPanel _folders = new() { Spacing = 4 };
@@ -49,7 +49,7 @@ internal sealed class RemoteWorkspaceAddDialog
         _cloneFields.Children.Add(_name);
         _cloneFields.Children.Add(new TextBlock
         {
-            Text = "Git runs on the selected computer. Private repositories use credentials on that computer. Closing this window leaves a started clone running there.",
+            Text = L10n.Text("windows.remoteworkspaceadddialog.git_runs_on_the_selected_computer_private.9d863aab"),
             TextWrapping = TextWrapping.Wrap,
             Opacity = 0.7,
         });
@@ -62,7 +62,7 @@ internal sealed class RemoteWorkspaceAddDialog
         body.Children.Add(new ScrollViewer { Content = _folders, Height = 190 });
         body.Children.Add(_progress);
         body.Children.Add(_notice);
-        var retry = ActionIconGlyph.Button("Reload folders", ActionIcon.Refresh, async (_, _) =>
+        var retry = ActionIconGlyph.Button(L10n.Text("windows.remoteworkspaceadddialog.reload_folders.e9d554ab"), ActionIcon.Refresh, async (_, _) =>
         {
             if (_working || _cloneSession is not null) return;
             if (Peer is null) await LoadPeersAsync();
@@ -103,8 +103,8 @@ internal sealed class RemoteWorkspaceAddDialog
 
     private void UpdateActions()
     {
-        _dialog.PrimaryButtonText = _working ? (Clone ? "Cloning…" : "Registering…")
-            : _cloneSession is not null ? "Check clone" : Clone ? "Clone here" : "Register this folder";
+        _dialog.PrimaryButtonText = _working ? (Clone ? L10n.Text("windows.remoteworkspaceadddialog.cloning.2c3cf7cb") : L10n.Text("windows.remoteworkspaceadddialog.registering.6bf4d89b"))
+            : _cloneSession is not null ? L10n.Text("windows.remoteworkspaceadddialog.check_clone.8fb17b7e") : Clone ? L10n.Text("windows.remoteworkspaceadddialog.clone_here.d17ed090") : L10n.Text("windows.remoteworkspaceadddialog.register_this_folder.e273b524");
         _dialog.IsPrimaryButtonEnabled = !_working && !_browsing && Peer is not null
             && !string.IsNullOrEmpty(_currentPath) && (!Clone || !string.IsNullOrWhiteSpace(_url.Text));
         _machine.IsEnabled = !_working && _cloneSession is null;
@@ -123,7 +123,7 @@ internal sealed class RemoteWorkspaceAddDialog
     {
         if (_loadingPeers || _closed.IsCancellationRequested) return;
         _loadingPeers = true;
-        _notice.Text = "Finding paired computers…";
+        _notice.Text = L10n.Text("windows.remoteworkspaceadddialog.finding_paired_computers.6b928a28");
         try
         {
             var listed = Format.Items(await AppServices.Host.CallAsync("machine.peers")) ?? new JsonArray();
@@ -152,7 +152,7 @@ internal sealed class RemoteWorkspaceAddDialog
                 _peers.Add((key, string.IsNullOrWhiteSpace(label) ? key[..Math.Min(8, key.Length)] : label));
             }
             _machine.ItemsSource = _peers.Select(peer => peer.Label).ToList();
-            _notice.Text = _peers.Count == 0 ? "Pair a computer on the Devices screen first. Folders live on computers, not phones or tablets." : "Choose the computer that will hold the folder.";
+            _notice.Text = _peers.Count == 0 ? L10n.Text("windows.remoteworkspaceadddialog.pair_a_computer_on_the_devices_screen_firs.2b5f4c70") : L10n.Text("windows.remoteworkspaceadddialog.choose_the_computer_that_will_hold_the_fol.8029a844");
             if (_peers.Count > 0) _machine.SelectedIndex = 0;
         }
         catch (Exception ex)
@@ -175,14 +175,14 @@ internal sealed class RemoteWorkspaceAddDialog
         _path.Text = "";
         _folders.Children.Clear();
         _roots.Children.Clear();
-        _notice.Text = "Loading folders…";
+        _notice.Text = L10n.Text("windows.remoteworkspaceadddialog.loading_folders.d0aa0da7");
         UpdateActions();
         try
         {
             var protocol = await RemoteFeatureGate.PeerProtocolAsync(peer);
             if (protocol.HasValue && protocol.Value < RemoteFeatureGate.FolderPickerMinProtocol)
             {
-                throw new InvalidOperationException("Update tokenstat on this computer to browse folders and clone repositories.");
+                throw new InvalidOperationException(L10n.Text("windows.remoteworkspaceadddialog.update_tokenstat_on_this_computer_to_brows.6ed19d6c"));
             }
             if (_closed.IsCancellationRequested || generation != _generation) return;
             var listing = await RemoteWorkspaces.CallOnPeerAsync(peer, "fs.browse", new JsonObject { ["path"] = path });
@@ -201,19 +201,19 @@ internal sealed class RemoteWorkspaceAddDialog
             var parent = Format.Text(listing, "parent");
             if (!string.IsNullOrEmpty(parent))
             {
-                _folders.Children.Add(ActionIconGlyph.Button("Up one folder", ActionIcon.Back, async (_, _) => await BrowseAsync(parent)));
+                _folders.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.remoteworkspaceadddialog.up_one_folder.ef9a7ae0"), ActionIcon.Back, async (_, _) => await BrowseAsync(parent)));
             }
             var count = 0;
             foreach (var entry in Format.Items(listing, "entries") ?? new JsonArray())
             {
                 var destination = Format.Text(entry, "path");
                 if (Format.Text(entry, "kind") != "directory" || Format.Flag(entry, "hidden") || string.IsNullOrEmpty(destination)) continue;
-                var label = Format.Text(entry, "name") + (Format.Flag(entry, "isRegistered") ? " · registered" : "");
+                var label = Format.Text(entry, "name") + (Format.Flag(entry, "isRegistered") ? L10n.Text("windows.remoteworkspaceadddialog.registered.4e579b71") : "");
                 _folders.Children.Add(ActionIconGlyph.Button(label, ActionIcon.Reveal, async (_, _) => await BrowseAsync(destination)));
                 count++;
             }
-            _notice.Text = Format.Flag(listing, "truncated") ? "This folder has more entries than can be displayed."
-                : count == 0 ? "No subfolders here. You can select the folder shown above." : "Select the folder shown above, or open a subfolder.";
+            _notice.Text = Format.Flag(listing, "truncated") ? L10n.Text("windows.remoteworkspaceadddialog.this_folder_has_more_entries_than_can_be_d.73229557")
+                : count == 0 ? L10n.Text("windows.remoteworkspaceadddialog.no_subfolders_here_you_can_select_the_fold.06f46554") : L10n.Text("windows.remoteworkspaceadddialog.select_the_folder_shown_above_or_open_a_su.5baa43ed");
         }
         catch (Exception ex)
         {
@@ -235,7 +235,7 @@ internal sealed class RemoteWorkspaceAddDialog
         var path = _currentPath;
         if (_working || _browsing || peer is null || string.IsNullOrEmpty(path)) return;
         _working = true;
-        _notice.Text = Clone ? "Cloning on the selected computer…" : "Registering folder…";
+        _notice.Text = Clone ? L10n.Text("windows.remoteworkspaceadddialog.cloning_on_the_selected_computer.4595f76c") : L10n.Text("windows.remoteworkspaceadddialog.registering_folder.dcacb71b");
         UpdateActions();
         try
         {
@@ -248,7 +248,7 @@ internal sealed class RemoteWorkspaceAddDialog
                     if (!string.IsNullOrWhiteSpace(_name.Text)) request["name"] = _name.Text.Trim();
                     var session = await RemoteWorkspaces.CallOnPeerAsync(peer, "workspace.clone", request);
                     var sessionId = Format.Text(session, "id");
-                    if (string.IsNullOrEmpty(sessionId)) throw new InvalidOperationException("The computer did not return a clone session. Check its folders before starting another clone.");
+                    if (string.IsNullOrEmpty(sessionId)) throw new InvalidOperationException(L10n.Text("windows.remoteworkspaceadddialog.the_computer_did_not_return_a_clone_sessio.8d908281"));
                     _cloneSession = sessionId;
                 }
                 id = await WatchCloneAsync(peer, _cloneSession);
@@ -258,7 +258,7 @@ internal sealed class RemoteWorkspaceAddDialog
             {
                 var added = await RemoteWorkspaces.CallOnPeerAsync(peer, "workspace.add", new JsonObject { ["path"] = path });
                 id = Format.Text(added, "id");
-                if (string.IsNullOrEmpty(id)) throw new InvalidOperationException("The computer did not return the folder. Reload its folders before trying again.");
+                if (string.IsNullOrEmpty(id)) throw new InvalidOperationException(L10n.Text("windows.remoteworkspaceadddialog.the_computer_did_not_return_the_folder_rel.f089dcc0"));
             }
             RemoteWorkspaces.RefreshPeer(peer);
             if (_closed.IsCancellationRequested) return;
@@ -294,24 +294,24 @@ internal sealed class RemoteWorkspaceAddDialog
                         var id = Format.Text(status, "workspaceId");
                         if (string.IsNullOrEmpty(id))
                         {
-                            _notice.Text = "The clone finished but its registered folder was not returned. Refresh folders on the machine.";
+                            _notice.Text = L10n.Text("windows.remoteworkspaceadddialog.the_clone_finished_but_its_registered_fold.0732e241");
                         }
                         return id;
                     case "failed":
                         _cloneSession = null;
-                        _notice.Text = FriendlyError.Display(Format.Text(status, "error", "The clone did not finish."));
+                        _notice.Text = FriendlyError.Display(Format.Text(status, "error", L10n.Text("windows.remoteworkspaceadddialog.the_clone_did_not_finish.fa812d0f")));
                         return "";
                 }
-                _notice.Text = "Cloning on the selected computer…";
+                _notice.Text = L10n.Text("windows.remoteworkspaceadddialog.cloning_on_the_selected_computer.4595f76c");
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
-                _notice.Text = "Waiting for the computer. " + FriendlyError.Display(ex.Message);
+                _notice.Text = L10n.Text("windows.remoteworkspaceadddialog.waiting_for_the_computer_0.030a34a1", $"{FriendlyError.Display(ex.Message)}");
             }
             await Task.Delay(TimeSpan.FromSeconds(2), _closed.Token);
         }
-        _notice.Text = "Stopped waiting for the clone. It may still be running on the computer. Choose Check clone to resume checking the same operation.";
+        _notice.Text = L10n.Text("windows.remoteworkspaceadddialog.stopped_waiting_for_the_clone_it_may_still.a0c65769");
         return "";
     }
 }

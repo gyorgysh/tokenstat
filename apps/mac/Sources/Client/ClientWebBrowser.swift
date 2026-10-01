@@ -68,7 +68,7 @@ struct ClientWebBrowser: View {
                             .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Close")
+                    .accessibilityLabel(L10n.text("common.close"))
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -79,7 +79,7 @@ struct ClientWebBrowser: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(Theme.accent)
-                    .accessibilityLabel("Reload")
+                    .accessibilityLabel(L10n.text("apple.clientwebbrowser.reload.bdc090ec"))
                 }
             }
         }

@@ -171,8 +171,8 @@ struct ModalHeader: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             InspectorCloseButton(
                 action: onClose,
-                help: "Close",
-                label: "Close \(title)"
+                help: L10n.text("common.close"),
+                label: L10n.text("apple.themedsheet.close_0.59546c79", "\(title)")
             )
         }
         .padding(.horizontal, Theme.Space.l)

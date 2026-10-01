@@ -43,7 +43,7 @@ struct ClientChatEventRow: View {
                     .padding(Theme.Space.m)
                     .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .contextMenu {
-                        Button("Copy") { ChatClipboard.copy(text) }
+                        Button(L10n.text("common.copy")) { ChatClipboard.copy(text) }
                     }
                     .layoutPriority(1)
             }
@@ -55,7 +55,7 @@ struct ClientChatEventRow: View {
                         .font(ClientType.caption.weight(.medium))
                         .foregroundStyle(Theme.accent)
                     Spacer(minLength: 0)
-                    RowCopyButton(text: text, help: "Copy response")
+                    RowCopyButton(text: text, help: L10n.text("apple.clientchatrows.copy_response.f0f755af"))
                 }
                 MessageMarkdown(
                     text,
@@ -74,21 +74,21 @@ struct ClientChatEventRow: View {
                     .strokeBorder(Theme.border.opacity(0.72), lineWidth: 1)
             }
             .contextMenu {
-                Button("Copy response") { ChatClipboard.copy(text) }
+                Button(L10n.text("apple.clientchatrows.copy_response.f0f755af")) { ChatClipboard.copy(text) }
             }
         case let .turnSeparator(backend):
             HStack(spacing: Theme.Space.s) {
                 Rectangle()
                     .fill(Theme.border)
                     .frame(height: 1)
-                Text("\(agentLabel(backend)) · new turn")
+                Text(L10n.text("apple.clientchatrows.0_new_turn.9f36f0a8", "\(agentLabel(backend))"))
                     .font(ClientType.caption.weight(.medium))
                     .foregroundStyle(Theme.accent)
                 Rectangle()
                     .fill(Theme.border)
                     .frame(height: 1)
             }
-            .accessibilityLabel("New turn with \(agentLabel(backend))")
+            .accessibilityLabel(L10n.text("apple.clientchatrows.new_turn_with_0.9f95018a", "\(agentLabel(backend))"))
         case let .thinking(text):
             // Same as the Mac: reasoning is markdown, and it stays an aside.
             MessageMarkdown(
@@ -104,7 +104,7 @@ struct ClientChatEventRow: View {
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contextMenu {
-                Button("Copy reasoning") { ChatClipboard.copy(text) }
+                Button(L10n.text("apple.clientchatrows.copy_reasoning.5d2976d8")) { ChatClipboard.copy(text) }
             }
         case let .tool(state):
             ToolRow(
@@ -134,7 +134,7 @@ struct ClientChatEventRow: View {
             ClientChatApprovalCard(approval: approval, isPending: isPending, resolve: resolve)
         case let .usage(input, output, cost):
             HStack(spacing: Theme.Space.s) {
-                Text("\(input.formatted()) in · \(output.formatted()) out")
+                Text(L10n.text("apple.clientchatrows.0_in_1_out.f48051a0", "\(input.formatted())", "\(output.formatted())"))
                 if let cost, cost > 0 {
                     Text(cost, format: .currency(code: "USD").precision(.fractionLength(2...4)))
                         .foregroundStyle(Theme.accent)
@@ -151,7 +151,7 @@ struct ClientChatEventRow: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contextMenu {
-                        Button("Copy") { ChatClipboard.copy(text) }
+                        Button(L10n.text("common.copy")) { ChatClipboard.copy(text) }
                     }
             }
         }
@@ -178,7 +178,7 @@ private struct ClientChatResponseAttachment: View {
             .buttonStyle(.plain)
             .disabled(isLoading)
             .accessibilityLabel(
-                data == nil ? "Download \(attachment.name)" : "Open \(attachment.name)"
+                data == nil ? L10n.text("apple.clientchatrows.download_0.465e0e80", "\(attachment.name)") : L10n.text("apple.clientchatrows.open_0.e71b4013", "\(attachment.name)")
             )
             .task(id: data) {
                 guard let data, attachment.mediaType?.hasPrefix("image/") == true else { return }
@@ -225,12 +225,12 @@ private struct ClientChatResponseAttachment: View {
                 if isLoading {
                     ProgressView().controlSize(.small)
                 } else if data == nil {
-                    ActionIcon.download.label(downloadError == nil ? "Download" : "Retry")
+                    ActionIcon.download.label(downloadError == nil ? L10n.text("apple.clientchatrows.download.d6eafe82") : L10n.text("common.retry"))
                         .font(ClientType.label)
                         .foregroundStyle(Theme.accent)
                         .frame(minHeight: 44)
                 } else {
-                    ActionIcon.preview.label("Open")
+                    ActionIcon.preview.label(L10n.text("common.open"))
                         .font(ClientType.label)
                         .foregroundStyle(Theme.accent)
                         .frame(minHeight: 44)
@@ -258,7 +258,7 @@ private struct ClientChatResponseAttachment: View {
 
     private var detail: String {
         if let downloadError { return downloadError }
-        let type = attachment.mediaType ?? "File"
+        let type = attachment.mediaType ?? L10n.text("apple.clientchatrows.file.50009ce1")
         guard let size = attachment.size else { return type }
         return "\(type) · \(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))"
     }
@@ -315,7 +315,7 @@ struct ClientChatHandoffRow: View {
                 Image(systemName: "arrow.left.arrow.right")
                     .font(Theme.font(10, weight: .semibold))
                     .foregroundStyle(Theme.accent)
-                Text("Handed to \(agent)")
+                Text(L10n.text("apple.clientchatrows.handed_to_0.902d7234", "\(agent)"))
                     .font(ClientType.caption.weight(.medium))
                     .foregroundStyle(Theme.accent)
                 Spacer(minLength: 0)
@@ -324,7 +324,7 @@ struct ClientChatHandoffRow: View {
                         withAnimation(.easeOut(duration: 0.14)) { expanded.toggle() }
                     } label: {
                         HStack(spacing: 4) {
-                            Text(expanded ? "Hide" : "What it was told")
+                            Text(expanded ? L10n.text("apple.clientchatrows.hide.ac20a57b") : L10n.text("apple.clientchatrows.what_it_was_told.4b2128b2"))
                             Image(systemName: "chevron.right")
                                 .font(Theme.font(9, weight: .semibold))
                                 .rotationEffect(.degrees(expanded ? 90 : 0))
@@ -348,7 +348,7 @@ struct ClientChatHandoffRow: View {
         }
         .padding(.vertical, Theme.Space.xs)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Handed to \(agent), with a summary of the conversation so far")
+        .accessibilityLabel(L10n.text("apple.clientchatrows.handed_to_0_with_a_summary_of_the_conversa.136c6fc3", "\(agent)"))
     }
 }
 
@@ -372,7 +372,7 @@ struct ClientChatApprovalCard: View {
                         .font(ClientType.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
-                        .accessibilityLabel("\(remaining) left to answer")
+                        .accessibilityLabel(L10n.text("apple.clientchatrows.0_left_to_answer.63343d2a", "\(remaining)"))
                 }
                 Text(SeatStep.approvalWord(verb: approval.verb, pending: isPending))
                     .font(ClientType.caption.weight(.medium))
@@ -433,11 +433,11 @@ struct ClientChatApprovalCard: View {
     }
 
     @ViewBuilder private var actions: some View {
-        Button("Allow", .allow) { resolve(approval, "allow") }
+        Button(L10n.text("apple.clientchatrows.allow.e213c161"), .allow) { resolve(approval, "allow") }
             .buttonStyle(AccentButtonStyle(small: true))
-        Button("Always allow", .allow) { resolve(approval, "allowAlways") }
+        Button(L10n.text("apple.clientchatrows.always_allow.977618bd"), .allow) { resolve(approval, "allowAlways") }
             .buttonStyle(SecondaryButtonStyle(small: true))
-        Button("Deny", .deny, role: .destructive) { resolve(approval, "deny") }
+        Button(L10n.text("apple.clientchatrows.deny.05a2d733"), .deny, role: .destructive) { resolve(approval, "deny") }
             .buttonStyle(DestructiveButtonStyle(small: true))
     }
 }

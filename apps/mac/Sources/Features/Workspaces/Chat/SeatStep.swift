@@ -20,70 +20,70 @@ enum SeatStep {
         let collapsed = collapse(line)
         switch name {
         case "Read":
-            return labeled("Reading", fileName(line))
+            return labeled(L10n.text("apple.seatstep.reading.463816d0"), fileName(line))
         case "Write":
-            return labeled("Writing", fileName(line))
+            return labeled(L10n.text("apple.seatstep.writing.a8bfae3e"), fileName(line))
         case "Edit", "NotebookEdit":
-            return labeled("Editing", fileName(line))
+            return labeled(L10n.text("apple.seatstep.editing.fab4539d"), fileName(line))
         case "Diff":
-            return labeled("Comparing", fileName(line))
+            return labeled(L10n.text("apple.seatstep.comparing.1fa1aad0"), fileName(line))
         case "Shell", "Bash":
-            return labeled("Running", collapsed)
+            return labeled(L10n.text("common.running"), collapsed)
         case "Grep", "Search":
-            return labeled("Searching", collapsed)
+            return labeled(L10n.text("apple.seatstep.searching.03bd6fca"), collapsed)
         case "Glob", "Find":
             let file = fileName(line)
-            if file.isEmpty { return "Looking" }
-            return labeled("Looking through", file)
+            if file.isEmpty { return L10n.text("apple.seatstep.looking.afa37c88") }
+            return labeled(L10n.text("apple.seatstep.looking_through.6c8d5b7b"), file)
         case "WebFetch":
-            return labeled("Opening", site(collapsed))
+            return labeled(L10n.text("apple.seatstep.opening.f4b13e93"), site(collapsed))
         case "WebSearch":
-            return "Searching the web"
+            return L10n.text("apple.seatstep.searching_the_web.87d2f338")
         case "Task", "Subagent":
-            return "Asking another agent"
+            return L10n.text("apple.seatstep.asking_another_agent.fde5ee73")
         case "TodoWrite":
-            return "Updating the list"
+            return L10n.text("apple.seatstep.updating_the_list.ca724dcc")
         default:
             // A path with nothing left after the slashes is just work.
             // "Working on" with an empty name reads as a broken sentence.
             let edges = trimEdges(line)
             if edges.contains("/") || edges.contains("\\") {
                 let file = fileName(line)
-                if file.isEmpty { return "Working" }
-                return labeled("Working on", file)
+                if file.isEmpty { return L10n.text("common.working") }
+                return labeled(L10n.text("apple.seatstep.working_on.006abaf3"), file)
             }
-            if collapsed.isEmpty { return "Working" }
-            return labeled("Working on", collapsed)
+            if collapsed.isEmpty { return L10n.text("common.working") }
+            return labeled(L10n.text("apple.seatstep.working_on.006abaf3"), collapsed)
         }
     }
 
     /// Waiting wins. A real step is shown as written. Speaking is a reply.
     /// Everything else is thought.
     static func seatLabel(waiting: Bool, step: String?, speaking: Bool) -> String {
-        if waiting { return "Waiting" }
+        if waiting { return L10n.text("common.waiting") }
         if let step, !step.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return step
         }
-        if speaking { return "Replying" }
-        return "Thinking"
+        if speaking { return L10n.text("apple.seatstep.replying.b2663dd7") }
+        return L10n.text("apple.seatstep.thinking.a20d12c5")
     }
 
     /// Present while the step runs, past once it has finished.
     /// An unknown name is returned unchanged, once trimmed.
     static func word(verb: String?, running: Bool) -> String {
         switch trimVerb(verb) {
-        case "Read": return running ? "Reading" : "Read"
-        case "Write": return running ? "Writing" : "Wrote"
-        case "Edit", "NotebookEdit": return running ? "Editing" : "Edited"
-        case "Diff": return running ? "Comparing" : "Compared"
-        case "Shell", "Bash": return running ? "Running" : "Ran"
-        case "Grep", "Search": return running ? "Searching" : "Searched"
-        case "Glob", "Find": return running ? "Looking" : "Looked"
-        case "WebFetch": return running ? "Opening" : "Opened"
-        case "WebSearch": return running ? "Searching the web" : "Searched the web"
-        case "Task", "Subagent": return running ? "Asking another agent" : "Asked another agent"
-        case "TodoWrite": return running ? "Updating the list" : "Updated the list"
-        case "": return running ? "Working" : "Worked"
+        case "Read": return running ? L10n.text("apple.seatstep.reading.463816d0") : L10n.text("apple.seatstep.read.9b9a8d05")
+        case "Write": return running ? L10n.text("apple.seatstep.writing.a8bfae3e") : L10n.text("apple.seatstep.wrote.42717062")
+        case "Edit", "NotebookEdit": return running ? L10n.text("apple.seatstep.editing.fab4539d") : L10n.text("apple.seatstep.edited.7117f080")
+        case "Diff": return running ? L10n.text("apple.seatstep.comparing.1fa1aad0") : L10n.text("apple.seatstep.compared.17c858fc")
+        case "Shell", "Bash": return running ? L10n.text("common.running") : L10n.text("apple.seatstep.ran.b6a7c95e")
+        case "Grep", "Search": return running ? L10n.text("apple.seatstep.searching.03bd6fca") : L10n.text("apple.seatstep.searched.9fc7f116")
+        case "Glob", "Find": return running ? L10n.text("apple.seatstep.looking.afa37c88") : L10n.text("apple.seatstep.looked.07558310")
+        case "WebFetch": return running ? L10n.text("apple.seatstep.opening.f4b13e93") : L10n.text("apple.seatstep.opened.b19fb8d1")
+        case "WebSearch": return running ? L10n.text("apple.seatstep.searching_the_web.87d2f338") : L10n.text("apple.seatstep.searched_the_web.7d2580ce")
+        case "Task", "Subagent": return running ? L10n.text("apple.seatstep.asking_another_agent.fde5ee73") : L10n.text("apple.seatstep.asked_another_agent.629f8e22")
+        case "TodoWrite": return running ? L10n.text("apple.seatstep.updating_the_list.ca724dcc") : L10n.text("apple.seatstep.updated_the_list.de8e6fab")
+        case "": return running ? L10n.text("common.working") : L10n.text("apple.seatstep.worked.e7f93aad")
         case let name: return name
         }
     }
@@ -99,7 +99,7 @@ enum SeatStep {
     /// is past tense, and a blank name stays Approval.
     static func approvalWord(verb: String?, pending: Bool) -> String {
         let name = trimVerb(verb)
-        if name.isEmpty { return "Approval" }
+        if name.isEmpty { return L10n.text("apple.seatstep.approval.147fb813") }
         return word(verb: name, running: pending)
     }
 
@@ -110,14 +110,14 @@ enum SeatStep {
     static func allowAlwaysNote(verb: String?, shellPrefix: String?) -> String? {
         let prefix = trimVerb(shellPrefix)
         if !prefix.isEmpty {
-            return "Always allow remembers \(prefix) for this chat only."
+            return L10n.text("apple.seatstep.always_allow_remembers_0_for_this_chat_onl.394a9e6d", "\(prefix)")
         }
         if isShell(verb: verb) {
-            return "Always allow answers this request only. Nothing is saved for later."
+            return L10n.text("apple.seatstep.always_allow_answers_this_request_only_not.a067a2b7")
         }
         let name = trimVerb(verb)
         if name.isEmpty { return nil }
-        return "Always allow remembers \(name) for this chat only."
+        return L10n.text("apple.seatstep.always_allow_remembers_0_for_this_chat_onl.394a9e6d", "\(name)")
     }
 
     /// Same rule as the host: a shell tool is never remembered by its name.

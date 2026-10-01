@@ -30,7 +30,7 @@ struct CommitTagPills: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Theme.accentSoft, in: Capsule())
-                    .accessibilityLabel("Tagged \(tag)")
+                    .accessibilityLabel(L10n.text("apple.committagpills.tagged_0.17a3d03e", "\(tag)"))
                 }
             }
         }

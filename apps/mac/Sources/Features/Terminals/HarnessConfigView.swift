@@ -26,8 +26,8 @@ struct HarnessConfigView: View {
 
     var body: some View {
         ThemedSheet(
-            title: "Configure \(profile.name)",
-            subtitle: "Model, effort and compaction for the next session. Saved into this tool's own config.",
+            title: L10n.text("apple.harnessconfigview.configure_0.76d41ce7", "\(profile.name)"),
+            subtitle: L10n.text("apple.harnessconfigview.model_effort_and_compaction_for_the_next_s.7b884582"),
             icon: .settings,
             scrolls: true,
             onClose: close
@@ -63,14 +63,14 @@ struct HarnessConfigView: View {
                     }
                 } else {
                     Text(config.flatMap { $0.available ? nil : $0.reason } ?? error
-                         ?? "This tool has no settings tokenstat can change.")
+                         ?? L10n.text("apple.harnessconfigview.this_tool_has_no_settings_tokenstat_can_ch.3288645e"))
                         .font(Theme.caption)
                         .foregroundStyle(Theme.controlGlyph)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
         } actions: {
-            Button("Cancel", .dismiss, role: .cancel) { close() }
+            Button(L10n.text("common.cancel"), .dismiss, role: .cancel) { close() }
                 .buttonStyle(SecondaryButtonStyle())
                 .keyboardShortcut(.cancelAction)
             if saving {
@@ -79,7 +79,7 @@ struct HarnessConfigView: View {
                     .tint(Theme.accent)
             }
             Spacer()
-            Button("Save", .save) {
+            Button(L10n.text("common.save"), .save) {
                 Task {
                     await save()
                     if error == nil { close() }
@@ -109,7 +109,7 @@ struct HarnessConfigView: View {
             switch field.kind {
             case "bool":
                 BrandToggleChip(
-                    title: (draft[field.key] ?? "") == "true" ? "On" : "Off",
+                    title: (draft[field.key] ?? "") == "true" ? L10n.text("apple.harnessconfigview.on.13001175") : L10n.text("apple.harnessconfigview.off.ca7981b4"),
                     isOn: boolBinding(field.key)
                 )
             case "choice":
@@ -162,7 +162,7 @@ struct HarnessConfigView: View {
                 in: low...high,
                 step: step
             )
-            Text(current.isEmpty ? "\(Int(fallback)) (default)" : numberLabel(field, current))
+            Text(current.isEmpty ? L10n.text("apple.harnessconfigview.0_default.bf9cca93", "\(Int(fallback))") : numberLabel(field, current))
                 .font(Theme.mono(11))
                 .foregroundStyle(current.isEmpty ? .secondary : .primary)
                 .frame(minWidth: 92, alignment: .trailing)

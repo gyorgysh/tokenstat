@@ -82,7 +82,7 @@ internal static class WorkspaceBranches
             var stack = new StackPanel { Spacing = Theme.SpaceS, MinWidth = 440 };
             stack.Children.Add(new TextBlock
             {
-                Text = "Local work first. Remote branches create a tracking branch.",
+                Text = L10n.Text("windows.workspacebranches.local_work_first_remote_branches_create_a.45483dc7"),
                 FontSize = 12,
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
@@ -98,19 +98,19 @@ internal static class WorkspaceBranches
                 {
                     list.Children.Add(new TextBlock
                     {
-                        Text = query.Length == 0 ? "No branches" : "No matching branches",
+                        Text = query.Length == 0 ? L10n.Text("windows.workspacebranches.no_branches.77cec90a") : L10n.Text("windows.workspacebranches.no_matching_branches.68f9e0ee"),
                         Opacity = 0.7,
                     });
                 }
                 else
                 {
-                    AddSection(list, "Local", filtered.Where(choice => !choice.Remote).ToList(), working, Pick);
-                    AddSection(list, "Remote", filtered.Where(choice => choice.Remote).ToList(), working, Pick);
+                    AddSection(list, L10n.Text("windows.workspacebranches.local.8c31e6e7"), filtered.Where(choice => !choice.Remote).ToList(), working, Pick);
+                    AddSection(list, L10n.Text("windows.workspacebranches.remote.ffa98e02"), filtered.Where(choice => choice.Remote).ToList(), working, Pick);
                 }
             }
             var filter = new TextBox
             {
-                PlaceholderText = "Filter branches",
+                PlaceholderText = L10n.Text("windows.workspacebranches.filter_branches.cc9f20c6"),
                 Text = query,
             };
             filter.TextChanged += (_, _) =>
@@ -129,7 +129,7 @@ internal static class WorkspaceBranches
             {
                 var nameBox = new TextBox
                 {
-                    PlaceholderText = "feature/name",
+                    PlaceholderText = L10n.Text("windows.workspacebranches.feature_name.1f69ba4a"),
                     Text = createName,
                     MinWidth = 280,
                 };
@@ -140,7 +140,7 @@ internal static class WorkspaceBranches
             {
                 var createRow = new Button
                 {
-                    Content = new TextBlock { Text = $"New branch from {current}" },
+                    Content = new TextBlock { Text = L10n.Text("windows.workspacebranches.new_branch_from_0.b6ff75b5", $"{current}") },
                     HorizontalAlignment = HorizontalAlignment.Stretch,
                     HorizontalContentAlignment = HorizontalAlignment.Left,
                 };
@@ -153,11 +153,11 @@ internal static class WorkspaceBranches
             }
             var dialog = new ContentDialog
             {
-                Title = "Switch branch",
+                Title = L10n.Text("windows.workspacebranches.switch_branch.5051902c"),
                 Content = new ScrollViewer { MaxHeight = 560, Content = stack },
-                PrimaryButtonText = creating ? "Create branch" : null,
-                SecondaryButtonText = creating ? "Cancel" : null,
-                CloseButtonText = "Close",
+                PrimaryButtonText = creating ? L10n.Text("windows.workspacebranches.create_branch.f102a103") : null,
+                SecondaryButtonText = creating ? L10n.Text("common.cancel") : null,
+                CloseButtonText = L10n.Text("common.close"),
                 DefaultButton = ContentDialogButton.Primary,
             };
             open = dialog;
@@ -271,13 +271,13 @@ internal static class WorkspaceBranches
                     VerticalAlignment = VerticalAlignment.Center,
                     Child = new TextBlock
                     {
-                        Text = "TRACK",
+                        Text = L10n.Text("windows.workspacebranches.track.9a0019c1"),
                         FontSize = 10,
                         FontWeight = Microsoft.UI.Text.FontWeights.Bold,
                         Foreground = Theme.AccentBrush,
                     },
                 });
-                ToolTipService.SetToolTip(row, "Creates a local tracking branch");
+                ToolTipService.SetToolTip(row, L10n.Text("windows.workspacebranches.creates_a_local_tracking_branch.062a62b7"));
             }
             var button = new Button
             {
@@ -306,7 +306,7 @@ internal static class WorkspaceBranches
                 });
             if (outcome is JsonObject && outcome["ok"] is not null && !Format.Flag(outcome, "ok"))
             {
-                return Format.Text(outcome, "message", "The branch could not be switched.");
+                return Format.Text(outcome, "message", L10n.Text("windows.workspacebranches.the_branch_could_not_be_switched.8c7163b0"));
             }
             return null;
         }
@@ -331,7 +331,7 @@ internal static class WorkspaceBranches
                 });
             if (outcome is JsonObject && outcome["ok"] is not null && !Format.Flag(outcome, "ok"))
             {
-                return Format.Text(outcome, "message", "The branch could not be created.");
+                return Format.Text(outcome, "message", L10n.Text("windows.workspacebranches.the_branch_could_not_be_created.594363f0"));
             }
             return null;
         }

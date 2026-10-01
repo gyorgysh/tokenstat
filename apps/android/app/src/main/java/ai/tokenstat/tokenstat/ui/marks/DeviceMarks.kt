@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.marks
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.R
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import androidx.compose.foundation.background
@@ -235,19 +237,19 @@ fun formatRelativeDate(raw: String?): String? {
     val date = parseServerDate(raw) ?: return null
     val seconds = ((Date().time - date.time) / 1000).coerceAtLeast(0)
     return when {
-        seconds < 10 -> "just now"
-        seconds < 60 -> "$seconds seconds ago"
+        seconds < 10 -> L10n.text("android.devicemarks.just_now.7ddb44d8")
+        seconds < 60 -> L10n.text("android.devicemarks.0_seconds_ago.ae8728cb", "${seconds}")
         seconds < 3600 -> {
             val m = seconds / 60
-            if (m == 1L) "1 minute ago" else "$m minutes ago"
+            if (m == 1L) L10n.text("android.devicemarks.1_minute_ago.0f450bad") else L10n.text("android.devicemarks.0_minutes_ago.e33faefc", "${m}")
         }
         seconds < 86400 -> {
             val h = seconds / 3600
-            if (h == 1L) "1 hour ago" else "$h hours ago"
+            if (h == 1L) L10n.text("android.devicemarks.1_hour_ago.e4bc2973") else L10n.text("android.devicemarks.0_hours_ago.d8431d4e", "${h}")
         }
         seconds < 7 * 86400 -> {
             val d = seconds / 86400
-            if (d == 1L) "yesterday" else "$d days ago"
+            if (d == 1L) "yesterday" else L10n.text("android.devicemarks.0_days_ago.bef5eece", "${d}")
         }
         else -> SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(date)
     }

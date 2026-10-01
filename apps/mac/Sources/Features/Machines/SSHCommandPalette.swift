@@ -56,7 +56,7 @@ struct SSHSuggestionPanel: View {
         )
         .shadow(color: SwiftUI.Color.black.opacity(0.22), radius: 12, y: 4)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Suggestions")
+        .accessibilityLabel(L10n.text("apple.sshcommandpalette.suggestions.16c1d601"))
     }
 
     /// The keys, and only the ones that are live right now. Before the palette
@@ -64,8 +64,8 @@ struct SSHSuggestionPanel: View {
     /// saying otherwise would be teaching somebody the wrong thing.
     private var hint: String {
         session.highlighted == nil
-            ? "↓ to choose"
-            : "⇥ or ↩ inserts · esc dismisses"
+            ? L10n.text("apple.sshcommandpalette.to_choose.2d5bd3ae")
+            : L10n.text("apple.sshcommandpalette.or_inserts_esc_dismisses.e3900158")
     }
 }
 
@@ -108,7 +108,7 @@ private struct SSHSuggestionRowView: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .accessibilityLabel(label)
-        .accessibilityHint("Types it at the prompt without running it")
+        .accessibilityHint(L10n.text("apple.sshcommandpalette.types_it_at_the_prompt_without_running_it.f30bd8cf"))
     }
 
     private var rowFill: SwiftUI.Color {
@@ -135,11 +135,11 @@ private struct SSHSuggestionRowView: View {
 
     private var label: String {
         switch row.kind {
-        case "directory": return "Folder \(row.title)"
-        case "visited": return "Folder you have been in, \(row.detail)"
-        case "snippet": return "Saved command \(row.title), \(row.detail)"
-        case "history": return "Command you ran, \(row.title)"
-        default: return "File \(row.title)"
+        case "directory": return L10n.text("apple.sshcommandpalette.folder_0.685096ca", "\(row.title)")
+        case "visited": return L10n.text("apple.sshcommandpalette.folder_you_have_been_in_0.af58033a", "\(row.detail)")
+        case "snippet": return L10n.text("apple.sshcommandpalette.saved_command_0_1.dc2af182", "\(row.title)", "\(row.detail)")
+        case "history": return L10n.text("apple.sshcommandpalette.command_you_ran_0.6d4e8f39", "\(row.title)")
+        default: return L10n.text("apple.sshcommandpalette.file_0.ef46530b", "\(row.title)")
         }
     }
 }
@@ -166,7 +166,7 @@ extension View {
                     hostIDs: [],
                     variables: row.variables
                 ),
-                action: "Insert",
+                action: L10n.text("apple.sshcommandpalette.insert.8aa318eb"),
                 icon: .apply
             ) { [replacing = session.pendingReplacement] command in
                 session.insert(command, replacing: replacing)

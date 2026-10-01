@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.logic
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -22,17 +24,17 @@ import kotlinx.serialization.json.longOrNull
 /// the Android section name the content renderer already knows; the label is
 /// the iOS row word.
 enum class HubSection(val key: String, val label: String) {
-    SESSIONS("Sessions", "Terminals"),
-    CHAT("Chat", "Chats"),
-    CHANGES("Changes", "Changes"),
-    HISTORY("History", "History"),
-    PULLS("Pulls", "Pull requests"),
-    TASKS("Tasks", "Tasks"),
-    NOTES("Notes", "Notes"),
-    WORKFLOWS("Workflows", "Workflows"),
-    AUTOMATIONS("Automations", "Automations"),
-    FILES("Files", "Files"),
-    BROWSER("Browser", "Browser"),
+    SESSIONS("Sessions", L10n.text("common.terminals")),
+    CHAT("Chat", L10n.text("common.chats")),
+    CHANGES("Changes", L10n.text("android.workspacehublogic.changes.bbd4b6a8")),
+    HISTORY("History", L10n.text("common.history")),
+    PULLS("Pulls", L10n.text("android.workspacehublogic.pull_requests.d9e3f260")),
+    TASKS("Tasks", L10n.text("common.tasks")),
+    NOTES("Notes", L10n.text("common.notes")),
+    WORKFLOWS("Workflows", L10n.text("common.workflows")),
+    AUTOMATIONS("Automations", L10n.text("common.automations")),
+    FILES("Files", L10n.text("common.files")),
+    BROWSER("Browser", L10n.text("common.browser")),
 }
 
 /// What the hub badges say. One value each, filled by one pass over
@@ -94,10 +96,10 @@ object HubCountsParser {
 /// is named, quoted, so the question reads as about that place.
 object ChatHint {
     fun hint(folderName: String, busy: Boolean, note: Boolean = false): String {
-        if (note) return "Add a note for the next step"
-        if (busy) return "Send after this turn"
+        if (note) return L10n.text("android.workspacehublogic.add_a_note_for_the_next_step.4778177a")
+        if (busy) return L10n.text("android.workspacehublogic.send_after_this_turn.012fc8c3")
         val name = folderName.trim()
-        return if (name.isEmpty()) "Ask about this folder" else "Ask about '$name'"
+        return if (name.isEmpty()) L10n.text("android.workspacehublogic.ask_about_this_folder.33b8b41b") else L10n.text("android.workspacehublogic.ask_about_0.5201a2d7", "${name}")
     }
 }
 
@@ -141,7 +143,7 @@ object LaunchCatalog {
     /// The built-in shell tile, for a host that answered with no catalog.
     fun shellFallback(): LaunchProfile = LaunchProfile(
         id = "shell",
-        name = "Shell",
+        name = L10n.text("android.workspacehublogic.shell.a7332854"),
         command = "/bin/zsh",
         args = listOf("-l"),
         bypassArgs = emptyList(),
@@ -190,10 +192,9 @@ object EditorConflict {
     }
 
     fun summary(mine: String, host: String): String {
-        var parts = "Yours has ${lineCount(mine)} lines, that computer has ${lineCount(host)}. " +
-            "Saving is off until you choose."
+        var parts = L10n.text("android.workspacehublogic.yours_has_0_lines_that_computer_has_1_savi.66339948", "${lineCount(mine)}", "${lineCount(host)}")
         val first = firstDifferenceLine(mine, host)
-        if (first != null) parts += " First difference: line $first."
+        if (first != null) parts += L10n.text("android.workspacehublogic.first_difference_line_0.42e7b04c", "${first}")
         return parts
     }
 }
@@ -216,7 +217,7 @@ object EditorFind {
 
     fun countLabel(index: Int, total: Int): String? {
         if (total == 0) return null
-        return "${(index.coerceIn(0, total - 1)) + 1} of $total"
+        return L10n.text("android.workspacehublogic.0_of_1.9fea8201", "${(index.coerceIn(0, total - 1)) + 1}", "${total}")
     }
 
     fun nextIndex(current: Int, total: Int): Int {
@@ -267,15 +268,15 @@ object PullReview {
     val VERDICTS = listOf("approve", "requestChanges", "comment")
 
     fun verdictLabel(verdict: String): String = when (verdict) {
-        "approve" -> "Approve"
-        "requestChanges" -> "Request changes"
-        "comment" -> "Comment review"
+        "approve" -> L10n.text("android.workspacehublogic.approve.6007acbe")
+        "requestChanges" -> L10n.text("android.workspacehublogic.request_changes.cb5d9f98")
+        "comment" -> L10n.text("android.workspacehublogic.comment_review.f8950d66")
         else -> verdict
     }
 
     fun reviewPlaceholder(verdict: String): String = when (verdict) {
-        "requestChanges" -> "Explain what needs to change…"
-        else -> "Add a review note…"
+        "requestChanges" -> L10n.text("android.workspacehublogic.explain_what_needs_to_change.5e9e1223")
+        else -> L10n.text("android.workspacehublogic.add_a_review_note.dd5bee74")
     }
 
     val MERGE_METHODS = listOf("merge", "squash", "rebase")

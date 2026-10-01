@@ -330,9 +330,9 @@ internal sealed class TerminalSession
                 ? await RemoteWorkspaces.CallOnPeerAsync(peer, "launcher.catalog")
                 : await AppServices.Host.CallAsync("launcher.catalog");
             var shell = Format.Items(catalog)?.FirstOrDefault(item => Format.Text(item, "id") == "shell")
-                ?? throw new InvalidOperationException("The host did not advertise an available shell.");
+                ?? throw new InvalidOperationException(L10n.Text("windows.terminalsession.the_host_did_not_advertise_an_available_sh.9e1e6520"));
             var command = Format.Text(shell, "command");
-            if (string.IsNullOrEmpty(command)) throw new InvalidOperationException("The host shell has no command.");
+            if (string.IsNullOrEmpty(command)) throw new InvalidOperationException(L10n.Text("windows.terminalsession.the_host_shell_has_no_command.65bc59e3"));
             var spawned = await AppServices.Host.CallAsync(
                 "pty.spawn",
                 new JsonObject
@@ -360,7 +360,7 @@ internal sealed class TerminalSession
             Alive = true;
             HasOutput = false;
             Closed = false;
-            LastError = string.IsNullOrEmpty(Id) ? "The host did not return a session id." : "";
+            LastError = string.IsNullOrEmpty(Id) ? L10n.Text("windows.terminalsession.the_host_did_not_return_a_session_id.834cef2f") : "";
             if (!string.IsNullOrEmpty(Id))
             {
                 ById[Id] = this;

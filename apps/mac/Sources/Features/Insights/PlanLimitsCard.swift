@@ -104,10 +104,10 @@ struct PlanLimitPanel: View {
         }
         if let observed = provider.observedAt {
             let age = observed.formatted(.relative(presentation: .named))
-            parts.append(provider.isStale ? "last read \(age)" : "read \(age)")
+            parts.append(provider.isStale ? L10n.text("apple.planlimitscard.last_read_0.ee7c4998", "\(age)") : L10n.text("apple.planlimitscard.read_0.5e63e83a", "\(age)"))
         }
         if provider.hasWindows, let next = provider.nextReset, next > .now {
-            parts.append("next window \(next.formatted(.relative(presentation: .named)))")
+            parts.append(L10n.text("apple.planlimitscard.next_window_0.fcd7ac2d", "\(next.formatted(.relative(presentation: .named)))"))
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
@@ -118,7 +118,7 @@ struct PlanLimitPanel: View {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(Theme.font(11))
                     .foregroundStyle(Theme.warning)
-                    .help("Cached. The vendor could not be reached on the last refresh.")
+                    .help(L10n.text("apple.planlimitscard.cached_the_vendor_could_not_be_reached_on.8dfff133"))
             }
             Button(action: refresh) {
                 if isLoading {
@@ -131,7 +131,7 @@ struct PlanLimitPanel: View {
             }
             .buttonStyle(.plain)
             .disabled(isLoading)
-            .help("Ask each vendor again")
+            .help(L10n.text("apple.planlimitscard.ask_each_vendor_again.0c1778b3"))
         }
     }
 }
@@ -153,7 +153,7 @@ private struct WindowBar: View {
                     // The shared tick, not `format: .relative`. One live time
                     // source per quota window kept the whole window in a
                     // layout pass every frame. See `RelativeClock`.
-                    Text("· resets \(RelativeClock.phrase(for: resets))")
+                    Text(L10n.text("apple.planlimitscard.resets_0.7a4480e9", "\(RelativeClock.phrase(for: resets))"))
                         .font(Theme.font(11))
                         .foregroundStyle(.tertiary)
                 }

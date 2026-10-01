@@ -149,7 +149,7 @@ internal static class SegmentedCapsule
                 ? Theme.AccentSoftBrush
                 : Theme.Brush(static () => WithAlpha(Theme.RowHighlight, 0.7));
             segment.Resources["ButtonBackgroundPressed"] = resting;
-            AutomationProperties.SetItemStatus(segment, now ? "Selected" : "Not selected");
+            AutomationProperties.SetItemStatus(segment, now ? L10n.Text("windows.segmentedcapsule.selected.57fd7a0c") : L10n.Text("windows.segmentedcapsule.not_selected.df12aeba"));
         }
         Paint(active);
         ToolTipService.SetToolTip(segment, label);

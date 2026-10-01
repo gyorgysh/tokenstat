@@ -60,9 +60,9 @@ struct MachinesView: View {
                 HStack(spacing: Theme.Space.m) {
                     SegmentedTabs(options: DevicePage.allCases, selection: $devicePage)
                         .frame(maxWidth: 320)
-                        .accessibilityLabel("Device management")
+                        .accessibilityLabel(L10n.text("apple.machinesview.device_management.1a7c41d5"))
                     Spacer(minLength: 0)
-                    Button("Add device", .create) { addingDevice = true }
+                    Button(L10n.text("common.add_device"), .create) { addingDevice = true }
                         .buttonStyle(AccentButtonStyle(small: true))
                 }
                 .padding(Theme.Space.m)
@@ -85,26 +85,26 @@ struct MachinesView: View {
                 .padding(Theme.Space.m)
             }
         }
-        .navigationTitle("Devices")
+        .navigationTitle(L10n.text("common.devices"))
         .background(Theme.background)
         .confirmationDialog(
-            "Remove from account?",
+            L10n.text("apple.machinesview.remove_from_account.a3010e43"),
             isPresented: Binding(
                 get: { pendingUnlink != nil },
                 set: { if !$0 { pendingUnlink = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("Remove", role: .destructive) {
+            Button(L10n.text("common.remove"), role: .destructive) {
                 if let machine = pendingUnlink {
                     Task { await model.unlink(machine) }
                 }
                 pendingUnlink = nil
             }
-            Button("Cancel", role: .cancel) { pendingUnlink = nil }
+            Button(L10n.text("common.cancel"), role: .cancel) { pendingUnlink = nil }
         } message: {
             Text(pendingUnlink.map {
-                "\(model.resolvedName(for: $0) ?? $0.displayName) will be removed from this account and its uploaded history deleted. Use this for a device id that no longer exists, for example after a reinstall."
+                L10n.text("apple.machinesview.0_will_be_removed_from_this_account_and_it.d003b06e", "\(model.resolvedName(for: $0) ?? $0.displayName)")
             } ?? "")
         }
         .overlay(alignment: .bottomTrailing) {
@@ -169,11 +169,11 @@ struct MachinesView: View {
     }
 
     private var sshAccessLabel: some View {
-        Label("SSH hosts", systemImage: "terminal")
+        Label(L10n.text("apple.machinesview.ssh_hosts.6e8d5967"), systemImage: "terminal")
             .font(Theme.callout.weight(.medium))
             .foregroundStyle(Theme.accent)
             .padding(.horizontal, Theme.Space.s)
-            .help("Saved servers, keys and command snippets")
+            .help(L10n.text("apple.machinesview.saved_servers_keys_and_command_snippets.0ac59dee"))
     }
 
     /// The full pairing screen: approvals, this machine, peers, add, e2e.
@@ -195,17 +195,17 @@ struct MachinesView: View {
         }
         switch devicePage {
         case .devices:
-            SearchField(text: $deviceSearch, prompt: "Find a device")
+            SearchField(text: $deviceSearch, prompt: L10n.text("apple.machinesview.find_a_device.d8cd5f42"))
             if !filteredAccountMachines.isEmpty { accountDevices }
             if !filteredKnownMachines.isEmpty { knownMachines }
             if !deviceSearch.isEmpty && filteredAccountMachines.isEmpty && filteredKnownMachines.isEmpty {
-                Text("No devices match “\(deviceSearch)”.")
+                Text(L10n.text("apple.machinesview.no_devices_match_0.e9b713e9", "\(deviceSearch)"))
                     .font(Theme.callout).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 100)
             }
             if model.accountMachines.isEmpty && unlistedKnown.isEmpty { addDeviceAction }
         case .access:
-            Text("Choose what connected devices can do on this computer.")
+            Text(L10n.text("apple.machinesview.choose_what_connected_devices_can_do_on_th.8a7b1610"))
                 .font(Theme.callout).foregroundStyle(.secondary)
             DevicePermissionCard(peers: model.known.filter { $0.trust == .approved })
             DevicePermissionCard(peers: [], localOnly: true)
@@ -238,13 +238,13 @@ struct MachinesView: View {
     private var remotePlanEmpty: some View {
         EmptyState(
             symbol: "lock.laptopcomputer",
-            title: "Remote is on Patron",
+            title: L10n.text("apple.machinesview.remote_is_on_patron.d25dea13"),
             message: model.account?.signedIn == true
-                ? "This Mac already shares the account and sees usage from every device on it. Opening folders and terminals from another device is a paid feature."
-                : "Sign in with a Patron or Legend account to open folders and terminals on this Mac from another device.",
+                ? L10n.text("apple.machinesview.this_mac_already_shares_the_account_and_se.9ac4290a")
+                : L10n.text("apple.machinesview.sign_in_with_a_patron_or_legend_account_to.af6beaa7"),
             mark: "mark_plan"
         ) {
-            Link("See plans", destination: URL(string: "https://tokenstat.ai/pricing")!)
+            Link(L10n.text("apple.machinesview.see_plans.d9898933"), destination: URL(string: "https://tokenstat.ai/pricing")!)
                 .buttonStyle(AccentButtonStyle())
         }
         .padding(Theme.Space.m)
@@ -256,8 +256,8 @@ struct MachinesView: View {
     /// the plan that can actually open a tunnel.
     private var lockedMachineList: some View {
         Card(
-            title: "Devices on this account",
-            subtitle: "Usage from every linked device is already here.",
+            title: L10n.text("apple.machinesview.devices_on_this_account.50d8cf5c"),
+            subtitle: L10n.text("apple.machinesview.usage_from_every_linked_device_is_already.9f16ae77"),
             mark: "mark_device"
         ) {
             VStack(spacing: 0) {
@@ -304,22 +304,22 @@ struct MachinesView: View {
 
     private var addDeviceAction: some View {
         Card(
-            title: "Add a device",
-            subtitle: "Paste the key from the other machine. Everything goes through the tunnel, so it works from any network.",
+            title: L10n.text("apple.machinesview.add_a_device.5469d968"),
+            subtitle: L10n.text("apple.machinesview.paste_the_key_from_the_other_machine_every.75ebefc4"),
             mark: "mark_device",
             accessory: AnyView(
-                Button("Add device", .create) { addingDevice = true }
+                Button(L10n.text("common.add_device"), .create) { addingDevice = true }
                     .buttonStyle(AccentButtonStyle(small: true))
             )
         )
     }
 
     private var hostSetup: some View {
-        Card(title: "This Mac is not ready for background connections", subtitle: "The app can still show local data. A small background helper is needed for machines and automations to keep working when this window is closed.", mark: "mark_host") {
+        Card(title: L10n.text("apple.machinesview.this_mac_is_not_ready_for_background_conne.78859719"), subtitle: L10n.text("apple.machinesview.the_app_can_still_show_local_data_a_small.67ec2880"), mark: "mark_host") {
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(Theme.success)
-                Text("Local app mode")
+                Text(L10n.text("apple.machinesview.local_app_mode.74554ff1"))
                     .font(Theme.callout.weight(.medium))
                 Spacer()
                 Button {
@@ -328,7 +328,7 @@ struct MachinesView: View {
                     if model.settingUpHelper {
                         ProgressView().controlSize(.small)
                     } else {
-                        ActionIcon.settings.label("Set up helper")
+                        ActionIcon.settings.label(L10n.text("apple.machinesview.set_up_helper.0ba42af7"))
                     }
                 }
                 .buttonStyle(AccentButtonStyle())
@@ -341,21 +341,21 @@ struct MachinesView: View {
 
     private func thisMachine(fillsHeight: Bool = false) -> some View {
         Card(
-            title: "Connection settings",
-            subtitle: "Identity and remote access for this Mac",
+            title: L10n.text("apple.machinesview.connection_settings.b4ddb3c1"),
+            subtitle: L10n.text("apple.machinesview.identity_and_remote_access_for_this_mac.ca73eeb3"),
             mark: "mark_device",
             fillsHeight: fillsHeight
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let identity = model.identity {
                     VStack(alignment: .leading, spacing: Theme.Space.m) {
-                        LabeledContent("Name") {
+                        LabeledContent(L10n.text("apple.machinesview.name.dcd1d522")) {
                             MachineNameField(identity: identity) { name in
                                 await model.rename(to: name)
                             }
                         }
                         if let words = model.words {
-                            LabeledContent("Known as") {
+                            LabeledContent(L10n.text("apple.machinesview.known_as.9076e6ab")) {
                                 // The comparison a person actually performs.
                                 // The fingerprint and the key still exist and
                                 // are one disclosure away, under Connection
@@ -385,8 +385,8 @@ struct MachinesView: View {
                 serving
                 Text(
                     model.accountMachines.isEmpty
-                        ? "Machines connect through the tokenstat tunnel, so they work from any network. Add a device once with its key and approve the connection on both sides."
-                        : "Open Devices to see your computers and phones. Choose Add device to pair a computer that is not signed in yet."
+                        ? L10n.text("apple.machinesview.machines_connect_through_the_tokenstat_tun.afcd7e99")
+                        : L10n.text("apple.machinesview.open_devices_to_see_your_computers_and_pho.bc894ce6")
                 )
                 .font(Theme.caption)
                 .foregroundStyle(.tertiary)
@@ -424,21 +424,21 @@ struct MachinesView: View {
                                 .frame(width: 30, height: 30)
                                 .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 8))
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Reach devices from anywhere")
+                                Text(L10n.text("apple.machinesview.reach_devices_from_anywhere.aaa32bd4"))
                                     .font(Theme.callout.weight(.semibold))
-                                Text("Connect to this Mac from your signed-in devices.")
+                                Text(L10n.text("apple.machinesview.connect_to_this_mac_from_your_signed_in_de.a81e4e37"))
                                     .font(Theme.caption)
                                     .foregroundStyle(.secondary)
                             }
                         }
                         Spacer(minLength: Theme.Space.m)
-                        Toggle("Reach devices from anywhere", isOn: Binding(
+                        Toggle(L10n.text("apple.machinesview.reach_devices_from_anywhere.aaa32bd4"), isOn: Binding(
                             get: { allowed && status.tunnel },
                             set: { enabled in Task { await model.setTunnel(enabled) } }
                         ))
                         .toggleStyle(.switch)
                         .labelsHidden()
-                        .accessibilityLabel("Reach devices from anywhere")
+                        .accessibilityLabel(L10n.text("apple.machinesview.reach_devices_from_anywhere.aaa32bd4"))
                         .disabled(!allowed)
                         .fixedSize()
                     }
@@ -450,15 +450,15 @@ struct MachinesView: View {
 
                     Label(
                         allowed && status.tunnel
-                            ? "Remote access is on. This Mac will be reachable while tokenstat is running."
-                            : "Turn this on to make this Mac reachable from your other devices.",
+                            ? L10n.text("apple.machinesview.remote_access_is_on_this_mac_will_be_reach.d98834a9")
+                            : L10n.text("apple.machinesview.turn_this_on_to_make_this_mac_reachable_fr.d2c43ce7"),
                         systemImage: allowed && status.tunnel ? "checkmark.circle.fill" : "info.circle"
                     )
                     .font(Theme.caption)
                     .foregroundStyle(allowed && status.tunnel ? Theme.accent : .secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                    Text("Connections are end-to-end encrypted. Screen sharing prefers a direct local route and otherwise uses the tunnel.")
+                    Text(L10n.text("apple.machinesview.connections_are_end_to_end_encrypted_scree.fca19521"))
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
 
@@ -470,16 +470,16 @@ struct MachinesView: View {
                         // account qualifies again.
                         VStack(alignment: .leading, spacing: Theme.Space.s) {
                             Text(model.account?.signedIn == true
-                                ? "This computer and another device already share the account."
-                                : "Remote reach needs a signed-in Patron account.")
+                                ? L10n.text("apple.machinesview.this_computer_and_another_device_already_s.c3dc1438")
+                                : L10n.text("apple.machinesview.remote_reach_needs_a_signed_in_patron_acco.7f190960"))
                                 .font(Theme.callout.weight(.medium))
                             Text(model.account?.signedIn == true
-                                ? "Free and Supporter add up usage from every device you link. Opening folders and terminals on this Mac from another device is on Patron."
-                                : "Sign in with an account that includes it, then turn the switch on.")
+                                ? L10n.text("apple.machinesview.free_and_supporter_add_up_usage_from_every.0b5ed1e8")
+                                : L10n.text("apple.machinesview.sign_in_with_an_account_that_includes_it_t.3e4fb59e"))
                                 .font(Theme.caption)
                                 .foregroundStyle(.secondary)
                             if model.account?.signedIn == true {
-                                Link("See plans", destination: URL(string: "https://tokenstat.ai/pricing")!)
+                                Link(L10n.text("apple.machinesview.see_plans.d9898933"), destination: URL(string: "https://tokenstat.ai/pricing")!)
                                     .font(Theme.caption.weight(.semibold))
                             }
                         }
@@ -488,7 +488,7 @@ struct MachinesView: View {
                         .background(Theme.accentSoft.opacity(0.55), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                     } else if planExpired {
                         Banner(
-                            text: "Your plan no longer includes remote reach. The relay is refusing this machine until the plan is restored.",
+                            text: L10n.text("apple.machinesview.your_plan_no_longer_includes_remote_reach.fc6a711f"),
                             severity: .warning
                         )
                     }
@@ -500,14 +500,14 @@ struct MachinesView: View {
                         // words from "wait".
                         Banner(
                             text: status.tunnelError.map {
-                                "Remote reach is on, but the tunnel is not connected: \($0)"
-                            } ?? "Remote reach is on, but the tunnel has not connected yet. It retries automatically.",
+                                L10n.text("apple.machinesview.remote_reach_is_on_but_the_tunnel_is_not_c.c73ccbbf", "\($0)")
+                            } ?? L10n.text("apple.machinesview.remote_reach_is_on_but_the_tunnel_has_not.024544f1"),
                             severity: .warning
                         )
                     }
                     if status.tunnel, status.tunnelOnline == true, status.tunnelRegistered == false {
                         Banner(
-                            text: "This machine is on the tunnel, but the account directory does not list it yet. It will retry registration automatically.",
+                            text: L10n.text("apple.machinesview.this_machine_is_on_the_tunnel_but_the_acco.7b29b022"),
                             severity: .warning
                         )
                     }
@@ -516,40 +516,40 @@ struct MachinesView: View {
             }
         }
         .confirmationDialog(
-            "Forget this device?",
+            L10n.text("apple.machinesview.forget_this_device.6bddebb5"),
             isPresented: Binding(
                 get: { confirmForget != nil },
                 set: { if !$0 { confirmForget = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("Forget", role: .destructive) {
+            Button(L10n.text("apple.machinesview.forget.a6bd489d"), role: .destructive) {
                 if let peer = confirmForget {
                     Task { await model.forget(peer) }
                 }
                 confirmForget = nil
             }
-            Button("Keep it", role: .cancel) { confirmForget = nil }
+            Button(L10n.text("apple.machinesview.keep_it.fdce5da2"), role: .cancel) { confirmForget = nil }
         } message: {
-            Text("It is removed from this machine's peer list. You can approve it again later if it connects.")
+            Text(L10n.text("apple.machinesview.it_is_removed_from_this_machine_s_peer_lis.0fe4b5c8"))
         }
         .confirmationDialog(
-            "Revoke access?",
+            L10n.text("apple.machinesview.revoke_access.8138e6ff"),
             isPresented: Binding(
                 get: { confirmRevoke != nil },
                 set: { if !$0 { confirmRevoke = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("Revoke", role: .destructive) {
+            Button(L10n.text("apple.machinesview.revoke.87e6d00b"), role: .destructive) {
                 if let peer = confirmRevoke {
                     Task { await model.revoke(peer) }
                 }
                 confirmRevoke = nil
             }
-            Button("Keep access", role: .cancel) { confirmRevoke = nil }
+            Button(L10n.text("apple.machinesview.keep_access.68cfc92d"), role: .cancel) { confirmRevoke = nil }
         } message: {
-            Text("That device can no longer reach this machine until you approve it again.")
+            Text(L10n.text("apple.machinesview.that_device_can_no_longer_reach_this_machi.e0406f8e"))
         }
         .animation(.easeOut(duration: 0.22), value: model.status != nil)
     }
@@ -561,8 +561,8 @@ struct MachinesView: View {
     /// looking after a toast or a banner has gone.
     private var askingForAccess: some View {
         Card(
-            title: "Waiting for you",
-            subtitle: "Approve only a device you recognise. You can take it back below.",
+            title: L10n.text("apple.machinesview.waiting_for_you.9f760ab2"),
+            subtitle: L10n.text("apple.machinesview.approve_only_a_device_you_recognise_you_ca.69c0725e"),
             mark: "mark_device"
         ) {
             VStack(spacing: Theme.Space.s) {
@@ -582,21 +582,21 @@ struct MachinesView: View {
                         // no way to hand over the mouse without sending
                         // somebody back to their phone to ask again.
                         if request.kind == .screen {
-                            Button("View only", .preview) {
+                            Button(L10n.text("apple.machinesview.view_only.9b4c6c85"), .preview) {
                                 Task { await deviceRequests.answer(request, view: true, control: false) }
                             }
                             .buttonStyle(SecondaryButtonStyle())
-                            Button("Full access", .approve) {
+                            Button(L10n.text("apple.machinesview.full_access.f19611c6"), .approve) {
                                 Task { await deviceRequests.answer(request, view: true, control: true) }
                             }
                             .buttonStyle(AccentButtonStyle())
                         } else {
-                            Button("Allow", .approve) {
+                            Button(L10n.text("apple.machinesview.allow.e213c161"), .approve) {
                                 Task { await deviceRequests.answer(request, view: true, control: false) }
                             }
                             .buttonStyle(AccentButtonStyle())
                         }
-                        Button("Deny", .revoke, role: .destructive) {
+                        Button(L10n.text("apple.machinesview.deny.05a2d733"), .revoke, role: .destructive) {
                             Task { await deviceRequests.answer(request, view: false, control: false) }
                         }
                         .buttonStyle(SecondaryButtonStyle())
@@ -616,8 +616,8 @@ struct MachinesView: View {
 
     private var waitingForApproval: some View {
         Card(
-            title: "Needs your approval",
-            subtitle: "Nothing can run here until you approve it.",
+            title: L10n.text("apple.machinesview.needs_your_approval.635ea5c1"),
+            subtitle: L10n.text("apple.machinesview.nothing_can_run_here_until_you_approve_it.1dbb95eb"),
             mark: "mark_device"
         ) {
             VStack(spacing: Theme.Space.s) {
@@ -628,17 +628,17 @@ struct MachinesView: View {
                         isSelected: model.selectedKind == .peer(peer.key)
                     ) {
                         HStack(spacing: Theme.Space.s) {
-                            Button("Approve", .approve) { Task { await model.approve(peer) } }
+                            Button(L10n.text("apple.machinesview.approve.6007acbe"), .approve) { Task { await model.approve(peer) } }
                                 .buttonStyle(AccentButtonStyle())
-                            Button("Forget", .delete, role: .destructive) { confirmForget = peer }
+                            Button(L10n.text("apple.machinesview.forget.a6bd489d"), .delete, role: .destructive) { confirmForget = peer }
                                 .buttonStyle(SecondaryButtonStyle())
                         }
                     }
                     .onTapGesture { inspectPeer(peer) }
                     .accessibilityIdentifier("device.details.peer.\(peer.key)")
-                    .accessibilityAction(named: "Details") { inspectPeer(peer) }
+                    .accessibilityAction(named: L10n.text("apple.machinesview.details.45989de4")) { inspectPeer(peer) }
                 }
-                Text("Approve only devices you recognize. You can revoke access later.")
+                Text(L10n.text("apple.machinesview.approve_only_devices_you_recognize_you_can.e599993b"))
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -670,7 +670,7 @@ struct MachinesView: View {
     }
 
     private var knownMachines: some View {
-        Card(title: "Other devices", subtitle: "Devices known to this Mac outside your account. Manage their access here.", mark: "mark_device", fillsHeight: true) {
+        Card(title: L10n.text("apple.machinesview.other_devices.4e027dbb"), subtitle: L10n.text("apple.machinesview.devices_known_to_this_mac_outside_your_acc.b77734a5"), mark: "mark_device", fillsHeight: true) {
             VStack(spacing: Theme.Space.s) {
                 ForEach(filteredKnownMachines) { peer in
                     PeerRow(
@@ -680,15 +680,15 @@ struct MachinesView: View {
                         isSelected: model.selectedKind == .peer(peer.key)
                     ) {
                         HStack(spacing: Theme.Space.s) {
-                            ToolbarMenuButton(help: "Manage \(peer.label.isEmpty ? (model.accountName(for: peer) ?? "device") : peer.label)") {
+                            ToolbarMenuButton(help: L10n.text("apple.machinesview.manage_0.d77d63f8", "\(peer.label.isEmpty ? (model.accountName(for: peer) ?? "device") : peer.label)")) {
                                 if peer.trust == .approved {
-                                    Button("Revoke", .revoke, role: .destructive) { confirmRevoke = peer }
+                                    Button(L10n.text("apple.machinesview.revoke.87e6d00b"), .revoke, role: .destructive) { confirmRevoke = peer }
                                         .buttonStyle(SecondaryButtonStyle())
                                 } else {
-                                    Button("Approve", .approve) { Task { await model.approve(peer) } }
+                                    Button(L10n.text("apple.machinesview.approve.6007acbe"), .approve) { Task { await model.approve(peer) } }
                                         .buttonStyle(SecondaryButtonStyle())
                                 }
-                                Button("Forget", .delete, role: .destructive) { confirmForget = peer }
+                                Button(L10n.text("apple.machinesview.forget.a6bd489d"), .delete, role: .destructive) { confirmForget = peer }
                                     .buttonStyle(SecondaryButtonStyle())
                             }
                             DeviceRowDisclosure()
@@ -696,7 +696,7 @@ struct MachinesView: View {
                     }
                     .onTapGesture { inspectPeer(peer) }
                     .accessibilityIdentifier("device.details.peer.\(peer.key)")
-                    .accessibilityAction(named: "Details") { inspectPeer(peer) }
+                    .accessibilityAction(named: L10n.text("apple.machinesview.details.45989de4")) { inspectPeer(peer) }
                 }
             }
             .transition(.smoothIn(reduceMotion: reduceMotion))
@@ -727,15 +727,15 @@ struct MachinesView: View {
     /// other devices may reach this Mac.
     private var alwaysOnHost: some View {
         Card(
-            title: "Always-on host",
-            subtitle: "Whether the host helper stays up after you quit",
+            title: L10n.text("apple.machinesview.always_on_host.f7990642"),
+            subtitle: L10n.text("apple.machinesview.whether_the_host_helper_stays_up_after_you.dd1619f2"),
             mark: "mark_host",
             fillsHeight: true
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let policy = model.hostPolicy {
                     toggleRow(
-                        "Keep this Mac reachable",
+                        L10n.text("apple.machinesview.keep_this_mac_reachable.99f1e1f6"),
                         detail: alwaysOnDetail(policy),
                         isOn: Binding(
                             get: { policy.alwaysOn },
@@ -744,17 +744,17 @@ struct MachinesView: View {
                     )
                     .disabled(model.isSavingHostPolicy)
                     if policy.alwaysOn && policy.hasInternalBattery {
-                        Text("Uses more power.")
+                        Text(L10n.text("apple.machinesview.uses_more_power.a24adb34"))
                             .font(Theme.caption)
                             .foregroundStyle(.secondary)
                     }
                     if !policy.alwaysOn {
-                        Text("Automations run only while tokenstat is open.")
+                        Text(L10n.text("apple.machinesview.automations_run_only_while_tokenstat_is_op.72980d54"))
                             .font(Theme.caption)
                             .foregroundStyle(.secondary)
                     }
                 } else {
-                    Text("The host helper has not answered yet.")
+                    Text(L10n.text("apple.machinesview.the_host_helper_has_not_answered_yet.ed11e9fb"))
                         .font(Theme.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -764,9 +764,9 @@ struct MachinesView: View {
 
     private func alwaysOnDetail(_ policy: HostPolicy) -> String {
         if policy.alwaysOn {
-            return "The host helper keeps running after you quit tokenstat, so other devices can reach this Mac. This Mac will not idle-sleep. A laptop still sleeps when you close the lid."
+            return L10n.text("apple.machinesview.the_host_helper_keeps_running_after_you_qu.8da69cf5")
         }
-        return "The host helper stops when you quit tokenstat, so this Mac can sleep. Other devices cannot open folders or terminals here until you open the app again."
+        return L10n.text("apple.machinesview.the_host_helper_stops_when_you_quit_tokens.3285420e")
     }
 
     private func toggleRow(_ title: String, detail: String, isOn: Binding<Bool>) -> some View {
@@ -788,14 +788,14 @@ struct MachinesView: View {
             Toggle("", isOn: isOn)
                 .toggleStyle(.switch)
                 .labelsHidden()
-                .accessibilityLabel("Always-on host")
+                .accessibilityLabel(L10n.text("apple.machinesview.always_on_host.f7990642"))
                 .fixedSize()
         }
     }
     #endif
 
     private var accountDevices: some View {
-        Card(title: "Your devices", subtitle: "Select a device for connection details. Phones and tablets connect to this Mac.", mark: "mark_device") {
+        Card(title: L10n.text("apple.machinesview.your_devices.555eaa22"), subtitle: L10n.text("apple.machinesview.select_a_device_for_connection_details_pho.2c07fad5"), mark: "mark_device") {
             LazyVStack(spacing: Theme.Space.s) {
                 ForEach(filteredAccountMachines) { machine in
                     // Phones are shown but never dialled: a client reaches a
@@ -898,7 +898,7 @@ struct MachinesView: View {
                     // VoiceOver get the same way in without a button for it.
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("device.details.account.\(machine.id)")
-                    .accessibilityAction(named: "Details") { inspectAccount(machine) }
+                    .accessibilityAction(named: L10n.text("apple.machinesview.details.45989de4")) { inspectAccount(machine) }
                 }
             }
             .transition(.smoothIn(reduceMotion: reduceMotion))
@@ -921,31 +921,31 @@ struct MachinesView: View {
             if machine.isHost, !isSelf {
                 if let peer = model.peer(for: machine) {
                     if model.isConnected(machine) {
-                        Button("Disconnect", .disconnect) { model.disconnect(peer) }
+                        Button(L10n.text("common.disconnect"), .disconnect) { model.disconnect(peer) }
                             .buttonStyle(SecondaryButtonStyle(small: true))
                     } else {
                         accountPeerActions(peer, machine: machine)
                     }
                 } else if let key = machine.publicIdentity, !key.isEmpty, model.canConnect(machine) {
-                    Button("Connect", .connect) { Task { await model.connect(machine) } }
+                    Button(L10n.text("common.connect"), .connect) { Task { await model.connect(machine) } }
                         .buttonStyle(AccentButtonStyle(small: true))
                 }
             }
             Spacer(minLength: 0)
-            ToolbarMenuButton(help: "Manage \(model.resolvedName(for: machine) ?? machine.displayName)") {
-                Button("Rename", .edit) { renamingID = machine.machineID }
+            ToolbarMenuButton(help: L10n.text("apple.machinesview.manage_0.d77d63f8", "\(model.resolvedName(for: machine) ?? machine.displayName)")) {
+                Button(L10n.text("common.rename"), .edit) { renamingID = machine.machineID }
                 if !isSelf {
                     if !machine.isHost, let peer = linkedPeer(for: machine) {
                         Divider()
                         if peer.trust == .approved {
-                            Button("Revoke access", .revoke, role: .destructive) { confirmRevoke = peer }
+                            Button(L10n.text("apple.machinesview.revoke_access.ab292ddb"), .revoke, role: .destructive) { confirmRevoke = peer }
                         } else {
-                            Button("Approve", .approve) { Task { await model.approve(peer) } }
+                            Button(L10n.text("apple.machinesview.approve.6007acbe"), .approve) { Task { await model.approve(peer) } }
                         }
-                        Button("Forget pairing", .delete, role: .destructive) { confirmForget = peer }
+                        Button(L10n.text("apple.machinesview.forget_pairing.a39ae4ac"), .delete, role: .destructive) { confirmForget = peer }
                     } else if machine.isHost {
                         Divider()
-                        Button("Remove from account", .delete, role: .destructive) { pendingUnlink = machine }
+                        Button(L10n.text("apple.machinesview.remove_from_account.6bfa319e"), .delete, role: .destructive) { pendingUnlink = machine }
                     }
                 }
             }
@@ -960,12 +960,12 @@ struct MachinesView: View {
     private func autoConnectRow(_ machine: Machine, isSelf: Bool) -> some View {
         if machine.isHost, !isSelf, let peer = model.peer(for: machine) {
             HStack(spacing: 6) {
-                Text("Auto-connect")
+                Text(L10n.text("apple.machinesview.auto_connect.45b6d201"))
                     .font(Theme.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 Toggle(
-                    "Auto-connect",
+                    L10n.text("apple.machinesview.auto_connect.45b6d201"),
                     isOn: Binding(
                         get: { WorkspacesModel.isAutoConnectEnabled(for: peer.key) },
                         set: { model.setAutoConnect($0, peer: peer, machine: machine) }
@@ -975,7 +975,7 @@ struct MachinesView: View {
                 .toggleStyle(.switch)
                 .controlSize(.small)
             }
-            .accessibilityLabel("Auto-connect \(model.resolvedName(for: machine) ?? machine.displayName)")
+            .accessibilityLabel(L10n.text("apple.machinesview.auto_connect_0.3bbf847e", "\(model.resolvedName(for: machine) ?? machine.displayName)"))
         }
     }
 
@@ -993,50 +993,50 @@ struct MachinesView: View {
     /// title in monospace, where an identifier belongs.
     private func deviceTitle(resolved: String?, machine: Machine) -> String {
         if let resolved, !resolved.isEmpty { return resolved }
-        return machine.isHost ? "Unnamed computer" : "Unnamed device"
+        return machine.isHost ? L10n.text("apple.machinesview.unnamed_computer.810da0c7") : L10n.text("apple.machinesview.unnamed_device.6aba593f")
     }
 
     /// One caption line under a machine's name. The presence light is the
     /// quick read; this carries the detail, and the two never collide.
     private func statusLine(for machine: Machine, isSelf: Bool) -> String {
-        if isSelf { return "This device" }
+        if isSelf { return L10n.text("apple.machinesview.this_device.d052579c") }
         if !machine.isHost {
             // A phone holds the tunnel only while somebody is using it, so
             // "offline" here means "not in the app right now", not "broken".
-            if machine.online == true { return "Phone · in the app now" }
-            if let seen = formatRelativeDate(machine.lastSeenAt) { return "Phone · last used \(seen)" }
-            return "Phone · signed in on this account"
+            if machine.online == true { return L10n.text("apple.machinesview.phone_in_the_app_now.49897ae2") }
+            if let seen = formatRelativeDate(machine.lastSeenAt) { return L10n.text("apple.machinesview.phone_last_used_0.555b7a23", "\(seen)") }
+            return L10n.text("apple.machinesview.phone_signed_in_on_this_account.58d549b8")
         }
-        if machine.publicIdentity?.isEmpty != false { return "No connection key yet" }
+        if machine.publicIdentity?.isEmpty != false { return L10n.text("apple.machinesview.no_connection_key_yet.86015bb4") }
         if machine.online == false {
             if let seen = formatRelativeDate(machine.lastSeenAt) {
-                return "Offline · last seen \(seen)"
+                return L10n.text("apple.machinesview.offline_last_seen_0.52d14c6d", "\(seen)")
             }
-            return "Offline"
+            return L10n.text("common.offline")
         }
-        if model.isConnected(machine) { return "Connected · projects in sidebar" }
-        if let seen = formatRelativeDate(machine.lastSeenAt) { return "Seen \(seen)" }
-        if let sync = formatRelativeDate(machine.lastSyncAt) { return "Last synced \(sync)" }
-        return "No sync recorded"
+        if model.isConnected(machine) { return L10n.text("apple.machinesview.connected_projects_in_sidebar.bc3f7d2f") }
+        if let seen = formatRelativeDate(machine.lastSeenAt) { return L10n.text("apple.machinesview.seen_0.522e2767", "\(seen)") }
+        if let sync = formatRelativeDate(machine.lastSyncAt) { return L10n.text("apple.machinesview.last_synced_0.789aa5cd", "\(sync)") }
+        return L10n.text("apple.machinesview.no_sync_recorded.e74abceb")
     }
 
     @ViewBuilder
     private func accountPeerActions(_ peer: Peer, machine: Machine) -> some View {
         switch peer.trust {
         case .pending:
-            Button("Approve", .approve) { Task { await model.approve(peer) } }
+            Button(L10n.text("apple.machinesview.approve.6007acbe"), .approve) { Task { await model.approve(peer) } }
                 .buttonStyle(AccentButtonStyle())
         case .approved:
             if model.canConnect(machine) {
-                Button("Connect", .connect) { Task { await model.connect(peer) } }
+                Button(L10n.text("common.connect"), .connect) { Task { await model.connect(peer) } }
                     .buttonStyle(AccentButtonStyle())
-                    .help("Connects through the tunnel from anywhere")
+                    .help(L10n.text("apple.machinesview.connects_through_the_tunnel_from_anywhere.71e633cf"))
             }
-            Button("Revoke", .revoke, role: .destructive) { confirmRevoke = peer }
+            Button(L10n.text("apple.machinesview.revoke.87e6d00b"), .revoke, role: .destructive) { confirmRevoke = peer }
                 .buttonStyle(SecondaryButtonStyle())
-                .help("Stops this device from reaching you; workspaces leave the sidebar")
+                .help(L10n.text("apple.machinesview.stops_this_device_from_reaching_you_worksp.dc0b132f"))
         case .revoked:
-            Button("Approve", .approve) { Task { await model.approve(peer) } }
+            Button(L10n.text("apple.machinesview.approve.6007acbe"), .approve) { Task { await model.approve(peer) } }
                 .buttonStyle(SecondaryButtonStyle())
         }
     }
@@ -1058,11 +1058,11 @@ struct MachinesView: View {
                     Image(systemName: "lock.shield.fill")
                         .foregroundStyle(Theme.accent)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("End to end encrypted")
+                        Text(L10n.text("apple.machinesview.end_to_end_encrypted.e3ac807e"))
                             .font(Theme.fit(13, weight: .semibold))
                         Text(encryptionExpanded
-                            ? "Keys and fingerprints are visible"
-                            : "Keys are hidden until you choose to view them")
+                            ? L10n.text("apple.machinesview.keys_and_fingerprints_are_visible.edabb3c3")
+                            : L10n.text("apple.machinesview.keys_are_hidden_until_you_choose_to_view_t.26d1e1a0"))
                             .font(Theme.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -1076,26 +1076,19 @@ struct MachinesView: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint(encryptionExpanded
-                ? "Hides the encryption keys"
-                : "Shows the encryption keys")
+                ? L10n.text("apple.machinesview.hides_the_encryption_keys.d8fa35b1")
+                : L10n.text("apple.machinesview.shows_the_encryption_keys.081948ff"))
 
             if encryptionExpanded {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    Text("""
-                    A connection between two machines carries terminal output, file \
-                    contents and diffs. It is encrypted on one machine and \
-                    decrypted on the other, with keys that never leave them. The \
-                    tunnel relays the encrypted bytes and cannot read them, and \
-                    neither can tokenstat. Only aggregate counters are ever \
-                    eligible for sync.
-                    """)
+                    Text(L10n.text("apple.machinesview.a_connection_between_two_machines_carries.aa0d4220"))
                     .font(Theme.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                     if let identity = model.identity {
                         keyLine(
-                            title: "This machine",
+                            title: L10n.text("apple.machinesview.this_machine.1b8548de"),
                             words: identity.words,
                             fingerprint: identity.fingerprint
                         )
@@ -1103,16 +1096,14 @@ struct MachinesView: View {
                     ForEach(model.known.filter { $0.trust == .approved }) { peer in
                         keyLine(
                             title: peer.label.isEmpty
-                                ? (model.accountName(for: peer) ?? "Approved device")
+                                ? (model.accountName(for: peer) ?? L10n.text("apple.machinesview.approved_device.3170ef88"))
                                 : peer.label,
                             words: peer.words,
                             fingerprint: peer.fingerprint
                         )
                     }
 
-                    Text("Noise XX handshake, X25519 keys, ChaCha20-Poly1305. "
-                        + "Two machines showing the same words for each other are talking "
-                        + "to each other and to nothing in between.")
+                    Text(L10n.text("apple.machinesview.noise_xx_handshake_x25519_keys_chacha20_po.8025c019"))
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1171,30 +1162,30 @@ private struct DevicePermissionCard: View {
     var body: some View {
         Group {
             if localOnly {
-                Card(title: "Local permissions", subtitle: "Screen sharing and incoming files on this Mac", mark: "mark_device", fillsHeight: fillsHeight) {
+                Card(title: L10n.text("apple.machinesview.local_permissions.26eb1221"), subtitle: L10n.text("apple.machinesview.screen_sharing_and_incoming_files_on_this.ead35623"), mark: "mark_device", fillsHeight: fillsHeight) {
                     VStack(alignment: .leading, spacing: Theme.Space.m) {
                     #if os(macOS)
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Incoming files").font(Theme.callout.weight(.medium))
-                            Text(transferDestination ?? "Choose a destination before receiving files")
+                            Text(L10n.text("apple.machinesview.incoming_files.41d9096f")).font(Theme.callout.weight(.medium))
+                            Text(transferDestination ?? L10n.text("apple.machinesview.choose_a_destination_before_receiving_file.d0d97910"))
                                 .font(Theme.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                         }
                         Spacer()
-                        Button("Choose folder", .reveal) { chooseTransferDestination() }
+                        Button(L10n.text("apple.machinesview.choose_folder.3db74100"), .reveal) { chooseTransferDestination() }
                     }
                     ThemeRule()
                     permissionRow(.screenRecording, granted: access.screenRecording)
                     if access.needsRelaunch {
                         HStack(alignment: .top) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Restart to finish").font(Theme.callout.weight(.medium))
-                                Text("macOS granted Screen Recording after this app started, and capture cannot see it until tokenstat is restarted.")
+                                Text(L10n.text("apple.machinesview.restart_to_finish.e70f1ec3")).font(Theme.callout.weight(.medium))
+                                Text(L10n.text("apple.machinesview.macos_granted_screen_recording_after_this.baaa55d4"))
                                     .font(Theme.caption).foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             Spacer(minLength: Theme.Space.m)
-                            Button("Restart", .refresh) { access.relaunch() }
+                            Button(L10n.text("apple.machinesview.restart.6b983a81"), .refresh) { access.relaunch() }
                                 .buttonStyle(AccentButtonStyle(small: true))
                         }
                     }
@@ -1203,7 +1194,7 @@ private struct DevicePermissionCard: View {
                     // somebody would assume the opposite. Capture runs in this
                     // app, not in the helper, so a closed app has no screen to
                     // share however always-on the helper is.
-                    Text("Capture runs in the app, so tokenstat has to be open for this screen to be shared. The always-on helper keeps terminals and files working, not the screen.")
+                    Text(L10n.text("apple.machinesview.capture_runs_in_the_app_so_tokenstat_has_t.e2be3644"))
                         .font(Theme.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1212,11 +1203,11 @@ private struct DevicePermissionCard: View {
                     }
                 }
             } else if !peers.isEmpty {
-                Card(title: "Device permissions", subtitle: "Choose what each approved device can access on this Mac", mark: "mark_device") {
+                Card(title: L10n.text("apple.machinesview.device_permissions.8b91be20"), subtitle: L10n.text("apple.machinesview.choose_what_each_approved_device_can_acces.2cfb4ad0"), mark: "mark_device") {
                     WidthReader { width in
                         permissionTable(compact: width < 620)
                     }
-                    Text("Control requires View. Devices can also request access; pending requests appear at the top of this page.")
+                    Text(L10n.text("apple.machinesview.control_requires_view_devices_can_also_req.b5c3c672"))
                         .font(Theme.caption).foregroundStyle(.secondary)
                     if let error { Text(error).font(Theme.caption).foregroundStyle(Theme.danger) }
                 }
@@ -1235,8 +1226,8 @@ private struct DevicePermissionCard: View {
         VStack(spacing: 0) {
             if !compact {
                 HStack {
-                    Text("DEVICE").frame(maxWidth: .infinity, alignment: .leading)
-                    ForEach(["PROJECTS", "VIEW", "CONTROL"], id: \.self) { title in
+                    Text(L10n.text("apple.machinesview.device.f92fc83b")).frame(maxWidth: .infinity, alignment: .leading)
+                    ForEach([L10n.text("apple.machinesview.projects.59891d08"), L10n.text("apple.machinesview.view.28baebc3"), L10n.text("apple.machinesview.control.6fecf908")], id: \.self) { title in
                         Text(title).frame(width: 105)
                     }
                 }
@@ -1270,11 +1261,11 @@ private struct DevicePermissionCard: View {
 
     private func permissionSwitches(_ peer: Peer, compact: Bool) -> some View {
         HStack(spacing: 0) {
-            permissionSwitch("Projects", peer: peer, value: workspaceBinding(peer), compact: compact)
-            permissionSwitch("View", peer: peer, value: binding(peer, control: false), compact: compact)
-            permissionSwitch("Control", peer: peer, value: binding(peer, control: true), compact: compact)
+            permissionSwitch(L10n.text("common.projects"), peer: peer, value: workspaceBinding(peer), compact: compact)
+            permissionSwitch(L10n.text("apple.machinesview.view.dcc839a4"), peer: peer, value: binding(peer, control: false), compact: compact)
+            permissionSwitch(L10n.text("apple.machinesview.control.32d7e820"), peer: peer, value: binding(peer, control: true), compact: compact)
                 .disabled(permissions[peer.key]?.view != true)
-                .help("Control requires screen viewing access")
+                .help(L10n.text("apple.machinesview.control_requires_screen_viewing_access.bf319cd9"))
         }
     }
 
@@ -1298,7 +1289,7 @@ private struct DevicePermissionCard: View {
                     Image(systemName: granted ? "checkmark.circle.fill" : "exclamationmark.circle")
                         .font(Theme.font(11))
                         .foregroundStyle(granted ? Theme.success : Theme.warning)
-                    Text(granted ? "Granted" : "Not granted")
+                    Text(granted ? L10n.text("apple.machinesview.granted.62026a42") : L10n.text("apple.machinesview.not_granted.352a5b4c"))
                         .font(Theme.caption)
                         .foregroundStyle(granted ? Theme.success : Theme.warning)
                 }
@@ -1308,7 +1299,7 @@ private struct DevicePermissionCard: View {
             }
             Spacer(minLength: Theme.Space.m)
             if !granted {
-                Button("Allow", .approve) { ask(kind) }
+                Button(L10n.text("apple.machinesview.allow.e213c161"), .approve) { ask(kind) }
                     .buttonStyle(AccentButtonStyle(small: true))
             }
         }
@@ -1437,17 +1428,17 @@ private struct StatusDot: View {
 
     private var accessibilityText: String {
         switch online {
-        case .some(true): return "Online"
-        case .some(false): return "Offline"
-        case nil: return "Connecting"
+        case .some(true): return L10n.text("common.online")
+        case .some(false): return L10n.text("common.offline")
+        case nil: return L10n.text("apple.machinesview.connecting.d403c686")
         }
     }
 
     private var helpText: String {
         switch online {
-        case .some(true): return "Online"
-        case .some(false): return "Offline"
-        case nil: return "Presence not confirmed yet"
+        case .some(true): return L10n.text("common.online")
+        case .some(false): return L10n.text("common.offline")
+        case nil: return L10n.text("apple.machinesview.presence_not_confirmed_yet.a71e57d2")
         }
     }
 }
@@ -1469,13 +1460,13 @@ private struct MachineNameField: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.xs) {
-            TextField("Name", text: $draft, prompt: Text(identity.label))
+            TextField(L10n.text("apple.machinesview.name.dcd1d522"), text: $draft, prompt: Text(identity.label))
                 .textFieldStyle(.plain)
                 .focused($editing)
                 .onSubmit { commit() }
                 .frame(maxWidth: 220)
             if identity.labelIsChosen == true {
-                Button("Use the computer's name", .device) {
+                Button(L10n.text("apple.machinesview.use_the_computer_s_name.f856ecb6"), .device) {
                     draft = ""
                     commit()
                 }
@@ -1524,16 +1515,16 @@ private struct AccountNameField: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.xs) {
-            TextField("Name", text: $draft, prompt: Text(placeholder))
+            TextField(L10n.text("apple.machinesview.name.dcd1d522"), text: $draft, prompt: Text(placeholder))
                 .textFieldStyle(.plain)
                 .font(Theme.callout.weight(.medium))
                 .focused($editing)
                 .frame(maxWidth: 220)
                 .onSubmit { Task { await commit(draft) } }
-            Button("Save", .save) { Task { await commit(draft) } }
+            Button(L10n.text("common.save"), .save) { Task { await commit(draft) } }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .labelStyle(.iconOnly)
-            Button("Cancel", .dismiss, role: .cancel) { onCancel() }
+            Button(L10n.text("common.cancel"), .dismiss, role: .cancel) { onCancel() }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .labelStyle(.iconOnly)
         }
@@ -1562,7 +1553,7 @@ private struct PeerRow<Actions: View>: View {
                 .foregroundStyle(tint)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: Theme.Space.s) {
-                    Text(peer.label.isEmpty ? (resolvedName ?? "Unnamed device") : peer.label)
+                    Text(peer.label.isEmpty ? (resolvedName ?? L10n.text("apple.machinesview.unnamed_device.6aba593f")) : peer.label)
                         .font(Theme.callout.weight(.medium))
                     TrustBadge(trust: peer.trust)
                 }
@@ -1570,7 +1561,7 @@ private struct PeerRow<Actions: View>: View {
                 // exists to be compared with another screen by a person, and
                 // that is the form they will read whole. They derive from a
                 // public key, so there is nothing to hide.
-                Text(peer.words ?? "Paired device")
+                Text(peer.words ?? L10n.text("apple.machinesview.paired_device.b2e5f1e4"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
@@ -1615,9 +1606,9 @@ private struct TrustBadge: View {
 
     private var label: String {
         switch trust {
-        case .approved: return "Access allowed"
-        case .pending: return "Waiting for approval"
-        case .revoked: return "Access removed"
+        case .approved: return L10n.text("apple.machinesview.access_allowed.f5058646")
+        case .pending: return L10n.text("apple.machinesview.waiting_for_approval.10c5739b")
+        case .revoked: return L10n.text("apple.machinesview.access_removed.dcdce51f")
         }
     }
 
@@ -1650,22 +1641,22 @@ private struct PairingForm: View {
     var body: some View {
         if showsCard {
             Card(
-                title: "Connect another device",
-                subtitle: "Paste an invite from the other device. A live invite includes its LAN address when available.",
+                title: L10n.text("apple.machinesview.connect_another_device.9890af94"),
+                subtitle: L10n.text("apple.machinesview.paste_an_invite_from_the_other_device_a_li.701376c1"),
                 mark: "mark_device"
             ) {
                 fields(includeConnect: true)
             }
         } else {
             ThemedSheet(
-                title: "Connect another device",
-                subtitle: "Paste an invite from the other device. A live invite includes its LAN address when available.",
+                title: L10n.text("apple.machinesview.connect_another_device.9890af94"),
+                subtitle: L10n.text("apple.machinesview.paste_an_invite_from_the_other_device_a_li.701376c1"),
                 icon: .pair,
                 onClose: { onClose?() }
             ) {
                 fields(includeConnect: false)
             } actions: {
-                Button("Cancel", .dismiss) { onClose?() }
+                Button(L10n.text("common.cancel"), .dismiss) { onClose?() }
                     .buttonStyle(SecondaryButtonStyle())
                     .keyboardShortcut(.cancelAction)
                 Spacer()
@@ -1680,12 +1671,12 @@ private struct PairingForm: View {
         VStack(alignment: .leading, spacing: Theme.Space.xl) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 TextField(
-                    "Pairing code",
+                    L10n.text("apple.machinesview.pairing_code.1c5ea2f7"),
                     text: $link,
-                    prompt: Text("Paste the code from the other device")
+                    prompt: Text(L10n.text("apple.machinesview.paste_the_code_from_the_other_device.1fa63d81"))
                 )
                 .font(Theme.mono(11))
-                TextField("Name", text: $label, prompt: Text("What you call that device (optional)"))
+                TextField(L10n.text("apple.machinesview.name.dcd1d522"), text: $label, prompt: Text(L10n.text("apple.machinesview.what_you_call_that_device_optional.dbb5fdab")))
             }
             .textFieldStyle(.themed)
 
@@ -1696,11 +1687,7 @@ private struct PairingForm: View {
                 }
             }
 
-            Text("""
-            Connecting here approves that machine to reach this one. The \
-            other machine has to approve this one too, and its own screen \
-            will show this machine waiting.
-            """)
+            Text(L10n.text("apple.machinesview.connecting_here_approves_that_machine_to_r.23b01cc2"))
             .font(Theme.caption)
             .foregroundStyle(Theme.controlGlyph)
             .fixedSize(horizontal: false, vertical: true)
@@ -1718,7 +1705,7 @@ private struct PairingForm: View {
                 label = ""
             }
         } label: {
-            ActionIcon.connect.label("Connect")
+            ActionIcon.connect.label(L10n.text("common.connect"))
         }
         .buttonStyle(AccentButtonStyle())
         .disabled(working || link.trimmingCharacters(in: .whitespaces).isEmpty)

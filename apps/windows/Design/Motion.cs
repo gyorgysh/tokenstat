@@ -345,7 +345,7 @@ internal static class Motion
     {
         var label = new TextBlock
         {
-            Text = "Working",
+            Text = L10n.Text("common.working"),
             Foreground = Theme.AccentBrush,
             FontSize = 12,
         };

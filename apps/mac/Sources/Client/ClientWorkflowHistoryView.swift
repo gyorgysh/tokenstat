@@ -27,7 +27,7 @@ struct ClientWorkflowHistoryView: View {
                 .padding(.bottom, 96)
         }
         .background(Theme.background)
-        .navigationTitle("Runs")
+        .navigationTitle(L10n.text("apple.clientworkflowhistoryview.runs.848f54e8"))
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
             await ClientRefresh.pull("workflow-history-\(graphID)") { await session.load() }
@@ -45,7 +45,7 @@ struct ClientWorkflowHistorySheet: View {
 
     var body: some View {
         ThemedSheet(
-            title: "Runs",
+            title: L10n.text("apple.clientworkflowhistoryview.runs.848f54e8"),
             subtitle: session.graphs.first(where: { $0.id == graphID })?.name ?? session.folderName,
             icon: .history,
             scrolls: true,
@@ -79,8 +79,8 @@ struct ClientWorkflowHistoryList: View {
                     .padding(.top, Theme.Space.xl)
             } else if runs.isEmpty {
                 ClientSectionEmpty(
-                    text: "Nothing has run yet",
-                    message: "When this workflow runs, the output lands here."
+                    text: L10n.text("apple.clientworkflowhistoryview.nothing_has_run_yet.45d9f27c"),
+                    message: L10n.text("apple.clientworkflowhistoryview.when_this_workflow_runs_the_output_lands_h.2b8433ca")
                 )
             } else {
                 Text(HostScheduleClock.timesCaption(
@@ -91,7 +91,7 @@ struct ClientWorkflowHistoryList: View {
                 .foregroundStyle(Theme.controlGlyph)
                 .fixedSize(horizontal: false, vertical: true)
                 if leftover > 0 {
-                    Text("Showing the \(visible.count) newest of \(runs.count).")
+                    Text(L10n.text("apple.clientworkflowhistoryview.showing_the_0_newest_of_1.4b456919", "\(visible.count)", "\(runs.count)"))
                         .font(ClientType.caption)
                         .foregroundStyle(Theme.controlGlyph)
                 }
@@ -99,7 +99,7 @@ struct ClientWorkflowHistoryList: View {
                     runRow(run)
                 }
                 if leftover > 0 {
-                    Button("Earlier runs", .history) {
+                    Button(L10n.text("apple.clientworkflowhistoryview.earlier_runs.04ab162c"), .history) {
                         shown += AutomationRunHistory.pageSize
                     }
                     .buttonStyle(SecondaryButtonStyle(comfortable: true))

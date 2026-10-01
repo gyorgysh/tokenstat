@@ -7,13 +7,13 @@ enum NoteFormatting: CaseIterable {
 
     var title: String {
         switch self {
-        case .heading: "Heading"
-        case .bold: "Bold"
-        case .italic: "Italic"
-        case .bullet: "Bulleted list"
-        case .checklist: "Checklist"
-        case .quote: "Quote"
-        case .code: "Code"
+        case .heading: L10n.text("apple.noteformatting.heading.b34f17f0")
+        case .bold: L10n.text("apple.noteformatting.bold.94fee62e")
+        case .italic: L10n.text("apple.noteformatting.italic.9bf37cb5")
+        case .bullet: L10n.text("apple.noteformatting.bulleted_list.ce51b395")
+        case .checklist: L10n.text("apple.noteformatting.checklist.73460304")
+        case .quote: L10n.text("apple.noteformatting.quote.eb4cdebd")
+        case .code: L10n.text("apple.noteformatting.code.340f4630")
         }
     }
 
@@ -32,12 +32,12 @@ enum NoteFormatting: CaseIterable {
         let placeholder: String
         let lines: Bool
         switch self {
-        case .heading: (prefix, suffix, placeholder, lines) = ("## ", "", "Heading", true)
+        case .heading: (prefix, suffix, placeholder, lines) = ("## ", "", L10n.text("apple.noteformatting.heading.b34f17f0"), true)
         case .bold: (prefix, suffix, placeholder, lines) = ("**", "**", "text", false)
         case .italic: (prefix, suffix, placeholder, lines) = ("*", "*", "text", false)
-        case .bullet: (prefix, suffix, placeholder, lines) = ("- ", "", "List item", true)
-        case .checklist: (prefix, suffix, placeholder, lines) = ("- [ ] ", "", "To do", true)
-        case .quote: (prefix, suffix, placeholder, lines) = ("> ", "", "Quote", true)
+        case .bullet: (prefix, suffix, placeholder, lines) = ("- ", "", L10n.text("apple.noteformatting.list_item.201333ac"), true)
+        case .checklist: (prefix, suffix, placeholder, lines) = ("- [ ] ", "", L10n.text("apple.noteformatting.to_do.100ec1bc"), true)
+        case .quote: (prefix, suffix, placeholder, lines) = ("> ", "", L10n.text("apple.noteformatting.quote.eb4cdebd"), true)
         case .code: (prefix, suffix, placeholder, lines) = ("`", "`", "code", false)
         }
         if lines {

@@ -114,7 +114,7 @@ struct ClientTerminalKeys: View {
                 if canToggleKeyboard {
                     iconKey(
                         keyboardUp ? "keyboard.chevron.compact.down" : "keyboard",
-                        label: keyboardUp ? "Hide keyboard" : "Show keyboard"
+                        label: keyboardUp ? L10n.text("apple.clientterminalkeys.hide_keyboard.f6b0718e") : L10n.text("apple.clientterminalkeys.show_keyboard.585f7659")
                     ) {
                         toggleKeyboard()
                     }
@@ -234,16 +234,16 @@ struct ClientTerminalKeys: View {
     /// VoiceOver reads the glyphs as words. "Right arrow", not "greater than".
     static func spoken(_ label: String) -> String {
         switch label {
-        case "⇥": return "Tab"
-        case "⇧⇥": return "Shift Tab"
-        case "↑": return "Up arrow"
-        case "↓": return "Down arrow"
-        case "←": return "Left arrow"
-        case "→": return "Right arrow"
-        case "/": return "Slash"
-        case "-": return "Dash"
-        case "|": return "Pipe"
-        case "~": return "Tilde"
+        case "⇥": return L10n.text("apple.clientterminalkeys.tab.90ddf196")
+        case "⇧⇥": return L10n.text("apple.clientterminalkeys.shift_tab.f3fa2578")
+        case "↑": return L10n.text("apple.clientterminalkeys.up_arrow.9d2e0b44")
+        case "↓": return L10n.text("apple.clientterminalkeys.down_arrow.2d612154")
+        case "←": return L10n.text("apple.clientterminalkeys.left_arrow.fe87c896")
+        case "→": return L10n.text("apple.clientterminalkeys.right_arrow.0611d428")
+        case "/": return L10n.text("apple.clientterminalkeys.slash.9c92721e")
+        case "-": return L10n.text("apple.clientterminalkeys.dash.8c3ea2ea")
+        case "|": return L10n.text("apple.clientterminalkeys.pipe.3725dbfe")
+        case "~": return L10n.text("apple.clientterminalkeys.tilde.66042131")
         default: return label
         }
     }

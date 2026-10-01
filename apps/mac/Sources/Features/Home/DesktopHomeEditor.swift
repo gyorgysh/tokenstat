@@ -32,8 +32,8 @@ struct DesktopHomeEditor: View {
     private var visible: [HomeSection] { order.filter { !hidden.contains($0) } }
 
     var body: some View {
-        ThemedSheet(title: "Customize Home",
-                    subtitle: "Keep what matters close. This arrangement stays on this Mac.",
+        ThemedSheet(title: L10n.text("apple.desktophomeeditor.customize_home.642cec6e"),
+                    subtitle: L10n.text("apple.desktophomeeditor.keep_what_matters_close_this_arrangement_s.bc3b0457"),
                     icon: .layout, scrolls: true, onClose: { dismiss() }) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 SegmentedCapsulePicker(
@@ -50,17 +50,17 @@ struct DesktopHomeEditor: View {
                     })
                 )
                 HomeLayoutPreview(sections: visible)
-                Text("Visible · drag the grip or use the arrows to reorder")
+                Text(L10n.text("apple.desktophomeeditor.visible_drag_the_grip_or_use_the_arrows_to.a21c0f32"))
                     .font(Theme.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 if visible.isEmpty {
-                    Text("Your Home is clear. Turn a section back on below whenever you need it.")
+                    Text(L10n.text("apple.desktophomeeditor.your_home_is_clear_turn_a_section_back_on.3f39aedb"))
                         .font(Theme.callout)
                         .foregroundStyle(.secondary)
                 }
                 ForEach(visible) { section in row(section, visible: true) }
                 if !hidden.isEmpty {
-                    Text("Hidden")
+                    Text(L10n.text("apple.desktophomeeditor.hidden.7e6fefff"))
                         .font(Theme.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                     ForEach(order.filter { hidden.contains($0) }) { section in
@@ -74,32 +74,32 @@ struct DesktopHomeEditor: View {
                         .accessibilityIdentifier("home.editor.announcement")
                 }
                 HStack {
-                    Button("Reset Home", .refresh) {
+                    Button(L10n.text("apple.desktophomeeditor.reset_home.99f3f8ce"), .refresh) {
                         beforeReset = HomeArrangement(order: order, hidden: hidden, preset: preset)
                         order = HomePreset.balanced.order
                         hidden = HomePreset.balanced.hidden
                         preset = .balanced
-                        announcement = "Balanced arrangement restored."
+                        announcement = L10n.text("apple.desktophomeeditor.balanced_arrangement_restored.f3e8a3f6")
                     }
                     .buttonStyle(SecondaryButtonStyle(small: true))
                     if let previous = beforeReset {
-                        Button("Undo reset", .restore) {
+                        Button(L10n.text("apple.desktophomeeditor.undo_reset.c4961cf5"), .restore) {
                             order = previous.order
                             hidden = previous.hidden
                             preset = previous.preset
                             beforeReset = nil
-                            announcement = "Previous arrangement restored."
+                            announcement = L10n.text("apple.desktophomeeditor.previous_arrangement_restored.cc0d9cd0")
                         }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                     }
                 }
             }
         } actions: {
-            Button("Cancel", .dismiss) { dismiss() }
+            Button(L10n.text("common.cancel"), .dismiss) { dismiss() }
                 .buttonStyle(SecondaryButtonStyle())
                 .keyboardShortcut(.cancelAction)
             Spacer()
-            Button("Done", .done) {
+            Button(L10n.text("common.done"), .done) {
                 layout.apply(order: order, hidden: hidden, preset: preset)
                 dismiss()
             }
@@ -111,14 +111,14 @@ struct DesktopHomeEditor: View {
 
     private func row(_ section: HomeSection, visible on: Bool) -> some View {
         let position = (visible.firstIndex(of: section) ?? 0) + 1
-        let accessibilityValue = on ? "Visible, position \(position)" : "Hidden"
+        let accessibilityValue = on ? L10n.text("apple.desktophomeeditor.visible_position_0.f3227a71", "\(position)") : L10n.text("apple.desktophomeeditor.hidden.7e6fefff")
         return HStack(spacing: Theme.Space.s) {
             if on {
                 Image(systemName: "line.3.horizontal")
                     .foregroundStyle(.secondary)
                     .frame(width: 24, height: 36)
                     .contentShape(Rectangle())
-                    .help("Drag to reorder \(section.label)")
+                    .help(L10n.text("apple.desktophomeeditor.drag_to_reorder_0.6c1ef024", "\(section.label)"))
                     .onDrag {
                         dragging = section
                         let provider = NSItemProvider(object: section.rawValue as NSString)
@@ -135,7 +135,7 @@ struct DesktopHomeEditor: View {
                 if on { hidden.insert(section) } else { hidden.remove(section) }
                 preset = nil
                 beforeReset = nil
-                announcement = "\(section.label) \(on ? "hidden" : "shown")."
+                announcement = "\(section.label) \(on ? L10n.text("apple.desktophomeeditor.hidden.e564b408") : L10n.text("apple.desktophomeeditor.shown.baaf5362"))."
             } label: {
                 HStack(spacing: Theme.Space.m) {
                     Image(systemName: section.symbol)
@@ -161,10 +161,10 @@ struct DesktopHomeEditor: View {
             .accessibilityValue(accessibilityValue)
             .accessibilityActions {
                 if on && visible.first != section {
-                    Button("Move up") { shift(section, by: -1) }
+                    Button(L10n.text("apple.desktophomeeditor.move_up.c66feb5e")) { shift(section, by: -1) }
                 }
                 if on && visible.last != section {
-                    Button("Move down") { shift(section, by: 1) }
+                    Button(L10n.text("apple.desktophomeeditor.move_down.40bb50da")) { shift(section, by: 1) }
                 }
             }
             .onKeyPress(.upArrow, phases: .down) { press in
@@ -182,18 +182,18 @@ struct DesktopHomeEditor: View {
                     Button { shift(section, by: -1) } label: {
                         Image(systemName: ActionIcon.collapse.symbol).frame(width: 28, height: 22)
                     }
-                    .accessibilityLabel("Move \(section.label) up")
+                    .accessibilityLabel(L10n.text("apple.desktophomeeditor.move_0_up.fe065a57", "\(section.label)"))
                     .disabled(visible.first == section)
                     Button { shift(section, by: 1) } label: {
                         Image(systemName: ActionIcon.more.symbol).frame(width: 28, height: 22)
                     }
-                    .accessibilityLabel("Move \(section.label) down")
+                    .accessibilityLabel(L10n.text("apple.desktophomeeditor.move_0_down.37babe0f", "\(section.label)"))
                     .disabled(visible.last == section)
                 }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.accent)
-                .help("Move \(section.label). Keyboard: Command–Up or Command–Down on the row.")
+                .help(L10n.text("apple.desktophomeeditor.move_0_keyboard_command_up_or_command_down.672847bc", "\(section.label)"))
             }
         }
         .padding(Theme.Space.s)
@@ -224,7 +224,7 @@ struct DesktopHomeEditor: View {
     private func changed(_ section: HomeSection) {
         preset = nil
         beforeReset = nil
-        announcement = "\(section.label) moved to position \((visible.firstIndex(of: section) ?? 0) + 1)."
+        announcement = L10n.text("apple.desktophomeeditor.0_moved_to_position_1.4fa1daea", "\(section.label)", "\((visible.firstIndex(of: section) ?? 0) + 1)")
         NSAccessibility.post(element: NSApp, notification: .announcementRequested,
                              userInfo: [.announcement: announcement, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
     }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -132,12 +134,12 @@ fun NotesSection(
                 .filter { (it.str("workspaceId") ?: workspace) == workspace }
                 .mapNotNull { it.toNoteCard() }
             error = null
-        }.onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+        }.onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacenotes.the_request_failed.db4fb447"), hostLabel) }
         loading = false
     }
     LaunchedEffect(workspace) { load() }
 
-    val place = folderName.ifBlank { "this folder" }
+    val place = folderName.ifBlank { L10n.text("android.workspacenotes.this_folder.9d6325c8") }
     val notes = NoteList.visible(cards, showingArchive, search, alphabetical)
     val archivedCount = NoteList.archivedCount(cards)
 
@@ -170,7 +172,7 @@ fun NotesSection(
             }.onFailure {
                 cards = cards.filter { it.id != pending.id }
                 if (draft.trim().isEmpty()) draft = text
-                error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+                error = TunnelCopy.display(it.message ?: L10n.text("android.workspacenotes.the_request_failed.db4fb447"), hostLabel)
             }
         }
     }
@@ -187,7 +189,7 @@ fun NotesSection(
                     cards = cards.map { if (it.id == fresh.id) fresh else it }
                 }
                 error = null
-            }.onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+            }.onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacenotes.the_request_failed.db4fb447"), hostLabel) }
         }
     }
 
@@ -205,7 +207,7 @@ fun NotesSection(
             error = null
             true
         }, onFailure = {
-            error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+            error = TunnelCopy.display(it.message ?: L10n.text("android.workspacenotes.the_request_failed.db4fb447"), hostLabel)
             false
         })
     }
@@ -222,7 +224,7 @@ fun NotesSection(
             }.onSuccess {
                 cards = cards.filter { it.id != note.id }
                 error = null
-            }.onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+            }.onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacenotes.the_request_failed.db4fb447"), hostLabel) }
         }
     }
 
@@ -233,23 +235,23 @@ fun NotesSection(
             }.onSuccess {
                 cards = cards.filter { it.id != note.id }
                 error = null
-            }.onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+            }.onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacenotes.the_request_failed.db4fb447"), hostLabel) }
         }
     }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            TsSearchField(prompt = if (showingArchive) "Search archived notes" else "Search notes",
+            TsSearchField(prompt = if (showingArchive) L10n.text("android.workspacenotes.search_archived_notes.aa6a048e") else L10n.text("android.workspacenotes.search_notes.6e7a2179"),
                 query = search, onQueryChange = { search = it }, modifier = Modifier.weight(1f))
-            TsSecondaryButton(label = "New note", icon = ActionIcon.Create.vector, small = true,
+            TsSecondaryButton(label = L10n.text("android.workspacenotes.new_note.76ea482f"), icon = ActionIcon.Create.vector, small = true,
                 onClick = { showingArchive = false; showingComposer = true })
             Box {
-                TsSecondaryButton(label = "View", icon = ActionIcon.More.vector, small = true,
+                TsSecondaryButton(label = L10n.text("android.workspacenotes.view.dcc839a4"), icon = ActionIcon.More.vector, small = true,
                     onClick = { libraryMenu = true })
                 DropdownMenu(expanded = libraryMenu, onDismissRequest = { libraryMenu = false }) {
-                    DropdownMenuItem(text = { Text(if (alphabetical) "Sort newest first" else "Sort by title") },
+                    DropdownMenuItem(text = { Text(if (alphabetical) L10n.text("android.workspacenotes.sort_newest_first.7b2f1373") else L10n.text("android.workspacenotes.sort_by_title.0cfdc1cd")) },
                         onClick = { alphabetical = !alphabetical; libraryMenu = false })
-                    DropdownMenuItem(text = { Text(if (showingArchive) "Show notes" else "Show archive ($archivedCount)") },
+                    DropdownMenuItem(text = { Text(if (showingArchive) L10n.text("android.workspacenotes.show_notes.1415fb63") else L10n.text("android.workspacenotes.show_archive_0.6636e64b", "${archivedCount}")) },
                         onClick = { showingArchive = !showingArchive; showingComposer = false; libraryMenu = false })
                 }
             }
@@ -262,26 +264,26 @@ fun NotesSection(
             ) {
                 OutlinedTextField(draft, { draft = it },
                     modifier = Modifier.fillMaxWidth().focusRequester(draftFocus),
-                    placeholder = { Text("Something worth remembering") },
+                    placeholder = { Text(L10n.text("android.workspacenotes.something_worth_remembering.a56cd69e")) },
                     minLines = 2, maxLines = 5)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                    Text("Saves to $place.", modifier = Modifier.weight(1f),
+                    Text(L10n.text("android.workspacenotes.saves_to_0.49357925", "${place}"), modifier = Modifier.weight(1f),
                         style = TextStyle(fontSize = 11.sp), color = LocalTsColors.current.textSecondary)
-                    TsSecondaryButton(label = "Close", icon = ActionIcon.Dismiss.vector, small = true,
+                    TsSecondaryButton(label = L10n.text("common.close"), icon = ActionIcon.Dismiss.vector, small = true,
                         onClick = { showingComposer = false })
-                    TsAccentButton(label = "Add", icon = ActionIcon.Create.vector, small = true,
+                    TsAccentButton(label = L10n.text("common.add"), icon = ActionIcon.Create.vector, small = true,
                         enabled = draft.trim().isNotEmpty(), onClick = ::save)
                 }
             }
         }
-        SectionLabel(if (showingArchive) "Archived notes" else "Notes", notes.size)
+        SectionLabel(if (showingArchive) L10n.text("android.workspacenotes.archived_notes.27a341f0") else L10n.text("common.notes"), notes.size)
         if (error != null) Banner(error!!, BannerSeverity.DANGER)
         if (!loading && notes.isEmpty() && error == null) {
             EmptyState(
                 Icons.AutoMirrored.Filled.Notes,
-                if (search.isNotEmpty()) "No matching notes" else if (showingArchive) "Nothing archived" else "No notes yet",
-                if (showingArchive) "Notes you put away in $place show up here."
-                else "Keep anything worth remembering about $place. Choose New note to start.",
+                if (search.isNotEmpty()) L10n.text("android.workspacenotes.no_matching_notes.5a859d10") else if (showingArchive) L10n.text("android.workspacenotes.nothing_archived.cd084fd7") else L10n.text("android.workspacenotes.no_notes_yet.a092ad6b"),
+                if (showingArchive) L10n.text("android.workspacenotes.notes_you_put_away_in_0_show_up_here.bab677fb", "${place}")
+                else L10n.text("android.workspacenotes.keep_anything_worth_remembering_about_0_ch.ca4055ff", "${place}"),
                 art = { EmptyArt(EmptyArtKind.Notes) },
             )
         }
@@ -328,14 +330,14 @@ fun NotesSection(
                         var menu by remember(note.id) { mutableStateOf(false) }
                         Box {
                             TsSecondaryButton(
-                                label = "Actions",
+                                label = L10n.text("android.workspacenotes.actions.ff8059dc"),
                                 icon = ActionIcon.More.vector,
                                 small = true,
                                 onClick = { menu = true },
                             )
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                                 DropdownMenuItem(
-                                    text = { Text(if (showingArchive) "Restore" else "Archive") },
+                                    text = { Text(if (showingArchive) L10n.text("common.restore") else L10n.text("common.archive")) },
                                     leadingIcon = {
                                         Icon(
                                             if (showingArchive) ActionIcon.Restore.vector else ActionIcon.Archive.vector,
@@ -346,19 +348,19 @@ fun NotesSection(
                                 )
                                 if (!showingArchive) {
                                     DropdownMenuItem(
-                                        text = { Text("Make a task") },
+                                        text = { Text(L10n.text("android.workspacenotes.make_a_task.0cfbd102")) },
                                         leadingIcon = { Icon(ActionIcon.Move.vector, null) },
                                         onClick = { menu = false; convert(note) },
                                     )
                                     DropdownMenuItem(
-                                        text = { Text("Edit") },
+                                        text = { Text(L10n.text("common.edit")) },
                                         leadingIcon = { Icon(ActionIcon.Edit.vector, null) },
                                         onClick = { menu = false; editing = note },
                                     )
                                 }
                                 HorizontalDivider()
                                 DropdownMenuItem(
-                                    text = { Text("Delete", color = LocalTsColors.current.danger) },
+                                    text = { Text(L10n.text("common.delete"), color = LocalTsColors.current.danger) },
                                     leadingIcon = {
                                         Icon(ActionIcon.Delete.vector, null, tint = LocalTsColors.current.danger)
                                     },
@@ -375,13 +377,13 @@ fun NotesSection(
     if (doomed != null) {
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
-            title = { Text("Delete this note?") },
-            text = { Text("Archiving keeps it. Deleting does not.") },
+            title = { Text(L10n.text("android.workspacenotes.delete_this_note.f8069d7e")) },
+            text = { Text(L10n.text("android.workspacenotes.archiving_keeps_it_deleting_does_not.55919870")) },
             confirmButton = {
-                TextButton(onClick = { pendingDelete = null; delete(doomed) }) { Text("Delete") }
+                TextButton(onClick = { pendingDelete = null; delete(doomed) }) { Text(L10n.text("common.delete")) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("Keep it") }
+                TextButton(onClick = { pendingDelete = null }) { Text(L10n.text("android.workspacenotes.keep_it.fdce5da2")) }
             },
         )
     }
@@ -421,20 +423,20 @@ private fun NoteEditorDialog(
         Column(Modifier.fillMaxSize().background(colors.background).systemBarsPadding().imePadding().padding(Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.m)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                TextButton(enabled = !saving, onClick = onDismiss) { Text("Cancel") }
-                Text("Note", style = TsType.chatBody)
+                TextButton(enabled = !saving, onClick = onDismiss) { Text(L10n.text("common.cancel")) }
+                Text(L10n.text("android.workspacenotes.note.d8da2c49"), style = TsType.chatBody)
                 TextButton(enabled = !saving && title.trim().isNotEmpty(), onClick = {
                     saving = true
                     scope.launch { try { onSave(title.trim(), body.text) } finally { saving = false } }
-                }) { Text(if (saving) "Saving…" else "Save") }
+                }) { Text(if (saving) L10n.text("android.workspacenotes.saving.23e39291") else L10n.text("common.save")) }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                FilterChip(selected = !preview, onClick = { preview = false }, label = { Text("Write") })
-                FilterChip(selected = preview, onClick = { preview = true }, label = { Text("Preview") })
+                FilterChip(selected = !preview, onClick = { preview = false }, label = { Text(L10n.text("android.workspacenotes.write.3f00927a")) })
+                FilterChip(selected = preview, onClick = { preview = true }, label = { Text(L10n.text("android.workspacenotes.preview.324b134f")) })
                 if (!preview) Box {
                     TextButton(enabled = !saving, onClick = { formatting = true }) {
                         Icon(ActionIcon.Edit.vector, contentDescription = null)
-                        Text("Format")
+                        Text(L10n.text("android.workspacenotes.format.2f343666"))
                     }
                     DropdownMenu(expanded = formatting, onDismissRequest = { formatting = false }) {
                         NoteFormat.entries.forEach { style ->
@@ -448,14 +450,14 @@ private fun NoteEditorDialog(
                 }
             }
             if (error != null) Text(error, color = colors.danger, style = TsType.caption)
-            OutlinedTextField(title, { title = it }, enabled = !saving, label = { Text("Title") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(title, { title = it }, enabled = !saving, label = { Text(L10n.text("android.workspacenotes.title.7e8cd205")) }, modifier = Modifier.fillMaxWidth())
             if (preview) {
-                MarkdownText(body.text.ifBlank { "Nothing written yet." }, TsType.chatBody, colors.textPrimary,
+                MarkdownText(body.text.ifBlank { L10n.text("android.workspacenotes.nothing_written_yet.4f01da04") }, TsType.chatBody, colors.textPrimary,
                     Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()))
             } else {
-                OutlinedTextField(body, { body = it }, enabled = !saving, label = { Text("Note") },
+                OutlinedTextField(body, { body = it }, enabled = !saving, label = { Text(L10n.text("android.workspacenotes.note.d8da2c49")) },
                     modifier = Modifier.weight(1f).fillMaxWidth())
-                Text("Markdown supported: headings, lists, links and code.", style = TsType.caption, color = colors.textSecondary)
+                Text(L10n.text("android.workspacenotes.markdown_supported_headings_lists_links_an.9e2568aa"), style = TsType.caption, color = colors.textSecondary)
             }
         }
     }

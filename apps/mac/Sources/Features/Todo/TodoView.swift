@@ -16,7 +16,7 @@ struct TodoView: View {
     var onRunInFront: ((InteractiveTaskLaunch) -> Void)? = nil
 
     private static let columns: [(String, String)] = [
-        ("backlog", "To Do"), ("doing", "In progress"), ("done", "Done"),
+        ("backlog", L10n.text("apple.todoview.to_do.150d92c4")), ("doing", L10n.text("apple.todoview.in_progress.c1f88e9d")), ("done", L10n.text("common.done")),
     ]
     @AppStorage("todo.sortNewestFirst") private var newestFirst = false
     @State private var search = ""
@@ -58,7 +58,7 @@ struct TodoView: View {
         guard let folder = folders.first(where: { $0.id == id }) else { return nil }
         return ScopeChip(
             label: folder.isRemote
-                ? "\(folder.machineLabel ?? "Remote") / \(folder.name)"
+                ? "\(folder.machineLabel ?? L10n.text("apple.todoview.remote.ffa98e02")) / \(folder.name)"
                 : folder.name,
             symbol: folder.isRemote ? "network" : "folder.fill"
         )
@@ -96,7 +96,7 @@ struct TodoView: View {
             }
         }
         .background(Theme.background)
-        .navigationTitle("Tasks")
+        .navigationTitle(L10n.text("common.tasks"))
         .sheet(item: creationColumn) { column in
             TaskCreationDestination(target: TaskEditorTarget(peer: nil), workspaceID: model.defaultWorkspaceID ?? "",
                                     column: column.id, hostName: "This computer") { card in
@@ -108,7 +108,7 @@ struct TodoView: View {
             TransientToast(
                 message: $model.noticeMessage,
                 severity: .success,
-                actionLabel: model.noticeScope == nil ? nil : "Show",
+                actionLabel: model.noticeScope == nil ? nil : L10n.text("apple.todoview.show.0df6f1ca"),
                 action: model.noticeScope.map { scope in
                     { model.filter = scope }
                 }
@@ -166,26 +166,26 @@ struct TodoView: View {
     /// than what narrows it.
     private var boardActions: some View {
         HStack(spacing: Theme.Space.s) {
-            Picker("Sort tasks", selection: $newestFirst) {
-                Text("Board order").tag(false)
-                Text("Newest first").tag(true)
+            Picker(L10n.text("apple.todoview.sort_tasks.952f3831"), selection: $newestFirst) {
+                Text(L10n.text("apple.todoview.board_order.a919c850")).tag(false)
+                Text(L10n.text("apple.todoview.newest_first.ffb6f576")).tag(true)
             }
             .pickerStyle(.menu).labelsHidden().fixedSize()
             .onChange(of: newestFirst) { _, on in model.sortNewestFirst = on }
             ToolbarIconButton(systemImage: model.showingArchive ? "archivebox.fill" : "archivebox",
-                help: model.showingArchive ? "Back to the board" : "Show archived tasks (\(model.archivedCount))",
+                help: model.showingArchive ? L10n.text("apple.todoview.back_to_the_board.0ebe76d6") : L10n.text("apple.todoview.show_archived_tasks_0.fdba34f9", "\(model.archivedCount)"),
                 isAccent: model.showingArchive) { model.showingArchive.toggle() }
                 .disabled(model.archivedCount == 0 && !model.showingArchive)
-            Button("New task", .create) { addingIn = "backlog" }
+            Button(L10n.text("apple.todoview.new_task.3e992276"), .create) { addingIn = "backlog" }
                 .buttonStyle(AccentButtonStyle(small: true))
-                .help("Add a card to To Do")
+                .help(L10n.text("apple.todoview.add_a_card_to_to_do.ca83de8d"))
         }
         .fixedSize()
     }
 
     private var filterControls: some View {
         HStack(spacing: Theme.Space.s) {
-            SearchField(text: $search, prompt: "Search tasks")
+            SearchField(text: $search, prompt: L10n.text("apple.todoview.search_tasks.46c6f1de"))
                 .frame(minWidth: 120, maxWidth: 220)
             if model.scope == nil {
                 // Only the global board gets a selector. A folder's board is
@@ -193,11 +193,10 @@ struct TodoView: View {
                 // answers to one question.
                 AppMenuPicker(
                     options: [
-                        (value: "", label: "All projects"),
+                        (value: "", label: L10n.text("apple.todoview.all_projects.4b87271b")),
                         (
                             value: Self.unfiledValue,
-                            label: "Uncategorized"
-                                + (model.unfiledCount > 0 ? " (\(model.unfiledCount))" : "")
+                            label: L10n.text("apple.todoview.uncategorized_0.413afa8b", "\((model.unfiledCount > 0 ? " (\(model.unfiledCount))" : ""))")
                         ),
                     ] + folders.map { (value: $0.id, label: $0.name) },
                     selection: Binding(
@@ -208,22 +207,22 @@ struct TodoView: View {
                 .frame(width: 140)
             }
             Menu {
-                Picker("Agent", selection: $agentFilter) {
-                    Text("All agents").tag("")
+                Picker(L10n.text("apple.todoview.agent.11b39c93"), selection: $agentFilter) {
+                    Text(L10n.text("apple.todoview.all_agents.54c32d3e")).tag("")
                     ForEach(model.pickerBackends(keeping: agentFilter), id: \.id) { backend in
                         Text(backend.label).tag(backend.id)
                     }
                 }
-                Toggle("Needs attention", isOn: $attentionOnly)
+                Toggle(L10n.text("apple.todoview.needs_attention.c1ebc781"), isOn: $attentionOnly)
             } label: {
-                Label(agentFilter.isEmpty && !attentionOnly ? "Filters" : "Filters applied",
+                Label(agentFilter.isEmpty && !attentionOnly ? L10n.text("apple.todoview.filters.546ebb8e") : L10n.text("apple.todoview.filters_applied.bb7cd36c"),
                       systemImage: agentFilter.isEmpty && !attentionOnly ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
             }
             .fixedSize()
             .labelStyle(.titleAndIcon)
-            .help("Filter by agent or show high-priority tasks and failed runs")
+            .help(L10n.text("apple.todoview.filter_by_agent_or_show_high_priority_task.4683acb4"))
             if hasFilters {
-                Button("Clear", .dismiss) { search = ""; agentFilter = ""; attentionOnly = false }
+                Button(L10n.text("apple.todoview.clear.83b12c22"), .dismiss) { search = ""; agentFilter = ""; attentionOnly = false }
                     .buttonStyle(.plain).foregroundStyle(Theme.accent).font(Theme.caption)
             }
         }
@@ -302,7 +301,7 @@ struct TodoView: View {
                         VStack(spacing: Theme.Space.s) {
                             Image(systemName: hasFilters ? "line.3.horizontal.decrease.circle" : symbol(for: id))
                                 .font(Theme.font(22)).foregroundStyle(tint(for: id).opacity(0.6))
-                            Text(hasFilters ? "No matching tasks" : emptyCopy(for: id))
+                            Text(hasFilters ? L10n.text("apple.todoview.no_matching_tasks.ff36d18d") : emptyCopy(for: id))
                                 .font(Theme.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
                         }
                         .frame(maxWidth: .infinity).padding(.vertical, Theme.Space.xl)
@@ -407,15 +406,15 @@ struct TodoView: View {
     }
 
     private func columnTitle(_ id: String, _ label: String) -> String {
-        if id == "done", model.showingArchive { return "Archive" }
+        if id == "done", model.showingArchive { return L10n.text("common.archive") }
         return label
     }
 
     private func emptyCopy(for id: String) -> String {
         if id == "done" {
-            return model.showingArchive ? "Archived tasks appear here" : "Completed tasks appear here"
+            return model.showingArchive ? L10n.text("apple.todoview.archived_tasks_appear_here.b33f5e59") : L10n.text("apple.todoview.completed_tasks_appear_here.6d7064fc")
         }
-        return id == "doing" ? "Move a task here when work begins" : "Add a task or drop one here"
+        return id == "doing" ? L10n.text("apple.todoview.move_a_task_here_when_work_begins.c470717a") : L10n.text("apple.todoview.add_a_task_or_drop_one_here.8bb8aa6a")
     }
 
     private func symbol(for id: String) -> String {
@@ -472,7 +471,7 @@ private struct CardView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: Theme.Space.s) {
                 if editingTitle {
-                    TextField("Title", text: $titleDraft)
+                    TextField(L10n.text("apple.todoview.title.7e8cd205"), text: $titleDraft)
                         .textFieldStyle(.plain)
                         .font(Theme.callout.weight(.medium))
                         .focused($titleFocused)
@@ -494,7 +493,7 @@ private struct CardView: View {
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(.secondary)
-                        .help("Discard title")
+                        .help(L10n.text("apple.todoview.discard_title.52f03907"))
                         Button {
                             saveTitle()
                         } label: {
@@ -503,7 +502,7 @@ private struct CardView: View {
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(Theme.accent)
-                        .help("Save title")
+                        .help(L10n.text("apple.todoview.save_title.c4ecfe02"))
                     } else if titleSaveState == .saving {
                         ProgressView()
                             .controlSize(.mini)
@@ -511,7 +510,7 @@ private struct CardView: View {
                         Image(systemName: "checkmark")
                             .font(Theme.font(10, weight: .bold))
                             .foregroundStyle(Theme.success)
-                            .help("Saved")
+                            .help(L10n.text("apple.todoview.saved.b5c120b3"))
                     }
                 } else {
                     Text(card.title)
@@ -539,18 +538,18 @@ private struct CardView: View {
                 delegateStatus(delegate)
             }
             if card.priority == "high" {
-                Label("High priority", systemImage: "flag.fill")
+                Label(L10n.text("apple.todoview.high_priority.b699a8c8"), systemImage: "flag.fill")
                     .font(Theme.caption2.weight(.medium)).foregroundStyle(Theme.secondary)
                     .padding(.horizontal, 7).padding(.vertical, 4)
                     .background(Theme.secondary.opacity(0.1), in: Capsule())
             } else if card.priority == "low" {
-                Label("Low priority", systemImage: "flag")
+                Label(L10n.text("apple.todoview.low_priority.904d0a4a"), systemImage: "flag")
                     .font(Theme.caption2.weight(.medium)).foregroundStyle(.secondary)
                     .padding(.horizontal, 7).padding(.vertical, 4)
                     .background(Theme.secondary.opacity(0.07), in: Capsule())
             }
             HStack(spacing: Theme.Space.s) {
-                Label(folders.first(where: { $0.id == card.workspaceID })?.name ?? "Uncategorized", systemImage: "folder")
+                Label(folders.first(where: { $0.id == card.workspaceID })?.name ?? L10n.text("apple.todoview.uncategorized.8d40d123"), systemImage: "folder")
                     .lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 4)
                 if !card.backend.isEmpty {
@@ -560,7 +559,7 @@ private struct CardView: View {
             }
             .font(Theme.caption2).foregroundStyle(.secondary)
             if card.budgetSeconds != 10_800 || card.delegate?.isRunning == true {
-                Label(card.budgetSeconds == 0 ? "No time limit" : Self.budgetLabel(card.budgetSeconds), systemImage: "timer")
+                Label(card.budgetSeconds == 0 ? L10n.text("apple.todoview.no_time_limit.436b4b94") : Self.budgetLabel(card.budgetSeconds), systemImage: "timer")
                     .font(Theme.caption2).foregroundStyle(.secondary)
             }
         }
@@ -585,7 +584,7 @@ private struct CardView: View {
             }
             onSelect()
         })
-        .help("Select to edit. Drag to move or reorder this task.")
+        .help(L10n.text("apple.todoview.select_to_edit_drag_to_move_or_reorder_thi.550cf9dc"))
         .draggable(card.id)
         .dropDestination(for: String.self) { ids, _ in
             guard let cardID = ids.first,
@@ -646,8 +645,8 @@ private struct CardView: View {
 
     private static func budgetLabel(_ seconds: UInt64) -> String {
         seconds % 60 == 0
-            ? "\(seconds / 60)m time limit"
-            : "\(seconds)s time limit"
+            ? L10n.text("apple.todoview.0_m_time_limit.b1348c43", "\(seconds / 60)")
+            : L10n.text("apple.todoview.0_s_time_limit.12b76484", "\(seconds)")
     }
 
     private func delegateStatus(_ delegate: TodoDelegate) -> some View {
@@ -666,19 +665,19 @@ private struct CardView: View {
                     .lineLimit(1)
             }
             if delegate.isRunning {
-                Button("Stop", .stop) { Task { await model.stop(card) } }
+                Button(L10n.text("common.stop"), .stop) { Task { await model.stop(card) } }
                     .buttonStyle(.borderless)
                     .controlSize(.mini)
             }
             // The result lives on the Automations screen; this is the door to
             // it, so a delegated card is never a dead end that only says
             // "Done" with nowhere to look.
-            Button("View result", .preview) {
+            Button(L10n.text("apple.todoview.view_result.fdb7eafd"), .preview) {
                 onViewRun?(delegate.runId, card.workspaceID)
             }
             .buttonStyle(.borderless)
             .controlSize(.mini)
-            .help("Open this run's transcript on the Automations screen")
+            .help(L10n.text("apple.todoview.open_this_run_s_transcript_on_the_automati.1f81d9a3"))
         }
     }
 
@@ -686,22 +685,22 @@ private struct CardView: View {
     private var controls: some View {
         Menu {
             if card.column != "backlog" {
-                Button("Move to To Do", .move) { Task { await model.move(card, to: "backlog") } }
+                Button(L10n.text("apple.todoview.move_to_to_do.740804f2"), .move) { Task { await model.move(card, to: "backlog") } }
             }
             if card.column != "doing" {
-                Button("Move to Doing", .move) { Task { await model.move(card, to: "doing") } }
+                Button(L10n.text("apple.todoview.move_to_doing.2d0966e8"), .move) { Task { await model.move(card, to: "doing") } }
             }
             if card.column != "done" && card.column != "archive" {
-                Button("Move to Done", .move) { Task { await model.move(card, to: "done") } }
+                Button(L10n.text("apple.todoview.move_to_done.a37bc1a6"), .move) { Task { await model.move(card, to: "done") } }
             }
             if card.column == "done" {
-                Button("Archive", .archive) { Task { await model.move(card, to: "archive") } }
+                Button(L10n.text("common.archive"), .archive) { Task { await model.move(card, to: "archive") } }
             }
             if card.column == "archive" {
-                Button("Restore to Done", .restore) { Task { await model.move(card, to: "done") } }
+                Button(L10n.text("apple.todoview.restore_to_done.7c7ceb11"), .restore) { Task { await model.move(card, to: "done") } }
             }
             ThemeRule()
-            Menu("Priority") {
+            Menu(L10n.text("apple.todoview.priority.d60dbba0")) {
                 ForEach(["low", "normal", "high"], id: \.self) { level in
                     Button {
                         Task { await model.updateCard(card, priority: level) }
@@ -716,11 +715,11 @@ private struct CardView: View {
             }
             ThemeRule()
             if !card.isNote {
-                Button("Run…", .run) {
+                Button(L10n.text("apple.todoview.run.1dcb1ca8"), .run) {
                     delegating = true
                 }
             }
-            Button("Delete", .delete, role: .destructive) { confirmingDelete = true }
+            Button(L10n.text("common.delete"), .delete, role: .destructive) { confirmingDelete = true }
         } label: {
             Image(systemName: "ellipsis")
                 .foregroundStyle(.secondary)
@@ -728,16 +727,16 @@ private struct CardView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Task actions")
+        .help(L10n.text("apple.todoview.task_actions.6135aebe"))
         .confirmationDialog(
-            "Delete this card?",
+            L10n.text("apple.todoview.delete_this_card.52c85ff8"),
             isPresented: $confirmingDelete,
             titleVisibility: .visible
         ) {
-            Button("Delete", role: .destructive) { Task { await model.remove(card) } }
-            Button("Keep it", role: .cancel) {}
+            Button(L10n.text("common.delete"), role: .destructive) { Task { await model.remove(card) } }
+            Button(L10n.text("apple.todoview.keep_it.fdce5da2"), role: .cancel) {}
         } message: {
-            Text("The card is removed from the board. This cannot be undone.")
+            Text(L10n.text("apple.todoview.the_card_is_removed_from_the_board_this_ca.b909cbf6"))
         }
     }
 }
@@ -755,7 +754,7 @@ private struct AddCardTrigger: View {
         Button {
             expanded.toggle()
         } label: {
-            Label("New task", systemImage: ActionIcon.create.symbol)
+            Label(L10n.text("apple.todoview.new_task.3e992276"), systemImage: ActionIcon.create.symbol)
             .font(Theme.caption.weight(.medium))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, Theme.Space.s)
@@ -795,20 +794,20 @@ struct DelegateSheet: View {
 
     var body: some View {
         ThemedSheet(
-            title: "Run this task",
+            title: L10n.text("apple.todoview.run_this_task.5ba8e499"),
             subtitle: card.title,
             icon: .run,
             onClose: { if !working { dismiss() } }
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
                 AppMenuPicker(
-                    title: "Agent",
+                    title: L10n.text("apple.todoview.agent.11b39c93"),
                     options: model.pickerBackends(keeping: card.backend).map { (value: $0.id, label: $0.label) },
                     selection: $backendID
                 )
                 AppMenuPicker(
-                    title: "Project",
-                    options: [(value: "", label: "Choose workspace")]
+                    title: L10n.text("apple.todoview.project.98595978"),
+                    options: [(value: "", label: L10n.text("apple.todoview.choose_workspace.94b211b5"))]
                         + folders.map { (value: $0.id, label: $0.name) },
                     selection: $workspaceID
                 )
@@ -825,8 +824,8 @@ struct DelegateSheet: View {
                         }
                         if !backend.efforts.isEmpty {
                             AppMenuPicker(
-                                title: "Effort",
-                                options: [(value: "", label: "Default")]
+                                title: L10n.text("apple.todoview.effort.4387e5d3"),
+                                options: [(value: "", label: L10n.text("apple.todoview.default.21b111cb"))]
                                     + backend.efforts.map { (value: $0, label: $0) },
                                 selection: $effortChoice
                             )
@@ -834,7 +833,7 @@ struct DelegateSheet: View {
                     }
                 }
                 HStack {
-                    Text("Time limit")
+                    Text(L10n.text("apple.todoview.time_limit.e592a9ca"))
                         .font(Theme.caption)
                         .foregroundStyle(Theme.controlGlyph)
                     TextField("180", text: $budgetMinutes)
@@ -844,7 +843,7 @@ struct DelegateSheet: View {
                     Text(budgetUnit)
                         .font(Theme.caption)
                         .foregroundStyle(Theme.controlGlyph)
-                    BrandToggleChip(title: "No limit", isOn: $noTimeLimit)
+                    BrandToggleChip(title: L10n.text("apple.todoview.no_limit.f7fcff0d"), isOn: $noTimeLimit)
                 }
                 if let validation = runDraft.validation {
                     Text(validation).font(Theme.caption).foregroundStyle(Theme.danger)
@@ -855,7 +854,7 @@ struct DelegateSheet: View {
             }
             .disabled(working)
         } actions: {
-            Button("Cancel", .dismiss) { dismiss() }
+            Button(L10n.text("common.cancel"), .dismiss) { dismiss() }
                 .buttonStyle(SecondaryButtonStyle())
                 .keyboardShortcut(.cancelAction)
                 .disabled(working)

@@ -46,32 +46,28 @@ enum ClientSampleStore {
         Turn(
             id: 0,
             speaker: .person,
-            text: "The landing page heading says \"Welcome to our site\". Make it say what "
-                + "the site is for instead."
+            text: L10n.text("apple.clientsamplestore.the_landing_page_heading_says_welcome_to_o.c45b7a1f")
         ),
         Turn(
             id: 1,
             speaker: .agent,
-            text: "index.html has one h1. The page is a bakery's opening hours and address, "
-                + "so the heading should say that. I'll change the one line and leave "
-                + "everything else alone."
+            text: L10n.text("apple.clientsamplestore.index_html_has_one_h1_the_page_is_a_bakery.c8074961")
         ),
         Turn(
             id: 2,
             speaker: .agent,
-            text: "Changed the heading in index.html. Nothing else in the file moved, and "
-                + "nothing is committed: the change is sitting in the folder for you."
+            text: L10n.text("apple.clientsamplestore.changed_the_heading_in_index_html_nothing.6635c27e")
         ),
     ]
 
     static let file = "index.html"
 
     static let diff: [Change] = [
-        Change(id: 0, kind: .context, text: "<body>"),
-        Change(id: 1, kind: .context, text: "  <header>"),
-        Change(id: 2, kind: .removed, text: "    <h1>Welcome to our site</h1>"),
-        Change(id: 3, kind: .added, text: "    <h1>Fresh bread, daily, on Mill Street</h1>"),
-        Change(id: 4, kind: .context, text: "  </header>"),
+        Change(id: 0, kind: .context, text: L10n.text("apple.clientsamplestore.body.9aabfd16")),
+        Change(id: 1, kind: .context, text: L10n.text("apple.clientsamplestore.header.4c4638da")),
+        Change(id: 2, kind: .removed, text: L10n.text("apple.clientsamplestore.h1_welcome_to_our_site_h1.5a4dd29d")),
+        Change(id: 3, kind: .added, text: L10n.text("apple.clientsamplestore.h1_fresh_bread_daily_on_mill_street_h1.e343866d")),
+        Change(id: 4, kind: .context, text: L10n.text("apple.clientsamplestore.header.566c3118")),
     ]
 
     /// What a reading looks like, with made-up numbers.
@@ -85,13 +81,12 @@ enum ClientSampleStore {
     }
 
     static let readings: [Reading] = [
-        Reading(id: "input", label: "Sent", value: "8,420 tokens"),
-        Reading(id: "output", label: "Received", value: "1,190 tokens"),
-        Reading(id: "cost", label: "Cost of this task", value: "$0.04"),
+        Reading(id: "input", label: L10n.text("apple.clientsamplestore.sent.c16bc82b"), value: "8,420 tokens"),
+        Reading(id: "output", label: L10n.text("apple.clientsamplestore.received.49f19bee"), value: "1,190 tokens"),
+        Reading(id: "cost", label: L10n.text("apple.clientsamplestore.cost_of_this_task.716802d2"), value: "$0.04"),
     ]
 
     /// Said in full wherever the numbers appear.
     static let disclaimer =
-        "This whole page is an example, made up to show the shape of the thing. "
-        + "The numbers are invented and are not anybody's usage or spending."
+        L10n.text("apple.clientsamplestore.this_whole_page_is_an_example_made_up_to_s.1389de3d")
 }

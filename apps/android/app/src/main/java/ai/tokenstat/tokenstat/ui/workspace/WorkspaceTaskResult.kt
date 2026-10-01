@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -69,7 +71,7 @@ fun TaskResultDialog(
             changeCount = asObjects(git?.get("files")).size
             folderMissing = folder?.bol("exists") == false
             error = null
-        }.onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+        }.onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacetaskresult.the_request_failed.db4fb447"), hostLabel) }
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -92,7 +94,7 @@ fun TaskResultDialog(
         ) {
             Column {
                 Text(
-                    title.ifBlank { "Result" },
+                    title.ifBlank { L10n.text("android.workspacetaskresult.result.6e7d50e8") },
                     style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
                     color = LocalTsColors.current.textPrimary,
                 )
@@ -114,7 +116,7 @@ fun TaskResultDialog(
                 onOpenChanges = { onDismiss(); onOpenSection("Changes") },
                 onOpenHistory = { onDismiss(); onOpenSection("History") },
             )
-            TsSecondaryButton(label = "Close", small = true, onClick = onDismiss)
+            TsSecondaryButton(label = L10n.text("common.close"), small = true, onClick = onDismiss)
         }
         }
     }
@@ -130,11 +132,11 @@ private fun TaskResultLinks(
     onOpenChanges: () -> Unit,
     onOpenHistory: () -> Unit,
 ) {
-    val folderLabel = folderName.ifBlank { "Folder" }
+    val folderLabel = folderName.ifBlank { L10n.text("android.workspacetaskresult.folder.74ccd433") }
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                "This folder",
+                L10n.text("android.workspacetaskresult.this_folder.ab7db04c"),
                 style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
                 color = LocalTsColors.current.textPrimary,
             )
@@ -146,11 +148,11 @@ private fun TaskResultLinks(
             )
         }
         val message = when {
-            workspaceEmpty -> "This task has no folder. Assign one to review files and history."
+            workspaceEmpty -> L10n.text("android.workspacetaskresult.this_task_has_no_folder_assign_one_to_revi.ec78820b")
             folderMissing -> if (hostName.isBlank()) {
-                "This folder is no longer available on the connected computer."
+                L10n.text("android.workspacetaskresult.this_folder_is_no_longer_available_on_the.be3071ed")
             } else {
-                "This folder is no longer available on $hostName."
+                L10n.text("android.workspacetaskresult.this_folder_is_no_longer_available_on_0.70d7366a", "${hostName}")
             }
             else -> null
         }
@@ -167,13 +169,13 @@ private fun TaskResultLinks(
             )
         } else {
             val changesCaption = when (changeCount) {
-                0 -> "Working tree matches the last commit"
-                1 -> "1 file to review"
-                null -> "Uncommitted files in this folder"
-                else -> "$changeCount files to review"
+                0 -> L10n.text("android.workspacetaskresult.working_tree_matches_the_last_commit.419b69e6")
+                1 -> L10n.text("android.workspacetaskresult.1_file_to_review.0d600164")
+                null -> L10n.text("android.workspacetaskresult.uncommitted_files_in_this_folder.9b817339")
+                else -> L10n.text("android.workspacetaskresult.0_files_to_review.b2f93852", "${changeCount}")
             }
-            TaskResultRow("Changes", changesCaption, changeCount, onOpenChanges, "Opens uncommitted files for this folder")
-            TaskResultRow("History", "Previous commits in this folder", null, onOpenHistory, "Opens commits for this folder")
+            TaskResultRow(L10n.text("android.workspacetaskresult.changes.bbd4b6a8"), changesCaption, changeCount, onOpenChanges, L10n.text("android.workspacetaskresult.opens_uncommitted_files_for_this_folder.9ca505db"))
+            TaskResultRow(L10n.text("common.history"), L10n.text("android.workspacetaskresult.previous_commits_in_this_folder.cf1fcffb"), null, onOpenHistory, L10n.text("android.workspacetaskresult.opens_commits_for_this_folder.a55a945b"))
         }
     }
 }

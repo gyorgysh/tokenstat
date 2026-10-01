@@ -20,9 +20,9 @@ struct DiffDocumentRow: Identifiable, Sendable {
             let prefix = "\(fileIndex):\(diff.path)"
             if fileHeaders { rows.append(Self(id: "\(prefix):file", content: .file(diff.path))) }
             if diff.binary {
-                rows.append(Self(id: "\(prefix):note", content: .note("Binary file · no text diff")))
+                rows.append(Self(id: "\(prefix):note", content: .note(L10n.text("apple.diffdocumentrows.binary_file_no_text_diff.82944fda"))))
             } else if diff.hunks.isEmpty {
-                rows.append(Self(id: "\(prefix):note", content: .note(diff.untracked ? "Empty untracked file" : "No text changes")))
+                rows.append(Self(id: "\(prefix):note", content: .note(diff.untracked ? L10n.text("apple.diffdocumentrows.empty_untracked_file.579072e4") : L10n.text("apple.diffdocumentrows.no_text_changes.08722a9e"))))
             } else {
                 for (hunkIndex, hunk) in diff.hunks.enumerated() {
                     guard !Task.isCancelled else { return [] }

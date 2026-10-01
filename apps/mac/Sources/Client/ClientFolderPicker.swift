@@ -41,32 +41,32 @@ struct ClientFolderPicker: View {
             content
         }
         .background(Theme.background)
-        .navigationTitle("Choose a folder")
+        .navigationTitle(L10n.text("apple.clientfolderpicker.choose_a_folder.5c71b8cd"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Button(showHidden ? "Hide dotfiles" : "Show dotfiles", .visibility) {
+                    Button(showHidden ? L10n.text("apple.clientfolderpicker.hide_dotfiles.6f372c94") : L10n.text("apple.clientfolderpicker.show_dotfiles.13e0a8dc"), .visibility) {
                         showHidden.toggle()
                     }
-                    Button("New folder here", .create) { naming = true }
+                    Button(L10n.text("apple.clientfolderpicker.new_folder_here.8d63070d"), .create) { naming = true }
                         .disabled(listing == nil)
                 } label: {
                     Image(systemName: ActionIcon.more.symbol)
                 }
             }
         }
-        .alert("New folder", isPresented: $naming) {
-            TextField("Name", text: $newFolder)
-            Button("Cancel", role: .cancel) { newFolder = "" }
-            Button("Create") { Task { await create() } }
+        .alert(L10n.text("apple.clientfolderpicker.new_folder.cf28f49e"), isPresented: $naming) {
+            TextField(L10n.text("apple.clientfolderpicker.name.dcd1d522"), text: $newFolder)
+            Button(L10n.text("common.cancel"), role: .cancel) { newFolder = "" }
+            Button(L10n.text("apple.clientfolderpicker.create.4759498a")) { Task { await create() } }
         } message: {
-            Text("It is made on \(hostName), inside the folder you are looking at.")
+            Text(L10n.text("apple.clientfolderpicker.it_is_made_on_0_inside_the_folder_you_are.7077098c", "\(hostName)"))
         }
         .safeAreaInset(edge: .bottom) {
             if let listing {
                 VStack(spacing: Theme.Space.s) {
-                    Button("Use this folder", .approve) {
+                    Button(L10n.text("apple.clientfolderpicker.use_this_folder.30cbaeca"), .approve) {
                         Task { await add(path: listing.path) }
                     }
                     .clientProminentStyle()
@@ -87,7 +87,7 @@ struct ClientFolderPicker: View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.s) {
                 if let parent = listing.parent {
-                    Button("Up", .back) { Task { await load(parent) } }
+                    Button(L10n.text("apple.clientfolderpicker.up.55490a4b"), .back) { Task { await load(parent) } }
                         .font(ClientType.label)
                         .buttonStyle(.plain)
                         .tint(Theme.accent)
@@ -129,8 +129,8 @@ struct ClientFolderPicker: View {
                     let rows = listing.entries.filter { showHidden || !$0.hidden }
                     if rows.isEmpty {
                         Text(listing.entries.isEmpty
-                            ? "This folder is empty."
-                            : "Everything here is a dotfile. Show them from the menu.")
+                            ? L10n.text("apple.clientfolderpicker.this_folder_is_empty.bd88d713")
+                            : L10n.text("apple.clientfolderpicker.everything_here_is_a_dotfile_show_them_fro.49521138"))
                             .font(ClientType.label)
                             .foregroundStyle(.secondary)
                             .padding(Theme.Space.m)
@@ -140,7 +140,7 @@ struct ClientFolderPicker: View {
                         ThemeRule()
                     }
                     if listing.truncated {
-                        Text("Only the first 2000 entries are shown.")
+                        Text(L10n.text("apple.clientfolderpicker.only_the_first_2000_entries_are_shown.9134432a"))
                             .font(ClientType.caption)
                             .foregroundStyle(.secondary)
                             .padding(Theme.Space.m)
@@ -165,7 +165,7 @@ struct ClientFolderPicker: View {
                         .foregroundStyle(entry.isDirectory ? .primary : .secondary)
                         .lineLimit(1)
                     if entry.isRegistered {
-                        Text("already registered")
+                        Text(L10n.text("apple.clientfolderpicker.already_registered.7a14f6c9"))
                             .font(ClientType.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -213,7 +213,7 @@ struct ClientFolderPicker: View {
         newFolder = ""
         guard !name.isEmpty, let here = listing?.path else { return }
         guard !name.contains("/"), !name.contains("\\"), name != "..", name != "." else {
-            self.error = "A folder name is one name, without a path in it."
+            self.error = L10n.text("apple.clientfolderpicker.a_folder_name_is_one_name_without_a_path_i.d41badd4")
             return
         }
         // Same guard as a browse: creating and then listing is two awaits, and

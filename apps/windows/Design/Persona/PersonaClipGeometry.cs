@@ -45,14 +45,14 @@ internal static class PersonaClipGeometry
                         case PolyLineSegment lines:
                             foreach (var p in lines.Points) builder.AddLine(Point(p));
                             break;
-                        default: throw new NotSupportedException($"Unsupported persona clip segment: {segment.GetType().Name}");
+                        default: throw new NotSupportedException(L10n.Text("windows.personaclipgeometry.unsupported_persona_clip_segment_0.4e368260", $"{segment.GetType().Name}"));
                     }
                 }
                 builder.EndFigure(figure.IsClosed ? CanvasFigureLoop.Closed : CanvasFigureLoop.Open);
             }
             result = CanvasGeometry.CreatePath(builder);
         }
-        else throw new NotSupportedException($"Unsupported persona clip: {source.GetType().Name}");
+        else throw new NotSupportedException(L10n.Text("windows.personaclipgeometry.unsupported_persona_clip_0.07a77db1", $"{source.GetType().Name}"));
 
         if (source.Transform is null) return result;
         // TransformGroup can combine translation, yaw compression and roll.

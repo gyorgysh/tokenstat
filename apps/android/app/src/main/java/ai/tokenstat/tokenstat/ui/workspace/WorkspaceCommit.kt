@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.chrome.TabBarChrome
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -111,7 +113,7 @@ fun CommitComposerDialog(
         ) {
             Column {
                 Text(
-                    "Review and commit",
+                    L10n.text("android.workspacecommit.review_and_commit.96f097b7"),
                     style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
                     color = LocalTsColors.current.textPrimary,
                 )
@@ -127,19 +129,19 @@ fun CommitComposerDialog(
                 )
             }
             if (CommitDraft.messageTooLong(state.title, state.details)) {
-                Banner("Shorten the commit message to 128 KiB or less before committing.", BannerSeverity.DANGER)
+                Banner(L10n.text("android.workspacecommit.shorten_the_commit_message_to_128_kib_or_l.ffe20f8c"), BannerSeverity.DANGER)
             }
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                Text("Commit title", style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
+                Text(L10n.text("android.workspacecommit.commit_title.30459372"), style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
                 OutlinedTextField(
                     state.title,
                     { state.title = it; scope.launch { state.save(context) } },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Describe the change") },
+                    placeholder = { Text(L10n.text("android.workspacecommit.describe_the_change.beaee364")) },
                     enabled = state.loaded && !state.working && !submitted,
                     maxLines = 3,
                 )
-                Text("Description (optional)", style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
+                Text(L10n.text("android.workspacecommit.description_optional.f6cbe2f0"), style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
                 OutlinedTextField(
                     state.details,
                     { state.details = it; scope.launch { state.save(context) } },
@@ -151,7 +153,7 @@ fun CommitComposerDialog(
             if (review != null) {
                 val count = reviewPaths.size
                 Text(
-                    "$count selected ${if (count == 1) "file" else "files"}",
+                    L10n.text("android.workspacecommit.0_selected_1.3a4c3bb6", "${count}", "${if (count == 1) L10n.text("android.workspacecommit.file.3b9c358f") else L10n.text("android.workspacecommit.files.3d7db37d")}"),
                     style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
                     color = LocalTsColors.current.textPrimary,
                 )
@@ -159,13 +161,13 @@ fun CommitComposerDialog(
                     ReviewedFileRow(model, state.peer, state.workspace, hostLabel, review, path)
                 }
             } else if (state.working) {
-                Text("Preparing review", color = LocalTsColors.current.textSecondary)
+                Text(L10n.text("android.workspacecommit.preparing_review.6cafe23d"), color = LocalTsColors.current.textSecondary)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                TsSecondaryButton(label = "Close", small = true, onClick = onDismiss, modifier = Modifier.weight(1f))
+                TsSecondaryButton(label = L10n.text("common.close"), small = true, onClick = onDismiss, modifier = Modifier.weight(1f))
                 if (submitted) {
                     TsAccentButton(
-                        label = if (state.canRetry) "Retry same submission" else "Check outcome",
+                        label = if (state.canRetry) L10n.text("android.workspacecommit.retry_same_submission.3dbca561") else L10n.text("android.workspacecommit.check_outcome.9200a2fd"),
                         small = true,
                         enabled = !state.working,
                         modifier = Modifier.weight(2f),
@@ -181,10 +183,10 @@ fun CommitComposerDialog(
                         },
                     )
                 } else if (outcomeState == "succeeded") {
-                    TsAccentButton(label = "Done", small = true, modifier = Modifier.weight(2f), onClick = onDismiss)
+                    TsAccentButton(label = L10n.text("common.done"), small = true, modifier = Modifier.weight(2f), onClick = onDismiss)
                 } else if (review == null) {
                     TsAccentButton(
-                        label = "Review selected files",
+                        label = L10n.text("android.workspacecommit.review_selected_files.fb340554"),
                         small = true,
                         enabled = !state.working,
                         modifier = Modifier.weight(2f),
@@ -193,7 +195,7 @@ fun CommitComposerDialog(
                 } else {
                     val count = reviewPaths.size
                     TsAccentButton(
-                        label = "Commit $count ${if (count == 1) "file" else "files"}",
+                        label = L10n.text("android.workspacecommit.commit_0_1.ed71a626", "${count}", "${if (count == 1) L10n.text("android.workspacecommit.file.3b9c358f") else L10n.text("android.workspacecommit.files.3d7db37d")}"),
                         small = true,
                         enabled = state.canCommit,
                         modifier = Modifier.weight(2f),
@@ -244,7 +246,7 @@ private fun ReviewedFileRow(
                 put("path", path)
             }) as? JsonObject
         }.onSuccess { diff = it; error = null }
-            .onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+            .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacecommit.the_request_failed.db4fb447"), hostLabel) }
         loading = false
     }
 
@@ -261,12 +263,12 @@ private fun ReviewedFileRow(
     ) {
         Text(path, style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textPrimary, maxLines = 2)
         if (open) {
-            if (loading) Text("Reading reviewed changes", style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
+            if (loading) Text(L10n.text("android.workspacecommit.reading_reviewed_changes.9c829fac"), style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
             else if (error != null) Banner(error!!, BannerSeverity.DANGER)
             else if (diff != null) {
                 if (diff!!.bol("binary")) {
                     Text(
-                        "Binary file · included in this reviewed selection",
+                        L10n.text("android.workspacecommit.binary_file_included_in_this_reviewed_sele.7b9e8582"),
                         style = TextStyle(fontSize = 12.sp),
                         color = LocalTsColors.current.textSecondary,
                     )
@@ -319,7 +321,7 @@ fun PushButton(
             onOperationId = { opId ->
                 submitted = opId
                 context.getSharedPreferences("tokenstat.push.v1", android.content.Context.MODE_PRIVATE)
-                    .edit().putString("$peer|$workspace|operationId", opId).apply()
+                    .edit().putString(L10n.text("android.workspacecommit.0_1_operationid.e339e779", "${peer}", "${workspace}"), opId).apply()
             },
             onDismiss = { presenting = false },
             onPushed = onPushed,
@@ -353,13 +355,13 @@ private fun PushSheet(
         working = true
         try {
             if (!supportsReviewedPush) {
-                error = "Update this computer's tokenstat to review and push a branch from here."
+                error = L10n.text("android.workspacecommit.update_this_computer_s_tokenstat_to_review.8147f2b4")
                 return
             }
             runCatching {
                 model.workspaceSection(peer, "workspace.pushReview", buildJsonObject { put("id", workspace) }) as? JsonObject
             }.onSuccess { review = it; outcome = null; error = null }
-                .onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+                .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacecommit.the_request_failed.db4fb447"), hostLabel) }
         } finally {
             working = false
         }
@@ -397,8 +399,7 @@ private fun PushSheet(
                     }
                 }
             }.onFailure {
-                error = "The push outcome has not been confirmed. Check its outcome before starting another. " +
-                    TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+                error = L10n.text("android.workspacecommit.the_push_outcome_has_not_been_confirmed_ch.128c6a9f", "${TunnelCopy.display(it.message ?: L10n.text("android.workspacecommit.the_request_failed.db4fb447"), hostLabel)}")
             }
         } finally {
             working = false
@@ -446,10 +447,10 @@ private fun PushSheet(
                 }
             } else {
                 canRetry = true
-                error = "This computer has no receipt for the submitted push. You can retry the same submission."
+                error = L10n.text("android.workspacecommit.this_computer_has_no_receipt_for_the_submi.cadba34a")
             }
         } catch (e: Exception) {
-            error = TunnelCopy.display(e.message ?: "The request failed.", hostLabel)
+            error = TunnelCopy.display(e.message ?: L10n.text("android.workspacecommit.the_request_failed.db4fb447"), hostLabel)
         } finally {
             working = false
         }
@@ -471,7 +472,7 @@ private fun PushSheet(
         ) {
             Column {
                 Text(
-                    "Push branch",
+                    L10n.text("android.workspacecommit.push_branch.97deb7c0"),
                     style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
                     color = LocalTsColors.current.textPrimary,
                 )
@@ -491,7 +492,7 @@ private fun PushSheet(
                     val remote = shown.str("remote") ?: ""
                     val remoteRef = (shown.str("remoteRef") ?: "").removePrefix("refs/heads/")
                     if (remote.isNotBlank()) {
-                        Text("To $remote/$remoteRef", style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textSecondary)
+                        Text(L10n.text("android.workspacecommit.to_0_1.cbcce59b", "${remote}", "${remoteRef}"), style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textSecondary)
                     }
                     (shown.str("head") ?: "").take(10).takeIf { it.isNotBlank() }?.let {
                         Text(it, style = TsType.mono(12), color = LocalTsColors.current.textSecondary)
@@ -500,15 +501,15 @@ private fun PushSheet(
                     val remoteHead = shown.str("remoteHead")
                     val outgoing = shown.get("outgoing")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
                     when {
-                        remoteHead == head -> Text("This branch is up to date.", style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.accent)
-                        outgoing == 0L -> Text("No outgoing commits. The remote branch is ahead.", style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textPrimary)
-                        remoteHead == null -> Text("Publish this branch to $remote.", style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textPrimary)
-                        outgoing != null -> Text("$outgoing ${if (outgoing == 1L) "commit" else "commits"} to push", style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textPrimary)
-                        else -> Text("The computer will check whether the remote branch can accept this commit.", style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textPrimary)
+                        remoteHead == head -> Text(L10n.text("android.workspacecommit.this_branch_is_up_to_date.01b49ce3"), style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.accent)
+                        outgoing == 0L -> Text(L10n.text("android.workspacecommit.no_outgoing_commits_the_remote_branch_is_a.7072ceca"), style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textPrimary)
+                        remoteHead == null -> Text(L10n.text("android.workspacecommit.publish_this_branch_to_0.e623bfa9", "${remote}"), style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textPrimary)
+                        outgoing != null -> Text(L10n.text("android.workspacecommit.0_1_to_push.190b18e2", "${outgoing}", "${if (outgoing == 1L) L10n.text("android.workspacecommit.commit.9505cacb") else L10n.text("android.workspacecommit.commits.02686016")}"), style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textPrimary)
+                        else -> Text(L10n.text("android.workspacecommit.the_computer_will_check_whether_the_remote.2c0a07ce"), style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textPrimary)
                     }
                     if (shown.bol("setUpstream")) {
                         Text(
-                            "This will also set the branch's tracking destination.",
+                            L10n.text("android.workspacecommit.this_will_also_set_the_branch_s_tracking_d.95dfeac0"),
                             style = TextStyle(fontSize = 12.sp),
                             color = LocalTsColors.current.textSecondary,
                         )
@@ -521,17 +522,17 @@ private fun PushSheet(
             if (error != null) Banner(error!!, BannerSeverity.DANGER)
             if (working) {
                 Text(
-                    if (submitted) "Checking push" else "Checking the branch",
+                    if (submitted) L10n.text("android.workspacecommit.checking_push.00fa6ce0") else L10n.text("android.workspacecommit.checking_the_branch.3733503a"),
                     style = TextStyle(fontSize = 14.sp),
                     color = LocalTsColors.current.textSecondary,
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                TsSecondaryButton(label = "Close", small = true, onClick = onDismiss, modifier = Modifier.weight(1f))
+                TsSecondaryButton(label = L10n.text("common.close"), small = true, onClick = onDismiss, modifier = Modifier.weight(1f))
                 if (submitted) {
                     if (canRetry) {
                         TsSecondaryButton(
-                            label = "Retry same push",
+                            label = L10n.text("android.workspacecommit.retry_same_push.d4ab8f02"),
                             small = true,
                             enabled = !working,
                             modifier = Modifier.weight(1f),
@@ -539,17 +540,17 @@ private fun PushSheet(
                         )
                     }
                     TsAccentButton(
-                        label = "Check outcome",
+                        label = L10n.text("android.workspacecommit.check_outcome.9200a2fd"),
                         small = true,
                         enabled = !working,
                         modifier = Modifier.weight(1f),
                         onClick = { scope.launch { checkOutcome() } },
                     )
                 } else if (outcomeState == "succeeded" || shown?.let { it.str("remoteHead") == it.str("head") } == true || shown?.get("outgoing")?.jsonPrimitive?.contentOrNull == "0") {
-                    TsAccentButton(label = "Done", small = true, modifier = Modifier.weight(1f), onClick = onDismiss)
+                    TsAccentButton(label = L10n.text("common.done"), small = true, modifier = Modifier.weight(1f), onClick = onDismiss)
                 } else if (review != null) {
                     TsAccentButton(
-                        label = if (review!!.str("remoteHead") == null) "Publish branch" else "Push branch",
+                        label = if (review!!.str("remoteHead") == null) L10n.text("android.workspacecommit.publish_branch.e1f5968c") else L10n.text("android.workspacecommit.push_branch.97deb7c0"),
                         small = true,
                         enabled = !working,
                         modifier = Modifier.weight(1f),
@@ -557,7 +558,7 @@ private fun PushSheet(
                     )
                 } else {
                     TsAccentButton(
-                        label = "Check branch",
+                        label = L10n.text("android.workspacecommit.check_branch.8128e71f"),
                         small = true,
                         enabled = !working,
                         modifier = Modifier.weight(1f),
@@ -598,7 +599,7 @@ fun BranchRow(
         horizontalArrangement = Arrangement.spacedBy(Space.xs),
     ) {
         Text(
-            "Branch ${branch ?: "detached"}",
+            L10n.text("android.workspacecommit.branch_0.e742d863", "${branch ?: L10n.text("android.workspacecommit.detached.88e34e4c")}"),
             style = TextStyle(fontSize = 12.sp),
             color = LocalTsColors.current.accent,
             maxLines = 1,
@@ -612,7 +613,7 @@ fun BranchRow(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Text("Switch", style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.accent)
+        Text(L10n.text("android.workspacecommit.switch.39921a74"), style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.accent)
     }
     if (showing) {
         BranchDialog(
@@ -651,7 +652,7 @@ private fun BranchDialog(
         }.onSuccess {
             branches = asObjects(it)
             error = null
-        }.onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+        }.onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacecommit.the_request_failed.db4fb447"), hostLabel) }
         loading = false
     }
     LaunchedEffect(Unit) { load() }
@@ -664,7 +665,7 @@ private fun BranchDialog(
                     put("id", workspace); put("branch", name)
                 })
             }.onSuccess { onChanged() }
-                .onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+                .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacecommit.the_request_failed.db4fb447"), hostLabel) }
             working = false
         }
     }
@@ -679,7 +680,7 @@ private fun BranchDialog(
                     put("id", workspace); put("branch", clean)
                 })
             }.onSuccess { onChanged() }
-                .onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+                .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacecommit.the_request_failed.db4fb447"), hostLabel) }
             working = false
         }
     }
@@ -703,10 +704,10 @@ private fun BranchDialog(
                 .padding(Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.s),
         ) {
-            Text("Switch branch", style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
+            Text(L10n.text("android.workspacecommit.switch_branch.5051902c"), style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
             if (error != null) Banner(error!!, BannerSeverity.DANGER)
             if (loading) {
-                Text("Loading…", color = LocalTsColors.current.textSecondary)
+                Text(L10n.text("android.workspacecommit.loading.ba3bbbe1"), color = LocalTsColors.current.textSecondary)
             } else {
                 // The list scrolls itself; scrolling the dialog Column too
                 // would measure it with infinite height and crash.
@@ -730,7 +731,7 @@ private fun BranchDialog(
                                 }
                             }
                             if (isCurrent) {
-                                Text("Current", style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium), color = LocalTsColors.current.accent)
+                                Text(L10n.text("android.workspacecommit.current.e0d1b682"), style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium), color = LocalTsColors.current.accent)
                             }
                         }
                     }
@@ -741,12 +742,12 @@ private fun BranchDialog(
                     newName,
                     { newName = it },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("New branch name") },
+                    placeholder = { Text(L10n.text("android.workspacecommit.new_branch_name.514cee61")) },
                     singleLine = true,
                 )
-                TsAccentButton(label = "Create", small = true, enabled = newName.trim().isNotEmpty() && !working, onClick = { create(newName) })
+                TsAccentButton(label = L10n.text("android.workspacecommit.create.4759498a"), small = true, enabled = newName.trim().isNotEmpty() && !working, onClick = { create(newName) })
             }
-            TsSecondaryButton(label = "Close", small = true, onClick = onDismiss)
+            TsSecondaryButton(label = L10n.text("common.close"), small = true, onClick = onDismiss)
         }
         }
     }
@@ -792,11 +793,11 @@ fun ReviewAllPage(
         verticalArrangement = Arrangement.spacedBy(Space.m),
     ) {
             TextButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
-                Text("← Changes", modifier = Modifier.fillMaxWidth())
+                Text(L10n.text("android.workspacecommit.changes.47127cfb"), modifier = Modifier.fillMaxWidth())
             }
-            Text("Review all", style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
+            Text(L10n.text("android.workspacecommit.review_all.d05163fa"), style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
             if (!loaded) {
-                Text("Loading…", color = LocalTsColors.current.textSecondary)
+                Text(L10n.text("android.workspacecommit.loading.ba3bbbe1"), color = LocalTsColors.current.textSecondary)
             } else {
                 if (failures > 0) {
                     Text(
@@ -833,7 +834,7 @@ fun ReviewAllPage(
                         if (diff != null) {
                             if (diff.bol("binary")) {
                                 Text(
-                                    "A binary file. There is nothing to show line by line.",
+                                    L10n.text("android.workspacecommit.a_binary_file_there_is_nothing_to_show_lin.d8a6c19c"),
                                     style = TextStyle(fontSize = 12.sp),
                                     color = LocalTsColors.current.textSecondary,
                                 )
@@ -849,10 +850,10 @@ fun ReviewAllPage(
                                 }
                             }
                         } else {
-                            Text("Still loading.", style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textTertiary)
+                            Text(L10n.text("android.workspacecommit.still_loading.fa2e3194"), style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textTertiary)
                         }
                         Text(
-                            "Full diff",
+                            L10n.text("android.workspacecommit.full_diff.79eeb065"),
                             style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
                             color = LocalTsColors.current.accent,
                             modifier = Modifier.clickable { onOpenFile(path) },

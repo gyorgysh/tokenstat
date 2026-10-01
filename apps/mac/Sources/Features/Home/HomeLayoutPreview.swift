@@ -22,7 +22,7 @@ struct HomeLayoutPreview: View {
                 .padding(.bottom, 3)
                 .accessibilityHidden(true)
             if sections.isEmpty {
-                Text("Your Home is clear")
+                Text(L10n.text("apple.homelayoutpreview.your_home_is_clear.9ae93db2"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 44)
@@ -59,7 +59,7 @@ struct HomeLayoutPreview: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: sections)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(sections.isEmpty
-            ? "Preview: Home is clear"
-            : "Preview: \(sections.map(\.label).joined(separator: ", "))")
+            ? L10n.text("apple.homelayoutpreview.preview_home_is_clear.be85742c")
+            : L10n.text("apple.homelayoutpreview.preview_0.7a199109", "\(sections.map(\.label).joined(separator: ", "))"))
     }
 }

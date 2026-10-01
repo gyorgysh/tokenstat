@@ -91,7 +91,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
     /// <summary>
     /// The tab strip names its own pages; the scope says this is the browser.
     /// </summary>
-    public UIElement? ToolbarScope => Chrome.ScopeChip("Browser", Symbol.Globe);
+    public UIElement? ToolbarScope => Chrome.ScopeChip(L10n.Text("common.browser"), Symbol.Globe);
 
     public IList<UIElement> ToolbarActions()
     {
@@ -99,11 +99,11 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         {
             Buttons.ToolbarIcon(
                 ActionIcon.Refresh,
-                "Reload the current page",
+                L10n.Text("windows.browserpage.reload_the_current_page.982ebb6a"),
                 (_, _) => CurrentTab()?.Reload()),
             Buttons.ToolbarIcon(
                 ActionIcon.Create,
-                "Open a new tab",
+                L10n.Text("windows.browserpage.open_a_new_tab.2b75279f"),
                 (_, _) => AddTab("", "127.0.0.1", 0, false, _peer)),
         };
     }
@@ -113,7 +113,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         _inspector.Children.Clear();
         _inspector.Children.Add(new TextBlock
         {
-            Text = $"Open tabs ({_tabs.TabItems.OfType<TabViewItem>().Count(Owns)})",
+            Text = L10n.Text("windows.browserpage.open_tabs_0.06665c93", $"{_tabs.TabItems.OfType<TabViewItem>().Count(Owns)}"),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         foreach (var entry in _tabs.TabItems)
@@ -139,7 +139,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         }
         if (CurrentTab() is BrowserTab current && !string.IsNullOrWhiteSpace(current.Url))
         {
-            _inspector.Children.Add(Chrome.InspectorField("Address", current.Url));
+            _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.browserpage.address.56ef8f20"), current.Url));
         }
     }
 
@@ -173,7 +173,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             item.Header = tab.Title;
             RenderInspector();
         };
-        ContextMenus.AddAsync(ContextMenus.Menu(item), "Close", async () => await CloseTabAsync(tab));
+        ContextMenus.AddAsync(ContextMenus.Menu(item), L10n.Text("common.close"), async () => await CloseTabAsync(tab));
         item.Tag = tab;
         _tabs.TabItems.Add(item);
         _tabs.SelectedItem = item;
@@ -219,7 +219,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         private readonly WebView2 _web = new();
         private readonly TextBox _address = new()
         {
-            PlaceholderText = "Enter a URL, for example localhost:8000",
+            PlaceholderText = L10n.Text("windows.browserpage.enter_a_url_for_example_localhost_8000.634e4c22"),
             FontFamily = Fonts.Mono,
             FontSize = 12,
             MinWidth = 200,
@@ -298,7 +298,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             {
                 if (string.IsNullOrWhiteSpace(_loadedUrl))
                 {
-                    return "New tab";
+                    return L10n.Text("windows.browserpage.new_tab.1e08fda9");
                 }
                 try
                 {
@@ -329,7 +329,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             AppServices.AccountChanged += OnAccountChanged;
             _address.Text = _loadedUrl;
 
-            _back = ActionIconGlyph.Button("Back", ActionIcon.Back, (_, _) =>
+            _back = ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, (_, _) =>
             {
                 try
                 {
@@ -344,7 +344,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                     Banner(ex.Message);
                 }
             });
-            _forward = ActionIconGlyph.Button("Forward", ActionIcon.Next, (_, _) =>
+            _forward = ActionIconGlyph.Button(L10n.Text("windows.browserpage.forward.f1c65e14"), ActionIcon.Next, (_, _) =>
             {
                 try
                 {
@@ -359,10 +359,10 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                     Banner(ex.Message);
                 }
             });
-            _reload = ActionIconGlyph.Button("Reload", ActionIcon.Refresh, (_, _) => Reload());
+            _reload = ActionIconGlyph.Button(L10n.Text("windows.browserpage.reload.bdc090ec"), ActionIcon.Refresh, (_, _) => Reload());
 
-            var go = ActionIconGlyph.Button("Go", ActionIcon.Next, async (_, _) => await CommitAsync(_address.Text));
-            var recent = ActionIconGlyph.Button("Browser actions and recent previews", ActionIcon.More, (_, _) => { });
+            var go = ActionIconGlyph.Button(L10n.Text("windows.browserpage.go.6cc8519b"), ActionIcon.Next, async (_, _) => await CommitAsync(_address.Text));
+            var recent = ActionIconGlyph.Button(L10n.Text("windows.browserpage.browser_actions_and_recent_previews.b24d2b03"), ActionIcon.More, (_, _) => { });
             recent.Flyout = _recentMenu;
             _recentMenu.Opening += async (_, _) => await RefreshRecentAsync(prefill: false);
             _address.KeyDown += async (_, e) =>
@@ -409,8 +409,8 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 Visibility = string.IsNullOrWhiteSpace(_loadedUrl) ? Visibility.Visible : Visibility.Collapsed,
             };
             _empty.Children.Add(Chrome.Empty(
-                "Open a project preview",
-                "Enter a local development server or any URL above.",
+                L10n.Text("windows.browserpage.open_a_project_preview.7249ee28"),
+                L10n.Text("windows.browserpage.enter_a_local_development_server_or_any_ur.b3312e2e"),
                 ActionIcon.Browser));
 
             _view.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -439,7 +439,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 RefreshHistory();
                 if (!args.IsSuccess)
                 {
-                    Banner("The page stopped responding. Reload to try again.");
+                    Banner(L10n.Text("windows.browserpage.the_page_stopped_responding_reload_to_try.9832b72e"));
                     return;
                 }
                 try
@@ -507,12 +507,12 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             if (_closed) return;
             var generation = ++_recentGeneration;
             _recentMenu.Items.Clear();
-            ContextMenus.Add(_recentMenu, "Open in default browser", () =>
+            ContextMenus.Add(_recentMenu, L10n.Text("windows.browserpage.open_in_default_browser.d1f5a889"), () =>
             {
                 try { if (Uri.TryCreate(_loadedUrl, UriKind.Absolute, out var uri)) Process.Start(new ProcessStartInfo { FileName = uri.AbsoluteUri, UseShellExecute = true }); }
                 catch (Exception ex) { Banner(ex.Message); }
             }).IsEnabled = _loadedUrl.Length > 0;
-            ContextMenus.Add(_recentMenu, "Close tab", () => _closeTab(this));
+            ContextMenus.Add(_recentMenu, L10n.Text("windows.browserpage.close_tab.50a3f952"), () => _closeTab(this));
             _recentMenu.Items.Add(new MenuFlyoutSeparator());
             var memory = _workspaceId is null ? null : await BrowserProjectMemory.ForAsync(_workspaceId);
             if (_closed || generation != _recentGeneration) return;
@@ -521,7 +521,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 _address.Text = targets[0];
             foreach (var target in targets)
                 ContextMenus.Add(_recentMenu, target, () => { _address.Text = target; _address.Focus(FocusState.Programmatic); });
-            if (targets.Count == 0) _recentMenu.Items.Add(new MenuFlyoutItem { Text = "No recent previews", IsEnabled = false });
+            if (targets.Count == 0) _recentMenu.Items.Add(new MenuFlyoutItem { Text = L10n.Text("windows.browserpage.no_recent_previews.79233708"), IsEnabled = false });
         }
 
         /// <summary>
@@ -553,7 +553,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             var canonical = BrowserHistory.CanonicalTarget(input);
             if (canonical is null && input.Length > 0 && input.All(char.IsDigit))
             {
-                Banner("Enter a port between 1 and 65535.");
+                Banner(L10n.Text("windows.browserpage.enter_a_port_between_1_and_65535.8d698cda"));
                 return;
             }
             var candidate = canonical ?? input;
@@ -685,7 +685,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 if (!Uri.TryCreate(args.Request.Uri, UriKind.Absolute, out var uri)) return;
                 var navigation = _navigationEpoch.Revision;
                 var operation = BrowserProjectMemory.AccountEpoch.Capture(() => _closed || navigation != _navigationEpoch.Revision);
-                var destination = args.Request.Headers.Contains("Sec-Fetch-Dest") ? args.Request.Headers.GetHeader("Sec-Fetch-Dest") : null;
+                var destination = args.Request.Headers.Contains("Sec-Fetch-Dest") ? args.Request.Headers.GetHeader(L10n.Text("windows.browserpage.sec_fetch_dest.9422d968")) : null;
                 var topLevel = BrowserRouteState.IsTopLevelDocument(args.ResourceContext == CoreWebView2WebResourceContext.Document, destination);
                 var worker = (args.RequestedSourceKind & (CoreWebView2WebResourceRequestSourceKinds.SharedWorker | CoreWebView2WebResourceRequestSourceKinds.ServiceWorker)) != 0;
                 var action = !operation.IsCurrent ? BrowserRouteState.RequestAction.Block
@@ -695,7 +695,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 if (action == BrowserRouteState.RequestAction.Pass) return;
                 // Refuse before rewriting too, so a failed WebView API call cannot
                 // send the original localhost request to this computer.
-                args.Response = core.Environment.CreateWebResourceResponse(null, 403, "Remote preview address unavailable", "Content-Length: 0\r\n");
+                args.Response = core.Environment.CreateWebResourceResponse(null, 403, L10n.Text("windows.browserpage.remote_preview_address_unavailable.40246f7f"), "Content-Length: 0\r\n");
                 if (action == BrowserRouteState.RequestAction.Rewrite && _routes.Active is { } active)
                 {
                     // Preserve the request method and body, including forms and subresources.
@@ -717,7 +717,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                     if (lease is null || !operation.IsCurrent) return;
                     // A document redirect gives the page its new proxy origin, so its
                     // relative requests follow the live listener after Back/Forward.
-                    args.Response = core.Environment.CreateWebResourceResponse(null, 302, "Preview listener refreshed",
+                    args.Response = core.Environment.CreateWebResourceResponse(null, 302, L10n.Text("windows.browserpage.preview_listener_refreshed.fa97adde"),
                         "Location: " + BrowserRouteState.Through(lease, uri) + "\r\nContent-Length: 0\r\n");
                 }
                 catch (Exception ex) { if (operation.IsCurrent) Banner(FriendlyError.Display(ex.Message)); }
@@ -758,7 +758,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         {
             _status.Children.Clear();
             _status.Children.Add(Chrome.Banner(
-                "The built-in browser could not start. Install or repair Microsoft Edge WebView2 Runtime, then retry.",
+                L10n.Text("windows.browserpage.the_built_in_browser_could_not_start_insta.a8ff6db2"),
                 Theme.Warning, Symbol.Important));
             _status.Children.Add(new TextBlock
             {
@@ -772,11 +772,11 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 try { Process.Start(new ProcessStartInfo { FileName = address, UseShellExecute = true }); }
                 catch (Exception ex) { Banner(FriendlyError.Display(ex.Message)); }
             }
-            actions.Children.Add(ActionIconGlyph.Button("Get WebView2", ActionIcon.Download,
+            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.browserpage.get_webview2.f964277f"), ActionIcon.Download,
                 (_, _) => OpenExternal("https://developer.microsoft.com/microsoft-edge/webview2/#download-section")));
-            actions.Children.Add(ActionIconGlyph.Button("Retry", ActionIcon.Refresh,
+            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.retry"), ActionIcon.Refresh,
                 async (_, _) => await CommitAsync(DisplayUrl(_loadedUrl))));
-            actions.Children.Add(ActionIconGlyph.Button("Open in browser", ActionIcon.External,
+            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.browserpage.open_in_browser.62a2dc1b"), ActionIcon.External,
                 (_, _) => OpenExternal(_loadedUrl)));
             _status.Children.Add(actions);
         }

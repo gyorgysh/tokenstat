@@ -44,7 +44,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
     };
     private readonly TextBox _draft = new()
     {
-        PlaceholderText = "Capture an idea, a decision, or something to follow up…",
+        PlaceholderText = L10n.Text("windows.notespage.capture_an_idea_a_decision_or_something_to.242ec14e"),
     };
     private TextBlock? _countText;
 
@@ -114,7 +114,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
                 return null;
             }
             var folder = _folders.FirstOrDefault(f => f.Id == _workspaceId);
-            return Chrome.ScopeChip(string.IsNullOrEmpty(folder.Name) ? "Folder" : folder.Name);
+            return Chrome.ScopeChip(string.IsNullOrEmpty(folder.Name) ? L10n.Text("windows.notespage.folder.74ccd433") : folder.Name);
         }
     }
 
@@ -128,7 +128,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
     {
         var archive = Buttons.ToolbarIcon(
             _showingArchive ? ActionIcon.Restore : ActionIcon.Archive,
-            _showingArchive ? "Show current notes" : "Show archived notes",
+            _showingArchive ? L10n.Text("windows.notespage.show_current_notes.ed6f9c49") : L10n.Text("windows.notespage.show_archived_notes.6474dd64"),
             (_, _) =>
             {
                 _showingArchive = !_showingArchive;
@@ -142,7 +142,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         {
             Buttons.ToolbarIcon(
                 ActionIcon.Refresh,
-                "Reload notes",
+                L10n.Text("windows.notespage.reload_notes.e1d102d3"),
                 async (_, _) =>
                 {
                     LogoRefresh.Began();
@@ -150,7 +150,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
                 }),
             Buttons.ToolbarIcon(
                 ActionIcon.Create,
-                "Write a note",
+                L10n.Text("windows.notespage.write_a_note.ab0f8406"),
                 (_, _) =>
                 {
                     _showingArchive = false;
@@ -160,7 +160,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
                 }),
             Buttons.ToolbarIcon(
                 ActionIcon.Layout,
-                _gridLayout ? "Show notes as a list" : "Show notes as cards",
+                _gridLayout ? L10n.Text("windows.notespage.show_notes_as_a_list.e7a6867e") : L10n.Text("windows.notespage.show_notes_as_cards.b66b5ddb"),
                 (_, _) =>
                 {
                     _gridLayout = !_gridLayout;
@@ -303,9 +303,9 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         var id = DestinationId();
         if (string.IsNullOrEmpty(id))
         {
-            return "Unassigned";
+            return L10n.Text("windows.notespage.unassigned.14d33bd0");
         }
-        return _folders.FirstOrDefault(f => f.Id == id).Name ?? "this folder";
+        return _folders.FirstOrDefault(f => f.Id == id).Name ?? L10n.Text("windows.notespage.this_folder.9d6325c8");
     }
 
     private string PlaceName(JsonNode? note)
@@ -313,9 +313,9 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         var id = Format.Text(note, "workspaceId");
         if (string.IsNullOrEmpty(id))
         {
-            return "Unassigned";
+            return L10n.Text("windows.notespage.unassigned.14d33bd0");
         }
-        return _folders.FirstOrDefault(f => f.Id == id).Name ?? "Folder";
+        return _folders.FirstOrDefault(f => f.Id == id).Name ?? L10n.Text("windows.notespage.folder.74ccd433");
     }
 
     private bool InScope(JsonNode? note)
@@ -417,19 +417,19 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         var span = DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeMilliseconds(ms);
         if (span.TotalMinutes < 1)
         {
-            return "just now";
+            return L10n.Text("windows.notespage.just_now.7ddb44d8");
         }
         if (span.TotalHours < 1)
         {
-            return $"{(int)span.TotalMinutes}m ago";
+            return L10n.Text("windows.notespage.0_m_ago.80e8bfb2", $"{(int)span.TotalMinutes}");
         }
         if (span.TotalDays < 1)
         {
-            return $"{(int)span.TotalHours}h ago";
+            return L10n.Text("windows.notespage.0_h_ago.4dcb4701", $"{(int)span.TotalHours}");
         }
         if (span.TotalDays < 7)
         {
-            return $"{(int)span.TotalDays}d ago";
+            return L10n.Text("windows.notespage.0_d_ago.1fccd42c", $"{(int)span.TotalDays}");
         }
         return DateTimeOffset.FromUnixTimeMilliseconds(ms).LocalDateTime.ToString("d");
     }
@@ -451,7 +451,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.Children.Add(new TextBlock
         {
-            Text = "Quick note",
+            Text = L10n.Text("windows.notespage.quick_note.b7fc4717"),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         var destination = new TextBlock
@@ -464,7 +464,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         Grid.SetColumn(destination, 1);
         head.Children.Add(destination);
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var close = Buttons.ToolbarIcon(ActionIcon.Dismiss, "Close composer; your draft stays here", (_, _) =>
+        var close = Buttons.ToolbarIcon(ActionIcon.Dismiss, L10n.Text("windows.notespage.close_composer_your_draft_stays_here.ce3bbbe5"), (_, _) =>
         {
             _showingComposer = false;
             RenderComposer();
@@ -476,18 +476,18 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.Children.Add(_draft);
-        var save = Buttons.Primary("Save note", ActionIcon.Create, async (_, _) => await SaveAsync());
+        var save = Buttons.Primary(L10n.Text("windows.notespage.save_note.6501e1ce"), ActionIcon.Create, async (_, _) => await SaveAsync());
         save.IsEnabled = !_saving;
         Grid.SetColumn(save, 1);
         row.Children.Add(save);
         body.Children.Add(row);
         body.Children.Add(new TextBlock
         {
-            Text = "Return to save · Select a note to edit its full text",
+            Text = L10n.Text("windows.notespage.return_to_save_select_a_note_to_edit_its_f.bfe179a8"),
             FontSize = 12,
             Opacity = 0.55,
         });
-        _composerHost.Children.Add(Chrome.Card("Notes", body, $"Saves to {DestinationName()}."));
+        _composerHost.Children.Add(Chrome.Card(L10n.Text("common.notes"), body, L10n.Text("windows.notespage.saves_to_0.49357925", $"{DestinationName()}")));
     }
 
     private void RenderLibrary()
@@ -495,7 +495,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         if (_scopeHost.Parent is Panel scopeParent) scopeParent.Children.Remove(_scopeHost);
         _libraryHost.Children.Clear();
         var bar = new FlowPanel { Spacing = Theme.SpaceS };
-        var search = Chrome.SearchField("Search notes", text =>
+        var search = Chrome.SearchField(L10n.Text("windows.notespage.search_notes.6e7a2179"), text =>
         {
             _search = text ?? "";
             if (_countText is not null) _countText.Text = ShownNotes().Count.ToString();
@@ -507,7 +507,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         bar.Children.Add(search);
         bar.Children.Add(_scopeHost);
         var sort = new ComboBox { MinWidth = 130, VerticalAlignment = VerticalAlignment.Center };
-        sort.ItemsSource = new[] { "Newest first", "Title A–Z" };
+        sort.ItemsSource = new[] { L10n.Text("windows.notespage.newest_first.ffb6f576"), L10n.Text("windows.notespage.title_a_z.ab217de6") };
         sort.SelectedIndex = _sortByTitle ? 1 : 0;
         sort.SelectionChanged += (_, _) =>
         {
@@ -525,12 +525,12 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
     {
         _scopeHost.Children.Clear();
         if (_workspaceId is not null) return;
-        var choices = new List<(string Id, string Name)> { ("", "All projects"), (UnassignedPick, "Unassigned") };
+        var choices = new List<(string Id, string Name)> { ("", L10n.Text("windows.notespage.all_projects.4b87271b")), (UnassignedPick, L10n.Text("windows.notespage.unassigned.14d33bd0")) };
         choices.AddRange(_folders);
         var picker = new ComboBox { MinWidth = 160, MaxWidth = 240,
             ItemsSource = choices.Select(choice => choice.Name).ToList(),
             SelectedIndex = Math.Max(0, choices.FindIndex(choice => choice.Id == _picked)) };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picker, "Filter notes by project");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picker, L10n.Text("windows.notespage.filter_notes_by_project.e770faa3"));
         picker.SelectionChanged += (_, _) =>
         {
             if (picker.SelectedIndex < 0) return;
@@ -555,10 +555,10 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
             if (!string.IsNullOrEmpty(_search.Trim()))
             {
                 _listHost.Children.Add(Chrome.Empty(
-                    "No matching notes",
-                    "No note in this list matches that search.",
+                    L10n.Text("windows.notespage.no_matching_notes.5a859d10"),
+                    L10n.Text("windows.notespage.no_note_in_this_list_matches_that_search.f6c7e842"),
                     ActionIcon.Search,
-                    ActionIconGlyph.Button("Clear search", ActionIcon.Dismiss, (_, _) =>
+                    ActionIconGlyph.Button(L10n.Text("windows.notespage.clear_search.3b7ea517"), ActionIcon.Dismiss, (_, _) =>
                     {
                         _search = "";
                         RenderAll();
@@ -567,10 +567,10 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
             else
             {
                 _listHost.Children.Add(EmptyState.View(
-                    _showingArchive ? "Nothing archived" : EmptyTitle(),
+                    _showingArchive ? L10n.Text("windows.notespage.nothing_archived.cd084fd7") : EmptyTitle(),
                     _showingArchive
-                        ? $"Notes you put away in {DestinationName()} show up here."
-                        : "Capture your first note above. You can turn it into a task later.",
+                        ? L10n.Text("windows.notespage.notes_you_put_away_in_0_show_up_here.bab677fb", $"{DestinationName()}")
+                        : L10n.Text("windows.notespage.capture_your_first_note_above_you_can_turn.bdbc3fb5"),
                     EmptyArtKind.Notes));
             }
             return;
@@ -607,13 +607,13 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         var scope = ScopePick;
         if (scope == UnassignedPick)
         {
-            return "No unassigned notes";
+            return L10n.Text("windows.notespage.no_unassigned_notes.18925a3b");
         }
         if (scope != "")
         {
-            return $"No notes in {DestinationName()}";
+            return L10n.Text("windows.notespage.no_notes_in_0.b3613db7", $"{DestinationName()}");
         }
-        return "No notes yet";
+        return L10n.Text("windows.notespage.no_notes_yet.a092ad6b");
     }
 
     private FrameworkElement NoteCard(JsonNode? note)
@@ -641,7 +641,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         body.Children.Add(head);
         body.Children.Add(new TextBlock
         {
-            Text = Format.Text(note, "title", "(untitled)"),
+            Text = Format.Text(note, "title", L10n.Text("windows.notespage.untitled.3bc7cc17")),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
             MaxLines = 2,
@@ -667,13 +667,13 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         if (_showingArchive)
         {
             foot.Children.Add(Buttons.Secondary(
-                "Restore", ActionIcon.Restore,
+                L10n.Text("common.restore"), ActionIcon.Restore,
                 async (_, _) => await SetArchivedAsync(id, archived: false), small: true));
         }
         else
         {
             foot.Children.Add(Buttons.Secondary(
-                "Make a task", ActionIcon.Move,
+                L10n.Text("windows.notespage.make_a_task.0cfbd102"), ActionIcon.Move,
                 async (_, _) => await ConvertAsync(id, DestinationId()), small: true));
         }
         if (_gridLayout) body.Children.Add(foot);
@@ -707,11 +707,11 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
             RenderDetail();
         };
         var menu = ContextMenus.Menu(button);
-        ContextMenus.AddButton(menu, button, "Edit note");
-        ContextMenus.Copy(menu, "Copy note", () => Format.Text(note, "title") + "\n" + Format.Text(note, "notes"));
+        ContextMenus.AddButton(menu, button, L10n.Text("windows.notespage.edit_note.299e604c"));
+        ContextMenus.Copy(menu, L10n.Text("windows.notespage.copy_note.d888b94d"), () => Format.Text(note, "title") + "\n" + Format.Text(note, "notes"));
         ContextMenus.AddButtons(menu, foot);
-        if (!_showingArchive) ContextMenus.AddAsync(menu, "Archive", async () => await SetArchivedAsync(id, true));
-        ContextMenus.Add(menu, "Delete note…", () =>
+        if (!_showingArchive) ContextMenus.AddAsync(menu, L10n.Text("common.archive"), async () => await SetArchivedAsync(id, true));
+        ContextMenus.Add(menu, L10n.Text("windows.notespage.delete_note.2ce712f3"), () =>
         {
             _selectedId = id;
             _confirmDelete = true;
@@ -761,18 +761,18 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         {
             _detailHost.Children.Add(new TextBlock
             {
-                Text = "Select a note",
+                Text = L10n.Text("windows.notespage.select_a_note.1e19c013"),
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             });
             _detailHost.Children.Add(new TextBlock
             {
-                Text = "Pick a note to read its full text.",
+                Text = L10n.Text("windows.notespage.pick_a_note_to_read_its_full_text.f806a70a"),
                 Opacity = 0.66,
                 TextWrapping = TextWrapping.Wrap,
             });
             return;
         }
-        _detailHost.Children.Add(Buttons.Secondary("All notes", ActionIcon.Back, (_, _) => {
+        _detailHost.Children.Add(Buttons.Secondary(L10n.Text("windows.notespage.all_notes.71ecec88"), ActionIcon.Back, (_, _) => {
             _selectedId = null; RenderList(); RenderDetail();
         }, small: true));
         _detailHost.Children.Add(DetailCard(note));
@@ -789,8 +789,8 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
             Opacity = 0.66,
         });
         var draft = _noteDrafts.Open(id, new(Format.Text(note, "title"), Format.Text(note, "notes")));
-        var text = new TextBox { Header = "Title", Text = draft.Title };
-        var content = new TextBox { Header = "Note", Text = draft.Notes, AcceptsReturn = true,
+        var text = new TextBox { Header = L10n.Text("windows.notespage.title.7e8cd205"), Text = draft.Title };
+        var content = new TextBox { Header = L10n.Text("windows.notespage.note.d8da2c49"), Text = draft.Notes, AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap, MinHeight = 320 };
         var saveState = new TextBlock { FontSize = 12, Opacity = 0.7, TextWrapping = TextWrapping.Wrap };
         bool applyingSavedTitle = false;
@@ -805,8 +805,8 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         _draftStatusChanged = changedId =>
         {
             if (changedId != id || _noteDrafts.Get(id) is not { } entry) return;
-            saveState.Text = entry.Error is not null ? "Not saved: " + entry.Error
-                : entry.Saving ? "Saving…" : entry.Dirty ? "Waiting to save…" : entry.HasSaved ? "Saved" : "Changes save automatically";
+            saveState.Text = entry.Error is not null ? L10n.Text("windows.notespage.not_saved_0.461a35ab", $"{entry.Error}")
+                : entry.Saving ? L10n.Text("windows.notespage.saving.23e39291") : entry.Dirty ? L10n.Text("windows.notespage.waiting_to_save.871f19f4") : entry.HasSaved ? L10n.Text("windows.notespage.saved.b5c120b3") : L10n.Text("windows.notespage.changes_save_automatically.2cbe996a");
             if (!entry.Dirty && !entry.Saving && text.Text != entry.Value.Title)
             {
                 int caret = text.SelectionStart;
@@ -821,8 +821,8 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         body.Children.Add(text);
         var preview = new Border { MinHeight = 320, Padding = new Thickness(Theme.SpaceS) };
         var modeRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        var writeMode = new Microsoft.UI.Xaml.Controls.Primitives.ToggleButton { Content = "Write" };
-        var previewMode = new Microsoft.UI.Xaml.Controls.Primitives.ToggleButton { Content = "Preview" };
+        var writeMode = new Microsoft.UI.Xaml.Controls.Primitives.ToggleButton { Content = L10n.Text("windows.notespage.write.3f00927a") };
+        var previewMode = new Microsoft.UI.Xaml.Controls.Primitives.ToggleButton { Content = L10n.Text("windows.notespage.preview.324b134f") };
         void ShowMode(bool read)
         {
             _previewNote = read;
@@ -850,14 +850,14 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
             };
             formatting.Items.Add(item);
         }
-        AddFormat("Heading", "## ", "", "Heading", line: true);
-        AddFormat("Bold", "**", "**", "text");
-        AddFormat("Italic", "*", "*", "text");
-        AddFormat("Bulleted list", "- ", "", "List item", line: true);
-        AddFormat("Checklist", "- [ ] ", "", "To do", line: true);
-        AddFormat("Quote", "> ", "", "Quote", line: true);
-        AddFormat("Code", "`", "`", "code");
-        var format = Buttons.Secondary("Format", ActionIcon.Edit, (_, _) => { }, small: true);
+        AddFormat(L10n.Text("windows.notespage.heading.b34f17f0"), "## ", "", L10n.Text("windows.notespage.heading.b34f17f0"), line: true);
+        AddFormat(L10n.Text("windows.notespage.bold.94fee62e"), "**", "**", "text");
+        AddFormat(L10n.Text("windows.notespage.italic.9bf37cb5"), "*", "*", "text");
+        AddFormat(L10n.Text("windows.notespage.bulleted_list.ce51b395"), "- ", "", L10n.Text("windows.notespage.list_item.201333ac"), line: true);
+        AddFormat(L10n.Text("windows.notespage.checklist.73460304"), "- [ ] ", "", L10n.Text("windows.notespage.to_do.100ec1bc"), line: true);
+        AddFormat(L10n.Text("windows.notespage.quote.eb4cdebd"), "> ", "", L10n.Text("windows.notespage.quote.eb4cdebd"), line: true);
+        AddFormat(L10n.Text("windows.notespage.code.340f4630"), "`", "`", "code");
+        var format = Buttons.Secondary(L10n.Text("windows.notespage.format.2f343666"), ActionIcon.Edit, (_, _) => { }, small: true);
         format.Flyout = formatting;
         modeRow.Children.Add(format);
         var saveShortcut = new Microsoft.UI.Xaml.Input.KeyboardAccelerator
@@ -883,20 +883,20 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         }
         var saveRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         saveRow.Children.Add(Buttons.Primary(
-            "Save", ActionIcon.Save,
+            L10n.Text("common.save"), ActionIcon.Save,
             async (_, _) => await SaveNoteAsync(id)));
         body.Children.Add(saveRow);
 
         var archived = Format.Text(note, "column") == "archive";
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         actions.Children.Add(ActionIconGlyph.Button(
-            archived ? "Restore" : "Archive",
+            archived ? L10n.Text("common.restore") : L10n.Text("common.archive"),
             archived ? ActionIcon.Restore : ActionIcon.Archive,
             async (_, _) => await SetArchivedAsync(id, archived: !archived)));
         if (!_confirmDelete)
         {
             actions.Children.Add(ActionIconGlyph.Button(
-                "Delete", ActionIcon.Delete, (_, _) =>
+                L10n.Text("common.delete"), ActionIcon.Delete, (_, _) =>
                 {
                     _confirmDelete = true;
                     RenderDetail();
@@ -905,7 +905,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         else
         {
             actions.Children.Add(ActionIconGlyph.Button(
-                "Keep it", ActionIcon.Back, (_, _) =>
+                L10n.Text("windows.notespage.keep_it.fdce5da2"), ActionIcon.Back, (_, _) =>
                 {
                     _confirmDelete = false;
                     RenderDetail();
@@ -916,12 +916,12 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         {
             body.Children.Add(new TextBlock
             {
-                Text = "Archiving keeps it. Deleting does not.",
+                Text = L10n.Text("windows.notespage.archiving_keeps_it_deleting_does_not.55919870"),
                 TextWrapping = TextWrapping.Wrap,
             });
             var confirmRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
             confirmRow.Children.Add(ActionIconGlyph.Button(
-                "Delete note", ActionIcon.Delete, async (_, _) => await DeleteAsync(id)));
+                L10n.Text("windows.notespage.delete_note.b80e4f44"), ActionIcon.Delete, async (_, _) => await DeleteAsync(id)));
             body.Children.Add(confirmRow);
         }
 
@@ -930,7 +930,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
             var convertBody = new StackPanel { Spacing = Theme.SpaceS };
             convertBody.Children.Add(new TextBlock
             {
-                Text = "This note becomes a card on the board.",
+                Text = L10n.Text("windows.notespage.this_note_becomes_a_card_on_the_board.38d7f0e9"),
                 FontSize = 12,
                 Opacity = 0.66,
                 TextWrapping = TextWrapping.Wrap,
@@ -939,7 +939,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
             if (_workspaceId is null)
             {
                 folderBox = new ComboBox { MinWidth = 160 };
-                var names = new List<string> { "Unassigned" };
+                var names = new List<string> { L10n.Text("windows.notespage.unassigned.14d33bd0") };
                 names.AddRange(_folders.Select(f => f.Name));
                 folderBox.ItemsSource = names;
                 var current = Format.Text(note, "workspaceId");
@@ -949,7 +949,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
             }
             var box = folderBox;
             convertBody.Children.Add(Buttons.Secondary(
-                "Make a task", ActionIcon.Move,
+                L10n.Text("windows.notespage.make_a_task.0cfbd102"), ActionIcon.Move,
                 async (_, _) =>
                 {
                     var folderId = _workspaceId ?? ComboFolderId(box);
@@ -957,7 +957,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
                 }));
             body.Children.Add(convertBody);
         }
-        return Chrome.Card("Note", body, PlaceName(note));
+        return Chrome.Card(L10n.Text("windows.notespage.note.d8da2c49"), body, PlaceName(note));
     }
 
     private string ComboFolderId(ComboBox? box)

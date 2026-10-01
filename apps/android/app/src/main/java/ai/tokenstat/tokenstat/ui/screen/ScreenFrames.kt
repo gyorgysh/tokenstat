@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.screen
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -155,7 +157,7 @@ object ScreenFrames {
                     ?: return@mapNotNull null
                 Display(
                     id = id,
-                    name = row["name"]?.jsonPrimitive?.contentOrNull ?: "Display",
+                    name = row["name"]?.jsonPrimitive?.contentOrNull ?: L10n.text("android.screenframes.display.34e108c0"),
                     width = row["width"]?.jsonPrimitive?.intOrNull ?: 0,
                     height = row["height"]?.jsonPrimitive?.intOrNull ?: 0,
                 )
@@ -260,9 +262,9 @@ object ScreenFrames {
     /// Missing stays missing: inventing "Encrypted relay" for a path nobody
     /// observed yet is the same lie the account card refuses to tell.
     fun transportLabel(raw: String?): String = when (raw) {
-        "direct" -> "Direct connection"
-        "relay" -> "Encrypted relay"
-        else -> raw ?: "Waiting…"
+        "direct" -> L10n.text("android.screenframes.direct_connection.28d0ad54")
+        "relay" -> L10n.text("android.screenframes.encrypted_relay.153d7b1c")
+        else -> raw ?: L10n.text("android.screenframes.waiting.612ffc5c")
     }
 }
 
@@ -306,19 +308,19 @@ object ScreenFlag {
 enum class ScreenPointerMode(val title: String) {
     /// The finger drags the pointer from wherever it already is. What a
     /// laptop trackpad does, and the default on a phone.
-    Trackpad("Trackpad"),
+    Trackpad(L10n.text("android.screenframes.trackpad.2fb10776")),
 
     /// The pointer goes where the finger touched.
-    Direct("Direct"),
+    Direct(L10n.text("android.screenframes.direct.002c7c68")),
 }
 
 /// What the picture is asked to be worth. Twin of Apple
 /// `ScreenQualityChoice`.
 enum class ScreenQuality(val title: String, val detail: String) {
-    Auto("Automatic", "Best the connection allows"),
-    Sharp("Sharp", "Every detail, on a fast link"),
-    Smooth("Smooth", "Steady over the relay"),
-    DataSaver("Data saver", "Least data, softest picture");
+    Auto(L10n.text("android.screenframes.automatic.d461a493"), L10n.text("android.screenframes.best_the_connection_allows.6532539b")),
+    Sharp(L10n.text("android.screenframes.sharp.1a3c4b30"), L10n.text("android.screenframes.every_detail_on_a_fast_link.ef30d0aa")),
+    Smooth(L10n.text("android.screenframes.smooth.da519387"), L10n.text("android.screenframes.steady_over_the_relay.6391fb1b")),
+    DataSaver(L10n.text("android.screenframes.data_saver.5b444f24"), L10n.text("android.screenframes.least_data_softest_picture.383ee72b"));
 
     /// Null for automatic: the absence of a choice, rather than a choice
     /// called automatic.

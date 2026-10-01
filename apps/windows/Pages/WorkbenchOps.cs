@@ -93,15 +93,15 @@ internal static class WorkbenchOps
 
     public static string RunLabel(string status) => status switch
     {
-        "starting" => "Starting",
-        "queued" => "Queued",
-        "running" => "Running",
-        "stopping" => "Stopping",
-        "ok" => "Done",
-        "stopped" => "Stopped",
-        "error" => "Failed",
-        "interrupted" => "Interrupted by restart",
-        _ => string.IsNullOrEmpty(status) ? "Unknown" : status,
+        "starting" => L10n.Text("windows.workbenchops.starting.aeed4d26"),
+        "queued" => L10n.Text("common.queued"),
+        "running" => L10n.Text("common.running"),
+        "stopping" => L10n.Text("windows.workbenchops.stopping.a71ee1d4"),
+        "ok" => L10n.Text("common.done"),
+        "stopped" => L10n.Text("windows.workbenchops.stopped.1a4f630a"),
+        "error" => L10n.Text("common.failed"),
+        "interrupted" => L10n.Text("windows.workbenchops.interrupted_by_restart.012812fe"),
+        _ => string.IsNullOrEmpty(status) ? L10n.Text("common.unknown") : status,
     };
 
     /// <summary>
@@ -176,19 +176,20 @@ internal static class WorkbenchOps
     /// Who owns a wall-clock time. Never prints a host time without saying
     /// whose clock it is.
     /// </summary>
-    public static string ClockCaption(string hostName, string? timezone, string subject = "This time is")
+    public static string ClockCaption(string hostName, string? timezone, string? subject = null)
     {
+        subject ??= L10n.Text("windows.workbenchops.this_time_is.e63a9d6e");
         var host = hostName.Trim();
         var place = ZonePlace(timezone);
         if (place is not null)
         {
             return string.IsNullOrEmpty(host)
-                ? $"{subject} on the connected computer ({place})."
-                : $"{subject} on {host} ({place}).";
+                ? L10n.Text("windows.workbenchops.0_on_the_connected_computer_1.856ab0a3", $"{subject}", $"{place}")
+                : L10n.Text("windows.workbenchops.0_on_1_2.39b8735b", $"{subject}", $"{host}", $"{place}");
         }
         return string.IsNullOrEmpty(host)
-            ? $"{subject} on the connected computer, not this device."
-            : $"{subject} on {host}, not this device.";
+            ? L10n.Text("windows.workbenchops.0_on_the_connected_computer_not_this_devic.444e2648", $"{subject}")
+            : L10n.Text("windows.workbenchops.0_on_1_not_this_device.4df70e6c", $"{subject}", $"{host}");
     }
 
     /// <summary>
@@ -252,11 +253,11 @@ internal static class WorkbenchOps
     {
         if (kind == "custom" && (weekdays & 0x7F) == 0)
         {
-            return "Pick at least one day for a custom schedule.";
+            return L10n.Text("windows.workbenchops.pick_at_least_one_day_for_a_custom_schedul.0c926625");
         }
         if (kind == "interval" && everySeconds < 60)
         {
-            return "Pick an interval of at least one minute.";
+            return L10n.Text("windows.workbenchops.pick_an_interval_of_at_least_one_minute.e57770a7");
         }
         return null;
     }
@@ -265,10 +266,10 @@ internal static class WorkbenchOps
         ["once", "interval", "daily", "weekdays", "weekly", "custom"];
 
     public static readonly string[] DayShortNames =
-        ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+        [L10n.Text("windows.workbenchops.mon.f40d7f51"), L10n.Text("windows.workbenchops.tue.d1eb39b0"), L10n.Text("windows.workbenchops.wed.58339f45"), L10n.Text("windows.workbenchops.thu.7da11212"), L10n.Text("windows.workbenchops.fri.66dab40c"), L10n.Text("windows.workbenchops.sat.fdeb71b5"), L10n.Text("windows.workbenchops.sun.db18f17f")];
 
     public static readonly string[] DayNames =
-        ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+        [L10n.Text("windows.workbenchops.monday.6a00dfc1"), L10n.Text("windows.workbenchops.tuesday.7d8af1de"), L10n.Text("windows.workbenchops.wednesday.c0a6cc82"), L10n.Text("windows.workbenchops.thursday.fc266206"), L10n.Text("windows.workbenchops.friday.e21f3f37"), L10n.Text("windows.workbenchops.saturday.dbe35c73"), L10n.Text("windows.workbenchops.sunday.873fef76")];
 
     /// <summary>
     /// Merge edited known fields back into the untouched raw object so unknown

@@ -108,10 +108,10 @@ struct ClientHostHeader: View {
                 ClientHostWorkspacesView(peerKey: peerKey, hostName: name)
             } label: {
                 DeviceActionRow(
-                    title: "Open work",
+                    title: L10n.text("apple.clienthostheader.open_work.536b133a"),
                     subtitle: online == true
-                        ? "Folders, terminals and sessions on this computer."
-                        : "It is asleep. Opening this will wake nothing, but it will try.",
+                        ? L10n.text("apple.clienthostheader.folders_terminals_and_sessions_on_this_com.d3339016")
+                        : L10n.text("apple.clienthostheader.it_is_asleep_opening_this_will_wake_nothin.9373e7fd"),
                     icon: .reveal
                 )
             }
@@ -123,13 +123,13 @@ struct ClientHostHeader: View {
             HStack(spacing: Theme.Space.m) {
                 ActionSeat(icon: .reveal)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Open work")
+                    Text(L10n.text("apple.clienthostheader.open_work.536b133a"))
                         .font(ClientType.label.weight(.medium))
-                    Text("Opening folders and terminals on this computer is on Patron.")
+                    Text(L10n.text("apple.clienthostheader.opening_folders_and_terminals_on_this_comp.995676db"))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Button("See plans", .plans) { store.showPaywall = true }
+                    Button(L10n.text("apple.clienthostheader.see_plans.d9898933"), .plans) { store.showPaywall = true }
                         .font(ClientType.caption.weight(.semibold))
                 }
                 Spacer(minLength: 0)
@@ -152,8 +152,8 @@ struct ClientHostHeader: View {
             ScreenViewerView(peer: peerKey, name: name, tier: account.account?.tier)
         } label: {
             DeviceActionRow(
-                title: "View screen",
-                subtitle: isLegend ? "End-to-end encrypted from this device." : "Requires Legend.",
+                title: L10n.text("apple.clienthostheader.view_screen.56dea3b5"),
+                subtitle: isLegend ? L10n.text("apple.clienthostheader.end_to_end_encrypted_from_this_device.54caee7b") : L10n.text("apple.clienthostheader.requires_legend.ba9f23f7"),
                 icon: .preview
             )
         }

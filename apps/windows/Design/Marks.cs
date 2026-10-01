@@ -103,7 +103,7 @@ internal static class Marks
             canvas.Children.Add(bar);
             bars.Add(bar);
         }
-        AutomationProperties.SetName(canvas, "tokenstat");
+        AutomationProperties.SetName(canvas, L10n.Text("windows.marks.tokenstat.63d30539"));
 
         if (!animated)
         {
@@ -186,7 +186,7 @@ internal static class Marks
         Grid.SetColumn(word, 1);
         word.Children.Add(new TextBlock
         {
-            Text = "token",
+            Text = L10n.Text("windows.marks.token.3c469e9d"),
             FontFamily = Fonts.Interface,
             FontSize = size * 0.88,
             FontWeight = FontWeights.Bold,
@@ -195,7 +195,7 @@ internal static class Marks
         });
         word.Children.Add(new TextBlock
         {
-            Text = "stat",
+            Text = L10n.Text("windows.marks.stat.40460da8"),
             FontFamily = Fonts.Interface,
             FontSize = size * 0.88,
             FontWeight = FontWeights.Bold,
@@ -204,7 +204,7 @@ internal static class Marks
         });
         row.Children.Add(word);
 
-        AutomationProperties.SetName(row, "tokenstat");
+        AutomationProperties.SetName(row, L10n.Text("windows.marks.tokenstat.63d30539"));
         return row;
     }
 
@@ -307,7 +307,7 @@ internal static class Marks
             }
         }
 
-        AutomationProperties.SetName(grid, string.IsNullOrWhiteSpace(name) ? "avatar" : name.Trim());
+        AutomationProperties.SetName(grid, string.IsNullOrWhiteSpace(name) ? L10n.Text("windows.marks.avatar.87bbe879") : name.Trim());
         return grid;
     }
 
@@ -395,7 +395,7 @@ internal static class Marks
             Width = size,
             Height = size,
         };
-        string label = char.ToUpperInvariant(kind[0]) + kind[1..] + " tier";
+        string label = char.ToUpperInvariant(kind[0]) + kind[1..] + L10n.Text("windows.marks.tier.9382d092");
         ToolTipService.SetToolTip(mark, label);
         AutomationProperties.SetName(mark, label);
         return mark;

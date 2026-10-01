@@ -26,7 +26,7 @@ struct BranchPickerPresentation<Label: View>: View {
     var body: some View {
         Button { isPresented = true } label: { label() }
             .buttonStyle(.plain)
-            .accessibilityLabel("Switch branch")
+            .accessibilityLabel(L10n.text("apple.branchpicker.switch_branch.5051902c"))
             #if os(macOS)
             .popover(isPresented: $isPresented, arrowEdge: .bottom) {
                 BranchPickerContent(
@@ -49,11 +49,11 @@ struct BranchPickerPresentation<Label: View>: View {
                         onChanged: onChanged,
                         dismiss: { isPresented = false }
                     )
-                    .navigationTitle("Branches")
+                    .navigationTitle(L10n.text("apple.branchpicker.branches.2eee037c"))
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button("Done") { isPresented = false }
+                            Button(L10n.text("common.done")) { isPresented = false }
                         }
                     }
                 }
@@ -88,13 +88,13 @@ struct BranchChip: View {
                 Image(systemName: "arrow.triangle.branch")
                     .font(Theme.font(9))
                 if !compact {
-                    Text(git.branch ?? "detached")
+                    Text(git.branch ?? L10n.text("apple.branchpicker.detached.88e34e4c"))
                         .font(Theme.mono(12))
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .frame(maxWidth: 140)
                         .fixedSize(horizontal: true, vertical: false)
-                        .help(git.branch ?? "detached")
+                        .help(git.branch ?? L10n.text("apple.branchpicker.detached.88e34e4c"))
                     if git.ahead > 0 {
                         Text("↑\(git.ahead)")
                             .font(Theme.numeric(11))
@@ -116,7 +116,7 @@ struct BranchChip: View {
             .background(Theme.panel, in: Capsule())
             .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
             .contentShape(Capsule())
-            .help("Switch branch · \(git.branch ?? "detached")")
+            .help(L10n.text("apple.branchpicker.switch_branch_0.6ce43b80", "\(git.branch ?? L10n.text("apple.branchpicker.detached.88e34e4c"))"))
         }
     }
 }
@@ -161,8 +161,8 @@ private struct BranchPickerContent: View {
             #if os(macOS)
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Switch branch").font(Theme.headline)
-                    Text("Local work first; remote branches create a tracking branch.")
+                    Text(L10n.text("apple.branchpicker.switch_branch.5051902c")).font(Theme.headline)
+                    Text(L10n.text("apple.branchpicker.local_work_first_remote_branches_create_a.d96bd8e1"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -179,7 +179,7 @@ private struct BranchPickerContent: View {
 
             Group {
                 if isLoading {
-                    ProgressView("Reading branches…")
+                    ProgressView(L10n.text("apple.branchpicker.reading_branches.6868e26a"))
                         .tint(Theme.accent)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if filtered.isEmpty {
@@ -187,10 +187,10 @@ private struct BranchPickerContent: View {
                         Image(systemName: "arrow.triangle.branch")
                             .font(Theme.font(28, weight: .light))
                             .foregroundStyle(Theme.accent)
-                        Text(query.isEmpty ? "No branches" : "No matching branches")
+                        Text(query.isEmpty ? L10n.text("apple.branchpicker.no_branches.77cec90a") : L10n.text("apple.branchpicker.no_matching_branches.68f9e0ee"))
                             .font(Theme.headline)
                         if !query.isEmpty {
-                            Text("Try another part of the branch name.")
+                            Text(L10n.text("apple.branchpicker.try_another_part_of_the_branch_name.aff30449"))
                                 .font(Theme.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -199,8 +199,8 @@ private struct BranchPickerContent: View {
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 2) {
-                            branchSection("Local", branches: locals)
-                            branchSection("Remote", branches: remotes)
+                            branchSection(L10n.text("apple.branchpicker.local.8c31e6e7"), branches: locals)
+                            branchSection(L10n.text("apple.branchpicker.remote.ffa98e02"), branches: remotes)
                         }
                         .padding(Theme.Space.s)
                     }
@@ -229,7 +229,7 @@ private struct BranchPickerContent: View {
                 // worktree is a branch with a folder of its own. A toolbar
                 // button of their own put a word most people never need
                 // beside the project name.
-                Button("Work on a branch in its own folder…", .source) {
+                Button(L10n.text("apple.branchpicker.work_on_a_branch_in_its_own_folder.0d37adc5"), .source) {
                     dismiss()
                     // The popover has to be gone before a sheet can open.
                     Task { @MainActor in
@@ -241,7 +241,7 @@ private struct BranchPickerContent: View {
                 .foregroundStyle(Theme.accent)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(Theme.Space.m)
-                .help("Worktrees: a separate folder for another branch, so two can be open at once")
+                .help(L10n.text("apple.branchpicker.worktrees_a_separate_folder_for_another_br.d86cd8e4"))
             }
         }
         .background(Theme.panel)
@@ -251,21 +251,21 @@ private struct BranchPickerContent: View {
         // branch move silently left editor buffers holding the old branch's
         // text, one Save away from overwriting the new branch's file.
         .confirmationDialog(
-            "Save changes before switching branches?",
+            L10n.text("apple.branchpicker.save_changes_before_switching_branches.df86487d"),
             isPresented: $confirmingUnsaved,
             titleVisibility: .visible
         ) {
-            Button("Save and switch") {
+            Button(L10n.text("apple.branchpicker.save_and_switch.b341e4a5")) {
                 guard let action = pendingAction else { return }
                 Task { await perform(action, saveFirst: true, reloadAfter: false) }
             }
-            Button("Discard and switch", role: .destructive) {
+            Button(L10n.text("apple.branchpicker.discard_and_switch.2c900860"), role: .destructive) {
                 guard let action = pendingAction else { return }
                 Task { await perform(action, saveFirst: false, reloadAfter: true) }
             }
-            Button("Cancel", role: .cancel) { pendingAction = nil }
+            Button(L10n.text("common.cancel"), role: .cancel) { pendingAction = nil }
         } message: {
-            Text("Files open in this workspace have changes that are not written to disk.")
+            Text(L10n.text("apple.branchpicker.files_open_in_this_workspace_have_changes.c74ba1e6"))
         }
     }
 
@@ -273,14 +273,14 @@ private struct BranchPickerContent: View {
         HStack(spacing: Theme.Space.s) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.tertiary)
-            TextField("Filter branches", text: $query)
+            TextField(L10n.text("apple.branchpicker.filter_branches.cc9f20c6"), text: $query)
                 .textFieldStyle(.plain)
             if !query.isEmpty {
                 Button { query = "" } label: {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Clear branch filter")
+                .accessibilityLabel(L10n.text("apple.branchpicker.clear_branch_filter.91702c83"))
             }
         }
         .padding(.horizontal, Theme.Space.s)
@@ -304,7 +304,7 @@ private struct BranchPickerContent: View {
                 }
                 .buttonStyle(BranchRowButtonStyle(selected: branch.current))
                 .disabled(workingID != nil || branch.current)
-                .accessibilityHint(branch.remote ? "Creates a local tracking branch" : "Switches this workspace")
+                .accessibilityHint(branch.remote ? L10n.text("apple.branchpicker.creates_a_local_tracking_branch.062a62b7") : L10n.text("apple.branchpicker.switches_this_workspace.fbaa348e"))
             }
         }
     }
@@ -313,17 +313,17 @@ private struct BranchPickerContent: View {
     private var createRow: some View {
         if isCreating {
             HStack(spacing: Theme.Space.s) {
-                TextField("feature/name", text: $newName)
+                TextField(L10n.text("apple.branchpicker.feature_name.1f69ba4a"), text: $newName)
                     .textFieldStyle(.plain)
                     .padding(.horizontal, Theme.Space.s)
                     .frame(minHeight: 34)
                     .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.Space.s))
                     .overlay(RoundedRectangle(cornerRadius: Theme.Space.s).strokeBorder(Theme.border))
                     .onSubmit { Task { await create() } }
-                Button("Create", .create) { Task { await create() } }
+                Button(L10n.text("apple.branchpicker.create.4759498a"), .create) { Task { await create() } }
                     .buttonStyle(.borderedProminent)
                     .disabled(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || workingID != nil)
-                Button("Cancel", .dismiss) {
+                Button(L10n.text("common.cancel"), .dismiss) {
                     isCreating = false
                     newName = ""
                 }
@@ -331,7 +331,7 @@ private struct BranchPickerContent: View {
             }
             .padding(Theme.Space.s)
         } else {
-            Button("New branch from \(currentBranch ?? "HEAD")", .create) {
+            Button(L10n.text("apple.branchpicker.new_branch_from_0.b6ff75b5", "\(currentBranch ?? L10n.text("apple.branchpicker.head.b5180223"))"), .create) {
                 outcome = nil
                 isCreating = true
             }
@@ -390,7 +390,7 @@ private struct BranchPickerContent: View {
             guard await model.saveAllDirty(in: workspaceID) else {
                 outcome = GitOutcome(
                     ok: false,
-                    message: "The open files could not be saved, so the branch was not changed."
+                    message: L10n.text("apple.branchpicker.the_open_files_could_not_be_saved_so_the_b.111513f4")
                 )
                 return
             }
@@ -470,7 +470,7 @@ private struct BranchRow: View {
             }
             Spacer(minLength: Theme.Space.s)
             if branch.remote {
-                Text("TRACK")
+                Text(L10n.text("apple.branchpicker.track.9a0019c1"))
                     .font(Theme.caption2.weight(.semibold))
                     .foregroundStyle(Theme.accent)
                     .padding(.horizontal, 7)

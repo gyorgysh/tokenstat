@@ -29,37 +29,37 @@ enum ClientJSON {
 /// peer approval is the only gate below this.
 enum ClientJobCopy {
     static func run(_ name: String, folder: String, host: String) -> String {
-        "Starts \(name) in \(folder) on \(host)."
+        L10n.text("apple.clientjobsupport.starts_0_in_1_on_2.c720825d", "\(name)", "\(folder)", "\(host)")
     }
 
     static func stop(_ name: String, folder: String, host: String) -> String {
-        "Stops the run of \(name) in \(folder) on \(host)."
+        L10n.text("apple.clientjobsupport.stops_the_run_of_0_in_1_on_2.4717028b", "\(name)", "\(folder)", "\(host)")
     }
 
     static func continueGate(_ name: String, folder: String, host: String) -> String {
-        "Lets \(name) continue in \(folder) on \(host)."
+        L10n.text("apple.clientjobsupport.lets_0_continue_in_1_on_2.4962fc94", "\(name)", "\(folder)", "\(host)")
     }
 
     static func budget(_ seconds: UInt64) -> String {
-        if seconds == 0 { return "No time limit" }
+        if seconds == 0 { return L10n.text("apple.clientjobsupport.no_time_limit.436b4b94") }
         let minutes = seconds / 60
         if minutes >= 60, minutes % 60 == 0 {
             let hours = minutes / 60
-            return "\(hours) hour\(hours == 1 ? "" : "s")"
+            return (hours == 1 ? L10n.text("apple.clientjobsupport.0_hour_1.0df4dd9a.one", "\(hours)") : L10n.text("apple.clientjobsupport.0_hour_1.0df4dd9a.other", "\(hours)"))
         }
-        return "\(minutes) minute\(minutes == 1 ? "" : "s")"
+        return (minutes == 1 ? L10n.text("apple.clientjobsupport.0_minute_1.ef3d336c.one", "\(minutes)") : L10n.text("apple.clientjobsupport.0_minute_1.ef3d336c.other", "\(minutes)"))
     }
 
     @MainActor
     static func lastRunPhrase(_ date: Date?) -> String {
-        guard let date else { return "Never run" }
-        return "Last \(RelativeClock.phrase(for: date, style: .abbreviated))"
+        guard let date else { return L10n.text("apple.clientjobsupport.never_run.3d40a69d") }
+        return L10n.text("apple.clientjobsupport.last_0.857c540b", "\(RelativeClock.phrase(for: date, style: .abbreviated))")
     }
 
     /// Fact-row value. The label is already "Last", so no prefix.
     @MainActor
     static func lastRunWhen(_ date: Date?) -> String {
-        guard let date else { return "Never run" }
+        guard let date else { return L10n.text("apple.clientjobsupport.never_run.3d40a69d") }
         return RelativeClock.phrase(for: date, style: .abbreviated)
     }
 }

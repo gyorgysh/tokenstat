@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.heatmap
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -225,7 +227,7 @@ fun YearHeatmap(
                         tint = colors.textTertiary,
                     )
                     Text(
-                        "Swipe for the whole year, hold a day to read it",
+                        L10n.text("android.heatmap.swipe_for_the_whole_year_hold_a_day_to_rea.90159e22"),
                         style = TextStyle(fontSize = 11.sp, fontFamily = TsType.interfaceFamily),
                         color = colors.textTertiary,
                         maxLines = 1,
@@ -246,7 +248,7 @@ fun YearHeatmap(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        if (value == 0L) "nothing recorded" else "${money(value)} at API list price",
+                        if (value == 0L) L10n.text("android.heatmap.nothing_recorded.ef5e03f6") else L10n.text("android.heatmap.0_at_api_list_price.1faebace", "${money(value)}"),
                         style = TextStyle(fontSize = 12.sp, fontFamily = TsType.interfaceFamily),
                         color = colors.textSecondary,
                         maxLines = 1,
@@ -273,7 +275,7 @@ fun YearHeatmap(
                     // spacer stretches across the card and squeezes the grid
                     // into what is left.
                     Spacer(Modifier.width(gutterWidth).height(monthRowHeight))
-                    listOf("M", "", "W", "", "F", "", "").forEach { letter ->
+                    listOf(L10n.text("android.heatmap.m.08f27188"), L10n.text("android.heatmap..e3b0c442"), L10n.text("android.heatmap.w.fcb5f40d"), L10n.text("android.heatmap..e3b0c442"), L10n.text("android.heatmap.f.f67ab10a"), L10n.text("android.heatmap..e3b0c442"), L10n.text("android.heatmap..e3b0c442")).forEach { letter ->
                         Box(Modifier.height(cellSize), contentAlignment = Alignment.CenterStart) {
                             Text(
                                 letter,
@@ -520,7 +522,7 @@ fun groupedCount(count: Long): String =
 /// "12 events, 1,214,203 tokens": the sheet's totals line, in the Apple
 /// client's shape. Events stay ungrouped there, tokens are grouped.
 fun dayTotalsLine(events: Long, tokens: Long): String =
-    "$events events, ${groupedCount(tokens)} tokens"
+    L10n.text("android.heatmap.0_events_1_tokens.e35a47c3", "${events}", "${groupedCount(tokens)}")
 
 /// The `model x harness` rows of an `activity.day` answer. Null (a quiet day,
 /// which the host answers with JSON null) and a missing rows array both mean
@@ -565,7 +567,7 @@ fun DayDetailSheet(day: JsonObject?, onDismiss: () -> Unit) {
             DayDetailHeader(day, detail)
             if (locked) {
                 Text(
-                    "Locked history shows the shape of the year only.",
+                    L10n.text("android.heatmap.locked_history_shows_the_shape_of_the_year.57d209fc"),
                     style = TsType.subheadline,
                     color = colors.textSecondary,
                 )
@@ -577,7 +579,7 @@ fun DayDetailSheet(day: JsonObject?, onDismiss: () -> Unit) {
                     // A quiet day is an answer. It must not read as a
                     // failure to look.
                     Text(
-                        "Nothing recorded on this day.",
+                        L10n.text("android.heatmap.nothing_recorded_on_this_day.5ad77ba8"),
                         style = TsType.subheadline,
                         color = colors.textSecondary,
                         modifier = Modifier.fillMaxWidth(),
@@ -602,7 +604,7 @@ private fun DayDetailHeader(day: JsonObject, detail: JsonObject?) {
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Text(money(value), style = TsType.numeric(34, FontWeight.SemiBold), color = colors.accent)
-        Text("at API list price", style = TsType.caption, color = colors.textSecondary)
+        Text(L10n.text("android.heatmap.at_api_list_price.128de85c"), style = TsType.caption, color = colors.textSecondary)
         if (detail != null) {
             val events = detail["events"]?.jsonPrimitive?.longOrNull ?: 0L
             val tokens = detail["tokens"]?.jsonPrimitive?.longOrNull ?: 0L
@@ -628,7 +630,7 @@ private fun DayPartRow(row: JsonObject) {
         Modifier
             .fillMaxWidth()
             .semantics(mergeDescendants = true) {
-                contentDescription = "$model on ${harnessName(src)}, ${compactTokens(tokens)} tokens"
+                contentDescription = L10n.text("android.heatmap.0_on_1_2_tokens.2b7237a6", "${model}", "${harnessName(src)}", "${compactTokens(tokens)}")
             }
             .tsPanel()
             .padding(Space.s)

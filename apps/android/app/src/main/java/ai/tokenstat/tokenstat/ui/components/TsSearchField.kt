@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.components
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -74,7 +76,7 @@ fun TsSearchField(
         if (query.isNotEmpty()) {
             Icon(
                 ActionIcon.Dismiss.vector,
-                "Clear filter",
+                L10n.text("android.tssearchfield.clear_filter.ba59e2d4"),
                 tint = colors.textTertiary,
                 modifier = Modifier
                     .padding(vertical = Space.xs)

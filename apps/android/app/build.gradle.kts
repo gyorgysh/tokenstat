@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import org.gradle.api.tasks.Exec
 import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.FileSystemOperations
+import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.TaskAction
+import javax.inject.Inject
 
 plugins {
     id("com.android.application")
@@ -10,6 +16,28 @@ plugins {
 }
 
 if (file("google-services.json").exists()) apply(plugin = "com.google.gms.google-services")
+
+abstract class GenerateLanguageResources : DefaultTask() {
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val sourceDirectory: DirectoryProperty
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+    @get:Inject
+    abstract val files: FileSystemOperations
+
+    @TaskAction
+    fun generate() {
+        files.sync {
+            from(sourceDirectory) { include("**/common.json", "**/android.json") }
+            into(outputDirectory)
+        }
+    }
+}
+val languageResources by tasks.registering(GenerateLanguageResources::class) {
+    sourceDirectory.set(rootProject.layout.projectDirectory.dir("../localization"))
+    outputDirectory.set(layout.buildDirectory.dir("generated-resources/localization"))
+}
 
 android {
     namespace = "ai.tokenstat.tokenstat"
@@ -88,6 +116,7 @@ val generateNotices by tasks.registering(GenerateAndroidFiles::class) {
 }
 androidComponents {
     onVariants { variant ->
+        variant.sources.resources?.addGeneratedSourceDirectory(languageResources, GenerateLanguageResources::outputDirectory)
         variant.sources.jniLibs?.addGeneratedSourceDirectory(buildRust, GenerateAndroidFiles::outputDirectory)
         variant.sources.assets?.addGeneratedSourceDirectory(generatePriceBook, GenerateAndroidFiles::outputDirectory)
         variant.sources.assets?.addGeneratedSourceDirectory(generateNotices, GenerateAndroidFiles::outputDirectory)

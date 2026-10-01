@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.logic.InsightDayAxis
 import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
 import ai.tokenstat.tokenstat.ui.components.TsDangerButton
@@ -236,13 +238,13 @@ import kotlinx.serialization.json.*
 private fun tsAccent(): Color = LocalTsColors.current.accent
 
 private enum class Destination(val id: String, val label: String, val icon: ImageVector, val detail: String) {
-    Home("home", "Home", Icons.Default.GridView, "Spend, activity and limits"),
-    Workspaces("workspaces", "Projects", Icons.Default.Folder, "Folders and sessions on your machines"),
-    Insights("insights", "Insights", Icons.Default.BarChart, "Breakdowns by model and project"),
+    Home("home", L10n.text("common.home"), Icons.Default.GridView, L10n.text("android.tokenstatapp.spend_activity_and_limits.c9d9e601")),
+    Workspaces("workspaces", L10n.text("common.projects"), Icons.Default.Folder, L10n.text("android.tokenstatapp.folders_and_sessions_on_your_machines.4b93afd1")),
+    Insights("insights", L10n.text("common.insights"), Icons.Default.BarChart, L10n.text("android.tokenstatapp.breakdowns_by_model_and_project.9846e926")),
     // The id is `machines`, like the iOS raw value, so the two tab stores
     // stay comparable. SSH stays last: entries order is the default bar.
-    Devices("machines", "Devices", Icons.Default.Laptop, "Computers on your account"),
-    Ssh("ssh", "SSH", Icons.Default.Terminal, "Saved servers and keys"),
+    Devices("machines", L10n.text("common.devices"), Icons.Default.Laptop, L10n.text("android.tokenstatapp.computers_on_your_account.232226fe")),
+    Ssh("ssh", "SSH", Icons.Default.Terminal, L10n.text("android.tokenstatapp.saved_servers_and_keys.47db8e47")),
 }
 
 /// Five doors after onboarding, not three: still checking, could not check
@@ -387,7 +389,7 @@ private fun AuthRetryScreen(
                 // Offline rewrites this whatever the call happened to say. A
                 // device with no internet produces a different sentence per
                 // subsystem, and all of them have one cause and one answer.
-                if (offline) "You are offline" else friendly.title,
+                if (offline) L10n.text("android.tokenstatapp.you_are_offline.4d5c9439") else friendly.title,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
                 color = colors.textPrimary,
@@ -395,8 +397,7 @@ private fun AuthRetryScreen(
             )
             Text(
                 if (offline) {
-                    "This device cannot reach the internet. You are still signed in, and " +
-                        "everything comes back on its own."
+                    L10n.text("android.tokenstatapp.this_device_cannot_reach_the_internet_you.55a944ab")
                 } else {
                     friendly.message
                 },
@@ -408,7 +409,7 @@ private fun AuthRetryScreen(
         }
         Spacer(Modifier.weight(1f))
         TsAccentButton(
-            label = if (isLoading) "Checking…" else "Try again",
+            label = if (isLoading) L10n.text("android.tokenstatapp.checking.ec963ffc") else L10n.text("android.tokenstatapp.try_again.d8b8392e"),
             icon = ActionIcon.Refresh.vector,
             enabled = !isLoading,
             onClick = onRetry,
@@ -453,7 +454,7 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
         Wordmark(size = 28, showsMark = false)
         Spacer(Modifier.height(Space.m))
         Text(
-            "Your coding agents, projects, and AI usage. Together, wherever you are.",
+            L10n.text("android.tokenstatapp.your_coding_agents_projects_and_ai_usage_t.6cfcf32f"),
             style = TsType.body,
             color = colors.textSecondary,
             textAlign = TextAlign.Center,
@@ -479,12 +480,12 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
                 ) {
                     CircularProgressIndicator(color = colors.accent)
                     Text(
-                        "Waiting for approval",
+                        L10n.text("android.tokenstatapp.waiting_for_approval.10c5739b"),
                         style = TsType.title3.copy(fontWeight = FontWeight.SemiBold),
                         color = colors.textPrimary,
                     )
                     Text(
-                        notice ?: "Approve this device on tokenstat.ai. This screen updates by itself.",
+                        notice ?: L10n.text("android.tokenstatapp.approve_this_device_on_tokenstat_ai_this_s.bad8690a"),
                         style = TsType.subheadline,
                         color = colors.textSecondary,
                         textAlign = TextAlign.Center,
@@ -500,13 +501,13 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                         TsSecondaryButton(
-                            label = "Open the page",
+                            label = L10n.text("android.tokenstatapp.open_the_page.911fa06e"),
                             icon = ActionIcon.External.vector,
                             small = true,
                             onClick = { model.presentSignInPage(::openPage) },
                         )
                         TsSecondaryButton(
-                            label = "Cancel",
+                            label = L10n.text("common.cancel"),
                             icon = ActionIcon.Dismiss.vector,
                             small = true,
                             onClick = { model.cancelSignIn() },
@@ -518,7 +519,7 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
                 // this is the door, and everything under it is a footnote to
                 // it. Same weight the iPhone gives it.
                 TsProminentButton(
-                    label = "Sign in",
+                    label = L10n.text("common.sign_in"),
                     icon = ActionIcon.SignIn.vector,
                     onClick = { model.signIn(::openPage) },
                     modifier = Modifier.fillMaxWidth(),
@@ -528,7 +529,7 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
                 // signs in with a provider they already have. This line says
                 // what happens instead of offering a fake choice.
                 Text(
-                    "No password to make. Signing in with GitHub, Google, X or Apple creates your account the first time.",
+                    L10n.text("android.tokenstatapp.no_password_to_make_signing_in_with_github.06825264"),
                     style = TsType.caption,
                     color = colors.textSecondary,
                     textAlign = TextAlign.Center,
@@ -555,7 +556,7 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.width(6.dp))
-                Text("What is tokenstat?", style = TsType.subheadline, color = colors.accent)
+                Text(L10n.text("android.tokenstatapp.what_is_tokenstat.b2e003ed"), style = TsType.subheadline, color = colors.accent)
             }
             // Signing in creates the account, so the two documents that govern
             // it belong on this screen and not only in Settings.
@@ -567,11 +568,11 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
 @Composable
 private fun LegalLine(onOpen: (String) -> Unit, modifier: Modifier = Modifier) {
     val colors = LocalTsColors.current
-    val terms = "Terms"
-    val privacy = "Privacy policy"
+    val terms = L10n.text("android.tokenstatapp.terms.ede54899")
+    val privacy = L10n.text("android.tokenstatapp.privacy_policy.ba445cff")
     // Word for word with the iPhone's line, which reads it as one sentence
     // with two links in it rather than a sentence about two documents.
-    val text = "By signing in you accept the $terms and $privacy"
+    val text = L10n.text("android.tokenstatapp.by_signing_in_you_accept_the_0_and_1.78bf1e2f", "${terms}", "${privacy}")
     val annotated = remember {
         buildAnnotatedString {
             append(text)
@@ -712,7 +713,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                             contentAlignment = Alignment.Center,
                         ) {
                         Avatar(
-                            state.account?.string("displayName") ?: state.account?.string("handle") ?: "your account",
+                            state.account?.string("displayName") ?: state.account?.string("handle") ?: L10n.text("android.tokenstatapp.your_account.17a7e5cf"),
                             size = 34,
                             avatarUrl = state.account?.string("avatar"),
                             signedIn = state.signedIn,
@@ -735,7 +736,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                         ) {
                             Icon(
                                 ActionIcon.Search.vector,
-                                "Search",
+                                L10n.text("common.search"),
                                 tint = colors.accent,
                                 modifier = Modifier.size(19.dp),
                             )
@@ -982,14 +983,12 @@ private fun RemoteGateScreen(signedIn: Boolean, onPlans: () -> Unit) {
         if (signedIn) {
             EmptyState(
                 kind = EmptyKind.NeedsAccount,
-                title = "Remote is on Patron",
-                message = "This device already shares the account and sees the usage from " +
-                    "every device on it. Opening folders and terminals on the computer is " +
-                    "a paid feature.",
+                title = L10n.text("android.tokenstatapp.remote_is_on_patron.d25dea13"),
+                message = L10n.text("android.tokenstatapp.this_device_already_shares_the_account_and.b2e29485"),
                 art = { EmptyArt(EmptyArtKind.RemoteGate) },
                 action = {
                     TsAccentButton(
-                        label = "See plans",
+                        label = L10n.text("android.tokenstatapp.see_plans.d9898933"),
                         icon = ActionIcon.Plans.vector,
                         onClick = onPlans,
                     )
@@ -998,9 +997,8 @@ private fun RemoteGateScreen(signedIn: Boolean, onPlans: () -> Unit) {
         } else {
             EmptyState(
                 kind = EmptyKind.NeedsAccount,
-                title = "Sign in to reach your computers",
-                message = "Remote work runs over your account. Sign in on this device and " +
-                    "the computers on it show up here.",
+                title = L10n.text("android.tokenstatapp.sign_in_to_reach_your_computers.a7a3b4e8"),
+                message = L10n.text("android.tokenstatapp.remote_work_runs_over_your_account_sign_in.26568263"),
                 art = { EmptyArt(EmptyArtKind.RemoteGate) },
             )
         }
@@ -1088,11 +1086,11 @@ private fun HomeScreen(
         if (id != null) onOpenWork(id, workspaceId, kind, item) else onOpenDevices()
     }
     fun emptyReason(section: HomeSection): String? = when (section) {
-        HomeSection.CONTINUE -> if (places.isEmpty()) "Appears after you open a folder or conversation." else null
-        HomeSection.PINNED -> if (pins.isEmpty()) "Pin a folder or conversation to keep it here." else null
-        HomeSection.MACHINES -> if (machines.isEmpty()) "Appears when your account has linked devices." else null
+        HomeSection.CONTINUE -> if (places.isEmpty()) L10n.text("android.tokenstatapp.appears_after_you_open_a_folder_or_convers.032af20f") else null
+        HomeSection.PINNED -> if (pins.isEmpty()) L10n.text("android.tokenstatapp.pin_a_folder_or_conversation_to_keep_it_he.e84b9c14") else null
+        HomeSection.MACHINES -> if (machines.isEmpty()) L10n.text("android.tokenstatapp.appears_when_your_account_has_linked_devic.8a84c464") else null
         HomeSection.LIMITS -> if (state.limits.isEmpty() && state.limitsError == null) {
-            "Readings appear after a linked computer shares how much of each tool's subscription is left."
+            L10n.text("android.tokenstatapp.readings_appear_after_a_linked_computer_sh.042da1f4")
         } else null
         else -> null
     }
@@ -1161,8 +1159,8 @@ private fun HomeScreen(
                 HomeSection.USAGE -> if (calendar != null) {
                     item {
                         Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                            TotalTile("Today", money(spendSince(cells, calendar.string("last"), 1)), "mark_day", Modifier.weight(1f))
-                            TotalTile("This week", money(spendSince(cells, calendar.string("last"), 7)), "mark_week", Modifier.weight(1f))
+                            TotalTile(L10n.text("common.today"), money(spendSince(cells, calendar.string("last"), 1)), "mark_day", Modifier.weight(1f))
+                            TotalTile(L10n.text("android.tokenstatapp.this_week.8c4eef5a"), money(spendSince(cells, calendar.string("last"), 7)), "mark_week", Modifier.weight(1f))
                         }
                     }
                 } else if (state.loading) {
@@ -1228,11 +1226,11 @@ private fun HomeScreen(
                                 verticalArrangement = Arrangement.spacedBy(Space.s),
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    SectionTitle("Activity", "mark_activity")
+                                    SectionTitle(L10n.text("android.tokenstatapp.activity.38da1505"), "mark_activity")
                                     Spacer(Modifier.weight(1f))
                                     Column(horizontalAlignment = Alignment.End) {
                                         Text(
-                                            "${calendar.int("activeDays") ?: 0} active days",
+                                            L10n.text("android.tokenstatapp.0_active_days.16d30c85", "${calendar.int("activeDays") ?: 0}"),
                                             style = TsType.caption,
                                             color = LocalTsColors.current.textSecondary,
                                         )
@@ -1251,7 +1249,7 @@ private fun HomeScreen(
                                         }
                                     }
                                 }
-                                if (cells.isEmpty()) Text("No synced activity yet.", color = LocalTsColors.current.textSecondary)
+                                if (cells.isEmpty()) Text(L10n.text("android.tokenstatapp.no_synced_activity_yet.adbeb6e5"), color = LocalTsColors.current.textSecondary)
                                 else {
                                     YearHeatmap(
                                         rows!!,
@@ -1271,12 +1269,12 @@ private fun HomeScreen(
                     item { SkeletonCard() }
                 }
                 HomeSection.LIMITS -> if (calendar != null) {
-                    item { SectionTitle("Plan limits", "mark_plan") }
+                    item { SectionTitle(L10n.text("android.tokenstatapp.plan_limits.925788cd"), "mark_plan") }
                     val planError = state.limitsError
                     if (planError != null) {
                         item {
                             Text(
-                                "Plan readings could not be refreshed. Pull to try again.",
+                                L10n.text("android.tokenstatapp.plan_readings_could_not_be_refreshed_pull.e771bffd"),
                                 style = TsType.caption,
                                 color = LocalTsColors.current.controlGlyph,
                             )
@@ -1300,7 +1298,7 @@ private fun HomeScreen(
                             // Not an error. Until a host shares readings the
                             // honest line is empty, not zero.
                             Text(
-                                "No readings yet. On a Mac, open Plan limits in Account and turn on Share with my devices. Then refresh or sync.",
+                                L10n.text("android.tokenstatapp.no_readings_yet_on_a_mac_open_plan_limits.467d1c76"),
                                 style = TsType.subheadline,
                                 color = LocalTsColors.current.textSecondary,
                                 modifier = Modifier.fillMaxWidth(),
@@ -1331,7 +1329,7 @@ private fun HomeScreen(
             // At the bottom, under everything it arranges. A control for
             // changing the furniture does not belong above the furniture.
             TsSecondaryButton(
-                label = "Customize Home",
+                label = L10n.text("android.tokenstatapp.customize_home.642cec6e"),
                 onClick = { customizing = true },
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -1368,7 +1366,7 @@ private fun NoticeCard(text: String, showSignIn: Boolean, onSignIn: () -> Unit) 
             Text(text, style = TsType.caption, color = colors.textSecondary)
         }
         if (showSignIn) {
-            TsSecondaryButton(label = "Sign in", icon = ActionIcon.SignIn.vector, onClick = onSignIn)
+            TsSecondaryButton(label = L10n.text("common.sign_in"), icon = ActionIcon.SignIn.vector, onClick = onSignIn)
         }
     }
 }
@@ -1402,10 +1400,10 @@ private fun HistoryLockBanner(days: Int = 30) {
     val note = remember(days, colors.textPrimary, colors.textSecondary) {
         buildAnnotatedString {
             withStyle(SpanStyle(color = colors.textPrimary, fontWeight = FontWeight.SemiBold)) {
-                append("Older history is locked. ")
+                append(L10n.text("android.tokenstatapp.older_history_is_locked.8ef6b29a"))
             }
             withStyle(SpanStyle(color = colors.textSecondary)) {
-                append("Free shows the last $days days in full. Older days keep the year shape only.")
+                append(L10n.text("android.tokenstatapp.free_shows_the_last_0_days_in_full_older_d.2a97306a", "${days}"))
             }
         }
     }
@@ -1423,7 +1421,7 @@ private fun HistoryLockBanner(days: Int = 30) {
         // a Play subscription, and a link out of the app is a route nobody
         // can buy from. See `Plans`.
         Text(
-            "See plans",
+            L10n.text("android.tokenstatapp.see_plans.d9898933"),
             style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
             color = colors.accent,
             modifier = Modifier.clickable(
@@ -1461,7 +1459,7 @@ private fun InsightsScreen(
     // client draws: the account holds no projects and no sessions.
     var cut by rememberSaveable { mutableStateOf(0) }
     var query by rememberSaveable { mutableStateOf("") }
-    val cutNames = listOf("Models", "Coding tools", "Days")
+    val cutNames = listOf(L10n.text("android.tokenstatapp.models.d17d2d78"), L10n.text("android.tokenstatapp.coding_tools.6032f740"), L10n.text("android.tokenstatapp.days.e08c0aa8"))
     val cutKeys = listOf("model", "source", "day")
     // Rows per cut. Null means "not asked yet", which is not the same as an
     // empty account and must not draw like one.
@@ -1487,7 +1485,7 @@ private fun InsightsScreen(
             }
             .onFailure {
                 if (asked == cut) {
-                    val text = it.message ?: "The request failed."
+                    val text = it.message ?: L10n.text("android.tokenstatapp.the_request_failed.db4fb447")
                     needsSignIn = text.contains("sign in", ignoreCase = true)
                     errorMessage = text
                 }
@@ -1537,7 +1535,7 @@ private fun InsightsScreen(
             // it and a clear button once there is something to clear, and
             // this one looked like a stray text input beside them.
             TsSearchField(
-                prompt = "Filter ${cutNames[cut].lowercase()}",
+                prompt = L10n.text("android.tokenstatapp.filter_0.50ee55cd", "${cutNames[cut].lowercase()}"),
                 query = query,
                 onQueryChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),
@@ -1560,16 +1558,16 @@ private fun InsightsScreen(
                         // Refused and unreachable are different answers and
                         // must not read alike.
                         kind = if (needsSignIn) EmptyKind.NeedsAccount else EmptyKind.Unreachable,
-                        title = if (offline) "You are offline" else "Could not load your usage",
+                        title = if (offline) L10n.text("android.tokenstatapp.you_are_offline.4d5c9439") else L10n.text("android.tokenstatapp.could_not_load_your_usage.45467004"),
                         message = if (offline) {
-                            "This updates by itself when the connection is back."
+                            L10n.text("android.tokenstatapp.this_updates_by_itself_when_the_connection.afd97997")
                         } else {
                             friendlyError(errorMessage).message
                         },
                         action = if (!offline) {
                             {
                                 TsAccentButton(
-                                    label = "Try again",
+                                    label = L10n.text("android.tokenstatapp.try_again.d8b8392e"),
                                     icon = ActionIcon.Refresh.vector,
                                     small = true,
                                     onClick = { refresh() },
@@ -1587,12 +1585,12 @@ private fun InsightsScreen(
             item {
                 EmptyState(
                     icon = Icons.Default.BarChart,
-                    title = "Nothing recorded yet",
-                    message = "Add a computer to this account and what it counts shows up here.",
+                    title = L10n.text("android.tokenstatapp.nothing_recorded_yet.cb77e288"),
+                    message = L10n.text("android.tokenstatapp.add_a_computer_to_this_account_and_what_it.1769a0a7"),
                     art = { EmptyArt(EmptyArtKind.FirstBars) },
                     action = {
                         TsAccentButton(
-                            label = "How to start",
+                            label = L10n.text("android.tokenstatapp.how_to_start.69f36336"),
                             icon = ActionIcon.Home.vector,
                             small = true,
                             onClick = onHome,
@@ -1620,7 +1618,7 @@ private fun InsightsScreen(
             if (shown.isEmpty()) {
                 item {
                     Text(
-                        "Nothing matches \"$term\".",
+                        L10n.text("android.tokenstatapp.nothing_matches_0.d59cf718", "${term}"),
                         style = TsType.subheadline,
                         color = colors.textSecondary,
                     )
@@ -1659,7 +1657,7 @@ private fun InsightSummary(rows: List<JsonObject>, cutName: String, stale: Boole
     val events = rows.sumOf { it.long("events") ?: 0L }
     TsCard {
         Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-            SectionTitle("This period", "mark_insights")
+            SectionTitle(L10n.text("android.tokenstatapp.this_period.8ed3e11f"), "mark_insights")
             Text(
                 moneyValue(total, estimated, complete),
                 style = TsType.numeric(34, FontWeight.SemiBold),
@@ -1668,15 +1666,14 @@ private fun InsightSummary(rows: List<JsonObject>, cutName: String, stale: Boole
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                "at API list price, across every device",
+                L10n.text("android.tokenstatapp.at_api_list_price_across_every_device.956db3fc"),
                 style = TsType.caption,
                 color = colors.textSecondary,
             )
             InsightStatPanels(insightFactPanels(tokens, events, rows.size, cutName) { compactTokens(it) })
             if (stale && fetchedAtMs != null) {
                 Text(
-                    "The refresh did not go through. Showing what this device last fetched, " +
-                        "${RelativeClock.label(fetchedAtMs, System.currentTimeMillis())}.",
+                    L10n.text("android.tokenstatapp.the_refresh_did_not_go_through_showing_wha.790fad9d", "${RelativeClock.label(fetchedAtMs, System.currentTimeMillis())}"),
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.textSecondary,
                 )
@@ -1701,14 +1698,14 @@ private fun InsightDayChart(rows: List<JsonObject>) {
     TsCard {
         val bars = days.map { it["counters"]?.jsonObject?.long("total") ?: 0L }
         Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-        SectionTitle("Daily activity", "mark_activity")
+        SectionTitle(L10n.text("android.tokenstatapp.daily_activity.561d7c9e"), "mark_activity")
         Text(
-            "Tokens per day · cache included",
+            L10n.text("android.tokenstatapp.tokens_per_day_cache_included.a6ebc86d"),
             style = MaterialTheme.typography.bodySmall,
             color = colors.textSecondary,
         )
         Canvas(Modifier.fillMaxWidth().height(180.dp).semantics {
-            contentDescription = "Daily activity across ${days.size} recorded days. Peak ${compactTokens(peak)} tokens. Values listed below."
+            contentDescription = L10n.text("android.tokenstatapp.daily_activity_across_0_recorded_days_peak.41b2115f", "${days.size}", "${compactTokens(peak)}")
         }) {
             if (bars.isEmpty() || peak <= 0) return@Canvas
             val stride = size.width / dayCount.toFloat()
@@ -1752,12 +1749,12 @@ private fun InsightTokenChart(rows: List<JsonObject>, cut: Int) {
     val peak = (ranked.maxOfOrNull { it["counters"]?.jsonObject?.long("total") ?: 0L } ?: 0L).coerceAtLeast(1L)
     TsCard {
         Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-            SectionTitle(if (cut == 1) "Most used coding tools" else "Most used models", "mark_insights")
-            Text("Tokens · including reported cache usage", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+            SectionTitle(if (cut == 1) L10n.text("android.tokenstatapp.most_used_coding_tools.efd611f9") else L10n.text("android.tokenstatapp.most_used_models.861b94dc"), "mark_insights")
+            Text(L10n.text("android.tokenstatapp.tokens_including_reported_cache_usage.a3e0a451"), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
             ranked.forEach { row ->
                 val title = cutTitle(cut, row.string("key") ?: "")
                 val total = row["counters"]?.jsonObject?.long("total") ?: 0L
-                Column(Modifier.semantics(mergeDescendants = true) { contentDescription = "$title: ${compactTokens(total)} tokens" },
+                Column(Modifier.semantics(mergeDescendants = true) { contentDescription = L10n.text("android.tokenstatapp.0_1_tokens.115695b6", "${title}", "${compactTokens(total)}") },
                     verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                         Text(title, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1806,7 +1803,7 @@ private fun InsightRow(row: JsonObject, cut: Int, peak: Long) {
                 val tokens = row["counters"]?.jsonObject?.long("total") ?: 0L
                 val events = row.long("events") ?: 0L
                 Text(
-                    "${compactTokens(tokens)} tokens, ${groupedCount(events)} events",
+                    L10n.text("android.tokenstatapp.0_tokens_1_events.8b30d61d", "${compactTokens(tokens)}", "${groupedCount(events)}"),
                     style = TsType.caption,
                     color = colors.textSecondary,
                 )
@@ -1897,7 +1894,7 @@ private fun DevicesScreen(
             // The list still drew. What failed is the share of spend beside
             // each name, which is worth one quiet line and not an error card
             // where the devices should be.
-            usageError = "Could not work out what each device spent."
+            usageError = L10n.text("android.tokenstatapp.could_not_work_out_what_each_device_spent.5f9efc51")
         }
     }
     // This device first, then awake machines by spend, then everyone else by
@@ -1923,7 +1920,7 @@ private fun DevicesScreen(
                 listOf(
                     DeviceCopy.displayName(machine.string("label"), machine.string("platform"), isHost),
                     machine.string("platform").orEmpty(), machine.string("id").orEmpty(),
-                    if (isHost) "Computer" else "Phone tablet",
+                    if (isHost) L10n.text("android.tokenstatapp.computer.76ed42d2") else L10n.text("android.tokenstatapp.phone_tablet.e6922f86"),
                     DeviceCopy.statusLine(
                         isThisDevice = thisId != null && machine.string("id") == thisId,
                         online = machine["online"]?.jsonPrimitive?.booleanOrNull,
@@ -1969,15 +1966,15 @@ private fun DevicesScreen(
             ) {
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                        TsSecondaryButton(label = "Add device", icon = ActionIcon.Create.vector,
+                        TsSecondaryButton(label = L10n.text("common.add_device"), icon = ActionIcon.Create.vector,
                             small = true, onClick = onSetupWizard)
-                        TsSecondaryButton(label = "SSH hosts", icon = Icons.Default.Terminal,
+                        TsSecondaryButton(label = L10n.text("android.tokenstatapp.ssh_hosts.6e8d5967"), icon = Icons.Default.Terminal,
                             small = true, onClick = { sshOpen = true })
                     }
                 }
             item {
                     TsSearchField(
-                        prompt = "Search devices",
+                        prompt = L10n.text("android.tokenstatapp.search_devices.3aebaefc"),
                         query = deviceQuery,
                         onQueryChange = { deviceQuery = it },
                         modifier = Modifier.fillMaxWidth(),
@@ -1996,7 +1993,7 @@ private fun DevicesScreen(
                 if (shownMachines.isEmpty() && deviceQuery.isNotBlank()) {
                     item {
                         Text(
-                            "No device matches \"${deviceQuery.trim()}\".",
+                            L10n.text("android.tokenstatapp.no_device_matches_0.34358393", "${deviceQuery.trim()}"),
                             style = MaterialTheme.typography.bodySmall,
                             color = LocalTsColors.current.textSecondary,
                         )
@@ -2050,7 +2047,7 @@ private fun DevicesScreen(
                                 // fetched has not been shown to have spent
                                 // nothing.
                                 Text(
-                                    if (micros != null) money(micros) else "n/a",
+                                    if (micros != null) money(micros) else L10n.text("android.tokenstatapp.n_a.a683c5c5"),
                                     style = TsType.numeric(15, FontWeight.SemiBold),
                                     color = if (micros != null) colors.accent else colors.controlGlyph,
                                 )
@@ -2060,7 +2057,7 @@ private fun DevicesScreen(
                                     Modifier.background(colors.accent.copy(alpha = 0.12f), RoundedCornerShape(50)),
                                 ) {
                                     Text(
-                                        "You",
+                                        L10n.text("android.tokenstatapp.you.08b04193"),
                                         style = MaterialTheme.typography.bodySmall,
                                         fontWeight = FontWeight.SemiBold,
                                         color = colors.accent,
@@ -2133,18 +2130,18 @@ private fun VaultDeleteDialog(
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Delete the vault and start over") },
+        title = { Text(L10n.text("android.tokenstatapp.delete_the_vault_and_start_over.e49d06f1")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("For when the password is forgotten and no other device can open it.")
+                Text(L10n.text("android.tokenstatapp.for_when_the_password_is_forgotten_and_no.fd06b159"))
                 if (stranded?.isNotEmpty() == true) {
-                    Text("Nothing recovers these keys:", fontWeight = FontWeight.SemiBold)
+                    Text(L10n.text("android.tokenstatapp.nothing_recovers_these_keys.46273eb6"), fontWeight = FontWeight.SemiBold)
                     stranded!!.forEach { Text("· $it") }
                 }
                 OutlinedTextField(
                     value = typed,
                     onValueChange = { typed = it },
-                    label = { Text("Type DELETE to confirm") },
+                    label = { Text(L10n.text("android.tokenstatapp.type_delete_to_confirm.d4856f41")) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -2162,9 +2159,9 @@ private fun VaultDeleteDialog(
                             .onFailure { error = it.message; working = false }
                     }
                 },
-            ) { Text(if (working) "Deleting…" else "Delete vault") }
+            ) { Text(if (working) L10n.text("android.tokenstatapp.deleting.43b5894c") else L10n.text("android.tokenstatapp.delete_vault.9fd7de76")) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(L10n.text("common.cancel")) } },
     )
 }
 
@@ -2179,7 +2176,7 @@ private fun AndroidSSHScreen(
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val tabs = listOf("Hosts", "Keys", "Snippets")
+    val tabs = listOf(L10n.text("android.tokenstatapp.hosts.bba9af13"), L10n.text("android.tokenstatapp.keys.f0d66a79"), L10n.text("android.tokenstatapp.snippets.ff717209"))
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var hosts by remember { mutableStateOf(JsonArray(emptyList())) }
     var keys by remember { mutableStateOf(JsonArray(emptyList())) }
@@ -2281,14 +2278,14 @@ private fun AndroidSSHScreen(
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (onBack != null) {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, L10n.text("common.back")) }
                 }
                 // No title: the tab that opened this already says SSH, and
                 // repeating it cost a row the host list wanted. The pushed
                 // form (reached from Devices) still needs one, because there
                 // the tab bar says Devices.
                 if (onBack != null) {
-                    Text("SSH", style = MaterialTheme.typography.headlineSmall)
+                    Text(L10n.text("android.tokenstatapp.ssh.01c4d3c2"), style = MaterialTheme.typography.headlineSmall)
                 }
             }
             if (!vaultAllowed) {
@@ -2320,12 +2317,12 @@ private fun AndroidSSHScreen(
                         Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 if (recoveryWords != null) {
-                                    TsAccentButton(label = "Show code", small = true, onClick = { showingRecovery = true })
-                                    TsSecondaryButton(label = "Discard vault", small = true, onClick = { scope.launch { dropFreshVault() } })
+                                    TsAccentButton(label = L10n.text("android.tokenstatapp.show_code.c9eab29c"), small = true, onClick = { showingRecovery = true })
+                                    TsSecondaryButton(label = L10n.text("android.tokenstatapp.discard_vault.cea8fd68"), small = true, onClick = { scope.launch { dropFreshVault() } })
                                 } else if (vault?.bool("created") != true) {
-                                    TsAccentButton(label = "Set up", small = true, onClick = { vaultSetup = true })
+                                    TsAccentButton(label = L10n.text("android.tokenstatapp.set_up.4da10f1f"), small = true, onClick = { vaultSetup = true })
                                 } else if (vault?.bool("locked") == true || vault?.bool("enrolled") != true) {
-                                    TsAccentButton(label = "Unlock", small = true, onClick = { vaultSetup = true })
+                                    TsAccentButton(label = L10n.text("android.tokenstatapp.unlock.4ac709aa"), small = true, onClick = { vaultSetup = true })
                                 }
                             }
                             // Sync and delete stay one tap away on a vault
@@ -2333,8 +2330,8 @@ private fun AndroidSSHScreen(
                             // carries the destroy-everywhere warning.
                             if (vault?.bool("created") == true && recoveryWords == null) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    TsSecondaryButton(label = "Sync now", small = true, onClick = { scope.launch { load(syncAsked = true) } })
-                                    TsSecondaryButton(label = "Delete vault", small = true, onClick = { confirmDrop = true })
+                                    TsSecondaryButton(label = L10n.text("common.sync_now"), small = true, onClick = { scope.launch { load(syncAsked = true) } })
+                                    TsSecondaryButton(label = L10n.text("android.tokenstatapp.delete_vault.9fd7de76"), small = true, onClick = { confirmDrop = true })
                                 }
                             }
                         }
@@ -2371,13 +2368,13 @@ private fun AndroidSSHScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TsSearchField(
-                prompt = "Search ${tabs[tab].lowercase()}",
+                prompt = L10n.text("android.tokenstatapp.search_0.09ee1648", "${tabs[tab].lowercase()}"),
                 query = query,
                 onQueryChange = { query = it },
                 modifier = Modifier.weight(1f),
             )
             TsAccentButton(
-                label = "Add",
+                label = L10n.text("common.add"),
                 icon = ActionIcon.Create.vector,
                 small = true,
                 onClick = {
@@ -2404,11 +2401,11 @@ private fun AndroidSSHScreen(
                 if (vaultAllowed) {
                     EmptyState(
                         icon = if (tab == 0) ActionIcon.Device.vector else if (tab == 1) ActionIcon.Token.vector else ActionIcon.Docs.vector,
-                        title = "No ${tabs[tab].lowercase()} yet",
-                        message = if (tab == 0) "Save a server address and choose authentication when connecting." else if (tab == 1) "Generated and imported keys are protected on this device." else "Save commands you use often.",
+                        title = L10n.text("android.tokenstatapp.no_0_yet.91be7356", "${tabs[tab].lowercase()}"),
+                        message = if (tab == 0) L10n.text("android.tokenstatapp.save_a_server_address_and_choose_authentic.268fdc9a") else if (tab == 1) L10n.text("android.tokenstatapp.generated_and_imported_keys_are_protected.1a42622f") else L10n.text("android.tokenstatapp.save_commands_you_use_often.27b06324"),
                         action = {
                             TsAccentButton(
-                                label = "Add ${tabs[tab].lowercase().trimEnd('s')}",
+                                label = L10n.text("android.tokenstatapp.add_0.882c2180", "${tabs[tab].lowercase().trimEnd('s')}"),
                                 onClick = {
                                     if (tab == 0) addHost = true
                                     else if (tab == 2) addSnippet = true
@@ -2467,7 +2464,7 @@ private fun AndroidSSHScreen(
                             key = item,
                             onEdit = { editKey = item },
                             onCopyPublic = {
-                                item.string("publicKey")?.let { copyText("public key", it) }
+                                item.string("publicKey")?.let { copyText(L10n.text("android.tokenstatapp.public_key.f569a86d"), it) }
                             },
                             onCopyFingerprint = {
                                 item.string("fingerprint")?.let { copyText("fingerprint", it) }
@@ -2601,7 +2598,7 @@ private fun AndroidSSHScreen(
             keys = keys,
             onDismiss = { connecting = null },
             onOpened = { id ->
-                val label = host.string("label") ?: host.string("hostname") ?: "SSH"
+                val label = host.string("label") ?: host.string("hostname") ?: L10n.text("android.tokenstatapp.ssh.01c4d3c2")
                 connecting = null
                 connections.adopt(
                     SshSessionEntry(
@@ -2647,40 +2644,40 @@ private fun SSHHostDialog(
     var credentialId by remember { mutableStateOf(existing?.string("credentialId") ?: "") }
     var authOpen by remember { mutableStateOf(false) }
     val savedKeys = remember(keys) { keys.filterIsInstance<JsonObject>() }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(if (existing == null) "Add SSH host" else "Edit SSH host") }, text = {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(if (existing == null) L10n.text("android.tokenstatapp.add_ssh_host.00d846a8") else L10n.text("android.tokenstatapp.edit_ssh_host.f66b117f")) }, text = {
         Column(
             Modifier.verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            OutlinedTextField(label, { label = it }, label = { Text("Name") }, singleLine = true)
-            OutlinedTextField(host, { host = it }, label = { Text("Address") }, singleLine = true)
-            OutlinedTextField(user, { user = it }, label = { Text("Username") }, singleLine = true)
-            OutlinedTextField(port, { value -> port = value.filter { it.isDigit() }.take(5) }, label = { Text("Port") }, singleLine = true)
-            OutlinedTextField(directory, { directory = it }, label = { Text("Starting directory") }, singleLine = true)
+            OutlinedTextField(label, { label = it }, label = { Text(L10n.text("android.tokenstatapp.name.dcd1d522")) }, singleLine = true)
+            OutlinedTextField(host, { host = it }, label = { Text(L10n.text("android.tokenstatapp.address.56ef8f20")) }, singleLine = true)
+            OutlinedTextField(user, { user = it }, label = { Text(L10n.text("android.tokenstatapp.username.e3b89e9d")) }, singleLine = true)
+            OutlinedTextField(port, { value -> port = value.filter { it.isDigit() }.take(5) }, label = { Text(L10n.text("android.tokenstatapp.port.72e9a59f")) }, singleLine = true)
+            OutlinedTextField(directory, { directory = it }, label = { Text(L10n.text("android.tokenstatapp.starting_directory.43eff379")) }, singleLine = true)
             if (folders.isNotEmpty()) {
-                Text("Folder", style = MaterialTheme.typography.labelMedium)
+                Text(L10n.text("android.tokenstatapp.folder.74ccd433"), style = MaterialTheme.typography.labelMedium)
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = folderId == null, onClick = { folderId = null }, label = { Text("Top level") })
+                    FilterChip(selected = folderId == null, onClick = { folderId = null }, label = { Text(L10n.text("android.tokenstatapp.top_level.f61dd254")) })
                     folders.forEach { value ->
                         val id = value.jsonObject.string("id") ?: return@forEach
                         FilterChip(
                             selected = folderId == id,
                             onClick = { folderId = id },
-                            label = { Text(value.jsonObject.string("name") ?: "Folder") },
+                            label = { Text(value.jsonObject.string("name") ?: L10n.text("android.tokenstatapp.folder.74ccd433")) },
                         )
                     }
                 }
             }
             if (savedKeys.isNotEmpty()) {
-                Text("Authentication", style = MaterialTheme.typography.labelMedium)
+                Text(L10n.text("android.tokenstatapp.authentication.66880d2d"), style = MaterialTheme.typography.labelMedium)
                 Box {
                     OutlinedTextField(
-                        value = savedKeys.find { it.string("id") == credentialId }?.string("label") ?: "Password",
+                        value = savedKeys.find { it.string("id") == credentialId }?.string("label") ?: L10n.text("android.tokenstatapp.password.e7cf3ef4"),
                         onValueChange = {},
                         readOnly = true,
                         trailingIcon = {
                             IconButton(onClick = { authOpen = true }) {
-                                Icon(ActionIcon.More.vector, "Choose authentication")
+                                Icon(ActionIcon.More.vector, L10n.text("android.tokenstatapp.choose_authentication.97790843"))
                             }
                         },
                         modifier = Modifier.fillMaxWidth().clickable { authOpen = true },
@@ -2688,19 +2685,19 @@ private fun SSHHostDialog(
                     )
                     DropdownMenu(expanded = authOpen, onDismissRequest = { authOpen = false }) {
                         DropdownMenuItem(
-                            text = { Text("Password") },
+                            text = { Text(L10n.text("android.tokenstatapp.password.e7cf3ef4")) },
                             onClick = { credentialId = ""; authOpen = false },
                         )
                         savedKeys.forEach { key ->
                             DropdownMenuItem(
-                                text = { Text(key.string("label") ?: "Key") },
+                                text = { Text(key.string("label") ?: L10n.text("android.tokenstatapp.key.99a52df3")) },
                                 onClick = { credentialId = key.string("id") ?: ""; authOpen = false },
                             )
                         }
                     }
                 }
             }
-            Text("You will verify the host fingerprint and choose a password or saved key before connecting.", style = MaterialTheme.typography.bodySmall)
+            Text(L10n.text("android.tokenstatapp.you_will_verify_the_host_fingerprint_and_c.b1e753b9"), style = MaterialTheme.typography.bodySmall)
         }
     }, confirmButton = {
         Button(
@@ -2724,8 +2721,8 @@ private fun SSHHostDialog(
                 }
                 onSave(JsonObject(map))
             },
-        ) { Text("Save") }
-    }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+        ) { Text(L10n.text("common.save")) }
+    }, dismissButton = { TextButton(onClick = onDismiss) { Text(L10n.text("common.cancel")) } })
 }
 
 @Composable
@@ -2741,21 +2738,21 @@ private fun SSHSnippetDialog(existing: JsonObject? = null, onDismiss: () -> Unit
         .toList()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (existing == null) "Add snippet" else "Edit snippet") },
+        title = { Text(if (existing == null) L10n.text("android.tokenstatapp.add_snippet.a1f802b9") else L10n.text("android.tokenstatapp.edit_snippet.3bb69add")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(title, { title = it }, label = { Text("Name") }, singleLine = true)
+                OutlinedTextField(title, { title = it }, label = { Text(L10n.text("android.tokenstatapp.name.dcd1d522")) }, singleLine = true)
                 OutlinedTextField(
                     command,
                     { command = it },
                     Modifier.fillMaxWidth(),
-                    label = { Text("Command") },
+                    label = { Text(L10n.text("android.tokenstatapp.command.71316697")) },
                     minLines = 8,
                     textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
                 )
                 Text(
-                    if (variables.isEmpty()) "Wrap a value in {{braces}} to be asked for it every time this runs."
-                    else "Asks for: ${variables.joinToString(", ")}",
+                    if (variables.isEmpty()) L10n.text("android.tokenstatapp.wrap_a_value_in_braces_to_be_asked_for_it.eae1d9b8")
+                    else L10n.text("android.tokenstatapp.asks_for_0.35d5d9fa", "${variables.joinToString(", ")}"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -2773,9 +2770,9 @@ private fun SSHSnippetDialog(existing: JsonObject? = null, onDismiss: () -> Unit
                     map["hostIDs"] = JsonArray(emptyList())
                 }
                 onSave(JsonObject(map))
-            }) { Text("Save") }
+            }) { Text(L10n.text("common.save")) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(L10n.text("common.cancel")) } },
     )
 }
 
@@ -2803,23 +2800,23 @@ private fun AndroidVaultDialog(
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (existing) "Unlock your vault" else "Create your vault") },
+        title = { Text(if (existing) L10n.text("android.tokenstatapp.unlock_your_vault.67a7b04b") else L10n.text("android.tokenstatapp.create_your_vault.de203ed0")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (existing && forgot) {
-                    Text("Enter your recovery code and choose a new password. The code is spent once this works.")
-                    OutlinedTextField(recovery, { recovery = it }, label = { Text("Recovery code") }, minLines = 2)
-                    OutlinedTextField(password, { password = it }, label = { Text("New password") }, visualTransformation = PasswordVisualTransformation())
-                    OutlinedTextField(confirm, { confirm = it }, label = { Text("Type it again") }, visualTransformation = PasswordVisualTransformation())
+                    Text(L10n.text("android.tokenstatapp.enter_your_recovery_code_and_choose_a_new.42e12740"))
+                    OutlinedTextField(recovery, { recovery = it }, label = { Text(L10n.text("android.tokenstatapp.recovery_code.5bda8302")) }, minLines = 2)
+                    OutlinedTextField(password, { password = it }, label = { Text(L10n.text("android.tokenstatapp.new_password.3dd9df44")) }, visualTransformation = PasswordVisualTransformation())
+                    OutlinedTextField(confirm, { confirm = it }, label = { Text(L10n.text("android.tokenstatapp.type_it_again.3b2acc21")) }, visualTransformation = PasswordVisualTransformation())
                     problems.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
-                    TextButton(onClick = { forgot = false }) { Text("Use the password instead") }
+                    TextButton(onClick = { forgot = false }) { Text(L10n.text("android.tokenstatapp.use_the_password_instead.8dd1f753")) }
                 } else if (existing) {
-                    OutlinedTextField(password, { password = it }, label = { Text("Vault password") }, visualTransformation = PasswordVisualTransformation())
-                    TextButton(onClick = { forgot = true }) { Text("I forgot the password") }
+                    OutlinedTextField(password, { password = it }, label = { Text(L10n.text("android.tokenstatapp.vault_password.1853752f")) }, visualTransformation = PasswordVisualTransformation())
+                    TextButton(onClick = { forgot = true }) { Text(L10n.text("android.tokenstatapp.i_forgot_the_password.c3aabb38")) }
                 } else {
-                    Text("One password protects every saved server and key, on all your devices.")
-                    OutlinedTextField(password, { password = it }, label = { Text("Vault password") }, visualTransformation = PasswordVisualTransformation())
-                    OutlinedTextField(confirm, { confirm = it }, label = { Text("Type it again") }, visualTransformation = PasswordVisualTransformation())
+                    Text(L10n.text("android.tokenstatapp.one_password_protects_every_saved_server_a.8bb557dc"))
+                    OutlinedTextField(password, { password = it }, label = { Text(L10n.text("android.tokenstatapp.vault_password.1853752f")) }, visualTransformation = PasswordVisualTransformation())
+                    OutlinedTextField(confirm, { confirm = it }, label = { Text(L10n.text("android.tokenstatapp.type_it_again.3b2acc21")) }, visualTransformation = PasswordVisualTransformation())
                     problems.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
                 }
             }
@@ -2834,12 +2831,12 @@ private fun AndroidVaultDialog(
                         else -> onUnlock(password)
                     }
                 },
-            ) { Text(if (!existing) "Create vault" else if (forgot) "Reset password" else "Unlock") }
+            ) { Text(if (!existing) L10n.text("android.tokenstatapp.create_vault.c8c44253") else if (forgot) L10n.text("android.tokenstatapp.reset_password.e0edfeb3") else L10n.text("android.tokenstatapp.unlock.4ac709aa")) }
         },
         dismissButton = {
             Row {
-                if (existing) TextButton(onClick = onDrop) { Text("Delete vault") }
-                TextButton(onClick = onDismiss) { Text("Cancel") }
+                if (existing) TextButton(onClick = onDrop) { Text(L10n.text("android.tokenstatapp.delete_vault.9fd7de76")) }
+                TextButton(onClick = onDismiss) { Text(L10n.text("common.cancel")) }
             }
         },
     )
@@ -2852,30 +2849,30 @@ private fun RecoveryCodeDialog(phrase: String, onDone: () -> Unit, onDismiss: ()
     val match = normalizedRecovery(phrase).isNotEmpty() && normalizedRecovery(phrase) == normalizedRecovery(typed)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (step == 0) "Save your recovery code" else "Type the recovery code") },
+        title = { Text(if (step == 0) L10n.text("android.tokenstatapp.save_your_recovery_code.1060e6a8") else L10n.text("android.tokenstatapp.type_the_recovery_code.4bf47928")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (step == 0) {
                     Text(phrase, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium)
-                    Text("Store this offline. Screenshots are not a reliable backup. You can close this and confirm later, or discard the vault and create a new one.")
+                    Text(L10n.text("android.tokenstatapp.store_this_offline_screenshots_are_not_a_r.03fc8d1e"))
                 } else {
-                    Text("The code is off screen on purpose. Type it from where you saved it.")
-                    OutlinedTextField(typed, { typed = it }, label = { Text("Recovery code") })
+                    Text(L10n.text("android.tokenstatapp.the_code_is_off_screen_on_purpose_type_it.348fd90a"))
+                    OutlinedTextField(typed, { typed = it }, label = { Text(L10n.text("android.tokenstatapp.recovery_code.5bda8302")) })
                     if (typed.isNotBlank()) {
-                        Text(if (match) "Recovery code matches." else "That is not what was generated.")
+                        Text(if (match) L10n.text("android.tokenstatapp.recovery_code_matches.b974b57c") else L10n.text("android.tokenstatapp.that_is_not_what_was_generated.cd8d7d81"))
                     }
-                    TextButton(onClick = { step = 0; typed = "" }) { Text("Show the code again") }
+                    TextButton(onClick = { step = 0; typed = "" }) { Text(L10n.text("android.tokenstatapp.show_the_code_again.2e6e5f4c")) }
                 }
             }
         },
         confirmButton = {
-            if (step == 0) Button(onClick = { step = 1 }) { Text("I have saved this") }
-            else Button(enabled = match, onClick = onDone) { Text("Done") }
+            if (step == 0) Button(onClick = { step = 1 }) { Text(L10n.text("android.tokenstatapp.i_have_saved_this.81674b57")) }
+            else Button(enabled = match, onClick = onDone) { Text(L10n.text("common.done")) }
         },
         dismissButton = {
             Row {
-                TextButton(onClick = onDiscard) { Text("Discard vault") }
-                TextButton(onClick = onDismiss) { Text("Close") }
+                TextButton(onClick = onDiscard) { Text(L10n.text("android.tokenstatapp.discard_vault.cea8fd68")) }
+                TextButton(onClick = onDismiss) { Text(L10n.text("common.close")) }
             }
         },
     )
@@ -2966,9 +2963,9 @@ private fun WorkspacesScreen(
             model.workspaceSection(peer, "workspace.access.ask", buildJsonObject {}) as JsonObject
         }.onSuccess { answer ->
             session.setRequestNotice(if (answer.bool("granted")) {
-                "This device already has access. Pull to refresh."
+                L10n.text("android.tokenstatapp.this_device_already_has_access_pull_to_ref.06b896c9")
             } else {
-                "Asked. On that computer run `tokenstat host access approve` (over SSH is fine) and pick this device."
+                L10n.text("android.tokenstatapp.asked_on_that_computer_run_tokenstat_host.40af0490")
             })
         }.onFailure {
             if (it is CancellationException) throw it
@@ -3004,7 +3001,7 @@ private fun WorkspacesScreen(
             // beside the new host's name is one lie waiting to be clicked.
             session.clearLists()
             runCatching {
-                model.prepareHost(peer, machine.string("label") ?: "Computer")
+                model.prepareHost(peer, machine.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"))
                 // Asked before anything is loaded. Being paired is not being let
                 // in: that computer allows each device to open its work
                 // explicitly.
@@ -3112,11 +3109,11 @@ private fun WorkspacesScreen(
         val match = folders.mapNotNull { it as? JsonObject }.find { it.string("id") == folderId }
             ?: return@LaunchedEffect
         selectedFolderId = match.string("id")
-        initialSection = if (pendingKind == "CHAT") "Chat" else if (pendingKind == "TERMINAL") "Sessions" else null
+        initialSection = if (pendingKind == "CHAT") "Chat" else if (pendingKind == "TERMINAL") L10n.text("android.tokenstatapp.sessions.6fa3cbf4") else null
         pendingChatId = if (pendingKind == "CHAT") pendingItem else null
         pendingOpenConversation = false
         if (pendingKind == "TERMINAL" && !pendingItem.isNullOrBlank()) {
-            terminalSession = WorkspaceTerminalRequest(pendingItem, folderId, host?.string("label") ?: "Computer")
+            terminalSession = WorkspaceTerminalRequest(pendingItem, folderId, host?.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"))
         }
         onPendingConsumed()
     }
@@ -3135,7 +3132,7 @@ private fun WorkspacesScreen(
             state.account?.string("accountId"),
         )
         val host = state.account?.string("host").orEmpty()
-        record.recordPlace(identity, host, peer, id, folderName ?: "Project", RecentPlaces.Kind.WORKSPACE)
+        record.recordPlace(identity, host, peer, id, folderName ?: L10n.text("android.tokenstatapp.project.98595978"), RecentPlaces.Kind.WORKSPACE)
     }
     LaunchedEffect(folders, pendingSelectFolderId) {
         val id = pendingSelectFolderId ?: return@LaunchedEffect
@@ -3165,7 +3162,7 @@ private fun WorkspacesScreen(
         val folder = boundFolder ?: return
         stores?.recordPlace(
             placesIdentity, placesHost, peer, folder.string("id"),
-            folder.string("name") ?: "Project", RecentPlaces.Kind.CHAT, chatId,
+            folder.string("name") ?: L10n.text("android.tokenstatapp.project.98595978"), RecentPlaces.Kind.CHAT, chatId,
         )
     }
     fun openRegisteredProject(folder: JsonObject) {
@@ -3181,7 +3178,7 @@ private fun WorkspacesScreen(
         val peer = boundHost?.string("publicIdentity") ?: return
         val folderId = request?.workspaceId ?: return
         val folderName = folders.mapNotNull { it as? JsonObject }
-            .find { it.string("id") == folderId }?.string("name") ?: "Project"
+            .find { it.string("id") == folderId }?.string("name") ?: L10n.text("android.tokenstatapp.project.98595978")
         stores?.recordPlace(
             placesIdentity, placesHost, peer, folderId,
             folderName, RecentPlaces.Kind.TERMINAL, sessionId,
@@ -3196,7 +3193,7 @@ private fun WorkspacesScreen(
         terminalSession = WorkspaceTerminalRequest(
             session.string("id"),
             workspaceId,
-            boundHost?.string("label") ?: "Computer",
+            boundHost?.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"),
         )
     }
     fun openChat(chat: JsonObject) {
@@ -3329,7 +3326,7 @@ private fun WorkspacesScreen(
         CloneRepositoryScreen(
             model = model,
             peer = boundHost.string("publicIdentity") ?: "",
-            hostLabel = boundHost.string("label") ?: "Computer",
+            hostLabel = boundHost.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"),
             onClose = { cloning = false },
             onCloned = { id ->
                 cloning = false
@@ -3341,7 +3338,7 @@ private fun WorkspacesScreen(
         FolderPickerScreen(
             model = model,
             peer = boundHost.string("publicIdentity") ?: "",
-            hostName = boundHost.string("label") ?: "Computer",
+            hostName = boundHost.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"),
             onClose = { picking = false },
             onAdded = { folder ->
                 picking = false
@@ -3373,7 +3370,7 @@ private fun WorkspacesScreen(
                 model, boundHost, boundFolder, Modifier.weight(1f),
                 initialSection = initialSection,
                 onBack = null,
-                onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: "Computer") },
+                onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2")) },
                 onOpenBrowser = { browser = it },
                 onRecordChat = ::recordChatOpened,
             onOpenProject = ::openRegisteredProject,
@@ -3386,7 +3383,7 @@ private fun WorkspacesScreen(
             model, boundHost, boundFolder, Modifier.fillMaxSize(),
             initialSection = initialSection,
             onBack = { selectedFolderId = null; initialSection = null; pendingChatId = null; pendingOpenConversation = false },
-            onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: "Computer") },
+            onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2")) },
             onOpenBrowser = { browser = it },
             onRecordChat = ::recordChatOpened,
             onOpenProject = ::openRegisteredProject,
@@ -3399,7 +3396,7 @@ private fun WorkspacesScreen(
     if (customizing) {
         AlertDialog(
             onDismissRequest = { customizing = false },
-            title = { Text("Customize Projects") },
+            title = { Text(L10n.text("android.tokenstatapp.customize_projects.00ab91c5")) },
             text = {
                 WorkspacesEditor(
                     order = layoutOrder,
@@ -3418,7 +3415,7 @@ private fun WorkspacesScreen(
     }
     choosingFor?.let { section ->
         FolderChooserDialog(
-            title = if (section == "Chat") "New chat in…" else "New session in…",
+            title = if (section == "Chat") L10n.text("android.tokenstatapp.new_chat_in.510ac43f") else L10n.text("android.tokenstatapp.new_session_in.30d4568b"),
             folders = folders.mapNotNull { it as? JsonObject },
             onPick = { folder ->
                 selectedFolderId = folder.string("id")
@@ -3499,7 +3496,7 @@ private fun WorkspaceList(
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                     ErrorCard(friendlyError(message).message)
                     if (onRetry != null) {
-                        TsSecondaryButton(label = "Try again", small = true, onClick = onRetry)
+                        TsSecondaryButton(label = L10n.text("android.tokenstatapp.try_again.d8b8392e"), small = true, onClick = onRetry)
                     }
                 }
             }
@@ -3508,13 +3505,12 @@ private fun WorkspaceList(
             item {
                 EmptyState(
                     icon = ActionIcon.Connect.vector,
-                    title = "No machine yet",
-                    message = "tokenstat runs agents on a machine that stays on. Connect " +
-                        "a computer you own, or give it a server and it sets one up.",
+                    title = L10n.text("android.tokenstatapp.no_machine_yet.3ea83dc9"),
+                    message = L10n.text("android.tokenstatapp.tokenstat_runs_agents_on_a_machine_that_st.93fe9732"),
                     art = { EmptyArt(EmptyArtKind.Connect) },
                     action = if (onSetup != null) ({
                         TsAccentButton(
-                            label = "Set up a machine",
+                            label = L10n.text("android.tokenstatapp.set_up_a_machine.43e10e13"),
                             icon = ActionIcon.Connect.vector,
                             onClick = onSetup,
                         )
@@ -3525,7 +3521,7 @@ private fun WorkspaceList(
         }
         item {
             Box(Modifier.fillMaxWidth().padding(horizontal = 2.dp), contentAlignment = Alignment.CenterStart) {
-                SectionTitle("Computers on your account", "mark_host")
+                SectionTitle(L10n.text("android.tokenstatapp.computers_on_your_account.232226fe"), "mark_host")
             }
         }
         items(hosts) { machine ->
@@ -3566,9 +3562,9 @@ private fun WorkspaceList(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            Text("This device", style = TsType.caption, color = colors.textSecondary)
+                            Text(L10n.text("android.tokenstatapp.this_device.d052579c"), style = TsType.caption, color = colors.textSecondary)
                         }
-                        Text("Online", style = TsType.caption, color = colors.accent)
+                        Text(L10n.text("common.online"), style = TsType.caption, color = colors.accent)
                     }
                     // What the connection is, on the screen that makes them.
                     SecurityCard(
@@ -3624,7 +3620,7 @@ private fun WorkspaceList(
             // with a floating label was the odd control out on a screen made
             // of cards.
             TsSearchField(
-                prompt = "Search projects",
+                prompt = L10n.text("android.tokenstatapp.search_projects.9e079c7d"),
                 query = search,
                 onQueryChange = onSearch,
                 modifier = Modifier.fillMaxWidth(),
@@ -3639,13 +3635,13 @@ private fun WorkspaceList(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp).padding(top = Space.s),
                         ) {
                             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                                SectionTitle("Projects", "mark_archive")
+                                SectionTitle(L10n.text("common.projects"), "mark_archive")
                             }
                             TextButton(onClick = onChooseFolder) {
-                                Text("Add", style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.accent)
+                                Text(L10n.text("common.add"), style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.accent)
                             }
                             TextButton(onClick = onClone) {
-                                Text("Clone", style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.accent)
+                                Text(L10n.text("android.tokenstatapp.clone.5779f32f"), style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.accent)
                             }
                         }
                     }
@@ -3664,18 +3660,18 @@ private fun WorkspaceList(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp).padding(top = Space.s),
                         ) {
                             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                                SectionTitle("Recent chats", "mark_activity")
+                                SectionTitle(L10n.text("android.tokenstatapp.recent_chats.2ccfecbc"), "mark_activity")
                             }
                             if (folderRows.isNotEmpty()) {
                                 TextButton(onClick = onNewChat) {
-                                    Text("New chat", style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.accent)
+                                    Text(L10n.text("android.tokenstatapp.new_chat.db18382a"), style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.accent)
                                 }
                             }
                         }
                     }
                     val shown = if (chatsExpanded) chatRows else chatRows.take(5)
                     items(shown) { chat ->
-                        val folderName = folderRows.find { it.string("id") == chat.string("workspaceId") }?.string("name") ?: "Project"
+                        val folderName = folderRows.find { it.string("id") == chat.string("workspaceId") }?.string("name") ?: L10n.text("android.tokenstatapp.project.98595978")
                         WorkspaceChatRow(chat = chat, folderName = folderName, onOpen = { onChat(chat) })
                     }
                     if (chatRows.size > 5) {
@@ -3685,7 +3681,7 @@ private fun WorkspaceList(
                                 modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
                             ) {
                                 Text(
-                                    if (chatsExpanded) "Show less" else "Show more (${chatRows.size - 5} more)",
+                                    if (chatsExpanded) L10n.text("android.tokenstatapp.show_less.94ea9b1d") else L10n.text("android.tokenstatapp.show_more_0_more.c732a4ba", "${chatRows.size - 5}"),
                                     style = TsType.caption.copy(fontWeight = FontWeight.SemiBold),
                                     color = colors.accent,
                                 )
@@ -3706,14 +3702,14 @@ private fun WorkspaceList(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp).padding(top = Space.s),
                         ) {
                             Text(
-                                "All sessions",
+                                L10n.text("android.tokenstatapp.all_sessions.78648d4d"),
                                 style = TsType.headline,
                                 color = colors.textPrimary,
                                 modifier = Modifier.weight(1f),
                             )
                             if (folderRows.isNotEmpty()) {
                                 TextButton(onClick = onNewSession) {
-                                    Text("New terminal", style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.accent)
+                                    Text(L10n.text("android.tokenstatapp.new_terminal.fe544556"), style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.accent)
                                 }
                             }
                         }
@@ -3729,7 +3725,7 @@ private fun WorkspaceList(
                     if (sessionRows.isEmpty()) {
                         item {
                             Text(
-                                "Nothing running. Start one from a folder.",
+                                L10n.text("android.tokenstatapp.nothing_running_start_one_from_a_folder.f1d69e99"),
                                 style = TsType.caption,
                                 color = colors.textSecondary,
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
@@ -3743,9 +3739,9 @@ private fun WorkspaceList(
             item {
                 TsCard {
                     Column {
-                        Text("Your Projects are clear", fontWeight = FontWeight.Medium, color = colors.textPrimary)
+                        Text(L10n.text("android.tokenstatapp.your_projects_are_clear.c7d87ca8"), fontWeight = FontWeight.Medium, color = colors.textPrimary)
                         Text(
-                            "Folders, chats and sessions are switched off.",
+                            L10n.text("android.tokenstatapp.folders_chats_and_sessions_are_switched_of.2cb24a2f"),
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.textSecondary,
                         )
@@ -3757,12 +3753,12 @@ private fun WorkspaceList(
             TextButton(onClick = onCustomize, modifier = Modifier.fillMaxWidth()) {
                 Icon(ActionIcon.Layout.vector, null, tint = colors.accent, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(Space.xs))
-                Text("Customize Projects", color = colors.accent)
+                Text(L10n.text("android.tokenstatapp.customize_projects.00ab91c5"), color = colors.accent)
             }
         }
     }
     renamingProject?.let { project ->
-        ai.tokenstat.tokenstat.ui.components.NameEditorDialog("Rename project", project.string("name") ?: "Project", onDismiss = { renamingProject = null }) { name ->
+        ai.tokenstat.tokenstat.ui.components.NameEditorDialog(L10n.text("android.tokenstatapp.rename_project.2a0478ee"), project.string("name") ?: L10n.text("android.tokenstatapp.project.98595978"), onDismiss = { renamingProject = null }) { name ->
             renamingProject = null
             actionScope.launch {
                 if (!currentProjectOwner()) return@launch
@@ -3843,9 +3839,9 @@ private fun AccountDialog(
         ) {
             SegmentedCapsulePicker(
                 options = listOf(
-                    Triple(0, "Account", null as ImageVector?),
-                    Triple(1, "This device", null as ImageVector?),
-                    Triple(2, "Legal", null as ImageVector?),
+                    Triple(0, L10n.text("common.account"), null as ImageVector?),
+                    Triple(1, L10n.text("android.tokenstatapp.this_device.d052579c"), null as ImageVector?),
+                    Triple(2, L10n.text("android.tokenstatapp.legal.4787eaf7"), null as ImageVector?),
                 ),
                 selection = pane,
                 onSelect = { pane = it },
@@ -3862,7 +3858,7 @@ private fun AccountDialog(
                     AccountLastSyncCard(state)
                     AccountDevicesCard(state)
                     TsDangerButton(
-                        label = "Sign out",
+                        label = L10n.text("common.sign_out"),
                         icon = ActionIcon.SignOut.vector,
                         onClick = { model.signOut(); onDismiss() },
                         modifier = Modifier.fillMaxWidth(),
@@ -3872,12 +3868,12 @@ private fun AccountDialog(
                     // the account rather than under Legal.
                     HorizontalDivider(color = colors.border)
                     Text(
-                        "Danger zone",
+                        L10n.text("android.tokenstatapp.danger_zone.fd8b8dae"),
                         style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
                         color = colors.danger,
                     )
                     TsCard(
-                        title = "Delete this account",
+                        title = L10n.text("android.tokenstatapp.delete_this_account.5e78b966"),
                         mark = "mark_delete",
                         markTint = colors.danger,
                     ) {
@@ -3887,15 +3883,15 @@ private fun AccountDialog(
                                         (it["billing"] as? JsonObject)?.string("provider")?.lowercase() == "google_play"
                                     } == true
                                 ) {
-                                    "Permanent. You can delete immediately on the website. Deletion does not cancel the Google Play subscription, so Google may keep charging until you cancel it separately."
+                                    L10n.text("android.tokenstatapp.permanent_you_can_delete_immediately_on_th.0752612f")
                                 } else {
-                                    "Permanent. Confirmed on the website's data settings. The account, linked providers, sessions and usage are removed outright."
+                                    L10n.text("android.tokenstatapp.permanent_confirmed_on_the_website_s_data.fd5ff108")
                                 },
                                 style = TextStyle(fontSize = 14.sp),
                                 color = colors.textSecondary,
                             )
                             TsDangerButton(
-                                label = "Delete on website…",
+                                label = L10n.text("android.tokenstatapp.delete_on_website.22e9668a"),
                                 icon = ActionIcon.Delete.vector,
                                 onClick = { open("https://tokenstat.ai/settings/data?mobile=1&focus=delete#delete") },
                                 modifier = Modifier.fillMaxWidth(),
@@ -3908,11 +3904,11 @@ private fun AccountDialog(
                     // order the Apple sheet uses, and each in a card with a
                     // mark. The switch used to be a bare row above the cards,
                     // so the pane opened on an unlabelled toggle.
-                    TsCard(title = "Notifications", mark = "mark_device") {
+                    TsCard(title = L10n.text("android.tokenstatapp.notifications.78801183"), mark = "mark_device") {
                         Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    "Notify this device",
+                                    L10n.text("android.tokenstatapp.notify_this_device.961006a8"),
                                     color = colors.textPrimary,
                                     modifier = Modifier.weight(1f),
                                 )
@@ -3934,13 +3930,13 @@ private fun AccountDialog(
                             // never carries a name. Promising "which machine"
                             // would be promising what never arrives.
                             Text(
-                                "When an agent run or a chat on one of your machines finishes, or stops to ask you something. The notification says what happened, and nothing about the work.",
+                                L10n.text("android.tokenstatapp.when_an_agent_run_or_a_chat_on_one_of_your.210bf09c"),
                                 style = TextStyle(fontSize = 13.sp),
                                 color = colors.textSecondary,
                             )
                             if (notifyOn) {
                                 TsSecondaryButton(
-                                    label = "Send a test",
+                                    label = L10n.text("android.tokenstatapp.send_a_test.edc01436"),
                                     icon = ActionIcon.Send.vector,
                                     small = true,
                                     onClick = {
@@ -3978,13 +3974,13 @@ private fun AccountDialog(
                             onDismiss = { tabsOpen = false },
                         )
                     }
-                    Text("Identity and credentials stay in Android's no-backup app storage.", style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
+                    Text(L10n.text("android.tokenstatapp.identity_and_credentials_stay_in_android_s.7721d3f6"), style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
                 }
                 else -> {
                     var sampleOpen by remember { mutableStateOf(false) }
                     // "Help" is the card's title, not a label floating above
                     // it, which is how the Apple sheet builds this pane.
-                    TsCard(title = "Help") {
+                    TsCard(title = L10n.text("common.help")) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(Space.m),
@@ -3992,9 +3988,9 @@ private fun AccountDialog(
                         ) {
                             Icon(ActionIcon.Run.vector, null, tint = colors.accent)
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                                Text("See a sample", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                                Text(L10n.text("android.tokenstatapp.see_a_sample.ae8b0f8d"), fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
                                 Text(
-                                    "Explore a project with invented data, right on this device.",
+                                    L10n.text("android.tokenstatapp.explore_a_project_with_invented_data_right.968c6aff"),
                                     style = TextStyle(fontSize = 12.sp),
                                     color = colors.textSecondary,
                                 )
@@ -4007,11 +4003,11 @@ private fun AccountDialog(
                     // named. Two full-width buttons labelled "Terms" and
                     // "Privacy" said less and looked like actions rather than
                     // links off the device.
-                    TsCard(title = "Terms and privacy", mark = "mark_license") {
+                    TsCard(title = L10n.text("android.tokenstatapp.terms_and_privacy.8d60f3a9"), mark = "mark_license") {
                         Column {
-                            LegalLinkRow("Privacy policy") { open("https://tokenstat.ai/privacy?mobile=1") }
+                            LegalLinkRow(L10n.text("android.tokenstatapp.privacy_policy.ba445cff")) { open("https://tokenstat.ai/privacy?mobile=1") }
                             HorizontalDivider(color = colors.border)
-                            LegalLinkRow("Terms of service") { open("https://tokenstat.ai/terms?mobile=1") }
+                            LegalLinkRow(L10n.text("android.tokenstatapp.terms_of_service.e69e0614")) { open("https://tokenstat.ai/terms?mobile=1") }
                         }
                     }
                     var licensesOpen by remember { mutableStateOf(false) }
@@ -4052,11 +4048,11 @@ private fun RelayUsageCard(account: JsonObject?, onRefresh: () -> Unit) {
     val supported = usage?.string("policy") == "rolling_30_utc_days"
         && usage?.int("windowDays") == 30
         && usage?.string("timezone") == "UTC"
-    TsCard(title = "Relay usage", subtitle = "One allowance across your devices", mark = "mark_activity") {
+    TsCard(title = L10n.text("android.tokenstatapp.relay_usage.1addb713"), subtitle = L10n.text("android.tokenstatapp.one_allowance_across_your_devices.608bfc41"), mark = "mark_activity") {
         Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
             if (usage == null || !supported) {
                 Text(
-                    "Relay usage details are not available from this server yet.",
+                    L10n.text("android.tokenstatapp.relay_usage_details_are_not_available_from.84fc7e91"),
                     color = LocalTsColors.current.textSecondary,
                 )
             } else {
@@ -4064,7 +4060,7 @@ private fun RelayUsageCard(account: JsonObject?, onRefresh: () -> Unit) {
                 val limit = usage.long("limitBytes") ?: 0L
                 val remaining = usage.long("remainingBytes") ?: 0L
                 Text(
-                    "${binaryBytes(used)} of ${binaryBytes(limit)} used",
+                    L10n.text("android.tokenstatapp.0_of_1_used.2226de62", "${binaryBytes(used)}", "${binaryBytes(limit)}"),
                     fontWeight = FontWeight.SemiBold,
                     color = LocalTsColors.current.textPrimary,
                 )
@@ -4072,12 +4068,12 @@ private fun RelayUsageCard(account: JsonObject?, onRefresh: () -> Unit) {
                     progress = { if (limit > 0) (used.toDouble() / limit).coerceIn(0.0, 1.0).toFloat() else 0f },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Text("${binaryBytes(remaining)} remaining", color = LocalTsColors.current.textSecondary)
-                UsageRow("Today (UTC)", usage.long("todayBytes") ?: 0L)
-                UsageRow("This calendar month (UTC)", usage.long("monthBytes") ?: 0L)
-                UsageRow("Rolling 30 days, used for your limit", used)
+                Text(L10n.text("android.tokenstatapp.0_remaining.dc8d32fc", "${binaryBytes(remaining)}"), color = LocalTsColors.current.textSecondary)
+                UsageRow(L10n.text("android.tokenstatapp.today_utc.7a33b067"), usage.long("todayBytes") ?: 0L)
+                UsageRow(L10n.text("android.tokenstatapp.this_calendar_month_utc.379dc97f"), usage.long("monthBytes") ?: 0L)
+                UsageRow(L10n.text("android.tokenstatapp.rolling_30_days_used_for_your_limit.290548eb"), used)
                 Text(
-                    "All relayed traffic shares this allowance. Direct connections do not count. The limit includes today and the previous 29 UTC days. Each day, older usage leaves the window. This is not a daily refill or a calendar-month reset.",
+                    L10n.text("android.tokenstatapp.all_relayed_traffic_shares_this_allowance.a652388b"),
                     style = TextStyle(fontSize = 12.sp),
                     color = LocalTsColors.current.textSecondary,
                 )
@@ -4085,7 +4081,7 @@ private fun RelayUsageCard(account: JsonObject?, onRefresh: () -> Unit) {
                 if (!unlock.isNullOrBlank()) {
                     val day = unlock.take(10)
                     Text(
-                        "Next usage to expire: ${binaryBytes(usage.long("nextUnlockBytes") ?: 0L)} on $day at 00:00 UTC.",
+                        L10n.text("android.tokenstatapp.next_usage_to_expire_0_on_1_at_00_00_utc.1b64d175", "${binaryBytes(usage.long("nextUnlockBytes") ?: 0L)}", "${day}"),
                         style = TextStyle(fontSize = 12.sp),
                         color = LocalTsColors.current.textSecondary,
                     )
@@ -4107,11 +4103,11 @@ private fun RelayUsageCard(account: JsonObject?, onRefresh: () -> Unit) {
                         .clickable { daysExpanded = !daysExpanded }
                         .semantics {
                             contentDescription =
-                                if (daysExpanded) "Daily usage, expanded" else "Daily usage, collapsed"
+                                if (daysExpanded) L10n.text("android.tokenstatapp.daily_usage_expanded.1ddd9985") else L10n.text("android.tokenstatapp.daily_usage_collapsed.d9ec9937")
                         },
                 ) {
                     Text(
-                        "Daily usage (UTC)",
+                        L10n.text("android.tokenstatapp.daily_usage_utc.520a8261"),
                         fontWeight = FontWeight.SemiBold,
                         color = LocalTsColors.current.textPrimary,
                         modifier = Modifier.weight(1f),
@@ -4131,7 +4127,7 @@ private fun RelayUsageCard(account: JsonObject?, onRefresh: () -> Unit) {
                     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                         if (days.isEmpty()) {
                             Text(
-                                "No relayed traffic in this window.",
+                                L10n.text("android.tokenstatapp.no_relayed_traffic_in_this_window.a3f245c1"),
                                 style = TextStyle(fontSize = 12.sp),
                                 color = LocalTsColors.current.textSecondary,
                             )
@@ -4145,12 +4141,12 @@ private fun RelayUsageCard(account: JsonObject?, onRefresh: () -> Unit) {
                 val asOf = usage.string("asOf")?.take(10).orEmpty()
                 val delay = usage.int("reportingDelaySeconds") ?: 0
                 Text(
-                    "As of $asOf. Relay reporting can lag by about $delay seconds.",
+                    L10n.text("android.tokenstatapp.as_of_0_relay_reporting_can_lag_by_about_1.f028d9ec", "${asOf}", "${delay}"),
                     style = TextStyle(fontSize = 12.sp),
                     color = LocalTsColors.current.textSecondary,
                 )
             }
-            TsSecondaryButton(label = "Refresh usage", onClick = onRefresh, modifier = Modifier.fillMaxWidth())
+            TsSecondaryButton(label = L10n.text("android.tokenstatapp.refresh_usage.8d3a136d"), onClick = onRefresh, modifier = Modifier.fillMaxWidth())
         }
     }
 }
@@ -4164,37 +4160,37 @@ private fun LocalTrafficCard(model: AppViewModel) {
     fun load() {
         scope.launch {
             loading = true
-            runCatching { model.core("remote.status") as? JsonObject ?: error("The host answered remote.status with an unexpected shape.") }
+            runCatching { model.core("remote.status") as? JsonObject ?: error(L10n.text("android.tokenstatapp.the_host_answered_remote_status_with_an_un.eff2f7a9")) }
                 .onSuccess {
                     status = it
                     error = null
                 }
-                .onFailure { error = it.message ?: "Could not load local traffic." }
+                .onFailure { error = it.message ?: L10n.text("android.tokenstatapp.could_not_load_local_traffic.13d1a1a4") }
             loading = false
         }
     }
     LaunchedEffect(Unit) { load() }
-    TsCard(title = "This device", subtitle = "How connections leave this machine", mark = "mark_activity") {
+    TsCard(title = L10n.text("android.tokenstatapp.this_device.d052579c"), subtitle = L10n.text("android.tokenstatapp.how_connections_leave_this_machine.a5ac544a"), mark = "mark_activity") {
         Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
             error?.let { Text(it, color = LocalTsColors.current.warning) }
             TunnelStatusBanner(status = status)
             val snapshot = status?.get("traffic") as? JsonObject
             if (snapshot == null && !loading && error == null) {
                 Text(
-                    "This computer does not report local traffic yet.",
+                    L10n.text("android.tokenstatapp.this_computer_does_not_report_local_traffi.c31505cb"),
                     color = LocalTsColors.current.textSecondary,
                 )
             } else if (snapshot != null) {
-                UsageRow("Direct", snapshot.long("directBytes") ?: 0L)
-                UsageRow("Relayed", snapshot.long("relayBytes") ?: 0L)
+                UsageRow(L10n.text("android.tokenstatapp.direct.002c7c68"), snapshot.long("directBytes") ?: 0L)
+                UsageRow(L10n.text("android.tokenstatapp.relayed.feb39b70"), snapshot.long("relayBytes") ?: 0L)
                 Text(
-                    "Counted on this device since tokenstat started. Direct traffic does not use the account relay allowance. The relayed figure is this machine only, not the account total.",
+                    L10n.text("android.tokenstatapp.counted_on_this_device_since_tokenstat_sta.0fc360a7"),
                     style = TextStyle(fontSize = 12.sp),
                     color = LocalTsColors.current.textSecondary,
                 )
                 val peers = (snapshot["peers"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
                 if (peers.isEmpty()) {
-                    Text("No live connections right now.", style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
+                    Text(L10n.text("android.tokenstatapp.no_live_connections_right_now.a7f971c5"), style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
                 } else {
                     peers.forEach { peer ->
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -4208,7 +4204,7 @@ private fun LocalTrafficCard(model: AppViewModel) {
                 }
             }
             TsSecondaryButton(
-                label = if (loading) "Refreshing…" else "Refresh traffic",
+                label = if (loading) L10n.text("android.tokenstatapp.refreshing.1c0def7b") else L10n.text("android.tokenstatapp.refresh_traffic.9e5ac8c2"),
                 onClick = { load() },
                 enabled = !loading,
                 modifier = Modifier.fillMaxWidth(),
@@ -4221,15 +4217,15 @@ private fun LocalTrafficCard(model: AppViewModel) {
 private fun SyncPrivacyCard() {
     // This phone does not upload an archive; the boundary is what the
     // computers put on the account and what a remote session carries.
-    TsCard(title = "Sync privacy") {
+    TsCard(title = L10n.text("android.tokenstatapp.sync_privacy.9f408670")) {
         Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
             Text(
-                "Your computers put aggregate counts on the account. This device reads them. Remote folders, terminals and agents stay encrypted between devices.",
+                L10n.text("android.tokenstatapp.your_computers_put_aggregate_counts_on_the.4e5bcb48"),
                 color = LocalTsColors.current.textSecondary,
             )
-            PrivacyLine("On account", "Counts per day, tool and model. Project names as salted hashes.")
-            PrivacyLine("Not synced", "Prompts, replies, file contents, file paths and session ids stay on the computer.")
-            PrivacyLine("Remote", "Folders, terminals and agents go device to device, encrypted. The relay cannot read them.")
+            PrivacyLine(L10n.text("android.tokenstatapp.on_account.b7b9c2b1"), L10n.text("android.tokenstatapp.counts_per_day_tool_and_model_project_name.49914859"))
+            PrivacyLine(L10n.text("android.tokenstatapp.not_synced.87cde3ef"), L10n.text("android.tokenstatapp.prompts_replies_file_contents_file_paths_a.22d61c00"))
+            PrivacyLine(L10n.text("android.tokenstatapp.remote.ffa98e02"), L10n.text("android.tokenstatapp.folders_terminals_and_agents_go_device_to.2cab47c4"))
         }
     }
 }
@@ -4274,9 +4270,9 @@ private fun binaryBytes(n: Long): String {
 }
 
 private fun transportLabel(raw: String?): String = when (raw) {
-    "direct" -> "Direct connection"
-    "relay" -> "Encrypted relay"
-    else -> raw ?: "Unknown"
+    "direct" -> L10n.text("android.tokenstatapp.direct_connection.28d0ad54")
+    "relay" -> L10n.text("android.tokenstatapp.encrypted_relay.153d7b1c")
+    else -> raw ?: L10n.text("common.unknown")
 }
 
 /// One headline figure with its label and period mark, top trailing the way
@@ -4318,8 +4314,8 @@ private fun LimitCard(reading: JsonObject) {
     // the snake key stays as a fallback for older hosts.
     val observedAt = (reading.long("observedAtMs") ?: reading.long("observed_at_ms"))?.takeIf { it > 0 }
     val observed = when {
-        observedAt == null -> "no date"
-        stale -> "stale, ${RelativeClock.label(observedAt)}"
+        observedAt == null -> L10n.text("android.tokenstatapp.no_date.89be6303")
+        stale -> L10n.text("android.tokenstatapp.stale_0.23070062", "${RelativeClock.label(observedAt)}")
         else -> RelativeClock.label(observedAt)
     }
     val source = reading.string("source") ?: ""
@@ -4333,7 +4329,7 @@ private fun LimitCard(reading: JsonObject) {
                 // provider a few letters, clipped mid-glyph: "OpenCod".
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                     Text(
-                        harnessName(source.ifEmpty { "Provider" }),
+                        harnessName(source.ifEmpty { L10n.text("android.tokenstatapp.provider.472590ae") }),
                         style = TsType.subheadline.copy(fontWeight = FontWeight.Medium),
                         color = colors.textPrimary,
                     )
@@ -4386,9 +4382,9 @@ private fun LimitGauge(value: JsonObject) {
     val scope = value.string("scope")
     val shown = when (scope?.lowercase()) {
         null, "" -> label
-        "secondary" -> "$label (all models)"
-        "primary" -> "$label (primary)"
-        "current model" -> "$label (secondary)"
+        "secondary" -> L10n.text("android.tokenstatapp.0_all_models.31683c25", "${label}")
+        "primary" -> L10n.text("android.tokenstatapp.0_primary.57ab87b8", "${label}")
+        "current model" -> L10n.text("android.tokenstatapp.0_secondary.6cd2b67a", "${label}")
         else -> "$label ($scope)"
     }
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -4430,7 +4426,7 @@ private fun LimitGauge(value: JsonObject) {
         val resetsAt = (value.long("resetsAtMs") ?: value.long("resets_at_ms"))?.takeIf { it > 0 }
         if (resetsAt != null) {
             Text(
-                "resets ${RelativeClock.until(resetsAt)}",
+                L10n.text("android.tokenstatapp.resets_0.5eb38742", "${RelativeClock.until(resetsAt)}"),
                 style = TsType.caption,
                 color = colors.textTertiary,
             )
@@ -4445,13 +4441,12 @@ private fun LimitGauge(value: JsonObject) {
 private fun VaultUpgradeCard(onPlans: () -> Unit) {
     EmptyState(
         kind = EmptyKind.NeedsAccount,
-        title = "Sync SSH between your devices",
-        message = "An encrypted vault keeps hosts and keys on every device signed in to " +
-            "this account. Supporter and above.",
+        title = L10n.text("android.tokenstatapp.sync_ssh_between_your_devices.8bd160ae"),
+        message = L10n.text("android.tokenstatapp.an_encrypted_vault_keeps_hosts_and_keys_on.75c5e63a"),
         art = { EmptyArt(EmptyArtKind.Vault) },
         action = {
             TsAccentButton(
-                label = "See plans",
+                label = L10n.text("android.tokenstatapp.see_plans.d9898933"),
                 icon = ActionIcon.Plans.vector,
                 onClick = onPlans,
             )
@@ -4466,7 +4461,7 @@ private fun VaultUpgradeCard(onPlans: () -> Unit) {
 
 private fun homeGreeting(account: JsonObject?, hasHistory: Boolean): String =
     HomeGreeting.line(
-        account?.string("displayName") ?: account?.string("handle") ?: "there",
+        account?.string("displayName") ?: account?.string("handle") ?: L10n.text("android.tokenstatapp.there.e244f187"),
         hasHistory,
     )
 private fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
@@ -4495,7 +4490,7 @@ private fun AccountIdentityCard(state: ClientState, onOpen: (String) -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(Space.s),
             ) {
                 Avatar(
-                    state.account?.string("displayName") ?: handle ?: "your account",
+                    state.account?.string("displayName") ?: handle ?: L10n.text("android.tokenstatapp.your_account.17a7e5cf"),
                     size = 56,
                     avatarUrl = state.account?.string("avatar"),
                     signedIn = state.signedIn,
@@ -4506,7 +4501,7 @@ private fun AccountIdentityCard(state: ClientState, onOpen: (String) -> Unit) {
                         horizontalArrangement = Arrangement.spacedBy(Space.xs),
                     ) {
                         Text(
-                            state.account?.string("displayName") ?: handle ?: "Signed in",
+                            state.account?.string("displayName") ?: handle ?: L10n.text("android.tokenstatapp.signed_in.ca566c89"),
                             style = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.SemiBold),
                             color = colors.textPrimary,
                             maxLines = 2,
@@ -4517,7 +4512,7 @@ private fun AccountIdentityCard(state: ClientState, onOpen: (String) -> Unit) {
                         Text("@$it", style = TextStyle(fontSize = 14.sp), color = colors.textSecondary)
                     }
                     Text(
-                        tier.replaceFirstChar { it.uppercase() } + " plan",
+                        tier.replaceFirstChar { it.uppercase() } + L10n.text("android.tokenstatapp.plan.56aeaecb"),
                         style = TextStyle(fontSize = 13.sp),
                         color = colors.textSecondary,
                     )
@@ -4526,7 +4521,7 @@ private fun AccountIdentityCard(state: ClientState, onOpen: (String) -> Unit) {
             handle?.let {
                 val host = state.account?.string("host")?.ifBlank { null } ?: "https://tokenstat.ai"
                 TsAccentButton(
-                    label = "View public profile",
+                    label = L10n.text("android.tokenstatapp.view_public_profile.9acb2dbb"),
                     icon = ActionIcon.External.vector,
                     onClick = { onOpen("$host/$it?mobile=1") },
                     modifier = Modifier.fillMaxWidth(),
@@ -4557,7 +4552,7 @@ private fun AccountPlanCard(state: ClientState, onPlans: () -> Unit) {
             ) {
                 TierMark(tier, markSize = 22)
                 Text(
-                    "Plan",
+                    L10n.text("android.tokenstatapp.plan.fa8ed0bd"),
                     style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
                     color = colors.textPrimary,
                 )
@@ -4567,7 +4562,7 @@ private fun AccountPlanCard(state: ClientState, onPlans: () -> Unit) {
                 paid -> " yearly"
                 else -> ""
             }
-            val until = billing?.string("periodEnd")?.let { shortDay(it) }?.let { " · until $it" }.orEmpty()
+            val until = billing?.string("periodEnd")?.let { shortDay(it) }?.let { L10n.text("android.tokenstatapp.until_0.f33ca039", "${it}") }.orEmpty()
             Text(
                 tier.replaceFirstChar { it.uppercase() } + period + until,
                 style = TextStyle(fontSize = 14.sp),
@@ -4586,43 +4581,43 @@ private fun AccountPlanCard(state: ClientState, onPlans: () -> Unit) {
             when {
                 provider == "google_play" && live -> {
                     Text(
-                        "Bought on Google Play. See every plan here, then change or cancel in Play Store subscriptions.",
+                        L10n.text("android.tokenstatapp.bought_on_google_play_see_every_plan_here.23fdf067"),
                         style = TextStyle(fontSize = 14.sp),
                         color = colors.textSecondary,
                     )
                     billing.string("scheduledTier")?.ifBlank { null }?.let { next ->
                         val nextPeriod = if (billing.string("scheduledInterval") == "month") " monthly" else " yearly"
                         Text(
-                            "Switches to ${next.replaceFirstChar { it.uppercase() }}$nextPeriod at the next renewal.",
+                            L10n.text("android.tokenstatapp.switches_to_0_1_at_the_next_renewal.ebb7b074", "${next.replaceFirstChar { it.uppercase() }}", "${nextPeriod}"),
                             style = TextStyle(fontSize = 12.sp),
                             color = colors.accent,
                         )
                     }
                     TsAccentButton(
-                        label = "See plans",
+                        label = L10n.text("android.tokenstatapp.see_plans.d9898933"),
                         icon = ActionIcon.Plans.vector,
                         onClick = onPlans,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
                 provider == "paddle" && live -> Text(
-                    "You subscribed on the website. Manage that plan there.",
+                    L10n.text("android.tokenstatapp.you_subscribed_on_the_website_manage_that.e063184d"),
                     style = TextStyle(fontSize = 14.sp),
                     color = colors.textSecondary,
                 )
                 paid -> Text(
-                    "This plan is not a Google Play purchase. Manage it on the web.",
+                    L10n.text("android.tokenstatapp.this_plan_is_not_a_google_play_purchase_ma.2e86d879"),
                     style = TextStyle(fontSize = 14.sp),
                     color = colors.textSecondary,
                 )
                 else -> {
                     Text(
-                        "The app stays free. A yearly plan unlocks more devices, longer history, and remote management.",
+                        L10n.text("android.tokenstatapp.the_app_stays_free_a_yearly_plan_unlocks_m.1b526c33"),
                         style = TextStyle(fontSize = 14.sp),
                         color = colors.textSecondary,
                     )
                     TsAccentButton(
-                        label = "See plans",
+                        label = L10n.text("android.tokenstatapp.see_plans.d9898933"),
                         icon = ActionIcon.Plans.vector,
                         onClick = onPlans,
                         modifier = Modifier.fillMaxWidth(),
@@ -4678,19 +4673,19 @@ private fun LegalLinkRow(label: String, onOpen: () -> Unit) {
 @Composable
 private fun AccountLastSyncCard(state: ClientState) {
     val colors = LocalTsColors.current
-    TsCard(title = "Last sync", mark = "mark_sync") {
+    TsCard(title = L10n.text("android.tokenstatapp.last_sync.71967fca"), mark = "mark_sync") {
         Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                Text("From any device", style = TextStyle(fontSize = 14.sp), color = colors.textSecondary)
+                Text(L10n.text("android.tokenstatapp.from_any_device.e91c4f05"), style = TextStyle(fontSize = 14.sp), color = colors.textSecondary)
                 val at = state.account?.string("lastSyncAt")
                 Text(
-                    at?.let { formatRelativeDate(it) } ?: "Never",
+                    at?.let { formatRelativeDate(it) } ?: L10n.text("common.never"),
                     style = TsType.numeric(14),
                     color = colors.textPrimary,
                 )
             }
             Text(
-                "This device reads that data. It does not upload an archive of its own.",
+                L10n.text("android.tokenstatapp.this_device_reads_that_data_it_does_not_up.a22bca17"),
                 style = TextStyle(fontSize = 14.sp),
                 color = colors.textSecondary,
             )
@@ -4707,13 +4702,13 @@ private fun AccountDevicesCard(state: ClientState) {
     val machines = ((state.account?.get("machines") as? JsonArray) ?: JsonArray(emptyList()))
         .mapNotNull { it as? JsonObject }
     val thisId = state.account?.string("thisMachineId")
-    TsCard(title = "Devices", mark = "mark_device") {
+    TsCard(title = L10n.text("common.devices"), mark = "mark_device") {
         Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
             Text(
                 if (machines.isEmpty()) {
-                    "None linked yet. Install tokenstat on a computer and sign in there."
+                    L10n.text("android.tokenstatapp.none_linked_yet_install_tokenstat_on_a_com.8fcd63a6")
                 } else {
-                    "${machines.size} linked to this account"
+                    L10n.text("android.tokenstatapp.0_linked_to_this_account.323c9727", "${machines.size}")
                 },
                 style = TextStyle(fontSize = 14.sp),
                 color = colors.textSecondary,
@@ -4748,11 +4743,11 @@ private fun AccountDevicesCard(state: ClientState) {
                                 overflow = TextOverflow.Ellipsis,
                             )
                             if (isThis) {
-                                Text("this device", style = TextStyle(fontSize = 12.sp), color = colors.accent)
+                                Text(L10n.text("android.tokenstatapp.this_device.cf3cc23e"), style = TextStyle(fontSize = 12.sp), color = colors.accent)
                             }
                         }
                         Text(
-                            formatRelativeDate(machine.string("lastSeenAt")) ?: "Never used",
+                            formatRelativeDate(machine.string("lastSeenAt")) ?: L10n.text("android.tokenstatapp.never_used.24d3236c"),
                             style = TextStyle(fontSize = 12.sp),
                             color = colors.textSecondary,
                         )

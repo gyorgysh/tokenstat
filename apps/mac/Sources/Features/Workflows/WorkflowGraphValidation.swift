@@ -29,13 +29,13 @@ enum WorkflowGraphRules {
     /// pass for the way out. Other steps use Then, On error and Always.
     static func outgoingRole(kind: WorkflowNodeKind, when: WorkflowEdgeWhen) -> String {
         switch (kind, when) {
-        case (.condition, .ok): return "Then"
-        case (.condition, .error): return "Else"
-        case (.loop, .ok): return "Body"
-        case (.loop, .always): return "After last pass"
-        case (_, .ok): return "Then"
-        case (_, .error): return "On error"
-        case (_, .always): return "Always"
+        case (.condition, .ok): return L10n.text("apple.workflowgraphvalidation.then.0597f441")
+        case (.condition, .error): return L10n.text("apple.workflowgraphvalidation.else.9c77d72e")
+        case (.loop, .ok): return L10n.text("apple.workflowgraphvalidation.body.6ccaa641")
+        case (.loop, .always): return L10n.text("apple.workflowgraphvalidation.after_last_pass.c89d89b0")
+        case (_, .ok): return L10n.text("apple.workflowgraphvalidation.then.0597f441")
+        case (_, .error): return L10n.text("apple.workflowgraphvalidation.on_error.817fc01c")
+        case (_, .always): return L10n.text("apple.workflowgraphvalidation.always.de9f057a")
         }
     }
 
@@ -46,15 +46,15 @@ enum WorkflowGraphRules {
     static func connectionCaption(kind: WorkflowNodeKind) -> String {
         switch kind {
         case .condition:
-            return "Then is success. Else is error. The test reads the previous step."
+            return L10n.text("apple.workflowgraphvalidation.then_is_success_else_is_error_the_test_rea.8b4c9b63")
         case .loop:
-            return "Body is the repeated work. After last pass is where the run goes when the loop is done. At most 20 passes."
+            return L10n.text("apple.workflowgraphvalidation.body_is_the_repeated_work_after_last_pass.121c684e")
         case .gate:
-            return "The run pauses here. Continue or Stop from the run."
+            return L10n.text("apple.workflowgraphvalidation.the_run_pauses_here_continue_or_stop_from.793fcc9e")
         case .input:
-            return "The starting prompt fills {{input}} when you press Run."
+            return L10n.text("apple.workflowgraphvalidation.the_starting_prompt_fills_input_when_you_p.25eaf312")
         default:
-            return "Then is on success. On error is the failure path. Always runs either way."
+            return L10n.text("apple.workflowgraphvalidation.then_is_on_success_on_error_is_the_failure.bab7fe1d")
         }
     }
 
@@ -77,10 +77,10 @@ enum WorkflowGraphRules {
 
     static func additionIssue(kind: WorkflowNodeKind, nodeCount: Int) -> String? {
         if kind == .mcp {
-            return "MCP steps are not available yet."
+            return L10n.text("apple.workflowgraphvalidation.mcp_steps_are_not_available_yet.d3e1bfc3")
         }
         if nodeCount >= maxNodes {
-            return "A workflow may have at most \(maxNodes) steps."
+            return L10n.text("apple.workflowgraphvalidation.a_workflow_may_have_at_most_0_steps.e533210f", "\(maxNodes)")
         }
         return nil
     }
@@ -92,42 +92,42 @@ enum WorkflowGraphRules {
         edges: [WorkflowEdge]
     ) -> String? {
         if from == to {
-            return "A step cannot connect to itself."
+            return L10n.text("apple.workflowgraphvalidation.a_step_cannot_connect_to_itself.315c4446")
         }
         let ids = Set(nodes.map(\.id))
         if !ids.contains(from) {
-            return "A connection starts from a missing step."
+            return L10n.text("apple.workflowgraphvalidation.a_connection_starts_from_a_missing_step.f423e421")
         }
         if !ids.contains(to) {
-            return "A connection points to a missing step."
+            return L10n.text("apple.workflowgraphvalidation.a_connection_points_to_a_missing_step.611cba65")
         }
         let replacing = edges.contains { $0.from == from && $0.to == to }
         if !replacing, edges.count >= maxEdges {
-            return "A workflow may have at most \(maxEdges) connections."
+            return L10n.text("apple.workflowgraphvalidation.a_workflow_may_have_at_most_0_connections.32d67dc9", "\(maxEdges)")
         }
         return nil
     }
 
     static func stepsIssue(nodes: [WorkflowNode], edges: [WorkflowEdge]) -> String? {
         if nodes.count > maxNodes {
-            return "A workflow may have at most \(maxNodes) steps."
+            return L10n.text("apple.workflowgraphvalidation.a_workflow_may_have_at_most_0_steps.e533210f", "\(maxNodes)")
         }
         if edges.count > maxEdges {
-            return "A workflow may have at most \(maxEdges) connections."
+            return L10n.text("apple.workflowgraphvalidation.a_workflow_may_have_at_most_0_connections.32d67dc9", "\(maxEdges)")
         }
         var ids = Set<String>()
         for node in nodes {
             let trimmed = node.id.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {
-                return "Every step needs an id."
+                return L10n.text("apple.workflowgraphvalidation.every_step_needs_an_id.8d69a4a0")
             }
             if !isPathSafeID(node.id) {
                 if node.id.utf8.count > maxPathID * 4 || node.id.contains("\0") {
-                    return "Step id \(node.id) cannot be used."
+                    return L10n.text("apple.workflowgraphvalidation.step_id_0_cannot_be_used.cb82549b", "\(node.id)")
                 }
             }
             if !ids.insert(node.id).inserted {
-                return "Two steps share the id \(node.id)."
+                return L10n.text("apple.workflowgraphvalidation.two_steps_share_the_id_0.7df9bf9b", "\(node.id)")
             }
             if let issue = nodeIssue(node) {
                 return issue
@@ -135,25 +135,25 @@ enum WorkflowGraphRules {
         }
         for edge in edges {
             if !ids.contains(edge.from) {
-                return "A connection starts from a missing step."
+                return L10n.text("apple.workflowgraphvalidation.a_connection_starts_from_a_missing_step.f423e421")
             }
             if !ids.contains(edge.to) {
-                return "A connection points to a missing step."
+                return L10n.text("apple.workflowgraphvalidation.a_connection_points_to_a_missing_step.611cba65")
             }
             if edge.from == edge.to {
-                return "A step cannot connect to itself."
+                return L10n.text("apple.workflowgraphvalidation.a_step_cannot_connect_to_itself.315c4446")
             }
         }
         if hasIllegalCycle(nodes: nodes, edges: edges) {
-            return "This graph loops without a Loop step."
+            return L10n.text("apple.workflowgraphvalidation.this_graph_loops_without_a_loop_step.92bd3735")
         }
         for node in nodes where node.kind == .loop {
             let times = node.times ?? 3
             if !(1...maxLoopTimes).contains(times) {
-                return "A loop may repeat at most \(maxLoopTimes) times."
+                return L10n.text("apple.workflowgraphvalidation.a_loop_may_repeat_at_most_0_times.5ac3bdc7", "\(maxLoopTimes)")
             }
             if !edges.contains(where: { $0.from == node.id && $0.when == .ok }) {
-                return "Loop \(node.displayTitle) needs a body connection."
+                return L10n.text("apple.workflowgraphvalidation.loop_0_needs_a_body_connection.0195107c", "\(node.displayTitle)")
             }
         }
         return nil
@@ -168,33 +168,33 @@ enum WorkflowGraphRules {
             case "contains", "equals", "matches":
                 return nil
             default:
-                return "If only supports Contains, Equals or Matches."
+                return L10n.text("apple.workflowgraphvalidation.if_only_supports_contains_equals_or_matche.3a5207ff")
             }
         case .mcp:
-            return "MCP steps are not available yet."
+            return L10n.text("apple.workflowgraphvalidation.mcp_steps_are_not_available_yet.d3e1bfc3")
         case .agent:
             if (node.backend ?? "").isEmpty {
-                return "An agent step needs an agent."
+                return L10n.text("apple.workflowgraphvalidation.an_agent_step_needs_an_agent.4f1e96ec")
             }
             return nil
         case .automation:
             if (node.automationID ?? "").isEmpty {
-                return "An automation step needs an automation."
+                return L10n.text("apple.workflowgraphvalidation.an_automation_step_needs_an_automation.5eb2b325")
             }
             return nil
         case .http:
             let url = node.url ?? ""
             if url.isEmpty {
-                return "An HTTP step needs a URL."
+                return L10n.text("apple.workflowgraphvalidation.an_http_step_needs_a_url.78b1c371")
             }
             if !(url.hasPrefix("http://") || url.hasPrefix("https://")) {
-                return "An HTTP URL must start with http:// or https://."
+                return L10n.text("apple.workflowgraphvalidation.an_http_url_must_start_with_http_or_https.f66df6ab")
             }
             return nil
         case .command:
             let text = node.command ?? node.prompt ?? ""
             if text.isEmpty {
-                return "A command step needs a command."
+                return L10n.text("apple.workflowgraphvalidation.a_command_step_needs_a_command.5d665b7c")
             }
             return nil
         }

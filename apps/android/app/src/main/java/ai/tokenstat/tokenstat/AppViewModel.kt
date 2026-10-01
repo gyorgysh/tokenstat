@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -165,7 +167,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         CoreObserver.report = { method, peer, error -> noteCall(method, peer, error) }
         CoreObserver.precheck = { method ->
             if (NetworkGate.isOffline && NetworkPlane.of(method) != null) {
-                CoreFailure("offline", "This device is offline.")
+                CoreFailure("offline", L10n.text("android.appviewmodel.this_device_is_offline.84b7cf97"))
             } else {
                 null
             }
@@ -271,7 +273,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // door instead of Sign in.
                 mutableState.value = mutableState.value.copy(
                     error = err.message,
-                    authError = err.message ?: "The account could not be reached.",
+                    authError = err.message ?: L10n.text("android.appviewmodel.the_account_could_not_be_reached.3159ef5a"),
                 )
             }
         mutableState.value = mutableState.value.copy(loading = false)
@@ -354,7 +356,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val device = CoreClient.call("account.deviceStart").jsonObject
                 val raw = device["openUrl"]?.jsonPrimitive?.content
-                    ?: throw IllegalStateException("The account did not return a sign-in URL.")
+                    ?: throw IllegalStateException(L10n.text("android.appviewmodel.the_account_did_not_return_a_sign_in_url.f1bc27a1"))
                 val url = tagSignInUrl(raw)
                 val code = device["userCode"]?.jsonPrimitive?.content ?: ""
                 var interval = device["interval"]?.jsonPrimitive?.longOrNull ?: 5L
@@ -375,16 +377,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             SignInPollFailure.TRANSPORT -> {
                                 transportFailures += 1
                                 if (transportFailures < 3) {
-                                    _signInNotice.value = "Waiting for the network."
+                                    _signInNotice.value = L10n.text("android.appviewmodel.waiting_for_the_network.76a08f16")
                                     delay(maxOf(interval, 3L) * 1_000)
                                     continue
                                 }
                                 cancelLogin()
-                                throw SignInFailed("The account service could not be reached after several tries. Try again.")
+                                throw SignInFailed(L10n.text("android.appviewmodel.the_account_service_could_not_be_reached_a.445bdbf0"))
                             }
                             SignInPollFailure.INVALID_GRANT -> {
                                 cancelLogin()
-                                throw SignInFailed("That sign-in expired. Start again.")
+                                throw SignInFailed(L10n.text("android.appviewmodel.that_sign_in_expired_start_again.28cffde9"))
                             }
                             SignInPollFailure.TERMINAL -> {
                                 cancelLogin()
@@ -401,7 +403,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     interval = poll.jsonObject["interval"]?.jsonPrimitive?.longOrNull ?: interval
                 }
                 cancelLogin()
-                _signInError.value = "The sign-in code expired before it was confirmed."
+                _signInError.value = L10n.text("android.appviewmodel.the_sign_in_code_expired_before_it_was_con.84ac1b4b")
             } catch (e: CancellationException) {
                 withContext(NonCancellable) { cancelLogin() }
                 throw e

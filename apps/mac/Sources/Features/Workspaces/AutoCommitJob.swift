@@ -6,7 +6,7 @@ import Foundation
 /// The scheduler never calls gitwrite. The agent commits because a person
 /// pressed the button.
 enum AutoCommitJob {
-    static let name = "Auto commit"
+    static let name = L10n.text("apple.autocommitjob.auto_commit.2559934f")
     static let budgetSeconds: UInt64 = 900
 
     static func isName(_ name: String) -> Bool {
@@ -14,25 +14,7 @@ enum AutoCommitJob {
     }
 
     static func prompt(workspaceName: String) -> String {
-        """
-        Commit the pending work in this git repository (\(workspaceName)).
-
-        Inspect the working tree (git status and git diff). Group the changes \
-        into one or more commits by concern. One concern per commit. A single \
-        concern is one commit.
-
-        Write messages that match this repository's existing style:
-        1. Follow the most recent commit subjects.
-        2. If CONTRIBUTING.md, a commitlint config, or .gitmessage exists, \
-        follow those rules.
-        3. Otherwise use Conventional Commits: lowercase type, optional scope, \
-        imperative subject, English.
-
-        Do not push. Do not force. Do not amend. Do not change files except to \
-        commit them. If there is nothing to commit, say so and stop.
-
-        After you finish, list the commits you made.
-        """
+        L10n.text("apple.autocommitjob.commit_the_pending_work_in_this_git_reposi.ab4eb7ed", "\(workspaceName)")
     }
 
     /// Agents that can write a commit. Shell stays out even if it was stored.

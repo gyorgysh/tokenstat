@@ -103,7 +103,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
     public AutomationsPage(string? workspaceId = null)
     {
         _scopeWorkspaceId = workspaceId;
-        _searchBox = Chrome.SearchField("Search automations", text =>
+        _searchBox = Chrome.SearchField(L10n.Text("windows.automationspage.search_automations.bdff71b2"), text =>
         {
             _query = text ?? "";
             RenderList();
@@ -361,9 +361,9 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
     {
         if (string.IsNullOrEmpty(workspaceId))
         {
-            return "Uncategorized";
+            return L10n.Text("windows.automationspage.uncategorized.8d40d123");
         }
-        return _folders.FirstOrDefault(f => f.Id == workspaceId).Name ?? "Folder";
+        return _folders.FirstOrDefault(f => f.Id == workspaceId).Name ?? L10n.Text("windows.automationspage.folder.74ccd433");
     }
 
     private bool MatchesQuery(JsonNode? job)
@@ -390,27 +390,27 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
                 ? ((_queueBudget / 60).ToString(), "minutes", false)
                 : (_queueBudget.ToString(), "seconds", false));
         var budget = new TextBox { Text = budgetText, MinWidth = 100 };
-        var noLimit = new CheckBox { Content = "No limit", IsChecked = queueNoLimit };
+        var noLimit = new CheckBox { Content = L10n.Text("windows.automationspage.no_limit.f7fcff0d"), IsChecked = queueNoLimit };
         var budgetRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         budgetRow.Children.Add(budget);
         budgetRow.Children.Add(new TextBlock
         {
-            Text = "minutes",
+            Text = L10n.Text("windows.automationspage.minutes.90e63d85"),
             VerticalAlignment = VerticalAlignment.Center,
             Opacity = 0.68,
         });
         budgetRow.Children.Add(noLimit);
-        body.Children.Add(Labeled("Default time limit", budgetRow));
+        body.Children.Add(Labeled(L10n.Text("windows.automationspage.default_time_limit.ce8a0efe"), budgetRow));
         var concurrent = new TextBox { Text = _queueConcurrent.ToString(), MinWidth = 100 };
-        body.Children.Add(Labeled("Jobs at once", concurrent));
+        body.Children.Add(Labeled(L10n.Text("windows.automationspage.jobs_at_once.66276ffd"), concurrent));
         body.Children.Add(new TextBlock
         {
-            Text = WorkbenchOps.ClockCaption("", _queueTimezone, subject: "Times are"),
+            Text = WorkbenchOps.ClockCaption("", _queueTimezone, subject: L10n.Text("windows.automationspage.times_are.e9a3f2bc")),
             FontSize = 12,
             Opacity = 0.68,
             TextWrapping = TextWrapping.Wrap,
         });
-        var save = ActionIconGlyph.Button("Save", ActionIcon.Save, async (_, _) =>
+        var save = ActionIconGlyph.Button(L10n.Text("common.save"), ActionIcon.Save, async (_, _) =>
         {
             ulong seconds;
             if (noLimit.IsChecked == true)
@@ -419,7 +419,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             }
             else if (!ulong.TryParse(budget.Text.Trim(), out var minutes) || minutes == 0)
             {
-                Banner("Enter a positive default time limit, or choose No limit.");
+                Banner(L10n.Text("windows.automationspage.enter_a_positive_default_time_limit_or_cho.81c37ef8"));
                 return;
             }
             else
@@ -428,7 +428,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             }
             if (!uint.TryParse(concurrent.Text.Trim(), out var atOnce) || atOnce == 0)
             {
-                Banner("Enter how many jobs may run at once.");
+                Banner(L10n.Text("windows.automationspage.enter_how_many_jobs_may_run_at_once.cfed4e98"));
                 return;
             }
             try
@@ -438,7 +438,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
                     ["defaultBudgetSeconds"] = seconds,
                     ["maxConcurrent"] = atOnce,
                 });
-                Notice("Scheduler saved.");
+                Notice(L10n.Text("windows.automationspage.scheduler_saved.4e10688a"));
             }
             catch (Exception ex)
             {
@@ -450,7 +450,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         row.Children.Add(save);
         body.Children.Add(row);
-        return Chrome.Card("Scheduler", body, "Queue settings for this computer.");
+        return Chrome.Card(L10n.Text("windows.automationspage.scheduler.d3a27d96"), body, L10n.Text("windows.automationspage.queue_settings_for_this_computer.31a48c0f"));
     }
 
     private List<JsonNode?> JobRuns(string jobId)
@@ -550,7 +550,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             Model = _dModel?.Text ?? "",
             Effort = _dEffort?.Text ?? "",
             BudgetText = _dBudget?.Text ?? "180",
-            BudgetUnit = _dBudgetUnit?.SelectedItem as string ?? "minutes",
+            BudgetUnit = _dBudgetUnit?.SelectedValue as string ?? "minutes",
             NoLimit = _dNoLimit?.IsChecked == true,
             Enabled = _dEnabled?.IsChecked == true,
             Kind = _dKind is null
@@ -591,7 +591,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             _detailHost.Children.Clear();
             var selected = _runs.FirstOrDefault(run => Format.Text(run, "id") == _selectedRunId);
             if (selected is not null) _detailHost.Children.Add(RunRow(selected));
-            else _detailHost.Children.Add(new TextBlock { Text = "Select a run to read its result and transcript.", TextWrapping = TextWrapping.Wrap });
+            else _detailHost.Children.Add(new TextBlock { Text = L10n.Text("windows.automationspage.select_a_run_to_read_its_result_and_transc.4d63e81f"), TextWrapping = TextWrapping.Wrap });
             return;
         }
         if (!_detailDirty)
@@ -616,12 +616,12 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         {
             _detailHost.Children.Add(new TextBlock
             {
-                Text = "Select an automation",
+                Text = L10n.Text("windows.automationspage.select_an_automation.f5ff23f7"),
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             });
             _detailHost.Children.Add(new TextBlock
             {
-                Text = "Pick a job to edit its schedule, run it, or read its history.",
+                Text = L10n.Text("windows.automationspage.pick_a_job_to_edit_its_schedule_run_it_or.ff95953b"),
                 Opacity = 0.66,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -639,88 +639,86 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
 
         body.Children.Add(new TextBlock
         {
-            Text = "Writing",
+            Text = L10n.Text("windows.automationspage.writing.a8bfae3e"),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
-        var name = new TextBox { Text = draft.Name, PlaceholderText = "Name" };
+        var name = new TextBox { Text = draft.Name, PlaceholderText = L10n.Text("windows.automationspage.name.dcd1d522") };
         name.TextChanged += (_, _) => _detailDirty = true;
-        body.Children.Add(Labeled("Name", name));
+        body.Children.Add(Labeled(L10n.Text("windows.automationspage.name.dcd1d522"), name));
         _dName = name;
 
         var prompt = new TextBox
         {
             Text = draft.Prompt,
-            PlaceholderText = "What should the agent do?",
+            PlaceholderText = L10n.Text("windows.automationspage.what_should_the_agent_do.99b09b41"),
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             MinHeight = 120,
         };
         prompt.TextChanged += (_, _) => _detailDirty = true;
-        body.Children.Add(Labeled("Prompt", prompt));
+        body.Children.Add(Labeled(L10n.Text("windows.automationspage.prompt.5c391238"), prompt));
         _dPrompt = prompt;
 
         var folderBox = new ComboBox { MinWidth = 200 };
-        var folderNames = new List<string> { "Choose a folder" };
+        var folderNames = new List<string> { L10n.Text("windows.automationspage.choose_a_folder.5c71b8cd") };
         folderNames.AddRange(_folders.Select(f => f.Name));
         folderBox.ItemsSource = folderNames;
         var folderIndex = _folders.FindIndex(f => f.Id == draft.FolderId);
         folderBox.SelectedIndex = folderIndex >= 0 ? folderIndex + 1 : 0;
         folderBox.SelectionChanged += (_, _) => _detailDirty = true;
-        body.Children.Add(Labeled("Folder", folderBox));
+        body.Children.Add(Labeled(L10n.Text("windows.automationspage.folder.74ccd433"), folderBox));
         _dFolder = folderBox;
 
         var backendBox = new ComboBox { MinWidth = 200 };
-        var backendNames = new List<string> { "Choose an agent" };
+        var backendNames = new List<string> { L10n.Text("windows.automationspage.choose_an_agent.b6890bc2") };
         backendNames.AddRange(_backends.Select(b => b.Label));
         backendBox.ItemsSource = backendNames;
         var backendIndex = _backends.FindIndex(b => b.Id == draft.BackendId);
         backendBox.SelectedIndex = backendIndex >= 0 ? backendIndex + 1 : 0;
         backendBox.SelectionChanged += (_, _) => _detailDirty = true;
-        body.Children.Add(Labeled("Agent", backendBox));
+        body.Children.Add(Labeled(L10n.Text("windows.automationspage.agent.11b39c93"), backendBox));
         _dBackend = backendBox;
 
-        var model = new TextBox { Text = draft.Model, PlaceholderText = "Default model" };
+        var model = new TextBox { Text = draft.Model, PlaceholderText = L10n.Text("windows.automationspage.default_model.3840d9d2") };
         model.TextChanged += (_, _) => _detailDirty = true;
-        body.Children.Add(Labeled("Model", model));
+        body.Children.Add(Labeled(L10n.Text("windows.automationspage.model.5e2c614c"), model));
         _dModel = model;
 
-        var effort = new TextBox { Text = draft.Effort, PlaceholderText = "Default effort" };
+        var effort = new TextBox { Text = draft.Effort, PlaceholderText = L10n.Text("windows.automationspage.default_effort.58c96ef8") };
         effort.TextChanged += (_, _) => _detailDirty = true;
-        body.Children.Add(Labeled("Effort", effort));
+        body.Children.Add(Labeled(L10n.Text("windows.automationspage.effort.4387e5d3"), effort));
         _dEffort = effort;
 
         var budget = new TextBox { Text = draft.BudgetText, MinWidth = 100 };
         budget.TextChanged += (_, _) => _detailDirty = true;
-        var budgetUnit = new ComboBox { MinWidth = 110 };
-        budgetUnit.ItemsSource = new[] { "minutes", "seconds" };
-        budgetUnit.SelectedItem = draft.BudgetUnit;
+        var budgetUnit = Chrome.BudgetUnits(draft.BudgetUnit);
         budgetUnit.SelectionChanged += (_, _) => _detailDirty = true;
-        var noLimit = new CheckBox { Content = "No limit", IsChecked = draft.NoLimit };
+        var noLimit = new CheckBox { Content = L10n.Text("windows.automationspage.no_limit.f7fcff0d"), IsChecked = draft.NoLimit };
         noLimit.Click += (_, _) => _detailDirty = true;
         var budgetRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         budgetRow.Children.Add(budget);
         budgetRow.Children.Add(budgetUnit);
         budgetRow.Children.Add(noLimit);
-        body.Children.Add(Labeled("Time limit", budgetRow));
+        body.Children.Add(Labeled(L10n.Text("windows.automationspage.time_limit.e592a9ca"), budgetRow));
         _dBudget = budget;
         _dBudgetUnit = budgetUnit;
         _dNoLimit = noLimit;
 
         body.Children.Add(new TextBlock
         {
-            Text = "Settings",
+            Text = L10n.Text("common.settings"),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
-        var enabled = new CheckBox { Content = "Enabled", IsChecked = draft.Enabled };
+        var enabled = new CheckBox { Content = L10n.Text("common.enabled"), IsChecked = draft.Enabled };
         enabled.Click += (_, _) => _detailDirty = true;
         body.Children.Add(enabled);
         _dEnabled = enabled;
 
         var kind = new ComboBox { MinWidth = 150 };
-        kind.ItemsSource = new[] { "Once", "Interval", "Daily", "Weekdays", "Weekly", "Custom" };
+        kind.ItemsSource = new[] { L10n.Text("windows.automationspage.once.d88f6d83"), L10n.Text("windows.automationspage.interval.6f45b000"), L10n.Text("windows.automationspage.daily.b36c2611"), L10n.Text("windows.automationspage.weekdays.6f4b602b"), L10n.Text("windows.automationspage.weekly.29751324"), L10n.Text("windows.automationspage.custom.494ca78f") };
         kind.SelectedIndex = Math.Max(0, Array.IndexOf(WorkbenchOps.ScheduleKinds, draft.Kind));
         kind.SelectionChanged += (_, _) => _detailDirty = true;
-        body.Children.Add(Labeled("Schedule", kind));
+        body.Children.Add(Labeled(L10n.Text("windows.automationspage.schedule.f4830a1d"), kind));
         _dKind = kind;
 
         var interval = new TextBox { Text = draft.IntervalMinutes, MinWidth = 100 };
@@ -729,11 +727,11 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         intervalRow.Children.Add(interval);
         intervalRow.Children.Add(new TextBlock
         {
-            Text = "minutes",
+            Text = L10n.Text("windows.automationspage.minutes.90e63d85"),
             VerticalAlignment = VerticalAlignment.Center,
             Opacity = 0.68,
         });
-        body.Children.Add(Labeled("Every", intervalRow));
+        body.Children.Add(Labeled(L10n.Text("windows.automationspage.every.9b8617fd"), intervalRow));
         _dInterval = interval;
 
         var hour = new ComboBox { MinWidth = 80 };
@@ -747,7 +745,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         var timeRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         timeRow.Children.Add(hour);
         timeRow.Children.Add(minute);
-        body.Children.Add(Labeled("Time", timeRow));
+        body.Children.Add(Labeled(L10n.Text("windows.automationspage.time.33b93476"), timeRow));
         _dHour = hour;
         _dMinute = minute;
 
@@ -755,7 +753,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         weekday.ItemsSource = WorkbenchOps.DayNames.ToArray();
         weekday.SelectedIndex = Math.Clamp(draft.Weekday, 0, 6);
         weekday.SelectionChanged += (_, _) => _detailDirty = true;
-        body.Children.Add(Labeled("Day", weekday));
+        body.Children.Add(Labeled(L10n.Text("windows.automationspage.day.8f2364e1"), weekday));
         _dWeekday = weekday;
 
         var daysRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
@@ -770,7 +768,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             _dDays[bit] = day;
             daysRow.Children.Add(day);
         }
-        body.Children.Add(Labeled("Days", daysRow));
+        body.Children.Add(Labeled(L10n.Text("windows.automationspage.days.e08c0aa8"), daysRow));
 
         // The host scheduler owns the zone. Never print a wall-clock time
         // without saying whose clock it is.
@@ -785,18 +783,18 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         if (_conflictId == id && !_creating)
         {
             body.Children.Add(Chrome.Banner(
-                "This job changed since you opened it. Compare the saved job before replacing it.",
+                L10n.Text("windows.automationspage.this_job_changed_since_you_opened_it_compa.ae02b985"),
                 Theme.Warning,
                 Symbol.Important));
             var conflictRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
             conflictRow.Children.Add(ActionIconGlyph.PrimaryButton(
-                "Save anyway", ActionIcon.Save, async (_, _) =>
+                L10n.Text("windows.automationspage.save_anyway.ef4c87b5"), ActionIcon.Save, async (_, _) =>
                 {
                     SnapshotDraft();
                     await SaveDraftAsync(force: true);
                 }));
             conflictRow.Children.Add(ActionIconGlyph.Button(
-                "Take saved", ActionIcon.Restore, async (_, _) =>
+                L10n.Text("windows.automationspage.take_saved.932c55d7"), ActionIcon.Restore, async (_, _) =>
                 {
                     _conflictId = null;
                     _detailDirty = false;
@@ -810,12 +808,12 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         {
             body.Children.Add(new TextBlock
             {
-                Text = "The job may already exist. Check this request before adding another.",
+                Text = L10n.Text("windows.automationspage.the_job_may_already_exist_check_this_reque.5fff3e32"),
                 TextWrapping = TextWrapping.Wrap,
             });
             var checkRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
             checkRow.Children.Add(ActionIconGlyph.Button(
-                "Check again", ActionIcon.Refresh, async (_, _) => await CheckCreationAsync()));
+                L10n.Text("windows.automationspage.check_again.fb7099ad"), ActionIcon.Refresh, async (_, _) => await CheckCreationAsync()));
             body.Children.Add(checkRow);
         }
 
@@ -823,7 +821,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         if (_creating)
         {
             var createButton = ActionIconGlyph.PrimaryButton(
-                "Create", ActionIcon.Create, async (_, _) =>
+                L10n.Text("windows.automationspage.create.4759498a"), ActionIcon.Create, async (_, _) =>
                 {
                     SnapshotDraft();
                     await CreateDraftAsync();
@@ -831,7 +829,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             createButton.IsEnabled = _pendingCreateOp is null && !_working;
             actions.Children.Add(createButton);
             actions.Children.Add(ActionIconGlyph.Button(
-                "Back", ActionIcon.Back, (_, _) =>
+                L10n.Text("common.back"), ActionIcon.Back, (_, _) =>
                 {
                     _creating = false;
                     _draft = null;
@@ -842,7 +840,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         else
         {
             actions.Children.Add(ActionIconGlyph.PrimaryButton(
-                "Save", ActionIcon.Save, async (_, _) =>
+                L10n.Text("common.save"), ActionIcon.Save, async (_, _) =>
                 {
                     SnapshotDraft();
                     await SaveDraftAsync(force: false);
@@ -850,7 +848,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             if (!_confirmDelete)
             {
                 actions.Children.Add(ActionIconGlyph.Button(
-                    "Delete", ActionIcon.Delete, (_, _) =>
+                    L10n.Text("common.delete"), ActionIcon.Delete, (_, _) =>
                     {
                         SnapshotDraft();
                         _confirmDelete = true;
@@ -860,7 +858,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             else
             {
                 actions.Children.Add(ActionIconGlyph.Button(
-                    "Back", ActionIcon.Back, (_, _) =>
+                    L10n.Text("common.back"), ActionIcon.Back, (_, _) =>
                     {
                         SnapshotDraft();
                         _confirmDelete = false;
@@ -875,12 +873,12 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             var confirm = new StackPanel { Spacing = Theme.SpaceS };
             confirm.Children.Add(new TextBlock
             {
-                Text = $"Delete \"{draft.Name}\"? This removes the job from this computer.",
+                Text = L10n.Text("windows.automationspage.delete_0_this_removes_the_job_from_this_co.8a23ac57", $"{draft.Name}"),
                 TextWrapping = TextWrapping.Wrap,
             });
             var confirmRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
             confirmRow.Children.Add(ActionIconGlyph.Button(
-                "Delete job", ActionIcon.Delete, async (_, _) => await DeleteAsync()));
+                L10n.Text("windows.automationspage.delete_job.be79dd9b"), ActionIcon.Delete, async (_, _) => await DeleteAsync()));
             confirm.Children.Add(confirmRow);
             body.Children.Add(confirm);
         }
@@ -892,18 +890,18 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             {
                 var retryRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
                 retryRow.Children.Add(ActionIconGlyph.Button(
-                    "Check again", ActionIcon.Refresh, async (_, _) => await CheckRunAsync()));
+                    L10n.Text("windows.automationspage.check_again.fb7099ad"), ActionIcon.Refresh, async (_, _) => await CheckRunAsync()));
                 retryRow.Children.Add(ActionIconGlyph.Button(
-                    "Retry", ActionIcon.Run, async (_, _) => await RetryRunAsync()));
+                    L10n.Text("common.retry"), ActionIcon.Run, async (_, _) => await RetryRunAsync()));
                 body.Children.Add(retryRow);
             }
         }
 
-        var title = _creating ? "New automation" : draft.Name;
+        var title = _creating ? L10n.Text("windows.automationspage.new_automation.db87a63d") : draft.Name;
         var subtitle = _creating
             ? null
-            : $"Revision {_detailRevision?.ToString() ?? "unknown"} · {FolderLabel(draft.FolderId)}";
-        return Chrome.Card(string.IsNullOrEmpty(title) ? "Automation" : title, body, subtitle);
+            : L10n.Text("windows.automationspage.revision_0_1.5721f8ac", $"{_detailRevision?.ToString() ?? L10n.Text("windows.automationspage.unknown.b23a6a84")}", $"{FolderLabel(draft.FolderId)}");
+        return Chrome.Card(string.IsNullOrEmpty(title) ? L10n.Text("windows.automationspage.automation.d909750b") : title, body, subtitle);
     }
 
     private string? ValidateDraft(JobDraft draft, out ulong budgetSeconds, out ulong everySeconds)
@@ -912,39 +910,39 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         everySeconds = 0;
         if (string.IsNullOrWhiteSpace(draft.Name))
         {
-            return "Give this job a name.";
+            return L10n.Text("windows.automationspage.give_this_job_a_name.8453c6c7");
         }
         if (draft.Name.Length > 4096)
         {
-            return "Shorten the name to 4 KiB or less.";
+            return L10n.Text("windows.automationspage.shorten_the_name_to_4_kib_or_less.5579d8cf");
         }
         if (string.IsNullOrWhiteSpace(draft.Prompt))
         {
-            return "Write what the agent should do.";
+            return L10n.Text("windows.automationspage.write_what_the_agent_should_do.308a8211");
         }
         if (draft.Prompt.Length > 1024 * 1024)
         {
-            return "Shorten the prompt to 1 MiB or less.";
+            return L10n.Text("windows.automationspage.shorten_the_prompt_to_1_mib_or_less.dba63070");
         }
         if (string.IsNullOrWhiteSpace(draft.FolderId))
         {
-            return "Choose a folder for this job.";
+            return L10n.Text("windows.automationspage.choose_a_folder_for_this_job.62a1a81c");
         }
         if (string.IsNullOrWhiteSpace(draft.BackendId))
         {
-            return "Choose an agent for this job.";
+            return L10n.Text("windows.automationspage.choose_an_agent_for_this_job.d585332f");
         }
         var budget = WorkbenchOps.BudgetSeconds(draft.BudgetText, draft.BudgetUnit, draft.NoLimit);
         if (budget is null)
         {
-            return "Enter a positive time limit, or choose No limit.";
+            return L10n.Text("windows.automationspage.enter_a_positive_time_limit_or_choose_no_l.3b7996e8");
         }
         budgetSeconds = budget.Value;
         if (draft.Kind == "interval")
         {
             if (!ulong.TryParse(draft.IntervalMinutes.Trim(), out var minutes) || minutes == 0)
             {
-                return "Pick an interval of at least one minute.";
+                return L10n.Text("windows.automationspage.pick_an_interval_of_at_least_one_minute.e57770a7");
             }
             try
             {
@@ -952,7 +950,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             }
             catch (OverflowException)
             {
-                return "Pick a shorter interval.";
+                return L10n.Text("windows.automationspage.pick_a_shorter_interval.de6c6298");
             }
         }
         var scheduleError = WorkbenchOps.ScheduleValidation(draft.Kind, everySeconds, draft.CustomDays);
@@ -1021,19 +1019,19 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
                         ["operationId"] = _pendingCreateOp,
                     });
                     _pendingCreateOp = null;
-                    Notice("Automation added.");
+                    Notice(L10n.Text("windows.automationspage.automation_added.b6e2be6a"));
                     ResetEditor();
                 }
                 catch (Exception ex)
                 {
-                    Banner("The job may already exist. Check this request before adding another. " + ex.Message);
+                    Banner(L10n.Text("windows.automationspage.the_job_may_already_exist_check_this_reque.bae6162a", $"{ex.Message}"));
                     return;
                 }
             }
             else
             {
                 await CallWorkbenchAsync("automation.create", new JsonObject { ["job"] = payload });
-                Notice("Automation added.");
+                Notice(L10n.Text("windows.automationspage.automation_added.b6e2be6a"));
                 ResetEditor();
             }
         }
@@ -1062,13 +1060,13 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             if (receipt is JsonObject obj && obj.Count > 0 && receipt["job"] is not null)
             {
                 _pendingCreateOp = null;
-                Notice("Automation added.");
+                Notice(L10n.Text("windows.automationspage.automation_added.b6e2be6a"));
                 ResetEditor();
                 await LoadAsync();
             }
             else
             {
-                Banner("The computer has not accepted this job yet. Check again when the connection is ready.");
+                Banner(L10n.Text("windows.automationspage.the_computer_has_not_accepted_this_job_yet.a0003912"));
             }
         }
         catch (Exception ex)
@@ -1101,7 +1099,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
                 var revision = force ? await FreshRevisionAsync(id) : _detailRevision;
                 if (revision is null)
                 {
-                    Banner("Reload this job before saving it.");
+                    Banner(L10n.Text("windows.automationspage.reload_this_job_before_saving_it.9425ae64"));
                     return;
                 }
                 payload["revision"] = revision.Value;
@@ -1116,7 +1114,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
                 catch (Exception ex) when (WorkbenchOps.IsConflict(ex))
                 {
                     _conflictId = id;
-                    Banner("This job changed since you opened it. Compare the saved job before replacing it.");
+                    Banner(L10n.Text("windows.automationspage.this_job_changed_since_you_opened_it_compa.ae02b985"));
                     await LoadAsync();
                     RenderDetail();
                     return;
@@ -1129,7 +1127,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             _detailDirty = false;
             _conflictId = null;
             _draft = null;
-            Notice($"Saved \"{draft.Name.Trim()}\".");
+            Notice(L10n.Text("windows.automationspage.saved_0.8eb4b783", $"{draft.Name.Trim()}"));
         }
         catch (Exception ex)
         {
@@ -1179,7 +1177,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         {
             await CallWorkbenchAsync(
                 "automation.remove", new JsonObject { ["id"] = _selectedId });
-            Notice("Automation deleted.");
+            Notice(L10n.Text("windows.automationspage.automation_deleted.533e9bb1"));
             ResetEditor();
         }
         catch (Exception ex)
@@ -1237,11 +1235,11 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
                     });
                     _pendingRunOp = null;
                     _pendingRunJob = null;
-                    Notice("The run started.");
+                    Notice(L10n.Text("windows.automationspage.the_run_started.26f45968"));
                 }
                 catch (Exception ex)
                 {
-                    _runError = "The run result is not confirmed. Check this request before starting another run. " + ex.Message;
+                    _runError = L10n.Text("windows.automationspage.the_run_result_is_not_confirmed_check_this.b7631660", $"{ex.Message}");
                     RenderDetail();
                     return;
                 }
@@ -1249,7 +1247,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             else
             {
                 await CallWorkbenchAsync("automation.run", new JsonObject { ["id"] = id });
-                Notice("The run started.");
+                Notice(L10n.Text("windows.automationspage.the_run_started.26f45968"));
             }
         }
         catch (Exception ex)
@@ -1279,18 +1277,18 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
                 _pendingRunOp = null;
                 _pendingRunJob = null;
                 _runError = null;
-                Notice("The run is confirmed.");
+                Notice(L10n.Text("windows.automationspage.the_run_is_confirmed.fa711bc2"));
                 await LoadAsync();
             }
             else
             {
-                _runError = "The computer has not accepted this run request. Retry the same request when the connection is ready.";
+                _runError = L10n.Text("windows.automationspage.the_computer_has_not_accepted_this_run_req.956da73e");
                 RenderDetail();
             }
         }
         catch (Exception ex)
         {
-            _runError = "The run result is still unavailable. Your request is kept on this device. " + ex.Message;
+            _runError = L10n.Text("windows.automationspage.the_run_result_is_still_unavailable_your_r.294ee202", $"{ex.Message}");
             RenderDetail();
         }
     }
@@ -1313,12 +1311,12 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             _pendingRunOp = null;
             _pendingRunJob = null;
             _runError = null;
-            Notice("The run is confirmed.");
+            Notice(L10n.Text("windows.automationspage.the_run_is_confirmed.fa711bc2"));
             await LoadAsync();
         }
         catch (Exception ex)
         {
-            _runError = "The run result is not confirmed. Check this request before starting another run. " + ex.Message;
+            _runError = L10n.Text("windows.automationspage.the_run_result_is_not_confirmed_check_this.b7631660", $"{ex.Message}");
             RenderDetail();
         }
     }
@@ -1329,7 +1327,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         try
         {
             await CallWorkbenchAsync("automation.kill", new JsonObject { ["id"] = runId });
-            Notice("Stopped.");
+            Notice(L10n.Text("windows.automationspage.stopped.f8ec77e7"));
         }
         catch (Exception ex)
         {
@@ -1356,7 +1354,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         {
             body.Children.Add(new TextBlock
             {
-                Text = "No runs yet. Run this job to see its history here.",
+                Text = L10n.Text("windows.automationspage.no_runs_yet_run_this_job_to_see_its_histor.a1596cf6"),
                 Opacity = 0.66,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -1365,13 +1363,13 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         {
             var remaining = runs.Count - shown.Count;
             body.Children.Add(ActionIconGlyph.Button(
-                $"Earlier runs ({remaining})", ActionIcon.History, (_, _) =>
+                L10n.Text("windows.automationspage.earlier_runs_0.3be9f95d", $"{remaining}"), ActionIcon.History, (_, _) =>
                 {
                     _historyShown += WorkbenchOps.RunPageSize;
                     RenderDetail();
                 }));
         }
-        return Chrome.Card("Run history", body, $"{runs.Count} runs");
+        return Chrome.Card(L10n.Text("windows.automationspage.run_history.addf321b"), body, L10n.Text("windows.automationspage.0_runs.fedf94fc", $"{runs.Count}"));
     }
 
     private UIElement RunRow(JsonNode run)
@@ -1382,7 +1380,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         var body = new StackPanel { Spacing = Theme.SpaceXs };
         body.Children.Add(new TextBlock
         {
-            Text = $"{Format.Text(run, "name", "Run")} · {WorkbenchOps.RunLabel(status)}",
+            Text = $"{Format.Text(run, "name", L10n.Text("common.run"))} · {WorkbenchOps.RunLabel(status)}",
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
         });
@@ -1409,17 +1407,17 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             {
                 var offset = saved.Next;
                 body.Children.Add(ActionIconGlyph.Button(
-                    "More", ActionIcon.More, async (_, _) => await LoadTranscriptAsync(runId, offset)));
+                    L10n.Text("windows.automationspage.more.d47d7cb0"), ActionIcon.More, async (_, _) => await LoadTranscriptAsync(runId, offset)));
             }
         }
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         row.Children.Add(ActionIconGlyph.Button(
-            "Transcript", ActionIcon.History, async (_, _) => await LoadTranscriptAsync(runId, 0)));
+            L10n.Text("windows.automationspage.transcript.721164f0"), ActionIcon.History, async (_, _) => await LoadTranscriptAsync(runId, 0)));
         if (live && !string.IsNullOrEmpty(runId))
         {
             var liveId = runId;
             row.Children.Add(ActionIconGlyph.Button(
-                "Stop", ActionIcon.Stop, async (_, _) => await KillAsync(liveId)));
+                L10n.Text("common.stop"), ActionIcon.Stop, async (_, _) => await KillAsync(liveId)));
         }
         body.Children.Add(row);
         return body;

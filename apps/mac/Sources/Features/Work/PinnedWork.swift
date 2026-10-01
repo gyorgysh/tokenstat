@@ -132,7 +132,7 @@ final class PinnedWorkStore {
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !trimmed.contains("/"), !trimmed.contains("\\"),
               trimmed.rangeOfCharacter(from: .controlCharacters) == nil
-        else { return "Pinned work" }
+        else { return L10n.text("apple.pinnedwork.pinned_work.23dd8f45") }
         return String(trimmed.prefix(80))
     }
 

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workflows
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
 import ai.tokenstat.tokenstat.ui.chrome.OwnSectionHeader
 
@@ -195,7 +197,7 @@ fun WorkflowsScreen(
                 loaded = true
                 error = null
             }
-            .onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+            .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workflows.the_request_failed.db4fb447"), hostLabel) }
         runCatching { model.workspaceSection(peer, "workflow.runs", buildJsonObject {}) }
             .onSuccess { element ->
                 runs = ((element as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()).map(WorkflowRunRecord::parse)
@@ -220,7 +222,7 @@ fun WorkflowsScreen(
     suspend fun run(graph: WorkflowGraph, input: String) {
         val issue = WorkflowGraphRules.stepsIssue(graph.nodes, graph.edges)
         if (issue != null) {
-            error = "$issue Fix it in the editor before running."
+            error = L10n.text("android.workflows.0_fix_it_in_the_editor_before_running.4e7debe8", "${issue}")
             return
         }
         working = true
@@ -231,11 +233,11 @@ fun WorkflowsScreen(
                 if (graph.workspaceID?.isNotEmpty() == true) put("workspaceId", graph.workspaceID!!)
             })
         }.onSuccess {
-            notice = "Started ${graph.name}."
+            notice = L10n.text("android.workflows.started_0.8f95ec71", "${graph.name}")
             error = null
             load()
         }.onFailure {
-            error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+            error = TunnelCopy.display(it.message ?: L10n.text("android.workflows.the_request_failed.db4fb447"), hostLabel)
         }
         working = false
     }
@@ -245,11 +247,11 @@ fun WorkflowsScreen(
         runCatching {
             model.workspaceSection(peer, "workflow.kill", buildJsonObject { put("id", run.id) })
         }.onSuccess {
-            notice = "Stopped ${run.name}."
+            notice = L10n.text("android.workflows.stopped_0.6cebd065", "${run.name}")
             error = null
             load()
         }.onFailure {
-            error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+            error = TunnelCopy.display(it.message ?: L10n.text("android.workflows.the_request_failed.db4fb447"), hostLabel)
         }
         working = false
     }
@@ -259,11 +261,11 @@ fun WorkflowsScreen(
         runCatching {
             model.workspaceSection(peer, "workflow.continue", buildJsonObject { put("id", run.id) })
         }.onSuccess {
-            notice = "Continued ${run.name}."
+            notice = L10n.text("android.workflows.continued_0.472d1447", "${run.name}")
             error = null
             load()
         }.onFailure {
-            error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+            error = TunnelCopy.display(it.message ?: L10n.text("android.workflows.the_request_failed.db4fb447"), hostLabel)
         }
         working = false
     }
@@ -280,7 +282,7 @@ fun WorkflowsScreen(
                 .map(WorkflowGraph::parse).firstOrNull { it.id == graph.id }
         }
         if (fresh == null) {
-            error = "This workflow is gone. Reload the list before changing it."
+            error = L10n.text("android.workflows.this_workflow_is_gone_reload_the_list_befo.0055e2ce")
             working = false
             return
         }
@@ -300,7 +302,7 @@ fun WorkflowsScreen(
             error = null
             load()
         }.onFailure {
-            error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+            error = TunnelCopy.display(it.message ?: L10n.text("android.workflows.the_request_failed.db4fb447"), hostLabel)
         }
         working = false
     }
@@ -311,11 +313,11 @@ fun WorkflowsScreen(
             model.workspaceSection(peer, "workflow.remove", buildJsonObject { put("id", graph.id) })
         }.onSuccess {
             dropGraph(graph.id)
-            notice = "Deleted ${graph.name}."
+            notice = L10n.text("android.workflows.deleted_0.4118427c", "${graph.name}")
             error = null
             load()
         }.onFailure {
-            error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+            error = TunnelCopy.display(it.message ?: L10n.text("android.workflows.the_request_failed.db4fb447"), hostLabel)
         }
         working = false
     }
@@ -479,13 +481,13 @@ fun WorkflowsScreen(
             is WorkflowConfirm.Continue -> runs.firstOrNull { it.id == pending.runID }
             else -> null
         }
-        val name = graph?.name?.ifBlank { "this workflow" } ?: "this workflow"
-        val place = folderName.ifBlank { "this folder" }
+        val name = graph?.name?.ifBlank { L10n.text("android.workflows.this_workflow.a7b5fc94") } ?: L10n.text("android.workflows.this_workflow.a7b5fc94")
+        val place = folderName.ifBlank { L10n.text("android.workflows.this_folder.9d6325c8") }
         when (pending) {
             is WorkflowConfirm.Run -> JobConfirmDialog(
-                title = "Run $name?",
+                title = L10n.text("android.workflows.run_0.52ecce8a", "${name}"),
                 message = JobCopy.run(name, place, hostLabel),
-                confirmLabel = "Run",
+                confirmLabel = L10n.text("common.run"),
                 onConfirm = {
                     val target = graphs.firstOrNull { it.id == pending.graphID }
                     if (target != null) scope.launch { run(target, pending.input) }
@@ -493,24 +495,24 @@ fun WorkflowsScreen(
                 onDismiss = { confirm = null },
             )
             is WorkflowConfirm.Stop -> if (targetRun != null) JobConfirmDialog(
-                title = "Stop $name?",
+                title = L10n.text("android.workflows.stop_0.0d85fcc3", "${name}"),
                 message = JobCopy.stop(name, place, hostLabel),
-                confirmLabel = "Stop",
+                confirmLabel = L10n.text("common.stop"),
                 destructive = true,
                 onConfirm = { scope.launch { stop(targetRun) } },
                 onDismiss = { confirm = null },
             )
             is WorkflowConfirm.Continue -> if (targetRun != null) JobConfirmDialog(
-                title = "Continue $name?",
+                title = L10n.text("android.workflows.continue_0.c6506423", "${name}"),
                 message = JobCopy.continueGate(name, place, hostLabel),
-                confirmLabel = "Continue",
+                confirmLabel = L10n.text("android.workflows.continue.31fbef16"),
                 onConfirm = { scope.launch { continueRun(targetRun) } },
                 onDismiss = { confirm = null },
             )
             is WorkflowConfirm.Delete -> if (graph != null) JobConfirmDialog(
-                title = "Delete $name?",
-                message = "The graph is removed. Past runs stay on this computer.",
-                confirmLabel = "Delete",
+                title = L10n.text("android.workflows.delete_0.dc6c5ae4", "${name}"),
+                message = L10n.text("android.workflows.the_graph_is_removed_past_runs_stay_on_thi.63fef9bc"),
+                confirmLabel = L10n.text("common.delete"),
                 destructive = true,
                 onConfirm = { scope.launch { remove(graph) } },
                 onDismiss = { confirm = null },
@@ -556,30 +558,30 @@ private fun WorkflowListPage(
     }
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Space.s)) {
         JobScreenHeader(
-            title = "Workflows",
+            title = L10n.text("common.workflows"),
             subtitle = folderCaption,
             onBack = onBack,
             actions = {
                 IconButton(onClick = onCreate) {
-                    Icon(ActionIcon.Create.vector, "New workflow", tint = LocalTsColors.current.accent)
+                    Icon(ActionIcon.Create.vector, L10n.text("android.workflows.new_workflow.750c4da4"), tint = LocalTsColors.current.accent)
                 }
             },
         )
         if (!supportsEdits) {
             Text(
-                "Update $hostLabel's tokenstat to save workflows from here. Below protocol 22 every save is last-write-wins.",
+                L10n.text("android.workflows.update_0_s_tokenstat_to_save_workflows_fro.fccb558d", "${hostLabel}"),
                 style = TsType.caption,
                 color = LocalTsColors.current.textSecondary,
             )
         }
         if (error != null) {
             Banner(error, BannerSeverity.DANGER)
-            TsSecondaryButton(label = "Reload", small = true, onClick = onReload)
+            TsSecondaryButton(label = L10n.text("android.workflows.reload.bdc090ec"), small = true, onClick = onReload)
         }
         if (notice != null) {
             Text(notice, style = TsType.caption, color = LocalTsColors.current.textSecondary)
         }
-        TsSearchField(prompt = "Search workflows", query = search, onQueryChange = onSearch)
+        TsSearchField(prompt = L10n.text("android.workflows.search_workflows.e827cf3e"), query = search, onQueryChange = onSearch)
         if (loaded && scoped.isNotEmpty()) {
             Text(
                 workflowListSummary(scoped.size, liveCount),
@@ -590,7 +592,7 @@ private fun WorkflowListPage(
         if (loading && !loaded) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 CircularProgressIndicator()
-                Text("Loading workflows", color = LocalTsColors.current.textSecondary)
+                Text(L10n.text("android.workflows.loading_workflows.0c1c66fa"), color = LocalTsColors.current.textSecondary)
             }
         }
         PullToRefreshBox(isRefreshing = loading && loaded, onRefresh = onReload, modifier = Modifier.weight(1f)) {
@@ -599,18 +601,18 @@ private fun WorkflowListPage(
                     item {
                         EmptyState(
                             ActionIcon.Plan.vector,
-                            "No workflows here",
-                            "Create a workflow for this folder. It runs on the connected computer.",
+                            L10n.text("android.workflows.no_workflows_here.e58560d8"),
+                            L10n.text("android.workflows.create_a_workflow_for_this_folder_it_runs.b0f95793"),
                             art = { EmptyArt(EmptyArtKind.Workflows) },
                             action = {
-                                TsAccentButton(label = "New workflow", icon = ActionIcon.Create.vector, small = true, onClick = onCreate)
+                                TsAccentButton(label = L10n.text("android.workflows.new_workflow.750c4da4"), icon = ActionIcon.Create.vector, small = true, onClick = onCreate)
                             },
                         )
                     }
                 } else if (loaded && filtered.isEmpty()) {
                     item {
                         Text(
-                            "No matching workflows",
+                            L10n.text("android.workflows.no_matching_workflows.2b5eeb7d"),
                             style = TsType.body,
                             color = LocalTsColors.current.textSecondary,
                         )
@@ -664,7 +666,7 @@ private fun WorkflowJobRow(
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    graph.name.ifBlank { "Untitled" },
+                    graph.name.ifBlank { L10n.text("android.workflows.untitled.f59ab8d1") },
                     style = TsType.subheadline.copy(fontWeight = FontWeight.Medium),
                     color = colors.textPrimary,
                     maxLines = 2,
@@ -675,19 +677,19 @@ private fun WorkflowJobRow(
                 if (isLive) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                         Canvas(Modifier.size(7.dp)) { drawCircle(colors.stateWorking) }
-                        Text("Running", style = TsType.caption, color = colors.stateWorking)
+                        Text(L10n.text("common.running"), style = TsType.caption, color = colors.stateWorking)
                     }
                 } else if (isPaused) {
-                    Text("Paused", style = TsType.caption, color = colors.textTertiary)
+                    Text(L10n.text("common.paused"), style = TsType.caption, color = colors.textTertiary)
                 }
                 Box {
                     IconButton(onClick = { menu = true }, enabled = !working) {
-                        Icon(ActionIcon.More.vector, "Workflow actions", tint = colors.controlGlyph)
+                        Icon(ActionIcon.More.vector, L10n.text("android.workflows.workflow_actions.17916cf6"), tint = colors.controlGlyph)
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Open") }, onClick = { menu = false; onOpen() })
-                        DropdownMenuItem(text = { Text("Edit") }, onClick = { menu = false; onEdit() })
-                        DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; onDelete() })
+                        DropdownMenuItem(text = { Text(L10n.text("common.open")) }, onClick = { menu = false; onOpen() })
+                        DropdownMenuItem(text = { Text(L10n.text("common.edit")) }, onClick = { menu = false; onEdit() })
+                        DropdownMenuItem(text = { Text(L10n.text("common.delete")) }, onClick = { menu = false; onDelete() })
                     }
                 }
             }
@@ -724,16 +726,16 @@ private fun WorkflowDetailPage(
 ) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Space.s)) {
         JobScreenHeader(
-            title = graph?.name?.ifBlank { "Workflow" } ?: "Workflow",
+            title = graph?.name?.ifBlank { L10n.text("android.workflows.workflow.2e2d5c56") } ?: L10n.text("android.workflows.workflow.2e2d5c56"),
             subtitle = folderName.ifBlank { hostLabel },
             onBack = onBack,
             actions = {
                 if (graph != null) {
                     IconButton(onClick = onEdit) {
-                        Icon(ActionIcon.Edit.vector, "Edit", tint = LocalTsColors.current.controlGlyph)
+                        Icon(ActionIcon.Edit.vector, L10n.text("common.edit"), tint = LocalTsColors.current.controlGlyph)
                     }
                     IconButton(onClick = onDelete) {
-                        Icon(ActionIcon.Delete.vector, "Delete", tint = LocalTsColors.current.danger)
+                        Icon(ActionIcon.Delete.vector, L10n.text("common.delete"), tint = LocalTsColors.current.danger)
                     }
                 }
             },
@@ -747,14 +749,14 @@ private fun WorkflowDetailPage(
             ) {
                 if (error != null) {
                     Banner(error, BannerSeverity.DANGER)
-                    TsSecondaryButton(label = "Reload", small = true, onClick = onReload)
+                    TsSecondaryButton(label = L10n.text("android.workflows.reload.bdc090ec"), small = true, onClick = onReload)
                 }
                 if (notice != null) {
                     Text(notice, style = TsType.caption, color = LocalTsColors.current.textSecondary)
                 }
                 if (graph == null) {
                     if (loaded) {
-                        JobGoneCard("This workflow is gone", "It is not in the folder any more.")
+                        JobGoneCard(L10n.text("android.workflows.this_workflow_is_gone.f1012e17"), L10n.text("android.workflows.it_is_not_in_the_folder_any_more.ff5d54d4"))
                     } else {
                         CircularProgressIndicator()
                     }
@@ -765,20 +767,20 @@ private fun WorkflowDetailPage(
                     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                         Text(hostLabel, style = TsType.caption, color = LocalTsColors.current.textSecondary)
                         Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                            JobFactRow("Schedule", graph.schedule.summary, Modifier.weight(1f))
-                            JobFactRow("Budget", JobCopy.budget(graph.budgetSeconds), Modifier.weight(1f))
+                            JobFactRow(L10n.text("android.workflows.schedule.f4830a1d"), graph.schedule.summary, Modifier.weight(1f))
+                            JobFactRow(L10n.text("android.workflows.budget.1c6225ec"), JobCopy.budget(graph.budgetSeconds), Modifier.weight(1f))
                         }
                         val place = HostScheduleClock.place(queueTimezone)
                         if (place != null || (graph.nextRunAtMs != null && graph.enabled)) {
                             Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                                 if (place != null) {
-                                    JobFactRow("Time zone", place, Modifier.weight(1f))
+                                    JobFactRow(L10n.text("android.workflows.time_zone.b9fe1464"), place, Modifier.weight(1f))
                                 } else {
                                     Box(Modifier.weight(1f))
                                 }
                                 val next = graph.nextRunAtMs
                                 if (next != null && graph.enabled) {
-                                    JobFactRow("Next", HostScheduleClock.nextRun(next, queueTimezone), Modifier.weight(1f))
+                                    JobFactRow(L10n.text("common.next"), HostScheduleClock.nextRun(next, queueTimezone), Modifier.weight(1f))
                                 } else {
                                     Box(Modifier.weight(1f))
                                 }
@@ -786,7 +788,7 @@ private fun WorkflowDetailPage(
                         }
                         val lastStarted = lastWorkflowRun(runs, graph)?.startedAtMs?.takeIf { it > 0 }
                             ?: graph.lastRunAtMs?.takeIf { it > 0 }
-                        JobFactRow("Last", JobCopy.lastRunWhen(lastStarted))
+                        JobFactRow(L10n.text("android.workflows.last.eb970eb0"), JobCopy.lastRunWhen(lastStarted))
                     }
                 }
                 if (graph.nodes.isNotEmpty()) {
@@ -798,13 +800,13 @@ private fun WorkflowDetailPage(
                             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                                 if (live.isWaiting) {
                                     TsAccentButton(
-                                        label = if (working) "Working" else "Continue",
+                                        label = if (working) L10n.text("common.working") else L10n.text("android.workflows.continue.31fbef16"),
                                         enabled = !working,
                                         onClick = { onContinue(live.id) },
                                     )
                                 }
                                 TsSecondaryButton(
-                                    label = "Stop",
+                                    label = L10n.text("common.stop"),
                                     icon = ActionIcon.Stop.vector,
                                     enabled = !working,
                                     onClick = { onStop(live.id) },
@@ -815,18 +817,18 @@ private fun WorkflowDetailPage(
                                 input,
                                 onInput,
                                 modifier = Modifier.fillMaxWidth(),
-                                label = { Text("Starting prompt") },
+                                label = { Text(L10n.text("android.workflows.starting_prompt.407bec2f")) },
                                 minLines = 3,
                             )
                             TsAccentButton(
-                                label = if (working) "Starting" else "Run",
+                                label = if (working) L10n.text("android.workflows.starting.aeed4d26") else L10n.text("common.run"),
                                 icon = ActionIcon.Run.vector,
                                 enabled = !working,
                                 onClick = onRun,
                             )
                         }
                         if (graph.schedule.repeats) {
-                            BrandToggleChip(if (graph.enabled) "On" else "Off", graph.enabled, { onToggle(graph) })
+                            BrandToggleChip(if (graph.enabled) L10n.text("android.workflows.on.13001175") else L10n.text("android.workflows.off.ca7981b4"), graph.enabled, { onToggle(graph) })
                         }
                     }
                 }
@@ -834,7 +836,7 @@ private fun WorkflowDetailPage(
                 val preview = remember(ordered) { ordered.take(RunHistory.PREVIEW_COUNT) }
                 if (preview.isNotEmpty()) {
                     Text(
-                        "Recent runs",
+                        L10n.text("android.workflows.recent_runs.237112b8"),
                         style = TsType.caption.copy(fontWeight = FontWeight.SemiBold),
                         color = LocalTsColors.current.textTertiary,
                     )
@@ -905,7 +907,7 @@ private fun WorkflowHistoryPage(
 ) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Space.s)) {
         JobScreenHeader(
-            title = "Runs",
+            title = L10n.text("android.workflows.runs.848f54e8"),
             subtitle = graph?.name.orEmpty(),
             onBack = onBack,
         )
@@ -923,8 +925,8 @@ private fun WorkflowHistoryPage(
                 if (runs.isEmpty()) {
                     EmptyState(
                         ActionIcon.History.vector,
-                        "Nothing has run yet",
-                        "When this workflow runs, the output lands here.",
+                        L10n.text("android.workflows.nothing_has_run_yet.45d9f27c"),
+                        L10n.text("android.workflows.when_this_workflow_runs_the_output_lands_h.2b8433ca"),
                     )
                     return@Column
                 }
@@ -938,7 +940,7 @@ private fun WorkflowHistoryPage(
                 )
                 if (leftover > 0) {
                     Text(
-                        "Showing the ${visible.size} newest of ${runs.size}.",
+                        L10n.text("android.workflows.showing_the_0_newest_of_1.4b456919", "${visible.size}", "${runs.size}"),
                         style = TsType.caption,
                         color = LocalTsColors.current.textSecondary,
                     )
@@ -953,7 +955,7 @@ private fun WorkflowHistoryPage(
                     )
                 }
                 if (leftover > 0) {
-                    TsSecondaryButton(label = "Earlier runs", icon = ActionIcon.History.vector, small = true, onClick = onMore)
+                    TsSecondaryButton(label = L10n.text("android.workflows.earlier_runs.04ab162c"), icon = ActionIcon.History.vector, small = true, onClick = onMore)
                 }
             }
         }
@@ -981,7 +983,7 @@ private fun WorkflowRunPage(
 ) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Space.s)) {
         JobScreenHeader(
-            title = run?.name?.ifBlank { "Run" } ?: "Run",
+            title = run?.name?.ifBlank { L10n.text("common.run") } ?: L10n.text("common.run"),
             subtitle = hostLabel,
             onBack = onBack,
         )
@@ -994,11 +996,11 @@ private fun WorkflowRunPage(
             ) {
                 if (error != null) {
                     Banner(error, BannerSeverity.DANGER)
-                    TsSecondaryButton(label = "Reload", small = true, onClick = onReload)
+                    TsSecondaryButton(label = L10n.text("android.workflows.reload.bdc090ec"), small = true, onClick = onReload)
                 }
                 if (run == null) {
                     if (loaded) {
-                        JobGoneCard("This run is unavailable", "It is no longer in this folder's run history.")
+                        JobGoneCard(L10n.text("android.workflows.this_run_is_unavailable.5bef28b2"), L10n.text("android.workflows.it_is_no_longer_in_this_folder_s_run_histo.0960f968"))
                     } else {
                         CircularProgressIndicator()
                     }
@@ -1017,7 +1019,7 @@ private fun WorkflowRunPage(
                         if (run.input.isNotBlank()) {
                             Text(run.input, style = TsType.body, color = LocalTsColors.current.textSecondary)
                         }
-                        JobFactRow("Budget", JobCopy.budget(run.budgetSeconds))
+                        JobFactRow(L10n.text("android.workflows.budget.1c6225ec"), JobCopy.budget(run.budgetSeconds))
                     }
                 }
                 if (run.isLive) {
@@ -1028,13 +1030,13 @@ private fun WorkflowRunPage(
                         ) {
                             if (run.isWaiting) {
                                 TsAccentButton(
-                                    label = if (working) "Working" else "Continue",
+                                    label = if (working) L10n.text("common.working") else L10n.text("android.workflows.continue.31fbef16"),
                                     enabled = !working,
                                     onClick = onContinue,
                                 )
                             }
                             TsSecondaryButton(
-                                label = "Stop",
+                                label = L10n.text("common.stop"),
                                 icon = ActionIcon.Stop.vector,
                                 enabled = !working,
                                 onClick = onStop,
@@ -1044,7 +1046,7 @@ private fun WorkflowRunPage(
                 }
                 if (run.steps.isNotEmpty()) {
                     Text(
-                        "Steps",
+                        L10n.text("android.workflows.steps.1de3df70"),
                         style = TsType.caption.copy(fontWeight = FontWeight.SemiBold),
                         color = LocalTsColors.current.textTertiary,
                     )
@@ -1058,7 +1060,7 @@ private fun WorkflowRunPage(
                         )
                     }
                     Text(
-                        "Transcript",
+                        L10n.text("android.workflows.transcript.721164f0"),
                         style = TsType.caption.copy(fontWeight = FontWeight.SemiBold),
                         color = LocalTsColors.current.textTertiary,
                     )
@@ -1074,13 +1076,13 @@ private fun WorkflowRunPage(
                     }
                 } else {
                     Text(
-                        "Transcript",
+                        L10n.text("android.workflows.transcript.721164f0"),
                         style = TsType.caption.copy(fontWeight = FontWeight.SemiBold),
                         color = LocalTsColors.current.textTertiary,
                     )
                     TsCard {
                         Text(
-                            if (run.isLive) "Waiting for output…" else "No readable output.",
+                            if (run.isLive) L10n.text("android.workflows.waiting_for_output.f05fefe2") else L10n.text("android.workflows.no_readable_output.cd218ba3"),
                             style = TsType.body,
                             color = LocalTsColors.current.textSecondary,
                             modifier = Modifier.padding(Space.m),
@@ -1140,7 +1142,7 @@ private fun WorkflowStepTranscript(
                 }) as JsonObject
             }.getOrElse { failure ->
                 if (failure is kotlinx.coroutines.CancellationException) throw failure
-                text = buffer.toString().ifEmpty { "Output is unavailable right now." }
+                text = buffer.toString().ifEmpty { L10n.text("android.workflows.output_is_unavailable_right_now.8b0840d6") }
                 return@ForegroundEffect
             }
             buffer.append(chunk.optStr("text").orEmpty())
@@ -1151,14 +1153,14 @@ private fun WorkflowStepTranscript(
         } while (live)
     }
     Text(
-        text ?: "Loading…",
+        text ?: L10n.text("android.workflows.loading.ba3bbbe1"),
         style = TsType.mono(12),
         color = LocalTsColors.current.textPrimary,
         modifier = modifier,
     )
     if (text != null && text!!.isBlank()) {
         Text(
-            if (live) "Waiting for output…" else "No readable output.",
+            if (live) L10n.text("android.workflows.waiting_for_output.f05fefe2") else L10n.text("android.workflows.no_readable_output.cd218ba3"),
             style = TsType.body,
             color = LocalTsColors.current.textSecondary,
             modifier = modifier,

@@ -26,7 +26,7 @@ enum SSHSecretStore {
             guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil),
                   context.biometryType == .touchID else {
                 throw NSError(domain: "SSHSecretStore", code: 3, userInfo: [NSLocalizedDescriptionKey:
-                    "Touch ID is unavailable. Set it up or unlock this device, then try again."])
+                    L10n.text("apple.sshsecretstore.touch_id_is_unavailable_set_it_up_or_unloc.e0b5e6e6")])
             }
             var error: Unmanaged<CFError>?
             guard let access = SecAccessControlCreateWithFlags(nil,
@@ -46,7 +46,7 @@ enum SSHSecretStore {
         guard status == errSecSuccess else {
             if biometric && status == errSecMissingEntitlement {
                 throw NSError(domain: "SSHSecretStore", code: Int(status), userInfo: [NSLocalizedDescriptionKey:
-                    "This build cannot save Touch ID keys because its Keychain signing entitlement is missing. Use a properly signed build. Existing keys are unchanged."])
+                    L10n.text("apple.sshsecretstore.this_build_cannot_save_touch_id_keys_becau.8d28dcb0")])
             }
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
         }
@@ -59,7 +59,7 @@ enum SSHSecretStore {
         guard requiresBiometrics(reference) else { return try load(reference: reference) }
         try Task.checkCancellation()
         let context = LAContext()
-        context.localizedReason = "Use your SSH key to connect"
+        context.localizedReason = L10n.text("apple.sshsecretstore.use_your_ssh_key_to_connect.752dbace")
         context.localizedFallbackTitle = ""
         defer { context.invalidate() }
         let secret = try await withTaskCancellationHandler {
@@ -102,13 +102,13 @@ enum SSHSecretStore {
 
     private static func biometricError() -> NSError {
         NSError(domain: "SSHSecretStore", code: 2, userInfo: [NSLocalizedDescriptionKey:
-            "Touch ID could not unlock this key. Try again. If your enrolled fingerprints changed, create a new key and authorize it on your servers."])
+            L10n.text("apple.sshsecretstore.touch_id_could_not_unlock_this_key_try_aga.f856f4a9")])
     }
 
     static func load(reference: String) throws -> String {
         guard reference.hasPrefix("keychain:") else {
             throw NSError(domain: "SSHSecretStore", code: 1,
-                          userInfo: [NSLocalizedDescriptionKey: "Unknown SSH secret reference"])
+                          userInfo: [NSLocalizedDescriptionKey: L10n.text("apple.sshsecretstore.unknown_ssh_secret_reference.31bf164e")])
         }
         let id = String(reference.dropFirst("keychain:".count))
         let query: [String: Any] = [

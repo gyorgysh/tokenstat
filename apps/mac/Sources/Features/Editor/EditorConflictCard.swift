@@ -23,16 +23,16 @@ struct EditorConflictCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("This file changed on that computer.")
+            Text(L10n.text("apple.editorconflictcard.this_file_changed_on_that_computer.c4576a6e"))
                 .font(ClientType.label.weight(.semibold))
             Text(summary)
                 .font(ClientType.caption)
                 .foregroundStyle(Theme.controlGlyph)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: Theme.Space.s) {
-                Button("Reload computer", .restore, role: .destructive) { onReload() }
+                Button(L10n.text("apple.editorconflictcard.reload_computer.2bdc7487"), .restore, role: .destructive) { onReload() }
                     .buttonStyle(SecondaryButtonStyle(small: true))
-                Button("Keep my draft", .edit) { onKeep() }
+                Button(L10n.text("apple.editorconflictcard.keep_my_draft.cdb80bb9"), .edit) { onKeep() }
                     .buttonStyle(AccentButtonStyle(small: true))
                 Spacer(minLength: 0)
             }
@@ -42,15 +42,15 @@ struct EditorConflictCard: View {
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("This file changed on that computer. \(summary)")
+        .accessibilityLabel(L10n.text("apple.editorconflictcard.this_file_changed_on_that_computer_0.087ee47e", "\(summary)"))
     }
 
     private var summary: String {
         let mine = document.text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).count
         let theirs = hostContent.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).count
-        var parts = "Yours has \(mine) lines, that computer has \(theirs). Saving is off until you choose."
+        var parts = L10n.text("apple.editorconflictcard.yours_has_0_lines_that_computer_has_1_savi.66339948", "\(mine)", "\(theirs)")
         if let first = firstDifference {
-            parts += " First difference: line \(first)."
+            parts += L10n.text("apple.editorconflictcard.first_difference_line_0.42e7b04c", "\(first)")
         }
         return parts
     }

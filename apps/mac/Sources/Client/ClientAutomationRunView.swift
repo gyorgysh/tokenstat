@@ -28,7 +28,7 @@ struct ClientAutomationRunView: View {
                 if let run {
                     header(run)
                     if let live = session.liveRun, live.id != run.id {
-                        Text("A run is going. This is an earlier one.")
+                        Text(L10n.text("apple.clientautomationrunview.a_run_is_going_this_is_an_earlier_one.c004db24"))
                             .font(ClientType.caption)
                             .foregroundStyle(Theme.controlGlyph)
                             .fixedSize(horizontal: false, vertical: true)
@@ -40,13 +40,13 @@ struct ClientAutomationRunView: View {
                         .cardSurface()
                     TranscriptView(
                         text: session.transcriptText,
-                        empty: run.isRunning ? "Waiting for output…" : "No readable output."
+                        empty: run.isRunning ? L10n.text("apple.clientautomationrunview.waiting_for_output.f05fefe2") : L10n.text("apple.clientautomationrunview.no_readable_output.cd218ba3")
                     )
                     .padding(Theme.Space.m)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .cardSurface()
                 } else if session.loaded {
-                    ClientSectionEmpty(text: "This run is unavailable", message: "It is no longer in this folder's run history.")
+                    ClientSectionEmpty(text: L10n.text("apple.clientautomationrunview.this_run_is_unavailable.5bef28b2"), message: L10n.text("apple.clientautomationrunview.it_is_no_longer_in_this_folder_s_run_histo.0960f968"))
                 }
             }
             .padding(.horizontal, Theme.Space.m)
@@ -54,7 +54,7 @@ struct ClientAutomationRunView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        .navigationTitle(run?.name ?? "Run")
+        .navigationTitle(run?.name ?? L10n.text("common.run"))
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
             await ClientRefresh.pull("automation-run-\(runID)") { await session.load() }
@@ -80,7 +80,7 @@ struct ClientAutomationRunView: View {
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
             }
-            ClientFactRow(label: "Backend", value: run.backend)
+            ClientFactRow(label: L10n.text("apple.clientautomationrunview.backend.2fb4019a"), value: run.backend)
         }
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)

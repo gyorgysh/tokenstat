@@ -123,7 +123,7 @@ struct ClientLauncherDestinationTile: View {
         .contentShape(.rect)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(count > 0
-                            ? "\(section.label), \(count) conversations"
+                            ? L10n.text("apple.clientlaunchtile.0_1_conversations.f33cef5a", "\(section.label)", "\(count)")
                             : section.label)
     }
 }
@@ -140,7 +140,7 @@ struct ClientMoreTile: View {
                     .font(Theme.font(18, weight: .medium))
                     .foregroundStyle(.tertiary)
                     .frame(height: 34)
-                Text(showing ? "Hide" : "More")
+                Text(showing ? L10n.text("apple.clientlaunchtile.hide.ac20a57b") : L10n.text("apple.clientlaunchtile.more.d47d7cb0"))
                     .font(ClientType.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -155,7 +155,7 @@ struct ClientMoreTile: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(showing ? "Hide extra tools" : "Show more tools")
+        .accessibilityLabel(showing ? L10n.text("apple.clientlaunchtile.hide_extra_tools.6063173b") : L10n.text("apple.clientlaunchtile.show_more_tools.fd6e5f9f"))
     }
 }
 

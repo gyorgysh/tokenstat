@@ -21,17 +21,17 @@ struct OfflineCard: View {
                     .foregroundStyle(Theme.warning)
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Offline")
+                    Text(L10n.text("common.offline"))
                         .font(Theme.callout.weight(.medium))
                         .foregroundStyle(.primary)
-                    Text("Retrying every \(Self.retrySeconds) seconds")
+                    Text(L10n.text("apple.offlinecard.retrying_every_0_seconds.cacf655a", "\(Self.retrySeconds)"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
                 Spacer(minLength: Theme.Space.s)
                 HStack(spacing: Theme.Space.xs) {
-                    Button("Try now", .refresh) {
+                    Button(L10n.text("apple.offlinecard.try_now.549f5e23"), .refresh) {
                         Task { await connectivity.checkNow() }
                     }
                     .buttonStyle(.borderless)
@@ -72,7 +72,7 @@ struct OfflineCard: View {
                 }
                 Spacer(minLength: Theme.Space.s)
                 HStack(spacing: Theme.Space.xs) {
-                    Button("Try now", .refresh) {
+                    Button(L10n.text("apple.offlinecard.try_now.549f5e23"), .refresh) {
                         connectivity.checkNow()
                         connection.reset()
                     }

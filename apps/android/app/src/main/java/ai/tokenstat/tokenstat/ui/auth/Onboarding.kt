@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.auth
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -52,54 +54,39 @@ private data class OnboardingPage(
 private val onboardingPages = listOf(
     OnboardingPage(
         OnboardingArtKind.Intro,
-        "Welcome",
-        "Your coding agents,\nwithin reach.",
-        "Run coding agents on your computer or a server. Pick up the " +
-            "conversation, work on your projects, and see your AI usage " +
-            "from your Android phone or tablet.",
+        L10n.text("android.onboarding.welcome.0e2226b5"),
+        L10n.text("android.onboarding.your_coding_agents_within_reach.e0c0e724"),
+        L10n.text("android.onboarding.run_coding_agents_on_your_computer_or_a_se.79e445d7"),
     ),
     OnboardingPage(
         OnboardingArtKind.Agents,
-        "Agents",
-        "Keep the conversation going",
-        "Give an agent a task, follow its progress, and reply when it " +
-            "needs you. Return to the same chat later, or open a live " +
-            "terminal when you want to work directly.",
+        L10n.text("android.onboarding.agents.279b44d2"),
+        L10n.text("android.onboarding.keep_the_conversation_going.4656fe2c"),
+        L10n.text("android.onboarding.give_an_agent_a_task_follow_its_progress_a.1c37d4c6"),
     ),
     OnboardingPage(
         OnboardingArtKind.Workspaces,
-        "Projects",
-        "Go from the chat\nto the code",
-        "Open a folder or clone a repository. Read and edit files, " +
-            "review changes, and keep tasks beside the code. Your " +
-            "projects stay on the machine that runs them.",
+        L10n.text("common.projects"),
+        L10n.text("android.onboarding.go_from_the_chat_to_the_code.612842a3"),
+        L10n.text("android.onboarding.open_a_folder_or_clone_a_repository_read_a.1ff55f95"),
     ),
     OnboardingPage(
         OnboardingArtKind.OnTheGo,
-        "Machines",
-        "Choose where the work runs",
-        "Use a computer you own or a cloud server. Connect it from " +
-            "this device, with guided setup for a server. That machine " +
-            "needs to be awake while you work; your Android phone or tablet is " +
-            "how you reach it.",
+        L10n.text("android.onboarding.machines.c061da19"),
+        L10n.text("android.onboarding.choose_where_the_work_runs.0e0fe3ac"),
+        L10n.text("android.onboarding.use_a_computer_you_own_or_a_cloud_server_c.2293108d"),
     ),
     OnboardingPage(
         OnboardingArtKind.Heatmap,
-        "Usage",
-        "Know where the tokens go",
-        "See activity and estimated cost by tool, model, and project, " +
-            "plus supported plans\u2019 usage and reset times. Synced numbers " +
-            "stay available with every computer asleep. Plan usage is " +
-            "shown separately from cost.",
+        L10n.text("android.onboarding.usage.8d59829c"),
+        L10n.text("android.onboarding.know_where_the_tokens_go.fc548566"),
+        L10n.text("android.onboarding.see_activity_and_estimated_cost_by_tool_mo.feb3684a"),
     ),
     OnboardingPage(
         OnboardingArtKind.Privacy,
-        "Privacy",
-        "Your machines.\nYour say.",
-        "Remote work travels over an end-to-end encrypted connection. " +
-            "You choose which devices can open your work and which usage " +
-            "totals to sync. Your account stays private unless you turn " +
-            "on a public profile.",
+        L10n.text("android.onboarding.privacy.54a57c31"),
+        L10n.text("android.onboarding.your_machines_your_say.71812757"),
+        L10n.text("android.onboarding.remote_work_travels_over_an_end_to_end_enc.6cfdbc5b"),
     ),
 )
 
@@ -133,7 +120,7 @@ fun Onboarding(onFinished: () -> Unit) {
             // page it would duplicate the button below, so it goes.
             if (page < onboardingPages.lastIndex) {
                 Text(
-                    "Skip",
+                    L10n.text("common.skip"),
                     color = colors.accent,
                     style = TextStyle(fontSize = 14.sp),
                     modifier = Modifier.clickable(onClick = onFinished),
@@ -155,7 +142,7 @@ fun Onboarding(onFinished: () -> Unit) {
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
-                    "${page + 1} of ${onboardingPages.size}",
+                    L10n.text("android.onboarding.0_of_1.9fea8201", "${page + 1}", "${onboardingPages.size}"),
                     style = TsType.numeric(12),
                     color = colors.accent,
                 )
@@ -214,7 +201,7 @@ fun Onboarding(onFinished: () -> Unit) {
         ) {
             if (page == onboardingPages.lastIndex) {
                 Text(
-                    "Next, sign in. You can connect a machine whenever you are ready.",
+                    L10n.text("android.onboarding.next_sign_in_you_can_connect_a_machine_whe.71155587"),
                     style = TextStyle(fontSize = 12.sp),
                     color = colors.textSecondary,
                     textAlign = TextAlign.Center,
@@ -227,14 +214,14 @@ fun Onboarding(onFinished: () -> Unit) {
             ) {
                 if (page > 0) {
                     TsSecondaryButton(
-                        label = "Back",
+                        label = L10n.text("common.back"),
                         onClick = { scope.launch { pagerState.animateScrollToPage(page - 1) } },
                     )
                 }
                 // The prominent action, like the client's prominent Continue:
                 // this is the one step the whole screen exists to take.
                 TsProminentButton(
-                    label = if (page == onboardingPages.lastIndex) "Get started" else "Continue",
+                    label = if (page == onboardingPages.lastIndex) L10n.text("android.onboarding.get_started.61e8d44a") else L10n.text("android.onboarding.continue.31fbef16"),
                     onClick = {
                         if (page == onboardingPages.lastIndex) {
                             onFinished()

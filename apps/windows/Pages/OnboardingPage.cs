@@ -73,48 +73,34 @@ internal sealed class OnboardingPage : Page
         var root = new StackPanel { Spacing = Theme.SpaceL, MaxWidth = 640 };
         root.Children.Add(new TextBlock
         {
-            Text = "tokenstat",
+            Text = L10n.Text("windows.onboardingpage.tokenstat.63d30539"),
             FontSize = 26,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         root.Children.Add(Section(
-            "Welcome",
-            "Your coding agents, within reach.",
-            "Run coding agents on your computer or a server. Pick up the "
-            + "conversation, work on your projects, and see your AI usage "
-            + "on this PC."));
+            L10n.Text("windows.onboardingpage.welcome.0e2226b5"),
+            L10n.Text("windows.onboardingpage.your_coding_agents_within_reach.f425119b"),
+            L10n.Text("windows.onboardingpage.run_coding_agents_on_your_computer_or_a_se.4eb96eb3")));
         root.Children.Add(Section(
-            "Agents",
-            "Keep the conversation going",
-            "Give an agent a task, follow its progress, and reply when it "
-            + "needs you. Return to the same chat later, or open a live "
-            + "terminal when you want to work directly."));
+            L10n.Text("windows.onboardingpage.agents.279b44d2"),
+            L10n.Text("windows.onboardingpage.keep_the_conversation_going.4656fe2c"),
+            L10n.Text("windows.onboardingpage.give_an_agent_a_task_follow_its_progress_a.1c37d4c6")));
         root.Children.Add(Section(
-            "Projects",
-            "Go from the chat to the code",
-            "Open a folder or clone a repository. Read and edit files, "
-            + "review changes, and keep tasks beside the code. Your "
-            + "projects stay on the machine that runs them."));
+            L10n.Text("common.projects"),
+            L10n.Text("windows.onboardingpage.go_from_the_chat_to_the_code.e1a5a08a"),
+            L10n.Text("windows.onboardingpage.open_a_folder_or_clone_a_repository_read_a.1ff55f95")));
         root.Children.Add(Section(
-            "Machines",
-            "Choose where the work runs",
-            "Use this PC or a cloud server, with guided setup for a server. "
-            + "That machine needs to be awake while you work, and this PC "
-            + "is how you reach it."));
+            L10n.Text("windows.onboardingpage.machines.c061da19"),
+            L10n.Text("windows.onboardingpage.choose_where_the_work_runs.0e0fe3ac"),
+            L10n.Text("windows.onboardingpage.use_this_pc_or_a_cloud_server_with_guided.dce35897")));
         root.Children.Add(Section(
-            "Usage",
-            "Know where the tokens go",
-            "See activity and estimated cost by tool, model, and project, "
-            + "plus supported plans’ usage and reset times. Synced numbers "
-            + "stay available with every computer asleep. Plan usage is "
-            + "shown separately from cost."));
+            L10n.Text("windows.onboardingpage.usage.8d59829c"),
+            L10n.Text("windows.onboardingpage.know_where_the_tokens_go.fc548566"),
+            L10n.Text("windows.onboardingpage.see_activity_and_estimated_cost_by_tool_mo.feb3684a")));
         root.Children.Add(Section(
-            "Privacy",
-            "Your machines. Your say.",
-            "Remote work travels over an end-to-end encrypted connection. "
-            + "You choose which devices can open your work and which usage "
-            + "totals to sync. Your account stays private unless you turn "
-            + "on a public profile."));
+            L10n.Text("windows.onboardingpage.privacy.54a57c31"),
+            L10n.Text("windows.onboardingpage.your_machines_your_say.6ae0dc0d"),
+            L10n.Text("windows.onboardingpage.remote_work_travels_over_an_end_to_end_enc.6cfdbc5b")));
         root.Children.Add(_signSlot);
         root.Children.Add(Footer());
         Content = new ScrollViewer
@@ -148,24 +134,24 @@ internal sealed class OnboardingPage : Page
         var body = new StackPanel { Spacing = Theme.SpaceM };
         body.Children.Add(new TextBlock
         {
-            Text = "Next, sign in. You can connect a machine whenever you are ready.",
+            Text = L10n.Text("windows.onboardingpage.next_sign_in_you_can_connect_a_machine_whe.71155587"),
             Opacity = 0.7,
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
         });
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         row.Children.Add(ActionIconGlyph.PrimaryButton(
-            "Get started", ActionIcon.Next, (_, _) => _done()));
+            L10n.Text("windows.onboardingpage.get_started.61e8d44a"), ActionIcon.Next, (_, _) => _done()));
         row.Children.Add(ActionIconGlyph.Button(
-            "Sign in", ActionIcon.SignIn,
+            L10n.Text("common.sign_in"), ActionIcon.SignIn,
             async (_, _) => await SignInFlow.RunAsync(this, _signSlot, () =>
             {
                 _done();
                 return Task.CompletedTask;
             })));
         row.Children.Add(ActionIconGlyph.Button(
-            "Skip", ActionIcon.Dismiss, (_, _) => _done()));
+            L10n.Text("common.skip"), ActionIcon.Dismiss, (_, _) => _done()));
         body.Children.Add(row);
-        return Chrome.Card("Ready when you are", body);
+        return Chrome.Card(L10n.Text("windows.onboardingpage.ready_when_you_are.34ef5704"), body);
     }
 }

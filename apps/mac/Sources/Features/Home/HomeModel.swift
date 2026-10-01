@@ -29,8 +29,8 @@ enum ActivityScope: String, CaseIterable, Identifiable, Sendable {
 
     var label: String {
         switch self {
-        case .thisMachine: return "This device"
-        case .allMachines: return "All devices"
+        case .thisMachine: return L10n.text("apple.homemodel.this_device.d052579c")
+        case .allMachines: return L10n.text("apple.homemodel.all_devices.0594fe82")
         }
     }
 

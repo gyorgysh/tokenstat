@@ -61,12 +61,12 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         ["input", "agent", "automation", "http", "command", "gate", "condition", "loop"];
 
     private static readonly string[] KindLabels =
-        ["Input", "Agent", "Automation", "HTTP", "Command", "Gate", "If", "Loop"];
+        [L10n.Text("windows.workflowspage.input.36ecb4f8"), L10n.Text("windows.workflowspage.agent.11b39c93"), L10n.Text("windows.workflowspage.automation.d909750b"), "HTTP", L10n.Text("windows.workflowspage.command.71316697"), L10n.Text("windows.workflowspage.gate.fa77a525"), L10n.Text("windows.workflowspage.if.1e3abf61"), L10n.Text("windows.workflowspage.loop.f2f6a018")];
 
     public WorkflowsPage(string? workspaceId = null)
     {
         _scopeWorkspaceId = workspaceId;
-        _searchBox = Chrome.SearchField("Search workflows", text =>
+        _searchBox = Chrome.SearchField(L10n.Text("windows.workflowspage.search_workflows.e827cf3e"), text =>
         {
             _query = text ?? "";
             RenderList();
@@ -119,7 +119,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         {
             Buttons.ToolbarIcon(
                 ActionIcon.Refresh,
-                "Reload workflows",
+                L10n.Text("windows.workflowspage.reload_workflows.6f2d0f98"),
                 async (_, _) =>
                 {
                     LogoRefresh.Began();
@@ -127,7 +127,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                 }),
             Buttons.ToolbarIcon(
                 ActionIcon.Create,
-                "Start a blank draft",
+                L10n.Text("windows.workflowspage.start_a_blank_draft.de239557"),
                 (_, _) => StartCreating()),
         };
     }
@@ -138,7 +138,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
     {
         _creating = true;
         _selectedId = null;
-        _graph = BlankGraph("Untitled");
+        _graph = BlankGraph(L10n.Text("windows.workflowspage.untitled.f59ab8d1"));
         _detailRevision = null;
         _detailDirty = false;
         _conflictId = null;
@@ -362,9 +362,9 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
     {
         if (string.IsNullOrEmpty(workspaceId))
         {
-            return "Uncategorized";
+            return L10n.Text("windows.workflowspage.uncategorized.8d40d123");
         }
-        return _folders.FirstOrDefault(f => f.Id == workspaceId).Name ?? "Folder";
+        return _folders.FirstOrDefault(f => f.Id == workspaceId).Name ?? L10n.Text("windows.workflowspage.folder.74ccd433");
     }
 
     private List<JsonNode?> GraphRuns(string graphId)
@@ -433,10 +433,10 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             if (!string.IsNullOrEmpty(_query.Trim()))
             {
                 _listHost.Children.Add(Chrome.Empty(
-                    "No matching workflows",
-                    $"No workflow matches \"{_query.Trim()}\".",
+                    L10n.Text("windows.workflowspage.no_matching_workflows.2b5eeb7d"),
+                    L10n.Text("windows.workflowspage.no_workflow_matches_0.696a5a93", $"{_query.Trim()}"),
                     ActionIcon.Search,
-                    ActionIconGlyph.Button("Clear search", ActionIcon.Dismiss, (_, _) =>
+                    ActionIconGlyph.Button(L10n.Text("windows.workflowspage.clear_search.3b7ea517"), ActionIcon.Dismiss, (_, _) =>
                     {
                         _searchBox.Text = "";
                     })));
@@ -444,10 +444,10 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             else
             {
                 _listHost.Children.Add(EmptyState.View(
-                    "No workflows yet",
-                    "Start from a blank graph, a recipe, or a draft from a prompt.",
+                    L10n.Text("windows.workflowspage.no_workflows_yet.d3e72e00"),
+                    L10n.Text("windows.workflowspage.start_from_a_blank_graph_a_recipe_or_a_dra.b387ebac"),
                     EmptyArtKind.Workflows,
-                    ActionIconGlyph.Button("New workflow", ActionIcon.Create, (_, _) => StartCreating())));
+                    ActionIconGlyph.Button(L10n.Text("windows.workflowspage.new_workflow.750c4da4"), ActionIcon.Create, (_, _) => StartCreating())));
             }
             return;
         }
@@ -472,7 +472,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                 global.Add(graph);
             }
         }
-        RenderSection("Global", global);
+        RenderSection(L10n.Text("windows.workflowspage.global.a258b30f"), global);
         if (_scopeWorkspaceId is not null)
         {
             if (byFolder.TryGetValue(_scopeWorkspaceId, out var scoped))
@@ -513,7 +513,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
 
     private UIElement GraphRow(JsonNode graph, string id)
     {
-        var name = Format.Text(graph, "name", "Workflow");
+        var name = Format.Text(graph, "name", L10n.Text("windows.workflowspage.workflow.2e2d5c56"));
         var runs = GraphRuns(id);
         var live = runs.FirstOrDefault(RunLive);
         var status = live is not null ? WorkbenchOps.RunLabel(Format.Text(live, "status")) : "idle";
@@ -527,7 +527,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         body.Children.Add(new TextBlock { Text = status, Opacity = 0.7 });
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         actions.Children.Add(ActionIconGlyph.Button(
-            "Run", ActionIcon.Run, async (_, _) => await RunAsync(id)));
+            L10n.Text("common.run"), ActionIcon.Run, async (_, _) => await RunAsync(id)));
         if (live is not null)
         {
             var runId = Format.Text(live, "id");
@@ -535,7 +535,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             {
                 var liveId = runId;
                 actions.Children.Add(ActionIconGlyph.Button(
-                    "Stop", ActionIcon.Stop, async (_, _) => await KillAsync(liveId)));
+                    L10n.Text("common.stop"), ActionIcon.Stop, async (_, _) => await KillAsync(liveId)));
             }
         }
         body.Children.Add(actions);
@@ -561,9 +561,9 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         }
         button.Click += (_, _) => SelectRow();
         var menu = ContextMenus.Menu(button);
-        ContextMenus.Add(menu, "Edit", SelectRow);
+        ContextMenus.Add(menu, L10n.Text("common.edit"), SelectRow);
         ContextMenus.AddButtons(menu, actions);
-        ContextMenus.Add(menu, "Delete…", () =>
+        ContextMenus.Add(menu, L10n.Text("windows.workflowspage.delete.9ce78fe3"), () =>
         {
             SelectRow();
             _confirmDelete = true;
@@ -604,7 +604,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             ["budgetSeconds"] = 10_800,
             ["enabled"] = false,
             ["schedule"] = WorkbenchOps.SchedulePayload("once", 0, 9, 0, 0, 0),
-            ["nodes"] = new JsonArray { StepNode("in", "input", "Start", 80, 120) },
+            ["nodes"] = new JsonArray { StepNode("in", "input", L10n.Text("common.start"), 80, 120) },
             ["edges"] = new JsonArray(),
         };
     }
@@ -612,13 +612,13 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
     private static JsonObject RecipeGraph(string name, string backend, string recipe)
     {
         var second = recipe == "review" ? "build" : "plan";
-        var secondTitle = recipe == "review" ? "Build" : "Plan";
+        var secondTitle = recipe == "review" ? L10n.Text("windows.workflowspage.build.bdd254b6") : L10n.Text("windows.workflowspage.plan.fa8ed0bd");
         var third = "build";
-        var thirdTitle = "Build";
+        var thirdTitle = L10n.Text("windows.workflowspage.build.bdd254b6");
         if (recipe == "review")
         {
             third = "review";
-            thirdTitle = "Review";
+            thirdTitle = L10n.Text("windows.workflowspage.review.aff0766a");
         }
         return new JsonObject
         {
@@ -630,7 +630,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             ["schedule"] = WorkbenchOps.SchedulePayload("once", 0, 9, 0, 0, 0),
             ["nodes"] = new JsonArray
             {
-                StepNode("in", "input", "Start", 80, 80),
+                StepNode("in", "input", L10n.Text("common.start"), 80, 80),
                 AgentNode(second, secondTitle, backend, 80, 240),
                 AgentNode(third, thirdTitle, backend, 80, 400),
             },
@@ -665,23 +665,23 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
     /// </summary>
     private static string ConnectionLabel(string kind, string when) => (kind, when) switch
     {
-        ("condition", "ok") => "Then",
-        ("condition", "error") => "Else",
-        ("loop", "ok") => "Body",
-        ("loop", "always") => "After last pass",
-        (_, "ok") => "Then",
-        (_, "error") => "On error",
-        (_, "always") => "Always",
+        ("condition", "ok") => L10n.Text("windows.workflowspage.then.0597f441"),
+        ("condition", "error") => L10n.Text("windows.workflowspage.else.9c77d72e"),
+        ("loop", "ok") => L10n.Text("windows.workflowspage.body.6ccaa641"),
+        ("loop", "always") => L10n.Text("windows.workflowspage.after_last_pass.c89d89b0"),
+        (_, "ok") => L10n.Text("windows.workflowspage.then.0597f441"),
+        (_, "error") => L10n.Text("windows.workflowspage.on_error.817fc01c"),
+        (_, "always") => L10n.Text("windows.workflowspage.always.de9f057a"),
         _ => when,
     };
 
     private static string ConnectionCaption(string kind) => kind switch
     {
-        "condition" => "Then is success. Else is error. The test reads the previous step.",
-        "loop" => "Body is the repeated work. After last pass is where the run goes when the loop is done. At most 20 passes.",
-        "gate" => "The run pauses here. Continue or Stop from the run.",
-        "input" => "The starting prompt fills {{input}} when you press Run.",
-        _ => "Then is on success. On error is the failure path. Always runs either way.",
+        "condition" => L10n.Text("windows.workflowspage.then_is_success_else_is_error_the_test_rea.8b4c9b63"),
+        "loop" => L10n.Text("windows.workflowspage.body_is_the_repeated_work_after_last_pass.121c684e"),
+        "gate" => L10n.Text("windows.workflowspage.the_run_pauses_here_continue_or_stop_from.793fcc9e"),
+        "input" => L10n.Text("windows.workflowspage.the_starting_prompt_fills_input_when_you_p.25eaf312"),
+        _ => L10n.Text("windows.workflowspage.then_is_on_success_on_error_is_the_failure.bab7fe1d"),
     };
 
     private JsonArray GraphNodes()
@@ -733,18 +733,18 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         _detailHost.Children.Clear();
         if (_creating && _graph is null)
         {
-            _graph = BlankGraph("Untitled");
+            _graph = BlankGraph(L10n.Text("windows.workflowspage.untitled.f59ab8d1"));
         }
         if (_graph is null)
         {
             _detailHost.Children.Add(new TextBlock
             {
-                Text = "Select a workflow",
+                Text = L10n.Text("windows.workflowspage.select_a_workflow.eaef14ea"),
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             });
             _detailHost.Children.Add(new TextBlock
             {
-                Text = "Pick a graph to edit its steps, run it, or read its history.",
+                Text = L10n.Text("windows.workflowspage.pick_a_graph_to_edit_its_steps_run_it_or_r.f444d785"),
                 Opacity = 0.66,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -776,36 +776,36 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         {
             body.Children.Add(new TextBlock
             {
-                Text = "Start",
+                Text = L10n.Text("common.start"),
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             });
             var recipe = new ComboBox { MinWidth = 220 };
             recipe.ItemsSource = new[]
             {
-                "Blank graph",
-                "Plan then build",
-                "Build with review",
-                "Draft from prompt",
+                L10n.Text("windows.workflowspage.blank_graph.18213e23"),
+                L10n.Text("windows.workflowspage.plan_then_build.9b157ea7"),
+                L10n.Text("windows.workflowspage.build_with_review.fca93771"),
+                L10n.Text("windows.workflowspage.draft_from_prompt.af0a3269"),
             };
             recipe.SelectedIndex = 0;
-            body.Children.Add(Labeled("Recipe", recipe));
+            body.Children.Add(Labeled(L10n.Text("windows.workflowspage.recipe.aec69352"), recipe));
             var designPrompt = new TextBox
             {
-                PlaceholderText = "Describe the workflow to draft",
+                PlaceholderText = L10n.Text("windows.workflowspage.describe_the_workflow_to_draft.f9c66e8c"),
                 AcceptsReturn = true,
                 TextWrapping = TextWrapping.Wrap,
                 MinHeight = 72,
             };
-            body.Children.Add(Labeled("Prompt", designPrompt));
+            body.Children.Add(Labeled(L10n.Text("windows.workflowspage.prompt.5c391238"), designPrompt));
             var designBackend = new ComboBox { MinWidth = 200 };
-            var backendNames = new List<string> { "Default agent" };
+            var backendNames = new List<string> { L10n.Text("windows.workflowspage.default_agent.94da52ec") };
             backendNames.AddRange(_backends.Select(b => b.Label));
             designBackend.ItemsSource = backendNames;
             designBackend.SelectedIndex = 0;
-            body.Children.Add(Labeled("Agent", designBackend));
+            body.Children.Add(Labeled(L10n.Text("windows.workflowspage.agent.11b39c93"), designBackend));
             var applyRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
             applyRow.Children.Add(ActionIconGlyph.Button(
-                "Apply", ActionIcon.Apply, async (_, _) =>
+                L10n.Text("windows.workflowspage.apply.31e392d1"), ActionIcon.Apply, async (_, _) =>
                 {
                     await ApplyRecipeAsync(recipe.SelectedIndex, designPrompt.Text, DesignBackendId(designBackend));
                 }));
@@ -815,7 +815,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         var name = new TextBox
         {
             Text = Format.Text(graph, "name"),
-            PlaceholderText = "Name",
+            PlaceholderText = L10n.Text("windows.workflowspage.name.dcd1d522"),
         };
         name.TextChanged += (_, _) =>
         {
@@ -825,10 +825,10 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             }
             _detailDirty = true;
         };
-        body.Children.Add(Labeled("Name", name));
+        body.Children.Add(Labeled(L10n.Text("windows.workflowspage.name.dcd1d522"), name));
 
         var scope = new ComboBox { MinWidth = 160 };
-        scope.ItemsSource = new[] { "Global", "This project" };
+        scope.ItemsSource = new[] { L10n.Text("windows.workflowspage.global.a258b30f"), L10n.Text("windows.workflowspage.this_project.d0f62545") };
         scope.SelectedIndex = Format.Text(graph, "scope") == "workspace" ? 1 : 0;
         scope.SelectionChanged += (_, _) =>
         {
@@ -838,10 +838,10 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             }
             _detailDirty = true;
         };
-        body.Children.Add(Labeled("Scope", scope));
+        body.Children.Add(Labeled(L10n.Text("windows.workflowspage.scope.b073f6c6"), scope));
 
         var folderBox = new ComboBox { MinWidth = 200 };
-        var folderNames = new List<string> { "No folder" };
+        var folderNames = new List<string> { L10n.Text("windows.workflowspage.no_folder.ca98f4c7") };
         folderNames.AddRange(_folders.Select(f => f.Name));
         folderBox.ItemsSource = folderNames;
         var workspaceId = Format.Text(graph, "workspaceId");
@@ -858,17 +858,15 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             }
             _detailDirty = true;
         };
-        body.Children.Add(Labeled("Folder", folderBox));
+        body.Children.Add(Labeled(L10n.Text("windows.workflowspage.folder.74ccd433"), folderBox));
 
         var budgetSeconds = Format.Long(graph, "budgetSeconds");
         var (budgetText, budgetUnit, noLimit) = budgetSeconds > 0
             ? WorkbenchOps.SplitBudget((ulong)budgetSeconds)
             : ("180", "minutes", true);
         var budget = new TextBox { Text = budgetText, MinWidth = 100 };
-        var unit = new ComboBox { MinWidth = 110 };
-        unit.ItemsSource = new[] { "minutes", "seconds" };
-        unit.SelectedItem = budgetUnit;
-        var noLimitBox = new CheckBox { Content = "No limit", IsChecked = noLimit };
+        var unit = Chrome.BudgetUnits(budgetUnit);
+        var noLimitBox = new CheckBox { Content = L10n.Text("windows.workflowspage.no_limit.f7fcff0d"), IsChecked = noLimit };
         void WriteBudget()
         {
             if (_graph is null)
@@ -880,7 +878,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                 _graph["budgetSeconds"] = 0;
                 return;
             }
-            var parsed = WorkbenchOps.BudgetSeconds(budget.Text, unit.SelectedItem as string ?? "minutes", false);
+            var parsed = WorkbenchOps.BudgetSeconds(budget.Text, unit.SelectedValue as string ?? "minutes", false);
             if (parsed is not null)
             {
                 _graph["budgetSeconds"] = parsed.Value;
@@ -893,9 +891,9 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         budgetRow.Children.Add(budget);
         budgetRow.Children.Add(unit);
         budgetRow.Children.Add(noLimitBox);
-        body.Children.Add(Labeled("Time limit", budgetRow));
+        body.Children.Add(Labeled(L10n.Text("windows.workflowspage.time_limit.e592a9ca"), budgetRow));
 
-        var enabled = new CheckBox { Content = "Enabled", IsChecked = Format.Flag(graph, "enabled") };
+        var enabled = new CheckBox { Content = L10n.Text("common.enabled"), IsChecked = Format.Flag(graph, "enabled") };
         enabled.Click += (_, _) =>
         {
             if (_graph is not null)
@@ -921,14 +919,14 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         if (_conflictId == _selectedId && !_creating)
         {
             body.Children.Add(Chrome.Banner(
-                "This workflow changed since you opened it. Compare the saved graph before replacing it.",
+                L10n.Text("windows.workflowspage.this_workflow_changed_since_you_opened_it.b752a79e"),
                 Theme.Warning,
                 Symbol.Important));
             var conflictRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
             conflictRow.Children.Add(ActionIconGlyph.PrimaryButton(
-                "Save anyway", ActionIcon.Save, async (_, _) => await SaveAsync(force: true)));
+                L10n.Text("windows.workflowspage.save_anyway.ef4c87b5"), ActionIcon.Save, async (_, _) => await SaveAsync(force: true)));
             conflictRow.Children.Add(ActionIconGlyph.Button(
-                "Take saved", ActionIcon.Restore, (_, _) =>
+                L10n.Text("windows.workflowspage.take_saved.932c55d7"), ActionIcon.Restore, (_, _) =>
                 {
                     _conflictId = null;
                     _detailDirty = false;
@@ -940,7 +938,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
 
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         var saveButton = ActionIconGlyph.PrimaryButton(
-            _creating ? "Create" : "Save", ActionIcon.Save, async (_, _) => await SaveAsync(force: false));
+            _creating ? L10n.Text("windows.workflowspage.create.4759498a") : L10n.Text("common.save"), ActionIcon.Save, async (_, _) => await SaveAsync(force: false));
         saveButton.IsEnabled = !_working;
         actions.Children.Add(saveButton);
         if (!_creating)
@@ -948,7 +946,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             if (!_confirmDelete)
             {
                 actions.Children.Add(ActionIconGlyph.Button(
-                    "Delete", ActionIcon.Delete, (_, _) =>
+                    L10n.Text("common.delete"), ActionIcon.Delete, (_, _) =>
                     {
                         _confirmDelete = true;
                         RenderDetail();
@@ -957,7 +955,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             else
             {
                 actions.Children.Add(ActionIconGlyph.Button(
-                    "Back", ActionIcon.Back, (_, _) =>
+                    L10n.Text("common.back"), ActionIcon.Back, (_, _) =>
                     {
                         _confirmDelete = false;
                         RenderDetail();
@@ -967,7 +965,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         else
         {
             actions.Children.Add(ActionIconGlyph.Button(
-                "Back", ActionIcon.Back, (_, _) =>
+                L10n.Text("common.back"), ActionIcon.Back, (_, _) =>
                 {
                     _creating = false;
                     _graph = null;
@@ -982,20 +980,20 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             var confirm = new StackPanel { Spacing = Theme.SpaceS };
             confirm.Children.Add(new TextBlock
             {
-                Text = $"Delete \"{Format.Text(graph, "name")}\"? This removes the workflow from this computer.",
+                Text = L10n.Text("windows.workflowspage.delete_0_this_removes_the_workflow_from_th.f5f08eb2", $"{Format.Text(graph, "name")}"),
                 TextWrapping = TextWrapping.Wrap,
             });
             var confirmRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
             confirmRow.Children.Add(ActionIconGlyph.Button(
-                "Delete workflow", ActionIcon.Delete, async (_, _) => await DeleteAsync()));
+                L10n.Text("windows.workflowspage.delete_workflow.b438c4a8"), ActionIcon.Delete, async (_, _) => await DeleteAsync()));
             confirm.Children.Add(confirmRow);
             body.Children.Add(confirm);
         }
 
-        var title = _creating ? "New workflow" : Format.Text(graph, "name", "Workflow");
+        var title = _creating ? L10n.Text("windows.workflowspage.new_workflow.750c4da4") : Format.Text(graph, "name", L10n.Text("windows.workflowspage.workflow.2e2d5c56"));
         var subtitle = _creating
             ? null
-            : $"Revision {_detailRevision?.ToString() ?? "unknown"} · {GraphNodes().Count} steps";
+            : L10n.Text("windows.workflowspage.revision_0_1_steps.bca9f803", $"{_detailRevision?.ToString() ?? L10n.Text("windows.workflowspage.unknown.b23a6a84")}", $"{GraphNodes().Count}");
         return Chrome.Card(title, body, subtitle);
     }
 
@@ -1016,7 +1014,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             await DesignFromPromptAsync(prompt, backend);
             return;
         }
-        var name = Format.Text(_graph, "name", "Untitled");
+        var name = Format.Text(_graph, "name", L10n.Text("windows.workflowspage.untitled.f59ab8d1"));
         _graph = recipe switch
         {
             1 => RecipeGraph(name, backend, "plan"),
@@ -1033,7 +1031,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         var schedule = graph?["schedule"] ?? graph;
         var body = new StackPanel { Spacing = Theme.SpaceS };
         var kind = new ComboBox { MinWidth = 150 };
-        kind.ItemsSource = new[] { "Once", "Interval", "Daily", "Weekdays", "Weekly", "Custom" };
+        kind.ItemsSource = new[] { L10n.Text("windows.workflowspage.once.d88f6d83"), L10n.Text("windows.workflowspage.interval.6f45b000"), L10n.Text("windows.workflowspage.daily.b36c2611"), L10n.Text("windows.workflowspage.weekdays.6f4b602b"), L10n.Text("windows.workflowspage.weekly.29751324"), L10n.Text("windows.workflowspage.custom.494ca78f") };
         var current = Format.Text(schedule, "kind", "once");
         kind.SelectedIndex = Math.Max(0, Array.IndexOf(WorkbenchOps.ScheduleKinds, current));
         kind.SelectionChanged += (_, _) =>
@@ -1041,7 +1039,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             WriteSchedule(kind.SelectedIndex, null, null, null, null, null);
             _detailDirty = true;
         };
-        body.Children.Add(Labeled("Schedule", kind));
+        body.Children.Add(Labeled(L10n.Text("windows.workflowspage.schedule.f4830a1d"), kind));
 
         var interval = new TextBox
         {
@@ -1060,11 +1058,11 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         intervalRow.Children.Add(interval);
         intervalRow.Children.Add(new TextBlock
         {
-            Text = "minutes",
+            Text = L10n.Text("windows.workflowspage.minutes.90e63d85"),
             VerticalAlignment = VerticalAlignment.Center,
             Opacity = 0.68,
         });
-        body.Children.Add(Labeled("Every", intervalRow));
+        body.Children.Add(Labeled(L10n.Text("windows.workflowspage.every.9b8617fd"), intervalRow));
 
         var hour = new ComboBox { MinWidth = 80 };
         hour.ItemsSource = Enumerable.Range(0, 24).Select(h => h.ToString("00")).ToArray();
@@ -1085,7 +1083,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         var timeRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         timeRow.Children.Add(hour);
         timeRow.Children.Add(minute);
-        body.Children.Add(Labeled("Time", timeRow));
+        body.Children.Add(Labeled(L10n.Text("windows.workflowspage.time.33b93476"), timeRow));
 
         var weekday = new ComboBox { MinWidth = 140 };
         weekday.ItemsSource = WorkbenchOps.DayNames.ToArray();
@@ -1095,7 +1093,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             WriteSchedule(null, null, null, null, weekday.SelectedIndex, null);
             _detailDirty = true;
         };
-        body.Children.Add(Labeled("Day", weekday));
+        body.Children.Add(Labeled(L10n.Text("windows.workflowspage.day.8f2364e1"), weekday));
 
         var mask = (int)Format.Long(schedule, "weekdays");
         var daysRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
@@ -1123,7 +1121,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             };
             daysRow.Children.Add(day);
         }
-        body.Children.Add(Labeled("Days", daysRow));
+        body.Children.Add(Labeled(L10n.Text("windows.workflowspage.days.e08c0aa8"), daysRow));
         return body;
     }
 
@@ -1171,21 +1169,21 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
     {
         if (_graph is null)
         {
-            return "Open a workflow first.";
+            return L10n.Text("windows.workflowspage.open_a_workflow_first.ef68cf31");
         }
         if (string.IsNullOrWhiteSpace(Format.Text(_graph, "name")))
         {
-            return "Give this workflow a name.";
+            return L10n.Text("windows.workflowspage.give_this_workflow_a_name.146078f2");
         }
         var nodes = GraphNodes();
         var edges = GraphEdges();
         if (nodes.Count > MaxSteps)
         {
-            return $"A workflow may have at most {MaxSteps} steps.";
+            return L10n.Text("windows.workflowspage.a_workflow_may_have_at_most_0_steps.e533210f", $"{MaxSteps}");
         }
         if (edges.Count > MaxConnections)
         {
-            return $"A workflow may have at most {MaxConnections} connections.";
+            return L10n.Text("windows.workflowspage.a_workflow_may_have_at_most_0_connections.32d67dc9", $"{MaxConnections}");
         }
         var ids = new HashSet<string>();
         foreach (var node in nodes)
@@ -1193,11 +1191,11 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             var id = Format.Text(node, "id").Trim();
             if (string.IsNullOrEmpty(id))
             {
-                return "Every step needs an id.";
+                return L10n.Text("windows.workflowspage.every_step_needs_an_id.8d69a4a0");
             }
             if (!ids.Add(id))
             {
-                return $"Two steps share the id {id}.";
+                return L10n.Text("windows.workflowspage.two_steps_share_the_id_0.7df9bf9b", $"{id}");
             }
         }
         foreach (var edge in edges)
@@ -1206,11 +1204,11 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             var to = Format.Text(edge, "to");
             if (from == to)
             {
-                return "A step cannot connect to itself.";
+                return L10n.Text("windows.workflowspage.a_step_cannot_connect_to_itself.315c4446");
             }
             if (!ids.Contains(from) || !ids.Contains(to))
             {
-                return "A connection points at a step that is not here.";
+                return L10n.Text("windows.workflowspage.a_connection_points_at_a_step_that_is_not.3aa47d7b");
             }
         }
         return null;
@@ -1223,7 +1221,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         var edges = GraphEdges();
         body.Children.Add(new TextBlock
         {
-            Text = $"{nodes.Count} steps · {edges.Count} connections",
+            Text = L10n.Text("windows.workflowspage.0_steps_1_connections.9fa532d7", $"{nodes.Count}", $"{edges.Count}"),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         foreach (var node in nodes)
@@ -1242,7 +1240,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                     outgoing.Add($"{ConnectionLabel(kind, Format.Text(edge, "when", "ok"))} → {Format.Text(edge, "to")}");
                 }
             }
-            var summary = outgoing.Count == 0 ? "no connections yet" : string.Join(", ", outgoing);
+            var summary = outgoing.Count == 0 ? L10n.Text("windows.workflowspage.no_connections_yet.bde0e292") : string.Join(", ", outgoing);
             var row = new StackPanel { Spacing = 2 };
             row.Children.Add(new TextBlock
             {
@@ -1274,8 +1272,8 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                 RenderDetail();
             };
             var menu = ContextMenus.Menu(button);
-            ContextMenus.AddButton(menu, button, "Edit step");
-            ContextMenus.Add(menu, "Delete step…", () =>
+            ContextMenus.AddButton(menu, button, L10n.Text("windows.workflowspage.edit_step.c5279a31"));
+            ContextMenus.Add(menu, L10n.Text("windows.workflowspage.delete_step.3e0ebca6"), () =>
             {
                 _stepId = stepId;
                 _confirmStep = true;
@@ -1287,13 +1285,13 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         var kindBox = new ComboBox { MinWidth = 130 };
         kindBox.ItemsSource = KindLabels.ToArray();
         kindBox.SelectedIndex = 1;
-        var titleBox = new TextBox { PlaceholderText = "Step title", MinWidth = 160 };
+        var titleBox = new TextBox { PlaceholderText = L10n.Text("windows.workflowspage.step_title.2e9af9d4"), MinWidth = 160 };
         addRow.Children.Add(kindBox);
         addRow.Children.Add(titleBox);
         addRow.Children.Add(ActionIconGlyph.Button(
-            "Add step", ActionIcon.Create, (_, _) => AddStep(kindBox.SelectedIndex, titleBox.Text)));
+            L10n.Text("windows.workflowspage.add_step.839bd5e0"), ActionIcon.Create, (_, _) => AddStep(kindBox.SelectedIndex, titleBox.Text)));
         body.Children.Add(addRow);
-        return Chrome.Card("Steps", body, "Explicit connections first. The canvas stays on the Mac.");
+        return Chrome.Card(L10n.Text("windows.workflowspage.steps.1de3df70"), body, L10n.Text("windows.workflowspage.explicit_connections_first_the_canvas_stay.a14a9557"));
     }
 
     private void AddStep(int kindIndex, string title)
@@ -1301,7 +1299,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         var nodes = GraphNodes();
         if (nodes.Count >= MaxSteps)
         {
-            Banner($"A workflow may have at most {MaxSteps} steps.");
+            Banner(L10n.Text("windows.workflowspage.a_workflow_may_have_at_most_0_steps.e533210f", $"{MaxSteps}"));
             return;
         }
         var kind = AuthorableKinds[Math.Clamp(kindIndex, 0, AuthorableKinds.Length - 1)];
@@ -1342,7 +1340,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         var body = new StackPanel { Spacing = Theme.SpaceM };
         body.Children.Add(new TextBlock
         {
-            Text = $"{KindLabel(kind)} step",
+            Text = L10n.Text("windows.workflowspage.0_step.68e67926", $"{KindLabel(kind)}"),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
 
@@ -1355,7 +1353,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             }
             _detailDirty = true;
         };
-        body.Children.Add(Labeled("Title", title));
+        body.Children.Add(Labeled(L10n.Text("windows.workflowspage.title.7e8cd205"), title));
 
         if (step is JsonObject stepObject)
         {
@@ -1391,7 +1389,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                 VerticalAlignment = VerticalAlignment.Center,
                 TextWrapping = TextWrapping.Wrap,
             });
-            var remove = ActionIconGlyph.Button("Remove", ActionIcon.Delete, (_, _) =>
+            var remove = ActionIconGlyph.Button(L10n.Text("common.remove"), ActionIcon.Delete, (_, _) =>
             {
                 GraphEdges().Remove(edge);
                 _detailDirty = true;
@@ -1420,9 +1418,9 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             targetBox.SelectedIndex = 0;
             var whens = kind switch
             {
-                "condition" => new[] { "Then", "Else", "Always" },
-                "loop" => new[] { "Body", "After last pass", "On error" },
-                _ => new[] { "Then", "On error", "Always" },
+                "condition" => new[] { L10n.Text("windows.workflowspage.then.0597f441"), L10n.Text("windows.workflowspage.else.9c77d72e"), L10n.Text("windows.workflowspage.always.de9f057a") },
+                "loop" => new[] { L10n.Text("windows.workflowspage.body.6ccaa641"), L10n.Text("windows.workflowspage.after_last_pass.c89d89b0"), L10n.Text("windows.workflowspage.on_error.817fc01c") },
+                _ => new[] { L10n.Text("windows.workflowspage.then.0597f441"), L10n.Text("windows.workflowspage.on_error.817fc01c"), L10n.Text("windows.workflowspage.always.de9f057a") },
             };
             var whenBox = new ComboBox { MinWidth = 120 };
             whenBox.ItemsSource = whens;
@@ -1430,7 +1428,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             addRow.Children.Add(targetBox);
             addRow.Children.Add(whenBox);
             addRow.Children.Add(ActionIconGlyph.Button(
-                "Add connection", ActionIcon.Create, (_, _) =>
+                L10n.Text("windows.workflowspage.add_connection.685f88ae"), ActionIcon.Create, (_, _) =>
                 {
                     AddConnection(id, targetBox.SelectedItem as string ?? "", whenBox.SelectedIndex, kind);
                 }));
@@ -1440,7 +1438,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         if (!_confirmStep)
         {
             body.Children.Add(ActionIconGlyph.Button(
-                "Remove step", ActionIcon.Delete, (_, _) =>
+                L10n.Text("windows.workflowspage.remove_step.d4c76f46"), ActionIcon.Delete, (_, _) =>
                 {
                     _confirmStep = true;
                     RenderDetail();
@@ -1450,9 +1448,9 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         {
             var confirmRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
             confirmRow.Children.Add(ActionIconGlyph.Button(
-                "Remove this step", ActionIcon.Delete, (_, _) => RemoveStep(id)));
+                L10n.Text("windows.workflowspage.remove_this_step.90d403c9"), ActionIcon.Delete, (_, _) => RemoveStep(id)));
             confirmRow.Children.Add(ActionIconGlyph.Button(
-                "Back", ActionIcon.Back, (_, _) =>
+                L10n.Text("common.back"), ActionIcon.Back, (_, _) =>
                 {
                     _confirmStep = false;
                     RenderDetail();
@@ -1492,7 +1490,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         if (kind == "agent")
         {
             var backendBox = new ComboBox { MinWidth = 200 };
-            var names = new List<string> { "Default agent" };
+            var names = new List<string> { L10n.Text("windows.workflowspage.default_agent.94da52ec") };
             names.AddRange(_backends.Select(b => b.Label));
             backendBox.ItemsSource = names;
             var backendId = Format.Text(step, "backend");
@@ -1504,9 +1502,9 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                 step["backend"] = pick >= 1 && pick - 1 < _backends.Count ? _backends[pick - 1].Id : "";
                 _detailDirty = true;
             };
-            fields.Add(Labeled("Agent", backendBox));
-            Text("model", "Model", placeholder: "Default model");
-            Text("effort", "Effort", placeholder: "Default effort");
+            fields.Add(Labeled(L10n.Text("windows.workflowspage.agent.11b39c93"), backendBox));
+            Text("model", "Model", placeholder: L10n.Text("windows.workflowspage.default_model.3840d9d2"));
+            Text("effort", "Effort", placeholder: L10n.Text("windows.workflowspage.default_effort.58c96ef8"));
         }
         if (kind == "command")
         {
@@ -1523,7 +1521,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                 step["method"] = method.SelectedItem as string ?? "GET";
                 _detailDirty = true;
             };
-            fields.Add(Labeled("Method", method));
+            fields.Add(Labeled(L10n.Text("windows.workflowspage.method.52a0f9b6"), method));
             Text("url", "URL");
             Text("body", "Body", true);
         }
@@ -1543,7 +1541,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                 }
                 _detailDirty = true;
             };
-            fields.Add(Labeled("Passes (at most 20)", times));
+            fields.Add(Labeled(L10n.Text("windows.workflowspage.passes_at_most_20.995c2f71"), times));
             Text("until", "Stop when found");
         }
         if (kind == "automation")
@@ -1567,7 +1565,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         }
         if (from == to)
         {
-            Banner("A step cannot connect to itself.");
+            Banner(L10n.Text("windows.workflowspage.a_step_cannot_connect_to_itself.315c4446"));
             return;
         }
         var when = (kind, whenIndex) switch
@@ -1597,7 +1595,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         }
         if (edges.Count >= MaxConnections)
         {
-            Banner($"A workflow may have at most {MaxConnections} connections.");
+            Banner(L10n.Text("windows.workflowspage.a_workflow_may_have_at_most_0_connections.32d67dc9", $"{MaxConnections}"));
             return;
         }
         edges.Add(Edge(from, to, when));
@@ -1671,7 +1669,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                 _selectedId = Format.Text(created, "id");
                 _detailDirty = false;
                 _conflictId = null;
-                Notice("Workflow added.");
+                Notice(L10n.Text("windows.workflowspage.workflow_added.f5b03ba6"));
             }
             else if (_selectedId is not null)
             {
@@ -1683,7 +1681,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                     var revision = force ? await FreshRevisionAsync(id) : _detailRevision;
                     if (revision is null)
                     {
-                        Banner("Reload this workflow before saving it.");
+                        Banner(L10n.Text("windows.workflowspage.reload_this_workflow_before_saving_it.4727f8d8"));
                         return;
                     }
                     payload["revision"] = revision.Value;
@@ -1698,7 +1696,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                     catch (Exception ex) when (WorkbenchOps.IsConflict(ex))
                     {
                         _conflictId = id;
-                        Banner("This workflow changed since you opened it. Compare the saved graph before replacing it.");
+                        Banner(L10n.Text("windows.workflowspage.this_workflow_changed_since_you_opened_it.b752a79e"));
                         await LoadAsync();
                         return;
                     }
@@ -1710,7 +1708,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                 }
                 _detailDirty = false;
                 _conflictId = null;
-                Notice($"Saved \"{Format.Text(_graph, "name")}\".");
+                Notice(L10n.Text("windows.workflowspage.saved_0.8eb4b783", $"{Format.Text(_graph, "name")}"));
             }
         }
         catch (Exception ex)
@@ -1749,7 +1747,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         {
             await CallWorkbenchAsync(
                 "workflow.remove", new JsonObject { ["id"] = _selectedId });
-            Notice("Workflow deleted.");
+            Notice(L10n.Text("windows.workflowspage.workflow_deleted.80fce204"));
             _creating = false;
             _selectedId = null;
             _graph = null;
@@ -1774,11 +1772,11 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         var clean = prompt.Trim();
         if (string.IsNullOrEmpty(clean))
         {
-            Banner("Describe the workflow to draft.");
+            Banner(L10n.Text("windows.workflowspage.describe_the_workflow_to_draft.8359a0bc"));
             return;
         }
         _working = true;
-        Notice("Designing. This drains an agent and can take minutes.");
+        Notice(L10n.Text("windows.workflowspage.designing_this_drains_an_agent_and_can_tak.6e719671"));
         try
         {
             var parameters = new JsonObject { ["prompt"] = clean };
@@ -1812,11 +1810,11 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                 _graph["id"] = _creating ? "" : _selectedId ?? "";
                 _stepId = null;
                 _detailDirty = true;
-                Notice("Draft ready. Review the steps, then Create or Save.");
+                Notice(L10n.Text("windows.workflowspage.draft_ready_review_the_steps_then_create_o.e8280683"));
             }
             else
             {
-                Banner("The designer returned nothing. Try a more concrete prompt.");
+                Banner(L10n.Text("windows.workflowspage.the_designer_returned_nothing_try_a_more_c.b4f06f38"));
             }
         }
         catch (Exception ex)
@@ -1836,26 +1834,26 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         var input = new TextBox
         {
             Text = _runInput,
-            PlaceholderText = "Starting prompt, fills {{input}}",
+            PlaceholderText = L10n.Text("windows.workflowspage.starting_prompt_fills_input.dbdea813"),
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
         };
         input.TextChanged += (_, _) => _runInput = input.Text;
-        body.Children.Add(Labeled("Input", input));
+        body.Children.Add(Labeled(L10n.Text("windows.workflowspage.input.36ecb4f8"), input));
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         var runButton = ActionIconGlyph.PrimaryButton(
-            "Run", ActionIcon.Run, async (_, _) => await RunAsync());
+            L10n.Text("common.run"), ActionIcon.Run, async (_, _) => await RunAsync());
         runButton.IsEnabled = !_working && !_creating;
         row.Children.Add(runButton);
         body.Children.Add(row);
-        return Chrome.Card("Run", body, FolderLabel(Format.Text(_graph, "workspaceId")));
+        return Chrome.Card(L10n.Text("common.run"), body, FolderLabel(Format.Text(_graph, "workspaceId")));
     }
 
     private async Task RunAsync()
     {
         if (_creating || _selectedId is null)
         {
-            Banner("Save the workflow before running it.");
+            Banner(L10n.Text("windows.workflowspage.save_the_workflow_before_running_it.73851c7f"));
             return;
         }
         if (_detailDirty)
@@ -1863,7 +1861,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             await SaveAsync(force: false);
             if (_detailDirty)
             {
-                Banner("Save the workflow before running it.");
+                Banner(L10n.Text("windows.workflowspage.save_the_workflow_before_running_it.73851c7f"));
                 return;
             }
         }
@@ -1881,7 +1879,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                 parameters["workspaceId"] = folder;
             }
             await CallWorkbenchAsync("workflow.run", parameters);
-            Notice("The run started.");
+            Notice(L10n.Text("windows.workflowspage.the_run_started.26f45968"));
         }
         catch (Exception ex)
         {
@@ -1927,7 +1925,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                 }
             }
             await CallWorkbenchAsync("workflow.run", parameters);
-            Notice("The run started.");
+            Notice(L10n.Text("windows.workflowspage.the_run_started.26f45968"));
         }
         catch (Exception ex)
         {
@@ -1946,7 +1944,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         try
         {
             await CallWorkbenchAsync("workflow.kill", new JsonObject { ["id"] = runId });
-            Notice("Stopped.");
+            Notice(L10n.Text("windows.workflowspage.stopped.f8ec77e7"));
         }
         catch (Exception ex)
         {
@@ -1961,7 +1959,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         try
         {
             await CallWorkbenchAsync("workflow.continue", new JsonObject { ["id"] = runId });
-            Notice("The run continued.");
+            Notice(L10n.Text("windows.workflowspage.the_run_continued.3c4ab7cf"));
         }
         catch (Exception ex)
         {
@@ -1979,7 +1977,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         {
             body.Children.Add(new TextBlock
             {
-                Text = "No runs yet. Run this workflow to see its history here.",
+                Text = L10n.Text("windows.workflowspage.no_runs_yet_run_this_workflow_to_see_its_h.bc271298"),
                 Opacity = 0.66,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -1992,7 +1990,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             }
             body.Children.Add(RunDetail(run));
         }
-        return Chrome.Card("Run history", body, $"{runs.Count} runs");
+        return Chrome.Card(L10n.Text("windows.workflowspage.run_history.addf321b"), body, L10n.Text("windows.workflowspage.0_runs.fedf94fc", $"{runs.Count}"));
     }
 
     private UIElement RunDetail(JsonNode run)
@@ -2003,7 +2001,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         var body = new StackPanel { Spacing = Theme.SpaceS };
         body.Children.Add(new TextBlock
         {
-            Text = $"{Format.Text(run, "name", "Run")} · {WorkbenchOps.RunLabel(status)}",
+            Text = $"{Format.Text(run, "name", L10n.Text("common.run"))} · {WorkbenchOps.RunLabel(status)}",
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
         });
@@ -2058,25 +2056,25 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                     var offset = saved.Next;
                     var moreNode = nodeId;
                     stepBox.Children.Add(ActionIconGlyph.Button(
-                        "More", ActionIcon.More, async (_, _) => await LoadStepTranscriptAsync(runId, moreNode, offset)));
+                        L10n.Text("windows.workflowspage.more.d47d7cb0"), ActionIcon.More, async (_, _) => await LoadStepTranscriptAsync(runId, moreNode, offset)));
                 }
             }
             var node = nodeId;
             stepBox.Children.Add(ActionIconGlyph.Button(
-                "Transcript", ActionIcon.History, async (_, _) => await LoadStepTranscriptAsync(runId, node, 0)));
+                L10n.Text("windows.workflowspage.transcript.721164f0"), ActionIcon.History, async (_, _) => await LoadStepTranscriptAsync(runId, node, 0)));
             body.Children.Add(stepBox);
         }
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         if (status == "waiting")
         {
             row.Children.Add(ActionIconGlyph.PrimaryButton(
-                "Continue", ActionIcon.Run, async (_, _) => await ContinueAsync(runId)));
+                L10n.Text("windows.workflowspage.continue.31fbef16"), ActionIcon.Run, async (_, _) => await ContinueAsync(runId)));
         }
         if (live && !string.IsNullOrEmpty(runId))
         {
             var liveId = runId;
             row.Children.Add(ActionIconGlyph.Button(
-                "Stop", ActionIcon.Stop, async (_, _) => await KillAsync(liveId)));
+                L10n.Text("common.stop"), ActionIcon.Stop, async (_, _) => await KillAsync(liveId)));
         }
         if (row.Children.Count > 0)
         {

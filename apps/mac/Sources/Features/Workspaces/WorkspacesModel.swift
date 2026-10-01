@@ -161,7 +161,7 @@ struct WorkspaceBrowserTab: Identifiable, Hashable, Sendable {
     let id: String
     var url: String
     var number: Int
-    var title: String { "Browser \(number)" }
+    var title: String { L10n.text("apple.workspacesmodel.browser_0.d9e7db6c", "\(number)") }
 }
 
 /// The folders the user chose to work in.
@@ -209,11 +209,11 @@ final class WorkspacesModel {
         switch tab {
         case .changes:
             let count = selected?.changeCount ?? 0
-            return count > 0 ? "Changes (\(count))" : "Changes"
+            return count > 0 ? L10n.text("apple.workspacesmodel.changes_0.eb1957f0", "\(count)") : L10n.text("apple.workspacesmodel.changes.bbd4b6a8")
         case .files:
-            return "Files"
+            return L10n.text("common.files")
         case .history:
-            return "History"
+            return L10n.text("common.history")
         }
     }
 
@@ -574,7 +574,7 @@ final class WorkspacesModel {
     func openRemotePort(_ port: Int, in folder: WorkspaceFolder) async {
         let parts = folder.id.split(separator: ":", maxSplits: 2).map(String.init)
         guard parts.count == 3, parts[0] == "remote", let target = BrowserTarget(String(port)) else {
-            errorMessage = "Choose a port from 1 to 65535 on a project on another device."
+            errorMessage = L10n.text("apple.workspacesmodel.choose_a_port_from_1_to_65535_on_a_project.905c6034")
             return
         }
         let tab = showBrowser(in: folder.id)
@@ -1416,13 +1416,13 @@ final class WorkspacesModel {
         stagedSelection[folder.id] = []
         commitMessage[folder.id] = ""
         commitDescription[folder.id] = ""
-        report(folder.id, .commit, GitOutcome(ok: true, message: "Committed the reviewed selection."))
+        report(folder.id, .commit, GitOutcome(ok: true, message: L10n.text("apple.workspacesmodel.committed_the_reviewed_selection.6566b601")))
         await refresh()
         await loadHistory(for: folder.id)
     }
 
     func pushCompleted(_ folder: WorkspaceFolder) async {
-        report(folder.id, .push, GitOutcome(ok: true, message: "Pushed the reviewed commit."))
+        report(folder.id, .push, GitOutcome(ok: true, message: L10n.text("apple.workspacesmodel.pushed_the_reviewed_commit.6edb2bd0")))
         await refresh()
         await loadHistory(for: folder.id)
     }
@@ -1481,8 +1481,8 @@ final class WorkspacesModel {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = true
-        panel.prompt = "Add Project"
-        panel.message = "Choose a project folder. tokenstat only reads it."
+        panel.prompt = L10n.text("apple.workspacesmodel.add_project.44b7ce21")
+        panel.message = L10n.text("apple.workspacesmodel.choose_a_project_folder_tokenstat_only_rea.90507456")
 
         guard panel.runModal() == .OK else { return }
         for url in panel.urls {

@@ -348,7 +348,7 @@ final class AccountModel {
                     // leave App Review looking at a spinner for fifteen minutes.
                     consecutiveTransportFailures += 1
                     if consecutiveTransportFailures < 3 {
-                        signInNotice = "Waiting for the network."
+                        signInNotice = L10n.text("apple.accountmodel.waiting_for_the_network.76a08f16")
                         try await Task.sleep(for: .seconds(max(interval, 3)))
                         continue
                     }
@@ -356,13 +356,13 @@ final class AccountModel {
                     signInNotice = nil
                     await Bridge.cancelLogin()
                     throw SignInFailure.message(
-                        "The account service could not be reached after several tries. Try again."
+                        L10n.text("apple.accountmodel.the_account_service_could_not_be_reached_a.445bdbf0")
                     )
                 case .invalidGrant:
                     signInDismisser?()
                     signInNotice = nil
                     await Bridge.cancelLogin()
-                    throw SignInFailure.message("That sign-in expired. Start again.")
+                    throw SignInFailure.message(L10n.text("apple.accountmodel.that_sign_in_expired_start_again.28cffde9"))
                 case .terminal:
                     signInDismisser?()
                     signInNotice = nil
@@ -397,7 +397,7 @@ final class AccountModel {
         signInDismisser?()
         signInNotice = nil
         await Bridge.cancelLogin()
-        errorMessage = "The sign-in code expired before it was confirmed."
+        errorMessage = L10n.text("apple.accountmodel.the_sign_in_code_expired_before_it_was_con.84ac1b4b")
     }
 
     private enum SignInPollFailure {
@@ -522,7 +522,7 @@ final class AccountModel {
         defer { isSyncing = false }
         do {
             let result = try await Bridge.sync()
-            lastSyncSummary = "Sent \(result.rows) rows for \(result.from) to \(result.to)."
+            lastSyncSummary = L10n.text("apple.accountmodel.sent_0_rows_for_1_to_2.5066c9eb", "\(result.rows)", "\(result.from)", "\(result.to)")
             lastSyncWasRateLimited = false
             showSyncNotice(lastSyncSummary!, isError: false)
             await load()

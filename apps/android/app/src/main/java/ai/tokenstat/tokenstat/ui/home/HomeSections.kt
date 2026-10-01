@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.home
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.animation.core.LinearEasing
@@ -339,11 +341,11 @@ class HomeStores(context: Context) {
 /// destination owns reachability; a machine that is asleep says so there.
 fun machineRowState(linked: Boolean, offline: Boolean, online: Boolean?): String =
     when {
-        !linked -> "No longer linked"
-        offline -> "You are offline"
-        online == true -> "Awake"
-        online == false -> "Asleep"
-        else -> "Status unknown"
+        !linked -> L10n.text("android.homesections.no_longer_linked.e409e8a7")
+        offline -> L10n.text("android.homesections.you_are_offline.4d5c9439")
+        online == true -> L10n.text("android.homesections.awake.9123b5f4")
+        online == false -> L10n.text("android.homesections.asleep.60135e8f")
+        else -> L10n.text("android.homesections.status_unknown.e412d872")
     }
 
 /// The work worth going back to: up to four folders and conversations, newest
@@ -363,7 +365,7 @@ fun ContinueSection(
     if (shown.isEmpty()) return
     var refused by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        SectionLabel("Pick up where you left off")
+        SectionLabel(L10n.text("android.homesections.pick_up_where_you_left_off.47173482"))
         TsCard {
             Column {
                 shown.forEachIndexed { index, place ->
@@ -392,7 +394,7 @@ fun ContinueSection(
                             val name = machineName(place.id.peer)
                             val state = machineRowState(name != null, offline, name?.let(machineOnline))
                             Text(
-                                "${name ?: "Machine"} · $state · ${RelativeClock.label(place.openedAtMs)}",
+                                "${name ?: L10n.text("android.homesections.machine.8f1cc42d")} · $state · ${RelativeClock.label(place.openedAtMs)}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = colors.textSecondary,
                                 maxLines = 2,
@@ -407,7 +409,7 @@ fun ContinueSection(
                             }) {
                                 Icon(
                                     (if (pinned) ActionIcon.Pinned else ActionIcon.Pin).vector,
-                                    if (pinned) "Pinned" else "Pin",
+                                    if (pinned) L10n.text("android.homesections.pinned.f20c8794") else L10n.text("android.homesections.pin.ff1cee74"),
                                     tint = when {
                                         pinned -> colors.accent
                                         refused -> colors.danger
@@ -426,7 +428,7 @@ fun ContinueSection(
         }
         if (refused) {
             Text(
-                "The shelf holds eight pins",
+                L10n.text("android.homesections.the_shelf_holds_eight_pins.5cd37254"),
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.danger,
             )
@@ -462,7 +464,7 @@ fun MachinesSection(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
         ) {
-            SectionTitle("Machines", "mark_host")
+            SectionTitle(L10n.text("android.homesections.machines.c061da19"), "mark_host")
             Spacer(Modifier.weight(1f))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -470,7 +472,7 @@ fun MachinesSection(
                 modifier = Modifier.clickable { onOpenDevices() }.padding(vertical = 12.dp),
             ) {
                 Text(
-                    "Devices",
+                    L10n.text("common.devices"),
                     style = TsType.caption.copy(fontWeight = FontWeight.SemiBold),
                     color = colors.accent,
                 )
@@ -535,9 +537,9 @@ fun MachinesSection(
 
 /// Awake, Asleep, or unknown, the same three words the Apple home reads.
 fun machineState(online: Boolean?): String = when (online) {
-    true -> "Awake"
-    false -> "Asleep"
-    else -> "Status unknown"
+    true -> L10n.text("android.homesections.awake.9123b5f4")
+    false -> L10n.text("android.homesections.asleep.60135e8f")
+    else -> L10n.text("android.homesections.status_unknown.e412d872")
 }
 
 /// The shelf: up to eight folders and conversations, newest first. Rows open
@@ -555,7 +557,7 @@ fun PinnedSection(
     val colors = LocalTsColors.current
     if (pins.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        SectionLabel("Pinned")
+        SectionLabel(L10n.text("android.homesections.pinned.f20c8794"))
         TsCard {
             Column {
                 pins.forEachIndexed { index, pin ->
@@ -579,14 +581,14 @@ fun PinnedSection(
                             val name = machineName(pin.hostIdentity)
                             val state = machineRowState(name != null, offline, name?.let(machineOnline))
                             Text(
-                                "${pin.folderName} · ${name ?: "Machine"} · $state · Pinned",
+                                L10n.text("android.homesections.0_1_2_pinned.75ce5ac6", "${pin.folderName}", "${name ?: L10n.text("android.homesections.machine.8f1cc42d")}", "${state}"),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = colors.textSecondary,
                                 maxLines = 2,
                             )
                         }
                         IconButton(onClick = { onUnpin(pin) }) {
-                            Icon(ActionIcon.Pinned.vector, "Unpin ${pin.label}", tint = colors.accent)
+                            Icon(ActionIcon.Pinned.vector, L10n.text("android.homesections.unpin_0.450ccf9f", "${pin.label}"), tint = colors.accent)
                         }
                         Icon(Icons.Default.ChevronRight, null, tint = colors.textSecondary)
                     }
@@ -613,18 +615,18 @@ fun HomeStatusBlock(error: String?, offline: Boolean, onRetry: () -> Unit) {
     if (offline) {
         EmptyState(
             kind = EmptyKind.Unreachable,
-            title = "You are offline",
-            message = "This updates by itself when the connection is back.",
+            title = L10n.text("android.homesections.you_are_offline.4d5c9439"),
+            message = L10n.text("android.homesections.this_updates_by_itself_when_the_connection.afd97997"),
             art = { EmptyArt(EmptyArtKind.Waiting) },
         )
     } else if (error != null) {
         EmptyState(
             kind = EmptyKind.Unreachable,
-            title = "Could not load your activity",
+            title = L10n.text("android.homesections.could_not_load_your_activity.83f3bb60"),
             message = friendlyError(error).message,
             action = {
                 TsAccentButton(
-                    label = "Try again",
+                    label = L10n.text("android.homesections.try_again.d8b8392e"),
                     icon = ActionIcon.Refresh.vector,
                     onClick = onRetry,
                 )
@@ -634,11 +636,11 @@ fun HomeStatusBlock(error: String?, offline: Boolean, onRetry: () -> Unit) {
     } else {
         EmptyState(
             kind = EmptyKind.Unreachable,
-            title = "Activity is unavailable",
-            message = "Waiting for your activity to load.",
+            title = L10n.text("android.homesections.activity_is_unavailable.05583cc4"),
+            message = L10n.text("android.homesections.waiting_for_your_activity_to_load.49d8b7e3"),
             action = {
                 TsAccentButton(
-                    label = "Try again",
+                    label = L10n.text("android.homesections.try_again.d8b8392e"),
                     icon = ActionIcon.Refresh.vector,
                     onClick = onRetry,
                 )
@@ -648,7 +650,7 @@ fun HomeStatusBlock(error: String?, offline: Boolean, onRetry: () -> Unit) {
     }
     Spacer(Modifier.height(Space.s))
     Text(
-        "tokenstat counts on the computers you work on. Only aggregate numbers are eligible for sync.",
+        L10n.text("android.homesections.tokenstat_counts_on_the_computers_you_work.337c7394"),
         style = MaterialTheme.typography.bodySmall,
         color = colors.textSecondary,
     )
@@ -659,9 +661,9 @@ fun HomeStatusBlock(error: String?, offline: Boolean, onRetry: () -> Unit) {
 @Composable
 fun ClearHomeCard() {
     TsCard {
-        Text("Your Home is clear", fontWeight = FontWeight.Medium, color = LocalTsColors.current.textPrimary)
+        Text(L10n.text("android.homesections.your_home_is_clear.9ae93db2"), fontWeight = FontWeight.Medium, color = LocalTsColors.current.textPrimary)
         Text(
-            "Every card is switched off. The tabs and your folders are where they were.",
+            L10n.text("android.homesections.every_card_is_switched_off_the_tabs_and_yo.1ab18ab6"),
             style = MaterialTheme.typography.bodySmall,
             color = LocalTsColors.current.textSecondary,
         )
@@ -881,10 +883,9 @@ fun GettingStartedCard(phoneName: String?, onSetup: () -> Unit) {
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
             EmptyArt(EmptyArtKind.GetCounting, modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp))
-            SectionTitle("Get tokenstat counting", "mark_activity")
+            SectionTitle(L10n.text("android.homesections.get_tokenstat_counting.331454ea"), "mark_activity")
             Text(
-                "tokenstat counts on the computers you work on. This device shows " +
-                    "what they counted, with every laptop shut.",
+                L10n.text("android.homesections.tokenstat_counts_on_the_computers_you_work.9e9d0969"),
                 style = TsType.subheadline,
                 color = colors.textSecondary,
             )
@@ -893,19 +894,17 @@ fun GettingStartedCard(phoneName: String?, onSetup: () -> Unit) {
             listOf(
                 GettingStartedStep(
                     number = 1,
-                    title = "Signed in",
-                    body = phoneName?.let { "This device is on your account as $it." }
-                        ?: "This device is on your account.",
+                    title = L10n.text("android.homesections.signed_in.ca566c89"),
+                    body = phoneName?.let { L10n.text("android.homesections.this_device_is_on_your_account_as_0.852b249c", "${it}") }
+                        ?: L10n.text("android.homesections.this_device_is_on_your_account.0d089d05"),
                     state = GettingStartedState.DONE,
                 ),
                 GettingStartedStep(
                     number = 2,
-                    title = "Connect a machine",
-                    body = "A Mac you already work on, or a server tokenstat sets up " +
-                        "for you over SSH. Free includes two devices, so a machine " +
-                        "and this device fit.",
+                    title = L10n.text("android.homesections.connect_a_machine.d4f654b6"),
+                    body = L10n.text("android.homesections.a_mac_you_already_work_on_or_a_server_toke.d55e3d18"),
                     state = GettingStartedState.NOW,
-                    actionTitle = "Set up a machine",
+                    actionTitle = L10n.text("android.homesections.set_up_a_machine.43e10e13"),
                     action = onSetup,
                 ),
             ),
@@ -913,12 +912,12 @@ fun GettingStartedCard(phoneName: String?, onSetup: () -> Unit) {
         Column(verticalArrangement = Arrangement.spacedBy(Space.s), modifier = Modifier.padding(top = Space.xs)) {
             HorizontalDivider(color = colors.border)
             Text(
-                "Then there is nothing left to run",
+                L10n.text("android.homesections.then_there_is_nothing_left_to_run.9a5af1d1"),
                 style = TsType.subheadline.copy(fontWeight = FontWeight.SemiBold),
                 color = colors.textPrimary,
             )
             Text(
-                "The first usage update arrives on its own and fills this screen.",
+                L10n.text("android.homesections.the_first_usage_update_arrives_on_its_own.771c0d1b"),
                 style = TsType.caption,
                 color = colors.textSecondary,
             )
@@ -964,14 +963,14 @@ fun HomeEditor(
     ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onCancel) { Icon(ActionIcon.Dismiss.vector, "Cancel") }
+                IconButton(onClick = onCancel) { Icon(ActionIcon.Dismiss.vector, L10n.text("common.cancel")) }
                 Text(
-                    "Customize Home",
+                    L10n.text("android.homesections.customize_home.642cec6e"),
                     style = MaterialTheme.typography.titleLarge,
                     color = colors.textPrimary,
                     modifier = Modifier.weight(1f),
                 )
-                TsAccentButton(label = "Done", small = true, onClick = { onDone(draftOrder, draftHidden, draftPreset) })
+                TsAccentButton(label = L10n.text("common.done"), small = true, onClick = { onDone(draftOrder, draftHidden, draftPreset) })
             }
         }
         item {
@@ -994,12 +993,12 @@ fun HomeEditor(
             Spacer(Modifier.height(Space.s))
             HomeLayoutPreview(sections = visible)
             Text(
-                "A starting arrangement. It moves the cards and nothing else.",
+                L10n.text("android.homesections.a_starting_arrangement_it_moves_the_cards.9484a124"),
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.textSecondary,
             )
         }
-        item { SectionLabel("Visible · drag to reorder") }
+        item { SectionLabel(L10n.text("android.homesections.visible_drag_to_reorder.865ac64c")) }
         itemsIndexed(visible, key = { _, section -> section.key }) { _, section ->
             TsCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1021,11 +1020,11 @@ fun HomeEditor(
                     IconButton(
                         onClick = { move(section, -1) },
                         enabled = visible.first() != section,
-                    ) { Icon(Icons.Default.KeyboardArrowUp, "Move up", tint = colors.accent) }
+                    ) { Icon(Icons.Default.KeyboardArrowUp, L10n.text("android.homesections.move_up.c66feb5e"), tint = colors.accent) }
                     IconButton(
                         onClick = { move(section, 1) },
                         enabled = visible.last() != section,
-                    ) { Icon(Icons.Default.KeyboardArrowDown, "Move down", tint = colors.accent) }
+                    ) { Icon(Icons.Default.KeyboardArrowDown, L10n.text("android.homesections.move_down.40bb50da"), tint = colors.accent) }
                     BrandCheckDisc(on = true, modifier = Modifier.clickable {
                         draftHidden = draftHidden + section
                         draftPreset = null
@@ -1035,7 +1034,7 @@ fun HomeEditor(
             }
         }
         if (draftHidden.isNotEmpty()) {
-            item { SectionLabel("Hidden") }
+            item { SectionLabel(L10n.text("android.homesections.hidden.7e6fefff")) }
             itemsIndexed(draftOrder.filter { it in draftHidden }, key = { _, section -> section.key }) { _, section ->
                 TsCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1067,9 +1066,9 @@ fun HomeEditor(
             val off = draftOrder.filter { it in draftHidden }
             Text(
                 when {
-                    visible.isEmpty() -> "Home will be clear. Search and the tabs are still there, and you can switch a card back on here at any time."
-                    off.isEmpty() -> "Every card is on."
-                    else -> "Off: ${off.joinToString(", ") { it.label }}."
+                    visible.isEmpty() -> L10n.text("android.homesections.home_will_be_clear_search_and_the_tabs_are.e1a1987c")
+                    off.isEmpty() -> L10n.text("android.homesections.every_card_is_on.2b53a175")
+                    else -> L10n.text("android.homesections.off_0.8d022e73", "${off.joinToString(", ") { it.label }}")
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.textSecondary,
@@ -1077,7 +1076,7 @@ fun HomeEditor(
         }
         item {
             TsSecondaryButton(
-                label = "Reset Home",
+                label = L10n.text("android.homesections.reset_home.99f3f8ce"),
                 onClick = {
                     beforeReset = Triple(draftOrder, draftHidden, draftPreset)
                     draftOrder = HomePreset.BALANCED.order
@@ -1090,7 +1089,7 @@ fun HomeEditor(
             if (previous != null) {
                 Spacer(Modifier.height(Space.s))
                 TsSecondaryButton(
-                    label = "Undo reset",
+                    label = L10n.text("android.homesections.undo_reset.c4961cf5"),
                     onClick = {
                         draftOrder = previous.first
                         draftHidden = previous.second
@@ -1139,7 +1138,7 @@ fun HomeLayoutPreview(sections: List<HomeSection>) {
         )
         if (sections.isEmpty()) {
             Text(
-                "Your Home is clear",
+                L10n.text("android.homesections.your_home_is_clear.9ae93db2"),
                 style = TextStyle(fontSize = 12.sp),
                 color = colors.textSecondary,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),

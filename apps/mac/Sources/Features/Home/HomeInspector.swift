@@ -22,7 +22,7 @@ struct HomeInspector: View {
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
-                InspectorTitle(title: "Day", symbol: "calendar")
+                InspectorTitle(title: L10n.text("apple.homeinspector.day.8f2364e1"), symbol: "calendar")
                 Spacer(minLength: 0)
             }
             Group {
@@ -31,8 +31,8 @@ struct HomeInspector: View {
                 } else {
                     InspectorEmptyState(
                         mark: "mark_activity",
-                        title: "Today opens here",
-                        subtitle: "The heatmap is still loading. Hover a day for a glance, or click another day to pin it."
+                        title: L10n.text("apple.homeinspector.today_opens_here.a6818424"),
+                        subtitle: L10n.text("apple.homeinspector.the_heatmap_is_still_loading_hover_a_day_f.566fb595")
                     )
                 }
             }
@@ -47,20 +47,20 @@ struct HomeInspector: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if day.isLocked {
-                    Text("This day is outside the unlocked window.")
+                    Text(L10n.text("apple.homeinspector.this_day_is_outside_the_unlocked_window.0d92dfdb"))
                         .font(Theme.callout)
                         .foregroundStyle(.secondary)
                 } else if model.isLoadingSelectedDetail, model.selectedDetail == nil {
                     HStack(spacing: Theme.Space.s) {
                         ProgressView().controlSize(.small)
-                        Text("Loading day…")
+                        Text(L10n.text("apple.homeinspector.loading_day.758e26f6"))
                             .font(Theme.caption)
                             .foregroundStyle(.secondary)
                     }
                 } else if let detail = model.selectedDetail {
                     overview(detail)
                 } else {
-                    Text("Nothing recorded on this day.")
+                    Text(L10n.text("apple.homeinspector.nothing_recorded_on_this_day.5ad77ba8"))
                         .font(Theme.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -87,14 +87,14 @@ struct HomeInspector: View {
                         onOpenInsights(day.date)
                     } label: {
                         HStack(spacing: Theme.Space.xs) {
-                            Text("Open in Insights")
+                            Text(L10n.text("apple.homeinspector.open_in_insights.5529d386"))
                             Image(systemName: "arrow.right")
                                 .font(Theme.font(11, weight: .semibold))
                         }
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(AccentButtonStyle())
-                    .help("Open the full report for this day")
+                    .help(L10n.text("apple.homeinspector.open_the_full_report_for_this_day.d8b6ca88"))
                     .padding(.horizontal, Theme.Space.m)
                     .padding(.vertical, Theme.Space.s)
                 }
@@ -111,9 +111,9 @@ struct HomeInspector: View {
                 .font(Theme.font(15, weight: .semibold))
 
             Stat(
-                label: "API list price",
+                label: L10n.text("apple.homeinspector.api_list_price.060458ef"),
                 value: detail.value.formatted,
-                note: detail.estimated ? "estimated" : "not an extra bill",
+                note: detail.estimated ? "estimated" : L10n.text("apple.homeinspector.not_an_extra_bill.79d2c7ad"),
                 tint: Theme.accent,
                 size: 22
             )
@@ -127,16 +127,16 @@ struct HomeInspector: View {
             split(detail)
 
             groupCard(
-                title: "Models",
-                subtitle: "API list price",
+                title: L10n.text("apple.homeinspector.models.d17d2d78"),
+                subtitle: L10n.text("apple.homeinspector.api_list_price.060458ef"),
                 rows: pricedModelRows(detail, extra: extra),
                 showsValue: true,
                 isHarness: false
             )
 
             groupCard(
-                title: "Coding tools",
-                subtitle: "Which agent produced the tokens",
+                title: L10n.text("apple.homeinspector.coding_tools.6032f740"),
+                subtitle: L10n.text("apple.homeinspector.which_agent_produced_the_tokens.d4a409e3"),
                 rows: harnessRows(detail, extra: extra),
                 showsValue: false,
                 isHarness: true
@@ -144,8 +144,8 @@ struct HomeInspector: View {
 
             if let projects = extra?.byProject, !projects.isEmpty {
                 groupCard(
-                    title: "Projects",
-                    subtitle: "Where the work happened",
+                    title: L10n.text("common.projects"),
+                    subtitle: L10n.text("apple.homeinspector.where_the_work_happened.250180a6"),
                     rows: projects.map { bucketRow($0, display: $0.key, monospaced: true) },
                     showsValue: false,
                     isHarness: false
@@ -154,8 +154,8 @@ struct HomeInspector: View {
 
             if let sessions = extra?.bySession, !sessions.isEmpty {
                 groupCard(
-                    title: "Sessions",
-                    subtitle: "This device",
+                    title: L10n.text("apple.homeinspector.sessions.6fa3cbf4"),
+                    subtitle: L10n.text("apple.homeinspector.this_device.d052579c"),
                     rows: sessions.map { bucketRow($0, display: $0.key, monospaced: true) },
                     showsValue: false,
                     isHarness: false
@@ -164,8 +164,8 @@ struct HomeInspector: View {
 
             if !detail.unpricedModels.isEmpty {
                 groupCard(
-                    title: "Unpriced / local models",
-                    subtitle: "No API price. Tokens still counted.",
+                    title: L10n.text("apple.homeinspector.unpriced_local_models.620f0ccf"),
+                    subtitle: L10n.text("apple.homeinspector.no_api_price_tokens_still_counted.9fd4e18e"),
                     rows: unpricedModelRows(detail, extra: extra),
                     showsValue: false,
                     isHarness: false
@@ -175,7 +175,7 @@ struct HomeInspector: View {
             if model.isLoadingSelectedOverview {
                 HStack(spacing: Theme.Space.s) {
                     ProgressView().controlSize(.mini)
-                    Text("Loading breakdown…")
+                    Text(L10n.text("apple.homeinspector.loading_breakdown.98c86f22"))
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                 }
@@ -185,11 +185,11 @@ struct HomeInspector: View {
 
     private func headline(_ detail: DayDetail, sessions: UInt64?) -> String {
         var parts = [
-            "\(formatTokens(detail.tokens)) tokens",
-            "\(detail.events.formatted(.number)) requests",
+            L10n.text("apple.homeinspector.0_tokens.624f11b9", "\(formatTokens(detail.tokens))"),
+            L10n.text("apple.homeinspector.0_requests.26f9894c", "\(detail.events.formatted(.number))"),
         ]
         if let sessions {
-            parts.append("\(sessions.formatted(.number)) sessions")
+            parts.append(L10n.text("apple.homeinspector.0_sessions.42cfea31", "\(sessions.formatted(.number))"))
         }
         return parts.joined(separator: " · ")
     }
@@ -197,11 +197,11 @@ struct HomeInspector: View {
     private func counters(_ detail: DayDetail) -> some View {
         let sums = Self.sumCounters(detail.rows)
         return VStack(spacing: Theme.Space.xs) {
-            counterRow("Fresh input", sums.fresh)
-            counterRow("Cache read", sums.cacheRead)
-            counterRow("Cache write 5m", sums.cacheWrite5m)
-            counterRow("Cache write 1h", sums.cacheWrite1h)
-            counterRow("Output", sums.output)
+            counterRow(L10n.text("apple.homeinspector.fresh_input.a5156480"), sums.fresh)
+            counterRow(L10n.text("apple.homeinspector.cache_read.0008ce30"), sums.cacheRead)
+            counterRow(L10n.text("apple.homeinspector.cache_write_5m.bf7e82f8"), sums.cacheWrite5m)
+            counterRow(L10n.text("apple.homeinspector.cache_write_1h.80055f01"), sums.cacheWrite1h)
+            counterRow(L10n.text("apple.homeinspector.output.b2439bcb"), sums.output)
         }
     }
 
@@ -211,7 +211,7 @@ struct HomeInspector: View {
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
             Spacer()
-            Text(value.map { formatTokens($0) } ?? "n/a")
+            Text(value.map { formatTokens($0) } ?? L10n.text("apple.homeinspector.n_a.a683c5c5"))
                 .font(Theme.numeric(11))
                 .foregroundStyle(value == nil ? .tertiary : .primary)
         }
@@ -226,7 +226,7 @@ struct HomeInspector: View {
     ) -> some View {
         Card(title: title, subtitle: subtitle, mark: isHarness ? "mark_automation" : "mark_insights") {
             if rows.isEmpty {
-                Text("Nothing recorded yet.")
+                Text(L10n.text("apple.homeinspector.nothing_recorded_yet.17f000e0"))
                     .font(Theme.caption)
                     .foregroundStyle(.tertiary)
             } else {
@@ -252,7 +252,7 @@ struct HomeInspector: View {
                         }
                     }
                     if rows.count > listLimit {
-                        Text("and \(rows.count - listLimit) more")
+                        Text(L10n.text("apple.homeinspector.and_0_more.938c3a14", "\(rows.count - listLimit)"))
                             .font(Theme.caption)
                             .foregroundStyle(.tertiary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -319,7 +319,7 @@ struct HomeInspector: View {
     private func bucketRow(_ bucket: Bucket, display: String, monospaced: Bool) -> DayGroupRow {
         DayGroupRow(
             key: bucket.key,
-            label: display.isEmpty ? "unknown" : display,
+            label: display.isEmpty ? L10n.text("apple.homeinspector.unknown.b23a6a84") : display,
             tokens: bucket.counters.total,
             value: bucket.value.formatted,
             monospaced: monospaced
@@ -347,7 +347,7 @@ struct HomeInspector: View {
         return totals.map { raw, tokens in
             DayGroupRow(
                 key: raw,
-                label: display(raw).isEmpty ? "unknown" : display(raw),
+                label: display(raw).isEmpty ? L10n.text("apple.homeinspector.unknown.b23a6a84") : display(raw),
                 tokens: tokens,
                 value: nil,
                 monospaced: monospaced
@@ -390,10 +390,10 @@ struct HomeInspector: View {
         guard grand > 0 else { return AnyView(EmptyView()) }
 
         let segments: [(label: String, value: UInt64, color: Color)] = [
-            ("cache read", total.cacheRead, Theme.heat[1]),
-            ("cache write", total.cacheWrite, Theme.heat[2]),
+            (L10n.text("apple.homeinspector.cache_read.e16dda7a"), total.cacheRead, Theme.heat[1]),
+            (L10n.text("apple.homeinspector.cache_write.e2bcc9d6"), total.cacheWrite, Theme.heat[2]),
             ("output", total.output, Theme.heat[4]),
-            ("fresh in", total.fresh, Theme.accent),
+            (L10n.text("apple.homeinspector.fresh_in.28475ebb"), total.fresh, Theme.accent),
         ].filter { $0.value > 0 }
 
         return AnyView(

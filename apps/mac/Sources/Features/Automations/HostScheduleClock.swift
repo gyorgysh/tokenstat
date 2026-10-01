@@ -55,7 +55,7 @@ enum HostScheduleClock {
 
     static func nextRun(_ date: Date, timezone: String?) -> String {
         guard let wall = wallClock(date, timezone: timezone) else {
-            return "on the connected computer"
+            return L10n.text("apple.hostscheduleclock.on_the_connected_computer.982b489d")
         }
         if let place = place(timezone) {
             return "\(wall) in \(place)"
@@ -68,12 +68,12 @@ enum HostScheduleClock {
     }
 
     static func timeCaption(hostName: String, timezone: String?) -> String {
-        clockOwnership(hostName: hostName, timezone: timezone, subject: "This time is")
+        clockOwnership(hostName: hostName, timezone: timezone, subject: L10n.text("apple.hostscheduleclock.this_time_is.e63a9d6e"))
     }
 
     /// Same ownership sentence for a list of run times.
     static func timesCaption(hostName: String, timezone: String?) -> String {
-        clockOwnership(hostName: hostName, timezone: timezone, subject: "Times are")
+        clockOwnership(hostName: hostName, timezone: timezone, subject: L10n.text("apple.hostscheduleclock.times_are.e9a3f2bc"))
     }
 
     static func listSubtitle(
@@ -96,19 +96,19 @@ enum HostScheduleClock {
         let host = hostName.trimmingCharacters(in: .whitespacesAndNewlines)
         if let place = place(timezone) {
             if host.isEmpty {
-                return "\(subject) on the connected computer (\(place))."
+                return L10n.text("apple.hostscheduleclock.0_on_the_connected_computer_1.856ab0a3", "\(subject)", "\(place)")
             }
             return "\(subject) on \(host) (\(place))."
         }
         if host.isEmpty {
-            return "\(subject) on the connected computer, not this device."
+            return L10n.text("apple.hostscheduleclock.0_on_the_connected_computer_not_this_devic.444e2648", "\(subject)")
         }
-        return "\(subject) on \(host), not this device."
+        return L10n.text("apple.hostscheduleclock.0_on_1_not_this_device.4df70e6c", "\(subject)", "\(host)")
     }
 
     private static let months = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        L10n.text("apple.hostscheduleclock.jan.5c5db120"), L10n.text("apple.hostscheduleclock.feb.caf71b3f"), L10n.text("apple.hostscheduleclock.mar.b4b7d381"), L10n.text("apple.hostscheduleclock.apr.617531b4"), L10n.text("apple.hostscheduleclock.may.8c78fe5b"), L10n.text("apple.hostscheduleclock.jun.b27fd46e"),
+        L10n.text("apple.hostscheduleclock.jul.c43f56b9"), L10n.text("apple.hostscheduleclock.aug.41e1d82a"), L10n.text("apple.hostscheduleclock.sep.451e2b71"), L10n.text("apple.hostscheduleclock.oct.6877e849"), L10n.text("apple.hostscheduleclock.nov.3e630d29"), L10n.text("apple.hostscheduleclock.dec.f2a0cfbc"),
     ]
 
     private struct CivilParts {

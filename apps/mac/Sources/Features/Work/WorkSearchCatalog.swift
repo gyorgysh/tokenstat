@@ -43,7 +43,7 @@ struct WorkSearchCatalog: Sendable {
                   WorkCache.matches(kind: record.kind, reference: reference),
                   reference.itemID == record.itemId, machines[reference.hostIdentity] != nil else { continue }
             let key = WorkSearchIndex.Folder(hostIdentity: reference.hostIdentity, workspaceID: reference.workspaceID)
-            if labels[key] == nil { labels[key] = "Saved folder" }
+            if labels[key] == nil { labels[key] = L10n.text("apple.worksearchcatalog.saved_folder.d881b670") }
         }
         folders = labels
         metadata = documents.values.sorted {

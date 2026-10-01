@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workflows
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.automations.AutomationSchedule
 import ai.tokenstat.tokenstat.ui.automations.BudgetFields
 import ai.tokenstat.tokenstat.ui.automations.ScheduleFields
@@ -37,8 +39,8 @@ internal fun JsonObject.optBool(key: String): Boolean? =
     this[key]?.takeUnless { it is JsonNull }?.jsonPrimitive?.booleanOrNull
 
 enum class WorkflowScope(val label: String) {
-    GLOBAL("Global"),
-    WORKSPACE("This project"),
+    GLOBAL(L10n.text("android.workflowmodels.global.a258b30f")),
+    WORKSPACE(L10n.text("android.workflowmodels.this_project.d0f62545")),
     ;
 
     companion object {
@@ -48,14 +50,14 @@ enum class WorkflowScope(val label: String) {
 }
 
 enum class WorkflowNodeKind(val label: String) {
-    INPUT("Input"),
-    AGENT("Agent"),
-    AUTOMATION("Automation"),
+    INPUT(L10n.text("android.workflowmodels.input.36ecb4f8")),
+    AGENT(L10n.text("android.workflowmodels.agent.11b39c93")),
+    AUTOMATION(L10n.text("android.workflowmodels.automation.d909750b")),
     HTTP("HTTP"),
-    COMMAND("Command"),
-    GATE("Gate"),
-    CONDITION("If"),
-    LOOP("Loop"),
+    COMMAND(L10n.text("android.workflowmodels.command.71316697")),
+    GATE(L10n.text("android.workflowmodels.gate.fa77a525")),
+    CONDITION(L10n.text("android.workflowmodels.if.1e3abf61")),
+    LOOP(L10n.text("android.workflowmodels.loop.f2f6a018")),
     MCP("MCP"),
     ;
 
@@ -66,8 +68,8 @@ enum class WorkflowNodeKind(val label: String) {
 }
 
 enum class WorkflowEdgeWhen(val label: String) {
-    OK("on success"),
-    ERROR("on error"),
+    OK(L10n.text("android.workflowmodels.on_success.97a99d2e")),
+    ERROR(L10n.text("android.workflowmodels.on_error.deef8196")),
     ALWAYS("always"),
     ;
 
@@ -148,21 +150,21 @@ data class WorkflowNode(
 
     /// One-line caption for the outline.
     val subtitle: String get() = when (kind) {
-        WorkflowNodeKind.INPUT -> "Starting prompt"
+        WorkflowNodeKind.INPUT -> L10n.text("android.workflowmodels.starting_prompt.407bec2f")
         WorkflowNodeKind.AGENT -> listOfNotNull(backend, model).filter { !it.isNullOrEmpty() }.joinToString(" · ")
-        WorkflowNodeKind.AUTOMATION -> automationID ?: "Run automation"
+        WorkflowNodeKind.AUTOMATION -> automationID ?: L10n.text("android.workflowmodels.run_automation.4c10763f")
         WorkflowNodeKind.HTTP -> {
             val verb = if (!method.isNullOrEmpty()) method else "GET"
             listOfNotNull(verb, url).filter { it.isNotEmpty() }.joinToString(" ")
         }
-        WorkflowNodeKind.COMMAND -> command ?: prompt ?: "Command"
-        WorkflowNodeKind.GATE -> "Waits for you"
-        WorkflowNodeKind.CONDITION -> if (!pattern.isNullOrEmpty()) pattern else "Then or else"
+        WorkflowNodeKind.COMMAND -> command ?: prompt ?: L10n.text("android.workflowmodels.command.71316697")
+        WorkflowNodeKind.GATE -> L10n.text("android.workflowmodels.waits_for_you.0851c4a2")
+        WorkflowNodeKind.CONDITION -> if (!pattern.isNullOrEmpty()) pattern else L10n.text("android.workflowmodels.then_or_else.2318a255")
         WorkflowNodeKind.LOOP -> {
-            if (!until.isNullOrEmpty()) "until $until"
+            if (!until.isNullOrEmpty()) L10n.text("android.workflowmodels.until_0.b5b51017", "${until}")
             else "${times ?: 3}×"
         }
-        WorkflowNodeKind.MCP -> "Reserved"
+        WorkflowNodeKind.MCP -> L10n.text("android.workflowmodels.reserved.3385ffe6")
     }
 
     fun toJson(): JsonObject {
@@ -266,12 +268,12 @@ data class WorkflowGraph(
         )
 
         /// Empty graph with a start node. The person still has to save it.
-        fun blank(name: String = "Untitled", workspaceID: String? = null): WorkflowGraph =
+        fun blank(name: String = L10n.text("android.workflowmodels.untitled.f59ab8d1"), workspaceID: String? = null): WorkflowGraph =
             WorkflowGraph(
                 name = name,
                 scope = WorkflowScope.WORKSPACE,
                 workspaceID = workspaceID,
-                nodes = listOf(WorkflowNode(id = "in", kind = WorkflowNodeKind.INPUT, x = 80.0, y = 120.0, title = "Start")),
+                nodes = listOf(WorkflowNode(id = "in", kind = WorkflowNodeKind.INPUT, x = 80.0, y = 120.0, title = L10n.text("common.start"))),
             )
     }
 
@@ -352,21 +354,21 @@ object WorkflowGraphRules {
     /// If uses Then/Else. Loop uses Body for the repeated work and After
     /// last pass for the way out. Other steps use Then, On error, Always.
     fun outgoingRole(kind: WorkflowNodeKind, whenDo: WorkflowEdgeWhen): String = when {
-        kind == WorkflowNodeKind.CONDITION && whenDo == WorkflowEdgeWhen.OK -> "Then"
-        kind == WorkflowNodeKind.CONDITION && whenDo == WorkflowEdgeWhen.ERROR -> "Else"
-        kind == WorkflowNodeKind.LOOP && whenDo == WorkflowEdgeWhen.OK -> "Body"
-        kind == WorkflowNodeKind.LOOP && whenDo == WorkflowEdgeWhen.ALWAYS -> "After last pass"
-        whenDo == WorkflowEdgeWhen.OK -> "Then"
-        whenDo == WorkflowEdgeWhen.ERROR -> "On error"
-        else -> "Always"
+        kind == WorkflowNodeKind.CONDITION && whenDo == WorkflowEdgeWhen.OK -> L10n.text("android.workflowmodels.then.0597f441")
+        kind == WorkflowNodeKind.CONDITION && whenDo == WorkflowEdgeWhen.ERROR -> L10n.text("android.workflowmodels.else.9c77d72e")
+        kind == WorkflowNodeKind.LOOP && whenDo == WorkflowEdgeWhen.OK -> L10n.text("android.workflowmodels.body.6ccaa641")
+        kind == WorkflowNodeKind.LOOP && whenDo == WorkflowEdgeWhen.ALWAYS -> L10n.text("android.workflowmodels.after_last_pass.c89d89b0")
+        whenDo == WorkflowEdgeWhen.OK -> L10n.text("android.workflowmodels.then.0597f441")
+        whenDo == WorkflowEdgeWhen.ERROR -> L10n.text("android.workflowmodels.on_error.817fc01c")
+        else -> L10n.text("android.workflowmodels.always.de9f057a")
     }
 
     fun connectionCaption(kind: WorkflowNodeKind): String = when (kind) {
-        WorkflowNodeKind.CONDITION -> "Then is success. Else is error. The test reads the previous step."
-        WorkflowNodeKind.LOOP -> "Body is the repeated work. After last pass is where the run goes when the loop is done. At most 20 passes."
-        WorkflowNodeKind.GATE -> "The run pauses here. Continue or Stop from the run."
-        WorkflowNodeKind.INPUT -> "The starting prompt fills {{input}} when you press Run."
-        else -> "Then is on success. On error is the failure path. Always runs either way."
+        WorkflowNodeKind.CONDITION -> L10n.text("android.workflowmodels.then_is_success_else_is_error_the_test_rea.8b4c9b63")
+        WorkflowNodeKind.LOOP -> L10n.text("android.workflowmodels.body_is_the_repeated_work_after_last_pass.121c684e")
+        WorkflowNodeKind.GATE -> L10n.text("android.workflowmodels.the_run_pauses_here_continue_or_stop_from.793fcc9e")
+        WorkflowNodeKind.INPUT -> L10n.text("android.workflowmodels.the_starting_prompt_fills_input_when_you_p.25eaf312")
+        else -> L10n.text("android.workflowmodels.then_is_on_success_on_error_is_the_failure.bab7fe1d")
     }
 
     fun suggestedWhen(kind: WorkflowNodeKind, outgoing: List<WorkflowEdge>): WorkflowEdgeWhen {
@@ -381,47 +383,47 @@ object WorkflowGraphRules {
     }
 
     fun additionIssue(kind: WorkflowNodeKind, nodeCount: Int): String? {
-        if (kind == WorkflowNodeKind.MCP) return "MCP steps are not available yet."
-        if (nodeCount >= MAX_NODES) return "A workflow may have at most $MAX_NODES steps."
+        if (kind == WorkflowNodeKind.MCP) return L10n.text("android.workflowmodels.mcp_steps_are_not_available_yet.d3e1bfc3")
+        if (nodeCount >= MAX_NODES) return L10n.text("android.workflowmodels.a_workflow_may_have_at_most_0_steps.e533210f", "${MAX_NODES}")
         return null
     }
 
     fun connectionIssue(from: String, to: String, nodes: List<WorkflowNode>, edges: List<WorkflowEdge>): String? {
-        if (from == to) return "A step cannot connect to itself."
+        if (from == to) return L10n.text("android.workflowmodels.a_step_cannot_connect_to_itself.315c4446")
         val ids = nodes.map { it.id }.toSet()
-        if (from !in ids) return "A connection starts from a missing step."
-        if (to !in ids) return "A connection points to a missing step."
+        if (from !in ids) return L10n.text("android.workflowmodels.a_connection_starts_from_a_missing_step.f423e421")
+        if (to !in ids) return L10n.text("android.workflowmodels.a_connection_points_to_a_missing_step.611cba65")
         val replacing = edges.any { it.from == from && it.to == to }
-        if (!replacing && edges.size >= MAX_EDGES) return "A workflow may have at most $MAX_EDGES connections."
+        if (!replacing && edges.size >= MAX_EDGES) return L10n.text("android.workflowmodels.a_workflow_may_have_at_most_0_connections.32d67dc9", "${MAX_EDGES}")
         return null
     }
 
     fun stepsIssue(nodes: List<WorkflowNode>, edges: List<WorkflowEdge>): String? {
-        if (nodes.size > MAX_NODES) return "A workflow may have at most $MAX_NODES steps."
-        if (edges.size > MAX_EDGES) return "A workflow may have at most $MAX_EDGES connections."
+        if (nodes.size > MAX_NODES) return L10n.text("android.workflowmodels.a_workflow_may_have_at_most_0_steps.e533210f", "${MAX_NODES}")
+        if (edges.size > MAX_EDGES) return L10n.text("android.workflowmodels.a_workflow_may_have_at_most_0_connections.32d67dc9", "${MAX_EDGES}")
         val ids = mutableSetOf<String>()
         nodes.forEach { node ->
             val trimmed = node.id.trim()
-            if (trimmed.isEmpty()) return "Every step needs an id."
+            if (trimmed.isEmpty()) return L10n.text("android.workflowmodels.every_step_needs_an_id.8d69a4a0")
             if (!isPathSafeID(node.id)) {
                 if (node.id.toByteArray().size > MAX_PATH_ID * 4 || node.id.contains('\u0000')) {
-                    return "Step id ${node.id} cannot be used."
+                    return L10n.text("android.workflowmodels.step_id_0_cannot_be_used.cb82549b", "${node.id}")
                 }
             }
-            if (!ids.add(node.id)) return "Two steps share the id ${node.id}."
+            if (!ids.add(node.id)) return L10n.text("android.workflowmodels.two_steps_share_the_id_0.7df9bf9b", "${node.id}")
             nodeIssue(node)?.let { return it }
         }
         edges.forEach { edge ->
-            if (edge.from !in ids) return "A connection starts from a missing step."
-            if (edge.to !in ids) return "A connection points to a missing step."
-            if (edge.from == edge.to) return "A step cannot connect to itself."
+            if (edge.from !in ids) return L10n.text("android.workflowmodels.a_connection_starts_from_a_missing_step.f423e421")
+            if (edge.to !in ids) return L10n.text("android.workflowmodels.a_connection_points_to_a_missing_step.611cba65")
+            if (edge.from == edge.to) return L10n.text("android.workflowmodels.a_step_cannot_connect_to_itself.315c4446")
         }
-        if (hasIllegalCycle(nodes, edges)) return "This graph loops without a Loop step."
+        if (hasIllegalCycle(nodes, edges)) return L10n.text("android.workflowmodels.this_graph_loops_without_a_loop_step.92bd3735")
         nodes.filter { it.kind == WorkflowNodeKind.LOOP }.forEach { node ->
             val times = node.times ?: 3
-            if (times !in 1..MAX_LOOP_TIMES) return "A loop may repeat at most $MAX_LOOP_TIMES times."
+            if (times !in 1..MAX_LOOP_TIMES) return L10n.text("android.workflowmodels.a_loop_may_repeat_at_most_0_times.5ac3bdc7", "${MAX_LOOP_TIMES}")
             if (edges.none { it.from == node.id && it.whenDo == WorkflowEdgeWhen.OK }) {
-                return "Loop ${node.displayTitle} needs a body connection."
+                return L10n.text("android.workflowmodels.loop_0_needs_a_body_connection.0195107c", "${node.displayTitle}")
             }
         }
         return null
@@ -431,22 +433,22 @@ object WorkflowGraphRules {
         WorkflowNodeKind.INPUT, WorkflowNodeKind.GATE, WorkflowNodeKind.LOOP -> null
         WorkflowNodeKind.CONDITION -> when (node.test ?: "contains") {
             "contains", "equals", "matches" -> null
-            else -> "If only supports Contains, Equals or Matches."
+            else -> L10n.text("android.workflowmodels.if_only_supports_contains_equals_or_matche.3a5207ff")
         }
-        WorkflowNodeKind.MCP -> "MCP steps are not available yet."
+        WorkflowNodeKind.MCP -> L10n.text("android.workflowmodels.mcp_steps_are_not_available_yet.d3e1bfc3")
         WorkflowNodeKind.AGENT ->
-            if ((node.backend ?: "").isEmpty()) "An agent step needs an agent." else null
+            if ((node.backend ?: "").isEmpty()) L10n.text("android.workflowmodels.an_agent_step_needs_an_agent.4f1e96ec") else null
         WorkflowNodeKind.AUTOMATION ->
-            if ((node.automationID ?: "").isEmpty()) "An automation step needs an automation." else null
+            if ((node.automationID ?: "").isEmpty()) L10n.text("android.workflowmodels.an_automation_step_needs_an_automation.5eb2b325") else null
         WorkflowNodeKind.HTTP -> {
             val url = node.url ?: ""
-            if (url.isEmpty()) "An HTTP step needs a URL."
-            else if (!url.startsWith("http://") && !url.startsWith("https://")) "An HTTP URL must start with http:// or https://."
+            if (url.isEmpty()) L10n.text("android.workflowmodels.an_http_step_needs_a_url.78b1c371")
+            else if (!url.startsWith("http://") && !url.startsWith("https://")) L10n.text("android.workflowmodels.an_http_url_must_start_with_http_or_https.f66df6ab")
             else null
         }
         WorkflowNodeKind.COMMAND -> {
             val text = node.command ?: node.prompt ?: ""
-            if (text.isEmpty()) "A command step needs a command." else null
+            if (text.isEmpty()) L10n.text("android.workflowmodels.a_command_step_needs_a_command.5d665b7c") else null
         }
     }
 
@@ -528,7 +530,7 @@ data class WorkflowEditorDraft(
         const val DESIGNED_STARTER_ID = "designed"
 
         fun blankNodes(): List<WorkflowNode> =
-            listOf(WorkflowNode(id = "in", kind = WorkflowNodeKind.INPUT, x = 80.0, y = 120.0, title = "Start"))
+            listOf(WorkflowNode(id = "in", kind = WorkflowNodeKind.INPUT, x = 80.0, y = 120.0, title = L10n.text("common.start")))
 
         fun blank(workspaceID: String, budgetSeconds: Long = 10_800): WorkflowEditorDraft =
             WorkflowEditorDraft(workspaceID = workspaceID, budget = BudgetFields.load(budgetSeconds))
@@ -574,10 +576,10 @@ data class WorkflowEditorDraft(
     )
 
     val validation: String? get() {
-        if (name.trim().isEmpty()) return "Give this workflow a name."
-        if (name.toByteArray().size > 4096) return "Shorten the name to 4 KiB or less."
-        if (workspaceID.trim().isEmpty()) return "Choose a folder for this workflow."
-        if (nodes.isEmpty()) return "A workflow needs a Start step."
+        if (name.trim().isEmpty()) return L10n.text("android.workflowmodels.give_this_workflow_a_name.146078f2")
+        if (name.toByteArray().size > 4096) return L10n.text("android.workflowmodels.shorten_the_name_to_4_kib_or_less.5579d8cf")
+        if (workspaceID.trim().isEmpty()) return L10n.text("android.workflowmodels.choose_a_folder_for_this_workflow.e6f199bc")
+        if (nodes.isEmpty()) return L10n.text("android.workflowmodels.a_workflow_needs_a_start_step.92d85360")
         WorkflowGraphRules.stepsIssue(nodes, edges)?.let { return it }
         schedule.validation?.let { return it }
         budget.validation?.let { return it }
@@ -596,7 +598,7 @@ data class WorkflowEditorDraft(
 
     fun makeGraph(id: String, lastRunAtMs: Long? = null, lastRunID: String? = null): WorkflowGraph {
         val budgetSeconds = budget.budgetSeconds
-            ?: throw IllegalArgumentException(validation ?: "Check this workflow's settings.")
+            ?: throw IllegalArgumentException(validation ?: L10n.text("android.workflowmodels.check_this_workflow_s_settings.e97a5e74"))
         if (validation != null) throw IllegalArgumentException(validation)
         return WorkflowGraph(
             id = id,
@@ -773,23 +775,23 @@ object WorkflowRecipes {
         val reviewPick = pickReview(agents)
         val stages = mutableListOf<Stage>()
         if (!short) {
-            stages.add(Stage("refine", "Refine", "Refine prompt", refinePick.backend, refinePick.model, refinePick.effort,
-                "Rewrite this starting prompt so it is clear and ready to plan.\n\n{{input}}"))
+            stages.add(Stage("refine", L10n.text("android.workflowmodels.refine.1e7f34ee"), L10n.text("android.workflowmodels.refine_prompt.cbab4873"), refinePick.backend, refinePick.model, refinePick.effort,
+                L10n.text("android.workflowmodels.rewrite_this_starting_prompt_so_it_is_clea.6b67cfe2")))
         }
         if (planPick != null && distinct(planPick, stages.lastOrNull())) {
-            stages.add(Stage("plan", "Plan", "Plan", planPick.backend, planPick.model, planPick.effort,
-                "Write a short plan for this work.\n\n${priorToken(stages.lastOrNull()?.id)}"))
+            stages.add(Stage("plan", L10n.text("android.workflowmodels.plan.fa8ed0bd"), L10n.text("android.workflowmodels.plan.fa8ed0bd"), planPick.backend, planPick.model, planPick.effort,
+                L10n.text("android.workflowmodels.write_a_short_plan_for_this_work_0.d30fbc18", "${priorToken(stages.lastOrNull()?.id)}")))
         }
         if (buildPick != null) {
-            stages.add(Stage("build", "Build", "Build", buildPick.backend, buildPick.model, buildPick.effort,
-                "Implement the plan.\n\n${priorToken(stages.lastOrNull()?.id)}"))
+            stages.add(Stage("build", L10n.text("android.workflowmodels.build.bdd254b6"), L10n.text("android.workflowmodels.build.bdd254b6"), buildPick.backend, buildPick.model, buildPick.effort,
+                L10n.text("android.workflowmodels.implement_the_plan_0.1bcd9971", "${priorToken(stages.lastOrNull()?.id)}")))
         }
         if (!short && reviewPick != null && distinct(reviewPick, stages.lastOrNull())) {
-            stages.add(Stage("review", "Review", "Review", reviewPick.backend, reviewPick.model, reviewPick.effort,
-                "Review the work. List issues first.\n\n${priorToken(stages.lastOrNull()?.id)}"))
+            stages.add(Stage("review", L10n.text("android.workflowmodels.review.aff0766a"), L10n.text("android.workflowmodels.review.aff0766a"), reviewPick.backend, reviewPick.model, reviewPick.effort,
+                L10n.text("android.workflowmodels.review_the_work_list_issues_first_0.6279f6f0", "${priorToken(stages.lastOrNull()?.id)}")))
         }
         if (stages.isEmpty()) return null
-        val nodes = mutableListOf(WorkflowNode(id = "in", kind = WorkflowNodeKind.INPUT, title = "Start"))
+        val nodes = mutableListOf(WorkflowNode(id = "in", kind = WorkflowNodeKind.INPUT, title = L10n.text("common.start")))
         val edges = mutableListOf<WorkflowEdge>()
         var previous = "in"
         stages.forEach { item ->
@@ -798,18 +800,18 @@ object WorkflowRecipes {
             edges.add(WorkflowEdge(previous, item.id, WorkflowEdgeWhen.OK))
             previous = item.id
         }
-        nodes.add(WorkflowNode(id = "done", kind = WorkflowNodeKind.COMMAND, title = "Done",
+        nodes.add(WorkflowNode(id = "done", kind = WorkflowNodeKind.COMMAND, title = L10n.text("common.done"),
             command = "afplay /System/Library/Sounds/Glass.aiff"))
         edges.add(WorkflowEdge(previous, "done", WorkflowEdgeWhen.OK))
-        val label = (listOf("Start") + stages.map {
+        val label = (listOf(L10n.text("common.start")) + stages.map {
             (listOf(it.verb, it.backend.label) + listOfNotNull(it.model, it.effort)).joinToString(" ")
-        } + "Done").joinToString(" → ")
-        val prompt = "Starting prompt, then " + stages.map { part ->
+        } + L10n.text("common.done")).joinToString(" → ")
+        val prompt = L10n.text("android.workflowmodels.starting_prompt_then_0_then_play_the_syste.5a7a8b91", "${stages.map { part ->
             (listOf(part.verb.lowercase(), "on", part.backend.label) +
                 listOfNotNull(part.model) +
                 listOfNotNull(part.effort?.let { "($it)" })).joinToString(" ")
-        }.joinToString(", then ") + ", then play the system done sound."
-        return WorkflowRecipe(id, if (short) "Plan then build" else "Plan, build, review", label, prompt, nodes, edges)
+        }.joinToString(L10n.text("android.workflowmodels.then.6b6fbf17"))}")
+        return WorkflowRecipe(id, if (short) L10n.text("android.workflowmodels.plan_then_build.9b157ea7") else L10n.text("android.workflowmodels.plan_build_review.f00c084c"), label, prompt, nodes, edges)
     }
 }
 
@@ -861,13 +863,13 @@ data class WorkflowRunRecord(
 ) {
     companion object {
         fun label(status: String): String = when (status) {
-            "queued" -> "Queued"
-            "running" -> "Working"
-            "waiting" -> "Needs attention"
-            "ok" -> "Done"
-            "stopped" -> "Stopped"
-            "error" -> "Failed"
-            "interrupted" -> "Interrupted by restart"
+            "queued" -> L10n.text("common.queued")
+            "running" -> L10n.text("common.working")
+            "waiting" -> L10n.text("android.workflowmodels.needs_attention.c1ebc781")
+            "ok" -> L10n.text("common.done")
+            "stopped" -> L10n.text("android.workflowmodels.stopped.1a4f630a")
+            "error" -> L10n.text("common.failed")
+            "interrupted" -> L10n.text("android.workflowmodels.interrupted_by_restart.012812fe")
             else -> status
         }
 
@@ -901,7 +903,7 @@ data class WorkflowDesignResult(val workflow: WorkflowGraph, val transcript: Str
 }
 
 /// "3 workflows · 1 running", the workflows library summary.
-fun workflowListSummary(total: Int, running: Int): String = "$total workflows · $running running"
+fun workflowListSummary(total: Int, running: Int): String = L10n.text("android.workflowmodels.0_workflows_1_running.3c6bc0ea", "${total}", "${running}")
 
 /// Library search covers the graph name, like the Apple client.
 fun graphMatchesQuery(graph: WorkflowGraph, query: String): Boolean {

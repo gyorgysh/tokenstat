@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.notifications
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -45,7 +47,7 @@ class TokenstatMessagingService : FirebaseMessagingService() {
         val manager = getSystemService(NotificationManager::class.java)
         if (!manager.areNotificationsEnabled()) return
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL, "Agent updates", NotificationManager.IMPORTANCE_DEFAULT),
+            NotificationChannel(CHANNEL, L10n.text("android.tokenstatmessagingservice.agent_updates.e78d7b9c"), NotificationManager.IMPORTANCE_DEFAULT),
         )
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP

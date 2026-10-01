@@ -25,34 +25,34 @@ internal static class SeatStep
         switch (name)
         {
             case "Read":
-                return Labeled("Reading", FileName(line));
+                return Labeled(L10n.Text("windows.seatstep.reading.463816d0"), FileName(line));
             case "Write":
-                return Labeled("Writing", FileName(line));
+                return Labeled(L10n.Text("windows.seatstep.writing.a8bfae3e"), FileName(line));
             case "Edit":
             case "NotebookEdit":
-                return Labeled("Editing", FileName(line));
+                return Labeled(L10n.Text("windows.seatstep.editing.fab4539d"), FileName(line));
             case "Diff":
-                return Labeled("Comparing", FileName(line));
+                return Labeled(L10n.Text("windows.seatstep.comparing.1fa1aad0"), FileName(line));
             case "Shell":
             case "Bash":
-                return Labeled("Running", collapsed);
+                return Labeled(L10n.Text("common.running"), collapsed);
             case "Grep":
             case "Search":
-                return Labeled("Searching", collapsed);
+                return Labeled(L10n.Text("windows.seatstep.searching.03bd6fca"), collapsed);
             case "Glob":
             case "Find":
                 var file = FileName(line);
-                if (file.Length == 0) return "Looking";
-                return Labeled("Looking through", file);
+                if (file.Length == 0) return L10n.Text("windows.seatstep.looking.afa37c88");
+                return Labeled(L10n.Text("windows.seatstep.looking_through.6c8d5b7b"), file);
             case "WebFetch":
-                return Labeled("Opening", Site(collapsed));
+                return Labeled(L10n.Text("windows.seatstep.opening.f4b13e93"), Site(collapsed));
             case "WebSearch":
-                return "Searching the web";
+                return L10n.Text("windows.seatstep.searching_the_web.87d2f338");
             case "Task":
             case "Subagent":
-                return "Asking another agent";
+                return L10n.Text("windows.seatstep.asking_another_agent.fde5ee73");
             case "TodoWrite":
-                return "Updating the list";
+                return L10n.Text("windows.seatstep.updating_the_list.ca724dcc");
             default:
                 // A path with nothing left after the slashes is just work.
                 // "Working on" with an empty name reads as a broken sentence.
@@ -60,11 +60,11 @@ internal static class SeatStep
                 if (edges.Contains('/') || edges.Contains('\\'))
                 {
                     var named = FileName(line);
-                    if (named.Length == 0) return "Working";
-                    return Labeled("Working on", named);
+                    if (named.Length == 0) return L10n.Text("common.working");
+                    return Labeled(L10n.Text("windows.seatstep.working_on.006abaf3"), named);
                 }
-                if (collapsed.Length == 0) return "Working";
-                return Labeled("Working on", collapsed);
+                if (collapsed.Length == 0) return L10n.Text("common.working");
+                return Labeled(L10n.Text("windows.seatstep.working_on.006abaf3"), collapsed);
         }
     }
 
@@ -74,10 +74,10 @@ internal static class SeatStep
     /// </summary>
     public static string SeatLabel(bool waiting, string? step, bool speaking)
     {
-        if (waiting) return "Waiting";
+        if (waiting) return L10n.Text("common.waiting");
         if (!string.IsNullOrWhiteSpace(step)) return step!;
-        if (speaking) return "Replying";
-        return "Thinking";
+        if (speaking) return L10n.Text("windows.seatstep.replying.b2663dd7");
+        return L10n.Text("windows.seatstep.thinking.a20d12c5");
     }
 
     /// <summary>
@@ -88,23 +88,23 @@ internal static class SeatStep
     {
         switch (TrimVerb(verb))
         {
-            case "Read": return running ? "Reading" : "Read";
-            case "Write": return running ? "Writing" : "Wrote";
+            case "Read": return running ? L10n.Text("windows.seatstep.reading.463816d0") : L10n.Text("windows.seatstep.read.9b9a8d05");
+            case "Write": return running ? L10n.Text("windows.seatstep.writing.a8bfae3e") : L10n.Text("windows.seatstep.wrote.42717062");
             case "Edit":
-            case "NotebookEdit": return running ? "Editing" : "Edited";
-            case "Diff": return running ? "Comparing" : "Compared";
+            case "NotebookEdit": return running ? L10n.Text("windows.seatstep.editing.fab4539d") : L10n.Text("windows.seatstep.edited.7117f080");
+            case "Diff": return running ? L10n.Text("windows.seatstep.comparing.1fa1aad0") : L10n.Text("windows.seatstep.compared.17c858fc");
             case "Shell":
-            case "Bash": return running ? "Running" : "Ran";
+            case "Bash": return running ? L10n.Text("common.running") : L10n.Text("windows.seatstep.ran.b6a7c95e");
             case "Grep":
-            case "Search": return running ? "Searching" : "Searched";
+            case "Search": return running ? L10n.Text("windows.seatstep.searching.03bd6fca") : L10n.Text("windows.seatstep.searched.9fc7f116");
             case "Glob":
-            case "Find": return running ? "Looking" : "Looked";
-            case "WebFetch": return running ? "Opening" : "Opened";
-            case "WebSearch": return running ? "Searching the web" : "Searched the web";
+            case "Find": return running ? L10n.Text("windows.seatstep.looking.afa37c88") : L10n.Text("windows.seatstep.looked.07558310");
+            case "WebFetch": return running ? L10n.Text("windows.seatstep.opening.f4b13e93") : L10n.Text("windows.seatstep.opened.b19fb8d1");
+            case "WebSearch": return running ? L10n.Text("windows.seatstep.searching_the_web.87d2f338") : L10n.Text("windows.seatstep.searched_the_web.7d2580ce");
             case "Task":
-            case "Subagent": return running ? "Asking another agent" : "Asked another agent";
-            case "TodoWrite": return running ? "Updating the list" : "Updated the list";
-            case "": return running ? "Working" : "Worked";
+            case "Subagent": return running ? L10n.Text("windows.seatstep.asking_another_agent.fde5ee73") : L10n.Text("windows.seatstep.asked_another_agent.629f8e22");
+            case "TodoWrite": return running ? L10n.Text("windows.seatstep.updating_the_list.ca724dcc") : L10n.Text("windows.seatstep.updated_the_list.de8e6fab");
+            case "": return running ? L10n.Text("common.working") : L10n.Text("windows.seatstep.worked.e7f93aad");
             default: return TrimVerb(verb);
         }
     }
@@ -126,7 +126,7 @@ internal static class SeatStep
     public static string ApprovalWord(string? verb, bool pending)
     {
         var name = TrimVerb(verb);
-        if (name.Length == 0) return "Approval";
+        if (name.Length == 0) return L10n.Text("windows.seatstep.approval.147fb813");
         return Word(name, pending);
     }
 
@@ -141,15 +141,15 @@ internal static class SeatStep
         var prefix = TrimVerb(shellPrefix);
         if (prefix.Length > 0)
         {
-            return "Always allow remembers " + prefix + " for this chat only.";
+            return L10n.Text("windows.seatstep.always_allow_remembers_0_for_this_chat_onl.394a9e6d", $"{prefix}");
         }
         if (IsShell(verb))
         {
-            return "Always allow answers this request only. Nothing is saved for later.";
+            return L10n.Text("windows.seatstep.always_allow_answers_this_request_only_not.a067a2b7");
         }
         var name = TrimVerb(verb);
         if (name.Length == 0) return null;
-        return "Always allow remembers " + name + " for this chat only.";
+        return L10n.Text("windows.seatstep.always_allow_remembers_0_for_this_chat_onl.394a9e6d", $"{name}");
     }
 
     /// <summary>

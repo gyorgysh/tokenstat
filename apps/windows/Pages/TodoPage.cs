@@ -32,7 +32,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         Spacing = Theme.SpaceL,
         Padding = new Thickness(Theme.SpaceM),
     };
-    private readonly TextBox _quickTitle = new() { PlaceholderText = "New task" };
+    private readonly TextBox _quickTitle = new() { PlaceholderText = L10n.Text("windows.todopage.new_task.3e992276") };
     private readonly Button _quickAdd;
     private readonly ComboBox _folderFilter = new()
     {
@@ -41,7 +41,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     };
     private readonly ComboBox _agentFilter = new() { MinWidth = 140 };
     private readonly ComboBox _attentionFilter = new() { MinWidth = 150 };
-    private readonly TextBox _search = new() { PlaceholderText = "Search tasks", MinWidth = 180 };
+    private readonly TextBox _search = new() { PlaceholderText = L10n.Text("windows.todopage.search_tasks.46c6f1de"), MinWidth = 180 };
 
     private JsonArray _cards = new();
     private JsonArray _runs = new();
@@ -60,7 +60,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     private readonly TaskCreationDraft _doingCreation = new();
     private TaskCreationDraft? _pendingCreateDraft;
     private long _pendingCreateRevision;
-    private readonly TextBox _doingTitle = new() { PlaceholderText = "New task", HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly TextBox _doingTitle = new() { PlaceholderText = L10n.Text("windows.todopage.new_task.3e992276"), HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly Button _doingAdd;
     private string? _pendingRunOp;
     private string? _runError;
@@ -100,19 +100,19 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     }
 
     private static readonly string[] Columns = ["backlog", "doing", "done"];
-    private static readonly string[] ColumnTitles = ["To Do", "In progress", "Done"];
+    private static readonly string[] ColumnTitles = [L10n.Text("windows.todopage.to_do.150d92c4"), L10n.Text("windows.todopage.in_progress.c1f88e9d"), L10n.Text("common.done")];
 
     public TodoPage(string? workspaceId = null)
     {
         _scopeWorkspaceId = workspaceId;
-        _quickAdd = ActionIconGlyph.Button("Add", ActionIcon.Create, async (_, _) => await CreateAsync());
-        _doingAdd = ActionIconGlyph.Button("Add", ActionIcon.Create, async (_, _) => await CreateAsync(_doingTitle, "doing"));
+        _quickAdd = ActionIconGlyph.Button(L10n.Text("common.add"), ActionIcon.Create, async (_, _) => await CreateAsync());
+        _doingAdd = ActionIconGlyph.Button(L10n.Text("common.add"), ActionIcon.Create, async (_, _) => await CreateAsync(_doingTitle, "doing"));
         _quickTitle.TextChanged += (_, _) => _backlogCreation.Edited();
         _doingTitle.TextChanged += (_, _) => _doingCreation.Edited();
         _quickTitle.KeyDown += async (_, key) => { if (key.Key == Windows.System.VirtualKey.Enter) { key.Handled = true; await CreateAsync(); } };
         _doingTitle.KeyDown += async (_, key) => { if (key.Key == Windows.System.VirtualKey.Enter) { key.Handled = true; await CreateAsync(_doingTitle, "doing"); } };
 
-        _attentionFilter.ItemsSource = new[] { "All tasks", "Running", "Needs attention", "High priority" };
+        _attentionFilter.ItemsSource = new[] { L10n.Text("windows.todopage.all_tasks.cb664823"), L10n.Text("common.running"), L10n.Text("windows.todopage.needs_attention.c1ebc781"), L10n.Text("windows.todopage.high_priority.b699a8c8") };
         _attentionFilter.SelectedIndex = 0;
         _attentionFilter.SelectionChanged += (_, _) => RenderBoard();
         _agentFilter.SelectionChanged += (_, _) => RenderBoard();
@@ -180,7 +180,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         {
             Buttons.ToolbarIcon(
                 ActionIcon.Refresh,
-                "Reload tasks",
+                L10n.Text("windows.todopage.reload_tasks.8eed27ce"),
                 async (_, _) =>
                 {
                     LogoRefresh.Began();
@@ -193,13 +193,13 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         }
         actions.Add(Buttons.ToolbarIcon(
             ActionIcon.Create,
-            "Add a card to To Do",
+            L10n.Text("windows.todopage.add_a_card_to_to_do.ca83de8d"),
             (_, _) => FocusNewTask()));
         var sort = SegmentedCapsule.View(
             new List<(string Value, string Label, ActionIcon? Glyph)>
             {
-                ("newest", "Newest", null),
-                ("board", "Board order", null),
+                ("newest", L10n.Text("windows.todopage.newest.d15efa17"), null),
+                ("board", L10n.Text("windows.todopage.board_order.a919c850"), null),
             },
             _newestFirst ? "newest" : "board",
             value =>
@@ -215,9 +215,9 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         int archived = ArchivedCount();
         var archive = Buttons.ToolbarIcon(
             _showArchive ? ActionIcon.Restore : ActionIcon.Archive,
-            _showArchive ? "Show Done"
-                : archived == 0 ? "No archived cards"
-                : "Show " + archived + " archived card" + (archived == 1 ? "" : "s"),
+            _showArchive ? L10n.Text("windows.todopage.show_done.79b95d57")
+                : archived == 0 ? L10n.Text("windows.todopage.no_archived_cards.ff87c4c5")
+                : (archived == 1 ? L10n.Text("windows.todopage.show_0_archived_card_1.57f16789.one", archived) : L10n.Text("windows.todopage.show_0_archived_card_1.57f16789.other", archived)),
             (_, _) =>
             {
                 _showArchive = !_showArchive;
@@ -265,9 +265,9 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     private UIElement FilterBar()
     {
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceM };
-        bar.Children.Add(Labeled("Agent", _agentFilter));
-        bar.Children.Add(Labeled("Showing", _attentionFilter));
-        bar.Children.Add(Labeled("Search", _search));
+        bar.Children.Add(Labeled(L10n.Text("windows.todopage.agent.11b39c93"), _agentFilter));
+        bar.Children.Add(Labeled(L10n.Text("windows.todopage.showing.d604310a"), _attentionFilter));
+        bar.Children.Add(Labeled(L10n.Text("common.search"), _search));
         return bar;
     }
 
@@ -472,7 +472,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
 
     private void RefreshFilterLists()
     {
-        var folderNames = new List<string> { "All projects", "Uncategorized" };
+        var folderNames = new List<string> { L10n.Text("windows.todopage.all_projects.4b87271b"), L10n.Text("windows.todopage.uncategorized.8d40d123") };
         folderNames.AddRange(_folders.Select(f => f.Name));
         _folderFilter.ItemsSource = folderNames;
         if (_scopeWorkspaceId is not null)
@@ -485,7 +485,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         {
             _folderFilter.SelectedIndex = 0;
         }
-        var agentNames = new List<string> { "All agents" };
+        var agentNames = new List<string> { L10n.Text("windows.todopage.all_agents.54c32d3e") };
         agentNames.AddRange(_backends.Select(b => b.Label));
         _agentFilter.ItemsSource = agentNames;
         if (_agentFilter.SelectedIndex < 0)
@@ -609,16 +609,16 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         if (_showArchive && _cards.Count == 0)
         {
             _boardHost.Children.Add(EmptyState.View(
-                _showArchive ? "No archived tasks" : "No tasks yet",
-                "Create a task or adjust the filters to see more work.",
+                _showArchive ? L10n.Text("windows.todopage.no_archived_tasks.5cad3e05") : L10n.Text("windows.todopage.no_tasks_yet.cca8d533"),
+                L10n.Text("windows.todopage.create_a_task_or_adjust_the_filters_to_see.50174b52"),
                 EmptyArtKind.Tasks,
-                ActionIconGlyph.Button("New task", ActionIcon.Create, (_, _) =>
+                ActionIconGlyph.Button(L10n.Text("windows.todopage.new_task.3e992276"), ActionIcon.Create, (_, _) =>
                     FocusNewTask())));
             return;
         }
         if (_showArchive)
         {
-            _boardHost.Children.Add(Column("archive", "Archive"));
+            _boardHost.Children.Add(Column("archive", L10n.Text("common.archive")));
             return;
         }
         var stages = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceM };
@@ -662,12 +662,12 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             list.Children.Add(new TextBlock
             {
                 Text = !string.IsNullOrWhiteSpace(_query) || _agentFilter.SelectedIndex > 0 || _attentionFilter.SelectedIndex > 0
-                    ? "No matching tasks" : column switch
+                    ? L10n.Text("windows.todopage.no_matching_tasks.ff36d18d") : column switch
                 {
-                    "backlog" => "Ready for your next task",
-                    "doing" => "Nothing in progress",
-                    "done" => "Completed tasks appear here",
-                    _ => "No archived tasks",
+                    "backlog" => L10n.Text("windows.todopage.ready_for_your_next_task.838d6e4b"),
+                    "doing" => L10n.Text("windows.todopage.nothing_in_progress.44a3cc77"),
+                    "done" => L10n.Text("windows.todopage.completed_tasks_appear_here.6d7064fc"),
+                    _ => L10n.Text("windows.todopage.no_archived_tasks.5cad3e05"),
                 },
                 TextWrapping = TextWrapping.Wrap,
                 Opacity = 0.6,
@@ -691,7 +691,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             Grid.SetColumn(add, 1);
             entry.Children.Add(input); entry.Children.Add(add);
             body.Children.Add(entry);
-            ToolTipService.SetToolTip(input, "New task in " + title);
+            ToolTipService.SetToolTip(input, L10n.Text("windows.todopage.new_task_in_0.77ab1dfa", $"{title}"));
         }
         body.Children.Add(list);
         var frame = new Border
@@ -727,7 +727,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     private UIElement CardRow(JsonNode card)
     {
         var id = Format.Text(card, "id");
-        var title = Format.Text(card, "title", "(untitled)");
+        var title = Format.Text(card, "title", L10n.Text("windows.todopage.untitled.3bc7cc17"));
         var backend = Format.Text(card, "backend");
         var priority = Format.Text(card, "priority");
         var status = Format.Text(card?["delegate"], "status");
@@ -738,7 +738,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         }
         if (priority == "high")
         {
-            line += " · High priority";
+            line += L10n.Text("windows.todopage.high_priority.bb9eb467");
         }
         var body = new StackPanel { Spacing = 2 };
         body.Children.Add(new TextBlock
@@ -777,7 +777,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             e.AcceptedOperation = DataPackageOperation.Move;
             frame.BorderBrush = Theme.AccentBrush;
             e.DragUIOverride.Caption = e.GetPosition(frame).Y < frame.ActualHeight / 2
-                ? "Move before this task" : "Move after this task";
+                ? L10n.Text("windows.todopage.move_before_this_task.76986a3b") : L10n.Text("windows.todopage.move_after_this_task.dabd62ad");
         };
         frame.DragLeave += (_, _) => frame.BorderBrush = Theme.BorderBrush;
         frame.Drop += async (_, e) =>
@@ -816,9 +816,9 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     {
         if (string.IsNullOrEmpty(workspaceId))
         {
-            return "Uncategorized";
+            return L10n.Text("windows.todopage.uncategorized.8d40d123");
         }
-        return _folders.FirstOrDefault(f => f.Id == workspaceId).Name ?? "Folder";
+        return _folders.FirstOrDefault(f => f.Id == workspaceId).Name ?? L10n.Text("windows.todopage.folder.74ccd433");
     }
 
     private void FocusNewTask()
@@ -870,11 +870,11 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
                     await CallTodoAsync("todo.createOnce", parameters);
                     _pendingCreateOp = null;
                     ClearAcceptedCreate();
-                    Notice("Task added.");
+                    Notice(L10n.Text("windows.todopage.task_added.d37be00e"));
                 }
                 catch (Exception ex)
                 {
-                    Banner("The task may already exist. Check this request before adding another. " + ex.Message);
+                    Banner(L10n.Text("windows.todopage.the_task_may_already_exist_check_this_requ.393dd6c6", $"{ex.Message}"));
                     RenderDetail();
                     return;
                 }
@@ -883,7 +883,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             {
                 await CallTodoAsync("todo.create", parameters);
                 if (draft.Accepts(submittedRevision)) input.Text = "";
-                Notice("Task added.");
+                Notice(L10n.Text("windows.todopage.task_added.d37be00e"));
             }
         }
         catch (Exception ex)
@@ -915,13 +915,13 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             {
                 _pendingCreateOp = null;
                 ClearAcceptedCreate();
-                Notice("Task added.");
+                Notice(L10n.Text("windows.todopage.task_added.d37be00e"));
                 await LoadAsync(quiet: true);
                 RenderBoard();
             }
             else
             {
-                Banner("The computer has not accepted this task yet. Check again when the connection is ready.");
+                Banner(L10n.Text("windows.todopage.the_computer_has_not_accepted_this_task_ye.a1c750b8"));
             }
         }
         catch (Exception ex)
@@ -1004,7 +1004,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
                 && _selectedId is not null)
             {
                 _conflictId = _selectedId;
-                Banner("This task changed since you opened it. Compare the saved task before replacing it.");
+                Banner(L10n.Text("windows.todopage.this_task_changed_since_you_opened_it_comp.e4a26988"));
             }
             return;
         }
@@ -1027,14 +1027,14 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             var pending = new StackPanel { Spacing = Theme.SpaceS };
             pending.Children.Add(new TextBlock
             {
-                Text = "The task may already exist. Check this request before adding another.",
+                Text = L10n.Text("windows.todopage.the_task_may_already_exist_check_this_requ.0c71c77c"),
                 TextWrapping = TextWrapping.Wrap,
             });
             var checkRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
             checkRow.Children.Add(ActionIconGlyph.Button(
-                "Check again", ActionIcon.Refresh, async (_, _) => await CheckCreationAsync()));
+                L10n.Text("windows.todopage.check_again.fb7099ad"), ActionIcon.Refresh, async (_, _) => await CheckCreationAsync()));
             pending.Children.Add(checkRow);
-            _detailHost.Children.Add(Chrome.Card("Saving task", pending));
+            _detailHost.Children.Add(Chrome.Card(L10n.Text("windows.todopage.saving_task.a0d363d3"), pending));
         }
         var card = SelectedCard();
         if (card is null)
@@ -1043,12 +1043,12 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             {
                 _detailHost.Children.Add(new TextBlock
                 {
-                    Text = "Select a task",
+                    Text = L10n.Text("windows.todopage.select_a_task.fc354a83"),
                     FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 });
                 _detailHost.Children.Add(new TextBlock
                 {
-                    Text = "Pick a card on the board to edit it, run it, or read its result.",
+                    Text = L10n.Text("windows.todopage.pick_a_card_on_the_board_to_edit_it_run_it.8bba3cca"),
                     Opacity = 0.66,
                     TextWrapping = TextWrapping.Wrap,
                 });
@@ -1079,7 +1079,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             Model = _dModel?.Text ?? "",
             Effort = _dEffort?.Text ?? "",
             BudgetText = _dBudget?.Text ?? "180",
-            BudgetUnit = _dUnit?.SelectedItem as string ?? "minutes",
+            BudgetUnit = _dUnit?.SelectedValue as string ?? "minutes",
             NoLimit = _dNoLimit?.IsChecked == true,
         };
     }
@@ -1113,33 +1113,33 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         var title = new TextBox
         {
             Text = draft?.Title ?? Format.Text(card, "title"),
-            PlaceholderText = "Title",
+            PlaceholderText = L10n.Text("windows.todopage.title.7e8cd205"),
         };
         title.TextChanged += (_, _) => _detailDirty = true;
-        body.Children.Add(Labeled("Title", title));
+        body.Children.Add(Labeled(L10n.Text("windows.todopage.title.7e8cd205"), title));
         _dTitle = title;
 
         var prompt = new TextBox
         {
             Text = draft?.Prompt ?? Format.Text(card, "notes"),
-            PlaceholderText = "What should the agent do?",
+            PlaceholderText = L10n.Text("windows.todopage.what_should_the_agent_do.99b09b41"),
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             MinHeight = 96,
         };
         prompt.TextChanged += (_, _) => _detailDirty = true;
-        body.Children.Add(Labeled("Prompt", prompt));
+        body.Children.Add(Labeled(L10n.Text("windows.todopage.prompt.5c391238"), prompt));
         _dPrompt = prompt;
 
         var folderBox = new ComboBox { MinWidth = 200 };
-        var folderNames = new List<string> { "Uncategorized" };
+        var folderNames = new List<string> { L10n.Text("windows.todopage.uncategorized.8d40d123") };
         folderNames.AddRange(_folders.Select(f => f.Name));
         folderBox.ItemsSource = folderNames;
         var workspaceId = draft?.FolderId ?? Format.Text(card, "workspaceId");
         var folderIndex = _folders.FindIndex(f => f.Id == workspaceId);
         folderBox.SelectedIndex = folderIndex >= 0 ? folderIndex + 1 : 0;
         folderBox.SelectionChanged += (_, _) => _detailDirty = true;
-        body.Children.Add(Labeled("Folder", folderBox));
+        body.Children.Add(Labeled(L10n.Text("windows.todopage.folder.74ccd433"), folderBox));
         _dFolder = folderBox;
 
         var priorityBox = new ComboBox { MinWidth = 140 };
@@ -1151,36 +1151,36 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             _ => "normal",
         };
         priorityBox.SelectionChanged += (_, _) => _detailDirty = true;
-        body.Children.Add(Labeled("Priority", priorityBox));
+        body.Children.Add(Labeled(L10n.Text("windows.todopage.priority.d60dbba0"), priorityBox));
         _dPriority = priorityBox;
 
         var backendBox = new ComboBox { MinWidth = 200 };
-        var backendNames = new List<string> { "Choose an agent" };
+        var backendNames = new List<string> { L10n.Text("windows.todopage.choose_an_agent.b6890bc2") };
         backendNames.AddRange(_backends.Select(b => b.Label));
         backendBox.ItemsSource = backendNames;
         var backendId = draft?.BackendId ?? Format.Text(card, "backend");
         var backendIndex = _backends.FindIndex(b => b.Id == backendId);
         backendBox.SelectedIndex = backendIndex >= 0 ? backendIndex + 1 : 0;
         backendBox.SelectionChanged += (_, _) => _detailDirty = true;
-        body.Children.Add(Labeled("Agent", backendBox));
+        body.Children.Add(Labeled(L10n.Text("windows.todopage.agent.11b39c93"), backendBox));
         _dBackend = backendBox;
 
         var model = new TextBox
         {
             Text = draft?.Model ?? Format.Text(card, "model"),
-            PlaceholderText = "Default model",
+            PlaceholderText = L10n.Text("windows.todopage.default_model.3840d9d2"),
         };
         model.TextChanged += (_, _) => _detailDirty = true;
-        body.Children.Add(Labeled("Model", model));
+        body.Children.Add(Labeled(L10n.Text("windows.todopage.model.5e2c614c"), model));
         _dModel = model;
 
         var effort = new TextBox
         {
             Text = draft?.Effort ?? Format.Text(card, "effort"),
-            PlaceholderText = "Default effort",
+            PlaceholderText = L10n.Text("windows.todopage.default_effort.58c96ef8"),
         };
         effort.TextChanged += (_, _) => _detailDirty = true;
-        body.Children.Add(Labeled("Effort", effort));
+        body.Children.Add(Labeled(L10n.Text("windows.todopage.effort.4387e5d3"), effort));
         _dEffort = effort;
 
         var (budgetValue, budgetUnit, noLimit) = draft is not null
@@ -1188,18 +1188,16 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             : WorkbenchOps.SplitBudget((ulong)Format.Long(card, "budgetSeconds"));
         var budget = new TextBox { Text = budgetValue, MinWidth = 100 };
         budget.TextChanged += (_, _) => _detailDirty = true;
-        var unit = new ComboBox { MinWidth = 110 };
-        unit.ItemsSource = new[] { "minutes", "seconds" };
+        var unit = Chrome.BudgetUnits(budgetUnit);
         // Selection first, handler after: the initial pick is not an edit.
-        unit.SelectedItem = budgetUnit;
         unit.SelectionChanged += (_, _) => _detailDirty = true;
-        var noLimitBox = new CheckBox { Content = "No limit", IsChecked = noLimit };
+        var noLimitBox = new CheckBox { Content = L10n.Text("windows.todopage.no_limit.f7fcff0d"), IsChecked = noLimit };
         noLimitBox.Click += (_, _) => _detailDirty = true;
         var budgetRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         budgetRow.Children.Add(budget);
         budgetRow.Children.Add(unit);
         budgetRow.Children.Add(noLimitBox);
-        body.Children.Add(Labeled("Time limit", budgetRow));
+        body.Children.Add(Labeled(L10n.Text("windows.todopage.time_limit.e592a9ca"), budgetRow));
         _dBudget = budget;
         _dUnit = unit;
         _dNoLimit = noLimitBox;
@@ -1207,18 +1205,18 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         if (_conflictId == id)
         {
             body.Children.Add(Chrome.Banner(
-                "This task changed since you opened it. Compare the saved task before replacing it.",
+                L10n.Text("windows.todopage.this_task_changed_since_you_opened_it_comp.e4a26988"),
                 Theme.Warning,
                 Symbol.Important));
             var conflictRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
             conflictRow.Children.Add(ActionIconGlyph.PrimaryButton(
-                "Save anyway", ActionIcon.Save, async (_, _) =>
+                L10n.Text("windows.todopage.save_anyway.ef4c87b5"), ActionIcon.Save, async (_, _) =>
                 {
                     SnapshotDraft();
                     await SaveDraftAsync(id, force: true);
                 }));
             conflictRow.Children.Add(ActionIconGlyph.Button(
-                "Take saved", ActionIcon.Restore, async (_, _) =>
+                L10n.Text("windows.todopage.take_saved.932c55d7"), ActionIcon.Restore, async (_, _) =>
                 {
                     _conflictId = null;
                     _detailDirty = false;
@@ -1232,7 +1230,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
 
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         actions.Children.Add(ActionIconGlyph.PrimaryButton(
-            "Save", ActionIcon.Save, async (_, _) =>
+            L10n.Text("common.save"), ActionIcon.Save, async (_, _) =>
             {
                 SnapshotDraft();
                 await SaveDraftAsync(id, force: false);
@@ -1244,23 +1242,23 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
                 var target = column;
                 var caption = label;
                 actions.Children.Add(ActionIconGlyph.Button(
-                    $"Move to {caption}", ActionIcon.Move, async (_, _) => await MoveAsync(id, target)));
+                    L10n.Text("windows.todopage.move_to_0.699bb2f5", $"{caption}"), ActionIcon.Move, async (_, _) => await MoveAsync(id, target)));
             }
         }
         if (Format.Text(card, "column") == "archive")
         {
             actions.Children.Add(ActionIconGlyph.Button(
-                "Restore", ActionIcon.Restore, async (_, _) => await MoveAsync(id, "backlog")));
+                L10n.Text("common.restore"), ActionIcon.Restore, async (_, _) => await MoveAsync(id, "backlog")));
         }
         else
         {
             actions.Children.Add(ActionIconGlyph.Button(
-                "Archive", ActionIcon.Archive, async (_, _) => await MoveAsync(id, "archive")));
+                L10n.Text("common.archive"), ActionIcon.Archive, async (_, _) => await MoveAsync(id, "archive")));
         }
         if (!_confirmDelete)
         {
             actions.Children.Add(ActionIconGlyph.Button(
-                "Delete", ActionIcon.Delete, (_, _) =>
+                L10n.Text("common.delete"), ActionIcon.Delete, (_, _) =>
                 {
                     SnapshotDraft();
                     _confirmDelete = true;
@@ -1270,7 +1268,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         else
         {
             actions.Children.Add(ActionIconGlyph.Button(
-                "Back", ActionIcon.Back, (_, _) =>
+                L10n.Text("common.back"), ActionIcon.Back, (_, _) =>
                 {
                     SnapshotDraft();
                     _confirmDelete = false;
@@ -1284,20 +1282,20 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             var confirm = new StackPanel { Spacing = Theme.SpaceS };
             confirm.Children.Add(new TextBlock
             {
-                Text = $"Delete \"{Format.Text(card, "title")}\"? This removes the task from this computer's board.",
+                Text = L10n.Text("windows.todopage.delete_0_this_removes_the_task_from_this_c.615625b6", $"{Format.Text(card, "title")}"),
                 TextWrapping = TextWrapping.Wrap,
             });
             var confirmRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
             confirmRow.Children.Add(ActionIconGlyph.Button(
-                "Delete task", ActionIcon.Delete, async (_, _) => await DeleteAsync(id)));
+                L10n.Text("windows.todopage.delete_task.3baf5547"), ActionIcon.Delete, async (_, _) => await DeleteAsync(id)));
             confirm.Children.Add(confirmRow);
             body.Children.Add(confirm);
         }
 
         return Chrome.Card(
-            Format.Text(card, "title", "Task"),
+            Format.Text(card, "title", L10n.Text("windows.todopage.task.4bc74b21")),
             body,
-            $"Revision {_detailRevision?.ToString() ?? "unknown"} · {FolderLabel(workspaceId)}");
+            L10n.Text("windows.todopage.revision_0_1.5721f8ac", $"{_detailRevision?.ToString() ?? L10n.Text("windows.todopage.unknown.b23a6a84")}", $"{FolderLabel(workspaceId)}"));
     }
 
     private async Task SaveDraftAsync(string id, bool force)
@@ -1310,28 +1308,28 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         var cleanTitle = draft.Title.Trim();
         if (cleanTitle.Length == 0)
         {
-            Banner("Give this task a title.");
+            Banner(L10n.Text("windows.todopage.give_this_task_a_title.30531d14"));
             return;
         }
         if (cleanTitle.Length > 4096)
         {
-            Banner("Shorten the title to 4 KiB or less.");
+            Banner(L10n.Text("windows.todopage.shorten_the_title_to_4_kib_or_less.f40e37a7"));
             return;
         }
         if (draft.Prompt.Length > 1024 * 1024)
         {
-            Banner("Shorten the prompt to 1 MiB or less.");
+            Banner(L10n.Text("windows.todopage.shorten_the_prompt_to_1_mib_or_less.dba63070"));
             return;
         }
         if (draft.Priority is not ("low" or "normal" or "high"))
         {
-            Banner("Choose a task priority.");
+            Banner(L10n.Text("windows.todopage.choose_a_task_priority.d4cee784"));
             return;
         }
         var seconds = WorkbenchOps.BudgetSeconds(draft.BudgetText, draft.BudgetUnit, draft.NoLimit);
         if (seconds is null)
         {
-            Banner("Enter a positive time limit, or choose No limit.");
+            Banner(L10n.Text("windows.todopage.enter_a_positive_time_limit_or_choose_no_l.3b7996e8"));
             return;
         }
         _working = true;
@@ -1354,7 +1352,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             {
                 if (revision is null)
                 {
-                    Banner("Reload this task before saving its settings.");
+                    Banner(L10n.Text("windows.todopage.reload_this_task_before_saving_its_setting.afe9a32c"));
                     return;
                 }
                 parameters["expectedRevision"] = revision.Value;
@@ -1365,7 +1363,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
                 catch (Exception ex) when (WorkbenchOps.IsConflict(ex))
                 {
                     _conflictId = id;
-                    Banner("This task changed since you opened it. Compare the saved task before replacing it.");
+                    Banner(L10n.Text("windows.todopage.this_task_changed_since_you_opened_it_comp.e4a26988"));
                     await LoadAsync(quiet: true);
                     if (SelectedCard() is JsonNode conflicted)
                     {
@@ -1383,7 +1381,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             _detailDirty = false;
             _conflictId = null;
             _draft = null;
-            Notice($"Saved \"{cleanTitle}\".");
+            Notice(L10n.Text("windows.todopage.saved_0.8eb4b783", $"{cleanTitle}"));
         }
         catch (Exception ex)
         {
@@ -1423,7 +1421,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
                 var revision = _detailRevision ?? await FreshRevisionAsync(id);
                 if (revision is null)
                 {
-                    Banner("Reload this task before deleting it.");
+                    Banner(L10n.Text("windows.todopage.reload_this_task_before_deleting_it.d6fd1986"));
                     return;
                 }
                 await CallTodoAsync(
@@ -1437,7 +1435,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             _confirmDelete = false;
             _draft = null;
             _detailDirty = false;
-            Notice("Task deleted.");
+            Notice(L10n.Text("windows.todopage.task_deleted.e954e713"));
         }
         catch (Exception ex)
         {
@@ -1469,9 +1467,9 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             {
                 var retryRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
                 retryRow.Children.Add(ActionIconGlyph.Button(
-                    "Check again", ActionIcon.Refresh, async (_, _) => await CheckRunAsync()));
+                    L10n.Text("windows.todopage.check_again.fb7099ad"), ActionIcon.Refresh, async (_, _) => await CheckRunAsync()));
                 retryRow.Children.Add(ActionIconGlyph.Button(
-                    "Retry", ActionIcon.Run, async (_, _) => await RetryRunAsync()));
+                    L10n.Text("common.retry"), ActionIcon.Run, async (_, _) => await RetryRunAsync()));
                 body.Children.Add(retryRow);
             }
         }
@@ -1482,7 +1480,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             {
                 Text = string.IsNullOrEmpty(runId)
                     ? WorkbenchOps.RunLabel(status)
-                    : $"{WorkbenchOps.RunLabel(status)} · run {runId}",
+                    : L10n.Text("windows.todopage.0_run_1.c42ad067", $"{WorkbenchOps.RunLabel(status)}", $"{runId}"),
                 TextWrapping = TextWrapping.Wrap,
             };
             body.Children.Add(line);
@@ -1491,17 +1489,17 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         var canRun = !running && _pendingRunOp is null && !_working;
         var backButton = ActionIconGlyph.Button(
-            "Run in background", ActionIcon.Run, async (_, _) => await RunAsync(id, "background"));
+            L10n.Text("windows.todopage.run_in_background.c7b156d3"), ActionIcon.Run, async (_, _) => await RunAsync(id, "background"));
         backButton.IsEnabled = canRun;
         var frontButton = ActionIconGlyph.Button(
-            "Run in foreground", ActionIcon.Run, async (_, _) => await RunAsync(id, "foreground"));
+            L10n.Text("windows.todopage.run_in_foreground.a995d3eb"), ActionIcon.Run, async (_, _) => await RunAsync(id, "foreground"));
         frontButton.IsEnabled = canRun;
         actions.Children.Add(backButton);
         actions.Children.Add(frontButton);
         if (running && !string.IsNullOrEmpty(runId))
         {
             actions.Children.Add(ActionIconGlyph.Button(
-                "Stop", ActionIcon.Stop, async (_, _) => await StopAsync(id, runId)));
+                L10n.Text("common.stop"), ActionIcon.Stop, async (_, _) => await StopAsync(id, runId)));
         }
         body.Children.Add(actions);
 
@@ -1514,12 +1512,12 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         {
             body.Children.Add(new TextBlock
             {
-                Text = "No run yet. Run this task to see its result here.",
+                Text = L10n.Text("windows.todopage.no_run_yet_run_this_task_to_see_its_result.57e240ef"),
                 Opacity = 0.66,
                 TextWrapping = TextWrapping.Wrap,
             });
         }
-        return Chrome.Card("Run", body, FolderLabel(Format.Text(card, "workspaceId")));
+        return Chrome.Card(L10n.Text("common.run"), body, FolderLabel(Format.Text(card, "workspaceId")));
     }
 
     private JsonNode? FindRun(string runId)
@@ -1541,7 +1539,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         {
             body.Children.Add(new TextBlock
             {
-                Text = "The run is not in this computer's history yet. Refresh to look again.",
+                Text = L10n.Text("windows.todopage.the_run_is_not_in_this_computer_s_history.c6fd51cc"),
                 Opacity = 0.66,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -1550,7 +1548,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         var status = Format.Text(run, "status");
         body.Children.Add(new TextBlock
         {
-            Text = $"{Format.Text(run, "name", "Run")} · {WorkbenchOps.RunLabel(status)}",
+            Text = $"{Format.Text(run, "name", L10n.Text("common.run"))} · {WorkbenchOps.RunLabel(status)}",
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
         });
@@ -1581,14 +1579,14 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         }
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         row.Children.Add(ActionIconGlyph.Button(
-            "View transcript", ActionIcon.History, async (_, _) => await LoadTranscriptAsync(runId)));
+            L10n.Text("windows.todopage.view_transcript.f5190d98"), ActionIcon.History, async (_, _) => await LoadTranscriptAsync(runId)));
         body.Children.Add(row);
         var workspaceId = Format.Text(card, "workspaceId");
         body.Children.Add(new TextBlock
         {
             Text = string.IsNullOrEmpty(workspaceId)
-                ? "This task has no folder. Assign one to review files and history."
-                : $"Review {FolderLabel(workspaceId)}: uncommitted files in Changes, previous commits in History.",
+                ? L10n.Text("windows.todopage.this_task_has_no_folder_assign_one_to_revi.ec78820b")
+                : L10n.Text("windows.todopage.review_0_uncommitted_files_in_changes_prev.42175e1f", $"{FolderLabel(workspaceId)}"),
             FontSize = 12,
             Opacity = 0.68,
             TextWrapping = TextWrapping.Wrap,
@@ -1610,7 +1608,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
                 "automation.transcript",
                 new JsonObject { ["id"] = runId, ["offset"] = 0 });
             var text = Format.Text(answer, "text");
-            _transcripts[runId] = string.IsNullOrEmpty(text) ? "(empty transcript)" : text;
+            _transcripts[runId] = string.IsNullOrEmpty(text) ? L10n.Text("windows.todopage.empty_transcript.5e12fcc2") : text;
         }
         catch (Exception ex)
         {
@@ -1623,16 +1621,16 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     {
         if (string.IsNullOrEmpty(Format.Text(card, "workspaceId").Trim()))
         {
-            return "Assign a folder before running this task.";
+            return L10n.Text("windows.todopage.assign_a_folder_before_running_this_task.6d7e591f");
         }
         if (string.IsNullOrEmpty(Format.Text(card, "backend").Trim()))
         {
-            return "Choose an agent before running this task.";
+            return L10n.Text("windows.todopage.choose_an_agent_before_running_this_task.8c283f81");
         }
         var prompt = Format.Text(card, "notes").Trim();
         if (string.IsNullOrEmpty(prompt) && string.IsNullOrEmpty(Format.Text(card, "title").Trim()))
         {
-            return "Write a prompt before running this task.";
+            return L10n.Text("windows.todopage.write_a_prompt_before_running_this_task.756d3037");
         }
         return null;
     }
@@ -1651,7 +1649,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             await SaveDraftAsync(id, force: false);
             if (_detailDirty)
             {
-                _runError = "Save the task before running it.";
+                _runError = L10n.Text("windows.todopage.save_the_task_before_running_it.8446db80");
                 RenderDetail();
                 return;
             }
@@ -1676,7 +1674,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
                 var revision = _detailRevision ?? await FreshRevisionAsync(id);
                 if (revision is null)
                 {
-                    _runError = "Reload this task before running it.";
+                    _runError = L10n.Text("windows.todopage.reload_this_task_before_running_it.838b5311");
                     RenderDetail();
                     return;
                 }
@@ -1695,12 +1693,12 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
                     });
                     _pendingRunOp = null;
                     Notice(placement == "foreground"
-                        ? "Foreground run started in a terminal."
-                        : "Handed the task to an agent.");
+                        ? L10n.Text("windows.todopage.foreground_run_started_in_a_terminal.c4cc5790")
+                        : L10n.Text("windows.todopage.handed_the_task_to_an_agent.f001c919"));
                 }
                 catch (Exception ex)
                 {
-                    _runError = "The run result is not confirmed. Check this request before starting another run. " + ex.Message;
+                    _runError = L10n.Text("windows.todopage.the_run_result_is_not_confirmed_check_this.b7631660", $"{ex.Message}");
                     RenderDetail();
                     return;
                 }
@@ -1708,7 +1706,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             else
             {
                 await CallTodoAsync("todo.delegate", new JsonObject { ["id"] = id });
-                Notice("Handed the task to an agent.");
+                Notice(L10n.Text("windows.todopage.handed_the_task_to_an_agent.f001c919"));
             }
         }
         catch (Exception ex)
@@ -1741,18 +1739,18 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             {
                 _pendingRunOp = null;
                 _runError = null;
-                Notice("The run is confirmed.");
+                Notice(L10n.Text("windows.todopage.the_run_is_confirmed.fa711bc2"));
                 await LoadAsync(quiet: true);
                 RenderBoard();
             }
             else
             {
-                _runError = "The computer has not accepted this run request. Retry the same request when the connection is ready.";
+                _runError = L10n.Text("windows.todopage.the_computer_has_not_accepted_this_run_req.956da73e");
             }
         }
         catch (Exception ex)
         {
-            _runError = "The run result is still unavailable. Your request is kept on this device. " + ex.Message;
+            _runError = L10n.Text("windows.todopage.the_run_result_is_still_unavailable_your_r.294ee202", $"{ex.Message}");
         }
         RenderDetail();
     }
@@ -1775,7 +1773,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             var revision = _detailRevision ?? await FreshRevisionAsync(_selectedId);
             if (revision is null)
             {
-                _runError = "Reload this task before retrying the run.";
+                _runError = L10n.Text("windows.todopage.reload_this_task_before_retrying_the_run.b57793dc");
                 RenderDetail();
                 return;
             }
@@ -1790,11 +1788,11 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             });
             _pendingRunOp = null;
             _runError = null;
-            Notice("The run is confirmed.");
+            Notice(L10n.Text("windows.todopage.the_run_is_confirmed.fa711bc2"));
         }
         catch (Exception ex)
         {
-            _runError = "The run result is not confirmed. Check this request before starting another run. " + ex.Message;
+            _runError = L10n.Text("windows.todopage.the_run_result_is_not_confirmed_check_this.b7631660", $"{ex.Message}");
             RenderDetail();
             return;
         }
@@ -1818,7 +1816,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
                 var revision = _detailRevision ?? await FreshRevisionAsync(id);
                 if (revision is null)
                 {
-                    Banner("Reload this task before stopping it.");
+                    Banner(L10n.Text("windows.todopage.reload_this_task_before_stopping_it.727e7588"));
                     return;
                 }
                 await CallTodoAsync("todo.stopTask", new JsonObject
@@ -1832,11 +1830,11 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             {
                 await CallTodoAsync("todo.stop", new JsonObject { ["id"] = id });
             }
-            Notice("Stopped.");
+            Notice(L10n.Text("windows.todopage.stopped.f8ec77e7"));
         }
         catch (Exception ex)
         {
-            Banner("The stop was not confirmed. Reload this task before trying again. " + ex.Message);
+            Banner(L10n.Text("windows.todopage.the_stop_was_not_confirmed_reload_this_tas.ea360237", $"{ex.Message}"));
             return;
         }
         finally

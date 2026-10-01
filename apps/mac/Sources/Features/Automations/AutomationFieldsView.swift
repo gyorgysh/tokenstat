@@ -49,12 +49,12 @@ struct AutomationFieldsView: View {
 
     private func writing(minimumHeight: CGFloat, fills: Bool) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            TextField("Job name", text: $fields.name, axis: .vertical)
+            TextField(L10n.text("apple.automationfieldsview.job_name.be810260"), text: $fields.name, axis: .vertical)
                 .font(Theme.title3.weight(.semibold))
                 .textFieldStyle(.plain)
-                .accessibilityLabel("Job name")
+                .accessibilityLabel(L10n.text("apple.automationfieldsview.job_name.be810260"))
             ThemeRule()
-            Text(fields.backend == "sh" ? "Command" : "Prompt")
+            Text(fields.backend == "sh" ? L10n.text("apple.automationfieldsview.command.71316697") : L10n.text("apple.automationfieldsview.prompt.5c391238"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
             TextEditor(text: $fields.prompt)
@@ -62,7 +62,7 @@ struct AutomationFieldsView: View {
                 .scrollContentBackground(.hidden)
                 .frame(minHeight: fills ? nil : minimumHeight)
                 .frame(maxWidth: .infinity, maxHeight: fills ? .infinity : nil, alignment: .topLeading)
-                .accessibilityLabel(fields.backend == "sh" ? "Job command" : "Job prompt")
+                .accessibilityLabel(fields.backend == "sh" ? L10n.text("apple.automationfieldsview.job_command.25d04df2") : L10n.text("apple.automationfieldsview.job_prompt.ac4bfabd"))
             Text(draftStatus)
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
@@ -73,24 +73,24 @@ struct AutomationFieldsView: View {
     private var settings: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             if section != .settings {
-                Text("Job settings").font(Theme.callout.weight(.semibold))
+                Text(L10n.text("apple.automationfieldsview.job_settings.4aefa68c")).font(Theme.callout.weight(.semibold))
             }
             if folderLocked {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Folder")
+                    Text(L10n.text("apple.automationfieldsview.folder.74ccd433"))
                         .font(Theme.caption)
                         .foregroundStyle(Theme.controlGlyph)
                     Text(folderName)
                         .font(Theme.callout)
-                    Text("This job runs in this folder on the connected computer.")
+                    Text(L10n.text("apple.automationfieldsview.this_job_runs_in_this_folder_on_the_connec.91eeb5c8"))
                         .font(Theme.caption)
                         .foregroundStyle(Theme.controlGlyph)
                 }
             } else {
-                AppMenuPicker(title: "Folder", options: folderOptions, selection: $fields.workspaceID)
+                AppMenuPicker(title: L10n.text("apple.automationfieldsview.folder.74ccd433"), options: folderOptions, selection: $fields.workspaceID)
             }
             AppMenuPicker(
-                title: "Agent",
+                title: L10n.text("apple.automationfieldsview.agent.11b39c93"),
                 options: backendOptions,
                 selection: Binding(
                     get: { fields.backend },
@@ -114,13 +114,13 @@ struct AutomationFieldsView: View {
                 }
                 if !backend.efforts.isEmpty || !fields.effort.isEmpty {
                     AppMenuPicker(
-                        title: "Effort",
+                        title: L10n.text("apple.automationfieldsview.effort.4387e5d3"),
                         options: effortOptions(backend.efforts, preserving: fields.effort),
                         selection: $fields.effort
                     )
                 }
                 if !fields.model.isEmpty && !backend.models.contains(fields.model) {
-                    Text("This computer does not list the saved model. Keep it or choose another.")
+                    Text(L10n.text("apple.automationfieldsview.this_computer_does_not_list_the_saved_mode.479cd2e2"))
                         .font(Theme.caption)
                         .foregroundStyle(Theme.controlGlyph)
                 }
@@ -147,25 +147,25 @@ struct AutomationFieldsView: View {
     }
 
     private var folderOptions: [(value: String, label: String)] {
-        var values = [(value: "", label: "Choose a folder")] + folders.map { (value: $0.id, label: $0.name) }
+        var values = [(value: "", label: L10n.text("apple.automationfieldsview.choose_a_folder.5c71b8cd"))] + folders.map { (value: $0.id, label: $0.name) }
         if !values.contains(where: { $0.value == fields.workspaceID }) {
-            values.append((fields.workspaceID, "Unavailable folder"))
+            values.append((fields.workspaceID, L10n.text("apple.automationfieldsview.unavailable_folder.6454a349")))
         }
         return values
     }
 
     private var backendOptions: [(value: String, label: String)] {
-        var values = [(value: "", label: "Choose an agent")] + backends.map { (value: $0.id, label: $0.label) }
+        var values = [(value: "", label: L10n.text("apple.automationfieldsview.choose_an_agent.b6890bc2"))] + backends.map { (value: $0.id, label: $0.label) }
         if !values.contains(where: { $0.value == fields.backend }) {
-            values.append((fields.backend, "\(fields.backend) · Unavailable"))
+            values.append((fields.backend, L10n.text("apple.automationfieldsview.0_unavailable.1212b25c", "\(fields.backend)")))
         }
         return values
     }
 
     private func effortOptions(_ values: [String], preserving value: String) -> [(value: String, label: String)] {
-        [(value: "", label: "Default")]
+        [(value: "", label: L10n.text("apple.automationfieldsview.default.21b111cb"))]
             + (values.contains(value) || value.isEmpty ? values : values + [value])
-            .map { (value: $0, label: values.contains($0) ? $0 : "\($0) · Saved choice") }
+            .map { (value: $0, label: values.contains($0) ? $0 : L10n.text("apple.automationfieldsview.0_saved_choice.8193b80c", "\($0)")) }
     }
 }
 
@@ -178,13 +178,13 @@ struct AutomationScheduleFields<Draft: JobScheduleEditing>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Frequency")
+            Text(L10n.text("apple.automationfieldsview.frequency.16b6668d"))
                 .font(Theme.sectionHeader)
                 .foregroundStyle(Theme.controlGlyph)
                 .padding(.bottom, Theme.Space.xs)
 
             VStack(spacing: 0) {
-                frequencyRow("Repeat") {
+                frequencyRow(L10n.text("apple.automationfieldsview.repeat.b6b7a006")) {
                     AppMenuPicker(
                         title: "",
                         options: ScheduleKind.allCases.map { (value: $0, label: $0.label) },
@@ -195,7 +195,7 @@ struct AutomationScheduleFields<Draft: JobScheduleEditing>: View {
 
                 if fields.scheduleKind == .interval {
                     ThemeRule()
-                    frequencyRow("Every") {
+                    frequencyRow(L10n.text("apple.automationfieldsview.every.9b8617fd")) {
                         AppMenuPicker(
                             title: "",
                             options: intervalOptions,
@@ -207,7 +207,7 @@ struct AutomationScheduleFields<Draft: JobScheduleEditing>: View {
 
                 if fields.scheduleKind == .weekly {
                     ThemeRule()
-                    frequencyRow("On") {
+                    frequencyRow(L10n.text("apple.automationfieldsview.on.13001175")) {
                         AppMenuPicker(
                             title: "",
                             options: (0..<7).map { (value: $0, label: JobScheduleCopy.weekdayNames[$0]) },
@@ -234,7 +234,7 @@ struct AutomationScheduleFields<Draft: JobScheduleEditing>: View {
                 if fields.scheduleKind == .custom {
                     ThemeRule()
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
-                        Text("On")
+                        Text(L10n.text("apple.automationfieldsview.on.13001175"))
                             .font(Theme.callout)
                         HStack(spacing: 4) {
                             ForEach(0..<7, id: \.self) { bit in
@@ -275,15 +275,15 @@ struct AutomationScheduleFields<Draft: JobScheduleEditing>: View {
                     || fields.scheduleKind == .weekly
                     || fields.scheduleKind == .custom {
                     ThemeRule()
-                    frequencyRow("At") {
-                        DatePicker("Time", selection: time, displayedComponents: .hourAndMinute)
+                    frequencyRow(L10n.text("apple.automationfieldsview.at.c72c5404")) {
+                        DatePicker(L10n.text("apple.automationfieldsview.time.33b93476"), selection: time, displayedComponents: .hourAndMinute)
                             .labelsHidden()
                             .tint(Theme.accent)
                     }
                 }
 
                 if fields.scheduleKind == .once {
-                    Text("Runs only when you press Run now. Nothing is scheduled.")
+                    Text(L10n.text("apple.automationfieldsview.runs_only_when_you_press_run_now_nothing_i.d8d3b24d"))
                         .font(Theme.caption)
                         .foregroundStyle(Theme.controlGlyph)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -382,16 +382,16 @@ struct AutomationBudgetFields<Draft: JobBudgetEditing>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Time limit")
+            Text(L10n.text("apple.automationfieldsview.time_limit.e592a9ca"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
             TimeLimitChips(minutesText: $fields.budgetMinutes, noLimit: $fields.noTimeLimit)
             if !fields.noTimeLimit, !isPreset {
-                TextField("Minutes", text: $fields.budgetMinutes)
+                TextField(L10n.text("apple.automationfieldsview.minutes.4f846a84"), text: $fields.budgetMinutes)
                     .textFieldStyle(.themed)
-                    .accessibilityLabel("Time limit in minutes")
+                    .accessibilityLabel(L10n.text("apple.automationfieldsview.time_limit_in_minutes.e841e686"))
             }
-            Text(fields.noTimeLimit ? "This run is not stopped by a timer." : "The connected computer stops the run at this budget.")
+            Text(fields.noTimeLimit ? L10n.text("apple.automationfieldsview.this_run_is_not_stopped_by_a_timer.dbacd6c6") : L10n.text("apple.automationfieldsview.the_connected_computer_stops_the_run_at_th.ddd7e504"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
         }

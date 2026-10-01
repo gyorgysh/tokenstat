@@ -101,7 +101,7 @@ struct ClientWorkspaceSessionsView: View {
             }
         }
         .background(Theme.background)
-        .navigationTitle("Sessions")
+        .navigationTitle(L10n.text("apple.clientworkspacedetailview.sessions.6fa3cbf4"))
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
             // Its own key. The section list this was pushed from pulls on
@@ -160,58 +160,58 @@ struct ClientWorkspaceSessionsView: View {
             )
         }
         .confirmationDialog(
-            "Close this session?",
+            L10n.text("apple.clientworkspacedetailview.close_this_session.2b66ce2d"),
             isPresented: Binding(
                 get: { pendingClose != nil },
                 set: { if !$0 { pendingClose = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("Close", role: .destructive) {
+            Button(L10n.text("common.close"), role: .destructive) {
                 if let session = pendingClose {
                     Task { await closeSession(session) }
                 }
                 pendingClose = nil
             }
-            Button("Keep it", role: .cancel) { pendingClose = nil }
+            Button(L10n.text("apple.clientworkspacedetailview.keep_it.fdce5da2"), role: .cancel) { pendingClose = nil }
         } message: {
-            Text("Stops the process on \(hostName).")
+            Text(L10n.text("apple.clientworkspacedetailview.stops_the_process_on_0.7aa0b494", "\(hostName)"))
         }
         .confirmationDialog(
-            pendingInstall.map { "Install \($0.name) on \(hostName)?" } ?? "Install this tool?",
+            pendingInstall.map { L10n.text("apple.clientworkspacedetailview.install_0_on_1.534b1069", "\($0.name)", "\(hostName)") } ?? L10n.text("apple.clientworkspacedetailview.install_this_tool.c9c5635e"),
             isPresented: Binding(
                 get: { pendingInstall != nil },
                 set: { if !$0 { pendingInstall = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("Install") {
+            Button(L10n.text("apple.clientworkspacedetailview.install.569ca49f")) {
                 if let profile = pendingInstall {
                     Task { await install(profile) }
                 }
                 pendingInstall = nil
             }
-            Button("Not now", role: .cancel) { pendingInstall = nil }
+            Button(L10n.text("apple.clientworkspacedetailview.not_now.a0e63d7c"), role: .cancel) { pendingInstall = nil }
         } message: {
-            Text("This runs its official installer.")
+            Text(L10n.text("apple.clientworkspacedetailview.this_runs_its_official_installer.0cbae9fd"))
         }
         .confirmationDialog(
-            pendingHide.map { "Remove \($0.name) from the launcher?" } ?? "Remove this tool?",
+            pendingHide.map { L10n.text("apple.clientworkspacedetailview.remove_0_from_the_launcher.c6685e92", "\($0.name)") } ?? L10n.text("apple.clientworkspacedetailview.remove_this_tool.fcc2e23e"),
             isPresented: Binding(
                 get: { pendingHide != nil },
                 set: { if !$0 { pendingHide = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("Remove", role: .destructive) {
+            Button(L10n.text("common.remove"), role: .destructive) {
                 if let profile = pendingHide {
                     Task { await hideOnHost(profile) }
                 }
                 pendingHide = nil
             }
-            Button("Keep", role: .cancel) { pendingHide = nil }
+            Button(L10n.text("apple.clientworkspacedetailview.keep.183f00f4"), role: .cancel) { pendingHide = nil }
         } message: {
-            Text("The tool stays on \(hostName). You can add it again from +.")
+            Text(L10n.text("apple.clientworkspacedetailview.the_tool_stays_on_0_you_can_add_it_again_f.b2c85a3e", "\(hostName)"))
         }
         .fullScreenCover(item: Binding(
             get: { showsBrowserPane ? nil : browserSession },
@@ -259,7 +259,7 @@ struct ClientWorkspaceSessionsView: View {
     private func browserPane(session: ProjectBrowserSession) -> some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Browser")
+                Text(L10n.text("common.browser"))
                     .font(ClientType.caption.weight(.semibold))
                     .foregroundStyle(Theme.controlGlyph)
                 Spacer(minLength: 0)
@@ -271,7 +271,7 @@ struct ClientWorkspaceSessionsView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.controlGlyph)
-                .accessibilityLabel("Close browser")
+                .accessibilityLabel(L10n.text("apple.clientworkspacedetailview.close_browser.dd33033e"))
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.top, Theme.Space.s)
@@ -298,15 +298,15 @@ struct ClientWorkspaceSessionsView: View {
                     .foregroundStyle(bypassOn ? Theme.warning : Theme.accent)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text("Bypass permissions")
+                Text(L10n.text("apple.clientworkspacedetailview.bypass_permissions.8f7a3f7f"))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
-                Text(bypassOn ? "On" : "Off")
+                Text(bypassOn ? L10n.text("apple.clientworkspacedetailview.on.13001175") : L10n.text("apple.clientworkspacedetailview.off.ca7981b4"))
                     .font(ClientType.label.weight(.medium))
             }
             Spacer(minLength: 0)
             Toggle(
-                "Bypass permissions",
+                L10n.text("apple.clientworkspacedetailview.bypass_permissions.8f7a3f7f"),
                 isOn: Binding(
                     get: { bypassOn },
                     set: { next in
@@ -322,17 +322,17 @@ struct ClientWorkspaceSessionsView: View {
         .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
         .cardSurface()
         .accessibilityElement(children: .combine)
-        .accessibilityValue(bypassOn ? "On" : "Off")
+        .accessibilityValue(bypassOn ? L10n.text("apple.clientworkspacedetailview.on.13001175") : L10n.text("apple.clientworkspacedetailview.off.ca7981b4"))
         .accessibilityHint(
             bypassOn
-                ? "Launches here skip permission prompts: shells and agents. Remembered for this folder."
-                : "Launches here ask before acting. Turn on to skip permission prompts for shells and agents."
+                ? L10n.text("apple.clientworkspacedetailview.launches_here_skip_permission_prompts_shel.56397e86")
+                : L10n.text("apple.clientworkspacedetailview.launches_here_ask_before_acting_turn_on_to.7f74555d")
         )
     }
 
     private var openCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Open")
+            Text(L10n.text("common.open"))
                 .font(ClientType.sectionTitle)
             LazyVGrid(
                 columns: [
@@ -407,7 +407,7 @@ struct ClientWorkspaceSessionsView: View {
                         workspaceName: folder.name,
                         workspaceIsRemote: true
                     )
-                    .navigationTitle("Pull requests")
+                    .navigationTitle(L10n.text("apple.clientworkspacedetailview.pull_requests.d9e3f260"))
                     .navigationBarTitleDisplayMode(.inline)
                 } label: {
                     ClientLauncherDestinationTile(
@@ -434,7 +434,7 @@ struct ClientWorkspaceSessionsView: View {
 
     private var launchCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Run an agent")
+            Text(L10n.text("apple.clientworkspacedetailview.run_an_agent.b7046310"))
                 .font(ClientType.sectionTitle)
             LazyVGrid(
                 columns: [
@@ -456,7 +456,7 @@ struct ClientWorkspaceSessionsView: View {
                     // shell, and the Shell tile is not added a second time.
                     launchTile(RemoteLaunchProfile(
                         id: "shell",
-                        name: "Shell",
+                        name: L10n.text("apple.clientworkspacedetailview.shell.a7332854"),
                         command: "/bin/zsh",
                         args: ["-l"],
                         bypassArgs: [],
@@ -490,30 +490,30 @@ struct ClientWorkspaceSessionsView: View {
         NavigationStack {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    Text("Open a local service")
+                    Text(L10n.text("apple.clientworkspacedetailview.open_a_local_service.dafb0b3d"))
                         .font(ClientType.screenTitle)
-                    Text("Enter the port a tool is serving on \(hostName). tokenstat opens an authenticated loopback bridge on this device.")
+                    Text(L10n.text("apple.clientworkspacedetailview.enter_the_port_a_tool_is_serving_on_0_toke.b0d3a820", "\(hostName)"))
                         .font(ClientType.body)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                TextField("Port", text: $portText)
+                TextField(L10n.text("apple.clientworkspacedetailview.port.72e9a59f"), text: $portText)
                     .keyboardType(.numberPad)
                     .textFieldStyle(.themed)
                 ClientRecentBrowserPorts(owner: browserOwner, portText: $portText)
                 Spacer(minLength: 0)
                 HStack(spacing: Theme.Space.s) {
-                    Button("Not now", .dismiss) { showPort = false }
+                    Button(L10n.text("apple.clientworkspacedetailview.not_now.a0e63d7c"), .dismiss) { showPort = false }
                         .buttonStyle(SecondaryButtonStyle())
                     Spacer(minLength: 0)
-                    Button("Open", .browser) { Task { await openPort() } }
+                    Button(L10n.text("common.open"), .browser) { Task { await openPort() } }
                         .buttonStyle(AccentButtonStyle())
                         .disabled(isOpeningPort || BrowserTarget.parsePort(portText) == nil)
                 }
             }
             .padding(Theme.Space.l)
             .background(Theme.background)
-            .navigationTitle("Browser")
+            .navigationTitle(L10n.text("common.browser"))
             .navigationBarTitleDisplayMode(.inline)
         }
         .presentationDetents([.medium])
@@ -554,7 +554,7 @@ struct ClientWorkspaceSessionsView: View {
             }
             .contextMenu {
                 if profile.id != "shell" {
-                    Button("Remove from launcher", .delete) { pendingHide = profile }
+                    Button(L10n.text("apple.clientworkspacedetailview.remove_from_launcher.b107a73b"), .delete) { pendingHide = profile }
                 }
             }
         } else if profile.installed {
@@ -566,7 +566,7 @@ struct ClientWorkspaceSessionsView: View {
                 profile: profile,
                 isMuted: true,
                 isBusy: installingID != nil && installingID != profile.id,
-                caption: installingID == profile.id ? "Installing…" : profile.name
+                caption: installingID == profile.id ? L10n.text("apple.clientworkspacedetailview.installing.530bcc35") : profile.name
             ) {
                 pendingInstall = profile
             }
@@ -584,7 +584,7 @@ struct ClientWorkspaceSessionsView: View {
             guard result.ok else {
                 let tail = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
                 errorMessage = tail.isEmpty
-                    ? "\(profile.name) could not be installed (exit \(result.exitCode ?? 1))"
+                    ? L10n.text("apple.clientworkspacedetailview.0_could_not_be_installed_exit_1.cd09fda1", "\(profile.name)", "\(result.exitCode ?? 1)")
                     : tail
                 return
             }
@@ -602,15 +602,15 @@ struct ClientWorkspaceSessionsView: View {
 
     private var sessionsCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Sessions")
+            Text(L10n.text("apple.clientworkspacedetailview.sessions.6fa3cbf4"))
                 .font(ClientType.sectionTitle)
             if !loaded {
                 ClientWireframe.Rows(count: 2)
             } else if sessions.isEmpty {
                 ClientSectionEmpty(
-                    text: "Nothing running here",
+                    text: L10n.text("apple.clientworkspacedetailview.nothing_running_here.58794718"),
                     art: .sessions,
-                    message: "Start an agent from the row above and it opens right here."
+                    message: L10n.text("apple.clientworkspacedetailview.start_an_agent_from_the_row_above_and_it_o.394f6ed0")
                 )
             } else {
                 List {
@@ -627,7 +627,7 @@ struct ClientWorkspaceSessionsView: View {
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button("Close", role: .destructive) {
+                            Button(L10n.text("common.close"), role: .destructive) {
                                 pendingClose = session
                             }
                         }
@@ -854,9 +854,9 @@ struct ClientFilesView: View {
             }
             if loaded, children.isEmpty, errorMessage == nil {
                 ClientSectionEmpty(
-                    text: "Nothing in this folder",
+                    text: L10n.text("apple.clientworkspacedetailview.nothing_in_this_folder.3316d855"),
                     art: .files,
-                    message: "Files an agent writes here show up as it works."
+                    message: L10n.text("apple.clientworkspacedetailview.files_an_agent_writes_here_show_up_as_it_w.20c94c7c")
                 )
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
@@ -874,7 +874,7 @@ struct ClientFilesView: View {
                         if !entry.isDir, let tab = editors.tab(for: ClientEditorKey(peer: peer, workspace: workspace, path: entry.path)),
                            tab.document.isDirty {
                             Circle().fill(Theme.accent).frame(width: 6, height: 6)
-                                .accessibilityLabel("Unsaved changes")
+                                .accessibilityLabel(L10n.text("apple.clientworkspacedetailview.unsaved_changes.a710c2b9"))
                         }
                         if entry.isDir {
                             Image(systemName: "chevron.right")
@@ -896,7 +896,7 @@ struct ClientFilesView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 if pathStack.count > 1 {
-                    Button("Up") {
+                    Button(L10n.text("apple.clientworkspacedetailview.up.55490a4b")) {
                         pathStack.removeLast()
                         Task { await load() }
                     }
@@ -1019,7 +1019,7 @@ struct ClientFileEditor: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Close") {
+                        Button(L10n.text("common.close")) {
                             if document.isDirty {
                                 confirmClose = true
                             } else {
@@ -1029,12 +1029,12 @@ struct ClientFileEditor: View {
                         .disabled(isSaving)
                     }
                     ToolbarItem {
-                        Button("Find in file", .search) { find.showing.toggle() }
+                        Button(L10n.text("apple.clientworkspacedetailview.find_in_file.214c422e"), .search) { find.showing.toggle() }
                             .labelStyle(.iconOnly)
                             .keyboardShortcut("f", modifiers: .command)
                     }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button(isSaving ? "Saving…" : "Save") {
+                        Button(isSaving ? L10n.text("apple.clientworkspacedetailview.saving.23e39291") : L10n.text("common.save")) {
                             Task { await save() }
                         }
                         .keyboardShortcut("s", modifiers: .command)
@@ -1060,14 +1060,14 @@ struct ClientFileEditor: View {
         #endif
         .interactiveDismissDisabled(document.isDirty || isSaving)
         .confirmationDialog(
-            "Discard changes?",
+            L10n.text("apple.clientworkspacedetailview.discard_changes.85bcf416"),
             isPresented: $confirmClose,
             titleVisibility: .visible
         ) {
-            Button("Discard", role: .destructive) { dismiss() }
-            Button("Cancel", role: .cancel) {}
+            Button(L10n.text("apple.clientworkspacedetailview.discard.eb1a70e3"), role: .destructive) { dismiss() }
+            Button(L10n.text("common.cancel"), role: .cancel) {}
         } message: {
-            Text("This file has edits that are not saved on that computer.")
+            Text(L10n.text("apple.clientworkspacedetailview.this_file_has_edits_that_are_not_saved_on.1290524e"))
         }
     }
 
@@ -1085,16 +1085,16 @@ struct ClientFileEditor: View {
         } else {
             HStack(spacing: Theme.Space.s) {
                 if document.isDirty {
-                    Label("Unsaved", systemImage: "circle.fill")
+                    Label(L10n.text("apple.clientworkspacedetailview.unsaved.6250d572"), systemImage: "circle.fill")
                         .font(ClientType.caption)
                         .foregroundStyle(Theme.warning)
                 } else if let savedAt = document.savedAt {
-                    Text("Saved \(savedAt.formatted(date: .omitted, time: .shortened))")
+                    Text(L10n.text("apple.clientworkspacedetailview.saved_0.4f0424e4", "\(savedAt.formatted(date: .omitted, time: .shortened))"))
                         .font(ClientType.caption)
                         .foregroundStyle(Theme.controlGlyph)
                 }
                 if !document.changedLines.isEmpty {
-                    Text("\(document.changedLines.count) changed")
+                    Text(L10n.text("apple.clientworkspacedetailview.0_changed.d85c3eae", "\(document.changedLines.count)"))
                         .font(ClientType.caption.monospacedDigit())
                         .foregroundStyle(.tertiary)
                 }
@@ -1120,7 +1120,7 @@ struct ClientFileEditor: View {
             findShowing: find.showing
         )
         return [
-            .workbench(.findNext, id: "find-next", title: "Find Next",
+            .workbench(.findNext, id: "find-next", title: L10n.text("apple.clientworkspacedetailview.find_next.664d6cdf"),
                        enabled: WorkbenchShortcutPolicy.canFindNext(state)) {
                 if find.showing {
                     find.goNext()
@@ -1128,7 +1128,7 @@ struct ClientFileEditor: View {
                     find.showing = true
                 }
             },
-            .workbench(.findPrevious, id: "find-previous", title: "Find Previous",
+            .workbench(.findPrevious, id: "find-previous", title: L10n.text("apple.clientworkspacedetailview.find_previous.bf0e5179"),
                        enabled: WorkbenchShortcutPolicy.canFindPrevious(state)) {
                 if find.showing {
                     find.goPrevious()
@@ -1147,7 +1147,7 @@ struct ClientFileEditor: View {
         do {
             host = try await read(peer, workspace, path)
         } catch {
-            errorMessage = "Could not re-read this file on that computer, so the save waits. Your edits are kept."
+            errorMessage = L10n.text("apple.clientworkspacedetailview.could_not_re_read_this_file_on_that_comput.dacb7165")
             return
         }
         let draft = document.text
@@ -1225,7 +1225,7 @@ struct ClientBrowserScreen: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                TextField("URL or port", text: $address)
+                TextField(L10n.text("apple.clientworkspacedetailview.url_or_port.8de6b795"), text: $address)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .submitLabel(.go)
@@ -1242,13 +1242,13 @@ struct ClientBrowserScreen: View {
                     Image(systemName: "clock.arrow.circlepath")
                 }
                 .disabled(session.recentPorts.isEmpty)
-                .accessibilityLabel("Recent project ports")
+                .accessibilityLabel(L10n.text("apple.clientworkspacedetailview.recent_project_ports.b18529b8"))
                 Button(action: openAddress) {
                     Image(systemName: "arrow.right.circle")
                         .frame(minWidth: 32, minHeight: 44)
                 }
                     .font(ClientType.caption.weight(.semibold))
-                    .accessibilityLabel("Open address")
+                    .accessibilityLabel(L10n.text("apple.clientworkspacedetailview.open_address.abc6bf46"))
                     .disabled(session.isOpening)
                 Button {
                     loadError = nil
@@ -1258,8 +1258,8 @@ struct ClientBrowserScreen: View {
                         .frame(minWidth: 32, minHeight: 44)
                 }
                 .font(ClientType.caption.weight(.semibold))
-                .accessibilityLabel("Reload")
-                Button("Done", .done, action: onClose)
+                .accessibilityLabel(L10n.text("apple.clientworkspacedetailview.reload.bdc090ec"))
+                Button(L10n.text("common.done"), .done, action: onClose)
                     .font(ClientType.caption.weight(.semibold))
             }
             .padding(Theme.Space.m)

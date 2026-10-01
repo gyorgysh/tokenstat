@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -181,7 +183,7 @@ fun WorkspaceSection(
         }
         runCatching { model.workspaceSection(peer, methodFor(section), params) }
             .onSuccess { data = it; error = null }
-            .onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+            .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacesections.the_request_failed.db4fb447"), hostLabel) }
         loading = false
     }
     LaunchedEffect(section) { load() }
@@ -199,7 +201,7 @@ fun WorkspaceSection(
         "Automations" -> AutomationsSection(model, peer, workspace, data, error, loading, reload, modifier, folderName, hostLabel, protocol)
         "Files" -> FilesSection(model, peer, workspace, modifier, folderName, hostLabel)
         "Browser" -> BrowserSection(model, peer, workspace, onOpenBrowser, modifier)
-        else -> EmptyState(Icons.AutoMirrored.Filled.Notes, "Nothing here", "This section has no content yet.", modifier)
+        else -> EmptyState(Icons.AutoMirrored.Filled.Notes, L10n.text("android.workspacesections.nothing_here.f4c7f41c"), L10n.text("android.workspacesections.this_section_has_no_content_yet.484c1572"), modifier)
     }
 }
 
@@ -329,19 +331,19 @@ private fun SessionsSection(
                 if (!current()) return@onSuccess
                 val id = info?.str("id")?.takeIf { it.isNotBlank() }
                 if (id == null) {
-                    stickyError = "The computer did not return a terminal. Refresh sessions before trying again."
+                    stickyError = L10n.text("android.workspacesections.the_computer_did_not_return_a_terminal_ref.cf051803")
                     onLoad()
                     return@onSuccess
                 }
                 if (duplicate != null) {
-                    val originalName = names.name(owner, duplicate.str("id").orEmpty()) ?: "Terminal"
-                    names.rename(owner, id, "$originalName copy")
+                    val originalName = names.name(owner, duplicate.str("id").orEmpty()) ?: L10n.text("android.workspacesections.terminal.e0926fda")
+                    names.rename(owner, id, L10n.text("android.workspacesections.0_copy.c02d0604", "${originalName}"))
                 }
                 onOpen(id)
                 onLoad()
             }.onFailure {
                 launchingId = null
-                if (current()) stickyError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+                if (current()) stickyError = TunnelCopy.display(it.message ?: L10n.text("android.workspacesections.the_request_failed.db4fb447"), hostLabel)
             }
         }
     }
@@ -360,11 +362,11 @@ private fun SessionsSection(
                 } else {
                     val tail = (result?.str("output") ?: "").trim()
                     val code = result?.long("exitCode") ?: 1
-                    stickyError = tail.ifEmpty { "${profile.name} could not be installed (exit $code)" }
+                    stickyError = tail.ifEmpty { L10n.text("android.workspacesections.0_could_not_be_installed_exit_1.cd09fda1", "${profile.name}", "${code}") }
                 }
             }.onFailure {
                 installingId = null
-                stickyError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+                stickyError = TunnelCopy.display(it.message ?: L10n.text("android.workspacesections.the_request_failed.db4fb447"), hostLabel)
             }
         }
     }
@@ -411,7 +413,7 @@ private fun SessionsSection(
             }
         }
         if (error != null) item { SectionError(error) }
-        item { SectionLabel("Run an agent") }
+        item { SectionLabel(L10n.text("android.workspacesections.run_an_agent.b7046310")) }
         if (!catalogLoaded) {
             item { SkeletonRows(count = 2) }
         } else {
@@ -463,8 +465,8 @@ private fun SessionsSection(
         }
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                SectionLabel("Sessions", sessions.size, Modifier.weight(1f))
-                TextButton(onClick = onLoad) { Text("Refresh") }
+                SectionLabel(L10n.text("android.workspacesections.sessions.6fa3cbf4"), sessions.size, Modifier.weight(1f))
+                TextButton(onClick = onLoad) { Text(L10n.text("common.refresh")) }
             }
         }
         if (loading && sessions.isEmpty()) item { SkeletonRows(count = 3) }
@@ -472,8 +474,8 @@ private fun SessionsSection(
             item {
                 EmptyState(
                     Icons.Default.Terminal,
-                    "Nothing running here",
-                    "Start an agent from the row above and it opens right here.",
+                    L10n.text("android.workspacesections.nothing_running_here.58794718"),
+                    L10n.text("android.workspacesections.start_an_agent_from_the_row_above_and_it_o.394f6ed0"),
                     art = { EmptyArt(EmptyArtKind.Sessions) },
                 )
             }
@@ -492,7 +494,7 @@ private fun SessionsSection(
             ) {
                 Icon(Icons.Default.Terminal, null, tint = LocalTsColors.current.accent)
                 Column(Modifier.weight(1f)) {
-                    Text(names.name(owner, id) ?: session.str("command") ?: "shell", style = TsType.mono(13), color = LocalTsColors.current.textPrimary)
+                    Text(names.name(owner, id) ?: session.str("command") ?: L10n.text("android.workspacesections.shell.ce635c4e"), style = TsType.mono(13), color = LocalTsColors.current.textPrimary)
                     Text(
                         listOfNotNull(session.str("status"), session.str("title")).joinToString(" · ").ifBlank { id },
                         style = TextStyle(fontSize = 11.sp),
@@ -503,21 +505,21 @@ private fun SessionsSection(
                 }
                 Box {
                     var menu by remember(id) { mutableStateOf(false) }
-                    IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Session actions") }
+                    IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, L10n.text("android.workspacesections.session_actions.742ab447")) }
                     DropdownMenu(menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; renaming = session })
-                        DropdownMenuItem(text = { Text("Duplicate") }, onClick = {
+                        DropdownMenuItem(text = { Text(L10n.text("common.rename")) }, onClick = { menu = false; renaming = session })
+                        DropdownMenuItem(text = { Text(L10n.text("android.workspacesections.duplicate.02cdaabf")) }, onClick = {
                             menu = false
                             if (current()) launch(catalog.firstOrNull { it.id == "shell" } ?: ai.tokenstat.tokenstat.ui.logic.LaunchCatalog.shellFallback(), session)
                         })
                         val pinned = pins.isPinned(pinIdentity, peer, workspace, ai.tokenstat.tokenstat.ui.logic.PinnedWork.Kind.TERMINAL, id)
-                        DropdownMenuItem(text = { Text(if (pinned) "Unpin" else "Pin") }, onClick = {
+                        DropdownMenuItem(text = { Text(if (pinned) L10n.text("android.workspacesections.unpin.ee3c7161") else L10n.text("android.workspacesections.pin.ff1cee74")) }, onClick = {
                             menu = false
-                            if (current() && !pins.togglePin(pinIdentity, peer, workspace, ai.tokenstat.tokenstat.ui.logic.PinnedWork.Kind.TERMINAL, id, names.name(owner, id) ?: session.str("title") ?: "Terminal", folderName)) {
-                                stickyError = "Pinned work holds eight items. Unpin one before adding another."
+                            if (current() && !pins.togglePin(pinIdentity, peer, workspace, ai.tokenstat.tokenstat.ui.logic.PinnedWork.Kind.TERMINAL, id, names.name(owner, id) ?: session.str("title") ?: L10n.text("android.workspacesections.terminal.e0926fda"), folderName)) {
+                                stickyError = L10n.text("android.workspacesections.pinned_work_holds_eight_items_unpin_one_be.e716eb5e")
                             }
                         })
-                        DropdownMenuItem(text = { Text("Close session") }, onClick = { menu = false; pendingClose = session })
+                        DropdownMenuItem(text = { Text(L10n.text("android.workspacesections.close_session.e503367c")) }, onClick = { menu = false; pendingClose = session })
                     }
                 }
             }
@@ -527,20 +529,20 @@ private fun SessionsSection(
     if (install != null) {
         AlertDialog(
             onDismissRequest = { pendingInstall = null },
-            title = { Text("Install ${install.name}?") },
-            text = { Text("This runs its official installer.") },
+            title = { Text(L10n.text("android.workspacesections.install_0.2cfbc939", "${install.name}")) },
+            text = { Text(L10n.text("android.workspacesections.this_runs_its_official_installer.0cbae9fd")) },
             confirmButton = {
-                TextButton(onClick = { pendingInstall = null; install(install) }) { Text("Install") }
+                TextButton(onClick = { pendingInstall = null; install(install) }) { Text(L10n.text("android.workspacesections.install.569ca49f")) }
             },
-            dismissButton = { TextButton(onClick = { pendingInstall = null }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { pendingInstall = null }) { Text(L10n.text("common.cancel")) } },
         )
     }
     val closing = pendingClose
     if (closing != null) {
         AlertDialog(
             onDismissRequest = { pendingClose = null },
-            title = { Text("Close this session?") },
-            text = { Text("The process on ${hostLabel.ifBlank { "that computer" }} stops. This cannot be undone.") },
+            title = { Text(L10n.text("android.workspacesections.close_this_session.2b66ce2d")) },
+            text = { Text(L10n.text("android.workspacesections.the_process_on_0_stops_this_cannot_be_undo.2263278f", "${hostLabel.ifBlank { L10n.text("android.workspacesections.that_computer.2b209061") }}")) },
             confirmButton = {
                 val scope2 = rememberCoroutineScope()
                 TextButton(onClick = {
@@ -548,17 +550,17 @@ private fun SessionsSection(
                     scope2.launch {
                         runCatching {
                             model.workspaceSection(peer, "pty.close", buildJsonObject { put("id", closing.str("id") ?: "") })
-                        }.onFailure { stickyError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+                        }.onFailure { stickyError = TunnelCopy.display(it.message ?: L10n.text("android.workspacesections.the_request_failed.db4fb447"), hostLabel) }
                         onLoad()
                     }
-                }) { Text("Close session") }
+                }) { Text(L10n.text("android.workspacesections.close_session.e503367c")) }
             },
-            dismissButton = { TextButton(onClick = { pendingClose = null }) { Text("Keep it") } },
+            dismissButton = { TextButton(onClick = { pendingClose = null }) { Text(L10n.text("android.workspacesections.keep_it.fdce5da2")) } },
         )
     }
     renaming?.let { session ->
         val id = session.str("id") ?: return@let
-        ai.tokenstat.tokenstat.ui.components.NameEditorDialog("Rename terminal", names.name(owner, id) ?: session.str("title") ?: "Terminal", onDismiss = { renaming = null }) { name ->
+        ai.tokenstat.tokenstat.ui.components.NameEditorDialog(L10n.text("android.workspacesections.rename_terminal.68e0c2a6"), names.name(owner, id) ?: session.str("title") ?: L10n.text("android.workspacesections.terminal.e0926fda"), onDismiss = { renaming = null }) { name ->
             renaming = null
             if (current()) {
                 names.rename(owner, id, name)
@@ -586,9 +588,9 @@ private fun BypassCard(bypassOn: Boolean, onToggle: (Boolean) -> Unit) {
             tint = if (bypassOn) colors.warning else colors.accent,
         )
         Column(Modifier.weight(1f)) {
-            Text("Bypass permissions", style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
+            Text(L10n.text("android.workspacesections.bypass_permissions.8f7a3f7f"), style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
             Text(
-                if (bypassOn) "On" else "Off",
+                if (bypassOn) L10n.text("android.workspacesections.on.13001175") else L10n.text("android.workspacesections.off.ca7981b4"),
                 style = TextStyle(fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium),
                 color = colors.textPrimary,
             )
@@ -600,15 +602,15 @@ private fun BypassCard(bypassOn: Boolean, onToggle: (Boolean) -> Unit) {
 @Composable
 private fun OpenDestinationsGrid(onOpenSection: (String) -> Unit, onStartChat: () -> Unit, chatCount: Int = 0) {
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        SectionLabel("Open")
+        SectionLabel(L10n.text("common.open"))
         val tiles = listOf(
-            Triple("Chat", Icons.Default.ChatBubbleOutline, null),
-            Triple("Files", Icons.Default.FolderOpen, "Files"),
-            Triple("Browser", Icons.Default.Language, "Browser"),
-            Triple("Changes", Icons.Default.Difference, "Changes"),
-            Triple("History", Icons.Default.History, "History"),
-            Triple("Pull requests", Icons.AutoMirrored.Filled.MergeType, "Pulls"),
-            Triple("Tasks", Icons.Default.Checklist, "Tasks"),
+            Triple(L10n.text("android.workspacesections.chat.460b3a7d"), Icons.Default.ChatBubbleOutline, null),
+            Triple(L10n.text("common.files"), Icons.Default.FolderOpen, "Files"),
+            Triple(L10n.text("common.browser"), Icons.Default.Language, "Browser"),
+            Triple(L10n.text("android.workspacesections.changes.bbd4b6a8"), Icons.Default.Difference, "Changes"),
+            Triple(L10n.text("common.history"), Icons.Default.History, "History"),
+            Triple(L10n.text("android.workspacesections.pull_requests.d9e3f260"), Icons.AutoMirrored.Filled.MergeType, "Pulls"),
+            Triple(L10n.text("common.tasks"), Icons.Default.Checklist, "Tasks"),
         )
         tiles.chunked(2).forEach { pair ->
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
@@ -728,7 +730,7 @@ private fun LaunchTile(
                 }
             }
             Text(
-                if (busy) "Starting…" else profile.name,
+                if (busy) L10n.text("android.workspacesections.starting.bbe5fc3b") else profile.name,
                 style = TsType.caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium),
                 color = if (dimmed) colors.textSecondary else colors.textPrimary,
                 maxLines = 1,
@@ -737,7 +739,7 @@ private fun LaunchTile(
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(
-                text = { Text("Remove from launcher") },
+                text = { Text(L10n.text("android.workspacesections.remove_from_launcher.b107a73b")) },
                 onClick = { menu = false; onHide() },
             )
         }
@@ -768,14 +770,14 @@ private fun ExtraLaunchRow(
         ai.tokenstat.tokenstat.ui.marks.HarnessMark(id = profile.harnessId ?: profile.id, size = 26.dp)
         Column(Modifier.weight(1f)) {
             Text(
-                if (installing) "Installing…" else profile.name,
+                if (installing) L10n.text("android.workspacesections.installing.530bcc35") else profile.name,
                 style = TextStyle(fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium),
                 color = colors.textPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                if (!profile.installed) "Not installed" else "Hidden",
+                if (!profile.installed) L10n.text("android.workspacesections.not_installed.d177cdc0") else L10n.text("android.workspacesections.hidden.7e6fefff"),
                 style = TextStyle(fontSize = 11.sp),
                 color = colors.textTertiary,
                 maxLines = 1,
@@ -783,12 +785,12 @@ private fun ExtraLaunchRow(
             )
         }
         if (!profile.installed && profile.installCommand != null) {
-            TsAccentButton(label = "Install", small = true, enabled = !installBusy && !installing, onClick = onInstall)
+            TsAccentButton(label = L10n.text("android.workspacesections.install.569ca49f"), small = true, enabled = !installBusy && !installing, onClick = onInstall)
         } else if (profile.installed && offGrid) {
-            TsSecondaryButton(label = "Show", small = true, onClick = onShow)
+            TsSecondaryButton(label = L10n.text("android.workspacesections.show.0df6f1ca"), small = true, onClick = onShow)
         } else if (profile.installed) {
-            TsSecondaryButton(label = "Start", small = true, onClick = onLaunch)
-            TextButton(onClick = onHide) { Text("Hide") }
+            TsSecondaryButton(label = L10n.text("common.start"), small = true, onClick = onLaunch)
+            TextButton(onClick = onHide) { Text(L10n.text("android.workspacesections.hide.ac20a57b")) }
         }
     }
 }
@@ -841,9 +843,9 @@ private fun TodoSection(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Space.s),
             ) {
-                SectionLabel(if (kindTask) "Tasks" else "Notes", cards.size, Modifier.weight(1f))
+                SectionLabel(if (kindTask) L10n.text("common.tasks") else L10n.text("common.notes"), cards.size, Modifier.weight(1f))
                 TsAccentButton(
-                    label = if (kindTask) "Add task" else "Add note",
+                    label = if (kindTask) L10n.text("android.workspacesections.add_task.ba423a46") else L10n.text("android.workspacesections.add_note.63565c04"),
                     icon = ActionIcon.Create.vector,
                     small = true,
                     onClick = { composer = true },
@@ -853,8 +855,8 @@ private fun TodoSection(
         if (kindTask) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                    TsSecondaryButton(label = "Open board", icon = ActionIcon.Layout.vector, small = true, onClick = { boardFolder = workspace })
-                    TsSecondaryButton(label = "All tasks", icon = ActionIcon.Docs.vector, small = true, onClick = { boardAll = true })
+                    TsSecondaryButton(label = L10n.text("android.workspacesections.open_board.673ae824"), icon = ActionIcon.Layout.vector, small = true, onClick = { boardFolder = workspace })
+                    TsSecondaryButton(label = L10n.text("android.workspacesections.all_tasks.cb664823"), icon = ActionIcon.Docs.vector, small = true, onClick = { boardAll = true })
                 }
             }
         }
@@ -863,11 +865,11 @@ private fun TodoSection(
             item {
                 EmptyState(
                     if (kindTask) Icons.Default.Checklist else Icons.AutoMirrored.Filled.Notes,
-                    if (kindTask) "No tasks yet" else "No notes yet",
+                    if (kindTask) L10n.text("android.workspacesections.no_tasks_yet.cca8d533") else L10n.text("android.workspacesections.no_notes_yet.a092ad6b"),
                     if (kindTask) {
-                        "Cards captured here land on the Mac's board for this folder."
+                        L10n.text("android.workspacesections.cards_captured_here_land_on_the_mac_s_boar.a2f0d409")
                     } else {
-                        "A note is text kept beside the folder it belongs to."
+                        L10n.text("android.workspacesections.a_note_is_text_kept_beside_the_folder_it_b.11aa5817")
                     },
                     art = { EmptyArt(if (kindTask) EmptyArtKind.Tasks else EmptyArtKind.Notes) },
                 )
@@ -896,13 +898,13 @@ private fun TodoSection(
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     Text(
-                        (card.str("column") ?: "backlog").replaceFirstChar(Char::uppercase),
+                        (card.str("column") ?: L10n.text("android.workspacesections.backlog.43313971")).replaceFirstChar(Char::uppercase),
                         style = TextStyle(fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
                         color = LocalTsColors.current.accent,
                     )
                     Spacer(Modifier.weight(1f))
                     if (kindTask) {
-                        TextButton(onClick = { resultCard = card }) { Text("View result") }
+                        TextButton(onClick = { resultCard = card }) { Text(L10n.text("android.workspacesections.view_result.fdb7eafd")) }
                     }
                     IconButton(onClick = {
                         scope.launch {
@@ -920,7 +922,7 @@ private fun TodoSection(
                         // row of thin accent marks.
                         Icon(
                             if (archived) ActionIcon.Restore.vector else ActionIcon.Archive.vector,
-                            if (archived) "Restore" else "Archive",
+                            if (archived) L10n.text("common.restore") else L10n.text("common.archive"),
                             tint = LocalTsColors.current.textSecondary,
                         )
                     }
@@ -945,7 +947,7 @@ private fun TodoSection(
     }
     if (composer) {
         ComposerDialog(
-            title = if (kindTask) "New task" else "New note",
+            title = if (kindTask) L10n.text("android.workspacesections.new_task.3e992276") else L10n.text("android.workspacesections.new_note.76ea482f"),
             onDismiss = { composer = false },
             onSave = { text ->
                 composer = false
@@ -977,8 +979,8 @@ private fun ComposerDialog(title: String, onDismiss: () -> Unit, onSave: (String
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = { OutlinedTextField(text, { text = it }, minLines = 3, modifier = Modifier.fillMaxWidth()) },
-        confirmButton = { Button(enabled = text.isNotBlank(), onClick = { onSave(text.trim()) }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = { Button(enabled = text.isNotBlank(), onClick = { onSave(text.trim()) }) { Text(L10n.text("common.save")) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(L10n.text("common.cancel")) } },
     )
 }
 
@@ -1016,15 +1018,15 @@ private fun WorkflowsSection(
     LazyColumn(modifier, contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(Space.s)) {
         if (error != null) item { SectionError(error) }
         item {
-            TsSecondaryButton(label = "Open workflows", icon = ActionIcon.Layout.vector, small = true, onClick = { workbench = true })
+            TsSecondaryButton(label = L10n.text("android.workspacesections.open_workflows.6fa79b22"), icon = ActionIcon.Layout.vector, small = true, onClick = { workbench = true })
         }
         if (loading && workflows.isEmpty()) item { SkeletonRows(count = 3) }
         if (!loading && workflows.isEmpty()) {
             item {
                 EmptyState(
                     Icons.Default.AccountTree,
-                    "No workflows yet",
-                    "Workflows built on the Mac appear here. Run one from this device.",
+                    L10n.text("android.workspacesections.no_workflows_yet.d3e72e00"),
+                    L10n.text("android.workspacesections.workflows_built_on_the_mac_appear_here_run.1adf0123"),
                     art = { EmptyArt(EmptyArtKind.Workflows) },
                 )
             }
@@ -1071,9 +1073,9 @@ private fun WorkflowsSection(
     if (transcript != null) {
         AlertDialog(
             onDismissRequest = { transcript = null },
-            title = { Text("Transcript") },
+            title = { Text(L10n.text("android.workspacesections.transcript.721164f0")) },
             text = { Text(transcript.orEmpty(), style = TsType.mono(11)) },
-            confirmButton = { TextButton(onClick = { transcript = null }) { Text("Close") } },
+            confirmButton = { TextButton(onClick = { transcript = null }) { Text(L10n.text("common.close")) } },
         )
     }
 }
@@ -1100,7 +1102,7 @@ private fun WorkflowCard(
         verticalArrangement = Arrangement.spacedBy(Space.s),
     ) {
         Text(
-            wf.str("name") ?: wf.str("title") ?: "Workflow",
+            wf.str("name") ?: wf.str("title") ?: L10n.text("android.workspacesections.workflow.2e2d5c56"),
             style = TextStyle(fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
             color = colors.textPrimary,
         )
@@ -1120,11 +1122,11 @@ private fun WorkflowCard(
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            TsAccentButton(label = "Run", small = true, onClick = onRun)
+            TsAccentButton(label = L10n.text("common.run"), small = true, onClick = onRun)
             if (liveRun != null) {
-                TsSecondaryButton(label = "Stop", small = true, onClick = { onKill(liveRun) })
+                TsSecondaryButton(label = L10n.text("common.stop"), small = true, onClick = { onKill(liveRun) })
                 steps.firstOrNull()?.str("id")?.let { node ->
-                    TsSecondaryButton(label = "Transcript", small = true, onClick = { onTranscript(liveRun, node) })
+                    TsSecondaryButton(label = L10n.text("android.workspacesections.transcript.721164f0"), small = true, onClick = { onTranscript(liveRun, node) })
                 }
             }
         }
@@ -1182,15 +1184,15 @@ private fun AutomationsSection(
     LazyColumn(modifier, contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(Space.s)) {
         if (error != null) item { SectionError(error) }
         item {
-            TsSecondaryButton(label = "Open automations", icon = ActionIcon.Layout.vector, small = true, onClick = { workbench = true })
+            TsSecondaryButton(label = L10n.text("android.workspacesections.open_automations.8c752bc8"), icon = ActionIcon.Layout.vector, small = true, onClick = { workbench = true })
         }
         if (loading && automations.isEmpty()) item { SkeletonRows(count = 3) }
         if (!loading && automations.isEmpty()) {
             item {
                 EmptyState(
                     Icons.Default.Bolt,
-                    "No automations yet",
-                    "Scheduled runs configured on that computer appear here.",
+                    L10n.text("android.workspacesections.no_automations_yet.b777509a"),
+                    L10n.text("android.workspacesections.scheduled_runs_configured_on_that_computer.a79574f9"),
                     art = { EmptyArt(EmptyArtKind.Automations) },
                 )
             }
@@ -1225,7 +1227,7 @@ private fun AutomationsSection(
                         Spacer(Modifier.width(Space.s))
                     }
                     Text(
-                        automation.str("label") ?: automation.str("name") ?: "Automation",
+                        automation.str("label") ?: automation.str("name") ?: L10n.text("android.workspacesections.automation.d909750b"),
                         style = TextStyle(fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
                         color = colors.textPrimary,
                         modifier = Modifier.weight(1f),
@@ -1249,14 +1251,14 @@ private fun AutomationsSection(
                             },
                     ) {
                         Text(
-                            if (enabled) "ON" else "OFF",
+                            if (enabled) L10n.text("android.workspacesections.on.e8a01133") else L10n.text("android.workspacesections.off.38cca6be"),
                             style = TextStyle(fontSize = 9.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
                             color = if (enabled) colors.accent else colors.controlGlyph,
                         )
                     }
                 }
                 TsAccentButton(
-                    label = "Run",
+                    label = L10n.text("common.run"),
                     small = true,
                     onClick = {
                         scope.launch {
@@ -1292,11 +1294,11 @@ private fun BrowserSection(
     val active = remember(owner, peer, workspace) { booleanArrayOf(true) }
     DisposableEffect(active) { onDispose { active[0] = false } }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        Text("Open a port on that computer in this device's browser.", color = LocalTsColors.current.textSecondary)
+        Text(L10n.text("android.workspacesections.open_a_port_on_that_computer_in_this_devic.b71fa086"), color = LocalTsColors.current.textSecondary)
         OutlinedTextField(
             portText,
             { portText = it.filter(Char::isDigit).take(5) },
-            label = { Text("Port") },
+            label = { Text(L10n.text("android.workspacesections.port.72e9a59f")) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             leadingIcon = { Icon(Icons.Default.Language, null) },
@@ -1310,12 +1312,12 @@ private fun BrowserSection(
         }
         error?.let { SectionError(it) }
         TsAccentButton(
-            label = if (busy) "Opening…" else "Open",
+            label = if (busy) L10n.text("android.workspacesections.opening.c926c2c5") else L10n.text("common.open"),
             enabled = !busy,
             onClick = {
                 val target = portText.toIntOrNull()?.let { BrowserHistory.forPort(history, it) }
                 if (target == null) {
-                    error = "Enter a port from 1 to 65535."
+                    error = L10n.text("android.workspacesections.enter_a_port_from_1_to_65535.8d1c95d1")
                     return@TsAccentButton
                 }
                 error = null
@@ -1373,7 +1375,7 @@ private fun MoreLaunchTile(showing: Boolean, onTap: () -> Unit, modifier: Modifi
             }
             .clickable(onClick = onTap)
             .semantics {
-                contentDescription = if (showing) "Hide extra tools" else "Show more tools"
+                contentDescription = if (showing) L10n.text("android.workspacesections.hide_extra_tools.6063173b") else L10n.text("android.workspacesections.show_more_tools.fd6e5f9f")
             }
             .padding(vertical = Space.m),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1388,7 +1390,7 @@ private fun MoreLaunchTile(showing: Boolean, onTap: () -> Unit, modifier: Modifi
             )
         }
         Text(
-            if (showing) "Hide" else "More",
+            if (showing) L10n.text("android.workspacesections.hide.ac20a57b") else L10n.text("android.workspacesections.more.d47d7cb0"),
             style = TsType.caption.copy(fontWeight = FontWeight.Medium),
             color = colors.textSecondary,
             maxLines = 1,

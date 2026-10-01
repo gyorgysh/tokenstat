@@ -71,7 +71,7 @@ internal sealed class TerminalSurface : Grid
                 return;
             }
             var core = web.CoreWebView2;
-            core.SetVirtualHostNameToFolderMapping("terminal.tokenstat.invalid", Path.Combine(AppContext.BaseDirectory, "Assets"), CoreWebView2HostResourceAccessKind.DenyCors);
+            core.SetVirtualHostNameToFolderMapping("terminal.tokenstat.invalid", Path.Combine(AppContext.BaseDirectory, L10n.Text("windows.terminalsurface.assets.bd12731d")), CoreWebView2HostResourceAccessKind.DenyCors);
             core.Settings.AreDevToolsEnabled = false;
             core.Settings.AreBrowserAcceleratorKeysEnabled = false;
             core.Settings.AreDefaultContextMenusEnabled = false;
@@ -106,11 +106,11 @@ internal sealed class TerminalSurface : Grid
                     {
                         var selection = message.GetProperty("selection").GetString() ?? "";
                         var menu = new MenuFlyout();
-                        ContextMenus.Add(menu, "Copy", () =>
+                        ContextMenus.Add(menu, L10n.Text("common.copy"), () =>
                         {
                             var data = new DataPackage(); data.SetText(selection); Clipboard.SetContent(data);
                         }, () => selection.Length > 0);
-                        ContextMenus.AddAsync(menu, "Paste", async () =>
+                        ContextMenus.AddAsync(menu, L10n.Text("windows.terminalsurface.paste.f3380f7b"), async () =>
                         {
                             try
                             {
@@ -119,7 +119,7 @@ internal sealed class TerminalSurface : Grid
                             }
                             catch (Exception ex) { Failed?.Invoke(ex.Message); }
                         });
-                        ContextMenus.Add(menu, "Select all", () => Send(new { type = "selectAll" }));
+                        ContextMenus.Add(menu, L10n.Text("windows.terminalsurface.select_all.1fc9a387"), () => Send(new { type = "selectAll" }));
                         menu.ShowAt(web, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions
                         {
                             Position = new Windows.Foundation.Point(message.GetProperty("x").GetDouble(), message.GetProperty("y").GetDouble()),

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
 
@@ -90,7 +92,7 @@ fun HistorySection(
         }.onSuccess { element ->
             commits = asObjects(element)
             error = null
-        }.onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+        }.onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacehistory.the_request_failed.db4fb447"), hostLabel) }
         runCatching {
             model.workspaceSection(peer, "workspace.status", buildJsonObject { put("id", workspace) }) as? JsonObject
         }.onSuccess { folder ->
@@ -101,7 +103,7 @@ fun HistorySection(
     }
     LaunchedEffect(peer, workspace) { load() }
 
-    val place = hostLabel.ifBlank { "the computer" }
+    val place = hostLabel.ifBlank { L10n.text("android.workspacehistory.the_computer.da52d93a") }
 
     val opened = openId
     if (opened != null) {
@@ -129,7 +131,7 @@ fun HistorySection(
             modifier = Modifier.fillMaxWidth(),
         ) {
             TsSecondaryButton(
-                label = "Refresh",
+                label = L10n.text("common.refresh"),
                 icon = ActionIcon.Refresh.vector,
                 small = true,
                 onClick = { scope.launch { load() } },
@@ -139,23 +141,23 @@ fun HistorySection(
         if (!exists) {
             EmptyState(
                 Icons.Default.History,
-                "Folder missing",
-                "This folder is no longer on $place.",
+                L10n.text("android.workspacehistory.folder_missing.f06c68a6"),
+                L10n.text("android.workspacehistory.this_folder_is_no_longer_on_0.ccbb9519", "${place}"),
                 kind = EmptyKind.Unreachable,
                 art = { EmptyArt(EmptyArtKind.History) },
             )
         } else if (loaded && !isRepo && error == null) {
             EmptyState(
                 Icons.Default.History,
-                "Not a git repository",
-                "This folder has no commits to browse. Make it a repository on $place and they will appear here.",
+                L10n.text("android.workspacehistory.not_a_git_repository.f903b388"),
+                L10n.text("android.workspacehistory.this_folder_has_no_commits_to_browse_make.9d24da5f", "${place}"),
                 art = { EmptyArt(EmptyArtKind.History) },
             )
         } else if (loaded && commits.isEmpty() && error == null) {
             EmptyState(
                 Icons.Default.History,
-                "No commits yet",
-                "Commit selected files in Changes and the result will appear here.",
+                L10n.text("android.workspacehistory.no_commits_yet.f17a8736"),
+                L10n.text("android.workspacehistory.commit_selected_files_in_changes_and_the_r.99826438"),
                 art = { EmptyArt(EmptyArtKind.History) },
             )
         } else {
@@ -210,7 +212,7 @@ private fun CommitRow(commit: JsonObject, onOpen: () -> Unit) {
                 Text("·", style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
                 Text(shortId(id), style = TsType.mono(12), color = LocalTsColors.current.textSecondary)
                 if (unpushed) {
-                    Icon(Icons.Default.ArrowUpward, "Not pushed yet", tint = LocalTsColors.current.accent)
+                    Icon(Icons.Default.ArrowUpward, L10n.text("android.workspacehistory.not_pushed_yet.06de6fec"), tint = LocalTsColors.current.accent)
                 }
             }
         }
@@ -239,7 +241,7 @@ private fun CommitDetailPage(
                 put("id", workspace); put("path", commit.str("id") ?: "")
             }) as? JsonObject
         }.onSuccess { detail = it; error = null }
-            .onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+            .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacehistory.the_request_failed.db4fb447"), hostLabel) }
         loaded = true
     }
     LaunchedEffect(commit) { load() }
@@ -266,7 +268,7 @@ private fun CommitDetailPage(
         verticalArrangement = Arrangement.spacedBy(Space.s),
     ) {
             TextButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
-                Text("← History", modifier = Modifier.fillMaxWidth())
+                Text(L10n.text("android.workspacehistory.history.dd1768e5"), modifier = Modifier.fillMaxWidth())
             }
             Text(shortId(id), style = TsType.mono(13), color = LocalTsColors.current.textSecondary)
             if (error != null) {
@@ -296,7 +298,7 @@ private fun CommitDetailPage(
                     }
                     Text(shortId(id), style = TsType.mono(12), color = LocalTsColors.current.textTertiary)
                     if (isMerge) {
-                        Text("merge", style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium), color = LocalTsColors.current.textSecondary)
+                        Text(L10n.text("android.workspacehistory.merge.283128ac"), style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium), color = LocalTsColors.current.textSecondary)
                     }
                 }
                 if (detail != null) {
@@ -304,7 +306,7 @@ private fun CommitDetailPage(
                         if (added > 0) Text("+$added", style = TsType.numeric(12), color = LocalTsColors.current.diffAdded)
                         if (removed > 0) Text("−$removed", style = TsType.numeric(12), color = LocalTsColors.current.diffRemoved)
                         Text(
-                            "${files.size} file${if (files.size == 1) "" else "s"}",
+                            (if (files.size == 1) L10n.text("android.workspacehistory.0_file_1.ac7c9517.one", files.size) else L10n.text("android.workspacehistory.0_file_1.ac7c9517.other", files.size)),
                             style = TextStyle(fontSize = 12.sp),
                             color = LocalTsColors.current.textSecondary,
                         )
@@ -312,13 +314,13 @@ private fun CommitDetailPage(
                 }
             }
             if (!loaded) {
-                Text("Loading…", color = LocalTsColors.current.textSecondary)
+                Text(L10n.text("android.workspacehistory.loading.ba3bbbe1"), color = LocalTsColors.current.textSecondary)
             } else if (detail != null) {
                 if (diffs.isEmpty()) {
                     EmptyState(
                         Icons.Default.History,
-                        if (isMerge) "A merge with no patch of its own" else "No files in this commit",
-                        if (isMerge) "The changes live on the parents." else "This commit changed no files.",
+                        if (isMerge) L10n.text("android.workspacehistory.a_merge_with_no_patch_of_its_own.862cd9e3") else L10n.text("android.workspacehistory.no_files_in_this_commit.db8823ee"),
+                        if (isMerge) L10n.text("android.workspacehistory.the_changes_live_on_the_parents.24d17008") else L10n.text("android.workspacehistory.this_commit_changed_no_files.9786b223"),
                         art = { EmptyArt(EmptyArtKind.History) },
                     )
                 } else {
@@ -344,13 +346,13 @@ private fun CommitDetailPage(
                             }
                             if (diff.bol("binary")) {
                                 Text(
-                                    "This is a binary file. There is nothing to show line by line.",
+                                    L10n.text("android.workspacehistory.this_is_a_binary_file_there_is_nothing_to.6573d54c"),
                                     style = TextStyle(fontSize = 12.sp),
                                     color = LocalTsColors.current.textSecondary,
                                 )
                             } else if (asObjects(diff["hunks"]).isEmpty()) {
                                 Text(
-                                    "No line changes in this file.",
+                                    L10n.text("android.workspacehistory.no_line_changes_in_this_file.2406d2d9"),
                                     style = TextStyle(fontSize = 12.sp),
                                     color = LocalTsColors.current.textSecondary,
                                 )

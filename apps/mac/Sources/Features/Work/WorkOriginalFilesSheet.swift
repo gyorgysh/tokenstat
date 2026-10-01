@@ -28,20 +28,20 @@ struct WorkOriginalFilesSheet: View {
     @State private var limit = 30
 
     var body: some View {
-        ThemedSheet(title: "Original draft files", subtitle: "Kept on this device", icon: .attach,
+        ThemedSheet(title: L10n.text("apple.workoriginalfilessheet.original_draft_files.1093f37b"), subtitle: L10n.text("apple.workoriginalfilessheet.kept_on_this_device.cd773d4c"), icon: .attach,
                     scrolls: true, onClose: { dismiss() }) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                Text("Originals stay here after sending, clearing saved work, or signing out. Export a file to keep it elsewhere. Saved drafts and pending messages are checked before removal.")
+                Text(L10n.text("apple.workoriginalfilessheet.originals_stay_here_after_sending_clearing.70513676"))
                     .font(Theme.callout).foregroundStyle(Theme.controlGlyph)
-                if loading { ProgressView("Reading saved originals…") }
-                else if files.isEmpty { Text("No original draft files are saved for this account.").font(Theme.callout) }
+                if loading { ProgressView(L10n.text("apple.workoriginalfilessheet.reading_saved_originals.c8c14bc0")) }
+                else if files.isEmpty { Text(L10n.text("apple.workoriginalfilessheet.no_original_draft_files_are_saved_for_this.f6c40297")).font(Theme.callout) }
                 else {
-                    Text("\(files.count) files · \(ByteCountFormatter.string(fromByteCount: Int64(clamping: files.reduce(UInt64(0)) { $0.saturatingAdd(UInt64(clamping: $1.bytes)) }), countStyle: .file)) on this device")
+                    Text(L10n.text("apple.workoriginalfilessheet.0_files_1_on_this_device.30ddc176", "\(files.count)", "\(ByteCountFormatter.string(fromByteCount: Int64(clamping: files.reduce(UInt64(0)) { $0.saturatingAdd(UInt64(clamping: $1.bytes)) }), countStyle: .file))"))
                         .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                     ForEach(Array(files.prefix(limit))) { file in
                         VStack(alignment: .leading, spacing: Theme.Space.s) {
                             Text(file.attachment.name).font(Theme.callout.weight(.semibold)).textSelection(.enabled)
-                            Text(inUse.contains(file.id) ? "Used by a draft or pending message" : "Retained original")
+                            Text(inUse.contains(file.id) ? L10n.text("apple.workoriginalfilessheet.used_by_a_draft_or_pending_message.ddb20ebe") : L10n.text("apple.workoriginalfilessheet.retained_original.28d0bbfd"))
                                 .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                             ViewThatFits(in: .horizontal) {
                                 HStack { actions(file) }
@@ -52,7 +52,7 @@ struct WorkOriginalFilesSheet: View {
                         .background(Theme.sidebar, in: RoundedRectangle(cornerRadius: 12))
                     }
                     if files.count > limit {
-                        Button("Show more files", .more) { limit += 30 }.buttonStyle(SecondaryButtonStyle())
+                        Button(L10n.text("apple.workoriginalfilessheet.show_more_files.cf390073"), .more) { limit += 30 }.buttonStyle(SecondaryButtonStyle())
                     }
                 }
                 if let message { Text(message).font(Theme.caption).foregroundStyle(Theme.controlGlyph) }
@@ -66,26 +66,26 @@ struct WorkOriginalFilesSheet: View {
         .onChange(of: WorkSessionContext.shared.readingScope) { _, value in
             if value != scope { document = nil; files = []; dismiss() }
         }
-        .confirmationDialog("Remove this retained original from this device?", isPresented: Binding(
+        .confirmationDialog(L10n.text("apple.workoriginalfilessheet.remove_this_retained_original_from_this_de.adf121c9"), isPresented: Binding(
             get: { removal != nil }, set: { if !$0 { removal = nil } }
         )) {
-            Button("Remove original", role: .destructive) {
+            Button(L10n.text("apple.workoriginalfilessheet.remove_original.b34e1154"), role: .destructive) {
                 guard let file = removal else { return }
                 removal = nil
                 Task { await remove(file) }
             }
-        } message: { Text("Export it first if you want another copy. Files on the conversation’s computer are unchanged.") }
+        } message: { Text(L10n.text("apple.workoriginalfilessheet.export_it_first_if_you_want_another_copy_f.6901d135")) }
         .fileExporter(isPresented: $exporting, document: document, contentType: .data, defaultFilename: exportName) { result in
             document = nil
             switch result {
-            case .success: message = "Original exported. The copy on this device remains here."
-            case .failure: message = "Export could not be completed. The original is still here."
+            case .success: message = L10n.text("apple.workoriginalfilessheet.original_exported_the_copy_on_this_device.df7aeea8")
+            case .failure: message = L10n.text("apple.workoriginalfilessheet.export_could_not_be_completed_the_original.6699e035")
             }
         }
     }
 
     @ViewBuilder private func actions(_ file: ChatLocalAttachmentStore.RetainedFile) -> some View {
-        Button("Export file", .download) {
+        Button(L10n.text("apple.workoriginalfilessheet.export_file.d9d979c6"), .download) {
             Task {
                 busy = true
                 defer { busy = false }
@@ -96,10 +96,10 @@ struct WorkOriginalFilesSheet: View {
                     document = WorkOriginalFileDocument(data: data)
                     exportName = ChatFileStaging.sanitized(file.attachment.name)
                     exporting = true
-                } catch { message = "The original could not be opened. It has not been removed." }
+                } catch { message = L10n.text("apple.workoriginalfilessheet.the_original_could_not_be_opened_it_has_no.b4b88550") }
             }
         }.buttonStyle(SecondaryButtonStyle(small: true))
-        Button("Remove original", .delete) { removal = file }
+        Button(L10n.text("apple.workoriginalfilessheet.remove_original.b34e1154"), .delete) { removal = file }
             .buttonStyle(SecondaryButtonStyle(small: true)).disabled(inUse.contains(file.id))
     }
 
@@ -120,8 +120,8 @@ struct WorkOriginalFilesSheet: View {
                 guard let key = WorkReferenceKey.conversation(file.reference) else { continue }
                 if protected[key]?.contains(file.attachment.id) != true { inUse.remove(file.id) }
             }
-            if result.hasUnreadableFiles { message = "Some original records could not be read. They have been left untouched." }
-        } catch { message = "Some original files or draft references could not be read. Removal stays unavailable until they can be checked." }
+            if result.hasUnreadableFiles { message = L10n.text("apple.workoriginalfilessheet.some_original_records_could_not_be_read_th.3a92c296") }
+        } catch { message = L10n.text("apple.workoriginalfilessheet.some_original_files_or_draft_references_co.e09752f8") }
     }
     private func remove(_ file: ChatLocalAttachmentStore.RetainedFile) async {
         busy = true
@@ -136,16 +136,16 @@ struct WorkOriginalFilesSheet: View {
                     $0.attachments.contains { $0.id == file.attachment.id }
                 }
             }
-            message = "Retained original removed from this device."
+            message = L10n.text("apple.workoriginalfilessheet.retained_original_removed_from_this_device.91b11019")
             await refresh()
         } catch ChatLocalAttachmentStore.Failure.removalUnconfirmed {
             message = ChatLocalAttachmentStore.Failure.removalUnconfirmed.localizedDescription
             await refresh()
         } catch ChatLocalAttachmentStore.Failure.inUse {
-            message = "This file is now used by a draft or pending message. It has been kept."
+            message = L10n.text("apple.workoriginalfilessheet.this_file_is_now_used_by_a_draft_or_pendin.1d6766bc")
             await refresh()
         } catch let error as OriginalFileCoordination.Failure {
             message = error.localizedDescription
-        } catch { message = "The file changed or could not be removed. It has been kept; reopen this sheet to review it again." }
+        } catch { message = L10n.text("apple.workoriginalfilessheet.the_file_changed_or_could_not_be_removed_i.241cc7d9") }
     }
 }

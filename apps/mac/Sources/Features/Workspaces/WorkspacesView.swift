@@ -103,29 +103,29 @@ struct WorkspacesView: View {
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: "laptopcomputer")
                     .foregroundStyle(Theme.accent)
-                Text(folder.machineLabel ?? "Remote machine")
+                Text(folder.machineLabel ?? L10n.text("apple.workspacesview.remote_machine.d9dd1af3"))
                     .font(Theme.fit(12, weight: .medium))
                 Spacer(minLength: 0)
                 // A headless server has no display layer. Offering a viewer
                 // for it only ends in the viewer's own error, so the button
                 // stays off the header entirely.
                 if !(ownerHeadless[peer] ?? false) {
-                    Button("View screen", .preview) {
+                    Button(L10n.text("apple.workspacesview.view_screen.56dea3b5"), .preview) {
                         openWindow(value: RemoteScreenTarget(
                             peer: peer,
-                            name: folder.machineLabel ?? "Remote machine",
+                            name: folder.machineLabel ?? L10n.text("apple.workspacesview.remote_machine.d9dd1af3"),
                             tier: tier
                         ))
                     }
                     .buttonStyle(SecondaryButtonStyle(small: true))
                     .fixedSize()
                 }
-                Button("Disconnect", .disconnect) {
+                Button(L10n.text("common.disconnect"), .disconnect) {
                     NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: peer)
                 }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .fixedSize()
-                .help("Stops showing this computer's folders in the sidebar")
+                .help(L10n.text("apple.workspacesview.stops_showing_this_computer_s_folders_in_t.fae41fce"))
             }
             HostStatsBar(peer: peer, online: true)
         }
@@ -147,27 +147,24 @@ struct WorkspacesView: View {
             Image(systemName: "terminal")
                 .font(Theme.font(34, weight: .light))
                 .foregroundStyle(Theme.accent.opacity(0.65))
-            Text("No terminal yet")
+            Text(L10n.text("apple.workspacesview.no_terminal_yet.df27bfbb"))
                 .font(Theme.title3.weight(.medium))
-            Text("""
-            This is where sessions run: Claude Code, Codex, OpenCode and the \
-            rest, launched in this folder. Live usage meters are coming next.
-            """)
+            Text(L10n.text("apple.workspacesview.this_is_where_sessions_run_claude_code_cod.7d562ef4"))
             .font(Theme.callout)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
             .frame(maxWidth: 400)
-            Text("Sessions are ready when you are")
+            Text(L10n.text("apple.workspacesview.sessions_are_ready_when_you_are.379c6d86"))
                 .font(Theme.caption)
                 .foregroundStyle(.tertiary)
 
             if folder.exists {
                 #if os(macOS)
-                Button("Reveal in Finder", .reveal) { model.revealInFinder(folder) }
+                Button(L10n.text("apple.workspacesview.reveal_in_finder.cc849385"), .reveal) { model.revealInFinder(folder) }
                     .padding(.top, Theme.Space.s)
                 #endif
             } else {
-                Label("This folder is missing. It is kept in case it comes back.",
+                Label(L10n.text("apple.workspacesview.this_folder_is_missing_it_is_kept_in_case.fe3bde5c"),
                       systemImage: "exclamationmark.triangle")
                     .font(Theme.caption)
                     .foregroundStyle(Theme.warning)
@@ -184,18 +181,15 @@ struct WorkspacesView: View {
             Image(systemName: "square.stack.3d.up")
                 .font(Theme.font(34, weight: .light))
                 .foregroundStyle(Theme.accent.opacity(0.65))
-            Text("No workspaces yet")
+            Text(L10n.text("apple.workspacesview.no_workspaces_yet.97d0b117"))
                 .font(Theme.title3.weight(.medium))
-            Text("""
-            Add a project folder. tokenstat reads its git state and gives you a \
-            place to run your agents.
-            """)
+            Text(L10n.text("apple.workspacesview.add_a_project_folder_tokenstat_reads_its_g.eced99eb"))
             .font(Theme.callout)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
             .frame(maxWidth: 360)
             #if os(macOS)
-            Button("Add Project", .create) {
+            Button(L10n.text("apple.workspacesview.add_project.44b7ce21"), .create) {
                 model.requestAdd()
             }
             .buttonStyle(.borderedProminent)
@@ -252,8 +246,8 @@ struct WorkspaceChangesView: View {
             if !folder.exists {
                 InspectorEmptyState(
                     systemImage: "exclamationmark.triangle",
-                    title: "Folder missing",
-                    subtitle: "The folder no longer exists on disk.",
+                    title: L10n.text("apple.workspacesview.folder_missing.f06c68a6"),
+                    subtitle: L10n.text("apple.workspacesview.the_folder_no_longer_exists_on_disk.54b54492"),
                     tint: Theme.warning
                 )
             } else if let git = folder.git, git.isRepo, !git.files.isEmpty {
@@ -271,8 +265,8 @@ struct WorkspaceChangesView: View {
         } else {
             InspectorEmptyState(
                 systemImage: "square.stack.3d.up",
-                title: "No workspace selected",
-                subtitle: "Pick a workspace from the list on the left."
+                title: L10n.text("apple.workspacesview.no_workspace_selected.12b33b8c"),
+                subtitle: L10n.text("apple.workspacesview.pick_a_workspace_from_the_list_on_the_left.ba048561")
             )
         }
     }
@@ -282,39 +276,39 @@ struct WorkspaceChangesView: View {
         if !folder.exists {
             InspectorEmptyState(
                 systemImage: "exclamationmark.triangle",
-                title: "Folder missing",
-                subtitle: "The folder no longer exists on disk.",
+                title: L10n.text("apple.workspacesview.folder_missing.f06c68a6"),
+                subtitle: L10n.text("apple.workspacesview.the_folder_no_longer_exists_on_disk.54b54492"),
                 tint: Theme.warning
             )
         } else if let git = folder.git, git.isRepo {
             if git.files.isEmpty {
                 InspectorEmptyState(
                     systemImage: "checkmark.seal",
-                    title: "Working tree clean",
-                    subtitle: "No uncommitted changes. Everything is up to date.",
+                    title: L10n.text("apple.workspacesview.working_tree_clean.95a0dabb"),
+                    subtitle: L10n.text("apple.workspacesview.no_uncommitted_changes_everything_is_up_to.28598d50"),
                     tint: Theme.accent
                 )
             } else {
                 HStack(alignment: .top, spacing: Theme.Space.s) {
                     summary(git)
                     Spacer(minLength: Theme.Space.s)
-                    Button("Review all", .preview) {
+                    Button(L10n.text("apple.workspacesview.review_all.d05163fa"), .preview) {
                         model.reviewWorkingTree(in: folder.id)
                     }
                     .buttonStyle(AccentButtonStyle(small: true))
                     .fixedSize()
-                    .help("Review all changes, including files not selected for commit.")
-                    .accessibilityLabel("Review all changes")
+                    .help(L10n.text("apple.workspacesview.review_all_changes_including_files_not_sel.aa125b4a"))
+                    .accessibilityLabel(L10n.text("apple.workspacesview.review_all_changes.24320120"))
                 }
                 diffControls(git, in: folder)
-                changeSection("Selected for commit", files: git.files.filter { model.isStaged($0.path, in: folder.id) }, in: folder)
-                changeSection("Not selected", files: git.files.filter { !model.isStaged($0.path, in: folder.id) }, in: folder)
+                changeSection(L10n.text("apple.workspacesview.selected_for_commit.938f04f0"), files: git.files.filter { model.isStaged($0.path, in: folder.id) }, in: folder)
+                changeSection(L10n.text("apple.workspacesview.not_selected.df12aeba"), files: git.files.filter { !model.isStaged($0.path, in: folder.id) }, in: folder)
             }
         } else {
             InspectorEmptyState(
                 systemImage: "arrow.triangle.branch",
-                title: "Not a git repository",
-                subtitle: "This folder has no branch. Files are still accessible in the Files tab."
+                title: L10n.text("apple.workspacesview.not_a_git_repository.f903b388"),
+                subtitle: L10n.text("apple.workspacesview.this_folder_has_no_branch_files_are_still.ec672a00")
             )
         }
     }
@@ -326,17 +320,17 @@ struct WorkspaceChangesView: View {
         let selected = (model.stagedSelection[folder.id] ?? []).intersection(git.files.map(\.path)).count
         let all = selected == git.files.count
         return HStack(spacing: Theme.Space.s) {
-            Toggle("Select all", isOn: Binding(
+            Toggle(L10n.text("apple.workspacesview.select_all.1fc9a387"), isOn: Binding(
                 get: { all },
                 set: { model.setAllStaged($0, in: folder) }
             ))
             .toggleStyle(.brandCheckbox)
             Spacer(minLength: 0)
-            Text("\(selected) of \(git.files.count) selected")
+            Text(L10n.text("apple.workspacesview.0_of_1_selected.d06c59a5", "\(selected)", "\(git.files.count)"))
                 .foregroundStyle(.secondary)
         }
         .font(Theme.caption)
-        .help("Choose which files the Commit button includes. This does not change the Git index yet.")
+        .help(L10n.text("apple.workspacesview.choose_which_files_the_commit_button_inclu.6bbf708b"))
     }
     #endif
 
@@ -349,14 +343,14 @@ struct WorkspaceChangesView: View {
                 Text("−\(git.removed)")
                     .font(Theme.numeric(13, weight: .medium))
                     .foregroundStyle(Theme.danger)
-                Text("· \(git.files.count) file\(git.files.count == 1 ? "" : "s")")
+                Text((git.files.count == 1 ? L10n.text("apple.workspacesview.0_file_1.ac963029.one", "\(git.files.count)") : L10n.text("apple.workspacesview.0_file_1.ac963029.other", "\(git.files.count)")))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
             }
             if git.partial {
                 // Untracked and binary files have no line counts, so saying
                 // "+120" flat would be a number nobody measured.
-                Text("Some files have no line counts, so these totals are a floor.")
+                Text(L10n.text("apple.workspacesview.some_files_have_no_line_counts_so_these_to.9aa88eb4"))
                     .font(Theme.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -366,7 +360,7 @@ struct WorkspaceChangesView: View {
     private func diffControls(_ git: GitStatus, in folder: WorkspaceFolder) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             Menu {
-            Button("Expand all", .more) {
+            Button(L10n.text("apple.workspacesview.expand_all.a3e586be"), .more) {
                 expandedDiffs.formUnion(git.files.map { diffKey($0, in: folder) })
                 Task {
                     for file in git.files {
@@ -375,12 +369,12 @@ struct WorkspaceChangesView: View {
                 }
             }
             .buttonStyle(.borderless)
-            Button("Collapse all", .collapse) {
+            Button(L10n.text("apple.workspacesview.collapse_all.25f7b372"), .collapse) {
                 expandedDiffs.subtract(git.files.map { diffKey($0, in: folder) })
             }
             .buttonStyle(.borderless)
             } label: {
-                Label("Inline previews", systemImage: "ellipsis.circle")
+                Label(L10n.text("apple.workspacesview.inline_previews.b3aaf348"), systemImage: "ellipsis.circle")
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
@@ -439,7 +433,7 @@ struct WorkspaceChangesView: View {
                                 .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
                                 .padding(.leading, Theme.Space.l)
                             if preview.cut > 0 {
-                                Button("Review full diff (\(preview.cut) more lines)", .preview) {
+                                Button(L10n.text("apple.workspacesview.review_full_diff_0_more_lines.071f50d8", "\(preview.cut)"), .preview) {
                                     model.reviewWorkingTree(in: folder.id)
                                 }
                                 .buttonStyle(SecondaryButtonStyle(small: true))
@@ -577,15 +571,15 @@ private struct CommitBox: View {
     private var box: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if let saved = savedCommitSession, saved.draft.submitted != nil {
-                Button("Check submitted commit", .refresh) { commitSession = saved }
+                Button(L10n.text("apple.workspacesview.check_submitted_commit.47abb7aa"), .refresh) { commitSession = saved }
                     .buttonStyle(AccentButtonStyle(comfortable: true))
             }
             if let outcome = model.gitOutcome(for: folder.id) {
                 let action = model.gitOutcomeAction(for: folder.id)
                 Banner(
                     text: outcome.ok
-                        ? (action?.done ?? "Done.")
-                        : (action?.failed ?? "That did not work."),
+                        ? (action?.done ?? L10n.text("apple.workspacesview.done.ed251864"))
+                        : (action?.failed ?? L10n.text("apple.workspacesview.that_did_not_work.8816661d")),
                     severity: outcome.ok ? .success : .danger,
                     detail: outcome.message,
                     onDismiss: { model.dismissGitOutcome(for: folder.id) }
@@ -647,7 +641,7 @@ private struct CommitBox: View {
 
     private var messageFields: some View {
         VStack(spacing: 0) {
-            TextField("Commit title", text: title)
+            TextField(L10n.text("apple.workspacesview.commit_title.30459372"), text: title)
                 .textFieldStyle(.plain)
                 .font(Theme.font(13))
                 .lineLimit(1)
@@ -661,7 +655,7 @@ private struct CommitBox: View {
                 .padding(.vertical, 2)
                 .overlay(alignment: .topLeading) {
                     if description.wrappedValue.isEmpty {
-                        Text("Description (optional)")
+                        Text(L10n.text("apple.workspacesview.description_optional.f6cbe2f0"))
                             .font(Theme.font(12))
                             .foregroundStyle(.tertiary)
                             .padding(.horizontal, Theme.Space.s)
@@ -680,7 +674,7 @@ private struct CommitBox: View {
             Button {
                 Task { commitSession = await model.prepareCommit(folder) }
             } label: {
-                ActionIcon.commit.label(selectedCount > 0 ? "Commit \(selectedCount)" : "Commit")
+                ActionIcon.commit.label(selectedCount > 0 ? L10n.text("apple.workspacesview.commit_0.20f6d192", "\(selectedCount)") : L10n.text("apple.workspacesview.commit.82a9c46f"))
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(AccentButtonStyle(comfortable: true))
@@ -709,14 +703,14 @@ private struct CommitBox: View {
             Button {
                 Task { await runAutoCommit() }
             } label: {
-                ActionIcon.run.label(autoCommitRunning ? "Running…" : "Auto commit")
+                ActionIcon.run.label(autoCommitRunning ? L10n.text("apple.workspacesview.running.46c54136") : L10n.text("apple.workspacesview.auto_commit.2559934f"))
             }
             .buttonStyle(SecondaryButtonStyle())
             .disabled(model.isCommitting || selectedBackend == nil || autoCommitRunning)
             .help(
                 autoCommitRunning
-                    ? "Auto commit is already running in this folder"
-                    : "One-time automation: the chosen agent commits in this folder"
+                    ? L10n.text("apple.workspacesview.auto_commit_is_already_running_in_this_fol.eba93f91")
+                    : L10n.text("apple.workspacesview.one_time_automation_the_chosen_agent_commi.983f2690")
             )
             .fixedSize()
             Spacer(minLength: 0)
@@ -725,14 +719,14 @@ private struct CommitBox: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(Theme.accent)
-            .accessibilityLabel("About commit actions")
-            .help("About commit actions")
+            .accessibilityLabel(L10n.text("apple.workspacesview.about_commit_actions.5c3bba32"))
+            .help(L10n.text("apple.workspacesview.about_commit_actions.5c3bba32"))
             .popover(isPresented: $showingCommitHelp) {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    Text("Commit actions").font(Theme.headline)
-                    Text("Commit stages the selected files and commits the Git index using your title and description. Files already staged outside tokenstat may also be included. Selection alone does not change the Git index.")
-                    Text("Push publishes existing local commits to the branch's remote. It does not commit your working changes.")
-                    Text("Auto commit runs the chosen agent once in this folder to inspect changes and create commits. It uses the automation's instructions, not the file checkboxes above. You can follow the run in Automations.")
+                    Text(L10n.text("apple.workspacesview.commit_actions.2b927b6f")).font(Theme.headline)
+                    Text(L10n.text("apple.workspacesview.commit_stages_the_selected_files_and_commi.de1a6db4"))
+                    Text(L10n.text("apple.workspacesview.push_publishes_existing_local_commits_to_t.a9bbfe5a"))
+                    Text(L10n.text("apple.workspacesview.auto_commit_runs_the_chosen_agent_once_in.2f7d19c7"))
                 }
                 .font(Theme.callout)
                 .padding(Theme.Space.l)
@@ -811,7 +805,7 @@ private struct ChangeRow: View {
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .help(isStaged ? "Will be committed" : "Include in the next commit")
+            .help(isStaged ? L10n.text("apple.workspacesview.will_be_committed.e9764743") : L10n.text("apple.workspacesview.include_in_the_next_commit.5d7f428d"))
             #endif
 
             Image(systemName: file.kind.symbol)
@@ -825,14 +819,14 @@ private struct ChangeRow: View {
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .help("Open the diff")
+            .help(L10n.text("apple.workspacesview.open_the_diff.55d1e169"))
             Button(action: onToggleDiff) {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                     .font(Theme.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .help(isExpanded ? "Collapse diff" : "Expand diff")
+            .help(isExpanded ? L10n.text("apple.workspacesview.collapse_diff.b5d061d1") : L10n.text("apple.workspacesview.expand_diff.ad6cc669"))
             Spacer(minLength: Theme.Space.xs)
             if let added = file.added, added > 0 {
                 Text("+\(added)").font(Theme.numeric(11)).foregroundStyle(Theme.success)
@@ -843,7 +837,7 @@ private struct ChangeRow: View {
             if file.added == nil {
                 // A dash, not a zero. The difference matters here as much as it
                 // does for token counters.
-                Text("n/a").font(Theme.numeric(11)).foregroundStyle(.tertiary)
+                Text(L10n.text("apple.workspacesview.n_a.a683c5c5")).font(Theme.numeric(11)).foregroundStyle(.tertiary)
             }
         }
         .help(file.path)

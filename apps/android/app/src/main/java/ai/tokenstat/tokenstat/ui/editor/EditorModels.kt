@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.editor
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.theme.SyntaxKind
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
@@ -191,10 +193,10 @@ class EditorFind {
 
     val countLabel: String? get() {
         if (!hasQuery) return null
-        if (matches.isEmpty()) return "No results"
+        if (matches.isEmpty()) return L10n.text("android.editormodels.no_results.a43619f3")
         val position = (currentIndex % matches.size) + 1
-        if (truncated) return "$position of ${matches.size}+"
-        return "$position of ${matches.size}"
+        if (truncated) return L10n.text("android.editormodels.0_of_1.0c082b77", "${position}", "${matches.size}")
+        return L10n.text("android.editormodels.0_of_1.9fea8201", "${position}", "${matches.size}")
     }
 
     val canNavigate: Boolean get() = hasQuery && matches.size > 1

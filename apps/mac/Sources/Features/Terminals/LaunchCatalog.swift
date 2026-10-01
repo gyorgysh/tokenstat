@@ -56,7 +56,7 @@ struct LaunchProfile: Identifiable, Sendable {
     static var shellFallback: LaunchProfile {
         LaunchProfile(
             id: "shell",
-            name: "Shell",
+            name: L10n.text("apple.launchcatalog.shell.a7332854"),
             command: shellCommand,
             args: shellArguments,
             bypassArgs: [],
@@ -79,7 +79,7 @@ struct LaunchProfile: Identifiable, Sendable {
     static let all: [LaunchProfile] = [
         LaunchProfile(
             id: "shell",
-            name: "Shell",
+            name: L10n.text("apple.launchcatalog.shell.a7332854"),
             command: shellCommand,
             args: shellArguments,
             bypassArgs: [],
@@ -87,13 +87,13 @@ struct LaunchProfile: Identifiable, Sendable {
             symbol: "terminal"
         ),
         LaunchProfile(
-            id: "claude_code", name: "Claude Code", command: "claude", args: [],
+            id: "claude_code", name: L10n.text("apple.launchcatalog.claude_code.246ef8c1"), command: "claude", args: [],
             bypassArgs: ["--dangerously-skip-permissions"],
             harnessID: "claude_code", symbol: nil,
             installCommand: "curl -fsSL https://claude.ai/install.sh | bash"
         ),
         LaunchProfile(
-            id: "codex", name: "Codex", command: "codex", args: [],
+            id: "codex", name: L10n.text("apple.launchcatalog.codex.616efbe9"), command: "codex", args: [],
             bypassArgs: ["--dangerously-bypass-approvals-and-sandbox"],
             harnessID: "codex", symbol: nil,
             installCommand: "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
@@ -113,20 +113,20 @@ struct LaunchProfile: Identifiable, Sendable {
             installCommand: "curl -fsSL https://opencode.ai/v2/install | bash"
         ),
         LaunchProfile(
-            id: "grok", name: "Grok Build", command: "grok", args: [],
+            id: "grok", name: L10n.text("apple.launchcatalog.grok_build.fd3bf01a"), command: "grok", args: [],
             bypassArgs: ["--permission-mode", "bypassPermissions"],
             harnessID: "grok", symbol: nil,
             installDirs: [".grok/bin"],
             installCommand: "curl -fsSL https://x.ai/cli/install.sh | bash"
         ),
         LaunchProfile(
-            id: "copilot", name: "Copilot CLI", command: "copilot", args: [],
+            id: "copilot", name: L10n.text("apple.launchcatalog.copilot_cli.c73e38d4"), command: "copilot", args: [],
             bypassArgs: ["--allow-all"],
             harnessID: "copilot", symbol: nil,
             installCommand: "npm install -g @github/copilot"
         ),
         LaunchProfile(
-            id: "cline", name: "Cline", command: "cline", args: [],
+            id: "cline", name: L10n.text("apple.launchcatalog.cline.8a91b069"), command: "cline", args: [],
             bypassArgs: [], harnessID: "cline", symbol: nil,
             installCommand: "npm install -g cline"
         ),
@@ -136,7 +136,7 @@ struct LaunchProfile: Identifiable, Sendable {
             installCommand: "curl -fsSL https://openclaw.ai/install.sh | bash"
         ),
         LaunchProfile(
-            id: "muse", name: "Muse", command: "muse", args: [],
+            id: "muse", name: L10n.text("apple.launchcatalog.muse.5fa6e850"), command: "muse", args: [],
             bypassArgs: ["--yolo"], harnessID: "muse", symbol: nil,
             installCommand: "curl -fsSL https://dev.meta.ai/install.sh | bash"
         ),
@@ -147,7 +147,7 @@ struct LaunchProfile: Identifiable, Sendable {
         ),
         LaunchProfile(
             id: "dsh",
-            name: "DeepSeek Harness",
+            name: L10n.text("apple.launchcatalog.deepseek_harness.e562a9c5"),
             command: "npx",
             args: ["--yes", "@deepseek-ai/dsh", "web"],
             bypassArgs: [],
@@ -156,48 +156,48 @@ struct LaunchProfile: Identifiable, Sendable {
             openUrl: "http://127.0.0.1:3080/"
         ),
         LaunchProfile(
-            id: "zed", name: "Zed", command: "zed", args: [],
+            id: "zed", name: L10n.text("apple.launchcatalog.zed.a90e4dc6"), command: "zed", args: [],
             bypassArgs: [], harnessID: "zed", symbol: nil
         ),
         LaunchProfile(
-            id: "antigravity", name: "Antigravity", command: "agy", args: [],
+            id: "antigravity", name: L10n.text("apple.launchcatalog.antigravity.4da276f5"), command: "agy", args: [],
             bypassArgs: ["--dangerously-skip-permissions"],
             harnessID: "antigravity", symbol: nil,
             installCommand: "curl -fsSL https://antigravity.google/cli/install.sh | bash"
         ),
         LaunchProfile(
-            id: "cursor_agent", name: "Cursor Agent", command: "agent", args: [],
+            id: "cursor_agent", name: L10n.text("apple.launchcatalog.cursor_agent.f2b703ad"), command: "agent", args: [],
             bypassArgs: [], harnessID: "cursor", symbol: nil,
             installCommand: "curl https://cursor.com/install -fsS | bash"
         ),
         LaunchProfile(
-            id: "cursor", name: "Cursor CLI", command: "cursor", args: [],
+            id: "cursor", name: L10n.text("apple.launchcatalog.cursor_cli.4faa6009"), command: "cursor", args: [],
             bypassArgs: [], harnessID: "cursor", symbol: nil
         ),
         LaunchProfile(
-            id: "hermes", name: "Hermes Agent", command: "hermes", args: [],
+            id: "hermes", name: L10n.text("apple.launchcatalog.hermes_agent.873e989a"), command: "hermes", args: [],
             bypassArgs: [], harnessID: "hermes", symbol: nil,
             installCommand: "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-setup"
         ),
         LaunchProfile(
-            id: "kilo", name: "Kilo Code", command: "kilocode", args: [],
+            id: "kilo", name: L10n.text("apple.launchcatalog.kilo_code.83abecfd"), command: "kilocode", args: [],
             bypassArgs: [], harnessID: "kilo", symbol: nil,
             installCommand: "npm install -g @kilocode/cli"
         ),
         LaunchProfile(
-            id: "kimi", name: "Kimi Code", command: "kimi", args: [],
+            id: "kimi", name: L10n.text("apple.launchcatalog.kimi_code.0c486180"), command: "kimi", args: [],
             bypassArgs: ["--yolo"], harnessID: "kimi", symbol: nil,
             installCommand: "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash"
         ),
         LaunchProfile(
-            id: "qwen", name: "Qwen Code", command: "qwen", args: [],
+            id: "qwen", name: L10n.text("apple.launchcatalog.qwen_code.47487dbd"), command: "qwen", args: [],
             bypassArgs: ["--approval-mode", "yolo"], harnessID: "qwen", symbol: nil,
             installCommand: "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash"
         ),
         // "dangerous" is the one permission mode that auto-approves every
         // tool: the default already runs read-only tools unasked.
         LaunchProfile(
-            id: "devin", name: "Devin CLI", command: "devin", args: [],
+            id: "devin", name: L10n.text("apple.launchcatalog.devin_cli.29247d05"), command: "devin", args: [],
             bypassArgs: ["--permission-mode", "dangerous"], harnessID: "devin", symbol: nil,
             installCommand: "curl -fsSL https://cli.devin.ai/install.sh | bash"
         ),
@@ -477,7 +477,7 @@ final class LaunchCatalog {
         }
         guard result.ok else {
             let tail = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            return tail.isEmpty ? "the installer exited with code \(result.exitCode ?? 1)" : tail
+            return tail.isEmpty ? L10n.text("apple.launchcatalog.the_installer_exited_with_code_0.80d5114c", "\(result.exitCode ?? 1)") : tail
         }
         LauncherVisibility.shared.show(profile.id, scope: peer ?? "local")
         if let peer {
@@ -540,9 +540,9 @@ final class LaunchCatalog {
     private nonisolated static func conventionalDirectories() -> [String] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return [
-            "\(home)/.local/bin",
-            "\(home)/.npm-global/bin",
-            "\(home)/.volta/bin",
+            L10n.text("apple.launchcatalog.0_local_bin.cc5adf3d", "\(home)"),
+            L10n.text("apple.launchcatalog.0_npm_global_bin.5bfa69dd", "\(home)"),
+            L10n.text("apple.launchcatalog.0_volta_bin.5e41e199", "\(home)"),
             "/opt/homebrew/bin",
             "/usr/local/bin",
             "/usr/bin",

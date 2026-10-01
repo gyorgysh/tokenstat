@@ -71,7 +71,7 @@ enum ScreenPointerMode: String, CaseIterable, Identifiable {
     case direct
 
     var id: String { rawValue }
-    var title: String { self == .trackpad ? "Trackpad" : "Direct" }
+    var title: String { self == .trackpad ? L10n.text("apple.screeninputsurface.trackpad.2fb10776") : L10n.text("apple.screeninputsurface.direct.002c7c68") }
     var symbol: String { self == .trackpad ? "rectangle.and.hand.point.up.left" : "hand.tap" }
 }
 
@@ -598,7 +598,7 @@ struct ScreenKeyBar: View {
                 // A held mouse button cannot scroll off screen: releasing it
                 // is the one pointer action that always has to be reachable.
                 Button(action: pointer.toggleDrag) {
-                    ActionIcon.move.label(pointer.dragLatched ? "Release" : "Hold")
+                    ActionIcon.move.label(pointer.dragLatched ? L10n.text("apple.screeninputsurface.release.e020e3c6") : L10n.text("apple.screeninputsurface.hold.8e685d54"))
                 }
                 // One width for both words. "Release" is wider than "Hold",
                 // so the pinned button used to grow the moment it was pressed
@@ -611,13 +611,13 @@ struct ScreenKeyBar: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: Theme.Space.s) {
                     if let pointer {
-                        Button("click") { pointer.click(0, 1) }
+                        Button(L10n.text("apple.screeninputsurface.click.e5c7ffac")) { pointer.click(0, 1) }
                             .buttonStyle(ScreenKeyStyle(active: false))
-                        Button("double") { pointer.click(0, 2) }
+                        Button(L10n.text("apple.screeninputsurface.double.2ce06a9e")) { pointer.click(0, 2) }
                             .buttonStyle(ScreenKeyStyle(active: false))
-                        Button("right") { pointer.click(1, 1) }
+                        Button(L10n.text("apple.screeninputsurface.right.27042f4e")) { pointer.click(1, 1) }
                             .buttonStyle(ScreenKeyStyle(active: false))
-                        Button("fine") { pointer.toggleFine() }
+                        Button(L10n.text("apple.screeninputsurface.fine.d14a58ba")) { pointer.toggleFine() }
                             .buttonStyle(ScreenKeyStyle(active: pointer.fine))
                         if pointer.zoom > 1.01 {
                             Button(String(format: "%.1fx", pointer.zoom)) { pointer.resetZoom() }

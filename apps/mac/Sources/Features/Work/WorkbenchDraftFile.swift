@@ -19,9 +19,9 @@ actor WorkbenchDraftFile<Value: Codable & Sendable & Equatable> {
         case changed, tooLarge, unavailable
         var errorDescription: String? {
             switch self {
-            case .changed: "This draft changed in another window. Your writing is still here. Compare the saved draft before replacing it."
-            case .tooLarge: "This draft is too large to save on this device. Your writing is still here."
-            case .unavailable: "This draft could not be saved on this device. Your writing is still here."
+            case .changed: L10n.text("apple.workbenchdraftfile.this_draft_changed_in_another_window_your.631f32ab")
+            case .tooLarge: L10n.text("apple.workbenchdraftfile.this_draft_is_too_large_to_save_on_this_de.1920c688")
+            case .unavailable: L10n.text("apple.workbenchdraftfile.this_draft_could_not_be_saved_on_this_devi.bf2381df")
             }
         }
     }

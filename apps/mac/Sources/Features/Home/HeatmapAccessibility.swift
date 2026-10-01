@@ -30,7 +30,7 @@ final class HeatmapAccessibilityHost: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func isAccessibilityElement() -> Bool { true }
     override func accessibilityRole() -> NSAccessibility.Role? { .group }
-    override func accessibilityLabel() -> String? { "Daily activity" }
+    override func accessibilityLabel() -> String? { L10n.text("apple.heatmapaccessibility.daily_activity.561d7c9e") }
     override func accessibilityChildren() -> [Any]? { days }
 
     func update(rows: [[HeatCell?]]) {
@@ -56,8 +56,8 @@ final class HeatmapAccessibilityDay: NSAccessibilityElement, NSAccessibilityButt
         super.init()
         setAccessibilityRole(.button)
         setAccessibilityEnabled(true)
-        setAccessibilityLabel("\(day.date): \(formatSpend(day.value)) at API list price")
-        setAccessibilityHelp("Pins this day in the inspector")
+        setAccessibilityLabel(L10n.text("apple.heatmapaccessibility.0_1_at_api_list_price.1a0524d3", "\(day.date)", "\(formatSpend(day.value))"))
+        setAccessibilityHelp(L10n.text("apple.heatmapaccessibility.pins_this_day_in_the_inspector.f1c6b2a5"))
     }
     override func accessibilityParent() -> Any? { owner }
     override func accessibilityIdentifier() -> String { "activity-day-" + day.date }

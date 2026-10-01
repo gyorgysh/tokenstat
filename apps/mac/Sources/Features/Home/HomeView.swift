@@ -42,13 +42,13 @@ struct HomeView: View {
         // not a floating mark over the heatmap.
         VStack(spacing: 0) {
             DetailChromeBar(accessory: { scopePicker }) {
-                ToolbarIconButton(systemImage: ActionIcon.layout.symbol, help: "Customize Home") {
+                ToolbarIconButton(systemImage: ActionIcon.layout.symbol, help: L10n.text("apple.homeview.customize_home.642cec6e")) {
                     editingHome = true
                 }
                 if hostReady {
                     ToolbarIconButton(
                         systemImage: "arrow.clockwise",
-                        help: "Re-read the archive for this device's activity and plan usage",
+                        help: L10n.text("apple.homeview.re_read_the_archive_for_this_device_s_acti.34b970ce"),
                         isBusy: model.isRefreshing,
                         isEnabled: !model.isLoading && !model.isRefreshing
                     ) {
@@ -166,21 +166,21 @@ struct HomeView: View {
     private func emptyReason(_ section: HomeSection) -> String? {
         switch section {
         case .continueWork where recentWork.isEmpty:
-            return "Appears after you open a conversation."
+            return L10n.text("apple.homeview.appears_after_you_open_a_conversation.c00808b0")
         case .pinnedWork where pinsStore.pins(in: WorkSessionContext.shared.scope).isEmpty:
-            return "Pin a folder from the sidebar or a conversation from its toolbar."
+            return L10n.text("apple.homeview.pin_a_folder_from_the_sidebar_or_a_convers.33c68474")
         case .machines where (account.account?.machines ?? []).isEmpty:
-            return "Appears when your account has linked devices."
+            return L10n.text("apple.homeview.appears_when_your_account_has_linked_devic.8a84c464")
         case .limits where model.hasLoadedPlanLimits && panels.isEmpty && !limitsPending && model.planErrorMessage == nil:
-            return "Appears when a connected plan has usage to show."
+            return L10n.text("apple.homeview.appears_when_a_connected_plan_has_usage_to.fd5f5a3e")
         default: return nil
         }
     }
 
     private var clearHome: some View {
-        Card(title: "Your Home is clear", subtitle: "Your work is still in the sidebar.",
+        Card(title: L10n.text("apple.homeview.your_home_is_clear.9ae93db2"), subtitle: L10n.text("apple.homeview.your_work_is_still_in_the_sidebar.88f122e8"),
              leading: AnyView(ActionSeat(icon: .home, size: 24))) {
-            Button("Customize Home", .layout) { editingHome = true }
+            Button(L10n.text("apple.homeview.customize_home.642cec6e"), .layout) { editingHome = true }
                 .buttonStyle(SecondaryButtonStyle())
         }
     }
@@ -226,22 +226,22 @@ struct HomeView: View {
         // carry no subtitle repeating it.
         if model.calendar != nil {
             HStack(alignment: .top, spacing: Theme.Space.s) {
-                figurePanel(title: "Today", value: model.todayValue.formatted, note: nil)
-                figurePanel(title: "Last 7 days", value: model.weekValue.formatted, note: nil)
+                figurePanel(title: L10n.text("common.today"), value: model.todayValue.formatted, note: nil)
+                figurePanel(title: L10n.text("apple.homeview.last_7_days.0603deca"), value: model.weekValue.formatted, note: nil)
                 if let busiest = model.calendar?.busiest {
                     figurePanel(
-                        title: "Busiest",
+                        title: L10n.text("apple.homeview.busiest.5192c2fb"),
                         value: formatSpend(busiest.value),
                         note: busiest.date
                     )
                 }
             }
         } else if model.errorMessage != nil {
-            Card(title: "Today and this week", mark: "mark_insights") {
-                EmptyHint(text: "Usage could not be read. See the message above.")
+            Card(title: L10n.text("apple.homeview.today_and_this_week.2cb0c4ae"), mark: "mark_insights") {
+                EmptyHint(text: L10n.text("apple.homeview.usage_could_not_be_read_see_the_message_ab.e05837aa"))
             }
         } else {
-            Card(title: "Today and this week", mark: "mark_insights") {
+            Card(title: L10n.text("apple.homeview.today_and_this_week.2cb0c4ae"), mark: "mark_insights") {
                 bar(width: nil, height: 40)
             }
         }
@@ -379,17 +379,15 @@ struct HomeView: View {
                 .foregroundStyle(Theme.accent)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Your other devices cannot see these numbers")
+                Text(L10n.text("apple.homeview.your_other_devices_cannot_see_these_number.464ea976"))
                     .font(Theme.callout.weight(.medium))
-                Text("Account has a Plan limits card for how much of each tool's subscription is left, "
-                    + "including while this Mac is asleep. "
-                    + "Turn a tool off there if you do not want it shared.")
+                Text(L10n.text("apple.homeview.account_has_a_plan_limits_card_for_how_muc.ba4309fd"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: Theme.Space.s)
-            Button("Open Account", .account) { onShowAccount() }
+            Button(L10n.text("apple.homeview.open_account.378549d3"), .account) { onShowAccount() }
                 .buttonStyle(SecondaryButtonStyle())
             Button {
                 limitsSyncHintDismissed = true
@@ -399,8 +397,8 @@ struct HomeView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .help("Do not offer this again")
-            .accessibilityLabel("Dismiss")
+            .help(L10n.text("apple.homeview.do_not_offer_this_again.876977c3"))
+            .accessibilityLabel(L10n.text("apple.homeview.dismiss.48845bff"))
         }
         .padding(Theme.Space.s)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
@@ -413,7 +411,7 @@ struct HomeView: View {
     private var greetingTitle: String {
         let hasHistory = (model.calendar?.activeDays ?? 0) > 0
         guard let name = account.account?.title, !name.isEmpty else {
-            guard account.signedIn else { return "Not signed in" }
+            guard account.signedIn else { return L10n.text("apple.homeview.not_signed_in.491fc91c") }
             return HomeGreeting.line(hasHistory: hasHistory)
         }
         return HomeGreeting.line(name: name, hasHistory: hasHistory)
@@ -463,7 +461,7 @@ struct HomeView: View {
                         .font(Theme.callout)
                         .foregroundStyle(.secondary)
                 } else if !account.signedIn {
-                    Text("Working locally")
+                    Text(L10n.text("apple.homeview.working_locally.da99af57"))
                         .font(Theme.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -489,13 +487,13 @@ struct HomeView: View {
             } else if let calendar = model.calendar {
                 HStack(spacing: Theme.Space.l) {
                     streak(
-                        "Streak",
+                        L10n.text("apple.homeview.streak.41db983f"),
                         "\(calendar.streakCurrent)",
                         note: calendar.streakCurrent == 1 ? "day" : "days",
                         tint: calendar.streakCurrent > 0 ? Theme.accent : .secondary
                     )
-                    streak("Best", "\(calendar.streakBest)", note: "days")
-                    streak("Active", "\(calendar.activeDays)", note: "days")
+                    streak(L10n.text("apple.homeview.best.c47d21c6"), "\(calendar.streakBest)", note: "days")
+                    streak(L10n.text("common.active"), "\(calendar.activeDays)", note: "days")
                 }
                 .transition(.smoothIn(reduceMotion: reduceMotion))
             }
@@ -602,12 +600,12 @@ struct HomeView: View {
     /// one of the two.
     private var activitySubtitle: String {
         guard let calendar = model.calendar else {
-            return "What each day was worth at API list price"
+            return L10n.text("apple.homeview.what_each_day_was_worth_at_api_list_price.c29a2633")
         }
-        let base = "\(formatSpend(calendar.total)) at API list price over \(calendar.activeDays) active days"
+        let base = L10n.text("apple.homeview.0_at_api_list_price_over_1_active_days.a929a181", "\(formatSpend(calendar.total))", "\(calendar.activeDays)")
         let source = model.deliveredScope == .allMachines
-            ? ", across every device on your account"
-            : ", on this device"
+            ? L10n.text("apple.homeview.across_every_device_on_your_account.de7d54ab")
+            : L10n.text("apple.homeview.on_this_device")
         if let notice = model.scopeNotice, !model.needsAccountSignIn {
             return base + source + ". " + notice
         }
@@ -617,7 +615,7 @@ struct HomeView: View {
     @ViewBuilder
     private var activity: some View {
         Card(
-            title: "Activity",
+            title: L10n.text("apple.homeview.activity.38da1505"),
             subtitle: activitySubtitle,
             mark: "mark_activity"
         ) {
@@ -635,7 +633,7 @@ struct HomeView: View {
                 // "We could not look" and "there is nothing" are different
                 // answers, and telling someone with a full archive that they
                 // have never scanned is the wrong one.
-                EmptyHint(text: "The activity could not be read. See the message above.")
+                EmptyHint(text: L10n.text("apple.homeview.the_activity_could_not_be_read_see_the_mes.595eb6b5"))
             } else if model.isLoading {
                 activityPlaceholder
             } else if model.hasConfirmedEmptyActivity {
@@ -668,7 +666,7 @@ struct HomeView: View {
     private var accountSignInPrompt: some View {
         HStack(spacing: Theme.Space.s) {
             Label(
-                "All devices needs your tokenstat.ai account",
+                L10n.text("apple.homeview.all_devices_needs_your_tokenstat_ai_accoun.019e31cd"),
                 systemImage: "person.crop.circle.badge.exclamationmark"
             )
             .font(Theme.callout)
@@ -680,7 +678,7 @@ struct HomeView: View {
                 account.signIn()
                 onShowAccount()
             } label: {
-                ActionIcon.signIn.label(account.signedIn ? "Reconnect" : "Sign in")
+                ActionIcon.signIn.label(account.signedIn ? L10n.text("apple.homeview.reconnect.bf8a9eab") : L10n.text("common.sign_in"))
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)

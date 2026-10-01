@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.marks
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -55,10 +57,10 @@ fun visibleRunTicks(ticks: List<RunTick>, limit: Int = RUN_HISTORY_SLOTS): List<
 }
 
 fun runStripSummary(shown: List<RunTick>): String {
-    if (shown.isEmpty()) return "Never run"
+    if (shown.isEmpty()) return L10n.text("android.runvisuals.never_run.3d40a69d")
     val failed = shown.count { it.status == "error" }
-    if (failed == 0) return "Last ${shown.size} runs, none failed"
-    return "Last ${shown.size} runs, $failed failed"
+    if (failed == 0) return L10n.text("android.runvisuals.last_0_runs_none_failed.773e87b0", "${shown.size}")
+    return L10n.text("android.runvisuals.last_0_runs_1_failed.486a96be", "${shown.size}", "${failed}")
 }
 
 /// The last handful of outcomes as ticks, newest on the right. A job whose
@@ -110,10 +112,10 @@ fun durationFraction(seconds: Double, longest: Double): Double {
 }
 
 fun durationLabel(seconds: Double): String {
-    if (seconds <= 0) return "Still running"
-    if (seconds < 60) return "Took ${seconds.toInt()}s"
-    if (seconds < 3600) return "Took ${(seconds / 60).toInt()}m"
-    return "Took ${"%.1f".format(Locale.US, seconds / 3600)}h"
+    if (seconds <= 0) return L10n.text("android.runvisuals.still_running.89acce55")
+    if (seconds < 60) return L10n.text("android.runvisuals.took_0_s.1a2d4f2a", "${seconds.toInt()}")
+    if (seconds < 3600) return L10n.text("android.runvisuals.took_0_m.17b48b0d", "${(seconds / 60).toInt()}")
+    return L10n.text("android.runvisuals.took_0_h.97b11662", "${"%.1f".format(Locale.US, seconds / 3600)}")
 }
 
 @Composable

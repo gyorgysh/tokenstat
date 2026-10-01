@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.setup
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ClientState
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
@@ -58,7 +60,7 @@ internal fun JsonObject.setupMachineId(): String? =
 internal fun JsonObject.setupHostLabel(): String =
     get("label")?.jsonPrimitive?.contentOrNull?.ifEmpty { null }
         ?: get("displayName")?.jsonPrimitive?.contentOrNull?.ifEmpty { null }
-        ?: "Computer"
+        ?: L10n.text("android.setupagentstep.computer.76ed42d2")
 
 /// The machines setup can work with: hosts with a connection key. A record
 /// from before the server knew client kinds carries no kind and would
@@ -94,7 +96,7 @@ fun SetupAgentStep(
     val machines = remember(state.account) { setupMachines(state.account) }
     val peer = connect.expectedPeer ?: machines.singleOrNull()?.setupPeer()
     val hostLabel = machines.find { it.setupPeer() == peer }?.setupHostLabel()
-        ?: connect.machineName.ifBlank { "the machine" }
+        ?: connect.machineName.ifBlank { L10n.text("android.setupagentstep.the_machine.0bb5c22e") }
     val protocol = remember(connect.finished) {
         connect.finished?.let { SetupProvisionInfo.of(it).protocol }
     }
@@ -142,21 +144,21 @@ fun SetupAgentStep(
     }
 
     SetupStepScaffold(
-        title = "Sign in to your agent",
-        subtitle = "The agent runs on the machine, so it signs in there. Installed is not ready: each agent still needs its own account.",
+        title = L10n.text("android.setupagentstep.sign_in_to_your_agent.313eb22f"),
+        subtitle = L10n.text("android.setupagentstep.the_agent_runs_on_the_machine_so_it_signs.5812b200"),
         number = 7,
         failure = failure,
         onDismissError = { failure = null },
         onRecover = onRecover,
         footer = {
             TsAccentButton(
-                label = "Continue",
+                label = L10n.text("android.setupagentstep.continue.31fbef16"),
                 icon = ActionIcon.Next.vector,
                 onClick = { onPush(SetupStep.PROJECT) },
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(
-                "You can also install and sign in later from the machine's page.",
+                L10n.text("android.setupagentstep.you_can_also_install_and_sign_in_later_fro.0fad5101"),
                 style = TsType.caption,
                 color = colors.textSecondary,
             )
@@ -164,12 +166,12 @@ fun SetupAgentStep(
     ) {
         if (peer == null) {
             Banner(
-                "No machines on this account yet. Run the install first, then sign in to an agent.",
+                L10n.text("android.setupagentstep.no_machines_on_this_account_yet_run_the_in.e96130a2"),
                 BannerSeverity.WARNING,
             )
             return@SetupStepScaffold
         }
-        HostContracts.updateMessage("Signing in to an agent", hostLabel, protocol, AGENT_SIGN_IN_MIN_PROTOCOL)?.let {
+        HostContracts.updateMessage(L10n.text("android.setupagentstep.signing_in_to_an_agent.7a8b7e31"), hostLabel, protocol, AGENT_SIGN_IN_MIN_PROTOCOL)?.let {
             Banner(it, BannerSeverity.WARNING)
         }
         val list = agents
@@ -180,19 +182,19 @@ fun SetupAgentStep(
             ) {
                 if (working) CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                 Text(
-                    if (working) "Asking the machine…" else "Nothing asked yet.",
+                    if (working) L10n.text("android.setupagentstep.asking_the_machine.b75ae3f1") else L10n.text("android.setupagentstep.nothing_asked_yet.3f88b8bf"),
                     style = TsType.subheadline,
                     color = colors.textSecondary,
                 )
             }
             if (!working) {
-                TsSecondaryButton(label = "Check again", icon = ActionIcon.Refresh.vector, onClick = { load() })
+                TsSecondaryButton(label = L10n.text("android.setupagentstep.check_again.fb7099ad"), icon = ActionIcon.Refresh.vector, onClick = { load() })
             }
             return@SetupStepScaffold
         }
         if (list.isEmpty()) {
             Text(
-                "The machine offers no agents to sign in to.",
+                L10n.text("android.setupagentstep.the_machine_offers_no_agents_to_sign_in_to.65e1b8af"),
                 style = TsType.subheadline,
                 color = colors.textSecondary,
             )
@@ -215,7 +217,7 @@ fun SetupAgentStep(
                     }
                     when {
                         !agent.installed -> TsAccentButton(
-                            label = if (installing == agent.id) "Installing…" else "Install",
+                            label = if (installing == agent.id) L10n.text("android.setupagentstep.installing.530bcc35") else L10n.text("android.setupagentstep.install.569ca49f"),
                             small = true,
                             enabled = installing == null,
                             onClick = {
@@ -236,7 +238,7 @@ fun SetupAgentStep(
                                             ?.takeIf { it.isNotBlank() }
                                         if (ok) load()
                                         else if (installOutput == null) {
-                                            installOutput = "The installer did not say why it failed."
+                                            installOutput = L10n.text("android.setupagentstep.the_installer_did_not_say_why_it_failed.901d1b74")
                                         }
                                     }.onFailure {
                                         failure = SetupFailure.from(it)
@@ -246,7 +248,7 @@ fun SetupAgentStep(
                             },
                         )
                         agent.canSignIn(protocol) -> TsAccentButton(
-                            label = "Sign in",
+                            label = L10n.text("common.sign_in"),
                             small = true,
                             onClick = {
                                 failure = null
@@ -265,13 +267,13 @@ fun SetupAgentStep(
                                     }.onSuccess { info ->
                                         val id = info.sshString("id")
                                         if (id != null) signInSession = id
-                                        else failure = SetupFailure("The machine did not open a sign-in terminal.", action = SetupAction.RETRY)
+                                        else failure = SetupFailure(L10n.text("android.setupagentstep.the_machine_did_not_open_a_sign_in_termina.c593b220"), action = SetupAction.RETRY)
                                     }.onFailure { failure = SetupFailure.from(it) }
                                 }
                             },
                         )
                         agent.readiness == AgentReadiness.SIGNED_IN ->
-                            Icon(ActionIcon.Done.vector, "Signed in", tint = colors.accent)
+                            Icon(ActionIcon.Done.vector, L10n.text("android.setupagentstep.signed_in.ca566c89"), tint = colors.accent)
                     }
                 }
             }
@@ -279,7 +281,7 @@ fun SetupAgentStep(
         installOutput?.let { output ->
             TsCard {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                    Text("Installer output", style = TsType.caption, color = colors.textSecondary)
+                    Text(L10n.text("android.setupagentstep.installer_output.5cc554fd"), style = TsType.caption, color = colors.textSecondary)
                     SelectionContainer {
                         Text(
                             output.takeLast(2000),
@@ -292,7 +294,7 @@ fun SetupAgentStep(
             }
         }
         TsSecondaryButton(
-            label = if (working) "Checking…" else "Check again",
+            label = if (working) L10n.text("android.setupagentstep.checking.ec963ffc") else L10n.text("android.setupagentstep.check_again.fb7099ad"),
             icon = ActionIcon.Refresh.vector,
             onClick = { load() },
             enabled = !working,

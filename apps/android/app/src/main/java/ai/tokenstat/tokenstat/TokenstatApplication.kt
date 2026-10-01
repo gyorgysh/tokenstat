@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import android.app.Application
 import android.os.Build
 import android.util.Log
@@ -19,7 +21,7 @@ class TokenstatApplication : Application() {
         CoreClient.initialize(
             dataDir = noBackupFilesDir.resolve("tokenstat"),
             cacheDir = cacheDir.resolve("tokenstat"),
-            deviceName = Build.MODEL.ifBlank { "Android" },
+            deviceName = Build.MODEL.ifBlank { L10n.text("android.tokenstatapplication.android.6d612a86") },
         )
         PushRegistrar.init(this)
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {

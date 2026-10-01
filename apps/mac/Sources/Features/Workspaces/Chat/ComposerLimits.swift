@@ -90,11 +90,11 @@ enum ComposerLimits {
             // never say the same thing about two different limits.
             let display = switch source?.lowercased() {
             case "general":
-                "\(name) (general)"
+                L10n.text("apple.composerlimits.0_general.71898c32", "\(name)")
             case "current model":
-                "\(name) (secondary)"
+                L10n.text("apple.composerlimits.0_secondary.6cd2b67a", "\(name)")
             case "secondary":
-                "all models \(tag)"
+                L10n.text("apple.composerlimits.all_models_0.1605636b", "\(tag)")
             case "primary", nil, _:
                 tag
             }

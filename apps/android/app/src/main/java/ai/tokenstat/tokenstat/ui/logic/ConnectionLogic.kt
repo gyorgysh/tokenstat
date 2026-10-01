@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.logic
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 /// Why a call failed, decided once instead of by each screen. Port of
 /// `NetworkFailureKind` in `ConnectionModel.swift`.
 ///
@@ -297,9 +299,8 @@ class ConnectionTracker {
                 ok = false,
                 down = true,
                 offline = true,
-                title = "Offline",
-                detail = "This device cannot reach the internet. It checks again by itself, " +
-                    "and everything comes back on its own.",
+                title = L10n.text("common.offline"),
+                detail = L10n.text("android.connectionlogic.this_device_cannot_reach_the_internet_it_c.c95f0743"),
                 lastGoodMs = lastGoodMs,
             )
         }
@@ -308,9 +309,8 @@ class ConnectionTracker {
                 ok = false,
                 down = true,
                 service = true,
-                title = "No connection",
-                detail = "Signed in, but tokenstat is not answering. Your numbers are the " +
-                    "last ones this device read.",
+                title = L10n.text("android.connectionlogic.no_connection.c9e1a200"),
+                detail = L10n.text("android.connectionlogic.signed_in_but_tokenstat_is_not_answering_y.0b89409f"),
                 lastGoodMs = lastGoodMs,
             )
         }
@@ -320,12 +320,11 @@ class ConnectionTracker {
                 ok = false,
                 down = false,
                 title = when {
-                    name != null -> "$name unreachable"
-                    unreachablePeers.size > 1 -> "Computers unreachable"
-                    else -> "Computer unreachable"
+                    name != null -> L10n.text("android.connectionlogic.0_unreachable.c9592a5e", "${name}")
+                    unreachablePeers.size > 1 -> L10n.text("android.connectionlogic.computers_unreachable.5c57873d")
+                    else -> L10n.text("android.connectionlogic.computer_unreachable.289a05cc")
                 },
-                detail = "The internet is fine and ${name ?: "the computer"} stopped " +
-                    "answering. It is asleep, or tokenstat is not running there.",
+                detail = L10n.text("android.connectionlogic.the_internet_is_fine_and_0_stopped_answeri.ff980764", "${name ?: L10n.text("android.connectionlogic.the_computer.da52d93a")}"),
                 lastGoodMs = lastGoodMs,
             )
         }

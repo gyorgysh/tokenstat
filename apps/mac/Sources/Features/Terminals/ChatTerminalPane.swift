@@ -30,8 +30,8 @@ struct ChatTerminalPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            InspectorChromeBar(onClose: onClose, closeLabel: "Close terminal pane") {
-                InspectorTitle(title: "Terminal", symbol: "terminal")
+            InspectorChromeBar(onClose: onClose, closeLabel: L10n.text("apple.chatterminalpane.close_terminal_pane.8cf7ffa3")) {
+                InspectorTitle(title: L10n.text("apple.chatterminalpane.terminal.e0926fda"), symbol: "terminal")
                 Spacer(minLength: 0)
                 Menu {
                     ForEach(profiles) { profile in
@@ -44,8 +44,8 @@ struct ChatTerminalPane: View {
                 }
                 .menuStyle(.borderlessButton).fixedSize()
                 .disabled(profiles.isEmpty || !folder.exists)
-                .help("New terminal in \(folder.name)")
-                .accessibilityLabel("New terminal beside chat")
+                .help(L10n.text("apple.chatterminalpane.new_terminal_in_0.aa5d373d", "\(folder.name)"))
+                .accessibilityLabel(L10n.text("apple.chatterminalpane.new_terminal_beside_chat.2441e10a"))
                 .padding(.trailing, Theme.Space.xs)
             }
             if !sessions.isEmpty {
@@ -57,11 +57,11 @@ struct ChatTerminalPane: View {
                             }
                         }
                     } label: {
-                        Label(active.map(sessionName) ?? "Sessions", systemImage: "terminal")
+                        Label(active.map(sessionName) ?? L10n.text("apple.chatterminalpane.sessions.6fa3cbf4"), systemImage: "terminal")
                             .lineLimit(1)
                     }
                     .menuStyle(.borderlessButton)
-                    .accessibilityLabel("Terminal sessions beside chat")
+                    .accessibilityLabel(L10n.text("apple.chatterminalpane.terminal_sessions_beside_chat.fd6daa2a"))
                     Spacer(minLength: 0)
                     Text(folder.name).font(Theme.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -75,7 +75,7 @@ struct ChatTerminalPane: View {
                         TerminalStack(sessions: sessions, leading: active, focused: active,
                                       onActivate: { select($0) })
                         if active.showsStartingState {
-                            ProgressView("Starting terminal…").font(Theme.caption)
+                            ProgressView(L10n.text("apple.chatterminalpane.starting_terminal.1d72e0c6")).font(Theme.caption)
                         }
                     } else {
                         launcher
@@ -103,8 +103,8 @@ struct ChatTerminalPane: View {
     private var launcher: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                Text("Open beside this chat").font(Theme.callout.weight(.semibold))
-                Text("Start a shell or an installed agent in \(folder.name).")
+                Text(L10n.text("apple.chatterminalpane.open_beside_this_chat.aaf2b9ed")).font(Theme.callout.weight(.semibold))
+                Text(L10n.text("apple.chatterminalpane.start_a_shell_or_an_installed_agent_in_0.1a6f0bcf", "\(folder.name)"))
                     .font(Theme.caption).foregroundStyle(.secondary)
                 ForEach(profiles) { profile in
                     Button { start(profile) } label: {
@@ -121,7 +121,7 @@ struct ChatTerminalPane: View {
                     .buttonStyle(.plain).disabled(!folder.exists)
                 }
                 if profiles.isEmpty {
-                    Text(resolved ? "No terminal launchers are available on this computer. Enable installed tools in the project launcher." : "Checking installed tools…")
+                    Text(resolved ? L10n.text("apple.chatterminalpane.no_terminal_launchers_are_available_on_thi.6e800543") : L10n.text("apple.chatterminalpane.checking_installed_tools.5a7a24c9"))
                         .font(Theme.caption).foregroundStyle(.secondary)
                 }
             }
@@ -136,7 +136,7 @@ struct ChatTerminalPane: View {
             } else {
                 Image(systemName: profile.symbol ?? "terminal").frame(width: 18)
             }
-            Text(profile.id == "shell" ? "Shell (\((profile.command as NSString).lastPathComponent))" : profile.name)
+            Text(profile.id == "shell" ? L10n.text("apple.chatterminalpane.shell_0.166d3d3c", "\((profile.command as NSString).lastPathComponent)") : profile.name)
                 .font(Theme.callout)
         }
     }
@@ -167,7 +167,7 @@ struct ChatTerminalPane: View {
                                                    modelProvider: model?.provider, modelID: model?.model,
                                                    selectAfter: false)
             guard scope == WorkSessionContext.shared.scope else { return }
-            if started == nil { launchError = terminals.errorMessage ?? "The terminal could not start. Reconnect this computer and try again." }
+            if started == nil { launchError = terminals.errorMessage ?? L10n.text("apple.chatterminalpane.the_terminal_could_not_start_reconnect_thi.c7cbe80c") }
         }
     }
 }

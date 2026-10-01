@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -42,25 +44,11 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import androidx.compose.foundation.clickable
 
-private const val AUTO_COMMIT_NAME = "Auto commit"
+private val AUTO_COMMIT_NAME = L10n.text("android.workspaceautocommit.auto_commit.2559934f")
 private const val AUTO_COMMIT_BUDGET_SECONDS = 900
 
 private fun autoCommitPrompt(workspaceName: String): String =
-    "Commit the pending work in this git repository ($workspaceName).\n" +
-        "\n" +
-        "Inspect the working tree (git status and git diff). Group the changes " +
-        "into one or more commits by concern. One concern per commit. A single " +
-        "concern is one commit.\n" +
-        "\n" +
-        "Write messages that match this repository's existing style:\n" +
-        "1. Follow the most recent commit subjects.\n" +
-        "2. If CONTRIBUTING.md, a commitlint config, or .gitmessage exists, follow those rules.\n" +
-        "3. Otherwise use Conventional Commits: lowercase type, optional scope, imperative subject, English.\n" +
-        "\n" +
-        "Do not push. Do not force. Do not amend. Do not change files except to commit them. " +
-        "If there is nothing to commit, say so and stop.\n" +
-        "\n" +
-        "After you finish, list the commits you made."
+    L10n.text("android.workspaceautocommit.commit_the_pending_work_in_this_git_reposi.ab4eb7ed", "${workspaceName}")
 
 /// Auto commit on Changes. Distinct from selected-file Commit: the agent
 /// inspects the folder and commits. Checkboxes do not choose its files.
@@ -188,7 +176,7 @@ fun AutoCommitCard(
                         return@launch
                     }
                 }
-                error = TunnelCopy.display("The request failed.", hostLabel)
+                error = TunnelCopy.display(L10n.text("android.workspaceautocommit.the_request_failed.db4fb447"), hostLabel)
                 working = false
                 return@launch
             }
@@ -222,7 +210,7 @@ fun AutoCommitCard(
                     retryable = true
                     error = null
                 }
-            }.onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+            }.onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspaceautocommit.the_request_failed.db4fb447"), hostLabel) }
             working = false
         }
     }
@@ -247,30 +235,30 @@ fun AutoCommitCard(
         verticalArrangement = Arrangement.spacedBy(Space.s),
     ) {
         Text(
-            "Auto commit",
+            L10n.text("android.workspaceautocommit.auto_commit.2559934f"),
             style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
             color = LocalTsColors.current.textPrimary,
         )
         Text(
-            "The chosen agent inspects this folder and commits. File checkboxes are for Review and commit.",
+            L10n.text("android.workspaceautocommit.the_chosen_agent_inspects_this_folder_and.05747a66"),
             style = TextStyle(fontSize = 12.sp),
             color = LocalTsColors.current.textSecondary,
         )
         Text(
-            "Runs on ${hostLabel.ifBlank { "this computer" }}.",
+            L10n.text("android.workspaceautocommit.runs_on_0.6b563ff8", "${hostLabel.ifBlank { L10n.text("android.workspaceautocommit.this_computer.058bf37c") }}"),
             style = TextStyle(fontSize = 12.sp),
             color = LocalTsColors.current.textSecondary,
         )
         if (commitBackends.isEmpty()) {
             Text(
-                "No agent on this computer can write a commit.",
+                L10n.text("android.workspaceautocommit.no_agent_on_this_computer_can_write_a_comm.9b85195e"),
                 style = TextStyle(fontSize = 12.sp),
                 color = LocalTsColors.current.textSecondary,
             )
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 BackendPicker(
-                    label = "Agent",
+                    label = L10n.text("android.workspaceautocommit.agent.11b39c93"),
                     options = commitBackends.map { (it.str("label") ?: it.str("id") ?: "") to (it.str("id") ?: "") },
                     selected = backendId,
                     enabled = !working && pendingOp == null,
@@ -284,7 +272,7 @@ fun AutoCommitCard(
                 )
                 if (models.isNotEmpty()) {
                     BackendPicker(
-                        label = "Model",
+                        label = L10n.text("android.workspaceautocommit.model.5e2c614c"),
                         options = models.map { it to it },
                         selected = modelName,
                         enabled = !working && pendingOp == null,
@@ -297,26 +285,26 @@ fun AutoCommitCard(
         if (error != null) Banner(error!!, BannerSeverity.DANGER)
         if (pendingOp != null) {
             Text(
-                "This start is not confirmed yet. Check it before starting another.",
+                L10n.text("android.workspaceautocommit.this_start_is_not_confirmed_yet_check_it_b.086397b5"),
                 style = TextStyle(fontSize = 12.sp),
                 color = LocalTsColors.current.textSecondary,
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
             if (pendingOp != null) {
-                TsSecondaryButton(label = "Check run", small = true, enabled = !working, onClick = ::checkLaunch)
+                TsSecondaryButton(label = L10n.text("android.workspaceautocommit.check_run.cece2401"), small = true, enabled = !working, onClick = ::checkLaunch)
                 if (retryable) {
-                    TsAccentButton(label = "Retry run", small = true, enabled = !working, onClick = ::retryLaunch)
+                    TsAccentButton(label = L10n.text("android.workspaceautocommit.retry_run.2f9c439b"), small = true, enabled = !working, onClick = ::retryLaunch)
                 }
             } else if (running) {
                 Text(
-                    "Running",
+                    L10n.text("common.running"),
                     style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
                     color = LocalTsColors.current.accent,
                 )
             } else {
                 TsSecondaryButton(
-                    label = if (working) "Starting…" else "Auto commit",
+                    label = if (working) L10n.text("android.workspaceautocommit.starting.bbe5fc3b") else L10n.text("android.workspaceautocommit.auto_commit.2559934f"),
                     small = true,
                     enabled = canStart,
                     onClick = ::start,

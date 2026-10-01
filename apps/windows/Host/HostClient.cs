@@ -107,17 +107,17 @@ internal sealed class HostClient
             var response = reader.ReadLineAsync(deadline.Token).AsTask().GetAwaiter().GetResult();
             if (response is null)
             {
-                throw new HostException("eof", "The host closed the connection. Try again.");
+                throw new HostException("eof", L10n.Text("windows.hostclient.the_host_closed_the_connection_try_again.ca257889"));
             }
             return Decode(method, response);
         }
         catch (OperationCanceledException)
         {
-            throw new HostException("timeout", $"The host did not answer {method} in time. Try again.");
+            throw new HostException("timeout", L10n.Text("windows.hostclient.the_host_did_not_answer_0_in_time_try_agai.dfd41ed2", $"{method}"));
         }
         catch (TimeoutException)
         {
-            throw new HostException("connect", "The local host could not be started. Try again or reopen tokenstat.");
+            throw new HostException("connect", L10n.Text("windows.hostclient.the_local_host_could_not_be_started_try_ag.ad4b14b1"));
         }
         catch (IOException ex)
         {
@@ -137,7 +137,7 @@ internal sealed class HostClient
         }
         catch (JsonException ex)
         {
-            throw new HostException("decode", $"Could not read the response to {method}: {ex.Message}");
+            throw new HostException("decode", L10n.Text("windows.hostclient.could_not_read_the_response_to_0_1.cd118b6b", $"{method}", $"{ex.Message}"));
         }
         var ok = node["ok"]?.GetValue<bool>() ?? false;
         if (ok)
@@ -152,6 +152,6 @@ internal sealed class HostClient
         var error = node["error"];
         throw new HostException(
             error?["code"]?.GetValue<string>() ?? "core",
-            error?["message"]?.GetValue<string>() ?? "The tokenstat host rejected the call.");
+            error?["message"]?.GetValue<string>() ?? L10n.Text("windows.hostclient.the_tokenstat_host_rejected_the_call.b1b9d852"));
     }
 }

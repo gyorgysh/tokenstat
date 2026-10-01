@@ -30,7 +30,7 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
     };
     private readonly TextBox _query = new()
     {
-        PlaceholderText = "Search work",
+        PlaceholderText = L10n.Text("windows.worksearchpage.search_work.cc46cedc"),
     };
     private readonly StackPanel _filters = new()
     {
@@ -85,10 +85,15 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
             });
         };
 
-        foreach (var name in new[] { "All", "Conversations", "Folders", "Changes" })
+        foreach (var (name, label) in new[] {
+            ("All", L10n.Text("windows.worksearchpage.all.a52ace42")),
+            ("Conversations", L10n.Text("windows.worksearchpage.conversations.1d432f58")),
+            ("Folders", L10n.Text("windows.worksearchpage.folders.c4d6bb20")),
+            ("Changes", L10n.Text("windows.worksearchpage.changes.bbd4b6a8")),
+        })
         {
             var local = name;
-            var chip = new Button { Content = local };
+            var chip = new Button { Content = label };
             if (local == _filter)
             {
                 chip.Foreground = Theme.AccentBrush;
@@ -110,7 +115,7 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
         var head = new StackPanel { Spacing = Theme.SpaceM };
         head.Children.Add(new TextBlock
         {
-            Text = "Search work",
+            Text = L10n.Text("windows.worksearchpage.search_work.cc46cedc"),
             FontSize = Fonts.PageTitle,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
@@ -147,7 +152,7 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
         {
             Buttons.ToolbarIcon(
                 ActionIcon.Refresh,
-                "Run the search again",
+                L10n.Text("windows.worksearchpage.run_the_search_again.7d16d81d"),
                 async (_, _) =>
                 {
                     LogoRefresh.Began();
@@ -155,11 +160,11 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
                 }),
             Buttons.ToolbarIcon(
                 ActionIcon.Search,
-                "Focus the search field",
+                L10n.Text("windows.worksearchpage.focus_the_search_field.c7d852f2"),
                 (_, _) => _query.Focus(FocusState.Programmatic)),
             Buttons.ToolbarIcon(
                 ActionIcon.Dismiss,
-                "Clear the search field",
+                L10n.Text("windows.worksearchpage.clear_the_search_field.f795bca3"),
                 (_, _) => _query.Text = ""),
         };
     }
@@ -178,7 +183,7 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
         {
             _inspector.Children.Add(new TextBlock
             {
-                Text = "Last search",
+                Text = L10n.Text("windows.worksearchpage.last_search.c39eb739"),
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             });
             _inspector.Children.Add(new TextBlock
@@ -188,12 +193,12 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
                 FontSize = 12,
                 TextWrapping = TextWrapping.Wrap,
             });
-            _inspector.Children.Add(Chrome.InspectorField("Matches", $"{_hitCount:N0}"));
+            _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.worksearchpage.matches.98abff28"), $"{_hitCount:N0}"));
             if (_unreadable > 0)
             {
                 _inspector.Children.Add(new TextBlock
                 {
-                    Text = $"{_unreadable} saved items could not be read.",
+                    Text = L10n.Text("windows.worksearchpage.0_saved_items_could_not_be_read.66c7c0be", $"{_unreadable}"),
                     Opacity = 0.7,
                     FontSize = 12,
                     TextWrapping = TextWrapping.Wrap,
@@ -202,14 +207,14 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
         }
         _inspector.Children.Add(new TextBlock
         {
-            Text = "Recent searches",
+            Text = L10n.Text("windows.worksearchpage.recent_searches.228c84b5"),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         if (_recent.Count == 0)
         {
             _inspector.Children.Add(new TextBlock
             {
-                Text = "Searches you run land here.",
+                Text = L10n.Text("windows.worksearchpage.searches_you_run_land_here.92389a78"),
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -307,8 +312,8 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
             if ((hits is null || hits.Count == 0) && !more)
             {
                 _results.Children.Add(Chrome.Empty(
-                    "No matches in your work",
-                    "Nothing here matches. Try fewer words, or another machine.",
+                    L10n.Text("windows.worksearchpage.no_matches_in_your_work.a6f76389"),
+                    L10n.Text("windows.worksearchpage.nothing_here_matches_try_fewer_words_or_an.7daab500"),
                     ActionIcon.Search));
                 RenderInspector();
                 return;
@@ -330,7 +335,7 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
             if (!string.IsNullOrEmpty(_cursor))
             {
                 var showMore = ActionIconGlyph.Button(
-                    "Show more results", ActionIcon.More, async (_, _) => await SearchAsync(true));
+                    L10n.Text("windows.worksearchpage.show_more_results.b27dc424"), ActionIcon.More, async (_, _) => await SearchAsync(true));
                 showMore.Tag = "more";
                 _results.Children.Add(showMore);
             }
@@ -378,7 +383,7 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
         {
             _results.Children.Add(new TextBlock
             {
-                Text = $"{unreadable} saved items could not be read. Results cover the copies available now.",
+                Text = L10n.Text("windows.worksearchpage.0_saved_items_could_not_be_read_results_co.3a212847", $"{unreadable}"),
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -390,7 +395,7 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
         var reference = hit["reference"];
         var kind = Format.Text(reference, "kind", "conversation");
         var workspaceId = Format.Text(reference, "workspaceId");
-        var title = Format.Text(hit, "title", "(untitled)");
+        var title = Format.Text(hit, "title", L10n.Text("windows.worksearchpage.untitled.3bc7cc17"));
         var folder = Format.Text(hit, "folderName");
         var excerpt = Format.Text(hit, "excerpt");
 
@@ -524,7 +529,7 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
     /// </summary>
     private static string Timing(JsonNode hit)
     {
-        var source = Format.Text(hit, "source", "Live");
+        var source = Format.Text(hit, "source", L10n.Text("windows.worksearchpage.live.b64ac05f"));
         var ms = Format.Long(hit, "updatedAtMs");
         var dated = "";
         if (ms > 0)
@@ -538,7 +543,7 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
             {
             }
         }
-        var partial = Format.Flag(hit, "partial") ? " · Partial conversation" : "";
+        var partial = Format.Flag(hit, "partial") ? L10n.Text("windows.worksearchpage.partial_conversation.26d41f9c") : "";
         return source + dated + partial;
     }
 
@@ -562,15 +567,15 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
         if (_recent.Count == 0)
         {
             _results.Children.Add(Chrome.Empty(
-                "Search your work",
-                "Type to find a conversation, a folder, or a change you have opened or saved.",
+                L10n.Text("windows.worksearchpage.search_your_work.25aa8c29"),
+                L10n.Text("windows.worksearchpage.type_to_find_a_conversation_a_folder_or_a.8c91322f"),
                 ActionIcon.Search));
             return;
         }
         var list = new StackPanel { Spacing = Theme.SpaceS };
         list.Children.Add(new TextBlock
         {
-            Text = "Recent searches",
+            Text = L10n.Text("windows.worksearchpage.recent_searches.228c84b5"),
             Opacity = 0.68,
         });
         foreach (var query in _recent)
@@ -583,7 +588,7 @@ internal sealed class WorkSearchPage : Page, IInspectorContent, IToolbarItems
             list.Children.Add(pick);
         }
         list.Children.Add(ActionIconGlyph.Button(
-            "Clear", ActionIcon.Delete, (_, _) =>
+            L10n.Text("windows.worksearchpage.clear.83b12c22"), ActionIcon.Delete, (_, _) =>
             {
                 _recent.Clear();
                 ShowRecent();

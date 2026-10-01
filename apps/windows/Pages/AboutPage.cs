@@ -49,13 +49,13 @@ internal sealed class AboutPage : Page
         var title = new StackPanel { Spacing = Theme.SpaceS };
         title.Children.Add(new TextBlock
         {
-            Text = "tokenstat",
+            Text = L10n.Text("windows.aboutpage.tokenstat.63d30539"),
             FontSize = 22,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         title.Children.Add(new TextBlock
         {
-            Text = "Version " + AppInfo.Version,
+            Text = L10n.Text("windows.aboutpage.version_0.9699394c", $"{AppInfo.Version}"),
             FontSize = 12,
             Opacity = 0.7,
         });
@@ -69,7 +69,7 @@ internal sealed class AboutPage : Page
 
         body.Children.Add(new TextBlock
         {
-            Text = "Token usage from every AI coding agent on this PC, read locally.",
+            Text = L10n.Text("windows.aboutpage.token_usage_from_every_ai_coding_agent_on.eb385f34"),
             TextWrapping = TextWrapping.Wrap,
             Opacity = 0.8,
         });
@@ -87,7 +87,7 @@ internal sealed class AboutPage : Page
         var licence = new StackPanel { Spacing = 2 };
         licence.Children.Add(new TextBlock
         {
-            Text = "Source-available licence",
+            Text = L10n.Text("windows.aboutpage.source_available_licence.55d415e8"),
             FontSize = 10,
             Opacity = 0.6,
         });
@@ -101,17 +101,17 @@ internal sealed class AboutPage : Page
 
         body.Children.Add(new TextBlock
         {
-            Text = "Everything happens on your machine. tokenstat reads your local logs, extracts counters, and discards the rest. Only aggregate numbers are eligible for sync.",
+            Text = L10n.Text("windows.aboutpage.everything_happens_on_your_machine_tokenst.a1e4aca2"),
             TextWrapping = TextWrapping.Wrap,
             Opacity = 0.8,
         });
         body.Children.Add(ActionIconGlyph.Button(
-            "Take the tour again", ActionIcon.Help, (_, _) => AppServices.OpenOnboarding?.Invoke()));
+            L10n.Text("windows.aboutpage.take_the_tour_again.73add5b9"), ActionIcon.Help, (_, _) => AppServices.OpenOnboarding?.Invoke()));
         if (SelfInstall.IsRunningFromInstall)
         {
             body.Children.Add(new TextBlock
             {
-                Text = "Installed at " + SelfInstall.InstallDirectory,
+                Text = L10n.Text("windows.aboutpage.installed_at_0.e0d76f31", $"{SelfInstall.InstallDirectory}"),
                 Opacity = 0.6,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -120,7 +120,7 @@ internal sealed class AboutPage : Page
         {
             body.Children.Add(new TextBlock
             {
-                Text = "Development build. It will not copy itself into Programs.",
+                Text = L10n.Text("windows.aboutpage.development_build_it_will_not_copy_itself.f601e93c"),
                 Opacity = 0.6,
             });
         }
@@ -128,7 +128,7 @@ internal sealed class AboutPage : Page
         Content = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceL),
-            Content = Chrome.Card("About", body),
+            Content = Chrome.Card(L10n.Text("windows.aboutpage.about.4efca0d1"), body),
         };
     }
 
@@ -136,7 +136,7 @@ internal sealed class AboutPage : Page
     private static UIElement Author()
     {
         var credit = new StackPanel { Spacing = 1 };
-        credit.Children.Add(new TextBlock { Text = "Made by", FontSize = 12 });
+        credit.Children.Add(new TextBlock { Text = L10n.Text("windows.aboutpage.made_by.25a23917"), FontSize = 12 });
         var name = new HyperlinkButton
         {
             Content = AppInfo.Author.Name,
@@ -160,11 +160,11 @@ internal sealed class AboutPage : Page
     private static UIElement Links()
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        row.Children.Add(Link("Contact", AppInfo.Author.Email));
+        row.Children.Add(Link(L10n.Text("windows.aboutpage.contact.2b5c3d26"), AppInfo.Author.Email));
         row.Children.Add(Separator());
         row.Children.Add(Link(AppInfo.WebsiteLabel, AppInfo.Website));
         row.Children.Add(Separator());
-        row.Children.Add(Link("Source", AppInfo.Repository));
+        row.Children.Add(Link(L10n.Text("windows.aboutpage.source.0e570ca6"), AppInfo.Repository));
         return row;
     }
 

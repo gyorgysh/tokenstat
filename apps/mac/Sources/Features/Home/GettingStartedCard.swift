@@ -59,10 +59,10 @@ struct GettingStartedCard: View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.s) {
                 FeatureMark(name: "mark_activity", tint: Theme.accent, size: 26)
-                Text("Get tokenstat counting")
+                Text(L10n.text("apple.gettingstartedcard.get_tokenstat_counting.331454ea"))
                     .font(Theme.title3.weight(.semibold))
             }
-            Text("It reads the logs the tools you already use leave on this Mac, and turns them into a year you can read.")
+            Text(L10n.text("apple.gettingstartedcard.it_reads_the_logs_the_tools_you_already_us.5d21d349"))
                 .font(Theme.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -73,8 +73,8 @@ struct GettingStartedCard: View {
         [
             GettingStartedStep(
                 number: 1,
-                title: "Installed",
-                body: "You are looking at it. Nothing else to put on this Mac.",
+                title: L10n.text("apple.gettingstartedcard.installed.f8b32f4e"),
+                body: L10n.text("apple.gettingstartedcard.you_are_looking_at_it_nothing_else_to_put.4b0687ad"),
                 state: .done
             ),
             // Scanning before signing in, because scanning is the step that
@@ -83,25 +83,25 @@ struct GettingStartedCard: View {
             // small lie about what the app needs.
             GettingStartedStep(
                 number: 2,
-                title: isScanning ? "Scanning" : "Run the first scan",
+                title: isScanning ? L10n.text("apple.gettingstartedcard.scanning.474ad819") : L10n.text("apple.gettingstartedcard.run_the_first_scan.a22d6e64"),
                 body: isScanning
-                    ? "Reading what is already on disk. The grid below fills in as it goes."
+                    ? L10n.text("apple.gettingstartedcard.reading_what_is_already_on_disk_the_grid_b.93b10b34")
                     : isCoolingDown
-                        ? "That scan found nothing new. Give it a moment before trying again."
-                        : "It reads what is already on disk, so the first grid covers the work you have done, not the work you do next.",
+                        ? L10n.text("apple.gettingstartedcard.that_scan_found_nothing_new_give_it_a_mome.2233cea9")
+                        : L10n.text("apple.gettingstartedcard.it_reads_what_is_already_on_disk_so_the_fi.52893eb3"),
                 state: .now,
-                actionTitle: canScan ? "Scan now" : nil,
+                actionTitle: canScan ? L10n.text("apple.gettingstartedcard.scan_now.c01d65df") : nil,
                 actionIcon: .refresh,
                 action: canScan ? onScan : nil
             ),
             GettingStartedStep(
                 number: 3,
-                title: signedIn ? "Connected to your account" : "Add your iPhone or iPad, if you want it",
+                title: signedIn ? L10n.text("apple.gettingstartedcard.connected_to_your_account.ba93f5ad") : L10n.text("apple.gettingstartedcard.add_your_iphone_or_ipad_if_you_want_it.610773d5"),
                 body: signedIn
-                    ? "Your devices share one account, so they show these numbers with the lid shut."
-                    : "Optional, and this Mac counts either way. An account is what puts these numbers on your iPhone or iPad and lets a second computer join. Free includes two devices.",
+                    ? L10n.text("apple.gettingstartedcard.your_devices_share_one_account_so_they_sho.db11b361")
+                    : L10n.text("apple.gettingstartedcard.optional_and_this_mac_counts_either_way_an.bae6cb80"),
                 state: signedIn ? .done : .next,
-                actionTitle: signedIn ? nil : "Sign in",
+                actionTitle: signedIn ? nil : L10n.text("common.sign_in"),
                 actionIcon: .signIn,
                 action: signedIn ? nil : onSignIn
             ),
@@ -112,7 +112,7 @@ struct GettingStartedCard: View {
     private var waiting: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             ThemeRule()
-            Text("Then the year fills in")
+            Text(L10n.text("apple.gettingstartedcard.then_the_year_fills_in.8ee449de"))
                 .font(Theme.headline)
             GettingStartedGhostGrid(weeks: 30)
         }

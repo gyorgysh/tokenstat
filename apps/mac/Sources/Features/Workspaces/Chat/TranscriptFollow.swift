@@ -67,7 +67,7 @@ enum TranscriptFollow {
             case let .tool(state) where state.running:
                 return SeatStep.phrase(verb: state.verb, target: state.target)
             case let .edit(state) where state.running:
-                return SeatStep.phrase(verb: "Edit", target: state.path)
+                return SeatStep.phrase(verb: L10n.text("common.edit"), target: state.path)
             default:
                 continue
             }
@@ -781,7 +781,7 @@ struct TranscriptSkeleton: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .padding(.vertical, Theme.Space.xl)
         .padding(.horizontal, Theme.Space.l)
-        .accessibilityLabel("Loading the conversation")
+        .accessibilityLabel(L10n.text("apple.transcriptfollow.loading_the_conversation.f32af8b0"))
         .allowsHitTesting(false)
     }
 
@@ -812,16 +812,16 @@ struct TranscriptFollowPill: View {
     var body: some View {
         Group {
             if showJump {
-                Button("Jump to latest", .latest, action: resume)
+                Button(L10n.text("apple.transcriptfollow.jump_to_latest.86752458"), .latest, action: resume)
                     .buttonStyle(AccentButtonStyle(small: true, capsule: true))
             } else if busy, paused {
-                Button("Follow", .latest, action: resume)
+                Button(L10n.text("apple.transcriptfollow.follow.641d1ef6"), .latest, action: resume)
                     .buttonStyle(AccentButtonStyle(small: true, capsule: true))
-                    .help("Follow new responses as they arrive")
+                    .help(L10n.text("apple.transcriptfollow.follow_new_responses_as_they_arrive.bc0eb314"))
             } else if busy {
-                Button("Following", .latest, action: pause)
+                Button(L10n.text("apple.transcriptfollow.following.344b4271"), .latest, action: pause)
                     .buttonStyle(AccentButtonStyle(small: true, capsule: true))
-                    .help("Pause auto-follow")
+                    .help(L10n.text("apple.transcriptfollow.pause_auto_follow.554e9318"))
             }
         }
         .padding(.bottom, Theme.Space.s)
@@ -1321,21 +1321,21 @@ struct TranscriptEarlierHeader: View {
             HStack(spacing: Theme.Space.s) {
                 if model.loadingEarlier {
                     ProgressView().controlSize(.small)
-                    Text("Loading earlier messages")
+                    Text(L10n.text("apple.transcriptfollow.loading_earlier_messages.41311657"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    Button("Earlier messages", .history, action: load)
+                    Button(L10n.text("apple.transcriptfollow.earlier_messages.561a197a"), .history, action: load)
                         .buttonStyle(SecondaryButtonStyle(small: true))
                 }
             }
             .frame(minHeight: Self.height)
             .frame(maxWidth: .infinity, alignment: .center)
-            .accessibilityLabel("Load earlier messages")
+            .accessibilityLabel(L10n.text("apple.transcriptfollow.load_earlier_messages.33fd46b9"))
         } else if model.reachedStart {
             HStack(spacing: Theme.Space.s) {
                 ThemeRule()
-                Text(model.historyTrimmed ? "Earlier messages are no longer available" : "Start of chat")
+                Text(model.historyTrimmed ? L10n.text("apple.transcriptfollow.earlier_messages_are_no_longer_available.aae6a081") : L10n.text("apple.transcriptfollow.start_of_chat.a7e744bb"))
                     .font(Theme.caption)
                     .foregroundStyle(Theme.controlGlyph)
                     .multilineTextAlignment(.center)

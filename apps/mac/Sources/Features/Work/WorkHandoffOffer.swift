@@ -16,14 +16,14 @@ struct WorkHandoffOffer: View {
             if let offered, offered.requestID != dismissedRequest,
                connection?.isCurrent == true {
                 HStack(spacing: Theme.Space.s) {
-                    Button("Continue from \(offered.deviceName)", .device) {
+                    Button(L10n.text("apple.workhandoffoffer.continue_from_0.5f98842e", "\(offered.deviceName)"), .device) {
                         dismissedRequest = offered.requestID
                         onOpen()
                     }
                     .buttonStyle(SecondaryButtonStyle())
                     Spacer(minLength: 0)
                     InspectorCloseButton(action: { dismissedRequest = offered.requestID },
-                        help: "Keep working here", label: "Dismiss shared work offer")
+                        help: L10n.text("apple.workhandoffoffer.keep_working_here.3de0b91f"), label: L10n.text("apple.workhandoffoffer.dismiss_shared_work_offer.556e6332"))
                 }
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.vertical, Theme.Space.s)

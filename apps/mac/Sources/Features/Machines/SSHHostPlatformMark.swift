@@ -30,8 +30,8 @@ struct SSHHostPlatformMark: View {
         }
         .foregroundStyle(Theme.accent)
         .frame(width: 34, height: 34)
-        .accessibilityLabel(label ?? "Server; platform not checked")
-        .help(label ?? "Platform appears after a server check")
+        .accessibilityLabel(label ?? L10n.text("apple.sshhostplatformmark.server_platform_not_checked.48eae098"))
+        .help(label ?? L10n.text("apple.sshhostplatformmark.platform_appears_after_a_server_check.adae81da"))
     }
 
     private func assetExists(_ name: String) -> Bool {

@@ -25,7 +25,7 @@ struct ChatInstructionsCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Instructions")
+            Text(L10n.text("apple.chatinstructionscard.instructions.934652dc"))
                 .font(Theme.caption)
                 .foregroundStyle(.tertiary)
 
@@ -34,7 +34,7 @@ struct ChatInstructionsCard: View {
                 .focused($focused)
                 .overlay(alignment: .topLeading) {
                     if draft.isEmpty {
-                        Text("How should this agent behave?")
+                        Text(L10n.text("apple.chatinstructionscard.how_should_this_agent_behave.6cee0aaf"))
                             .font(Theme.callout)
                             .foregroundStyle(.tertiary)
                             .padding(.horizontal, Theme.Space.s)
@@ -50,7 +50,7 @@ struct ChatInstructionsCard: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
                 if changed {
-                    Button("Save", .save) { commit() }
+                    Button(L10n.text("common.save"), .save) { commit() }
                         .disabled(model.savedCopy != nil)
                         .buttonStyle(AccentButtonStyle(small: true))
                 }
@@ -63,14 +63,14 @@ struct ChatInstructionsCard: View {
                     Image(systemName: "chevron.right")
                         .font(Theme.font(10, weight: .semibold))
                         .rotationEffect(.degrees(showingAdded ? 90 : 0))
-                    Text("What tokenstat adds")
+                    Text(L10n.text("apple.chatinstructionscard.what_tokenstat_adds.358d9a68"))
                 }
                 .font(Theme.caption.weight(.medium))
                 .foregroundStyle(Theme.accent)
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(showingAdded ? "Hide what tokenstat adds" : "Show what tokenstat adds")
+            .accessibilityLabel(showingAdded ? L10n.text("apple.chatinstructionscard.hide_what_tokenstat_adds.fa10e5bb") : L10n.text("apple.chatinstructionscard.show_what_tokenstat_adds.8288a2b7"))
 
             if showingAdded {
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
@@ -86,7 +86,7 @@ struct ChatInstructionsCard: View {
                             in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                         )
                     if let instructions = model.instructions, !instructions.added.isEmpty {
-                        Text("Every conversation gets this so an agent can put a file or image into this chat. It is sent once, and it tells the agent not to talk about it.")
+                        Text(L10n.text("apple.chatinstructionscard.every_conversation_gets_this_so_an_agent_c.a8858c75"))
                             .font(Theme.caption)
                             .foregroundStyle(.tertiary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -118,7 +118,7 @@ struct ChatInstructionsCard: View {
     /// rather than leave a spinner that never resolves.
     private var addedInstructions: String {
         if let added = model.instructions?.added, !added.isEmpty { return added }
-        return model.instructionsLoaded ? "Not available on this computer." : "Loading…"
+        return model.instructionsLoaded ? L10n.text("apple.chatinstructionscard.not_available_on_this_computer.ffcbd9b9") : L10n.text("apple.chatinstructionscard.loading.ba3bbbe1")
     }
 
     /// Name the channel for the agent actually selected.
@@ -128,13 +128,13 @@ struct ChatInstructionsCard: View {
     /// flag for this. The rest are told once, ahead of a message, and the
     /// sentence says so.
     private var channelNote: String {
-        let agent = model.backend(for: chat.backend)?.label ?? "This agent"
+        let agent = model.backend(for: chat.backend)?.label ?? L10n.text("apple.chatinstructionscard.this_agent.15af7e1b")
         guard let instructions = model.instructions else {
-            return "Sent as an instruction, never as part of your message."
+            return L10n.text("apple.chatinstructionscard.sent_as_an_instruction_never_as_part_of_yo.48abdbf3")
         }
         return instructions.travelsAsSystemPrompt
-            ? "\(agent) takes this as a system prompt, so it is never part of your message."
-            : "\(agent) has no system-prompt flag, so this is sent once, ahead of your message."
+            ? L10n.text("apple.chatinstructionscard.0_takes_this_as_a_system_prompt_so_it_is_n.dc332cd6", "\(agent)")
+            : L10n.text("apple.chatinstructionscard.0_has_no_system_prompt_flag_so_this_is_sen.01aa66c2", "\(agent)")
     }
 
     private func commit() {

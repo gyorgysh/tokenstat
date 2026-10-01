@@ -56,7 +56,7 @@ struct SavedWorkSettings: View {
     private var card: some View {
         #if os(macOS)
         Card(
-            title: "Saved work",
+            title: L10n.text("apple.savedworksettings.saved_work.9204cce7"),
             subtitle: usageLabel,
             mark: "mark_cache",
             accessory: statusAccessory
@@ -66,7 +66,7 @@ struct SavedWorkSettings: View {
         #else
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .center, spacing: Theme.Space.s) {
-                ClientSectionTitle(title: "Saved work", mark: "mark_cache")
+                ClientSectionTitle(title: L10n.text("apple.savedworksettings.saved_work.9204cce7"), mark: "mark_cache")
                 Spacer(minLength: 0)
                 if let statusAccessory { statusAccessory }
             }
@@ -85,7 +85,7 @@ struct SavedWorkSettings: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             keepRow
             ThemeRule()
-            Text("Opened conversations and viewed changes are encrypted on this device. Saved changes are read-only snapshots. Copies never leave the device; clearing them leaves source work and unsent drafts alone. Downloaded copies remain readable offline until removed or until access changes are learned on reconnection.")
+            Text(L10n.text("apple.savedworksettings.opened_conversations_and_viewed_changes_ar.6ef58718"))
                 #if os(macOS)
                 .font(Theme.caption)
                 #else
@@ -94,13 +94,13 @@ struct SavedWorkSettings: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             storagePolicy
-            Button("Manage saved work", .archive) { showManagement = true }
+            Button(L10n.text("apple.savedworksettings.manage_saved_work.4802a957"), .archive) { showManagement = true }
                 .buttonStyle(SecondaryButtonStyle())
                 .disabled(scope == nil)
-            Button("Manage original draft files", .attach) { showOriginals = true }
+            Button(L10n.text("apple.savedworksettings.manage_original_draft_files.dd83a362"), .attach) { showOriginals = true }
                 .buttonStyle(SecondaryButtonStyle())
                 .disabled(WorkSessionContext.shared.readingScope == nil)
-            Button("Recover older pending drafts", .history) { showOlderDrafts = true }
+            Button(L10n.text("apple.savedworksettings.recover_older_pending_drafts.f85e1cbc"), .history) { showOlderDrafts = true }
                 .buttonStyle(SecondaryButtonStyle())
             clearButton
             if let message {
@@ -117,7 +117,7 @@ struct SavedWorkSettings: View {
     }
 
     private var keepRow: some View {
-        Toggle("Save recent work on this device", isOn: $enabled)
+        Toggle(L10n.text("apple.savedworksettings.save_recent_work_on_this_device.e5e4effd"), isOn: $enabled)
             .toggleStyle(.brandCheckbox)
             #if os(macOS)
             .font(Theme.callout)
@@ -133,29 +133,29 @@ struct SavedWorkSettings: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Menu {
                 ForEach(WorkCacheSettings.retentionChoices, id: \.self) { days in
-                    Button("\(days) days", days == retentionDays ? ActionIcon.done : .history) {
+                    Button(L10n.text("apple.savedworksettings.0_days.af78beb0", "\(days)"), days == retentionDays ? ActionIcon.done : .history) {
                         retentionDays = days
                         WorkCacheSettings.shared.retentionDays = days
                     }
                 }
-            } label: { ActionIcon.history.label("Keep recent copies for \(retentionDays) days") }
+            } label: { ActionIcon.history.label(L10n.text("apple.savedworksettings.keep_recent_copies_for_0_days.6ae1227d", "\(retentionDays)")) }
             Menu {
                 ForEach(WorkCacheSettings.budgetChoices, id: \.self) { mb in
-                    Button("\(mb) MB", mb == budgetMB ? ActionIcon.done : .archive) {
+                    Button(L10n.text("apple.savedworksettings.0_mb.a698208f", "\(mb)"), mb == budgetMB ? ActionIcon.done : .archive) {
                         budgetMB = mb
                         WorkCacheSettings.shared.budgetMB = mb
                     }
                 }
-            } label: { ActionIcon.archive.label("Recent copies · \(budgetMB) MB") }
+            } label: { ActionIcon.archive.label(L10n.text("apple.savedworksettings.recent_copies_0_mb.139b8ff8", "\(budgetMB)")) }
             Menu {
                 ForEach(WorkCacheSettings.offlineBudgetChoices, id: \.self) { mb in
-                    Button("\(mb) MB", mb == offlineBudgetMB ? ActionIcon.done : .pin) {
+                    Button(L10n.text("apple.savedworksettings.0_mb.a698208f", "\(mb)"), mb == offlineBudgetMB ? ActionIcon.done : .pin) {
                         offlineBudgetMB = mb
                         WorkCacheSettings.shared.offlineBudgetMB = mb
                     }
                 }
-            } label: { ActionIcon.pin.label("Offline storage limit · \(offlineBudgetMB) MB") }
-            Text("Limits apply when saving new work. Copies kept offline do not expire automatically. Lowering a limit never deletes them; remove copies in Manage saved work to make room.")
+            } label: { ActionIcon.pin.label(L10n.text("apple.savedworksettings.offline_storage_limit_0_mb.46a5934c", "\(offlineBudgetMB)")) }
+            Text(L10n.text("apple.savedworksettings.limits_apply_when_saving_new_work_copies_k.6bcfd49d"))
                 .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
         }
         .font(Theme.callout)
@@ -164,7 +164,7 @@ struct SavedWorkSettings: View {
     @ViewBuilder
     private var clearButton: some View {
         #if os(macOS)
-        Button("Clear saved work", .delete) {
+        Button(L10n.text("apple.savedworksettings.clear_saved_work.d362e82a"), .delete) {
             Task { await clear() }
         }
         .buttonStyle(SecondaryButtonStyle())
@@ -173,7 +173,7 @@ struct SavedWorkSettings: View {
         Button {
             Task { await clear() }
         } label: {
-            ActionIcon.delete.label(clearing ? "Clearing…" : "Clear saved work")
+            ActionIcon.delete.label(clearing ? L10n.text("apple.savedworksettings.clearing.9a81378b") : L10n.text("apple.savedworksettings.clear_saved_work.d362e82a"))
                 .labelStyle(ActionLabelStyle())
                 .font(ClientType.label.weight(.semibold))
                 .foregroundStyle(Theme.accent)
@@ -184,7 +184,7 @@ struct SavedWorkSettings: View {
         }
         .buttonStyle(.plain)
         .disabled(clearing || bytes == nil || bytes == 0)
-        .accessibilityHint("Removes saved copies from this device. Drafts stay, and nothing is deleted on any computer.")
+        .accessibilityHint(L10n.text("apple.savedworksettings.removes_saved_copies_from_this_device_draf.85fe0c9a"))
         #endif
     }
 
@@ -196,21 +196,21 @@ struct SavedWorkSettings: View {
             return AnyView(
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(Theme.accent)
-                    .accessibilityLabel("Saved work cleared")
+                    .accessibilityLabel(L10n.text("apple.savedworksettings.saved_work_cleared.b146d276"))
             )
         }
         return nil
     }
 
     private var usageLabel: String {
-        if cleared { return "Saved work cleared" }
-        guard let bytes, let records else { return "Saved work on this device" }
-        if records == 0 { return "Nothing saved on this device" }
+        if cleared { return L10n.text("apple.savedworksettings.saved_work_cleared.b146d276") }
+        guard let bytes, let records else { return L10n.text("apple.savedworksettings.saved_work_on_this_device.6942a15d") }
+        if records == 0 { return L10n.text("apple.savedworksettings.nothing_saved_on_this_device.30328043") }
         let size = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
-        let kept = pinned.map { $0 > 0 ? ", \($0) kept" : "" } ?? ""
+        let kept = pinned.map { $0 > 0 ? L10n.text("apple.savedworksettings.0_kept.74c0ae6a", "\($0)") : "" } ?? ""
         return records == 1
-            ? "1 saved item (\(size)\(kept)) on this device"
-            : "\(records) saved items (\(size)\(kept)) on this device"
+            ? L10n.text("apple.savedworksettings.1_saved_item_0_1_on_this_device.2656032d", "\(size)", "\(kept)")
+            : L10n.text("apple.savedworksettings.0_saved_items_1_2_on_this_device.7c9fd44c", "\(records)", "\(size)", "\(kept)")
     }
 
     /// Re-read totals when the management sheet goes away. A named function
@@ -239,12 +239,12 @@ struct SavedWorkSettings: View {
                 }
                 guard refreshGeneration == generation, self.scope == scope, !Task.isCancelled else { return }
                 message = key == nil
-                    ? "Secure storage is unavailable. Unlock this device and try again. Work cannot be saved until its encryption key is available." : nil
+                    ? L10n.text("apple.savedworksettings.secure_storage_is_unavailable_unlock_this.e9f2fab6") : nil
             } else { message = nil }
         } catch {
             guard refreshGeneration == generation, self.scope == scope, !Task.isCancelled else { return }
             if !WorkCacheStore.isUnavailable(error) {
-                message = "Saved work could not be measured. Try again."
+                message = L10n.text("apple.savedworksettings.saved_work_could_not_be_measured_try_again.c5966f63")
             }
             bytes = nil
             records = nil
@@ -270,7 +270,7 @@ struct SavedWorkSettings: View {
             cleared = true
         } catch {
             await refresh(afterFailedClear: true)
-            if self.scope == scope { message = "Some saved work could not be removed. Try again." }
+            if self.scope == scope { message = L10n.text("apple.savedworksettings.some_saved_work_could_not_be_removed_try_a.fc8393cf") }
         }
     }
 }

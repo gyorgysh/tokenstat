@@ -71,7 +71,7 @@ struct HostUpdateCard: View {
         HStack(spacing: Theme.Space.s) {
             FeatureMark(name: "mark_sync", size: 22)
                 .accessibilityHidden(true)
-            Text("Software")
+            Text(L10n.text("apple.hostupdatecard.software.9b3289a3"))
                 .font(titleFont)
                 .accessibilityAddTraits(.isHeader)
         }
@@ -100,7 +100,7 @@ struct HostUpdateCard: View {
         case .checking:
             HStack(spacing: Theme.Space.s) {
                 ProgressView().controlSize(.small)
-                Text("Looking for a newer release")
+                Text(L10n.text("apple.hostupdatecard.looking_for_a_newer_release.7e1ada06"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
             }
@@ -109,7 +109,7 @@ struct HostUpdateCard: View {
         case .installing:
             HStack(spacing: Theme.Space.s) {
                 ProgressView().controlSize(.small)
-                Text("Downloading, checking and installing. This takes a minute.")
+                Text(L10n.text("apple.hostupdatecard.downloading_checking_and_installing_this_t.c0e97360"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -134,9 +134,9 @@ struct HostUpdateCard: View {
                     // name a version the running process does not have.
                     note(pendingSentence(state), tone: .waiting)
                 } else if state.newer {
-                    note("Version \(state.latest) is available.", tone: .available)
+                    note(L10n.text("apple.hostupdatecard.version_0_is_available.874abce6", "\(state.latest)"), tone: .available)
                 } else {
-                    note("Up to date.", tone: .plain)
+                    note(L10n.text("apple.hostupdatecard.up_to_date.50620fd9"), tone: .plain)
                 }
                 // Additive, not instead of the line above: an
                 // application-managed helper that is current should still say
@@ -144,19 +144,19 @@ struct HostUpdateCard: View {
                 if state.appManaged {
                     note(
                         local
-                            ? "The tokenstat application owns this helper and replaces it when it updates itself."
-                            : "The tokenstat application there owns its helper and replaces it when it updates itself.",
+                            ? L10n.text("apple.hostupdatecard.the_tokenstat_application_owns_this_helper.d5e8bbb9")
+                            : L10n.text("apple.hostupdatecard.the_tokenstat_application_there_owns_its_h.c214574e"),
                         tone: .plain
                     )
                 } else {
                     if state.newer, !state.canRestart {
                         note(
-                            "It installs but cannot restart itself, so it keeps running the version it started with until it is restarted.",
+                            L10n.text("apple.hostupdatecard.it_installs_but_cannot_restart_itself_so_i.f14f8d70"),
                             tone: .waiting
                         )
                     }
                     if state.autoApply {
-                        note("Checks daily on its own.", tone: .plain)
+                        note(L10n.text("apple.hostupdatecard.checks_daily_on_its_own.bfd7c539"), tone: .plain)
                     }
                 }
             }
@@ -174,11 +174,11 @@ struct HostUpdateCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 } else if applied.restarting == true {
                     note(
-                        "Installed \(applied.to ?? "the new version"). Restarting on it now, so this may go quiet for a moment.",
+                        L10n.text("apple.hostupdatecard.installed_0_restarting_on_it_now_so_this_m.4a3fb7f6", "\(applied.to ?? L10n.text("apple.hostupdatecard.the_new_version.b455aa8f"))"),
                         tone: .available
                     )
                 } else if let image = applied.appImage, !image.isEmpty, applied.appManaged == true {
-                    note("The application's download is ready on that machine.", tone: .available)
+                    note(L10n.text("apple.hostupdatecard.the_application_s_download_is_ready_on_tha.bc948717"), tone: .available)
                 } else {
                     note(installedWaitingSentence(applied), tone: .waiting)
                 }
@@ -189,7 +189,7 @@ struct HostUpdateCard: View {
     /// Two versions on one line, because the pair is the fact.
     private func versionLine(_ state: HostUpdateState) -> some View {
         HStack(spacing: 6) {
-            Text(state.restartPending ? "Running \(state.hostVersion)" : state.hostVersion)
+            Text(state.restartPending ? L10n.text("apple.hostupdatecard.running_0.015ef2e2", "\(state.hostVersion)") : state.hostVersion)
                 .font(figureFont)
                 .monospacedDigit()
             if state.newer, !state.restartPending {
@@ -206,8 +206,8 @@ struct HostUpdateCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             state.newer
-                ? "Version \(state.hostVersion), \(state.latest) available"
-                : "Version \(state.hostVersion), up to date"
+                ? L10n.text("apple.hostupdatecard.version_0_1_available.b977d810", "\(state.hostVersion)", "\(state.latest)")
+                : L10n.text("apple.hostupdatecard.version_0_up_to_date.c993e60a", "\(state.hostVersion)")
         )
     }
 
@@ -220,37 +220,37 @@ struct HostUpdateCard: View {
                 // would be offering work that is already done.
                 if phase == .done {
                     if applied?.restartPending == true, state.canRestart {
-                        Button("Restart", .refresh) { Task { await apply(restartNow: true) } }
+                        Button(L10n.text("apple.hostupdatecard.restart.6b983a81"), .refresh) { Task { await apply(restartNow: true) } }
                             .buttonStyle(AccentButtonStyle())
                     }
                 } else if state.restartPending {
                     // The only thing left is the restart, and it ends whatever
                     // that machine is running, so it is never automatic here.
                     if state.canRestart {
-                        Button("Restart", .refresh) { Task { await apply(restartNow: true) } }
+                        Button(L10n.text("apple.hostupdatecard.restart.6b983a81"), .refresh) { Task { await apply(restartNow: true) } }
                             .buttonStyle(AccentButtonStyle())
                     }
                 } else if state.newer, !state.appManaged {
-                    Button("Install", .download) { Task { await apply(restartNow: false) } }
+                    Button(L10n.text("apple.hostupdatecard.install.569ca49f"), .download) { Task { await apply(restartNow: false) } }
                         .buttonStyle(AccentButtonStyle())
                 } else if state.appManaged, state.newer {
                     Button(fetchTitle, .download) { Task { await apply(restartNow: false) } }
                         .buttonStyle(AccentButtonStyle())
                 }
-                Button("Check again", .refresh) { retry &+= 1 }
+                Button(L10n.text("apple.hostupdatecard.check_again.fb7099ad"), .refresh) { retry &+= 1 }
                     .buttonStyle(SecondaryButtonStyle())
             }
         }
     }
 
     private var fetchTitle: String {
-        local ? "Download" : "Fetch"
+        local ? L10n.text("apple.hostupdatecard.download.d6eafe82") : L10n.text("apple.hostupdatecard.fetch.cd7d61bf")
     }
 
     /// Where a restart has to happen, in the words that fit the machine being
     /// looked at.
     private var restartElsewhere: String {
-        local ? "Restart the helper to use it." : "Restart it there to use it."
+        local ? L10n.text("apple.hostupdatecard.restart_the_helper_to_use_it.8ead99bc") : L10n.text("apple.hostupdatecard.restart_it_there_to_use_it.40a2d6df")
     }
 
     /// How this card colours a sentence. Three tones, so a waiting state does
@@ -277,30 +277,30 @@ struct HostUpdateCard: View {
     }
 
     private func pendingSentence(_ state: HostUpdateState) -> String {
-        let installed = "Version \(state.latest) is installed and waiting."
+        let installed = L10n.text("apple.hostupdatecard.version_0_is_installed_and_waiting.87629ce8", "\(state.latest)")
         guard state.canRestart else {
             return "\(installed) \(restartElsewhere)"
         }
         return state.liveWork > 0
-            ? "\(installed) \(workPhrase(state.liveWork)) running, so it restarts when they finish."
-            : "\(installed) It restarts on its own shortly."
+            ? L10n.text("apple.hostupdatecard.0_1_running_so_it_restarts_when_they_finis.3d730cfa", "\(installed)", "\(workPhrase(state.liveWork))")
+            : L10n.text("apple.hostupdatecard.0_it_restarts_on_its_own_shortly.0d399003", "\(installed)")
     }
 
     private func installedWaitingSentence(_ applied: HostUpdateResult) -> String {
-        let version = applied.to ?? "The new version"
+        let version = applied.to ?? L10n.text("apple.hostupdatecard.the_new_version.c8c06a3b")
         let live = applied.liveWork ?? 0
         if applied.canRestart == false {
-            return "Installed \(version). \(restartElsewhere)"
+            return L10n.text("apple.hostupdatecard.installed_0_1.1598fee3", "\(version)", "\(restartElsewhere)")
         }
         return live > 0
-            ? "Installed \(version). \(workPhrase(live)) running, so it restarts when they finish."
-            : "Installed \(version). It restarts shortly."
+            ? L10n.text("apple.hostupdatecard.installed_0_1_running_so_it_restarts_when.ae74cc9c", "\(version)", "\(workPhrase(live))")
+            : L10n.text("apple.hostupdatecard.installed_0_it_restarts_shortly.b1c4d920", "\(version)")
     }
 
     /// Counted rather than "some work": a person deciding whether to end their
     /// own sessions wants the number.
     private func workPhrase(_ count: Int) -> String {
-        count == 1 ? "One thing is" : "\(count) things are"
+        count == 1 ? L10n.text("apple.hostupdatecard.one_thing_is.cda2ad7f") : L10n.text("apple.hostupdatecard.0_things_are.ce038154", "\(count)")
     }
 
     private func load() async {

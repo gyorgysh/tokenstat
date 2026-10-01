@@ -229,7 +229,7 @@ struct SetupFailureBanner: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Dismiss")
+                    .accessibilityLabel(L10n.text("apple.clientsetupserversteps.dismiss.48845bff"))
                 }
             }
             HStack(spacing: Theme.Space.s) {
@@ -245,7 +245,7 @@ struct SetupFailureBanner: View {
                     .accessibilityIdentifier("setup.recover")
                 }
                 if failure.details != nil {
-                    Button(showingDetails ? "Hide details" : "Details", .more) {
+                    Button(showingDetails ? L10n.text("apple.clientsetupserversteps.hide_details.c9722a7a") : L10n.text("apple.clientsetupserversteps.details.45989de4"), .more) {
                         showingDetails.toggle()
                     }
                     .buttonStyle(.plain)
@@ -297,7 +297,7 @@ struct SetupRail: View {
     let total: Int
 
     private static let milestones: [(name: String, last: Int)] = [
-        ("Connect", 5), ("Machine", 6), ("Project", 7),
+        (L10n.text("common.connect"), 5), (L10n.text("apple.clientsetupserversteps.machine.8f1cc42d"), 6), (L10n.text("apple.clientsetupserversteps.project.98595978"), 7),
     ]
 
     private var index: Int {
@@ -316,7 +316,7 @@ struct SetupRail: View {
         .frame(maxWidth: .infinity, alignment: .center)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            "Step \(number) of \(total), \(Self.milestones[index].name)"
+            L10n.text("apple.clientsetupserversteps.step_0_of_1_2.69f669d8", "\(number)", "\(total)", "\(Self.milestones[index].name)")
         )
         .accessibilityIdentifier("setup.rail.\(Self.milestones[index].name.lowercased())")
     }
@@ -339,7 +339,7 @@ struct SetupRail: View {
     private var short: some View {
         HStack(spacing: Theme.Space.xs) {
             chip(Self.milestones[index].name, at: index)
-            Text("\(number) of \(total)")
+            Text(L10n.text("apple.clientsetupserversteps.0_of_1.9fea8201", "\(number)", "\(total)"))
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
         }
@@ -401,8 +401,8 @@ private struct WhereStep: View {
 
     var body: some View {
         StepScaffold(
-            title: "Which server",
-            subtitle: "Choose a saved server or enter its address. Connect securely over SSH with your own credentials.",
+            title: L10n.text("apple.clientsetupserversteps.which_server.f723b68c"),
+            subtitle: L10n.text("apple.clientsetupserversteps.choose_a_saved_server_or_enter_its_address.a9fb6642"),
             number: 1,
             art: .find,
             failure: model.failure,
@@ -410,7 +410,7 @@ private struct WhereStep: View {
             onRecover: { recover($0, model: model, path: $path) }
         ) {
             if !library.hosts.isEmpty {
-                StepSection(title: "Saved servers") {
+                StepSection(title: L10n.text("apple.clientsetupserversteps.saved_servers.4bf08480")) {
                     ForEach(library.hosts) { host in
                         Button {
                             model.password = ""
@@ -440,18 +440,18 @@ private struct WhereStep: View {
                 }
             }
             StepSection(title: library.hosts.isEmpty
-                ? "The server"
-                : (model.pickedHostID == nil ? "Or type one" : "Type another")) {
-                LabeledField(title: "Address", text: serverField(\.hostname), placeholder: "203.0.113.10")
+                ? L10n.text("apple.clientsetupserversteps.the_server.442b5366")
+                : (model.pickedHostID == nil ? L10n.text("apple.clientsetupserversteps.or_type_one.3c8afc53") : L10n.text("apple.clientsetupserversteps.type_another.0993d6bc"))) {
+                LabeledField(title: L10n.text("apple.clientsetupserversteps.address.56ef8f20"), text: serverField(\.hostname), placeholder: "203.0.113.10")
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                LabeledField(title: "User", text: serverField(\.username), placeholder: "root")
+                LabeledField(title: L10n.text("apple.clientsetupserversteps.user.b512d97e"), text: serverField(\.username), placeholder: L10n.text("apple.clientsetupserversteps.root.4813494d"))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                LabeledField(title: "Name", text: serverField(\.label), placeholder: "cloud one")
+                LabeledField(title: L10n.text("apple.clientsetupserversteps.name.dcd1d522"), text: serverField(\.label), placeholder: L10n.text("apple.clientsetupserversteps.cloud_one.ab0123af"))
             }
         } footer: {
-            Button("Continue", .next) {
+            Button(L10n.text("apple.clientsetupserversteps.continue.31fbef16"), .next) {
                 if model.pickedHostID == nil {
                     if model.host.label.trimmingCharacters(in: .whitespaces).isEmpty {
                         model.host.label = model.host.hostname
@@ -461,12 +461,12 @@ private struct WhereStep: View {
             }
             .setupPrimaryStyle()
             .disabled(!ready)
-            Button("Set up with a terminal", .docs) {
+            Button(L10n.text("apple.clientsetupserversteps.set_up_with_a_terminal.c6e8442d"), .docs) {
                 path.append(.byHand)
             }
             .font(ClientType.label)
         }
-        .navigationTitle("Connect a server")
+        .navigationTitle(L10n.text("apple.clientsetupserversteps.connect_a_server.a438d2cf"))
         .onAppear { model.resetServer() }
         .onChange(of: model.pickedHostID) { _, picked in
             guard let picked, let host = library.hosts.first(where: { $0.id == picked }) else {
@@ -497,9 +497,8 @@ private struct CredentialStep: View {
 
     var body: some View {
         StepScaffold(
-            title: "How to sign in",
-            subtitle: "A key from your vault, or a password used once for this connection "
-                + "and never written down.",
+            title: L10n.text("apple.clientsetupserversteps.how_to_sign_in.6730dada"),
+            subtitle: L10n.text("apple.clientsetupserversteps.a_key_from_your_vault_or_a_password_used_o.75f6b9b8"),
             number: 2,
             art: .unlock,
             failure: model.failure,
@@ -508,14 +507,13 @@ private struct CredentialStep: View {
         ) {
             if library.keys.isEmpty {
                 Text(
-                    "There are no keys in your vault yet. Add one under Machines, SSH, or "
-                    + "use a password this time."
+                    L10n.text("apple.clientsetupserversteps.there_are_no_keys_in_your_vault_yet_add_on.ca0f75f6")
                 )
                 .font(ClientType.label)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             } else {
-                StepSection(title: "Keys in your vault") {
+                StepSection(title: L10n.text("apple.clientsetupserversteps.keys_in_your_vault.32d8b1ef")) {
                     ForEach(library.keys) { key in
                         Button {
                             model.credential = .key(key.id)
@@ -539,9 +537,9 @@ private struct CredentialStep: View {
                 }
             }
             StepSection(title: library.keys.isEmpty
-                ? "A password, this time only"
-                : "Or a password, this time only") {
-                SecureField("Password", text: $model.password)
+                ? L10n.text("apple.clientsetupserversteps.a_password_this_time_only.0283f848")
+                : L10n.text("apple.clientsetupserversteps.or_a_password_this_time_only.44e1c7da")) {
+                SecureField(L10n.text("apple.clientsetupserversteps.password.e7cf3ef4"), text: $model.password)
                     .textFieldStyle(.themed)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -549,21 +547,20 @@ private struct CredentialStep: View {
                         if !value.isEmpty { model.credential = .password }
                     }
                 Text(
-                    "Used for this connection and dropped when the wizard closes. It is "
-                    + "never saved to the vault or to this device."
+                    L10n.text("apple.clientsetupserversteps.used_for_this_connection_and_dropped_when.43398559")
                 )
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             }
         } footer: {
-            Button("Continue", .next) {
+            Button(L10n.text("apple.clientsetupserversteps.continue.31fbef16"), .next) {
                 path.append(model.resumingInstallation ? .finish : .fingerprint)
             }
                 .setupPrimaryStyle()
                 .disabled(!ready)
         }
-        .navigationTitle("Sign in")
+        .navigationTitle(L10n.text("common.sign_in"))
     }
 }
 
@@ -576,24 +573,22 @@ private struct FingerprintStep: View {
 
     var body: some View {
         StepScaffold(
-            title: "Is this your server?",
-            subtitle: "Compare this fingerprint with your server before continuing. "
-                + "It identifies the machine that will receive your credentials.",
+            title: L10n.text("apple.clientsetupserversteps.is_this_your_server.1d76f188"),
+            subtitle: L10n.text("apple.clientsetupserversteps.compare_this_fingerprint_with_your_server.f06f2526"),
             number: 3,
             art: .identify,
             failure: model.failure,
             onDismissError: { model.failure = nil },
             onRecover: { recover($0, model: model, path: $path) }
         ) {
-            StepSection(title: "Fingerprint") {
+            StepSection(title: L10n.text("apple.clientsetupserversteps.fingerprint.ba7af0b7")) {
                 if let fingerprint = model.fingerprint {
                     Text(fingerprint)
                         .font(Theme.monoText(13))
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(
-                        "Compare it with what the server itself reports. On the machine, "
-                        + "`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` prints it."
+                        LocalizedStringKey(L10n.text("apple.clientsetupserversteps.compare_it_with_what_the_server_itself_rep.0f5fff76"))
                     )
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
@@ -601,32 +596,31 @@ private struct FingerprintStep: View {
                 } else if model.working {
                     HStack(spacing: Theme.Space.s) {
                         ProgressView().controlSize(.small)
-                        Text("Asking the server…").font(ClientType.label)
+                        Text(L10n.text("apple.clientsetupserversteps.asking_the_server.fb689559")).font(ClientType.label)
                     }
                     Text(
-                        "An address that is wrong takes about a minute to give up, because "
-                        + "nothing answers to say so."
+                        L10n.text("apple.clientsetupserversteps.an_address_that_is_wrong_takes_about_a_min.c355da67")
                     )
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    Text("Nothing asked yet.").font(ClientType.label).foregroundStyle(.secondary)
+                    Text(L10n.text("apple.clientsetupserversteps.nothing_asked_yet.3f88b8bf")).font(ClientType.label).foregroundStyle(.secondary)
                 }
             }
         } footer: {
             if model.fingerprint == nil {
                 if model.working {
-                    Button("Stop", .stop) { model.cancelWork() }
+                    Button(L10n.text("common.stop"), .stop) { model.cancelWork() }
                         .setupPrimaryStyle()
                 } else {
-                    Button("Ask the server", .connect) {
+                    Button(L10n.text("apple.clientsetupserversteps.ask_the_server.5d186479"), .connect) {
                         Task { await model.probe(library: library) }
                     }
                     .setupPrimaryStyle()
                 }
             } else {
-                Button("This is my server", .approve) {
+                Button(L10n.text("apple.clientsetupserversteps.this_is_my_server.22acffe8"), .approve) {
                     Task {
                         await model.trust(library: library)
                         if model.trusted { path.append(.check) }
@@ -634,14 +628,14 @@ private struct FingerprintStep: View {
                 }
                 .setupPrimaryStyle()
                 .disabled(model.working)
-                Button("Ask again", .refresh) {
+                Button(L10n.text("apple.clientsetupserversteps.ask_again.0d9ad5ef"), .refresh) {
                     model.fingerprint = nil
                     Task { await model.probe(library: library) }
                 }
                 .font(ClientType.label)
             }
         }
-        .navigationTitle("Fingerprint")
+        .navigationTitle(L10n.text("apple.clientsetupserversteps.fingerprint.ba7af0b7"))
         .task {
             guard model.fingerprint == nil, !model.working else { return }
             await model.probe(library: library)
@@ -658,9 +652,8 @@ private struct CheckStep: View {
 
     var body: some View {
         StepScaffold(
-            title: "What is on it",
-            subtitle: "Read before anything is written. Nothing on the server changes on "
-                + "this screen.",
+            title: L10n.text("apple.clientsetupserversteps.what_is_on_it.047811ac"),
+            subtitle: L10n.text("apple.clientsetupserversteps.read_before_anything_is_written_nothing_on.f53dc6d5"),
             number: 4,
             art: .inspect,
             failure: model.failure,
@@ -668,27 +661,25 @@ private struct CheckStep: View {
             onRecover: { recover($0, model: model, path: $path) }
         ) {
             if let check = model.check {
-                StepSection(title: "The machine") {
-                    fact("Operating system", check.distro ?? check.os ?? "unknown")
-                    fact("Architecture", check.arch ?? "unknown")
-                    fact("Signs in as", check.user ?? "unknown")
-                    fact("Service manager", (check.systemd ?? false) ? "systemd" : "not systemd")
-                    fact("Free space", check.diskFreeMb.map { "\($0 / 1024) GB" } ?? "unknown")
+                StepSection(title: L10n.text("apple.clientsetupserversteps.the_machine.0cccf589")) {
+                    fact(L10n.text("apple.clientsetupserversteps.operating_system.0fcabfe6"), check.distro ?? check.os ?? "unknown")
+                    fact(L10n.text("apple.clientsetupserversteps.architecture.cd74053c"), check.arch ?? "unknown")
+                    fact(L10n.text("apple.clientsetupserversteps.signs_in_as.f6adc71c"), check.user ?? "unknown")
+                    fact(L10n.text("apple.clientsetupserversteps.service_manager.ddd070d4"), (check.systemd ?? false) ? "systemd" : L10n.text("apple.clientsetupserversteps.not_systemd.050cd421"))
+                    fact(L10n.text("apple.clientsetupserversteps.free_space.64cd989e"), check.diskFreeMb.map { "\($0 / 1024) GB" } ?? "unknown")
                     if check.installed == true {
-                        fact("Already installed", "tokenstat is on this machine")
+                        fact(L10n.text("apple.clientsetupserversteps.already_installed.9616d808"), L10n.text("apple.clientsetupserversteps.tokenstat_is_on_this_machine.3fc55e14"))
                     }
                 }
                 if check.root == true {
                     // A fact next to the operating system version, not a
                     // warning triangle. It is the trade being made, and it is
                     // the right one for a machine that exists to do this work.
-                    StepSection(title: "Who agents run as") {
-                        Text("Agents on this machine will run as root.")
+                    StepSection(title: L10n.text("apple.clientsetupserversteps.who_agents_run_as.fc7c9918")) {
+                        Text(L10n.text("apple.clientsetupserversteps.agents_on_this_machine_will_run_as_root.d624b53a"))
                             .font(ClientType.body)
                         Text(
-                            "That is the same authority as the SSH session you just opened, "
-                            + "so agents can access system files as well as your projects. "
-                            + "Each agent's own approval settings still apply."
+                            L10n.text("apple.clientsetupserversteps.that_is_the_same_authority_as_the_ssh_sess.27a3539a")
                         )
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
@@ -696,7 +687,7 @@ private struct CheckStep: View {
                     }
                 }
                 if !check.blockers.isEmpty {
-                    StepSection(title: "In the way") {
+                    StepSection(title: L10n.text("apple.clientsetupserversteps.in_the_way.ec946c03")) {
                         ForEach(check.blockers, id: \.self) { blocker in
                             Text(blocker)
                                 .font(ClientType.label)
@@ -704,37 +695,37 @@ private struct CheckStep: View {
                         }
                     }
                 }
-                StepSection(title: "What to call it") {
-                    LabeledField(title: "Name", text: $model.machineName, placeholder: "cloud one")
-                    Text("This is the name on your account, and what you tap to reach it.")
+                StepSection(title: L10n.text("apple.clientsetupserversteps.what_to_call_it.55325bff")) {
+                    LabeledField(title: L10n.text("apple.clientsetupserversteps.name.dcd1d522"), text: $model.machineName, placeholder: L10n.text("apple.clientsetupserversteps.cloud_one.ab0123af"))
+                    Text(L10n.text("apple.clientsetupserversteps.this_is_the_name_on_your_account_and_what.4a9ec588"))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                 }
             } else if model.working {
                 HStack(spacing: Theme.Space.s) {
                     ProgressView().controlSize(.small)
-                    Text("Looking at the machine…").font(ClientType.label)
+                    Text(L10n.text("apple.clientsetupserversteps.looking_at_the_machine.2b29e9e2")).font(ClientType.label)
                 }
             }
         } footer: {
             if model.working {
-                Button("Stop", .stop) { model.cancelWork() }
+                Button(L10n.text("common.stop"), .stop) { model.cancelWork() }
                     .setupPrimaryStyle()
             } else if model.check?.ready == true {
-                Button("Install", .download) { path.append(.install) }
+                Button(L10n.text("apple.clientsetupserversteps.install.569ca49f"), .download) { path.append(.install) }
                     .setupPrimaryStyle()
                     .disabled(model.working || model.machineName.trimmingCharacters(in: .whitespaces).isEmpty)
             } else {
-                Button("Check again", .refresh) {
+                Button(L10n.text("apple.clientsetupserversteps.check_again.fb7099ad"), .refresh) {
                     Task { await model.inspect(library: library) }
                 }
                 .setupPrimaryStyle()
                 .disabled(model.working)
             }
-            Button("Show me the command instead", .docs) { path.append(.byHand) }
+            Button(L10n.text("apple.clientsetupserversteps.show_me_the_command_instead.1da2f134"), .docs) { path.append(.byHand) }
                 .font(ClientType.label)
         }
-        .navigationTitle("Check")
+        .navigationTitle(L10n.text("apple.clientsetupserversteps.check.9d60841e"))
         .task {
             guard model.check == nil, !model.working else { return }
             await model.inspect(library: library)
@@ -766,7 +757,7 @@ private struct InstallStep: View {
                 // they can watch, and every support conversation about a
                 // failed install starts with this text.
                 HStack {
-                    Text("Installing on \(model.machineName)")
+                    Text(L10n.text("apple.clientsetupserversteps.installing_on_0.db18c0f3", "\(model.machineName)"))
                         .font(ClientType.label)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -780,58 +771,54 @@ private struct InstallStep: View {
                 SSHNativeTerminal(session: terminal)
                 ThemeRule()
                 VStack(spacing: Theme.Space.s) {
-                    Button("It finished, check the machine", .next) { path.append(.finish) }
+                    Button(L10n.text("apple.clientsetupserversteps.it_finished_check_the_machine.0c1b9b30"), .next) { path.append(.finish) }
                         .setupPrimaryStyle()
-                    Button("It failed, show me the command", .docs) { path.append(.byHand) }
+                    Button(L10n.text("apple.clientsetupserversteps.it_failed_show_me_the_command.df0a4f0d"), .docs) { path.append(.byHand) }
                         .font(ClientType.label)
                 }
                 .padding(Theme.Space.m)
             } else {
                 StepScaffold(
-                    title: "Install",
-                    subtitle: "tokenstat mints a one-time pairing code, writes it to a private "
-                        + "file on the server, and runs the installer. You watch the whole thing.",
+                    title: L10n.text("apple.clientsetupserversteps.install.569ca49f"),
+                    subtitle: L10n.text("apple.clientsetupserversteps.tokenstat_mints_a_one_time_pairing_code_wr.f10f332e"),
                     number: 5,
                     art: .install,
                     failure: model.failure,
                     onDismissError: { model.failure = nil },
                     onRecover: { recover($0, model: model, path: $path) }
                 ) {
-                    StepSection(title: "What will happen") {
-                        bullet("The CLI and the always-on host are installed.")
-                        bullet("The machine signs in to your account with a code that "
-                            + "expires in fifteen minutes and works once.")
-                        bullet("This device is allowed to open the work here, granted over "
-                            + "this SSH session rather than through our servers.")
-                        bullet("It stays on and keeps counting, which costs whatever the "
-                            + "server costs.")
+                    StepSection(title: L10n.text("apple.clientsetupserversteps.what_will_happen.d5b89826")) {
+                        bullet(L10n.text("apple.clientsetupserversteps.the_cli_and_the_always_on_host_are_install.5c5da81f"))
+                        bullet(L10n.text("apple.clientsetupserversteps.the_machine_signs_in_to_your_account_with.72be3ba6"))
+                        bullet(L10n.text("apple.clientsetupserversteps.this_device_is_allowed_to_open_the_work_he.47d6f496"))
+                        bullet(L10n.text("apple.clientsetupserversteps.it_stays_on_and_keeps_counting_which_costs.713e3511"))
                     }
-                    StepSection(title: "Agents") {
-                        agentChoice("claude_code", name: "Claude Code",
-                            detail: "Anthropic’s coding agent for your projects.")
+                    StepSection(title: L10n.text("apple.clientsetupserversteps.agents.279b44d2")) {
+                        agentChoice("claude_code", name: L10n.text("apple.clientsetupserversteps.claude_code.246ef8c1"),
+                            detail: L10n.text("apple.clientsetupserversteps.anthropic_s_coding_agent_for_your_projects.2be1987f"))
                         ThemeRule()
-                        agentChoice("codex", name: "Codex",
-                            detail: "OpenAI’s coding agent for your projects.")
-                        Text("Choose either, both, or neither. You can install more later.")
+                        agentChoice("codex", name: L10n.text("apple.clientsetupserversteps.codex.616efbe9"),
+                            detail: L10n.text("apple.clientsetupserversteps.openai_s_coding_agent_for_your_projects.68a482b3"))
+                        Text(L10n.text("apple.clientsetupserversteps.choose_either_both_or_neither_you_can_inst.36b5f4ed"))
                             .font(ClientType.caption)
                             .foregroundStyle(.secondary)
-                        Text("Next, setup helps you sign in to your agent and choose a project. You can also do either later from the machine's page.")
+                        Text(L10n.text("apple.clientsetupserversteps.next_setup_helps_you_sign_in_to_your_agent.34acb358"))
                             .font(ClientType.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 } footer: {
-                    Button("Start the install", .download) {
+                    Button(L10n.text("apple.clientsetupserversteps.start_the_install.40fb0ff5"), .download) {
                         Task { await model.install(library: library) }
                     }
                     .setupPrimaryStyle()
                     .disabled(model.working)
-                    Button("I would rather run it myself", .docs) { path.append(.byHand) }
+                    Button(L10n.text("apple.clientsetupserversteps.i_would_rather_run_it_myself.73496e0e"), .docs) { path.append(.byHand) }
                         .font(ClientType.label)
                 }
             }
         }
-        .navigationTitle("Install")
+        .navigationTitle(L10n.text("apple.clientsetupserversteps.install.569ca49f"))
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -878,21 +865,21 @@ private struct FinishStep: View {
 
     var body: some View {
         StepScaffold(
-            title: model.finished == nil ? "Waiting for the machine" : "It is up",
+            title: model.finished == nil ? L10n.text("apple.clientsetupserversteps.waiting_for_the_machine.9a2264c1") : L10n.text("apple.clientsetupserversteps.it_is_up.3f950bb2"),
             subtitle: model.finished == nil
-                ? "The server signs in, joins the tunnel and answers. This takes a few seconds."
-                : "\(model.machineName) is on your account and this device can reach it.",
+                ? L10n.text("apple.clientsetupserversteps.the_server_signs_in_joins_the_tunnel_and_a.2831dd5b")
+                : L10n.text("apple.clientsetupserversteps.0_is_on_your_account_and_this_device_can_r.944d14db", "\(model.machineName)"),
             number: 6,
             failure: model.failure,
             onDismissError: { model.failure = nil },
             onRecover: { recover($0, model: model, path: $path) }
         ) {
             if model.manualInstall, model.finished == nil {
-                StepSection(title: "Confirm the installed machine") {
-                    Text("Paste the full machine key printed at the end of the installer, or run tokenstat host identity on the server. This selects the exact machine, even when two servers have the same name.")
+                StepSection(title: L10n.text("apple.clientsetupserversteps.confirm_the_installed_machine.835e82aa")) {
+                    Text(L10n.text("apple.clientsetupserversteps.paste_the_full_machine_key_printed_at_the.11894974"))
                         .font(ClientType.label)
                         .foregroundStyle(.secondary)
-                    TextField("64-character machine key", text: $model.manualMachineKey)
+                    TextField(L10n.text("apple.clientsetupserversteps.64_character_machine_key.90b955a9"), text: $model.manualMachineKey)
                         .font(Theme.monoText(13))
                         .textFieldStyle(.themed)
                         .textInputAutocapitalization(.never)
@@ -903,20 +890,19 @@ private struct FinishStep: View {
             ClientEmptyArt(kind: model.finished == nil ? .provisioning : .serverReady)
                 .frame(maxWidth: .infinity)
             if let status = model.finished {
-                StepSection(title: "This machine") {
-                    fact("Signed in", status.account.handle ?? "yes")
-                    fact("Always on", (status.alwaysOn ?? false) ? "on" : "off")
-                    fact("Reachable", (status.tunnel.online ?? false) ? "yes" : "connecting")
-                    fact("Runs as", status.runsAs?.name ?? "unknown")
-                    fact("Allowed devices", "\(status.allowedDevices)")
+                StepSection(title: L10n.text("apple.clientsetupserversteps.this_machine.1b8548de")) {
+                    fact(L10n.text("apple.clientsetupserversteps.signed_in.ca566c89"), status.account.handle ?? "yes")
+                    fact(L10n.text("apple.clientsetupserversteps.always_on.044ba8a9"), (status.alwaysOn ?? false) ? "on" : "off")
+                    fact(L10n.text("apple.clientsetupserversteps.reachable.f94b5f3d"), (status.tunnel.online ?? false) ? "yes" : "connecting")
+                    fact(L10n.text("apple.clientsetupserversteps.runs_as.dc98511e"), status.runsAs?.name ?? "unknown")
+                    fact(L10n.text("apple.clientsetupserversteps.allowed_devices.748d1f2f"), "\(status.allowedDevices)")
                 }
-                StepSection(title: "What is next") {
+                StepSection(title: L10n.text("apple.clientsetupserversteps.what_is_next.8cfb34ce")) {
                     Text(
                         status.agents.contains(where: \.installed)
-                        ? "The agent is on the machine. It still needs its own sign-in, which "
-                        + "is the next step."
-                        : "No agent is on the machine yet. The next step installs one and "
-                        + "signs it in."
+                        ? L10n.text("apple.clientsetupserversteps.the_agent_is_on_the_machine_it_still_needs.10e35681")
+                        : L10n.text("apple.clientsetupserversteps.no_agent_is_on_the_machine_yet_the_next_st.51e14f92")
+                        + L10n.text("apple.clientsetupserversteps.signs_it_in.f4f1faf5")
                     )
                     .font(ClientType.label)
                     .fixedSize(horizontal: false, vertical: true)
@@ -924,17 +910,17 @@ private struct FinishStep: View {
             }
         } footer: {
             if model.finished == nil {
-                Button("Check again", .refresh) {
+                Button(L10n.text("apple.clientsetupserversteps.check_again.fb7099ad"), .refresh) {
                     Task { await model.waitForMachine(library: library, account: account) }
                 }
                 .setupPrimaryStyle()
                 .disabled(model.working || !model.canCheckMachine)
             } else {
-                Button("Continue", .next) { path.append(.project) }
+                Button(L10n.text("apple.clientsetupserversteps.continue.31fbef16"), .next) { path.append(.project) }
                     .setupPrimaryStyle()
             }
         }
-        .navigationTitle("Finish")
+        .navigationTitle(L10n.text("apple.clientsetupserversteps.finish.a6c7a84b"))
         .task {
             guard model.finished == nil, !model.working, model.canCheckMachine else { return }
             await model.waitForMachine(library: library, account: account)

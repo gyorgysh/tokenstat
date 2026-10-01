@@ -166,21 +166,21 @@ struct ClientFolderSplit: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Port", text: $portText)
+                    TextField(L10n.text("apple.clientfoldersplit.port.72e9a59f"), text: $portText)
                         .keyboardType(.numberPad)
                     ClientRecentBrowserPorts(owner: browserOwner, portText: $portText)
                 } footer: {
-                    Text("Opens a loopback bridge to that port on \(hostName) and shows it in the in-app browser.")
+                    Text(L10n.text("apple.clientfoldersplit.opens_a_loopback_bridge_to_that_port_on_0.53f0e3cb", "\(hostName)"))
                 }
             }
-            .navigationTitle("Browse port")
+            .navigationTitle(L10n.text("apple.clientfoldersplit.browse_port.d3b57f13"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { showPort = false }
+                    Button(L10n.text("common.cancel")) { showPort = false }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Open") { Task { await openPort() } }
+                    Button(L10n.text("common.open")) { Task { await openPort() } }
                         .disabled(isOpeningPort || BrowserTarget.parsePort(portText) == nil)
                 }
             }

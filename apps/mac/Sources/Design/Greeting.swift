@@ -47,19 +47,19 @@ enum HomeGreeting {
     static func phrase(hour: Int, hasHistory: Bool, dayOfYear: Int) -> String {
         let timed: String
         switch hour {
-        case 5..<12: timed = "Good morning"
-        case 12..<17: timed = "Good afternoon"
-        case 17..<22: timed = "Good evening"
-        default: timed = "Hello"
+        case 5..<12: timed = L10n.text("apple.greeting.good_morning.90a90a48")
+        case 12..<17: timed = L10n.text("apple.greeting.good_afternoon.d325e1bb")
+        case 17..<22: timed = L10n.text("apple.greeting.good_evening.15a421e4")
+        default: timed = L10n.text("apple.greeting.hello.185f8db3")
         }
         // Fixed length so a later hasHistory flip only changes the returning
         // slots, not which index the day lands on.
         let pool = [
             timed,
-            "Hello",
-            "What's up",
-            hasHistory ? "Welcome back" : "Welcome",
-            hasHistory ? "Back at it" : timed,
+            L10n.text("apple.greeting.hello.185f8db3"),
+            L10n.text("apple.greeting.what_s_up.11ec53bc"),
+            hasHistory ? L10n.text("apple.greeting.welcome_back.66212495") : L10n.text("apple.greeting.welcome.0e2226b5"),
+            hasHistory ? L10n.text("apple.greeting.back_at_it.9ce858b7") : timed,
         ]
         return pool[abs(dayOfYear) % pool.count]
     }

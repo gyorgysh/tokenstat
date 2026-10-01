@@ -42,27 +42,27 @@ struct WorkflowsView: View {
             library
             #endif
         }
-        .navigationTitle("Workflows")
+        .navigationTitle(L10n.text("common.workflows"))
         .background(Theme.background)
         .sheet(item: $running) { graph in
             RunWorkflowSheet(model: model, graph: graph, folders: folders)
         }
         .confirmationDialog(
-            "Delete \(confirmingDelete?.name ?? "this workflow")?",
+            L10n.text("apple.workflowsview.delete_0.dc6c5ae4", "\(confirmingDelete?.name ?? L10n.text("apple.workflowsview.this_workflow.a7b5fc94"))"),
             isPresented: Binding(
                 get: { confirmingDelete != nil },
                 set: { if !$0 { confirmingDelete = nil } }
             )
         ) {
-            Button("Delete", role: .destructive) {
+            Button(L10n.text("common.delete"), role: .destructive) {
                 if let graph = confirmingDelete {
                     Task { await model.remove(graph) }
                 }
                 confirmingDelete = nil
             }
-            Button("Cancel", role: .cancel) { confirmingDelete = nil }
+            Button(L10n.text("common.cancel"), role: .cancel) { confirmingDelete = nil }
         } message: {
-            Text("The graph is removed. Past runs stay on this Mac.")
+            Text(L10n.text("apple.workflowsview.the_graph_is_removed_past_runs_stay_on_thi.a2583b27"))
         }
         .overlay(alignment: .bottomTrailing) {
             TransientToast(message: $model.noticeMessage, severity: .success)
@@ -93,16 +93,16 @@ struct WorkflowsView: View {
             // Automations and Tasks have. The intro and the count tiles that
             // used to stand here said what the tab already says.
             HStack(spacing: Theme.Space.s) {
-                SearchField(text: $search, prompt: "Search workflows")
+                SearchField(text: $search, prompt: L10n.text("apple.workflowsview.search_workflows.e827cf3e"))
                     .frame(maxWidth: 260)
                     .focused($searchFocused)
                 Spacer(minLength: Theme.Space.s)
-                Button("Blank draft", .create) {
+                Button(L10n.text("apple.workflowsview.blank_draft.0e175b42"), .create) {
                     model.startBlank(scope: defaultScope, workspaceID: defaultWorkspaceID)
                 }
                 .buttonStyle(AccentButtonStyle(small: true))
                 .disabled(!model.canStartNewDraft)
-                .help("Arrange the steps yourself on a canvas")
+                .help(L10n.text("apple.workflowsview.arrange_the_steps_yourself_on_a_canvas.e0752ec8"))
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.vertical, Theme.Space.s)
@@ -169,7 +169,7 @@ struct WorkflowsView: View {
         guard let folder = folders.first(where: { $0.id == id }) else { return nil }
         return ScopeChip(
             label: folder.isRemote
-                ? "\(folder.machineLabel ?? "Remote") / \(folder.name)"
+                ? "\(folder.machineLabel ?? L10n.text("apple.workflowsview.remote.ffa98e02")) / \(folder.name)"
                 : folder.name,
             symbol: folder.isRemote ? "network" : "folder.fill"
         )
@@ -192,8 +192,8 @@ struct WorkflowsView: View {
 
     private var builderCard: some View {
         Card(
-            title: "Design a workflow",
-            subtitle: "Describe the outcome. Review the generated steps before saving or running.",
+            title: L10n.text("apple.workflowsview.design_a_workflow.0988799d"),
+            subtitle: L10n.text("apple.workflowsview.describe_the_outcome_review_the_generated.9033b885"),
             mark: "mark_workflow"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -215,7 +215,7 @@ struct WorkflowsView: View {
                     .font(Theme.font(9, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .rotationEffect(.degrees(examplesExpanded ? 0 : -90))
-                Text("Or start from an example")
+                Text(L10n.text("apple.workflowsview.or_start_from_an_example.a144c61b"))
                     .font(Theme.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
@@ -223,7 +223,7 @@ struct WorkflowsView: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(examplesExpanded ? "Hide the examples" : "Show the examples")
+        .accessibilityLabel(examplesExpanded ? L10n.text("apple.workflowsview.hide_the_examples.80398b38") : L10n.text("apple.workflowsview.show_the_examples.4a2afda5"))
         if examplesExpanded {
             WorkflowRecipeChips(recipes: designRecipes) { designPrompt = $0.prompt }
         }
@@ -236,19 +236,14 @@ struct WorkflowsView: View {
     /// It says what you get before you press it.
     private var manualCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Build it yourself")
+            Text(L10n.text("apple.workflowsview.build_it_yourself.72369f88"))
                 .font(Theme.callout.weight(.medium))
-            Text("""
-            Opens the blank canvas with a Start card. Add a step under any card, \
-            drag from the dot on the bottom to join two of them, and pick who runs \
-            each step in the inspector. Green joins run on success, red on error. \
-            Nothing runs until you press Run.
-            """)
+            Text(L10n.text("apple.workflowsview.opens_the_blank_canvas_with_a_start_card_a.a7edec56"))
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: Theme.Space.s) {
-                Button("Start blank", .create) {
+                Button(L10n.text("apple.workflowsview.start_blank.456d31e9"), .create) {
                     model.startBlank(scope: defaultScope, workspaceID: defaultWorkspaceID)
                 }
                 .buttonStyle(SecondaryButtonStyle())
@@ -267,8 +262,8 @@ struct WorkflowsView: View {
             let layout = width >= 720 ? AnyLayout(HStackLayout(alignment: .top, spacing: Theme.Space.l)) : AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Space.m))
             layout {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Text("What should happen?").font(Theme.callout.weight(.medium))
-                TextField("Rewrite the prompt, plan it, build it, then review", text: $designPrompt, axis: .vertical)
+                Text(L10n.text("apple.workflowsview.what_should_happen.cfb17824")).font(Theme.callout.weight(.medium))
+                TextField(L10n.text("apple.workflowsview.rewrite_the_prompt_plan_it_build_it_then_r.29987a60"), text: $designPrompt, axis: .vertical)
                     .textFieldStyle(.themedMultiline)
                     .lineLimit(6...10)
                     .focused($designFocused)
@@ -276,11 +271,11 @@ struct WorkflowsView: View {
                 if !designRecipes.isEmpty {
                     examplesSection
                 }
-                Text("Prefer to build visually? Start a blank draft from the header.")
+                Text(L10n.text("apple.workflowsview.prefer_to_build_visually_start_a_blank_dra.a4b0aefd"))
                     .font(Theme.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                Text("Draft configuration").font(Theme.callout.weight(.medium))
+                Text(L10n.text("apple.workflowsview.draft_configuration.95c3b7b9")).font(Theme.callout.weight(.medium))
                 WorkflowDesignPickers(
                     agents: WorkflowRecipes.designAgents(from: model.pickerBackends(keeping: designBackend)),
                     folders: folders,
@@ -292,7 +287,7 @@ struct WorkflowsView: View {
                 HStack(spacing: Theme.Space.s) {
                     if model.isDesigning { ProgressView().controlSize(.small) }
                     Spacer()
-                    Button(model.isDesigning ? "Designing…" : "Generate draft", .create) {
+                    Button(model.isDesigning ? L10n.text("apple.workflowsview.designing.f3b6dd36") : L10n.text("apple.workflowsview.generate_draft.12696858"), .create) {
                         Task {
                             await model.design(
                                 prompt: designPrompt,
@@ -323,8 +318,8 @@ struct WorkflowsView: View {
 
     private func draftCard(_ draft: WorkflowGraph) -> some View {
         Card(
-            title: draft.name.isEmpty ? "Draft" : draft.name,
-            subtitle: "Unsaved. Review the outline, then save. It will not run until you press Run.",
+            title: draft.name.isEmpty ? L10n.text("apple.workflowsview.draft.ebf12ef4") : draft.name,
+            subtitle: L10n.text("apple.workflowsview.unsaved_review_the_outline_then_save_it_wi.c57fe6b3"),
             mark: "mark_workflow"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -334,12 +329,12 @@ struct WorkflowsView: View {
                 WorkflowStepStrip(nodes: draft.nodes, edges: draft.edges)
                 WorkflowOutline(nodes: draft.nodes, edges: draft.edges)
                 HStack(spacing: Theme.Space.s) {
-                    Button("Save", .save) { Task { await model.saveDraft() } }
+                    Button(L10n.text("common.save"), .save) { Task { await model.saveDraft() } }
                         .buttonStyle(AccentButtonStyle())
-                    Button("Discard", .dismiss) { model.discardDraft() }
+                    Button(L10n.text("apple.workflowsview.discard.eb1a70e3"), .dismiss) { model.discardDraft() }
                         .buttonStyle(SecondaryButtonStyle())
                     Spacer()
-                    Text("\(draft.nodes.count) nodes")
+                    Text(L10n.text("apple.workflowsview.0_nodes.42495a92", "\(draft.nodes.count)"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -349,14 +344,11 @@ struct WorkflowsView: View {
     }
 
     private var nothingYet: some View {
-        Card(title: "Workflows", subtitle: nil, mark: "mark_workflow") {
+        Card(title: L10n.text("common.workflows"), subtitle: nil, mark: "mark_workflow") {
             EmptyState(
                 symbol: "point.3.connected.trianglepath.dotted",
-                title: "No workflows yet",
-                message: """
-                Your saved workflows will appear here. Describe an outcome above \
-                or start a blank draft to arrange the steps on a canvas.
-                """
+                title: L10n.text("apple.workflowsview.no_workflows_yet.d3e72e00"),
+                message: L10n.text("apple.workflowsview.your_saved_workflows_will_appear_here_desc.6ef86f49")
             ) {
                 EmptyView()
             }
@@ -378,7 +370,7 @@ struct WorkflowsView: View {
     private var librarySections: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             section(
-                title: "Global",
+                title: L10n.text("apple.workflowsview.global.a258b30f"),
                 graphs: filtered.filter { $0.scope == .global }
             )
             ForEach(folders) { folder in
@@ -428,8 +420,8 @@ struct WorkflowsView: View {
 
     private var recentRuns: some View {
         Card(
-            title: "Recent runs",
-            subtitle: "Select a run to read a step in the inspector.",
+            title: L10n.text("apple.workflowsview.recent_runs.237112b8"),
+            subtitle: L10n.text("apple.workflowsview.select_a_run_to_read_a_step_in_the_inspect.738e1797"),
             mark: "mark_workflow"
         ) {
             VStack(spacing: 0) {
@@ -539,17 +531,17 @@ private struct WorkflowRow: View {
             .buttonStyle(.plain)
             if let last, last.isLive {
                 if last.isWaiting {
-                    Button("Continue", .next) { onViewRun(last) }
+                    Button(L10n.text("apple.workflowsview.continue.31fbef16"), .next) { onViewRun(last) }
                         .buttonStyle(AccentButtonStyle(small: true))
                 } else {
-                    Button("Open", .preview) { onViewRun(last) }
+                    Button(L10n.text("common.open"), .preview) { onViewRun(last) }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                 }
             } else {
-                Button("Run", .run) { onRun() }
+                Button(L10n.text("common.run"), .run) { onRun() }
                     .buttonStyle(AccentButtonStyle(small: true))
             }
-            Button("Delete", .delete, role: .destructive) { onDelete() }
+            Button(L10n.text("common.delete"), .delete, role: .destructive) { onDelete() }
                 .buttonStyle(SecondaryButtonStyle(small: true))
         }
         .padding(.vertical, Theme.Space.s)
@@ -648,7 +640,7 @@ struct WorkflowOutline: View {
     private func incomingHint(for node: WorkflowNode) -> some View {
         let incoming = edges.filter { $0.to == node.id }
         if incoming.count > 1 {
-            Text("joins \(incoming.count) steps")
+            Text(L10n.text("apple.workflowsview.joins_0_steps.fe010394", "\(incoming.count)"))
                 .font(Theme.caption2)
                 .foregroundStyle(.tertiary)
                 .padding(.leading, 28)
@@ -669,8 +661,8 @@ struct RunWorkflowSheet: View {
 
     var body: some View {
         ThemedSheet(
-            title: "Run \(graph.name)",
-            subtitle: "The starting prompt fills {{input}} in every node.",
+            title: L10n.text("apple.workflowsview.run_0.815f1347", "\(graph.name)"),
+            subtitle: L10n.text("apple.workflowsview.the_starting_prompt_fills_input_in_every_n.1cfd180d"),
             icon: .run,
             onClose: { dismiss() }
         ) {
@@ -678,31 +670,31 @@ struct RunWorkflowSheet: View {
                 if let error = model.errorMessage {
                     ErrorBanner(message: error) { Task { await model.load() } }
                 }
-                TextField("Starting prompt", text: $input, axis: .vertical)
+                TextField(L10n.text("apple.workflowsview.starting_prompt.407bec2f"), text: $input, axis: .vertical)
                     .textFieldStyle(.themed)
                     .lineLimit(3...8)
                 if folders.isEmpty {
-                    Text("Add a project first. Agents run in a folder.")
+                    Text(L10n.text("apple.workflowsview.add_a_project_first_agents_run_in_a_folder.21857ea2"))
                         .font(Theme.caption)
                         .foregroundStyle(Theme.controlGlyph)
                 } else {
                     AppMenuPicker(
-                        title: "Project",
-                        options: [(value: "", label: "Choose a project")]
+                        title: L10n.text("apple.workflowsview.project.98595978"),
+                        options: [(value: "", label: L10n.text("apple.workflowsview.choose_a_project.8ba607b1"))]
                             + folders.map { (value: $0.id, label: $0.name) },
                         selection: $workspaceID
                     )
-                    Text("Agents and commands run in this workspace.")
+                    Text(L10n.text("apple.workflowsview.agents_and_commands_run_in_this_workspace.0ab3feab"))
                         .font(Theme.caption)
                         .foregroundStyle(Theme.controlGlyph)
                 }
             }
         } actions: {
-            Button("Cancel", .dismiss) { dismiss() }
+            Button(L10n.text("common.cancel"), .dismiss) { dismiss() }
                 .buttonStyle(SecondaryButtonStyle())
                 .keyboardShortcut(.cancelAction)
             Spacer()
-            Button(working ? "Starting" : "Run", .run) {
+            Button(working ? L10n.text("apple.workflowsview.starting.aeed4d26") : L10n.text("common.run"), .run) {
                 working = true
                 Task {
                     await model.run(

@@ -312,7 +312,7 @@ final class AutomationsModel {
             existing.budgetSeconds = budget
             existing.enabled = true
             await update(existing, announce: false)
-            showNotice("Updated Auto commit in this folder.")
+            showNotice(L10n.text("apple.automationsmodel.updated_auto_commit_in_this_folder.90b44ff5"))
             selectJob(existing.id)
             return
         }
@@ -325,7 +325,7 @@ final class AutomationsModel {
         if Self.isAutoCommitName(trimmed) {
             do {
                 _ = try await Bridge.createAutomation(job)
-                showNotice("\(trimmed) will run \(scheduleSummary(schedule)).")
+                showNotice(L10n.text("apple.automationsmodel.0_will_run_1.0536f940", "\(trimmed)", "\(scheduleSummary(schedule))"))
                 errorMessage = nil
                 await load()
             } catch {
@@ -334,7 +334,7 @@ final class AutomationsModel {
             return
         }
         if let pending = pendingCreate, !Self.sameCreateRequest(pending.job, job) {
-            errorMessage = "A new job was sent and is not confirmed yet. Check creation before making another."
+            errorMessage = L10n.text("apple.automationsmodel.a_new_job_was_sent_and_is_not_confirmed_ye.97b65031")
             return
         }
         do {
@@ -365,14 +365,14 @@ final class AutomationsModel {
         } else {
             let trimmed = queueBudgetMinutes.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let minutes = UInt64(trimmed), minutes > 0, minutes <= UInt64.max / 60 else {
-                errorMessage = "Time limit must be a whole number of minutes."
+                errorMessage = L10n.text("apple.automationsmodel.time_limit_must_be_a_whole_number_of_minut.490575e6")
                 return
             }
             budget = minutes * 60
         }
         let maxTrimmed = queueMaxConcurrent.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let max = UInt32(maxTrimmed) else {
-            errorMessage = "Max concurrent jobs must be a whole number."
+            errorMessage = L10n.text("apple.automationsmodel.max_concurrent_jobs_must_be_a_whole_number.5458c85d")
             return
         }
         do {
@@ -380,7 +380,7 @@ final class AutomationsModel {
                 defaultBudgetSeconds: budget,
                 maxConcurrent: max
             ))
-            showNotice("Scheduler saved.")
+            showNotice(L10n.text("apple.automationsmodel.scheduler_saved.4e10688a"))
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -414,7 +414,7 @@ final class AutomationsModel {
         do {
             _ = try await Bridge.editAutomation(job, expectedRevision: job.revision)
             if announce {
-                showNotice("Saved \(job.name).")
+                showNotice(L10n.text("apple.automationsmodel.saved_0.d851298f", "\(job.name)"))
             }
             errorMessage = nil
             await load()
@@ -434,7 +434,7 @@ final class AutomationsModel {
                 await confirmCreate(outcome, name: pending.job.name, schedule: pending.job.schedule)
             } else {
                 errorMessage = nil
-                showNotice("The computer has no creation receipt yet. Retry creation uses the same request.")
+                showNotice(L10n.text("apple.automationsmodel.the_computer_has_no_creation_receipt_yet_r.0bbb20f6"))
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -485,7 +485,7 @@ final class AutomationsModel {
                 await confirmRun(outcome, job: job)
             } else {
                 errorMessage = nil
-                showNotice("The computer has no run receipt yet. Retry run uses the same request.")
+                showNotice(L10n.text("apple.automationsmodel.the_computer_has_no_run_receipt_yet_retry.bb1e0fd1"))
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -497,7 +497,7 @@ final class AutomationsModel {
     func stop(_ run: RunRecord) async {
         do {
             try await Bridge.automationKill(runID: run.id)
-            showNotice("Stopped \(run.name).")
+            showNotice(L10n.text("apple.automationsmodel.stopped_0.6cebd065", "\(run.name)"))
             errorMessage = nil
             await load()
         } catch {
@@ -561,7 +561,7 @@ final class AutomationsModel {
         schedule: AutomationSchedule
     ) async {
         pendingCreate = nil
-        showNotice("\(name) will run \(scheduleSummary(schedule)).")
+        showNotice(L10n.text("apple.automationsmodel.0_will_run_1.0536f940", "\(name)", "\(scheduleSummary(schedule))"))
         errorMessage = nil
         await load()
         if let created = outcome.job {
@@ -573,7 +573,7 @@ final class AutomationsModel {
 
     private func confirmRun(_ outcome: AutomationRunOutcome, job: Automation) async {
         pendingLaunches[job.id] = nil
-        showNotice("Started \(job.name).")
+        showNotice(L10n.text("apple.automationsmodel.started_0.8f95ec71", "\(job.name)"))
         errorMessage = nil
         await load()
         if let run = outcome.run, runs.contains(where: { $0.id == run.id }) {

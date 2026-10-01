@@ -16,6 +16,15 @@ namespace Tokenstat.Design;
 
 internal static class Chrome
 {
+    public static ComboBox BudgetUnits(string unit)
+    {
+        var choices = new ComboBox { MinWidth = 110, SelectedValuePath = "Tag" };
+        choices.Items.Add(new ComboBoxItem { Content = L10n.Text("windows.chrome.minutes"), Tag = "minutes" });
+        choices.Items.Add(new ComboBoxItem { Content = L10n.Text("windows.chrome.seconds"), Tag = "seconds" });
+        choices.SelectedValue = unit;
+        return choices;
+    }
+
     public static Border Card(string title, UIElement body, string? subtitle = null, FrameworkElement? accessory = null, FrameworkElement? mark = null)
     {
         var header = new StackPanel { Spacing = 2 };
@@ -325,8 +334,8 @@ internal static class Chrome
             HorizontalAlignment = HorizontalAlignment.Left,
             Child = row,
         };
-        ToolTipService.SetToolTip(chip, "Showing " + label);
-        AutomationProperties.SetName(chip, "Showing " + label);
+        ToolTipService.SetToolTip(chip, L10n.Text("windows.chrome.showing_0.ee1f5b6a", $"{label}"));
+        AutomationProperties.SetName(chip, L10n.Text("windows.chrome.showing_0.ee1f5b6a", $"{label}"));
         return chip;
     }
 
@@ -594,8 +603,8 @@ internal static class Chrome
             VerticalAlignment = VerticalAlignment.Center,
         };
         dismiss.Click += (_, _) => Dismiss();
-        ToolTipService.SetToolTip(dismiss, "Dismiss notification");
-        AutomationProperties.SetName(dismiss, "Dismiss notification");
+        ToolTipService.SetToolTip(dismiss, L10n.Text("windows.chrome.dismiss_notification.b7bb3f34"));
+        AutomationProperties.SetName(dismiss, L10n.Text("windows.chrome.dismiss_notification.b7bb3f34"));
         row.Children.Add(dismiss);
         toast = new Border
         {
@@ -634,10 +643,10 @@ internal static class Chrome
     /// </summary>
     public static UIElement SaveStatus(FieldSaveState state) => state switch
     {
-        FieldSaveState.Dirty => SaveText("Unsaved", Theme.Warning),
+        FieldSaveState.Dirty => SaveText(L10n.Text("windows.chrome.unsaved.6250d572"), Theme.Warning),
         FieldSaveState.Saving => SaveWorking(),
         FieldSaveState.Saved => SaveDone(),
-        FieldSaveState.Failed => SaveText("Not saved", Theme.Danger),
+        FieldSaveState.Failed => SaveText(L10n.Text("windows.chrome.not_saved.22b3467c"), Theme.Danger),
         _ => new TextBlock { Visibility = Visibility.Collapsed },
     };
 
@@ -660,7 +669,7 @@ internal static class Chrome
             VerticalAlignment = VerticalAlignment.Center,
         };
         row.Children.Add(new ProgressRing { Width = 12, Height = 12, IsActive = true });
-        var label = SaveText("Saving", Theme.StateIdle);
+        var label = SaveText(L10n.Text("windows.chrome.saving.096b7362"), Theme.StateIdle);
         row.Children.Add(label);
         return row;
     }
@@ -679,7 +688,7 @@ internal static class Chrome
             Foreground = Theme.Brush(static () => Theme.Success),
             VerticalAlignment = VerticalAlignment.Center,
         });
-        row.Children.Add(SaveText("Saved", Theme.Success));
+        row.Children.Add(SaveText(L10n.Text("windows.chrome.saved.b5c120b3"), Theme.Success));
         return row;
     }
 
@@ -712,7 +721,7 @@ internal static class Chrome
                 selected,
                 () => onPick(minutes.ToString(), false)));
         }
-        row.Children.Add(ChoiceChip("No limit", noLimit, () => onPick(minutesText, true)));
+        row.Children.Add(ChoiceChip(L10n.Text("windows.chrome.no_limit.f7fcff0d"), noLimit, () => onPick(minutesText, true)));
         return row;
     }
 
@@ -744,7 +753,7 @@ internal static class Chrome
                 selected,
                 () => onPick(count.ToString())));
         }
-        row.Children.Add(ChoiceChip("No cap", uncapped, () => onPick("0")));
+        row.Children.Add(ChoiceChip(L10n.Text("windows.chrome.no_cap.59db2115"), uncapped, () => onPick("0")));
         return row;
     }
 
@@ -872,7 +881,7 @@ internal static class Chrome
         {
             row.Children.Add(new TextBlock
             {
-                Text = "No cap",
+                Text = L10n.Text("windows.chrome.no_cap.59db2115"),
                 FontFamily = Fonts.Interface,
                 FontSize = Fonts.Caption,
                 Opacity = 0.7,
@@ -906,7 +915,7 @@ internal static class Chrome
         }
         AutomationProperties.SetName(
             row,
-            uncapped ? "No limit on jobs at once" : $"{filled} of {total} slots busy");
+            uncapped ? L10n.Text("windows.chrome.no_limit_on_jobs_at_once.76b43c57") : L10n.Text("windows.chrome.0_of_1_slots_busy.2b6c328d", $"{filled}", $"{total}"));
         return row;
     }
 

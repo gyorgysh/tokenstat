@@ -58,28 +58,28 @@ struct WorkflowTouchCanvas: View {
     private var toolbar: some View {
         HStack(alignment: .center, spacing: Theme.Space.s) {
             VStack(alignment: .leading, spacing: 1) {
-                Text("Canvas")
+                Text(L10n.text("apple.workflowtouchcanvas.canvas.3824a9f4"))
                     .font(Theme.caption.weight(.semibold))
                     .foregroundStyle(Theme.controlGlyph)
-                Text("\(nodes.count) steps · \(edges.count) connections")
+                Text(L10n.text("apple.workflowtouchcanvas.0_steps_1_connections.9fa532d7", "\(nodes.count)", "\(edges.count)"))
                     .font(Theme.caption)
                     .foregroundStyle(Theme.controlGlyph)
             }
             Spacer(minLength: 0)
-            Button("Undo", .restore) { undo() }
+            Button(L10n.text("apple.workflowtouchcanvas.undo.a8283ade"), .restore) { undo() }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .disabled(!session.canUndoGraph)
-            Button("Redo", .next) { redo() }
+            Button(L10n.text("apple.workflowtouchcanvas.redo.74273989"), .next) { redo() }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .disabled(!session.canRedoGraph)
-            Button("Fit", .layout) { fit() }
+            Button(L10n.text("apple.workflowtouchcanvas.fit.9f872ed4"), .layout) { fit() }
                 .buttonStyle(SecondaryButtonStyle(small: true))
             Text("\(Int((zoom * 100).rounded()))%")
                 .font(Theme.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 40, alignment: .trailing)
-                .accessibilityLabel("Zoom \(Int((zoom * 100).rounded())) percent")
-            Button("Add step", .create) { showingAdd = true }
+                .accessibilityLabel(L10n.text("apple.workflowtouchcanvas.zoom_0_percent.d4906524", "\(Int((zoom * 100).rounded()))"))
+            Button(L10n.text("apple.workflowtouchcanvas.add_step.839bd5e0"), .create) { showingAdd = true }
                 .buttonStyle(AccentButtonStyle(small: true))
                 .disabled(session.additionIssue(kind: .gate) != nil)
         }
@@ -89,12 +89,12 @@ struct WorkflowTouchCanvas: View {
         let source = nodes.first { $0.id == armed.from }
         let role = WorkflowGraphRules.outgoingRole(kind: source?.kind ?? .agent, when: armed.when)
         return HStack(alignment: .center, spacing: Theme.Space.s) {
-            Text("Choose the next step for \(role). Tap a card or its top dot.")
+            Text(L10n.text("apple.workflowtouchcanvas.choose_the_next_step_for_0_tap_a_card_or_i.4c0fe0bf", "\(role)"))
                 .font(Theme.caption.weight(.medium))
                 .foregroundStyle(Theme.accent)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
-            Button("Cancel", .dismiss) { self.armed = nil }
+            Button(L10n.text("common.cancel"), .dismiss) { self.armed = nil }
                 .buttonStyle(SecondaryButtonStyle(small: true))
         }
         .padding(.horizontal, Theme.Space.s)
@@ -134,7 +134,7 @@ struct WorkflowTouchCanvas: View {
         .overlay(alignment: .topLeading) { emptyHint }
         .coordinateSpace(name: viewport)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Workflow canvas. \(nodes.count) steps.")
+        .accessibilityLabel(L10n.text("apple.workflowtouchcanvas.workflow_canvas_0_steps.1d93edf2", "\(nodes.count)"))
     }
 
     private var contentStack: some View {
@@ -181,7 +181,7 @@ struct WorkflowTouchCanvas: View {
         let selected = session.selectedStepID == node.id
         return WorkflowTouchNodeCard(node: node, selected: selected)
             .overlay(alignment: .top) {
-                TouchPortDot(tint: Theme.accent, label: "Input of \(node.displayTitle)")
+                TouchPortDot(tint: Theme.accent, label: L10n.text("apple.workflowtouchcanvas.input_of_0.d65afa9f", "\(node.displayTitle)"))
                     .offset(y: -7)
                     .onTapGesture { completeArmed(to: node.id) }
             }
@@ -221,9 +221,9 @@ struct WorkflowTouchCanvas: View {
     private var emptyHint: some View {
         if nodes.count <= 1 || edges.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
-                Text("The run goes top to bottom")
+                Text(L10n.text("apple.workflowtouchcanvas.the_run_goes_top_to_bottom.a11e63c8"))
                     .font(Theme.callout.weight(.medium))
-                Text("Drag a card to move it. Drag a bottom dot to the next card, or tap a dot then a card. Fit is in the toolbar.")
+                Text(L10n.text("apple.workflowtouchcanvas.drag_a_card_to_move_it_drag_a_bottom_dot_t.04aeca17"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -238,14 +238,14 @@ struct WorkflowTouchCanvas: View {
     }
 
     private var hint: some View {
-        Text("Canvas edits the same steps as the list. Selection opens in the inspector.")
+        Text(L10n.text("apple.workflowtouchcanvas.canvas_edits_the_same_steps_as_the_list_se.b7c18a38"))
             .font(Theme.caption)
             .foregroundStyle(Theme.controlGlyph)
     }
 
     private func touchPortLabel(node: WorkflowNode, when: WorkflowEdgeWhen) -> String {
         let role = WorkflowGraphRules.outgoingRole(kind: node.kind, when: when)
-        return "\(role) of \(node.displayTitle)"
+        return L10n.text("apple.workflowtouchcanvas.0_of_1.9fea8201", "\(role)", "\(node.displayTitle)")
     }
 
     private func selectNode(_ id: String) {
@@ -586,7 +586,7 @@ struct WorkflowConnectionInspector: View {
             let source = session.fields.nodes.first { $0.id == edge.from }
             let target = session.fields.nodes.first { $0.id == edge.to }
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                Text("Connection")
+                Text(L10n.text("apple.workflowtouchcanvas.connection.639a40e8"))
                     .font(Theme.caption.weight(.semibold))
                     .foregroundStyle(Theme.controlGlyph)
                 Text("\(source?.displayTitle ?? edge.from) → \(target?.displayTitle ?? edge.to)")
@@ -603,13 +603,13 @@ struct WorkflowConnectionInspector: View {
                     .foregroundStyle(Theme.controlGlyph)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: Theme.Space.s) {
-                    Button("Remove connection", .delete, role: .destructive) {
+                    Button(L10n.text("apple.workflowtouchcanvas.remove_connection.e9e9e26c"), .delete, role: .destructive) {
                         session.removeConnection(id: edge.id)
                         stepPath = []
                     }
                     .buttonStyle(SecondaryButtonStyle(small: true))
                     Spacer(minLength: 0)
-                    Button("Done", .done) {
+                    Button(L10n.text("common.done"), .done) {
                         session.selectConnection(nil)
                         stepPath = []
                     }
@@ -618,7 +618,7 @@ struct WorkflowConnectionInspector: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            Text("This connection is no longer in the graph.")
+            Text(L10n.text("apple.workflowtouchcanvas.this_connection_is_no_longer_in_the_graph.b4b00b24"))
                 .font(Theme.callout)
                 .foregroundStyle(Theme.controlGlyph)
         }
@@ -641,7 +641,7 @@ private struct TouchAddSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ThemedSheet(title: "Add a step", subtitle: "Then connects from the selected step.", icon: .create, onClose: { dismiss() }) {
+        ThemedSheet(title: L10n.text("apple.workflowtouchcanvas.add_a_step.e45a4474"), subtitle: L10n.text("apple.workflowtouchcanvas.then_connects_from_the_selected_step.e2188a9a"), icon: .create, onClose: { dismiss() }) {
             LazyVGrid(
                 columns: [GridItem(.flexible(), spacing: Theme.Space.s), GridItem(.flexible(), spacing: Theme.Space.s)],
                 spacing: Theme.Space.s
@@ -675,7 +675,7 @@ private struct TouchAddSheet: View {
             }
             .padding(.top, Theme.Space.s)
         } actions: {
-            Button("Done", .done) {
+            Button(L10n.text("common.done"), .done) {
                 onDone()
                 dismiss()
             }
@@ -702,14 +702,14 @@ private struct TouchAddSheet: View {
 
     private var choices: [(kind: WorkflowNodeKind, title: String, subtitle: String)] {
         [
-            (.input, "Start", "Starting prompt"),
-            (.agent, "Agent", "Model and prompt"),
-            (.automation, "Automation", "Run a saved job"),
-            (.http, "HTTP", "Host-owned request"),
-            (.command, "Command", "Shell in the folder"),
-            (.gate, "Gate", "Wait for you"),
-            (.condition, "If", "Then or else"),
-            (.loop, "Loop", "Repeat a body"),
+            (.input, L10n.text("common.start"), L10n.text("apple.workflowtouchcanvas.starting_prompt.407bec2f")),
+            (.agent, L10n.text("apple.workflowtouchcanvas.agent.11b39c93"), L10n.text("apple.workflowtouchcanvas.model_and_prompt.4250fe37")),
+            (.automation, L10n.text("apple.workflowtouchcanvas.automation.d909750b"), L10n.text("apple.workflowtouchcanvas.run_a_saved_job.ce446b1f")),
+            (.http, "HTTP", L10n.text("apple.workflowtouchcanvas.host_owned_request.f7355983")),
+            (.command, L10n.text("apple.workflowtouchcanvas.command.71316697"), L10n.text("apple.workflowtouchcanvas.shell_in_the_folder.b6875024")),
+            (.gate, L10n.text("apple.workflowtouchcanvas.gate.fa77a525"), L10n.text("apple.workflowtouchcanvas.wait_for_you.d955a62d")),
+            (.condition, L10n.text("apple.workflowtouchcanvas.if.1e3abf61"), L10n.text("apple.workflowtouchcanvas.then_or_else.2318a255")),
+            (.loop, L10n.text("apple.workflowtouchcanvas.loop.f2f6a018"), L10n.text("apple.workflowtouchcanvas.repeat_a_body.a05cb63b")),
         ]
     }
 }

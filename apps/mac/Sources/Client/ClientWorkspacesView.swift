@@ -107,11 +107,9 @@ struct ClientWorkspacesView: View {
                     if !remoteAllowed, account.signedIn {
                         ClientEmptyState(
                             kind: .needsAccount,
-                            title: "Remote is on Patron",
-                            message: "This device already shares the account and sees the usage "
-                                + "from every device on it. Opening folders and terminals on "
-                                + "the computer is a paid feature.",
-                            actionTitle: "See plans",
+                            title: L10n.text("apple.clientworkspacesview.remote_is_on_patron.d25dea13"),
+                            message: L10n.text("apple.clientworkspacesview.this_device_already_shares_the_account_and.b2e29485"),
+                            actionTitle: L10n.text("apple.clientworkspacesview.see_plans.d9898933"),
                             actionIcon: .plans,
                             action: {
                                 store.showPaywall = true
@@ -124,16 +122,15 @@ struct ClientWorkspacesView: View {
                         // sentences of instructions about another computer.
                         ClientEmptyState(
                             kind: .nothingYet,
-                            title: "No machine yet",
-                            message: "tokenstat runs agents on a machine that stays on. Connect "
-                                + "a computer you own, or give it a server and it sets one up.",
-                            actionTitle: "Set up a machine",
+                            title: L10n.text("apple.clientworkspacesview.no_machine_yet.3ea83dc9"),
+                            message: L10n.text("apple.clientworkspacesview.tokenstat_runs_agents_on_a_machine_that_st.93fe9732"),
+                            actionTitle: L10n.text("apple.clientworkspacesview.set_up_a_machine.43e10e13"),
                             actionIcon: .connect,
                             action: { showSetup = true },
                             art: .connect
                         )
                     } else {
-                        ClientSectionTitle(title: "Computers on your account", mark: "mark_host")
+                        ClientSectionTitle(title: L10n.text("apple.clientworkspacesview.computers_on_your_account.232226fe"), mark: "mark_host")
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 2)
 
@@ -178,7 +175,7 @@ struct ClientWorkspacesView: View {
                     ClientFolderChooserSheet(
                         hostName: host.name,
                         folders: model.folders,
-                        title: section == .chat ? "New chat in…" : "New session in…"
+                        title: section == .chat ? L10n.text("apple.clientworkspacesview.new_chat_in.510ac43f") : L10n.text("apple.clientworkspacesview.new_session_in.30d4568b")
                     ) { folder in
                         let raw = ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
                         navigation.open(folderID: "remote:\(peer):\(raw)", section: section)
@@ -197,7 +194,7 @@ struct ClientWorkspacesView: View {
             .fullScreenCover(isPresented: $showSetup) {
                 ClientSetupWizard()
             }
-            .navigationTitle("Projects")
+            .navigationTitle(L10n.text("common.projects"))
             .navigationBarTitleDisplayMode(.inline)
             .refreshable {
                 await ClientRefresh.pull("workspaces") {
@@ -262,24 +259,24 @@ struct ClientWorkspacesView: View {
                 )
             }
             .confirmationDialog(
-                "Close this session?",
+                L10n.text("apple.clientworkspacesview.close_this_session.2b66ce2d"),
                 isPresented: Binding(
                     get: { pendingClose != nil },
                     set: { if !$0 { pendingClose = nil } }
                 ),
                 titleVisibility: .visible
             ) {
-                Button("Close", role: .destructive) {
+                Button(L10n.text("common.close"), role: .destructive) {
                     if let session = pendingClose {
                         Task { await model.closeSession(session) }
                     }
                     pendingClose = nil
                 }
-                Button("Keep it", role: .cancel) { pendingClose = nil }
+                Button(L10n.text("apple.clientworkspacesview.keep_it.fdce5da2"), role: .cancel) { pendingClose = nil }
             } message: {
                 Text(model.hosts.first { $0.peerKey == model.connectedKey }.map {
-                    "Stops the process on \($0.name)."
-                } ?? "Stops the process on the computer.")
+                    L10n.text("apple.clientworkspacesview.stops_the_process_on_0.7aa0b494", "\($0.name)")
+                } ?? L10n.text("apple.clientworkspacesview.stops_the_process_on_the_computer.c5651cd1"))
             }
     }
 
@@ -344,7 +341,7 @@ struct ClientWorkspacesView: View {
                 scope: scope,
                 peer: peer,
                 workspaceID: chat.workspaceID,
-                folderName: folder?.name ?? "Project",
+                folderName: folder?.name ?? L10n.text("apple.clientworkspacesview.project.98595978"),
                 hostName: hostName,
                 chatID: chat.id
             )
@@ -425,7 +422,7 @@ struct ClientWorkspacesView: View {
     @ViewBuilder
     private func foldersSection(peer: String, hostName: String) -> some View {
         if !model.folders.isEmpty {
-            ClientSectionTitle(title: "Folders", mark: "mark_archive")
+            ClientSectionTitle(title: L10n.text("apple.clientworkspacesview.folders.c4d6bb20"), mark: "mark_archive")
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 2)
                 .padding(.top, Theme.Space.s)
@@ -452,11 +449,11 @@ struct ClientWorkspacesView: View {
     private var sessionsSection: some View {
         if !model.sessions.isEmpty || !model.folders.isEmpty {
             HStack(alignment: .center) {
-                Text("All sessions")
+                Text(L10n.text("apple.clientworkspacesview.all_sessions.78648d4d"))
                     .font(ClientType.sectionTitle)
                 Spacer(minLength: Theme.Space.s)
                 if !model.folders.isEmpty {
-                    Button("New terminal", .create) { starting = .sessions }
+                    Button(L10n.text("apple.clientworkspacesview.new_terminal.fe544556"), .create) { starting = .sessions }
                         .font(ClientType.caption.weight(.semibold))
                 }
             }
@@ -464,7 +461,7 @@ struct ClientWorkspacesView: View {
             .padding(.horizontal, 2)
             .padding(.top, Theme.Space.s)
             if model.sessions.isEmpty {
-                Text("Nothing running. Start one from a folder.")
+                Text(L10n.text("apple.clientworkspacesview.nothing_running_start_one_from_a_folder.f1d69e99"))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -479,7 +476,7 @@ struct ClientWorkspacesView: View {
                         }
                         .buttonStyle(.plain)
                         .modifier(ClientTerminalActions(peer: model.connectedKey ?? "", workspaceID: session.workspaceID ?? "",
-                            folderName: model.folders.first { ClientRemote.rawWorkspaceID(of: $0) == session.workspaceID || $0.id == session.workspaceID }?.name ?? "Project",
+                            folderName: model.folders.first { ClientRemote.rawWorkspaceID(of: $0) == session.workspaceID || $0.id == session.workspaceID }?.name ?? L10n.text("apple.clientworkspacesview.project.98595978"),
                             info: session, onDuplicate: { copied in model.openSession(copied); Task { await model.refresh(account: account.account) } }))
                         .listRowInsets(EdgeInsets(
                             top: 0, leading: 0, bottom: Theme.Space.s, trailing: 0
@@ -487,7 +484,7 @@ struct ClientWorkspacesView: View {
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button("Close", role: .destructive) {
+                            Button(L10n.text("common.close"), role: .destructive) {
                                 pendingClose = session
                             }
                         }
@@ -503,9 +500,9 @@ struct ClientWorkspacesView: View {
 
     private var clearWorkspaces: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            Text("Your Projects are clear")
+            Text(L10n.text("apple.clientworkspacesview.your_projects_are_clear.c7d87ca8"))
                 .font(ClientType.label.weight(.medium))
-            Text("Folders, chats and sessions are switched off. Computers stay above.")
+            Text(L10n.text("apple.clientworkspacesview.folders_chats_and_sessions_are_switched_of.2757c507"))
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -517,7 +514,7 @@ struct ClientWorkspacesView: View {
     }
 
     private var customizeWorkspacesButton: some View {
-        Button("Customize Projects", .layout) { customizing = true }
+        Button(L10n.text("apple.clientworkspacesview.customize_projects.00ab91c5"), .layout) { customizing = true }
             .buttonStyle(.plain)
             .font(ClientType.caption.weight(.medium))
             .foregroundStyle(Theme.accent)
@@ -543,12 +540,12 @@ struct ClientWorkspacesView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(name)
                         .font(ClientType.label.weight(.medium))
-                    Text("This device")
+                    Text(L10n.text("apple.clientworkspacesview.this_device.d052579c"))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("Online")
+                Text(L10n.text("common.online"))
                     .font(ClientType.caption)
                     .foregroundStyle(Theme.accent)
             }
@@ -571,17 +568,17 @@ struct ClientWorkspacesView: View {
                     .font(ClientType.label.weight(.medium))
                 Spacer()
                 if host.online == false {
-                    Text("Offline")
+                    Text(L10n.text("common.offline"))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                 } else if model.connectedKey == host.peerKey {
-                    Button("Disconnect", .disconnect) {
+                    Button(L10n.text("common.disconnect"), .disconnect) {
                         model.disconnect()
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 } else {
-                    Button(model.isBusy(with: host.peerKey) ? "Connecting…" : "Connect", .connect) {
+                    Button(model.isBusy(with: host.peerKey) ? L10n.text("apple.clientworkspacesview.connecting.72021eb7") : L10n.text("common.connect"), .connect) {
                         Task { await model.connect(host) }
                     }
                     .buttonStyle(.borderedProminent)
@@ -598,7 +595,7 @@ struct ClientWorkspacesView: View {
                     navigation.openDevice(machineID: host.machineID)
                 } label: {
                     HStack(spacing: 4) {
-                        Text("Open device")
+                        Text(L10n.text("apple.clientworkspacesview.open_device.021a82bd"))
                             .font(ClientType.caption.weight(.semibold))
                         Image(systemName: "chevron.right")
                             .font(ClientType.caption)
@@ -618,7 +615,7 @@ struct ClientWorkspacesView: View {
                 HostStatsStrip(peer: host.peerKey)
                 // Per-host, on by default, same line-height as Disconnect.
                 HStack(spacing: 6) {
-                    Text("Auto-connect")
+                    Text(L10n.text("apple.clientworkspacesview.auto_connect.45b6d201"))
                         .font(ClientType.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                     Spacer(minLength: Theme.Space.s)
@@ -629,8 +626,8 @@ struct ClientWorkspacesView: View {
                 }
                 .padding(.top, 4)
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("Auto-connect \(host.name)")
-                .accessibilityValue(isAutoConnectEnabled(for: host.peerKey) ? "On" : "Off")
+                .accessibilityLabel(L10n.text("apple.clientworkspacesview.auto_connect_0.3bbf847e", "\(host.name)"))
+                .accessibilityValue(isAutoConnectEnabled(for: host.peerKey) ? L10n.text("apple.clientworkspacesview.on.13001175") : L10n.text("apple.clientworkspacesview.off.ca7981b4"))
             }
         }
         .padding(Theme.Space.m)
@@ -703,7 +700,7 @@ final class ClientWorkspacesModel {
             let name: String = {
                 if let label = machine.label, !label.isEmpty { return label }
                 if let id = machine.machineID { return id }
-                return "Computer"
+                return L10n.text("apple.clientworkspacesview.computer.76ed42d2")
             }()
             return ClientHost(
                 peerKey: key,
@@ -840,7 +837,7 @@ final class ClientWorkspacesModel {
         if pendingPeer == host.peerKey { pendingPeer = nil }
         guard isConnecting == nil else { return }
         guard host.online != false else {
-            errorMessage = "\(host.name) is asleep."
+            errorMessage = L10n.text("apple.clientworkspacesview.0_is_asleep.18ebf568", "\(host.name)")
             infoMessage = nil
             if !recovering {
                 connectedKey = nil
@@ -914,8 +911,8 @@ final class ClientWorkspacesModel {
             } catch {
                 let text = error.localizedDescription
                 if Self.isApprovalNeeded(text) {
-                    infoMessage = "Approve this device on \(host.name): open Machines "
-                        + "and tap Approve next to this device. Then Connect again."
+                    infoMessage = L10n.text("apple.clientworkspacesview.approve_this_device_on_0_open_machines.fef8f93c", "\(host.name)")
+                        + L10n.text("apple.clientworkspacesview.and_tap_approve_next_to_this_device_then_c.ce0bfe0d")
                     errorMessage = nil
                     if !recovering {
                         connectedKey = nil

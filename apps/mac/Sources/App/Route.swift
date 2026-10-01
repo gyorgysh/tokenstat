@@ -133,14 +133,14 @@ enum GlobalSection: String, CaseIterable, Identifiable, Hashable {
 
     var label: String {
         switch self {
-        case .home: return "Home"
-        case .todo: return "Tasks"
-        case .notes: return "Notes"
-        case .automations: return "Automations"
-        case .workflows: return "Workflows"
-        case .machines: return "Devices"
-        case .insights: return "Insights"
-        case .account: return "Account"
+        case .home: return L10n.text("common.home")
+        case .todo: return L10n.text("common.tasks")
+        case .notes: return L10n.text("common.notes")
+        case .automations: return L10n.text("common.automations")
+        case .workflows: return L10n.text("common.workflows")
+        case .machines: return L10n.text("common.devices")
+        case .insights: return L10n.text("common.insights")
+        case .account: return L10n.text("common.account")
         }
     }
 
@@ -187,17 +187,17 @@ enum WorkspaceSection: String, CaseIterable, Identifiable, Hashable {
 
     var label: String {
         switch self {
-        case .sessions: return "Terminals"
-        case .chat: return "Chats"
-        case .changes: return "Changes"
-        case .history: return "History"
-        case .pulls: return "Pull requests"
-        case .todo: return "Tasks"
-        case .notes: return "Notes"
-        case .workflows: return "Workflows"
-        case .automations: return "Automations"
-        case .files: return "Files"
-        case .browser: return "Browser"
+        case .sessions: return L10n.text("common.terminals")
+        case .chat: return L10n.text("common.chats")
+        case .changes: return L10n.text("apple.route.changes.bbd4b6a8")
+        case .history: return L10n.text("common.history")
+        case .pulls: return L10n.text("apple.route.pull_requests.d9e3f260")
+        case .todo: return L10n.text("common.tasks")
+        case .notes: return L10n.text("common.notes")
+        case .workflows: return L10n.text("common.workflows")
+        case .automations: return L10n.text("common.automations")
+        case .files: return L10n.text("common.files")
+        case .browser: return L10n.text("common.browser")
         }
     }
 
@@ -257,10 +257,10 @@ enum SSHSection: Hashable, Identifiable {
 
     var label: String {
         switch self {
-        case .hosts: return "Hosts"
-        case .keys: return "Keys"
-        case .snippets: return "Snippets"
-        case .knownHosts: return "Trusted servers"
+        case .hosts: return L10n.text("apple.route.hosts.bba9af13")
+        case .keys: return L10n.text("apple.route.keys.f0d66a79")
+        case .snippets: return L10n.text("apple.route.snippets.ff717209")
+        case .knownHosts: return L10n.text("apple.route.trusted_servers.b101ed86")
         }
     }
 
@@ -276,10 +276,10 @@ enum SSHSection: Hashable, Identifiable {
     /// The word an Add button uses. Singular, because it adds one.
     var addLabel: String {
         switch self {
-        case .hosts: return "Add host"
-        case .keys: return "Add key"
-        case .snippets: return "Add snippet"
-        case .knownHosts: return "Add server"
+        case .hosts: return L10n.text("apple.route.add_host.7da3f6f4")
+        case .keys: return L10n.text("apple.route.add_key.12626d65")
+        case .snippets: return L10n.text("apple.route.add_snippet.a1f802b9")
+        case .knownHosts: return L10n.text("apple.route.add_server.1099b2a9")
         }
     }
 }

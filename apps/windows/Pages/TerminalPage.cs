@@ -94,7 +94,7 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         startBody.Children.Add(_startTitle);
         startBody.Children.Add(new TextBlock
         {
-            Text = "The session is up. Waiting for the program to draw.",
+            Text = L10n.Text("windows.terminalpage.the_session_is_up_waiting_for_the_program.2a36333d"),
             FontSize = 13,
             Opacity = 0.7,
             MaxWidth = 360,
@@ -106,9 +106,9 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         _startOverlay.Background = new SolidColorBrush(TerminalPalette.Surface(dark));
         _startOverlay.Children.Add(startBody);
 
-        _kill = Buttons.ToolbarIcon(ActionIcon.Stop, "Kill the process", async (_, _) => await _session.KillAsync());
-        _close = Buttons.ToolbarIcon(ActionIcon.Disconnect, "Close this session", async (_, _) => await _session.CloseAsync());
-        _respawn = Buttons.ToolbarIcon(ActionIcon.Refresh, "Start a fresh shell", async (_, _) =>
+        _kill = Buttons.ToolbarIcon(ActionIcon.Stop, L10n.Text("windows.terminalpage.kill_the_process.9e42d840"), async (_, _) => await _session.KillAsync());
+        _close = Buttons.ToolbarIcon(ActionIcon.Disconnect, L10n.Text("windows.terminalpage.close_this_session.fa2af1b6"), async (_, _) => await _session.CloseAsync());
+        _respawn = Buttons.ToolbarIcon(ActionIcon.Refresh, L10n.Text("windows.terminalpage.start_a_fresh_shell.337e23dd"), async (_, _) =>
         {
             _terminal.Reset();
             await _session.RespawnAsync(CurrentRows(), CurrentCols());
@@ -185,7 +185,7 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
     /// The folder this shell runs in.
     /// </summary>
     public UIElement? ToolbarScope =>
-        Chrome.ScopeChip(string.IsNullOrEmpty(_folderName) ? "Terminal" : _folderName);
+        Chrome.ScopeChip(string.IsNullOrEmpty(_folderName) ? L10n.Text("windows.terminalpage.terminal.e0926fda") : _folderName);
 
     /// <summary>
     /// Kill, close, and respawn. The same buttons the page holds, so session
@@ -205,7 +205,7 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
     private void RenderInspector()
     {
         _inspector.Children.Clear();
-        var label = string.IsNullOrEmpty(_session.Command) ? "Shell" : _session.Command;
+        var label = string.IsNullOrEmpty(_session.Command) ? L10n.Text("windows.terminalpage.shell.a7332854") : _session.Command;
         _inspector.Children.Add(new TextBlock
         {
             Text = label,
@@ -219,27 +219,27 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
             FontSize = 12,
             Opacity = 0.7,
         });
-        var state = _session.Closed ? "Closed"
-            : !_session.Alive ? "Exited"
-            : "Running";
-        _inspector.Children.Add(Chrome.InspectorField("State", state));
+        var state = _session.Closed ? L10n.Text("windows.terminalpage.closed.c21ead06")
+            : !_session.Alive ? L10n.Text("windows.terminalpage.exited.85fc46c1")
+            : L10n.Text("common.running");
+        _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.terminalpage.state.a3b50c47"), state));
         if (_session.ExitCode.HasValue)
         {
-            _inspector.Children.Add(Chrome.InspectorField("Exit status", $"{_session.ExitCode}"));
+            _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.terminalpage.exit_status.f69b3d7f"), $"{_session.ExitCode}"));
         }
-        _inspector.Children.Add(Chrome.InspectorField("Size", $"{_session.Cols}×{_session.Rows}"));
+        _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.terminalpage.size.1af85190"), $"{_session.Cols}×{_session.Rows}"));
         if (_session.Paused)
         {
             _inspector.Children.Add(new TextBlock
             {
-                Text = "Output is paused while the handoff window is full. It resumes on its own.",
+                Text = L10n.Text("windows.terminalpage.output_is_paused_while_the_handoff_window.23f0e74c"),
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
             });
         }
         if (_session.Dropped > 0)
         {
-            _inspector.Children.Add(Chrome.InspectorField("Dropped", $"{_session.Dropped:N0}"));
+            _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.terminalpage.dropped.739f68fe"), $"{_session.Dropped:N0}"));
         }
     }
 
@@ -320,8 +320,8 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
 
     private void RefreshOnUi()
     {
-        var label = string.IsNullOrEmpty(_session.Command) ? "Shell" : _session.Command;
-        _startTitle.Text = "Starting " + StartingLabel();
+        var label = string.IsNullOrEmpty(_session.Command) ? L10n.Text("windows.terminalpage.shell.a7332854") : _session.Command;
+        _startTitle.Text = L10n.Text("windows.terminalpage.starting_0.099752ea", $"{StartingLabel()}");
         // Up but not painted yet: agent CLIs spend seconds in that gap. A
         // failed spawn or an exited process shows its banner instead.
         _startOverlay.Visibility = !_session.HasOutput && _session.Alive && !_session.Closed
@@ -341,21 +341,21 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         _status.Children.Clear();
         if (_session.Closed)
         {
-            Banner("The session was closed. Respawn starts a fresh shell.");
+            Banner(L10n.Text("windows.terminalpage.the_session_was_closed_respawn_starts_a_fr.0ebaaba6"));
         }
         else if (!_session.Alive)
         {
             Banner(_session.ExitCode.HasValue
-                ? $"The process exited with status {_session.ExitCode}."
-                : "The process exited.");
+                ? L10n.Text("windows.terminalpage.the_process_exited_with_status_0.25dad567", $"{_session.ExitCode}")
+                : L10n.Text("windows.terminalpage.the_process_exited.fd45b6ed"));
         }
         if (_session.Paused)
         {
-            Banner("tokenstat paused output because the handoff window is full. It resumes on its own.");
+            Banner(L10n.Text("windows.terminalpage.tokenstat_paused_output_because_the_handof.1e2648f2"));
         }
         if (_session.Dropped > 0)
         {
-            Banner("Some output was dropped while catching up.");
+            Banner(L10n.Text("windows.terminalpage.some_output_was_dropped_while_catching_up.dc39823b"));
         }
         if (!string.IsNullOrEmpty(_session.LastError) && _session.Alive && !_session.Closed)
         {
@@ -376,11 +376,11 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         {
             command = command[(cut + 1)..];
         }
-        if (new[] { ".exe", ".cmd", ".bat" }.Any(extension => command.EndsWith(extension, StringComparison.OrdinalIgnoreCase)))
+        if (new[] { L10n.Text("windows.terminalpage.exe.e42f3ea0"), L10n.Text("windows.terminalpage.cmd.4ec29444"), L10n.Text("windows.terminalpage.bat.e23b5839") }.Any(extension => command.EndsWith(extension, StringComparison.OrdinalIgnoreCase)))
         {
             command = command[..^4];
         }
-        return string.IsNullOrEmpty(command) ? "Shell" : command;
+        return string.IsNullOrEmpty(command) ? L10n.Text("windows.terminalpage.shell.a7332854") : command;
     }
 
     private static string ShortId(string id)

@@ -84,9 +84,9 @@ struct ClientHostWorkspacesView: View {
                     VStack(spacing: Theme.Space.s) {
                         ClientEmptyState(
                             kind: .nothingYet,
-                            title: "\(hostName) has not let this device in yet",
-                            message: "Folders, files, terminals and the agents running in them are only open to devices that computer has allowed. This screen opens on its own once the request is answered.",
-                            actionTitle: model.isRequesting ? "Asking…" : "Request access",
+                            title: L10n.text("apple.clienthostworkspacesview.0_has_not_let_this_device_in_yet.e161eb1e", "\(hostName)"),
+                            message: L10n.text("apple.clienthostworkspacesview.folders_files_terminals_and_the_agents_run.22c37ee2"),
+                            actionTitle: model.isRequesting ? L10n.text("apple.clienthostworkspacesview.asking.0b832840") : L10n.text("apple.clienthostworkspacesview.request_access.b06f1662"),
                             actionIcon: .approve,
                             action: {
                                 showApproval = true
@@ -116,7 +116,7 @@ struct ClientHostWorkspacesView: View {
                             }
                         }
                         HStack(spacing: Theme.Space.m) {
-                            Button("How to approve", .help) { showApproval = true }
+                            Button(L10n.text("apple.clienthostworkspacesview.how_to_approve.e0fc7247"), .help) { showApproval = true }
                                 .font(ClientType.label.weight(.semibold))
                                 .tint(Theme.accent)
                             Spacer(minLength: 0)
@@ -128,7 +128,7 @@ struct ClientHostWorkspacesView: View {
                                     Task { await model.connect(peerKey: peerKey, name: hostName) }
                                 }
                             } label: {
-                                Label("I have a code", systemImage: ActionIcon.pair.symbol)
+                                Label(L10n.text("apple.clienthostworkspacesview.i_have_a_code.b090f9d2"), systemImage: ActionIcon.pair.symbol)
                                     .font(ClientType.label.weight(.semibold))
                             }
                             .tint(Theme.accent)
@@ -178,9 +178,8 @@ struct ClientHostWorkspacesView: View {
                         VStack(spacing: Theme.Space.s) {
                             ClientEmptyState(
                                 kind: .nothingYet,
-                                title: "Nothing to work on yet",
-                                message: "Give \(hostName) a folder. Choose one it already "
-                                    + "has, or clone a repository onto it.",
+                                title: L10n.text("apple.clienthostworkspacesview.nothing_to_work_on_yet.80d6fed9"),
+                                message: L10n.text("apple.clienthostworkspacesview.give_0_a_folder_choose_one_it_already_has.bfd23a13", "\(hostName)"),
                                 art: .noMachine
                             )
                             NavigationLink {
@@ -188,7 +187,7 @@ struct ClientHostWorkspacesView: View {
                                     Task { await model.connect(peerKey: peerKey, name: hostName) }
                                 }
                             } label: {
-                                Label("Choose a folder", systemImage: ActionIcon.reveal.symbol)
+                                Label(L10n.text("apple.clienthostworkspacesview.choose_a_folder.5c71b8cd"), systemImage: ActionIcon.reveal.symbol)
                                     .font(ClientType.label)
                             }
                             .tint(Theme.accent)
@@ -197,7 +196,7 @@ struct ClientHostWorkspacesView: View {
                                     Task { await model.connect(peerKey: peerKey, name: hostName) }
                                 }
                             } label: {
-                                Label("Clone a repository", systemImage: ActionIcon.download.symbol)
+                                Label(L10n.text("apple.clienthostworkspacesview.clone_a_repository.749e5d4d"), systemImage: ActionIcon.download.symbol)
                                     .font(ClientType.label)
                             }
                             .tint(Theme.accent)
@@ -214,9 +213,9 @@ struct ClientHostWorkspacesView: View {
                     }
                     if layout.sections.isEmpty {
                         VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                            Text("Your Projects are clear")
+                            Text(L10n.text("apple.clienthostworkspacesview.your_projects_are_clear.c7d87ca8"))
                                 .font(ClientType.label.weight(.medium))
-                            Text("Folders, chats and sessions are switched off.")
+                            Text(L10n.text("apple.clienthostworkspacesview.folders_chats_and_sessions_are_switched_of.2cb24a2f"))
                                 .font(ClientType.caption)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -226,7 +225,7 @@ struct ClientHostWorkspacesView: View {
                         .cardSurface()
                         .padding(.top, Theme.Space.s)
                     }
-                    Button("Customize Projects", .layout) { customizing = true }
+                    Button(L10n.text("apple.clienthostworkspacesview.customize_projects.00ab91c5"), .layout) { customizing = true }
                         .buttonStyle(.plain)
                         .font(ClientType.caption.weight(.medium))
                         .foregroundStyle(Theme.accent)
@@ -242,7 +241,7 @@ struct ClientHostWorkspacesView: View {
         }
         .background(Theme.background)
         .navigationTitle(hostName)
-        .searchable(text: $search, prompt: "Search projects")
+        .searchable(text: $search, prompt: L10n.text("apple.clienthostworkspacesview.search_projects.9e079c7d"))
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
             await ClientRefresh.pull("host-\(peerKey)") {
@@ -267,7 +266,7 @@ struct ClientHostWorkspacesView: View {
             ClientFolderChooserSheet(
                 hostName: hostName,
                 folders: model.folders,
-                title: section == .chat ? "New chat in…" : "New session in…"
+                title: section == .chat ? L10n.text("apple.clienthostworkspacesview.new_chat_in.510ac43f") : L10n.text("apple.clienthostworkspacesview.new_session_in.30d4568b")
             ) { folder in
                 open(folder, section: section)
             }
@@ -300,14 +299,14 @@ struct ClientHostWorkspacesView: View {
     private var hostFoldersSection: some View {
         if !model.folders.isEmpty {
             HStack(alignment: .center) {
-                ClientSectionTitle(title: "Projects", mark: "mark_archive")
+                ClientSectionTitle(title: L10n.text("common.projects"), mark: "mark_archive")
                 Spacer(minLength: Theme.Space.s)
                 NavigationLink {
                     ClientFolderPicker(peer: peerKey, hostName: hostName) { _ in
                         Task { await model.connect(peerKey: peerKey, name: hostName) }
                     }
                 } label: {
-                    Text("Add")
+                    Text(L10n.text("common.add"))
                         .font(ClientType.caption.weight(.semibold))
                 }
                 .tint(Theme.accent)
@@ -316,7 +315,7 @@ struct ClientHostWorkspacesView: View {
                         Task { await model.connect(peerKey: peerKey, name: hostName) }
                     }
                 } label: {
-                    Text("Clone")
+                    Text(L10n.text("apple.clienthostworkspacesview.clone.5779f32f"))
                         .font(ClientType.caption.weight(.semibold))
                 }
                 .tint(Theme.accent)
@@ -351,10 +350,10 @@ struct ClientHostWorkspacesView: View {
     private var hostSessionsSection: some View {
         if !model.sessions.isEmpty || !model.folders.isEmpty {
             HStack(alignment: .center) {
-                ClientSectionTitle(title: "All sessions", mark: "mark_terminal")
+                ClientSectionTitle(title: L10n.text("apple.clienthostworkspacesview.all_sessions.78648d4d"), mark: "mark_terminal")
                 Spacer(minLength: Theme.Space.s)
                 if !model.folders.isEmpty {
-                    Button("New terminal", .create) { starting = .sessions }
+                    Button(L10n.text("apple.clienthostworkspacesview.new_terminal.fe544556"), .create) { starting = .sessions }
                         .font(ClientType.caption.weight(.semibold))
                 }
             }
@@ -369,11 +368,11 @@ struct ClientHostWorkspacesView: View {
                 }
                 .buttonStyle(.plain)
                 .modifier(ClientTerminalActions(peer: peerKey, workspaceID: session.workspaceID ?? "",
-                    folderName: model.folders.first { ClientRemote.rawWorkspaceID(of: $0) == session.workspaceID || $0.id == session.workspaceID }?.name ?? "Project",
+                    folderName: model.folders.first { ClientRemote.rawWorkspaceID(of: $0) == session.workspaceID || $0.id == session.workspaceID }?.name ?? L10n.text("apple.clienthostworkspacesview.project.98595978"),
                     info: session, onDuplicate: { copied in model.open(copied, peer: peerKey); Task { await model.connect(peerKey: peerKey, name: hostName) } }))
             }
             if model.sessions.isEmpty {
-                Text("Nothing running. Start one from a folder.")
+                Text(L10n.text("apple.clienthostworkspacesview.nothing_running_start_one_from_a_folder.f1d69e99"))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -479,9 +478,9 @@ final class ClientHostWorkspacesModel {
         do {
             let answer = try await Bridge.askWorkspaceAccess(peer: peerKey)
             if answer.granted == true {
-                requestNotice = "This device already has access. Pull to refresh."
+                requestNotice = L10n.text("apple.clienthostworkspacesview.this_device_already_has_access_pull_to_ref.06b896c9")
             } else {
-                requestNotice = "Asked. On that computer run `tokenstat host access approve` (over SSH is fine) and pick this device."
+                requestNotice = L10n.text("apple.clienthostworkspacesview.asked_on_that_computer_run_tokenstat_host.40af0490")
             }
         } catch {
             requestNotice = error.localizedDescription

@@ -12,7 +12,7 @@ struct GitCommitDraft: Codable, Equatable, Sendable {
     var message: String {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let details = details.trimmingCharacters(in: .whitespacesAndNewlines)
-        return details.isEmpty ? title : "\(title)\n\n\(details)"
+        return details.isEmpty ? title : L10n.text("apple.gitcommitsession.0_1.7fc9c5a1", "\(title)", "\(details)")
     }
 }
 
@@ -102,7 +102,7 @@ final class GitCommitSession: Identifiable {
     func load() async {
         guard !loaded else { return }
         guard let storage else {
-            saveError = "Waiting for this account and computer to be verified before saving work."
+            saveError = L10n.text("apple.gitcommitsession.waiting_for_this_account_and_computer_to_b.f97b4242")
             loaded = true
             return
         }
@@ -174,7 +174,7 @@ final class GitCommitSession: Identifiable {
         let paths = draft.paths
         do {
             guard await service.supportsReviewedCommit() else {
-                errorMessage = "Update the connected computer to commit selected files."
+                errorMessage = L10n.text("apple.gitcommitsession.update_the_connected_computer_to_commit_se.54c335ba")
                 return
             }
             let fresh = try await service.review(paths: paths.sorted())
@@ -198,7 +198,7 @@ final class GitCommitSession: Identifiable {
             await persist()
         } catch {
             // No rollback, retry or new ID follows a lost response.
-            errorMessage = "The commit outcome has not been confirmed. Check its outcome before starting another. \(error.localizedDescription)"
+            errorMessage = L10n.text("apple.gitcommitsession.the_commit_outcome_has_not_been_confirmed.5b129e15", "\(error.localizedDescription)")
         }
     }
 
@@ -216,7 +216,7 @@ final class GitCommitSession: Identifiable {
                 await persist()
             } else {
                 canRetrySubmission = true
-                errorMessage = "The computer has no recorded outcome yet. You can retry this same submission."
+                errorMessage = L10n.text("apple.gitcommitsession.the_computer_has_no_recorded_outcome_yet_y.0b11d451")
             }
         } catch { errorMessage = error.localizedDescription }
     }
@@ -230,7 +230,7 @@ final class GitCommitSession: Identifiable {
         do {
             adopt(try await service.commit(submission))
             await persist()
-        } catch { errorMessage = "Check this commit's outcome before starting another. \(error.localizedDescription)" }
+        } catch { errorMessage = L10n.text("apple.gitcommitsession.check_this_commit_s_outcome_before_startin.f3872ebf", "\(error.localizedDescription)") }
     }
 
     private func adopt(_ receipt: GitCommitReceipt) {

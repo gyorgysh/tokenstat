@@ -34,18 +34,18 @@ struct WorkingTreeReviewView: View {
                 ErrorBanner(message: error) { Task { await load() } }
                 InspectorEmptyState(
                     systemImage: "exclamationmark.circle",
-                    title: "Could not load changes",
+                    title: L10n.text("apple.workingtreereviewview.could_not_load_changes.07be1deb"),
                     subtitle: error,
                     tint: Theme.danger
                 )
             } else if loading, diffs.isEmpty {
-                ProgressView("Reading working tree")
+                ProgressView(L10n.text("apple.workingtreereviewview.reading_working_tree.7e8e886f"))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if diffs.isEmpty {
                 InspectorEmptyState(
                     systemImage: "checkmark.seal",
-                    title: "No changes to review",
-                    subtitle: "The working tree is clean."
+                    title: L10n.text("apple.workingtreereviewview.no_changes_to_review.e964b314"),
+                    subtitle: L10n.text("apple.workingtreereviewview.the_working_tree_is_clean.84230b1f")
                 )
             } else {
                 DiffDocumentView(diffs: diffs) {
@@ -63,7 +63,7 @@ struct WorkingTreeReviewView: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Uncommitted changes")
+                    Text(L10n.text("apple.workingtreereviewview.uncommitted_changes.a388bd2d"))
                         .font(Theme.font(15, weight: .semibold))
                     Text(folder.name)
                         .font(Theme.caption)
@@ -79,10 +79,10 @@ struct WorkingTreeReviewView: View {
                 HStack(spacing: Theme.Space.s) {
                     Text("+\(git.added)").foregroundStyle(Theme.success)
                     Text("−\(git.removed)").foregroundStyle(Theme.danger)
-                    Text("· \(files.count) file\(files.count == 1 ? "" : "s")")
+                    Text((files.count == 1 ? L10n.text("apple.workingtreereviewview.0_file_1.ac963029.one", "\(files.count)") : L10n.text("apple.workingtreereviewview.0_file_1.ac963029.other", "\(files.count)")))
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Text("Working tree")
+                    Text(L10n.text("apple.workingtreereviewview.working_tree.f90114ae"))
                         .foregroundStyle(.tertiary)
                 }
                 .font(Theme.caption)
@@ -123,7 +123,7 @@ struct WorkingTreeReviewView: View {
         guard !Task.isCancelled, generation == loadGeneration else { return }
         diffs = paths.compactMap { model.diff(for: $0, in: folderID) }
         if failures > 0 {
-            error = "Could not refresh \(failures) file(s). Available changes are still shown. Try again."
+            error = L10n.text("apple.workingtreereviewview.could_not_refresh_0_file_s_available_chang.89fdefb0", "\(failures)")
         }
         loading = false
         let owner = WorkViewedChange.owner(folderID: folderID)

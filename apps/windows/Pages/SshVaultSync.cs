@@ -14,7 +14,7 @@ internal static class SshVaultSync
         try
         {
             var answer = await AppServices.Host.CallAsync("ssh.vault.record.list");
-            var records = answer["records"] as JsonArray ?? throw new InvalidOperationException("The vault returned no records.");
+            var records = answer["records"] as JsonArray ?? throw new InvalidOperationException(L10n.Text("windows.sshvaultsync.the_vault_returned_no_records.e0b54c7b"));
             var known = records.OfType<JsonNode>().Select(r => Format.Text(r, "id")).ToHashSet();
             var local = await ReadLocalAsync();
             // A child folder cannot be saved before its parent. Repeatedly
@@ -71,7 +71,7 @@ internal static class SshVaultSync
                                 // and any successfully saved new record stay valid.
                                 reference = CredentialVault.RefFor(split[1] + "_" + Guid.NewGuid().ToString("N"));
                                 if (!SshSecrets.Put(reference, Format.Text(remote, "privateKey")))
-                                    throw new InvalidOperationException("Could not store the synced key in Windows Credential Manager.");
+                                    throw new InvalidOperationException(L10n.Text("windows.sshvaultsync.could_not_store_the_synced_key_in_windows.c890a396"));
                                 save.Remove("privateKey");
                                 save["secretRef"] = reference;
                             }
@@ -85,7 +85,7 @@ internal static class SshVaultSync
                     progressed = true;
                 }
                 if (!progressed && pending.Count > 0)
-                    throw new InvalidOperationException("Some vault records refer to missing folders. Sync those folders from the original device first.");
+                    throw new InvalidOperationException(L10n.Text("windows.sshvaultsync.some_vault_records_refer_to_missing_folder.e45a6137"));
             }
             foreach (var pair in local.Where(pair => !known.Contains(pair.Key)))
                 await PushAsync(pair.Key.Split(':', 2)[0], pair.Value);
@@ -99,7 +99,7 @@ internal static class SshVaultSync
         foreach (var kind in Kinds)
         {
             var rows = Format.Items(await AppServices.Host.CallAsync($"ssh.{kind}.list"))
-                ?? throw new InvalidOperationException($"Could not read local SSH {kind} records.");
+                ?? throw new InvalidOperationException(L10n.Text("windows.sshvaultsync.could_not_read_local_ssh_0_records.b72de8e8", $"{kind}"));
             foreach (var row in rows.OfType<JsonNode>())
                 local[kind + ":" + Format.Text(row, "id")] = row;
         }
@@ -121,7 +121,7 @@ internal static class SshVaultSync
             if (problem.Length > 0) throw new InvalidOperationException(problem);
             var synced = Format.Flag(status, "created");
             if (synced && (Format.Flag(status, "locked") || Format.Flag(status, "needsRecreate")))
-                throw new InvalidOperationException("Unlock the SSH vault before editing synced records.");
+                throw new InvalidOperationException(L10n.Text("windows.sshvaultsync.unlock_the_ssh_vault_before_editing_synced.82afa69a"));
             var kind = method.Split('.')[1];
             if (synced && method.EndsWith(".delete", StringComparison.Ordinal))
                 await AppServices.Host.CallAsync("ssh.vault.record.delete", new JsonObject
@@ -147,7 +147,7 @@ internal static class SshVaultSync
             if (synced && method.EndsWith(".save", StringComparison.Ordinal))
             {
                 try { await PushAsync(kind, saved); }
-                catch (Exception ex) { throw new InvalidOperationException("Saved on this PC, but vault sync failed: " + ex.Message); }
+                catch (Exception ex) { throw new InvalidOperationException(L10n.Text("windows.sshvaultsync.saved_on_this_pc_but_vault_sync_failed_0.894e1add", $"{ex.Message}")); }
             }
             return saved;
         }

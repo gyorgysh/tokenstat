@@ -43,6 +43,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="..\localization\**\common.json;..\localization\**\windows.json">
+      <Link>localization\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
     <Content Include="Assets\Licenses\*.txt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\Brands\*.svg" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\Terminal\**\*" CopyToOutputDirectory="PreserveNewest" />

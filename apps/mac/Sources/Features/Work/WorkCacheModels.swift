@@ -46,7 +46,7 @@ struct CachedRecordPayload: Decodable, Sendable {
         let timestamp = try values.decode(String.self, forKey: .savedAt)
         guard let date = ISO8601DateFormatter().date(from: timestamp) else {
             throw DecodingError.dataCorruptedError(forKey: .savedAt, in: values,
-                debugDescription: "Saved work timestamp is not ISO 8601")
+                debugDescription: L10n.text("apple.workcachemodels.saved_work_timestamp_is_not_iso_8601.6d432dbd"))
         }
         savedAt = date
     }

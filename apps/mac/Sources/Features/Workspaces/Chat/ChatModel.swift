@@ -421,7 +421,7 @@ final class ChatModel {
         saveDraftNow()
         if let pending = queued.first(where: { $0.id == draftMessageID && $0.needsReceipt }) {
             unconfirmedSend = .init(conversationID: selected.id, messageID: pending.id, checking: false)
-            error = "Check delivery before sending this draft again. An unknown receipt does not prove it was never sent."
+            error = L10n.text("apple.chatmodel.check_delivery_before_sending_this_draft_a.7ce8d3db")
             return false
         }
         if let previous = queued.first(where: { $0.id == draftMessageID }),
@@ -435,7 +435,7 @@ final class ChatModel {
                 }
                 ChatDraftStore.shared.save(text: draft, attachments: attachments, for: reference, newMessage: true)
             } catch {
-                self.error = "The pending message changed. Review Pending messages before sending this edit."
+                self.error = L10n.text("apple.chatmodel.the_pending_message_changed_review_pending.99de1c5d")
                 return false
             }
         }
@@ -541,7 +541,7 @@ final class ChatModel {
         } catch {
             restoreSubmission(submission)
             if currentReference == reference {
-                self.error = "This message could not be safely saved for sending. Your draft stays here. Review Pending messages before trying again."
+                self.error = L10n.text("apple.chatmodel.this_message_could_not_be_safely_saved_for.35073d4d")
             }
         }
     }
@@ -580,11 +580,11 @@ final class ChatModel {
             guard let item = try ChatOutboxStore.shared.items(for: reference).first(where: { $0.id == pending.messageID }) else {
                 // A legacy unresolved send has no durable payload to compare.
                 // Never interpret a missing record or receipt as permission to replay.
-                error = "Review the conversation before starting a new draft. The original delivery cannot be confirmed from this device."
+                error = L10n.text("apple.chatmodel.review_the_conversation_before_starting_a.51f999d2")
                 return
             }
             _ = await deliverQueued(item, stopCurrent: false)
-        } catch { self.error = "Pending delivery could not be read. Your draft remains on this device." }
+        } catch { self.error = L10n.text("apple.chatmodel.pending_delivery_could_not_be_read_your_dr.8bf84006") }
     }
 
     @ObservationIgnored private var recentMessages = ChatRecentMessages<ChatDisplayItem>()
@@ -1135,7 +1135,7 @@ final class ChatModel {
                     // An explicit destination must never fall back to a different
                     // conversation. Pins and notifications name one exact thread.
                     await select(nil)
-                    error = "This conversation is no longer available in this folder. Choose another conversation from the sidebar."
+                    error = L10n.text("apple.chatmodel.this_conversation_is_no_longer_available_i.d930b486")
                 }
             } else if let selected, let fresh = chats.first(where: { $0.id == selected.id }) {
                 // This conversation is already open. Re-selecting it would
@@ -1528,7 +1528,7 @@ final class ChatModel {
             backendRefreshError = nil
         } catch {
             guard context == loadGeneration else { return }
-            backendRefreshError = "Can’t check agents on this computer. Reconnect and retry."
+            backendRefreshError = L10n.text("apple.chatmodel.can_t_check_agents_on_this_computer_reconn.49c16d28")
         }
     }
 
@@ -1612,7 +1612,7 @@ final class ChatModel {
         if let reference = draftReference(for: updated.id, in: folderID),
            PinnedWorkStore.shared.isPinned(reference) {
             let folderName = PinnedWorkStore.shared.pins(in: reference.scope)
-                .first { $0.reference == reference }?.folderName ?? "Project"
+                .first { $0.reference == reference }?.folderName ?? L10n.text("apple.chatmodel.project.98595978")
             PinnedWorkStore.shared.pin(reference, label: updated.title, folderName: folderName)
         }
     }
@@ -1623,7 +1623,7 @@ final class ChatModel {
                                                peer: Bridge.chatRoute(workspaceID: folderID, peer: peer).peer)
         guard scope == WorkSessionContext.shared.scope else {
             throw NSError(domain: "Chat", code: 1,
-                          userInfo: [NSLocalizedDescriptionKey: "The account changed while copying the chat."])
+                          userInfo: [NSLocalizedDescriptionKey: L10n.text("apple.chatmodel.the_account_changed_while_copying_the_chat.223191a0")])
         }
         publishSidebarConversation(copied, in: folderID)
         return copied
@@ -1793,7 +1793,7 @@ final class ChatModel {
                 if atFront { items.insert(item, at: 0) } else { items.append(item) }
             }
             guard let stored = queued.first(where: { $0.id == item.id }), !stored.needsReceipt else {
-                self.error = "Check delivery in Pending messages before queuing this draft again."
+                self.error = L10n.text("apple.chatmodel.check_delivery_in_pending_messages_before.af602276")
                 return nil
             }
             authorizedQueueItems.insert(item.id)
@@ -1802,7 +1802,7 @@ final class ChatModel {
             Task { await drainQueue() }
             return item
         } catch {
-            self.error = "This message could not be saved to the queue. Your draft and attachments stay here. The queue holds 20 messages."
+            self.error = L10n.text("apple.chatmodel.this_message_could_not_be_saved_to_the_que.95da1002")
             return nil
         }
     }
@@ -1828,7 +1828,7 @@ final class ChatModel {
                 items[index].text = text
                 items[index].expectedRevision = contextRevision
             }
-        } catch { self.error = "This queued message changed or could not be saved. Reopen Pending messages before editing it again." }
+        } catch { self.error = L10n.text("apple.chatmodel.this_queued_message_changed_or_could_not_b.8393fdc8") }
     }
 
     func removeQueued(_ item: ChatQueuedMessage, owner: WorkReference?) {
@@ -1842,7 +1842,7 @@ final class ChatModel {
             }
             authorizedQueueItems.remove(item.id)
             Task { await drainQueue() }
-        } catch { self.error = "The queued copy could not be removed. Check its delivery first, then try again." }
+        } catch { self.error = L10n.text("apple.chatmodel.the_queued_copy_could_not_be_removed_check.dc44397e") }
     }
 
     func moveQueued(from offsets: IndexSet, to destination: Int, owner: WorkReference?) {
@@ -1853,7 +1853,7 @@ final class ChatModel {
                 guard items.map(\.id) == expected else { throw ChatOutboxStore.Failure.conflict }
                 items.move(fromOffsets: offsets, toOffset: destination)
             }
-        } catch { self.error = "The queue changed or could not be saved. Reopen Pending messages to see its current order." }
+        } catch { self.error = L10n.text("apple.chatmodel.the_queue_changed_or_could_not_be_saved_re.fa598b04") }
     }
 
     func queueDraftWhenConnected() {
@@ -1873,12 +1873,12 @@ final class ChatModel {
     func sendNow(_ item: ChatQueuedMessage, owner: WorkReference?) async {
         guard let owner, owner == queuedReference, ownsQueue else { return }
         guard savedCopy == nil else {
-            error = "Check for updates to return to the live conversation before sending or checking delivery. Your pending copy stays here."
+            error = L10n.text("apple.chatmodel.check_for_updates_to_return_to_the_live_co.3b041e43")
             return
         }
         if item.delivery == .needsReview {
             guard let revision = contextRevision else {
-                error = "Check for updates before using the latest conversation context. Your message stays here."
+                error = L10n.text("apple.chatmodel.check_for_updates_before_using_the_latest.71504043")
                 return
             }
             do {
@@ -1889,8 +1889,8 @@ final class ChatModel {
                     items[index].expectedRevision = revision
                     items[index].delivery = .ready
                 }
-                error = "The message is ready with the conversation context you last opened. Choose Send now when you are ready."
-            } catch { self.error = "The pending message changed. Reopen it before using the latest context." }
+                error = L10n.text("apple.chatmodel.the_message_is_ready_with_the_conversation.a1db2644")
+            } catch { self.error = L10n.text("apple.chatmodel.the_pending_message_changed_reopen_it_befo.3d158d7b") }
             return
         }
         guard !sendingNow else { return }
@@ -1915,7 +1915,7 @@ final class ChatModel {
     /// A refusal with no words looks like a dead button: the message stays
     /// queued, the draft comes back, and nothing says why.
     private func busyTurnError() {
-        error = "This conversation is still finishing its previous turn. Wait a moment, or press Stop and send again."
+        error = L10n.text("apple.chatmodel.this_conversation_is_still_finishing_its_p.01b9e26a")
     }
 
     /// Acceptance updates the captured owner's disk record even if navigation
@@ -1938,8 +1938,8 @@ final class ChatModel {
         do {
             guard try await machineConfirmsSends(peer: targetPeer, checkingReceipt: candidate.needsReceipt), current() else {
                 if current() { error = candidate.needsReceipt
-                    ? "Update this computer to check message delivery. Your pending copy stays here."
-                    : "Update this computer before sending. It needs the latest message confirmation support. Your draft stays here." }
+                    ? L10n.text("apple.chatmodel.update_this_computer_to_check_message_deli.32c24339")
+                    : L10n.text("apple.chatmodel.update_this_computer_before_sending_it_nee.37a38ceb") }
                 authorizedQueueItems.remove(candidate.id)
                 return false
             }
@@ -1954,7 +1954,7 @@ final class ChatModel {
             guard let item = stored.first(where: { $0.id == candidate.id }), item == candidate else {
                 publish(stored)
                 authorizedQueueItems.remove(candidate.id)
-                error = "The pending message changed. Review its current copy before sending."
+                error = L10n.text("apple.chatmodel.the_pending_message_changed_review_its_cur.51debf03")
                 return false
             }
             if item.needsReceipt {
@@ -1972,8 +1972,8 @@ final class ChatModel {
                 })
                 authorizedQueueItems.remove(item.id)
                 if current() { error = receipt.state == .needsRecovery
-                    ? "The computer could not confirm whether this message started. Review the conversation before copying it into a new draft. Your pending copy stays here."
-                    : "Delivery is not confirmed. Check the conversation before copying this message into a new draft. An unknown receipt is not proof it was never sent." }
+                    ? L10n.text("apple.chatmodel.the_computer_could_not_confirm_whether_thi.64b634e0")
+                    : L10n.text("apple.chatmodel.delivery_is_not_confirmed_check_the_conver.7944f74e") }
                 return false
             }
             guard item.delivery != .needsReview, item.expectedRevision != nil else {
@@ -1981,7 +1981,7 @@ final class ChatModel {
                     if let index = items.firstIndex(where: { $0.id == item.id }) { items[index].delivery = .needsReview }
                 })
                 authorizedQueueItems.remove(item.id)
-                if current() { error = "Review the live conversation, then choose Use latest context in Pending messages. Your message has not been sent." }
+                if current() { error = L10n.text("apple.chatmodel.review_the_live_conversation_then_choose_u.aec734da") }
                 return false
             }
             guard current(), !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !item.attachments.isEmpty else { return false }
@@ -2052,7 +2052,7 @@ final class ChatModel {
                     }
                 })
                 if current() { self.error = accepted || Bridge.isDeliveryUnknown(error)
-                    ? "The machine did not confirm delivery. Your queued copy stays here. Choose Check delivery before doing anything else."
+                    ? L10n.text("apple.chatmodel.the_machine_did_not_confirm_delivery_your.dbfa6c4d")
                     : error.localizedDescription }
                 return false
             }
@@ -2060,8 +2060,8 @@ final class ChatModel {
             authorizedQueueItems.remove(candidate.id)
             if current() {
                 self.error = candidate.needsReceipt
-                    ? "Delivery could not be checked. The original stays pending; check delivery again before starting a new message."
-                    : "This message stays pending. " + error.localizedDescription
+                    ? L10n.text("apple.chatmodel.delivery_could_not_be_checked_the_original.b9f28e27")
+                    : L10n.text("apple.chatmodel.this_message_stays_pending.eada83a6") + error.localizedDescription
             }
             return false
         }
@@ -2106,7 +2106,7 @@ final class ChatModel {
 
     func attach(_ file: URL) async {
         guard let item = ChatInbox.item(from: file) else {
-            error = "That file could not be read."
+            error = L10n.text("apple.chatmodel.that_file_could_not_be_read.e9fe8433")
             return
         }
         await attach(item)
@@ -2126,11 +2126,11 @@ final class ChatModel {
         guard !isCurrent || !sending else { return }
         let existing = isCurrent ? attachments : (ChatDraftStore.shared.draft(for: reference)?.attachments ?? [])
         guard existing.count + stagingAttachments < 20 else {
-            error = "A draft can include up to 20 files. Remove a file before adding another."
+            error = L10n.text("apple.chatmodel.a_draft_can_include_up_to_20_files_remove.14221a45")
             return
         }
         if item.data.count > ChatInbox.maxBytes {
-            error = "An attachment is limited to 12 MB."
+            error = L10n.text("apple.chatmodel.an_attachment_is_limited_to_12_mb.a0b63b0d")
             return
         }
         if isCurrent { saveDraftNow() }
@@ -2504,7 +2504,7 @@ final class ChatModel {
                 items.append(item)
             }
             guard let stored = queued.first(where: { $0.id == messageID }), !stored.needsReceipt else {
-                error = "Check delivery in Pending messages before queuing this draft again."
+                error = L10n.text("apple.chatmodel.check_delivery_in_pending_messages_before.af602276")
                 return
             }
             authorizedQueueItems.insert(messageID)
@@ -2515,7 +2515,7 @@ final class ChatModel {
             }
             Task { await drainQueue() }
         } catch {
-            self.error = "This message could not be saved to the queue. Your draft stays here. The queue holds 20 messages."
+            self.error = L10n.text("apple.chatmodel.this_message_could_not_be_saved_to_the_que.342364f9")
         }
     }
 
@@ -3246,7 +3246,7 @@ final class ChatModel {
     /// page's own `hasEarlier` flag.
     private func keepOfflineCopy(id: String, title: String?, page: ChatEventPage, sendRevision: UInt64?) {
         guard let reference = currentReference, reference.itemID == id else { return }
-        let title = title ?? "Conversation"
+        let title = title ?? L10n.text("apple.chatmodel.conversation.ccca1817")
         let backend = selected?.backend
         Task {
             await WorkCacheStore.shared.saveConversation(reference: reference, title: title, page: page, backend: backend, sendRevision: sendRevision)
@@ -3301,7 +3301,7 @@ final class ChatModel {
         guard savedCopy != nil, !checkingSavedCopy, let chat = selected,
               let workspaceID, let reference = currentReference else { return }
         guard reference.scope == WorkSessionContext.shared.scope else {
-            error = "Verify your account before returning to the live conversation. Your draft stays on this device."
+            error = L10n.text("apple.chatmodel.verify_your_account_before_returning_to_th.a9d4a28a")
             return
         }
         let generation = selectionGeneration
@@ -3322,13 +3322,13 @@ final class ChatModel {
                 let allowed = try await Bridge.workspaceAccessAllowed(peer: targetPeer)
                 guard stillCurrent() else { return }
                 guard allowed else {
-                    error = "Allow workspace access on the other computer before returning to the live conversation. Your draft stays on this device."
+                    error = L10n.text("apple.chatmodel.allow_workspace_access_on_the_other_comput.4dacd28c")
                     return
                 }
                 let version = try await Bridge.peerProtocolVersion(targetPeer)
                 guard stillCurrent() else { return }
                 guard version >= RemoteHostFeature.chat.minimumProtocol else {
-                    error = "Update tokenstat on the other computer before checking for live messages. You can still read this saved copy."
+                    error = L10n.text("apple.chatmodel.update_tokenstat_on_the_other_computer_bef.4aa383e2")
                     return
                 }
             }
@@ -3337,7 +3337,7 @@ final class ChatModel {
             guard stillCurrent() else { return }
             let liveChats = applyChatList(answer, read: listRead, current: chats)
             guard let live = liveChats.first(where: { $0.id == chat.id && $0.workspaceID == workspaceID }) else {
-                error = "This conversation is no longer on the machine. You can still read this saved copy."
+                error = L10n.text("apple.chatmodel.this_conversation_is_no_longer_on_the_mach.de283833")
                 return
             }
             replace(live, preservePendingSteer: false)
@@ -3380,7 +3380,7 @@ final class ChatModel {
             else { return nil }
             return ChatAttachment(
                 id: attachmentID,
-                name: event.name ?? "Attachment",
+                name: event.name ?? L10n.text("apple.chatmodel.attachment.040d2b36"),
                 mediaType: event.mediaType,
                 size: event.size
             )
@@ -3468,15 +3468,15 @@ final class ChatModel {
     private static func downloadFailure(_ error: Error) -> String {
         let reason = error.localizedDescription
         if reason.contains("quota_exceeded") {
-            return "Relay allowance reached. A direct connection can still transfer this file."
+            return L10n.text("apple.chatmodel.relay_allowance_reached_a_direct_connectio.46be688f")
         }
         if reason.localizedCaseInsensitiveContains("too large") {
-            return "This file is too large to transfer. Open it on the computer that made it."
+            return L10n.text("apple.chatmodel.this_file_is_too_large_to_transfer_open_it.a6327156")
         }
         if reason.localizedCaseInsensitiveContains("no longer available") {
-            return "This file is no longer on the computer that made it."
+            return L10n.text("apple.chatmodel.this_file_is_no_longer_on_the_computer_tha.00478114")
         }
-        return "Download failed. Tap to retry."
+        return L10n.text("apple.chatmodel.download_failed_tap_to_retry.c38f779d")
     }
 
     /// The brief and the one rule tokenstat adds. Reloaded whenever either
@@ -3593,7 +3593,7 @@ final class ChatModel {
             queued = try ChatOutboxStore.shared.items(for: reference)
             authorizedQueueItems = Set(queued.filter { $0.whenConnected && $0.delivery == .waiting }.map(\.id))
         }
-        catch { self.error = "Saved pending messages could not be opened. They have not been discarded. Try again after unlocking this device." }
+        catch { self.error = L10n.text("apple.chatmodel.saved_pending_messages_could_not_be_opened.8bc6ad06") }
         // Legacy conversation-only queues have no provable host/account owner.
         // Recovery is explicit; opening this conversation never adopts them.
     }
@@ -3660,7 +3660,7 @@ struct ChatToolState: Equatable {
             return "| \(shown)"
         }
         if lines.count > Self.snippetLineCap {
-            out.append("| … (\(lines.count - Self.snippetLineCap) more)")
+            out.append(L10n.text("apple.chatmodel.0_more.8bfcca49", "\(lines.count - Self.snippetLineCap)"))
         }
         return Array(out)
     }
@@ -3741,7 +3741,7 @@ struct ChatEditState: Equatable {
     /// Nil on the first change of a file in a turn. Later ones name themselves.
     var changeLabel: String? {
         guard revision >= 2 else { return nil }
-        return "\(ChatClock.ordinal(revision)) change"
+        return L10n.text("apple.chatmodel.0_change.d4ef778c", "\(ChatClock.ordinal(revision))")
     }
 
     mutating func applyPatch(added: UInt32, removed: UInt32, patch: String) {
@@ -3984,7 +3984,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
                 flushThinking()
                 // A new user turn bounds any tools left open by an interrupted
                 // older turn, including histories recorded by older hosts.
-                closeRunningTools(failed: false, at: event.atMs, detail: "Interrupted")
+                closeRunningTools(failed: false, at: event.atMs, detail: L10n.text("apple.chatmodel.interrupted.132d124d"))
                 editRevisions = [:]
                 items.append(
                     ChatDisplayItem(
@@ -4076,7 +4076,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
                                     added: 0,
                                     removed: 0,
                                     patch: "",
-                                    revision: nextEditRevision(target.isEmpty ? "File" : target),
+                                    revision: nextEditRevision(target.isEmpty ? L10n.text("apple.chatmodel.file.50009ce1") : target),
                                     running: true,
                                     failed: false,
                                     startedAtMs: event.atMs ?? 0,
@@ -4134,7 +4134,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
                 } else if ChatToolState.isFileEditVerb(agent.verb ?? "") {
                     let path = {
                         let clipped = ChatToolState.clip(agent.target ?? "")
-                        return clipped.isEmpty ? "File" : clipped
+                        return clipped.isEmpty ? L10n.text("apple.chatmodel.file.50009ce1") : clipped
                     }()
                     var state = ChatEditState(
                         path: path,
@@ -4181,7 +4181,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
                 flushText()
                 flushThinking()
                 let callId = agent.callId ?? ""
-                let path = agent.path ?? "File"
+                let path = agent.path ?? L10n.text("apple.chatmodel.file.50009ce1")
                 let added = agent.added ?? 0
                 let removed = agent.removed ?? 0
                 let patch = agent.patch ?? ""
@@ -4241,7 +4241,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
                         kind: .attachment(
                             ChatAttachment(
                                 id: id,
-                                name: agent.name.flatMap { $0.isEmpty ? nil : $0 } ?? "Attachment",
+                                name: agent.name.flatMap { $0.isEmpty ? nil : $0 } ?? L10n.text("apple.chatmodel.attachment.040d2b36"),
                                 mediaType: agent.mediaType,
                                 size: agent.size
                             )
@@ -4268,7 +4268,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
                 items.append(
                     ChatDisplayItem(
                         id: "failed-\(stamp(event, items.count))",
-                        kind: .failed(agent.text ?? "The turn failed")
+                        kind: .failed(agent.text ?? L10n.text("apple.chatmodel.the_turn_failed.45783181"))
                     )
                 )
             case "done":
@@ -4289,7 +4289,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
         flushThinking()
         // Tool logs are history; only the host knows whether a process lives.
         if !running {
-            closeRunningTools(failed: false, at: nil, detail: "Ended without a tool result")
+            closeRunningTools(failed: false, at: nil, detail: L10n.text("apple.chatmodel.ended_without_a_tool_result.da8d3680"))
         }
         for (callId, indexes) in toolIndexes {
             let live = Set(indexes.filter { items.indices.contains($0) })
@@ -4303,26 +4303,26 @@ struct ChatDisplayItem: Identifiable, Equatable {
 enum ChatGateCopy {
     static func chip(_ tier: String?) -> String {
         switch tier {
-        case "full": return "Approvals"
-        case "rules": return "Rules"
-        case "bypassOnly": return "Bypass only"
-        default: return "Checking"
+        case "full": return L10n.text("apple.chatmodel.approvals.2bfc3471")
+        case "rules": return L10n.text("apple.chatmodel.rules.4228aeb0")
+        case "bypassOnly": return L10n.text("apple.chatmodel.bypass_only.6110acbf")
+        default: return L10n.text("apple.chatmodel.checking.0dfe1d63")
         }
     }
 
     static func explanation(_ tier: String?, bypass: Bool) -> String {
         if bypass {
-            return "This agent can use its backend's bypass mode in this folder."
+            return L10n.text("apple.chatmodel.this_agent_can_use_its_backend_s_bypass_mo.620f4900")
         }
         switch tier {
         case "full":
-            return "tokenstat asks before every tool action, and the agent waits for your answer."
+            return L10n.text("apple.chatmodel.tokenstat_asks_before_every_tool_action_an.0dbf3a6c")
         case "rules":
-            return "Saved permission rules run. Anything else is denied."
+            return L10n.text("apple.chatmodel.saved_permission_rules_run_anything_else_i.ef7fb8c5")
         case "bypassOnly":
-            return "This backend has no tokenstat approval gate, so this chat can only run without asking."
+            return L10n.text("apple.chatmodel.this_backend_has_no_tokenstat_approval_gat.7c4924cd")
         default:
-            return "Checking this backend's permission support."
+            return L10n.text("apple.chatmodel.checking_this_backend_s_permission_support.13f013cf")
         }
     }
 }

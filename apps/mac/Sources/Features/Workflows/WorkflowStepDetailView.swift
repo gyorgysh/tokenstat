@@ -29,7 +29,7 @@ struct WorkflowStepDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
             if showsBack {
-                Button("Steps", .back) {
+                Button(L10n.text("apple.workflowstepdetailview.steps.1de3df70"), .back) {
                     pop()
                 }
                 .buttonStyle(SecondaryButtonStyle(comfortable: true))
@@ -44,7 +44,7 @@ struct WorkflowStepDetailView: View {
                         .foregroundStyle(Theme.danger)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Button("Delete step", .delete, role: .destructive) {
+                Button(L10n.text("apple.workflowstepdetailview.delete_step.0e31c081"), .delete, role: .destructive) {
                     session.selectStep(node.id)
                     session.removeSelectedStep()
                     pop()
@@ -52,7 +52,7 @@ struct WorkflowStepDetailView: View {
                 .buttonStyle(SecondaryButtonStyle(comfortable: true))
                 .disabled(session.creating || session.otherDraft != nil)
             } else {
-                Text("This step is no longer in the graph.")
+                Text(L10n.text("apple.workflowstepdetailview.this_step_is_no_longer_in_the_graph.f4c519a4"))
                     .font(Theme.callout)
                     .foregroundStyle(Theme.controlGlyph)
             }
@@ -81,7 +81,7 @@ struct WorkflowStepDetailView: View {
             Text(WorkflowStepListView.kindTitle(node.kind))
                 .font(Theme.caption.weight(.semibold))
                 .foregroundStyle(Theme.controlGlyph)
-            labeledField("Title", text: $title) { next in
+            labeledField(L10n.text("apple.workflowstepdetailview.title.7e8cd205"), text: $title) { next in
                 write(node.id) { $0.title = next }
             }
             switch node.kind {
@@ -100,7 +100,7 @@ struct WorkflowStepDetailView: View {
             case .loop:
                 loopFields(node)
             case .mcp:
-                caption("Reserved. This kind cannot be saved yet.")
+                caption(L10n.text("apple.workflowstepdetailview.reserved_this_kind_cannot_be_saved_yet.3dc62a35"))
             }
         }
     }
@@ -109,9 +109,9 @@ struct WorkflowStepDetailView: View {
     private func agentFields(_ node: WorkflowNode) -> some View {
         let backends = session.backends.visibleForPicker(keeping: node.backend)
         AppMenuPicker(
-            title: "Agent",
+            title: L10n.text("apple.workflowstepdetailview.agent.11b39c93"),
             options: backends.isEmpty
-                ? [(value: node.backend ?? "", label: "Choose an agent")]
+                ? [(value: node.backend ?? "", label: L10n.text("apple.workflowstepdetailview.choose_an_agent.b6890bc2"))]
                 : backends.map { (value: $0.id, label: $0.label) },
             selection: Binding(
                 get: { node.backend ?? "" },
@@ -147,8 +147,8 @@ struct WorkflowStepDetailView: View {
             }
             if !backend.efforts.isEmpty {
                 AppMenuPicker(
-                    title: "Effort",
-                    options: [(value: "", label: "Default")]
+                    title: L10n.text("apple.workflowstepdetailview.effort.4387e5d3"),
+                    options: [(value: "", label: L10n.text("apple.workflowstepdetailview.default.21b111cb"))]
                         + backend.efforts.map { (value: $0, label: $0) },
                     selection: Binding(
                         get: { node.effort ?? "" },
@@ -159,14 +159,14 @@ struct WorkflowStepDetailView: View {
                 )
             }
         }
-        labeledField("Prompt", text: $prompt, axis: .vertical) { next in
+        labeledField(L10n.text("apple.workflowstepdetailview.prompt.5c391238"), text: $prompt, axis: .vertical) { next in
             write(node.id) { $0.prompt = next }
         }
         AppMenuPicker(
-            title: "Wait",
+            title: L10n.text("apple.workflowstepdetailview.wait.26b83994"),
             options: [
-                (value: "exit", label: "Until the process exits"),
-                (value: "output", label: "Until output matches"),
+                (value: "exit", label: L10n.text("apple.workflowstepdetailview.until_the_process_exits.5c4be6c2")),
+                (value: "output", label: L10n.text("apple.workflowstepdetailview.until_output_matches.6f886c69")),
             ],
             selection: Binding(
                 get: { node.wait ?? "exit" },
@@ -176,19 +176,19 @@ struct WorkflowStepDetailView: View {
             )
         )
         if node.wait == "output" {
-            labeledField("Match", text: $waitPattern) { next in
+            labeledField(L10n.text("apple.workflowstepdetailview.match.03c0e806"), text: $waitPattern) { next in
                 write(node.id) { $0.waitPattern = next.isEmpty ? nil : next }
             }
         }
-        caption("{{input}} is the starting prompt. {{nodeId.output}} is an earlier step.")
+        caption(L10n.text("apple.workflowstepdetailview.input_is_the_starting_prompt_nodeid_output.98d8c50d"))
     }
 
     @ViewBuilder
     private func automationFields(_ node: WorkflowNode) -> some View {
         AppMenuPicker(
-            title: "Automation",
+            title: L10n.text("apple.workflowstepdetailview.automation.d909750b"),
             options: session.jobs.isEmpty
-                ? [(value: node.automationID ?? "", label: "Choose an automation")]
+                ? [(value: node.automationID ?? "", label: L10n.text("apple.workflowstepdetailview.choose_an_automation.758af24e"))]
                 : session.jobs.map { (value: $0.id, label: $0.name) },
             selection: Binding(
                 get: { node.automationID ?? "" },
@@ -197,16 +197,16 @@ struct WorkflowStepDetailView: View {
                 }
             )
         )
-        labeledField("Prompt override", text: $promptOverride, axis: .vertical) { next in
+        labeledField(L10n.text("apple.workflowstepdetailview.prompt_override.b992708e"), text: $promptOverride, axis: .vertical) { next in
             write(node.id) { $0.promptOverride = next.isEmpty ? nil : next }
         }
-        caption("A timer cannot commit. This step runs because you press Run.")
+        caption(L10n.text("apple.workflowstepdetailview.a_timer_cannot_commit_this_step_runs_becau.0f4f14da"))
     }
 
     @ViewBuilder
     private func httpFields(_ node: WorkflowNode) -> some View {
         AppMenuPicker(
-            title: "Method",
+            title: L10n.text("apple.workflowstepdetailview.method.52a0f9b6"),
             options: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"].map { (value: $0, label: $0) },
             selection: Binding(
                 get: { node.method ?? "GET" },
@@ -215,34 +215,34 @@ struct WorkflowStepDetailView: View {
                 }
             )
         )
-        labeledField("URL", text: $url) { next in
+        labeledField(L10n.text("apple.workflowstepdetailview.url.e7a241de"), text: $url) { next in
             write(node.id) { $0.url = next }
         }
-        labeledField("Headers", text: $headers, axis: .vertical) { next in
+        labeledField(L10n.text("apple.workflowstepdetailview.headers.194e9fe6"), text: $headers, axis: .vertical) { next in
             write(node.id) { $0.headers = Self.parseHeaders(next) }
         }
-        labeledField("Body", text: $bodyText, axis: .vertical) { next in
+        labeledField(L10n.text("apple.workflowstepdetailview.body.6ccaa641"), text: $bodyText, axis: .vertical) { next in
             write(node.id) { $0.body = next.isEmpty ? nil : next }
         }
-        caption("This leaves the machine only because you press Run. Authorization is a header you type.")
+        caption(L10n.text("apple.workflowstepdetailview.this_leaves_the_machine_only_because_you_p.902dc077"))
     }
 
     @ViewBuilder
     private func commandFields(_ node: WorkflowNode) -> some View {
-        labeledField("Command", text: $command, axis: .vertical) { next in
+        labeledField(L10n.text("apple.workflowstepdetailview.command.71316697"), text: $command, axis: .vertical) { next in
             write(node.id) { $0.command = next }
         }
-        caption("Runs in the folder, as you. A timer cannot commit.")
+        caption(L10n.text("apple.workflowstepdetailview.runs_in_the_folder_as_you_a_timer_cannot_c.c658a7be"))
     }
 
     @ViewBuilder
     private func conditionFields(_ node: WorkflowNode) -> some View {
         AppMenuPicker(
-            title: "Test",
+            title: L10n.text("apple.workflowstepdetailview.test.532eaabd"),
             options: [
-                (value: "contains", label: "Contains"),
-                (value: "equals", label: "Equals"),
-                (value: "matches", label: "Matches"),
+                (value: "contains", label: L10n.text("apple.workflowstepdetailview.contains.2eaecb3d")),
+                (value: "equals", label: L10n.text("apple.workflowstepdetailview.equals.f939ae3d")),
+                (value: "matches", label: L10n.text("apple.workflowstepdetailview.matches.98abff28")),
             ],
             selection: Binding(
                 get: { node.test ?? "contains" },
@@ -251,7 +251,7 @@ struct WorkflowStepDetailView: View {
                 }
             )
         )
-        labeledField("Pattern", text: $conditionPattern, axis: .vertical, lines: 1...4) { next in
+        labeledField(L10n.text("apple.workflowstepdetailview.pattern.4288ade7"), text: $conditionPattern, axis: .vertical, lines: 1...4) { next in
             write(node.id) { $0.pattern = next }
         }
     }
@@ -259,7 +259,7 @@ struct WorkflowStepDetailView: View {
     @ViewBuilder
     private func loopFields(_ node: WorkflowNode) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text("Times")
+            Text(L10n.text("apple.workflowstepdetailview.times.0c0fd31c"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
             FlowLayout(spacing: 6, rowSpacing: 6) {
@@ -271,7 +271,7 @@ struct WorkflowStepDetailView: View {
                     }
                 }
             }
-            TextField("Times", text: $loopTimes)
+            TextField(L10n.text("apple.workflowstepdetailview.times.0c0fd31c"), text: $loopTimes)
                 .textFieldStyle(.themed)
                 #if os(iOS)
                 .keyboardType(.numberPad)
@@ -281,7 +281,7 @@ struct WorkflowStepDetailView: View {
                     write(node.id) { $0.times = UInt32(next) ?? 3 }
                 }
         }
-        labeledField("Until", text: $loopUntil) { next in
+        labeledField(L10n.text("apple.workflowstepdetailview.until.7caf856e"), text: $loopUntil) { next in
             write(node.id) { $0.until = next.isEmpty ? nil : next }
         }
     }
@@ -291,11 +291,11 @@ struct WorkflowStepDetailView: View {
         let outgoing = session.fields.edges.filter { $0.from == node.id }
         let incoming = session.fields.edges.filter { $0.to == node.id }
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Connections")
+            Text(L10n.text("apple.workflowstepdetailview.connections.dc273117"))
                 .font(Theme.callout.weight(.semibold))
             caption(WorkflowGraphRules.connectionCaption(kind: node.kind))
             if outgoing.isEmpty {
-                Text("No next step yet.")
+                Text(L10n.text("apple.workflowstepdetailview.no_next_step_yet.2cc05797"))
                     .font(Theme.callout)
                     .foregroundStyle(Theme.controlGlyph)
             }
@@ -303,11 +303,11 @@ struct WorkflowStepDetailView: View {
                 outgoingRow(node: node, edge: edge)
             }
             addConnection(node: node, outgoing: outgoing)
-            Text("Arrives from")
+            Text(L10n.text("apple.workflowstepdetailview.arrives_from.7356ce95"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
             if incoming.isEmpty {
-                Text(node.kind == .input ? "Run fills this step." : "Nothing connects here yet.")
+                Text(node.kind == .input ? L10n.text("apple.workflowstepdetailview.run_fills_this_step.6c0bab88") : L10n.text("apple.workflowstepdetailview.nothing_connects_here_yet.f2c1b3f9"))
                     .font(Theme.callout)
                     .foregroundStyle(Theme.controlGlyph)
             }
@@ -342,7 +342,7 @@ struct WorkflowStepDetailView: View {
                     }
                 }
                 Spacer(minLength: 0)
-                Button("Remove", .delete, role: .destructive) {
+                Button(L10n.text("common.remove"), .delete, role: .destructive) {
                     session.removeConnection(id: edge.id)
                 }
                 .buttonStyle(SecondaryButtonStyle(small: true))
@@ -367,7 +367,7 @@ struct WorkflowStepDetailView: View {
                     .foregroundStyle(Theme.controlGlyph)
             }
             Spacer(minLength: 0)
-            Button("Remove", .delete, role: .destructive) {
+            Button(L10n.text("common.remove"), .delete, role: .destructive) {
                 session.removeConnection(id: edge.id)
             }
             .buttonStyle(SecondaryButtonStyle(small: true))
@@ -385,18 +385,18 @@ struct WorkflowStepDetailView: View {
             .filter { $0.id != node.id && !connected.contains($0.id) }
             .map { (value: $0.id, label: $0.displayTitle) }
         if session.fields.edges.count >= WorkflowGraphRules.maxEdges {
-            Text("A workflow may have at most \(WorkflowGraphRules.maxEdges) connections.")
+            Text(L10n.text("apple.workflowstepdetailview.a_workflow_may_have_at_most_0_connections.32d67dc9", "\(WorkflowGraphRules.maxEdges)"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
         } else if targets.isEmpty {
-            Text("Every other step already connects from here.")
+            Text(L10n.text("apple.workflowstepdetailview.every_other_step_already_connects_from_her.274fc9dd"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
         } else {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 AppMenuPicker(
-                    title: "Add connection",
-                    options: [(value: "", label: "Choose a step")] + targets,
+                    title: L10n.text("apple.workflowstepdetailview.add_connection.685f88ae"),
+                    options: [(value: "", label: L10n.text("apple.workflowstepdetailview.choose_a_step.f1fb3b3c"))] + targets,
                     selection: $addTarget
                 )
                 FlowLayout(spacing: 6, rowSpacing: 6) {
@@ -406,7 +406,7 @@ struct WorkflowStepDetailView: View {
                         }
                     }
                 }
-                Button("Connect", .create) {
+                Button(L10n.text("common.connect"), .create) {
                     session.connectSteps(from: node.id, to: addTarget, when: addWhen)
                     addTarget = ""
                     addWhen = WorkflowGraphRules.suggestedWhen(kind: node.kind, outgoing: session.fields.edges.filter { $0.from == node.id })

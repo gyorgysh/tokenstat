@@ -47,7 +47,7 @@ enum TerminalActivity {
                 .userInitiatedAllowingIdleSystemSleep,
                 .latencyCritical,
             ],
-            reason: "draining terminal session output"
+            reason: L10n.text("apple.terminalactivity.draining_terminal_session_output.f2f3eb50")
         )
     }
 

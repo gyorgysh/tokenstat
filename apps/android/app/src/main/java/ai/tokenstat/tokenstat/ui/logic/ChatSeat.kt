@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.logic
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 /// Words for the live seat, a tool row, and a permission chip.
 ///
 /// The same sentences are used on every client. The seat names the whole
@@ -18,31 +20,31 @@ object ChatSeat {
         val line = firstLine(scan(target))
         val collapsed = collapse(line)
         return when (name) {
-            "Read" -> labeled("Reading", fileName(line))
-            "Write" -> labeled("Writing", fileName(line))
-            "Edit", "NotebookEdit" -> labeled("Editing", fileName(line))
-            "Diff" -> labeled("Comparing", fileName(line))
-            "Shell", "Bash" -> labeled("Running", collapsed)
-            "Grep", "Search" -> labeled("Searching", collapsed)
+            "Read" -> labeled(L10n.text("android.chatseat.reading.463816d0"), fileName(line))
+            "Write" -> labeled(L10n.text("android.chatseat.writing.a8bfae3e"), fileName(line))
+            "Edit", "NotebookEdit" -> labeled(L10n.text("android.chatseat.editing.fab4539d"), fileName(line))
+            "Diff" -> labeled(L10n.text("android.chatseat.comparing.1fa1aad0"), fileName(line))
+            "Shell", "Bash" -> labeled(L10n.text("common.running"), collapsed)
+            "Grep", "Search" -> labeled(L10n.text("android.chatseat.searching.03bd6fca"), collapsed)
             "Glob", "Find" -> {
                 val file = fileName(line)
-                if (file.isEmpty()) "Looking" else labeled("Looking through", file)
+                if (file.isEmpty()) L10n.text("android.chatseat.looking.afa37c88") else labeled(L10n.text("android.chatseat.looking_through.6c8d5b7b"), file)
             }
-            "WebFetch" -> labeled("Opening", site(collapsed))
-            "WebSearch" -> "Searching the web"
-            "Task", "Subagent" -> "Asking another agent"
-            "TodoWrite" -> "Updating the list"
+            "WebFetch" -> labeled(L10n.text("android.chatseat.opening.f4b13e93"), site(collapsed))
+            "WebSearch" -> L10n.text("android.chatseat.searching_the_web.87d2f338")
+            "Task", "Subagent" -> L10n.text("android.chatseat.asking_another_agent.fde5ee73")
+            "TodoWrite" -> L10n.text("android.chatseat.updating_the_list.ca724dcc")
             else -> {
                 // A path with nothing left after the slashes is just work.
                 // "Working on" with an empty name reads as a broken sentence.
                 val edges = trimEdges(line)
                 if (edges.contains('/') || edges.contains('\\')) {
                     val file = fileName(line)
-                    if (file.isEmpty()) "Working" else labeled("Working on", file)
+                    if (file.isEmpty()) L10n.text("common.working") else labeled(L10n.text("android.chatseat.working_on.006abaf3"), file)
                 } else if (collapsed.isEmpty()) {
-                    "Working"
+                    L10n.text("common.working")
                 } else {
-                    labeled("Working on", collapsed)
+                    labeled(L10n.text("android.chatseat.working_on.006abaf3"), collapsed)
                 }
             }
         }
@@ -51,28 +53,28 @@ object ChatSeat {
     /// Waiting wins. A real step is shown as written. Speaking is a reply.
     /// Everything else is thought.
     fun seatLabel(waiting: Boolean, step: String?, speaking: Boolean): String {
-        if (waiting) return "Waiting"
+        if (waiting) return L10n.text("common.waiting")
         if (step != null && step.isNotBlank()) return step
-        if (speaking) return "Replying"
-        return "Thinking"
+        if (speaking) return L10n.text("android.chatseat.replying.b2663dd7")
+        return L10n.text("android.chatseat.thinking.a20d12c5")
     }
 
     /// Present while the step runs, past once it has finished.
     /// An unknown name is returned unchanged, once trimmed.
     fun word(verb: String?, running: Boolean): String {
         return when (trimVerb(verb)) {
-            "Read" -> if (running) "Reading" else "Read"
-            "Write" -> if (running) "Writing" else "Wrote"
-            "Edit", "NotebookEdit" -> if (running) "Editing" else "Edited"
-            "Diff" -> if (running) "Comparing" else "Compared"
-            "Shell", "Bash" -> if (running) "Running" else "Ran"
-            "Grep", "Search" -> if (running) "Searching" else "Searched"
-            "Glob", "Find" -> if (running) "Looking" else "Looked"
-            "WebFetch" -> if (running) "Opening" else "Opened"
-            "WebSearch" -> if (running) "Searching the web" else "Searched the web"
-            "Task", "Subagent" -> if (running) "Asking another agent" else "Asked another agent"
-            "TodoWrite" -> if (running) "Updating the list" else "Updated the list"
-            "" -> if (running) "Working" else "Worked"
+            "Read" -> if (running) L10n.text("android.chatseat.reading.463816d0") else L10n.text("android.chatseat.read.9b9a8d05")
+            "Write" -> if (running) L10n.text("android.chatseat.writing.a8bfae3e") else L10n.text("android.chatseat.wrote.42717062")
+            "Edit", "NotebookEdit" -> if (running) L10n.text("android.chatseat.editing.fab4539d") else L10n.text("android.chatseat.edited.7117f080")
+            "Diff" -> if (running) L10n.text("android.chatseat.comparing.1fa1aad0") else L10n.text("android.chatseat.compared.17c858fc")
+            "Shell", "Bash" -> if (running) L10n.text("common.running") else L10n.text("android.chatseat.ran.b6a7c95e")
+            "Grep", "Search" -> if (running) L10n.text("android.chatseat.searching.03bd6fca") else L10n.text("android.chatseat.searched.9fc7f116")
+            "Glob", "Find" -> if (running) L10n.text("android.chatseat.looking.afa37c88") else L10n.text("android.chatseat.looked.07558310")
+            "WebFetch" -> if (running) L10n.text("android.chatseat.opening.f4b13e93") else L10n.text("android.chatseat.opened.b19fb8d1")
+            "WebSearch" -> if (running) L10n.text("android.chatseat.searching_the_web.87d2f338") else L10n.text("android.chatseat.searched_the_web.7d2580ce")
+            "Task", "Subagent" -> if (running) L10n.text("android.chatseat.asking_another_agent.fde5ee73") else L10n.text("android.chatseat.asked_another_agent.629f8e22")
+            "TodoWrite" -> if (running) L10n.text("android.chatseat.updating_the_list.ca724dcc") else L10n.text("android.chatseat.updated_the_list.de8e6fab")
+            "" -> if (running) L10n.text("common.working") else L10n.text("android.chatseat.worked.e7f93aad")
             else -> trimVerb(verb)
         }
     }
@@ -88,7 +90,7 @@ object ChatSeat {
     /// is past tense, and a blank name stays Approval.
     fun approvalWord(verb: String?, pending: Boolean): String {
         val name = trimVerb(verb)
-        if (name.isEmpty()) return "Approval"
+        if (name.isEmpty()) return L10n.text("android.chatseat.approval.147fb813")
         return word(name, pending)
     }
 
@@ -99,14 +101,14 @@ object ChatSeat {
     fun allowAlwaysNote(verb: String?, shellPrefix: String?): String? {
         val prefix = trimVerb(shellPrefix)
         if (prefix.isNotEmpty()) {
-            return "Always allow remembers $prefix for this chat only."
+            return L10n.text("android.chatseat.always_allow_remembers_0_for_this_chat_onl.394a9e6d", "${prefix}")
         }
         if (isShell(verb)) {
-            return "Always allow answers this request only. Nothing is saved for later."
+            return L10n.text("android.chatseat.always_allow_answers_this_request_only_not.a067a2b7")
         }
         val name = trimVerb(verb)
         if (name.isEmpty()) return null
-        return "Always allow remembers $name for this chat only."
+        return L10n.text("android.chatseat.always_allow_remembers_0_for_this_chat_onl.394a9e6d", "${name}")
     }
 
     /// Same rule as the host: a shell tool is never remembered by its name.

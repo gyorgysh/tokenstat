@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.billing
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 /// Human words for a Play Billing ISO-8601 period (`P3D`, `P1W`, `P1M`,
 /// `P1Y`, `P6M`). Unknown shapes pass through untouched rather than
 /// rendering as a wrong duration.
@@ -48,5 +50,5 @@ fun introCaption(phases: List<PhaseView>): String? {
     if (phases.size < 2) return null
     val intro = phases.first()
     val regular = phases.last()
-    return "${intro.formattedPrice} for ${humanizeBillingPeriod(intro.billingPeriod)}, then ${regular.formattedPrice}."
+    return L10n.text("android.billingphases.0_for_1_then_2.dba51e31", "${intro.formattedPrice}", "${humanizeBillingPeriod(intro.billingPeriod)}", "${regular.formattedPrice}")
 }

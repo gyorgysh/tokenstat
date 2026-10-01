@@ -1045,13 +1045,13 @@ struct SSHLiveTerminalScreen: View {
             HStack {
                 Text(session.title).font(Theme.headline)
                 if !session.alive {
-                    Text("ended").font(Theme.caption).foregroundStyle(.secondary)
+                    Text(L10n.text("apple.sshliveterminal.ended.e87ba7a0")).font(Theme.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("End session", .disconnect) { confirmingClose = true }
+                Button(L10n.text("apple.sshliveterminal.end_session.f00b921f"), .disconnect) { confirmingClose = true }
                     .buttonStyle(SecondaryButtonStyle(small: true))
                 // "Done" leaves it running, which is why it is not "Close".
-                Button("Done", .done) { dismiss() }
+                Button(L10n.text("common.done"), .done) { dismiss() }
             }
             .padding(Theme.Space.s)
             if siblings.count > 1 { tabs }
@@ -1090,15 +1090,15 @@ struct SSHLiveTerminalScreen: View {
             }
         }
 
-        .confirmationDialog("End this session?", isPresented: $confirmingClose, titleVisibility: .visible) {
-            Button("End session", role: .destructive) {
+        .confirmationDialog(L10n.text("apple.sshliveterminal.end_this_session.2a445dc0"), isPresented: $confirmingClose, titleVisibility: .visible) {
+            Button(L10n.text("apple.sshliveterminal.end_session.f00b921f"), role: .destructive) {
                 let doomed = session
                 dismiss()
                 Task { await sessions.close(doomed) }
             }
-            Button("Cancel", role: .cancel) {}
+            Button(L10n.text("common.cancel"), role: .cancel) {}
         } message: {
-            Text("Whatever is running in it stops. Nothing else on the server changes.")
+            Text(L10n.text("apple.sshliveterminal.whatever_is_running_in_it_stops_nothing_el.f25aee6b"))
         }
     }
 
@@ -1140,7 +1140,7 @@ struct SSHLiveTerminalScreen: View {
                     .buttonStyle(.plain)
                 }
                 if let onNewSession {
-                    Button("New terminal", .create, action: onNewSession)
+                    Button(L10n.text("apple.sshliveterminal.new_terminal.fe544556"), .create, action: onNewSession)
                         .buttonStyle(SecondaryButtonStyle(small: true))
                 }
             }
@@ -1165,7 +1165,7 @@ struct SSHLiveTerminalScreen: View {
                     .font(Theme.font(13, weight: .medium))
                     .frame(minWidth: 34, minHeight: 30)
             }
-            .accessibilityLabel("Snippets")
+            .accessibilityLabel(L10n.text("apple.sshliveterminal.snippets.ff717209"))
         )
     }
     #endif
@@ -1194,7 +1194,7 @@ struct SSHSnippetRunSheet: View {
     let snippet: SSHSnippet
     /// What the button says, because the same sheet fills in a command that
     /// is about to run and one that is only being typed at the prompt.
-    var action: String = "Run it"
+    var action: String = L10n.text("apple.sshliveterminal.run_it.958ca26c")
     var icon: ActionIcon = .run
     let onFilled: (String) -> Void
 
@@ -1217,7 +1217,7 @@ struct SSHSnippetRunSheet: View {
     var body: some View {
         ThemedSheet(
             title: snippet.title,
-            subtitle: "Values are asked for every time and never saved.",
+            subtitle: L10n.text("apple.sshliveterminal.values_are_asked_for_every_time_and_never.407fc629"),
             icon: .run,
             onClose: { dismiss() }
         ) {
@@ -1238,7 +1238,7 @@ struct SSHSnippetRunSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         } actions: {
-            Button("Cancel", .dismiss) { dismiss() }
+            Button(L10n.text("common.cancel"), .dismiss) { dismiss() }
                 .buttonStyle(SecondaryButtonStyle())
                 .keyboardShortcut(.cancelAction)
             Spacer()

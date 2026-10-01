@@ -125,8 +125,8 @@ struct CountdownRing: View {
         }
         .frame(width: size, height: size)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Next run \(words)")
-        .help("Next run \(words)")
+        .accessibilityLabel(L10n.text("apple.cadenceglyph.next_run_0.64198a42", "\(words)"))
+        .help(L10n.text("apple.cadenceglyph.next_run_0.64198a42", "\(words)"))
     }
 
     private var fraction: Double {
@@ -181,7 +181,7 @@ struct SlotGauge: View {
     var body: some View {
         HStack(spacing: 3) {
             if uncapped {
-                Text("No cap")
+                Text(L10n.text("apple.cadenceglyph.no_cap.59db2115"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -203,8 +203,8 @@ struct SlotGauge: View {
     }
 
     private var label: String {
-        if uncapped { return "No limit on jobs at once" }
-        return "\(filled) of \(total) slots busy"
+        if uncapped { return L10n.text("apple.cadenceglyph.no_limit_on_jobs_at_once.76b43c57") }
+        return L10n.text("apple.cadenceglyph.0_of_1_slots_busy.2b6c328d", "\(filled)", "\(total)")
     }
 }
 

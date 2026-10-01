@@ -26,7 +26,7 @@ struct ChatInspector: View {
         VStack(spacing: 0) {
             if showsHeader {
             InspectorChromeBar(onClose: onClose) {
-                InspectorTitle(title: "Chat", symbol: "bubble.left.and.bubble.right")
+                InspectorTitle(title: L10n.text("apple.chatinspector.chat.460b3a7d"), symbol: "bubble.left.and.bubble.right")
                 Spacer(minLength: 0)
             }
             }
@@ -40,7 +40,7 @@ struct ChatInspector: View {
                             folderCard
                             allowlist(chat)
                             ChatCostMeter(totals: model.turnUsage)
-                            Button("Delete chat", .delete, role: .destructive) {
+                            Button(L10n.text("apple.chatinspector.delete_chat.93291d9c"), .delete, role: .destructive) {
                                 guard let owner = model.currentReference else { return }
                                 deletionTarget = DeletionTarget(chat: chat, owner: owner)
                                 pendingDelete = true
@@ -62,8 +62,8 @@ struct ChatInspector: View {
                 } else {
                     InspectorEmptyState(
                         systemImage: "bubble.left.and.bubble.right",
-                        title: "Start a chat",
-                        subtitle: "A conversation's settings, allowlist and cost open here.",
+                        title: L10n.text("apple.chatinspector.start_a_chat.d80b1888"),
+                        subtitle: L10n.text("apple.chatinspector.a_conversation_s_settings_allowlist_and_co.c2f31ecf"),
                         tint: Theme.accent
                     )
                 }
@@ -76,8 +76,8 @@ struct ChatInspector: View {
         .sheet(isPresented: $showingPersonas) {
             PersonaEditor(model: model, onClose: { showingPersonas = false })
         }
-        .confirmationDialog("Delete this chat?", isPresented: $pendingDelete, titleVisibility: .visible) {
-            Button("Delete chat", role: .destructive) {
+        .confirmationDialog(L10n.text("apple.chatinspector.delete_this_chat.848dad9b"), isPresented: $pendingDelete, titleVisibility: .visible) {
+            Button(L10n.text("apple.chatinspector.delete_chat.93291d9c"), role: .destructive) {
                 guard let target = deletionTarget else { return }
                 Task {
                     guard model.currentReference == target.owner,
@@ -86,9 +86,9 @@ struct ChatInspector: View {
                     await model.remove(target.chat)
                 }
             }
-            Button("Cancel", role: .cancel) {}
+            Button(L10n.text("common.cancel"), role: .cancel) {}
         } message: {
-            Text("The transcript stays on this computer until you delete it. This cannot be undone.")
+            Text(L10n.text("apple.chatinspector.the_transcript_stays_on_this_computer_unti.46662c93"))
         }
         .onChange(of: model.currentReference) { _, _ in
             pendingDelete = false
@@ -103,18 +103,18 @@ struct ChatInspector: View {
     }
 
     private func identity(_ chat: ChatConversation) -> some View {
-        group("Conversation") {
+        group(L10n.text("apple.chatinspector.conversation.ccca1817")) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                TextField("Title", text: $titleDraft)
+                TextField(L10n.text("apple.chatinspector.title.7e8cd205"), text: $titleDraft)
                     .themedFieldBox()
                     .disabled(model.savedCopy != nil)
                     .focused($titleFocused)
                     .onSubmit { commitTitle(chat) }
                 HStack(spacing: Theme.Space.s) {
-                    Button("Personas", .persona) { showingPersonas = true }
+                    Button(L10n.text("apple.chatinspector.personas.fa2ea3fb"), .persona) { showingPersonas = true }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                     if chat.running {
-                        Text("Working")
+                        Text(L10n.text("common.working"))
                             .font(Theme.caption.weight(.medium))
                             .foregroundStyle(Theme.accent)
                     }
@@ -126,9 +126,9 @@ struct ChatInspector: View {
 
     @ViewBuilder
     private var folderCard: some View {
-        group("Folder") {
+        group(L10n.text("apple.chatinspector.folder.74ccd433")) {
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                Text(folder?.name ?? "This project")
+                Text(folder?.name ?? L10n.text("apple.chatinspector.this_project.d0f62545"))
                     .font(Theme.callout.weight(.medium))
                 if let path = folder?.path, !path.isEmpty {
                     Text(path)
@@ -143,14 +143,14 @@ struct ChatInspector: View {
     }
 
     private func allowlist(_ chat: ChatConversation) -> some View {
-        group("Always allowed") {
+        group(L10n.text("apple.chatinspector.always_allowed.94387772")) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Text("Always allow on a permission card writes here. Remove a rule to ask again.")
+                Text(L10n.text("apple.chatinspector.always_allow_on_a_permission_card_writes_h.b50406cc"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if chat.allowedTools.isEmpty && chat.allowedShellPrefixes.isEmpty {
-                    Text("Nothing is remembered yet.")
+                    Text(L10n.text("apple.chatinspector.nothing_is_remembered_yet.d523b614"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -184,7 +184,7 @@ struct ChatInspector: View {
             Text(title)
                 .font(Theme.caption.weight(.medium))
                 .foregroundStyle(Theme.accent)
-            Button("Remove", .dismiss) { remove() }
+            Button(L10n.text("common.remove"), .dismiss) { remove() }
                 .disabled(model.savedCopy != nil)
                 .buttonStyle(.plain)
                 .font(Theme.caption)

@@ -49,8 +49,8 @@ final class ClientSetupCoordinator {
         do { savedDraft = try store.load(scope: scope) }
         catch {
             failure = ClientSetupFailure(
-                explanation: "The saved setup could not be opened.",
-                changed: "Nothing on the server was removed, and nothing will be.",
+                explanation: L10n.text("apple.clientsetupcoordinator.the_saved_setup_could_not_be_opened.d4cbda1f"),
+                changed: L10n.text("apple.clientsetupcoordinator.nothing_on_the_server_was_removed_and_noth.78c00221"),
                 action: .retry,
                 details: error.localizedDescription
             )

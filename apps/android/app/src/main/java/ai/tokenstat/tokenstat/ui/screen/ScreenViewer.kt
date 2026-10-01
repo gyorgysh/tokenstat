@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.screen
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.activity.compose.BackHandler
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.chrome.HideTabBar
@@ -319,7 +321,7 @@ fun ScreenViewerScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onClose) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = colors.textPrimary)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, L10n.text("common.back"), tint = colors.textPrimary)
                     }
                 },
                 actions = {
@@ -329,7 +331,7 @@ fun ScreenViewerScreen(
                     ) {
                         Icon(
                             Icons.Default.Mouse,
-                            if (controlling) "View only" else "Control",
+                            if (controlling) L10n.text("android.screenviewer.view_only.9b4c6c85") else L10n.text("android.screenviewer.control.32d7e820"),
                             tint = if (controlling) colors.accent else colors.textPrimary,
                         )
                     }
@@ -337,7 +339,7 @@ fun ScreenViewerScreen(
                         IconButton(onClick = { keyboardWanted = !keyboardWanted }) {
                             Icon(
                                 Icons.Default.Keyboard,
-                                "Keyboard",
+                                L10n.text("android.screenviewer.keyboard.2316810a"),
                                 tint = if (keyboardWanted) colors.accent else colors.textPrimary,
                             )
                         }
@@ -345,13 +347,13 @@ fun ScreenViewerScreen(
                     IconButton(onClick = { immersive = true }) {
                         Icon(
                             Icons.Default.Fullscreen,
-                            "Full screen",
+                            L10n.text("android.screenviewer.full_screen.674fe2ac"),
                             tint = colors.textPrimary,
                         )
                     }
                     Box {
                         IconButton(onClick = { menu = Menu.Main }) {
-                            Icon(Icons.Default.MoreVert, "More", tint = colors.textPrimary)
+                            Icon(Icons.Default.MoreVert, L10n.text("android.screenviewer.more.d47d7cb0"), tint = colors.textPrimary)
                         }
                         ViewerMenu(
                             open = menu,
@@ -453,7 +455,7 @@ fun ScreenViewerScreen(
             // is a click on somebody's desktop.
             if (immersive) {
                 TsSecondaryButton(
-                    label = "Exit full screen",
+                    label = L10n.text("android.screenviewer.exit_full_screen.897e0cf7"),
                     icon = ActionIcon.ExitFullScreen.vector,
                     small = true,
                     onClick = { immersive = false },
@@ -476,12 +478,12 @@ fun ScreenViewerScreen(
                     horizontalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
                     Text(
-                        "Holding the left button",
+                        L10n.text("android.screenviewer.holding_the_left_button.fcaabf2e"),
                         style = TsType.caption.copy(fontWeight = FontWeight.SemiBold),
                         color = Color.White,
                     )
                     TsSecondaryButton(
-                        label = "Release",
+                        label = L10n.text("android.screenviewer.release.e020e3c6"),
                         icon = ActionIcon.Move.vector,
                         small = true,
                         onClick = {
@@ -503,7 +505,7 @@ fun ScreenViewerScreen(
                         color = colors.accent,
                     )
                     TsSecondaryButton(
-                        label = "Cancel",
+                        label = L10n.text("common.cancel"),
                         icon = ActionIcon.Dismiss.vector,
                         small = true,
                         onClick = { session.cancelTransfer() },
@@ -668,19 +670,18 @@ private fun ScreenOverlay(
             }
             session.needsLegend -> {
                 Text(
-                    "Screen access is on Legend",
+                    L10n.text("android.screenviewer.screen_access_is_on_legend.6cb112d2"),
                     style = TsType.headline,
                     color = Color.White,
                     textAlign = TextAlign.Center,
                 )
                 Text(
-                    "Mouse and keyboard never travel without the picture, and the picture is " +
-                        "end-to-end encrypted between your devices. Legend is the plan that includes it.",
+                    L10n.text("android.screenviewer.mouse_and_keyboard_never_travel_without_th.b97a2ef8"),
                     style = TsType.callout,
                     color = Color.White.copy(alpha = 0.72f),
                     textAlign = TextAlign.Center,
                 )
-                TsAccentButton(label = "See plans", icon = ActionIcon.Plans.vector, onClick = onPlans)
+                TsAccentButton(label = L10n.text("android.screenviewer.see_plans.d9898933"), icon = ActionIcon.Plans.vector, onClick = onPlans)
             }
             else -> {
                 Text(
@@ -696,22 +697,22 @@ private fun ScreenOverlay(
                         .padding(Space.m),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Readiness("Legend plan", tier.equals("legend", ignoreCase = true))
-                    Readiness("Signed in and paired", true)
+                    Readiness(L10n.text("android.screenviewer.legend_plan.1160a70f"), tier.equals("legend", ignoreCase = true))
+                    Readiness(L10n.text("android.screenviewer.signed_in_and_paired.0cf50cf8"), true)
                     Readiness(
-                        "Computer online",
+                        L10n.text("android.screenviewer.computer_online.3793e57b"),
                         !session.message.contains("offline", ignoreCase = true),
                     )
-                    Readiness("Per-device screen permission", !session.needsPermission)
+                    Readiness(L10n.text("android.screenviewer.per_device_screen_permission.2a9f7a46"), !session.needsPermission)
                     Readiness(
-                        if (controlling) "Screen Recording and Accessibility"
-                        else "Screen Recording on that computer",
+                        if (controlling) L10n.text("android.screenviewer.screen_recording_and_accessibility.d2a661df")
+                        else L10n.text("android.screenviewer.screen_recording_on_that_computer.9102c9a7"),
                         !session.message.contains("recording", ignoreCase = true),
                     )
                 }
                 if (session.needsPermission) {
                     TsAccentButton(
-                        label = "Request access",
+                        label = L10n.text("android.screenviewer.request_access.b06f1662"),
                         icon = ActionIcon.Approve.vector,
                         enabled = !session.isRequesting,
                         onClick = { session.requestAccess() },
@@ -726,7 +727,7 @@ private fun ScreenOverlay(
                     )
                 }
                 TsSecondaryButton(
-                    label = "Try again",
+                    label = L10n.text("android.screenviewer.try_again.d8b8392e"),
                     icon = ActionIcon.Refresh.vector,
                     onClick = onRetry,
                 )
@@ -776,21 +777,21 @@ private fun ViewerMenu(
     DropdownMenu(expanded = open == Menu.Main, onDismissRequest = onDismiss) {
         if (session.displays.size > 1) {
             DropdownMenuItem(
-                text = { Text("Display: " + currentDisplayName(session)) },
+                text = { Text(L10n.text("android.screenviewer.display_0.017d4ba0", "${currentDisplayName(session)}")) },
                 onClick = { onOpen(Menu.Displays) },
             )
         }
         DropdownMenuItem(
-            text = { Text("Quality: " + session.quality.title) },
+            text = { Text(L10n.text("android.screenviewer.quality_0.be982f4f", "${session.quality.title}")) },
             onClick = { onOpen(Menu.Quality) },
         )
         if (controlling) {
             DropdownMenuItem(
-                text = { Text("Pointer: " + pointerMode.title) },
+                text = { Text(L10n.text("android.screenviewer.pointer_0.9fe661c8", "${pointerMode.title}")) },
                 onClick = { onOpen(Menu.Pointer) },
             )
             DropdownMenuItem(
-                text = { Text(if (session.transferProgress == null) "Send file" else "Cancel transfer") },
+                text = { Text(if (session.transferProgress == null) L10n.text("android.screenviewer.send_file.cb4bef0b") else L10n.text("android.screenviewer.cancel_transfer.f48e8dc7")) },
                 onClick = {
                     onDismiss()
                     if (session.transferProgress == null) onSendFile() else session.cancelTransfer()
@@ -798,7 +799,7 @@ private fun ViewerMenu(
             )
         }
         DropdownMenuItem(
-            text = { Text(if (muted) "Unmute" else "Mute") },
+            text = { Text(if (muted) L10n.text("android.screenviewer.unmute.ce4ee4ef") else L10n.text("android.screenviewer.mute.8dd6857b")) },
             onClick = {
                 onDismiss()
                 onMute(!muted)
@@ -806,7 +807,7 @@ private fun ViewerMenu(
         )
         if (zoomed) {
             DropdownMenuItem(
-                text = { Text("Fit") },
+                text = { Text(L10n.text("android.screenviewer.fit.9f872ed4")) },
                 onClick = {
                     onDismiss()
                     onFit()
@@ -861,7 +862,7 @@ private fun ViewerMenu(
 private fun currentDisplayName(session: ScreenViewerModel): String =
     session.displays.firstOrNull { it.id == session.selectedDisplay }?.name
         ?: session.displays.firstOrNull()?.name
-        ?: "Main"
+        ?: L10n.text("android.screenviewer.main.eb814be3")
 
 /// This device's clipboard, kept in step with the far end while controlling
 /// it. The contents are read only when the description says they changed, so
@@ -891,6 +892,6 @@ private fun fileSource(context: Context, uri: Uri): ScreenFileSource {
         }
     }.getOrNull() ?: uri.lastPathSegment?.substringAfterLast('/') ?: "file"
     return ScreenFileSource(name) {
-        resolver.openInputStream(uri) ?: throw IllegalStateException("That file could not be read.")
+        resolver.openInputStream(uri) ?: throw IllegalStateException(L10n.text("android.screenviewer.that_file_could_not_be_read.e9fe8433"))
     }
 }

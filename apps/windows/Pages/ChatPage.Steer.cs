@@ -87,11 +87,11 @@ internal sealed partial class ChatPage
     private void RefreshComposerHint()
     {
         if (Busy() && SteerKnownAvailable())
-            _draft.PlaceholderText = "Add a note for the next step";
+            _draft.PlaceholderText = L10n.Text("windows.chatpage_steer.add_a_note_for_the_next_step.4778177a");
         else if (Busy())
-            _draft.PlaceholderText = "Send after this turn";
+            _draft.PlaceholderText = L10n.Text("windows.chatpage_steer.send_after_this_turn.012fc8c3");
         else
-            _draft.PlaceholderText = "Ask about this folder";
+            _draft.PlaceholderText = L10n.Text("windows.chatpage_steer.ask_about_this_folder.33b8b41b");
     }
 
     private async Task<long?> ReadProtocolAsync()
@@ -194,7 +194,7 @@ internal sealed partial class ChatPage
         _started = _events.Count > 0 || !string.IsNullOrEmpty(Format.Text(_openChat, "resumeToken"));
         if (_titleBox.FocusState == FocusState.Unfocused)
         {
-            _titleBox.Text = Format.Text(_openChat, "title", "New chat");
+            _titleBox.Text = Format.Text(_openChat, "title", L10n.Text("windows.chatpage_steer.new_chat.db18382a"));
         }
         var note = PendingSteerText(_openChat);
         if (wasBusy != Busy() || previous != note)
@@ -396,15 +396,15 @@ internal sealed partial class ChatPage
     {
         var title = new TextBlock
         {
-            Text = "On the next step",
+            Text = L10n.Text("windows.chatpage_steer.on_the_next_step.78ea7972"),
             FontSize = 12,
             FontWeight = FontWeights.Medium,
             Foreground = Theme.AccentBrush,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        var remove = ActionIconGlyph.Button("Remove", ActionIcon.Delete, async (_, _) => await ClearSteerAsync());
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(remove, "Remove this note");
-        ToolTipService.SetToolTip(remove, "Remove this note");
+        var remove = ActionIconGlyph.Button(L10n.Text("common.remove"), ActionIcon.Delete, async (_, _) => await ClearSteerAsync());
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(remove, L10n.Text("windows.chatpage_steer.remove_this_note.80951b12"));
+        ToolTipService.SetToolTip(remove, L10n.Text("windows.chatpage_steer.remove_this_note.80951b12"));
         var header = new Grid { ColumnSpacing = Theme.SpaceS };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -432,7 +432,7 @@ internal sealed partial class ChatPage
             Padding = new Thickness(Theme.SpaceS),
             Child = stack,
         };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(border, "On the next step. " + note);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(border, L10n.Text("windows.chatpage_steer.on_the_next_step_0.81127e40", $"{note}"));
         return border;
     }
 }

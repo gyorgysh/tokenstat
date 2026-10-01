@@ -46,7 +46,7 @@ struct DesktopSavedConversation: View {
     private var current: Bool { WorkCacheAccess.canRead(destination.reference) }
 
     var body: some View {
-        ThemedSheet(title: "Saved conversation", subtitle: "Work kept on this Mac", icon: .comment,
+        ThemedSheet(title: L10n.text("apple.desktopsavedwork.saved_conversation.20844222"), subtitle: L10n.text("apple.desktopsavedwork.work_kept_on_this_mac.6d1f8dc8"), icon: .comment,
                     onClose: { dismiss() }) {
             if current {
                 if available {
@@ -54,9 +54,9 @@ struct DesktopSavedConversation: View {
                              showingOverview: .constant(false),
                              loadsWorkspace: false)
                 } else if loaded {
-                    Text("This conversation has no readable saved copy on this Mac. Reconnect its machine and open the folder to read it live.")
+                    Text(L10n.text("apple.desktopsavedwork.this_conversation_has_no_readable_saved_co.f49077e3"))
                         .font(Theme.callout).foregroundStyle(Theme.controlGlyph)
-                } else { ProgressView("Opening saved conversation") }
+                } else { ProgressView(L10n.text("apple.desktopsavedwork.opening_saved_conversation.0d440015")) }
             }
         }
         .modalFrame(width: 900, height: 760)

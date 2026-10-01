@@ -46,13 +46,13 @@ enum AppInstaller {
 
         var errorDescription: String? {
             switch self {
-            case .notMounted(let why): return "The download could not be opened: \(why)"
-            case .noAppInImage: return "The download did not contain tokenstat."
-            case .unsigned(let why): return "The download is not correctly signed: \(why)"
-            case .rejectedByGatekeeper(let why): return "macOS refused the download: \(why)"
+            case .notMounted(let why): return L10n.text("apple.appinstaller.the_download_could_not_be_opened_0.f108766c", "\(why)")
+            case .noAppInImage: return L10n.text("apple.appinstaller.the_download_did_not_contain_tokenstat.1fcbc345")
+            case .unsigned(let why): return L10n.text("apple.appinstaller.the_download_is_not_correctly_signed_0.44772622", "\(why)")
+            case .rejectedByGatekeeper(let why): return L10n.text("apple.appinstaller.macos_refused_the_download_0.b81bebd3", "\(why)")
             case .authorizationFailed(let why):
-                return "The update needs your Mac password to replace the app: \(why)"
-            case .replaceFailed(let why): return "The update could not be put in place: \(why)"
+                return L10n.text("apple.appinstaller.the_update_needs_your_mac_password_to_repl.b47c6644", "\(why)")
+            case .replaceFailed(let why): return L10n.text("apple.appinstaller.the_update_could_not_be_put_in_place_0.1c64b8f4", "\(why)")
             }
         }
     }
@@ -113,7 +113,7 @@ enum AppInstaller {
                 return last
             }
             .last
-        guard let mount else { throw Failure.notMounted("no mount point in hdiutil's output") }
+        guard let mount else { throw Failure.notMounted(L10n.text("apple.appinstaller.no_mount_point_in_hdiutil_s_output.95266b5d")) }
         return URL(fileURLWithPath: mount)
     }
 
@@ -139,10 +139,10 @@ enum AppInstaller {
             // A local build has no Developer ID to hold the download to, so
             // there is nothing to check against and it must not pretend
             // otherwise. Local builds are replaced by hand anyway.
-            throw Failure.unsigned("this build is not a signed release, so it cannot verify one")
+            throw Failure.unsigned(L10n.text("apple.appinstaller.this_build_is_not_a_signed_release_so_it_c.998f998c"))
         }
         guard let offered = developerIDTeam(of: app), offered == expected else {
-            throw Failure.unsigned("it was signed by somebody else")
+            throw Failure.unsigned(L10n.text("apple.appinstaller.it_was_signed_by_somebody_else.8cf77a94"))
         }
 
         let gate = run("/usr/sbin/spctl", [
@@ -408,7 +408,7 @@ enum AppInstaller {
     }
 
     private static func firstLine(_ text: String) -> String {
-        text.split(separator: "\n").first.map(String.init) ?? "no reason given"
+        text.split(separator: "\n").first.map(String.init) ?? L10n.text("apple.appinstaller.no_reason_given.bdb1872e")
     }
 }
 #endif

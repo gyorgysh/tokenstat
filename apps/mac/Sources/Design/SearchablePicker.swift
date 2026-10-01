@@ -109,7 +109,7 @@ extension View {
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button("Done") { isPresented.wrappedValue = false }
+                            Button(L10n.text("common.done")) { isPresented.wrappedValue = false }
                         }
                     }
             }
@@ -144,7 +144,7 @@ struct PickerSearchField: View {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Clear filter")
+                .accessibilityLabel(L10n.text("apple.searchablepicker.clear_filter.ba59e2d4"))
             }
         }
         .padding(.horizontal, Theme.Space.s)
@@ -317,7 +317,7 @@ struct PickerOptionList<Value: Hashable>: View {
                         .font(Theme.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityLabel("Current selection: \(selectionSummary)")
+                        .accessibilityLabel(L10n.text("apple.searchablepicker.current_selection_0.a744cd0f", "\(selectionSummary)"))
                 }
                 HStack(spacing: Theme.Space.s) {
                     PickerSearchField(prompt: prompt, query: $query, onSubmit: submit)
@@ -344,11 +344,11 @@ struct PickerOptionList<Value: Hashable>: View {
 
             if filtered.isEmpty {
                 VStack(spacing: Theme.Space.xs) {
-                    Text(query.isEmpty ? emptyMessage : "Nothing matches")
+                    Text(query.isEmpty ? emptyMessage : L10n.text("apple.searchablepicker.nothing_matches.965b516d"))
                         .font(Theme.callout)
                         .foregroundStyle(.secondary)
                     if !query.isEmpty {
-                        Text("Try another part of the name.")
+                        Text(L10n.text("apple.searchablepicker.try_another_part_of_the_name.168c7783"))
                             .font(Theme.caption)
                             .foregroundStyle(.tertiary)
                     }
@@ -399,7 +399,7 @@ struct PickerOptionList<Value: Hashable>: View {
     }
 
     private var refreshButton: some View {
-        Button("Refresh", .refresh) {
+        Button(L10n.text("common.refresh"), .refresh) {
             guard let refresh, !refreshing else { return }
             Task {
                 refreshing = true
@@ -416,7 +416,7 @@ struct PickerOptionList<Value: Hashable>: View {
         #endif
         .disabled(refreshing)
         .opacity(refreshing ? 0.4 : 1)
-        .help("Ask this computer to read the agent's model list again")
+        .help(L10n.text("apple.searchablepicker.ask_this_computer_to_read_the_agent_s_mode.a3d03fd8"))
     }
 
     /// The group names stay visible while the list changes underneath them.
@@ -425,13 +425,13 @@ struct PickerOptionList<Value: Hashable>: View {
     private var sectionFilter: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                sectionTab(title: "All", section: "")
+                sectionTab(title: L10n.text("apple.searchablepicker.all.a52ace42"), section: "")
                 ForEach(sectionTabs, id: \.self) { section in
                     sectionTab(title: section, section: section)
                 }
             }
         }
-        .accessibilityLabel("Filter settings")
+        .accessibilityLabel(L10n.text("apple.searchablepicker.filter_settings.4e47a723"))
     }
 
     private func sectionTab(title: String, section: String) -> some View {

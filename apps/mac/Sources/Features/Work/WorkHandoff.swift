@@ -61,7 +61,7 @@ enum WorkHandoffResult: Decodable, Equatable, Sendable {
         case "conflict": self = .conflict(try values.decodeIfPresent(WorkHandoff.self, forKey: .current))
         default:
             throw DecodingError.dataCorruptedError(forKey: .status, in: values,
-                debugDescription: "Unknown handoff result")
+                debugDescription: L10n.text("apple.workhandoff.unknown_handoff_result.f02f6cdd"))
         }
     }
 }

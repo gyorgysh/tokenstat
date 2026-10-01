@@ -67,7 +67,7 @@ internal sealed class WorkspaceTabStrip
             tab = new TabViewItem { Header = label, Content = create(), IsClosable = closable,
                 HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
             var menu = ContextMenus.Menu(tab);
-            ContextMenus.Add(menu, "Close", () => CloseRequested?.Invoke(tab), () => tab.IsClosable);
+            ContextMenus.Add(menu, L10n.Text("common.close"), () => CloseRequested?.Invoke(tab), () => tab.IsClosable);
             _surfaces.Add(key, tab);
             View.TabItems.Add(tab);
         }

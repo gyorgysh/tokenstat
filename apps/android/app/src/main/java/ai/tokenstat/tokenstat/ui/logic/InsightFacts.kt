@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.logic
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 /// One fact under Insights' "This period" total: which figure it is, the
 /// already formatted value, and the house mark drawn on its trailing tile.
 /// Port of the tuples `ClientInsightFacts.panels` returns.
@@ -22,7 +24,7 @@ fun insightFactPanels(
     countLabel: String,
     formatCompact: (Long) -> String,
 ): List<InsightFactPanel> = listOf(
-    InsightFactPanel(label = "Tokens", value = formatCompact(tokens), mark = "mark_insights"),
-    InsightFactPanel(label = "Events", value = formatCompact(events), mark = "mark_activity"),
+    InsightFactPanel(label = L10n.text("android.insightfacts.tokens.a039dfb9"), value = formatCompact(tokens), mark = "mark_insights"),
+    InsightFactPanel(label = L10n.text("android.insightfacts.events.8d14f6e7"), value = formatCompact(events), mark = "mark_activity"),
     InsightFactPanel(label = countLabel, value = count.toString(), mark = "mark_examples"),
 )

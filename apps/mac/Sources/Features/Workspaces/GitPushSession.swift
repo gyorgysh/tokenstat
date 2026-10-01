@@ -33,7 +33,7 @@ final class GitPushSession {
     func load() async {
         guard !loaded else { return }
         guard let storage else {
-            errorMessage = "Waiting for this account and computer to be verified before saving work."
+            errorMessage = L10n.text("apple.gitpushsession.waiting_for_this_account_and_computer_to_b.f97b4242")
             return
         }
         do {
@@ -54,7 +54,7 @@ final class GitPushSession {
         defer { working = false }
         review = nil
         guard await service.supportsReviewedPush() else {
-            errorMessage = "Update this computer's tokenstat to review and push a branch from here."
+            errorMessage = L10n.text("apple.gitpushsession.update_this_computer_s_tokenstat_to_review.8147f2b4")
             return
         }
         do {
@@ -92,7 +92,7 @@ final class GitPushSession {
                 }
             } else {
                 canRetry = true
-                errorMessage = "This computer has no receipt for the submitted push. You can retry the same submission."
+                errorMessage = L10n.text("apple.gitpushsession.this_computer_has_no_receipt_for_the_submi.cadba34a")
             }
         } catch { errorMessage = error.localizedDescription }
     }
@@ -109,7 +109,7 @@ final class GitPushSession {
         guard let submission = draft.submitted else { return }
         canRetry = false
         do { await adopt(try await service.push(submission, retry: retry)) }
-        catch { errorMessage = "The push outcome has not been confirmed. Check its outcome before starting another. \(error.localizedDescription)" }
+        catch { errorMessage = L10n.text("apple.gitpushsession.the_push_outcome_has_not_been_confirmed_ch.128c6a9f", "\(error.localizedDescription)") }
     }
 
     private func adopt(_ receipt: GitPushReceipt) async {

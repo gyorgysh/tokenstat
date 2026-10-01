@@ -94,7 +94,7 @@ extension RelativeClock {
         let ticked = shared.now
         shared.wasRead = true
         let now = max(ticked, Date())
-        if abs(date.timeIntervalSince(now)) < 1 { return "just now" }
+        if abs(date.timeIntervalSince(now)) < 1 { return L10n.text("apple.relativetimetext.just_now.7ddb44d8") }
         formatter.unitsStyle = style
         return formatter.localizedString(for: date, relativeTo: now)
     }

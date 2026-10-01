@@ -552,7 +552,7 @@ struct ClientTerminalScreen: View {
                     Text(SidebarTerminalNames.shared.name(for: session.workReference) ?? URL(fileURLWithPath: session.command).lastPathComponent)
                         .font(ClientType.label.weight(.semibold))
                         .lineLimit(1)
-                    Text(session.alive ? session.cwd : (session.exitCode.map { "exited \($0)" } ?? "stopped"))
+                    Text(session.alive ? session.cwd : (session.exitCode.map { L10n.text("apple.clientterminalsession.exited_0.39ec5073", "\($0)") } ?? L10n.text("apple.clientterminalsession.stopped.8322e87d")))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -560,23 +560,23 @@ struct ClientTerminalScreen: View {
                 }
                 Spacer()
                 if session.droppedOutput {
-                    Text("output dropped")
+                    Text(L10n.text("apple.clientterminalsession.output_dropped.99ba5f69"))
                         .font(ClientType.caption)
                         .foregroundStyle(Theme.warning)
                 }
                 if session.workspaceID != nil {
                     PinToggleButton(reference: session.workReference,
-                        label: SidebarTerminalNames.shared.name(for: session.workReference) ?? "Terminal",
+                        label: SidebarTerminalNames.shared.name(for: session.workReference) ?? L10n.text("apple.clientterminalsession.terminal.e0926fda"),
                         folderName: URL(fileURLWithPath: session.cwd).lastPathComponent)
-                    Button("Project", .source) { showingWorkspace = true }
+                    Button(L10n.text("apple.clientterminalsession.project.98595978"), .source) { showingWorkspace = true }
                         .font(ClientType.caption.weight(.semibold))
-                        .accessibilityLabel("Project files, changes and history")
+                        .accessibilityLabel(L10n.text("apple.clientterminalsession.project_files_changes_and_history.4da56c40"))
                 }
-                Button("Close", .dismiss, role: .destructive) {
+                Button(L10n.text("common.close"), .dismiss, role: .destructive) {
                     confirmClose = true
                 }
                 .font(ClientType.caption.weight(.semibold))
-                Button("Done", .done) {
+                Button(L10n.text("common.done"), .done) {
                     onClose?()
                     dismiss()
                 }
@@ -587,7 +587,7 @@ struct ClientTerminalScreen: View {
             .background(Theme.background)
 
             if session.outputPaused {
-                Text("Output paused while the terminal catches up.")
+                Text(L10n.text("apple.clientterminalsession.output_paused_while_the_terminal_catches_u.c3cbbc1c"))
                     .font(ClientType.caption)
                     .foregroundStyle(Theme.warning)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -653,11 +653,11 @@ struct ClientTerminalScreen: View {
             }
         }
         .confirmationDialog(
-            "Close this session?",
+            L10n.text("apple.clientterminalsession.close_this_session.2b66ce2d"),
             isPresented: $confirmClose,
             titleVisibility: .visible
         ) {
-            Button("Close", role: .destructive) {
+            Button(L10n.text("common.close"), role: .destructive) {
                 Task {
                     do {
                         try await session.close()
@@ -669,11 +669,11 @@ struct ClientTerminalScreen: View {
                     }
                 }
             }
-            Button("Keep it", role: .cancel) {}
+            Button(L10n.text("apple.clientterminalsession.keep_it.fdce5da2"), role: .cancel) {}
         } message: {
             Text(hostName.isEmpty
-                ? "Stops the process on the computer."
-                : "Stops the process on \(hostName).")
+                ? L10n.text("apple.clientterminalsession.stops_the_process_on_the_computer.c5651cd1")
+                : L10n.text("apple.clientterminalsession.stops_the_process_on_0.7aa0b494", "\(hostName)"))
         }
         .sheet(isPresented: $showingWorkspace) {
             if let workspaceID = session.workspaceID {
@@ -686,7 +686,7 @@ struct ClientTerminalScreen: View {
                     )
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
-                            Button("Done", .done) { showingWorkspace = false }
+                            Button(L10n.text("common.done"), .done) { showingWorkspace = false }
                         }
                     }
                 }

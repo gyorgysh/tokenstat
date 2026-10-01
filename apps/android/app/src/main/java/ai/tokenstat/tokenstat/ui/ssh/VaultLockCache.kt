@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.ssh
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import android.content.Context
 import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
@@ -76,11 +78,11 @@ data class VaultLockSnapshot(
     /// detail: the count, "not syncing" where the plan cannot write, and no
     /// "locked" here, because the badge beside it already says that.
     fun detail(canWrite: Boolean): String? = when {
-        !created -> if (canWrite) "not set up" else "not syncing"
+        !created -> if (canWrite) L10n.text("android.vaultlockcache.not_set_up.ef93782b") else L10n.text("android.vaultlockcache.not_syncing.c0737345")
         locked -> null
         else -> {
-            val records = if (recordCount == 1) "1 record" else "$recordCount records"
-            if (canWrite) records else "$records · not syncing"
+            val records = if (recordCount == 1) "1 record" else L10n.text("android.vaultlockcache.0_records.2cd6fd62", "${recordCount}")
+            if (canWrite) records else L10n.text("android.vaultlockcache.0_not_syncing.b60c9633", "${records}")
         }
     }
 }
@@ -145,7 +147,7 @@ fun VaultLockRow(
             )
             Spacer(Modifier.width(Space.s))
             Text(
-                text = if (unconfirmedRecovery) "Recovery code not confirmed" else "Encrypted vault",
+                text = if (unconfirmedRecovery) L10n.text("android.vaultlockcache.recovery_code_not_confirmed.dc3c61fd") else L10n.text("android.vaultlockcache.encrypted_vault.31939e06"),
                 style = TsType.body,
                 color = if (unconfirmedRecovery) colors.warning else colors.textPrimary,
                 maxLines = 1,
@@ -154,7 +156,7 @@ fun VaultLockRow(
             )
             when {
                 shown == null -> Text(
-                    "checking…",
+                    L10n.text("android.vaultlockcache.checking.a0ec28fd"),
                     style = TsType.caption,
                     color = colors.textSecondary,
                 )
@@ -169,14 +171,14 @@ fun VaultLockRow(
             }
             if (checking && shown != null) {
                 Spacer(Modifier.width(Space.xs))
-                Text("checking…", style = TsType.caption, color = colors.textTertiary)
+                Text(L10n.text("android.vaultlockcache.checking.a0ec28fd"), style = TsType.caption, color = colors.textTertiary)
             }
             Icon(Icons.Default.ChevronRight, contentDescription = null, tint = colors.textTertiary)
         }
         if (unconfirmedRecovery) {
             Spacer(Modifier.height(Space.s))
             Banner(
-                "The code has been generated but not written down. It is the only way back in if the password is forgotten and every device is lost.",
+                L10n.text("android.vaultlockcache.the_code_has_been_generated_but_not_writte.e121ffb4"),
                 BannerSeverity.WARNING,
             )
         }
@@ -192,6 +194,6 @@ private fun VaultLockedBadge() {
             .background(colors.accentSoft)
             .padding(horizontal = 6.dp, vertical = 1.dp),
     ) {
-        Text("Locked", style = TsType.caption, color = colors.accent)
+        Text(L10n.text("android.vaultlockcache.locked.a424e33d"), style = TsType.caption, color = colors.accent)
     }
 }

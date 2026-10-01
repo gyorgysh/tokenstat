@@ -12,10 +12,10 @@ struct ClientWorkSearchButton: View {
     @Environment(ClientNavigationModel.self) private var navigation
 
     var body: some View {
-        Button("Search", .searchAll) { navigation.showWorkSearch = true }
+        Button(L10n.text("common.search"), .searchAll) { navigation.showWorkSearch = true }
             .labelStyle(.iconOnly)
             .keyboardShortcut("k", modifiers: .command)
-            .accessibilityLabel("Search")
+            .accessibilityLabel(L10n.text("common.search"))
     }
 }
 
@@ -39,14 +39,14 @@ struct ClientWorkSearchPresentation: View {
             if let model {
                 WorkSearchSheet(model: model, open: open, places: places)
             } else {
-                ThemedSheet(title: "Search", subtitle: "Find a screen, a setting, or your work",
+                ThemedSheet(title: L10n.text("common.search"), subtitle: L10n.text("apple.clientworksearch.find_a_screen_a_setting_or_your_work.e15aaac3"),
                             icon: .searchAll, scrolls: true, onClose: { dismiss() }) {
                     VStack(alignment: .leading, spacing: Theme.Space.m) {
                         placeField
-                        if preparing { ProgressView("Preparing saved work") }
+                        if preparing { ProgressView(L10n.text("apple.clientworksearch.preparing_saved_work.b5c92a5d")) }
                         if let failure {
                             Text(failure).font(Theme.callout).foregroundStyle(Theme.controlGlyph)
-                            Button("Try again", .refresh) { Task { await prepare() } }
+                            Button(L10n.text("apple.clientworksearch.try_again.d8b8392e"), .refresh) { Task { await prepare() } }
                                 .buttonStyle(SecondaryButtonStyle())
                         }
                         ForEach(ClientAppPlaces.matches(placeQuery, machines: machines)) { place in
@@ -92,7 +92,7 @@ struct ClientWorkSearchPresentation: View {
     private var placeField: some View {
         HStack(spacing: Theme.Space.s) {
             Image(systemName: ActionIcon.search.symbol).foregroundStyle(Theme.controlGlyph)
-            TextField("Search the app", text: $placeQuery)
+            TextField(L10n.text("apple.clientworksearch.search_the_app.ad908e74"), text: $placeQuery)
                 .textFieldStyle(.plain)
                 .font(Theme.body)
                 .focused($placeFieldFocused)
@@ -147,8 +147,8 @@ struct ClientWorkSearchPresentation: View {
                         && Set(account.account?.machines.compactMap(\.publicIdentity) ?? []) == Set(machines.keys)
                 })
             model.coverageNotice = allowed.count < machines.count
-                ? "Search covers machines with verified project access. Open a folder on another machine to verify its access."
-                : (includesText ? nil : "Saved conversation text is off. Search covers folder information kept on this device.")
+                ? L10n.text("apple.clientworksearch.search_covers_machines_with_verified_proje.0b813f10")
+                : (includesText ? nil : L10n.text("apple.clientworksearch.saved_conversation_text_is_off_search_cove.38f2ad0a"))
             self.model = model
             await learn(scope: scope, hosts: allowed, access: access, linked: Set(machines.keys))
         } catch {
@@ -156,7 +156,7 @@ struct ClientWorkSearchPresentation: View {
                   WorkSessionContext.shared.scope == scope,
                   WorkAccessStore.shared.generation == access,
                   Set(account.account?.machines.compactMap(\.publicIdentity) ?? []) == Set(machines.keys) else { return }
-            failure = "Saved work could not be opened for search. Unlock this device and try again."
+            failure = L10n.text("apple.clientworksearch.saved_work_could_not_be_opened_for_search.0824fde8")
         }
     }
 

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.sample
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 /// The sample, as data and nothing else. Port of `ClientSampleStore`.
 ///
 /// Deliberately a fixture, not a workspace, a peer or a chat. A sample that
@@ -30,21 +32,17 @@ object SampleStore {
         Turn(
             0,
             Speaker.PERSON,
-            "The landing page heading says \"Welcome to our site\". Make it say what " +
-                "the site is for instead.",
+            L10n.text("android.samplestore.the_landing_page_heading_says_welcome_to_o.c45b7a1f"),
         ),
         Turn(
             1,
             Speaker.AGENT,
-            "index.html has one h1. The page is a bakery's opening hours and address, " +
-                "so the heading should say that. I'll change the one line and leave " +
-                "everything else alone.",
+            L10n.text("android.samplestore.index_html_has_one_h1_the_page_is_a_bakery.c8074961"),
         ),
         Turn(
             2,
             Speaker.AGENT,
-            "Changed the heading in index.html. Nothing else in the file moved, and " +
-                "nothing is committed: the change is sitting in the folder for you.",
+            L10n.text("android.samplestore.changed_the_heading_in_index_html_nothing.6635c27e"),
         ),
     )
 
@@ -53,8 +51,8 @@ object SampleStore {
     val diff: List<Change> = listOf(
         Change(0, ChangeKind.CONTEXT, "<body>"),
         Change(1, ChangeKind.CONTEXT, "  <header>"),
-        Change(2, ChangeKind.REMOVED, "    <h1>Welcome to our site</h1>"),
-        Change(3, ChangeKind.ADDED, "    <h1>Fresh bread, daily, on Mill Street</h1>"),
+        Change(2, ChangeKind.REMOVED, L10n.text("android.samplestore.h1_welcome_to_our_site_h1.5a4dd29d")),
+        Change(3, ChangeKind.ADDED, L10n.text("android.samplestore.h1_fresh_bread_daily_on_mill_street_h1.e343866d")),
         Change(4, ChangeKind.CONTEXT, "  </header>"),
     )
 
@@ -65,13 +63,11 @@ object SampleStore {
     data class Reading(val id: String, val label: String, val value: String)
 
     val readings: List<Reading> = listOf(
-        Reading("input", "Sent", "8,420 tokens"),
-        Reading("output", "Received", "1,190 tokens"),
-        Reading("cost", "Cost of this task", "$0.04"),
+        Reading("input", L10n.text("android.samplestore.sent.c16bc82b"), "8,420 tokens"),
+        Reading("output", L10n.text("android.samplestore.received.49f19bee"), "1,190 tokens"),
+        Reading("cost", L10n.text("android.samplestore.cost_of_this_task.716802d2"), "$0.04"),
     )
 
     /// Said in full wherever the numbers appear.
-    const val disclaimer: String =
-        "This whole page is an example, made up to show the shape of the thing. " +
-            "The numbers are invented and are not anybody's usage or spending."
+    val disclaimer: String = L10n.text("android.samplestore.this_whole_page_is_an_example_made_up_to_s.1389de3d")
 }

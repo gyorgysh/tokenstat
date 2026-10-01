@@ -43,7 +43,7 @@ struct ChatSetupHeader: View {
             PersonaMark(seed: model.faceSeed, size: 30)
                 .environment(\.personaMotionAllowed, false)
             AppMenuPicker(
-                title: "Persona",
+                title: L10n.text("apple.chatsetupheader.persona.31bdeef9"),
                 options: personaOptions,
                 selection: personaBinding
             )
@@ -52,7 +52,7 @@ struct ChatSetupHeader: View {
     }
 
     private var personaOptions: [(value: String, label: String)] {
-        var options: [(value: String, label: String)] = [(value: "", label: "No persona")]
+        var options: [(value: String, label: String)] = [(value: "", label: L10n.text("apple.chatsetupheader.no_persona.cce53fca"))]
         for persona in model.personas {
             options.append((value: persona.id, label: persona.name))
         }
@@ -62,9 +62,9 @@ struct ChatSetupHeader: View {
     private var form: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             if showsIntro {
-                Text("How this chat should work")
+                Text(L10n.text("apple.chatsetupheader.how_this_chat_should_work.b5eec3c8"))
                     .font(Theme.callout.weight(.semibold))
-                Text("These stay here until the first message. After that they collapse, and Edit setup still has them.")
+                Text(L10n.text("apple.chatsetupheader.these_stay_here_until_the_first_message_af.61e86a8e"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -75,13 +75,13 @@ struct ChatSetupHeader: View {
             }
             SegmentedCapsulePicker(
                 options: [
-                    (value: "plan", label: "Plan", symbol: ActionIcon.plan.symbol),
-                    (value: "execute", label: "Execute", symbol: "hammer"),
+                    (value: "plan", label: L10n.text("apple.chatsetupheader.plan.fa8ed0bd"), symbol: ActionIcon.plan.symbol),
+                    (value: "execute", label: L10n.text("apple.chatsetupheader.execute.e3a67d95"), symbol: "hammer"),
                 ],
                 selection: modeBinding
             )
             .disabled(chat.running)
-            Toggle("Work without asking", isOn: bypassBinding)
+            Toggle(L10n.text("apple.chatsetupheader.work_without_asking.dde89661"), isOn: bypassBinding)
                 .toggleStyle(.brandCheckbox)
                 .disabled(chat.running || isBypassOnly)
             Text(ChatGateCopy.explanation(backend?.gateTier, bypass: chat.autonomy == "bypass"))
@@ -100,17 +100,17 @@ struct ChatSetupHeader: View {
 
     private var chips: some View {
         HStack(spacing: Theme.Space.s) {
-            chip("Next response: \(backend?.label ?? chat.backend)")
-            chip(chat.mode == "plan" ? "Plan" : "Execute")
+            chip(L10n.text("apple.chatsetupheader.next_response_0.b4c572aa", "\(backend?.label ?? chat.backend)"))
+            chip(chat.mode == "plan" ? L10n.text("apple.chatsetupheader.plan.fa8ed0bd") : L10n.text("apple.chatsetupheader.execute.e3a67d95"))
             if let modelName = chat.model, !modelName.isEmpty {
                 chip(modelName)
             }
             chip(chat.autonomy == "bypass"
-                ? "Don't ask"
+                ? L10n.text("apple.chatsetupheader.don_t_ask.15dae980")
                 : ChatGateCopy.chip(backend?.gateTier))
             Spacer(minLength: 0)
             if let onOpenInspector {
-                Button("Edit setup", .settings) { onOpenInspector() }
+                Button(L10n.text("apple.chatsetupheader.edit_setup.5311c363"), .settings) { onOpenInspector() }
                     .buttonStyle(SecondaryButtonStyle(small: true))
                     .environment(\.compactActions, true)
             }
@@ -138,7 +138,7 @@ struct ChatSetupHeader: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .bottom, spacing: Theme.Space.s) {
                 AppMenuPicker(
-                    title: "Agent",
+                    title: L10n.text("apple.chatsetupheader.agent.11b39c93"),
                     options: agentOptions,
                     selection: backendBinding
                 )
@@ -157,8 +157,8 @@ struct ChatSetupHeader: View {
                     }
                     if !backend.efforts.isEmpty {
                         AppMenuPicker(
-                            title: "Effort",
-                            options: [(value: "", label: "Default")]
+                            title: L10n.text("apple.chatsetupheader.effort.4387e5d3"),
+                            options: [(value: "", label: L10n.text("apple.chatsetupheader.default.21b111cb"))]
                                 + backend.efforts.map { (value: $0, label: $0) },
                             selection: effortBinding
                         )
@@ -253,7 +253,7 @@ struct ChatComposerControls: View {
     var body: some View {
         layout
             .pickerPanelSurface(
-                title: "Agent, model and effort",
+                title: L10n.text("apple.chatsetupheader.agent_model_and_effort.217ff8ae"),
                 isPresented: $pickingAgent,
                 anchorsToLeadingEdge: true
             ) {
@@ -272,7 +272,7 @@ struct ChatComposerControls: View {
     @ViewBuilder
     private var layout: some View {
         if model.savedCopy != nil {
-            Label("Draft on this device", systemImage: ActionIcon.edit.symbol)
+            Label(L10n.text("apple.chatsetupheader.draft_on_this_device.8c266c9c"), systemImage: ActionIcon.edit.symbol)
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
         } else if compact {
@@ -316,8 +316,8 @@ struct ChatComposerControls: View {
     private var pills: some View {
         ChatCompactPills(
             options: [
-                (value: "plan", label: "Plan"),
-                (value: "execute", label: "Execute"),
+                (value: "plan", label: L10n.text("apple.chatsetupheader.plan.fa8ed0bd")),
+                (value: "execute", label: L10n.text("apple.chatsetupheader.execute.e3a67d95")),
             ],
             selection: modeBinding
         )
@@ -328,15 +328,15 @@ struct ChatComposerControls: View {
             // with its choice made by the backend. Never enabled: there is
             // nothing to switch to, like the setup form's locked toggle.
             ChatCompactPills(
-                options: [(value: "bypass", label: "Don't ask")],
+                options: [(value: "bypass", label: L10n.text("apple.chatsetupheader.don_t_ask.15dae980"))],
                 selection: autonomyBinding
             )
             .disabled(true)
         } else {
             ChatCompactPills(
                 options: [
-                    (value: "standard", label: "Ask first"),
-                    (value: "bypass", label: "Don't ask"),
+                    (value: "standard", label: L10n.text("apple.chatsetupheader.ask_first.4a9e8cf3")),
+                    (value: "bypass", label: L10n.text("apple.chatsetupheader.don_t_ask.15dae980")),
                 ],
                 selection: autonomyBinding
             )
@@ -401,29 +401,29 @@ struct ChatAgentChoices {
     var choices: [PickerChoice<Choice>] {
         var rows = agentOptions.map {
             PickerChoice(value: Choice.agent($0.value), label: $0.label,
-                         detail: model.backend(for: $0.value)?.readiness == "needsSignIn" ? "Sign-in may be needed" :
-                            model.backend(for: $0.value)?.readiness == "expired" ? "Stored login has expired" : nil,
-                         section: "Agent")
+                         detail: model.backend(for: $0.value)?.readiness == "needsSignIn" ? L10n.text("apple.chatsetupheader.sign_in_may_be_needed.c3dde98c") :
+                            model.backend(for: $0.value)?.readiness == "expired" ? L10n.text("apple.chatsetupheader.stored_login_has_expired.bf189dae") : nil,
+                         section: L10n.text("apple.chatsetupheader.agent.11b39c93"))
         }
         if let backend, backend.installed != false {
             rows.append(
                 PickerChoice(
                     value: .model(""),
-                    label: "Default",
-                    detail: "\(backend.label) picks the model",
-                    section: "Model"
+                    label: L10n.text("apple.chatsetupheader.default.21b111cb"),
+                    detail: L10n.text("apple.chatsetupheader.0_picks_the_model.59367853", "\(backend.label)"),
+                    section: L10n.text("apple.chatsetupheader.model.5e2c614c")
                 )
             )
             rows += modelIDs.map {
                 PickerChoice(value: Choice.model($0), label: $0,
-                             detail: backend.models.contains($0) ? nil : "Saved choice · availability unverified",
-                             section: "Model")
+                             detail: backend.models.contains($0) ? nil : L10n.text("apple.chatsetupheader.saved_choice_availability_unverified.96a7ce32"),
+                             section: L10n.text("apple.chatsetupheader.model.5e2c614c"))
             }
         }
         if let backend, backend.installed != false, !backend.efforts.isEmpty {
-            rows.append(PickerChoice(value: .effort(""), label: "Default", section: "Effort"))
+            rows.append(PickerChoice(value: .effort(""), label: L10n.text("apple.chatsetupheader.default.21b111cb"), section: L10n.text("apple.chatsetupheader.effort.4387e5d3")))
             rows += backend.efforts.map {
-                PickerChoice(value: Choice.effort($0), label: $0, section: "Effort")
+                PickerChoice(value: Choice.effort($0), label: $0, section: L10n.text("apple.chatsetupheader.effort.4387e5d3"))
             }
         }
         return rows
@@ -442,12 +442,12 @@ struct ChatAgentChoices {
     /// settings, and a heading that only names the group leaves somebody
     /// scrolling to find which row carries the mark.
     func currentValue(_ section: String) -> String? {
-        switch section {
-        case "Agent": backend?.label ?? chat.backend
-        case "Model": (chat.model?.isEmpty == false ? chat.model : "Default")
-        case "Effort": (chat.effort?.isEmpty == false ? chat.effort : "Default")
-        default: nil
-        }
+        let values: [String: String?] = [
+            L10n.text("apple.chatsetupheader.agent.11b39c93"): backend?.label ?? chat.backend,
+            L10n.text("apple.chatsetupheader.model.5e2c614c"): chat.model?.isEmpty == false ? chat.model : L10n.text("apple.chatsetupheader.default.21b111cb"),
+            L10n.text("apple.chatsetupheader.effort.4387e5d3"): chat.effort?.isEmpty == false ? chat.effort : L10n.text("apple.chatsetupheader.default.21b111cb"),
+        ]
+        return values[section] ?? nil
     }
 
     /// Three marks in one list, one per section, each reading the
@@ -503,7 +503,7 @@ struct ChatAgentChoices {
             parts.append(name)
         }
         if backend?.efforts.isEmpty == false, let effort = chat.effort, !effort.isEmpty {
-            parts.append("\(effort) effort")
+            parts.append(L10n.text("apple.chatsetupheader.0_effort.b0d63362", "\(effort)"))
         }
         return parts.joined(separator: " · ")
     }
@@ -547,7 +547,7 @@ struct ChatAgentField: View {
         .buttonStyle(.plain)
         .disabled(locked)
         .fixedSize(horizontal: false, vertical: true)
-        .help("Agent, model and effort")
+        .help(L10n.text("apple.chatsetupheader.agent_model_and_effort.217ff8ae"))
         .accessibilityLabel(choices.summary)
     }
 
@@ -577,9 +577,9 @@ struct ChatAgentPanel: View {
         VStack(spacing: 0) {
             #if os(macOS)
             HStack {
-                Text("Agent, model and effort").font(Theme.callout.weight(.semibold))
+                Text(L10n.text("apple.chatsetupheader.agent_model_and_effort.217ff8ae")).font(Theme.callout.weight(.semibold))
                 Spacer()
-                Button("Done", .done) { onDone() }
+                Button(L10n.text("common.done"), .done) { onDone() }
                     .keyboardShortcut(.defaultAction)
             }
             .padding(Theme.Space.s)
@@ -590,9 +590,9 @@ struct ChatAgentPanel: View {
                 PickerOptionList(
                     choices: choices.choices,
                     isSelected: choices.isSelected,
-                    prompt: "Filter agents, models and efforts",
-                    emptyMessage: "No agents installed. Set up an agent to start chatting.",
-                    caption: model.peer == nil ? "Agents on this computer" : "Agents on this chat’s remote host",
+                    prompt: L10n.text("apple.chatsetupheader.filter_agents_models_and_efforts.315032da"),
+                    emptyMessage: L10n.text("apple.chatsetupheader.no_agents_installed_set_up_an_agent_to_sta.2f73b57f"),
+                    caption: model.peer == nil ? L10n.text("apple.chatsetupheader.agents_on_this_computer.133ab3d5") : L10n.text("apple.chatsetupheader.agents_on_this_chat_s_remote_host.2c090971"),
                     refresh: canRefresh ? { await model.reloadBackends() } : nil,
                     sectionValue: choices.currentValue,
                     sectionTabs: choices.selectableSections,
@@ -607,10 +607,10 @@ struct ChatAgentPanel: View {
                 }
             }
             if choices.backend?.modelListStatus == "refreshFailed" {
-                Text("Couldn’t refresh models. Use the agent default or a previously listed model.")
+                Text(L10n.text("apple.chatsetupheader.couldn_t_refresh_models_use_the_agent_defa.d28dc412"))
                     .font(Theme.caption).foregroundStyle(Theme.warning).padding(.horizontal, Theme.Space.s)
             } else if choices.backend?.modelListStatus == "loading" {
-                Text("Checking models… Agent default is available.")
+                Text(L10n.text("apple.chatsetupheader.checking_models_agent_default_is_available.6cb73a5c"))
                     .font(Theme.caption).foregroundStyle(Theme.controlGlyph).padding(.horizontal, Theme.Space.s)
             }
             if let error = setupError ?? model.backendRefreshError {
@@ -618,11 +618,11 @@ struct ChatAgentPanel: View {
                     .padding(.horizontal, Theme.Space.s)
             }
             HStack {
-                Button(showingSetup ? "Back to agent choices" : "Set up another agent…", showingSetup ? .back : .create) {
+                Button(showingSetup ? L10n.text("apple.chatsetupheader.back_to_agent_choices.a5dc0271") : L10n.text("apple.chatsetupheader.set_up_another_agent.ba92ba58"), showingSetup ? .back : .create) {
                     showingSetup.toggle()
                 }
                 Spacer(minLength: 0)
-                Button("Retry", .refresh) { Task { await model.reloadBackends() } }
+                Button(L10n.text("common.retry"), .refresh) { Task { await model.reloadBackends() } }
                     .disabled(installing != nil || locked)
             }
             .font(Theme.caption)
@@ -634,21 +634,21 @@ struct ChatAgentPanel: View {
     private var setupList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                Text(model.peer == nil ? "Set up on this computer" : "Set up on this chat’s remote host")
+                Text(model.peer == nil ? L10n.text("apple.chatsetupheader.set_up_on_this_computer.ba4e1cd3") : L10n.text("apple.chatsetupheader.set_up_on_this_chat_s_remote_host.95b6115d"))
                     .font(Theme.callout.weight(.semibold))
                 ForEach(model.backends.filter { $0.id != "sh" }) { backend in
                     HStack {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(backend.label).font(Theme.callout)
-                            Text(backend.installed == false ? "Not installed" :
+                            Text(backend.installed == false ? L10n.text("apple.chatsetupheader.not_installed.d177cdc0") :
                                  backend.readiness == "needsSignIn" || backend.readiness == "expired"
-                                 ? "Open this agent in the host’s Terminal to sign in, then retry."
-                                 : backend.installed == true ? "Installed" : "Availability unknown")
+                                 ? L10n.text("apple.chatsetupheader.open_this_agent_in_the_host_s_terminal_to.717a86f6")
+                                 : backend.installed == true ? L10n.text("apple.chatsetupheader.installed.f8b32f4e") : L10n.text("apple.chatsetupheader.availability_unknown.2e0078a8"))
                                 .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                         }
                         Spacer()
                         if backend.installed == false && backend.canInstall {
-                            Button(installing == backend.id ? "Installing…" : "Install", .download) {
+                            Button(installing == backend.id ? L10n.text("apple.chatsetupheader.installing.530bcc35") : L10n.text("apple.chatsetupheader.install.569ca49f"), .download) {
                                 install(backend)
                             }
                             .disabled(installing != nil || locked)
@@ -674,7 +674,7 @@ struct ChatAgentPanel: View {
                     result = try await Bridge.launcherInstall(id: id)
                 }
                 guard model.peer == peer else { return }
-                if !result.ok { setupError = "Installation failed. \(result.output.suffix(600))" }
+                if !result.ok { setupError = L10n.text("apple.chatsetupheader.installation_failed_0.f293f900", "\(result.output.suffix(600))") }
                 await model.reloadBackends()
             } catch {
                 guard model.peer == peer else { return }
@@ -723,7 +723,7 @@ struct ChatAgentPanel: View {
             .buttonStyle(.plain)
             .accessibilityLabel(
                 favorites.contains(backend: backend.id, model: id)
-                    ? "Unpin \(id)" : "Pin \(id)"
+                    ? L10n.text("apple.chatsetupheader.unpin_0.450ccf9f", "\(id)") : L10n.text("apple.chatsetupheader.pin_0.67fd141b", "\(id)")
             )
         }
     }
@@ -821,12 +821,12 @@ struct ChatAgentAvailabilityNotice: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("\(model.backend(for: chat.backend)?.label ?? chat.backend) isn’t installed on this computer.")
+            Text(L10n.text("apple.chatsetupheader.0_isn_t_installed_on_this_computer.27bea130", "\(model.backend(for: chat.backend)?.label ?? chat.backend)"))
                 .font(Theme.caption).foregroundStyle(Theme.warning)
-            Button("Set up or choose another agent", .create) { showingOptions = true }
+            Button(L10n.text("apple.chatsetupheader.set_up_or_choose_another_agent.f544267b"), .create) { showingOptions = true }
                 .font(Theme.caption)
         }
-        .pickerPanelSurface(title: "Agent options", isPresented: $showingOptions) {
+        .pickerPanelSurface(title: L10n.text("apple.chatsetupheader.agent_options.31eb33af"), isPresented: $showingOptions) {
             ChatAgentPanel(model: model, chat: chat, locked: chat.running,
                            onDone: { showingOptions = false })
         }

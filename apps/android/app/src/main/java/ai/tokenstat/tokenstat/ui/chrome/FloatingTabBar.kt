@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.chrome
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
@@ -191,14 +193,14 @@ private fun MinimizedPill(
                 enabled = visible,
                 onClick = onExpandRequest,
                 role = Role.Button,
-                onClickLabel = "Show tabs",
+                onClickLabel = L10n.text("android.floatingtabbar.show_tabs.321c6e5b"),
             ),
         contentAlignment = Alignment.Center,
     ) {
         if (icon != null) {
             Icon(
                 icon,
-                contentDescription = "Show tabs",
+                contentDescription = L10n.text("android.floatingtabbar.show_tabs.321c6e5b"),
                 tint = colors.accent,
                 modifier = Modifier.size(22.dp),
             )

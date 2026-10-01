@@ -56,16 +56,16 @@ struct WorkspaceFilesView: View {
             if !folder.exists {
                 InspectorEmptyState(
                     systemImage: "exclamationmark.triangle",
-                    title: "Folder missing",
-                    subtitle: "The folder no longer exists on disk.",
+                    title: L10n.text("apple.workspacefilesview.folder_missing.f06c68a6"),
+                    subtitle: L10n.text("apple.workspacefilesview.the_folder_no_longer_exists_on_disk.54b54492"),
                     tint: Theme.warning
                 )
             } else if let roots = model.children(of: "", in: folder.id) {
                 if roots.isEmpty {
                     InspectorEmptyState(
                         systemImage: "tray",
-                        title: "Empty folder",
-                        subtitle: "There are no files or directories here yet."
+                        title: L10n.text("apple.workspacefilesview.empty_folder.ca1fd454"),
+                        subtitle: L10n.text("apple.workspacefilesview.there_are_no_files_or_directories_here_yet.cd25464f")
                     )
                 } else {
                     ScrollView {
@@ -98,8 +98,8 @@ struct WorkspaceFilesView: View {
         } else {
             InspectorEmptyState(
                 systemImage: "sidebar.right",
-                title: "No workspace selected",
-                subtitle: "Pick a workspace from the list on the left."
+                title: L10n.text("apple.workspacefilesview.no_workspace_selected.12b33b8c"),
+                subtitle: L10n.text("apple.workspacefilesview.pick_a_workspace_from_the_list_on_the_left.ba048561")
             )
         }
     }
@@ -173,7 +173,7 @@ private struct TreeRow: View {
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
         .accessibilityAddTraits(isOpen ? [.isSelected] : [])
-        .help(entry.ignored ? "\(entry.path) (git ignores this)" : entry.path)
+        .help(entry.ignored ? L10n.text("apple.workspacefilesview.0_git_ignores_this.772ed8ab", "\(entry.path)") : entry.path)
     }
 
     private var symbol: String {

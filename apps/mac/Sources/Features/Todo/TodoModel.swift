@@ -186,7 +186,7 @@ final class TodoModel {
                 notes: card.notes.isEmpty ? card.title : card.notes,
                 workspaceID: workspaceID
             )
-            showNotice("Moved to Tasks.")
+            showNotice(L10n.text("apple.todomodel.moved_to_tasks.903d2d20"))
             await load()
         } catch {
             errorMessage = error.localizedDescription
@@ -317,10 +317,10 @@ final class TodoModel {
     }
 
     func taskCreated(_ created: TodoCard, folders: [WorkspaceFolder]) async {
-        if inScope(created) { showNotice("Task added.") }
+        if inScope(created) { showNotice(L10n.text("apple.todomodel.task_added.d37be00e")) }
         else {
-            let place = created.workspaceID.isEmpty ? "Uncategorized" : folders.first(where: { $0.id == created.workspaceID })?.name ?? "another folder"
-            showNotice("Task added to \(place).", scope: scope == nil ? destinationScope(of: created) : nil)
+            let place = created.workspaceID.isEmpty ? L10n.text("apple.todomodel.uncategorized.8d40d123") : folders.first(where: { $0.id == created.workspaceID })?.name ?? L10n.text("apple.todomodel.another_folder.c5f5ba2c")
+            showNotice(L10n.text("apple.todomodel.task_added_to_0.54e9b589", "\(place)"), scope: scope == nil ? destinationScope(of: created) : nil)
         }
         errorMessage = nil
         await load()
@@ -368,7 +368,7 @@ final class TodoModel {
         }
         if let validation = draft.validation { errorMessage = validation; return false }
         guard card.revision != nil else {
-            errorMessage = "Reload this task before saving its settings."
+            errorMessage = L10n.text("apple.todomodel.reload_this_task_before_saving_its_setting.afe9a32c")
             return false
         }
         do {
@@ -398,7 +398,7 @@ final class TodoModel {
         if value == card.title { return true }
         do {
             _ = try await Bridge.todoUpdate(id: card.id, title: value)
-            showNotice("Saved \"\(value)\".")
+            showNotice(L10n.text("apple.todomodel.saved_0.8eb4b783", "\(value)"))
             errorMessage = nil
             await load()
             return true
@@ -438,7 +438,7 @@ final class TodoModel {
     func delegate(_ card: TodoCard) async -> String? {
         do {
             let updated = try await Bridge.todoDelegate(id: card.id)
-            showNotice("Handed \"\(card.title)\" to an agent.")
+            showNotice(L10n.text("apple.todomodel.handed_0_to_an_agent.095b5329", "\(card.title)"))
             errorMessage = nil
             await load()
             return updated.delegate?.runId ?? cards.first { $0.id == card.id }?.delegate?.runId
@@ -449,7 +449,7 @@ final class TodoModel {
     }
 
     func noticeOpenedInFront(_ title: String) {
-        showNotice("Opened \"\(title)\" in a terminal.")
+        showNotice(L10n.text("apple.todomodel.opened_0_in_a_terminal.37753566", "\(title)"))
     }
 
     private func showNotice(_ message: String, scope: TodoScope? = nil) {

@@ -225,7 +225,7 @@ final class MachinesModel {
         #else
         UIPasteboard.general.string = code
         #endif
-        showNotice("Invite copied. On the other device, choose Add device and paste it there.")
+        showNotice(L10n.text("apple.machinesmodel.invite_copied_on_the_other_device_choose_a.ff13a35e"))
     }
 
     /// The two words for this machine, which is what a person compares against
@@ -357,7 +357,7 @@ final class MachinesModel {
             try HostAgentInstaller.installAndStart()
             Bridge.reconnect()
             await load()
-            showNotice(Bridge.isHosted ? "Background helper is running." : "Helper installed. It is still starting. Try again in a moment.")
+            showNotice(Bridge.isHosted ? L10n.text("apple.machinesmodel.background_helper_is_running.d1b3097f") : L10n.text("apple.machinesmodel.helper_installed_it_is_still_starting_try.dd2ec051"))
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -377,8 +377,8 @@ final class MachinesModel {
             identity = try await Bridge.renameMachine(trimmed)
             errorMessage = nil
             showNotice(trimmed.isEmpty
-                ? "Back to the name this computer already had."
-                : "Other devices will see this one as \(identity?.label ?? trimmed).")
+                ? L10n.text("apple.machinesmodel.back_to_the_name_this_computer_already_had.574b11b2")
+                : L10n.text("apple.machinesmodel.other_devices_will_see_this_one_as_0.e25cb345", "\(identity?.label ?? trimmed)"))
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -402,8 +402,8 @@ final class MachinesModel {
             }
             errorMessage = nil
             showNotice(trimmed.isEmpty
-                ? "Back to the name that device gives itself."
-                : "Every screen on this account calls it \(trimmed) now.")
+                ? L10n.text("apple.machinesmodel.back_to_the_name_that_device_gives_itself.ef51c3b6")
+                : L10n.text("apple.machinesmodel.every_screen_on_this_account_calls_it_0_no.d72bed77", "\(trimmed)"))
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -426,8 +426,8 @@ final class MachinesModel {
         do {
             _ = try await Bridge.setTunnel(enabled)
             showNotice(enabled
-                ? "Remote reach is on. Direct connections are preferred when available."
-                : "Remote reach is off.")
+                ? L10n.text("apple.machinesmodel.remote_reach_is_on_direct_connections_are.f9aa785a")
+                : L10n.text("apple.machinesmodel.remote_reach_is_off.701869a6"))
             errorMessage = nil
             await load()
         } catch {
@@ -438,7 +438,7 @@ final class MachinesModel {
     func pair(key: String, label: String, address: String) async {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard key != identity?.key else {
-            errorMessage = "That is this device. It is already here and does not need to be added."
+            errorMessage = L10n.text("apple.machinesmodel.that_is_this_device_it_is_already_here_and.6ca9f067")
             return
         }
         do {
@@ -447,10 +447,7 @@ final class MachinesModel {
                 label: label.trimmingCharacters(in: .whitespacesAndNewlines),
                 address: address.trimmingCharacters(in: .whitespacesAndNewlines)
             )
-            showNotice("""
-            Paired with \(peer.label). It will not answer until somebody \
-            approves this machine over there too.
-            """)
+            showNotice(L10n.text("apple.machinesmodel.paired_with_0_it_will_not_answer_until_som.653a0611", "\(peer.label)"))
             errorMessage = nil
             await refreshPeers()
         } catch {
@@ -461,7 +458,7 @@ final class MachinesModel {
     func approve(_ peer: Peer) async {
         let changed = await change(peer) { try await Bridge.approve(key: peer.key) }
         guard changed else { return }
-        showNotice("\(peer.label) may now reach this device.")
+        showNotice(L10n.text("apple.machinesmodel.0_may_now_reach_this_device.cef66588", "\(peer.label)"))
     }
 
     func revoke(_ peer: Peer) async {
@@ -472,13 +469,13 @@ final class MachinesModel {
         guard changed else { return }
         connectedPeerKeys.remove(peer.key)
         NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: peer.key)
-        showNotice("\(peer.label) can no longer reach this device.")
+        showNotice(L10n.text("apple.machinesmodel.0_can_no_longer_reach_this_device.e6993257", "\(peer.label)"))
     }
 
     func forget(_ peer: Peer) async {
         let changed = await change(peer) { try await Bridge.forget(key: peer.key) }
         guard changed else { return }
-        showNotice("\(peer.label) is forgotten. It will arrive as a stranger next time.")
+        showNotice(L10n.text("apple.machinesmodel.0_is_forgotten_it_will_arrive_as_a_strange.c48a4600", "\(peer.label)"))
     }
 
     func connect(_ peer: Peer) async {
@@ -486,7 +483,7 @@ final class MachinesModel {
         // screen session exchanges and tries direct candidates before carrying
         // its high-bandwidth stream through the relay.
         guard status?.tunnel == true else {
-            errorMessage = "Turn on Reach devices from anywhere before connecting to \(peer.label)."
+            errorMessage = L10n.text("apple.machinesmodel.turn_on_reach_devices_from_anywhere_before.4930ed6e", "\(peer.label)")
             return
         }
         await dial(peer)
@@ -505,7 +502,7 @@ final class MachinesModel {
             return
         }
         guard let key = machine.publicIdentity, !key.isEmpty else {
-            errorMessage = "\(machine.displayName) has no connection key on this account record yet. Open the Devices screen on that device so it registers one, then try again."
+            errorMessage = L10n.text("apple.machinesmodel.0_has_no_connection_key_on_this_account_re.9e4e975a", "\(machine.displayName)")
             return
         }
         guard key != identity?.key else { return }
@@ -544,7 +541,7 @@ final class MachinesModel {
                 await WorkSearchCache.shared.revokeHost(host, scope: scope)
                 await WorkCacheAccess.purge(host: host, scope: scope)
             }
-            showNotice("\(machine.displayName) removed from the account.")
+            showNotice(L10n.text("apple.machinesmodel.0_removed_from_the_account.008c6cc8", "\(machine.displayName)"))
             await load()
         } catch {
             errorMessage = error.localizedDescription
@@ -559,7 +556,7 @@ final class MachinesModel {
             _ = try await Bridge.remoteWorkspaces(peer: peer)
             connectedPeerKeys.insert(peer.key)
             errorMessage = nil
-            showNotice("Connected to \(peer.label). Its workspaces are now available in the sidebar.")
+            showNotice(L10n.text("apple.machinesmodel.connected_to_0_its_workspaces_are_now_avai.c79dc8f5", "\(peer.label)"))
             NotificationCenter.default.post(name: .remotePeerDidConnect, object: peer.key)
         } catch {
             connectedPeerKeys.remove(peer.key)
@@ -568,25 +565,25 @@ final class MachinesModel {
             // present as one: the other screen shows this machine waiting.
             let text = error.localizedDescription
             if text.contains("has not approved") || text.contains("not approved") {
-                showNotice("\(peer.label) has been asked to let this device in. Approve it on the other device and its workspaces will appear here.")
+                showNotice(L10n.text("apple.machinesmodel.0_has_been_asked_to_let_this_device_in_app.6f734666", "\(peer.label)"))
                 errorMessage = nil
             } else if WorkspacesModel.isWorkspaceRefusal(text) {
                 _ = try? await Bridge.askWorkspaceAccess(peer: peer.key)
-                showNotice("\(peer.label) has been asked to let this device open its work. Approve it on that computer and its folders will appear here.")
+                showNotice(L10n.text("apple.machinesmodel.0_has_been_asked_to_let_this_device_open_i.961b2eaf", "\(peer.label)"))
                 errorMessage = nil
             } else if text.contains("closed before the answer arrived") {
                 // A drop mid-answer is the peer's daemon swapping its tunnel
                 // listener or a connection that died between two machines that
                 // are both retrying. It resolves itself; naming it as a hard
                 // failure would send somebody down a debugging rabbit hole.
-                showNotice("The connection to \(peer.label) dropped mid-answer. It reconnects automatically. Try again in a moment.")
+                showNotice(L10n.text("apple.machinesmodel.the_connection_to_0_dropped_mid_answer_it.0e22c33a", "\(peer.label)"))
                 errorMessage = nil
             } else if text.localizedCaseInsensitiveContains("offline")
                 || text.localizedCaseInsensitiveContains("not reachable")
                 || text.localizedCaseInsensitiveContains("timed out")
                 || text.localizedCaseInsensitiveContains("timeout")
             {
-                errorMessage = "\(peer.label) is offline or not reachable right now. Wait until it is awake, then try Connect again."
+                errorMessage = L10n.text("apple.machinesmodel.0_is_offline_or_not_reachable_right_now_wa.b6a9fae4", "\(peer.label)")
             } else {
                 errorMessage = text
             }
@@ -620,7 +617,7 @@ final class MachinesModel {
         // One broadcast: RootView drops workspaces (and suppresses re-dial),
         // and this screen's own listener clears any stale Connected mark.
         NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: peer.key)
-        showNotice("Disconnected from \(peer.label). Its workspaces are no longer in the sidebar.")
+        showNotice(L10n.text("apple.machinesmodel.disconnected_from_0_its_workspaces_are_no.3ecfb24d", "\(peer.label)"))
     }
 
     /// Whether Connect is honest for this account machine right now.

@@ -80,7 +80,7 @@ enum WorkflowLayering {
         let steps = layers(nodes: nodes, edges: edges).map { column in
             column.map(\.displayTitle).joined(separator: " and ")
         }
-        if steps.isEmpty { return "Empty workflow" }
+        if steps.isEmpty { return L10n.text("apple.minigraph.empty_workflow.f1fad181") }
         return steps.joined(separator: ", then ")
     }
 }
@@ -269,7 +269,7 @@ struct MiniGraph: View {
                 RoundedRectangle(cornerRadius: dot / 3, style: .continuous)
                     .fill(Theme.border.opacity(0.5))
             )
-            .help("\(count) more steps")
+            .help(L10n.text("apple.minigraph.0_more_steps.af5b37ef", "\(count)"))
     }
 
     /// Resting, or coloured by what the run did with this node.

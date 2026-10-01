@@ -28,7 +28,7 @@ struct AutomationQueueDestination: View {
                     onFinished: onFinished
                 )
             } else {
-                ProgressView("Opening scheduler")
+                ProgressView(L10n.text("apple.automationqueueview.opening_scheduler.b7f091c6"))
                     .font(Theme.callout)
             }
         }
@@ -54,7 +54,7 @@ struct AutomationQueueView: View {
 
     var body: some View {
         ThemedSheet(
-            title: "Scheduler",
+            title: L10n.text("apple.automationqueueview.scheduler.d3a27d96"),
             subtitle: hostName,
             icon: .settings,
             scrolls: true,
@@ -81,7 +81,7 @@ struct AutomationQueueView: View {
 
     @ViewBuilder private var notices: some View {
         if session.working {
-            ProgressView("Saving scheduler")
+            ProgressView(L10n.text("apple.automationqueueview.saving_scheduler.82aa4bfc"))
                 .font(Theme.callout)
         }
         if let message = session.noticeMessage, !session.dirty {
@@ -95,7 +95,7 @@ struct AutomationQueueView: View {
                 .foregroundStyle(Theme.danger)
                 .textSelection(.enabled)
             if session.queue == nil {
-                Button("Try again", .refresh) { Task { await session.load() } }
+                Button(L10n.text("apple.automationqueueview.try_again.d8b8392e"), .refresh) { Task { await session.load() } }
                     .buttonStyle(SecondaryButtonStyle(comfortable: true))
                     .disabled(session.working)
             }
@@ -118,32 +118,32 @@ struct AutomationQueueView: View {
         let host = hostName.trimmingCharacters(in: .whitespacesAndNewlines)
         let folder = folderName.trimmingCharacters(in: .whitespacesAndNewlines)
         if host.isEmpty, folder.isEmpty {
-            return "How queued jobs run on the connected computer. This applies to every folder."
+            return L10n.text("apple.automationqueueview.how_queued_jobs_run_on_the_connected_compu.0d28db88")
         }
         if folder.isEmpty {
-            return "How queued jobs run on \(host). This applies to every folder."
+            return L10n.text("apple.automationqueueview.how_queued_jobs_run_on_0_this_applies_to_e.09927d15", "\(host)")
         }
         if host.isEmpty {
-            return "How queued jobs run on the connected computer, not just \(folder)."
+            return L10n.text("apple.automationqueueview.how_queued_jobs_run_on_the_connected_compu.993795e3", "\(folder)")
         }
-        return "How queued jobs run on \(host), not just \(folder)."
+        return L10n.text("apple.automationqueueview.how_queued_jobs_run_on_0_not_just_1.a7cb9842", "\(host)", "\(folder)")
     }
 
     private var timeLimit: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Time limit")
+            Text(L10n.text("apple.automationqueueview.time_limit.e592a9ca"))
                 .font(ClientType.label.weight(.medium))
             TimeLimitChips(minutesText: $session.draft.budgetMinutes, noLimit: $session.draft.noLimit)
             if !session.draft.noLimit, !session.draft.isBudgetPreset {
-                TextField("Minutes", text: $session.draft.budgetMinutes)
+                TextField(L10n.text("apple.automationqueueview.minutes.4f846a84"), text: $session.draft.budgetMinutes)
                     .textFieldStyle(.themed)
                     .keyboardType(.numberPad)
-                    .accessibilityLabel("Time limit in minutes")
+                    .accessibilityLabel(L10n.text("apple.automationqueueview.time_limit_in_minutes.e841e686"))
             }
             Text(
                 session.draft.noLimit
-                    ? "New jobs are not stopped by a timer. A job can still set its own."
-                    : "New jobs inherit this. A job can still set its own."
+                    ? L10n.text("apple.automationqueueview.new_jobs_are_not_stopped_by_a_timer_a_job.a97a5725")
+                    : L10n.text("apple.automationqueueview.new_jobs_inherit_this_a_job_can_still_set.9e62e04e")
             )
             .font(ClientType.caption)
             .foregroundStyle(Theme.controlGlyph)
@@ -154,7 +154,7 @@ struct AutomationQueueView: View {
     private var concurrent: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .center, spacing: Theme.Space.s) {
-                Text("Jobs at once")
+                Text(L10n.text("apple.automationqueueview.jobs_at_once.66276ffd"))
                     .font(ClientType.label.weight(.medium))
                 Spacer(minLength: 0)
                 SlotGauge(
@@ -166,15 +166,15 @@ struct AutomationQueueView: View {
             }
             ConcurrentChips(countText: $session.draft.maxConcurrent)
             if !session.draft.isConcurrentPreset {
-                TextField("Jobs at once", text: $session.draft.maxConcurrent)
+                TextField(L10n.text("apple.automationqueueview.jobs_at_once.66276ffd"), text: $session.draft.maxConcurrent)
                     .textFieldStyle(.themed)
                     .keyboardType(.numberPad)
-                    .accessibilityLabel("Jobs at once")
+                    .accessibilityLabel(L10n.text("apple.automationqueueview.jobs_at_once.66276ffd"))
             }
             Text(
                 (session.draft.concurrent ?? 1) == 0
-                    ? "No limit on how many jobs run together."
-                    : "Extra jobs wait until a place is free."
+                    ? L10n.text("apple.automationqueueview.no_limit_on_how_many_jobs_run_together.483e4a96")
+                    : L10n.text("apple.automationqueueview.extra_jobs_wait_until_a_place_is_free.862f1074")
             )
             .font(ClientType.caption)
             .foregroundStyle(Theme.controlGlyph)
@@ -194,29 +194,29 @@ struct AutomationQueueView: View {
         let place = HostScheduleClock.place(session.timezone)
         if let place {
             if host.isEmpty {
-                return "The clock on the connected computer is \(place)."
+                return L10n.text("apple.automationqueueview.the_clock_on_the_connected_computer_is_0.12b427b3", "\(place)")
             }
-            return "The clock on \(host) is \(place)."
+            return L10n.text("apple.automationqueueview.the_clock_on_0_is_1.021f9b37", "\(host)", "\(place)")
         }
         if host.isEmpty {
-            return "The clock is on the connected computer, not this device."
+            return L10n.text("apple.automationqueueview.the_clock_is_on_the_connected_computer_not.eb1dfcf7")
         }
-        return "The clock is on \(host), not this device."
+        return L10n.text("apple.automationqueueview.the_clock_is_on_0_not_this_device.730d6f0a", "\(host)")
     }
 
     private var footer: some View {
         HStack(spacing: Theme.Space.s) {
             if session.dirty {
-                Text("Unsaved")
+                Text(L10n.text("apple.automationqueueview.unsaved.6250d572"))
                     .font(ClientType.caption.weight(.medium))
                     .foregroundStyle(Theme.warning)
             } else if justSaved {
-                Label("Saved", systemImage: "checkmark")
+                Label(L10n.text("apple.automationqueueview.saved.b5c120b3"), systemImage: "checkmark")
                     .font(ClientType.caption.weight(.medium))
                     .foregroundStyle(Theme.success)
             }
             Spacer(minLength: 0)
-            Button(session.working ? "Saving" : "Save scheduler", .save) {
+            Button(session.working ? L10n.text("apple.automationqueueview.saving.096b7362") : L10n.text("apple.automationqueueview.save_scheduler.24ffd545"), .save) {
                 Task {
                     await session.save()
                     if session.errorMessage == nil, !session.dirty {
@@ -248,7 +248,7 @@ struct ClientSchedulerCard: View {
             HStack(alignment: .center, spacing: Theme.Space.s) {
                 FeatureMark(name: "mark_scheduler", tint: Theme.accent, size: 28)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Scheduler")
+                    Text(L10n.text("apple.automationqueueview.scheduler.d3a27d96"))
                         .font(ClientType.label.weight(.medium))
                         .foregroundStyle(.primary)
                     Text(summary)
@@ -277,13 +277,13 @@ struct ClientSchedulerCard: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Scheduler, \(summary), \(scope)")
-        .accessibilityHint("Opens how queued jobs run on this computer")
+        .accessibilityLabel(L10n.text("apple.automationqueueview.scheduler_0_1.64fb806b", "\(summary)", "\(scope)"))
+        .accessibilityHint(L10n.text("apple.automationqueueview.opens_how_queued_jobs_run_on_this_computer.7be792c7"))
     }
 
     private var summary: String {
         guard let queue else {
-            return "How queued jobs run on this computer"
+            return L10n.text("apple.automationqueueview.how_queued_jobs_run_on_this_computer.8038f73a")
         }
         return AutomationQueueDraft.summary(
             budgetSeconds: queue.defaultBudgetSeconds,
@@ -295,19 +295,19 @@ struct ClientSchedulerCard: View {
         let host = hostName.trimmingCharacters(in: .whitespacesAndNewlines)
         let folder = folderName.trimmingCharacters(in: .whitespacesAndNewlines)
         if compactCopy {
-            if host.isEmpty { return "Every folder" }
-            return "Every folder on \(host)"
+            if host.isEmpty { return L10n.text("apple.automationqueueview.every_folder.9836340c") }
+            return L10n.text("apple.automationqueueview.every_folder_on_0.158c4469", "\(host)")
         }
         if host.isEmpty, folder.isEmpty {
-            return "Every folder on the connected computer"
+            return L10n.text("apple.automationqueueview.every_folder_on_the_connected_computer.14a3d916")
         }
         if folder.isEmpty {
-            return "Every folder on \(host)"
+            return L10n.text("apple.automationqueueview.every_folder_on_0.158c4469", "\(host)")
         }
         if host.isEmpty {
-            return "Every folder, not just \(folder)"
+            return L10n.text("apple.automationqueueview.every_folder_not_just_0.0c11b65f", "\(folder)")
         }
-        return "On \(host), not just \(folder)"
+        return L10n.text("apple.automationqueueview.on_0_not_just_1.dd74bb64", "\(host)", "\(folder)")
     }
 }
 

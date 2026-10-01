@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.auth
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -112,9 +114,9 @@ private fun IntroArt(reduceMotion: Boolean, active: Boolean) {
     // Apple's spring(response 0.5, dampingFraction 0.82), staggered per tile.
     val spring = TsMotion.tunedSpring<Float>(0.5f, 0.82f)
     val tiles = listOf(
-        Triple("Agents", Icons.Default.Forum, 0),
-        Triple("Projects", Icons.Default.Folder, 80),
-        Triple("Usage", Icons.Default.BarChart, 160),
+        Triple(L10n.text("android.onboardingart.agents.279b44d2"), Icons.Default.Forum, 0),
+        Triple(L10n.text("common.projects"), Icons.Default.Folder, 80),
+        Triple(L10n.text("android.onboardingart.usage.8d59829c"), Icons.Default.BarChart, 160),
     )
     Column(
         Modifier.width(320.dp),
@@ -127,7 +129,7 @@ private fun IntroArt(reduceMotion: Boolean, active: Boolean) {
         ) {
             LogoMark(size = 32, animated = !reduceMotion, loops = false)
             Text(
-                "Your work, together",
+                L10n.text("android.onboardingart.your_work_together.89923b0a"),
                 style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
                 color = colors.textPrimary,
             )
@@ -207,7 +209,7 @@ private fun AgentsArt(reduceMotion: Boolean, active: Boolean) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
             Icon(Icons.Default.Folder, contentDescription = null, tint = colors.accent, modifier = Modifier.size(16.dp))
             Text(
-                "Your project",
+                L10n.text("android.onboardingart.your_project.131a8553"),
                 style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
                 color = colors.textPrimary,
             )
@@ -215,7 +217,7 @@ private fun AgentsArt(reduceMotion: Boolean, active: Boolean) {
             Icon(Icons.Default.Forum, contentDescription = null, tint = colors.accent, modifier = Modifier.size(16.dp))
         }
         Text(
-            "Let\u2019s work on the next idea.",
+            L10n.text("android.onboardingart.let_s_work_on_the_next_idea.5c39b8ef"),
             style = TextStyle(fontSize = 14.sp),
             color = colors.textPrimary,
             modifier = Modifier
@@ -233,12 +235,12 @@ private fun AgentsArt(reduceMotion: Boolean, active: Boolean) {
             Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = colors.accent, modifier = Modifier.size(16.dp))
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    "Ready for your review",
+                    L10n.text("android.onboardingart.ready_for_your_review.cfe3b835"),
                     style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
                     color = colors.textPrimary,
                 )
                 Text(
-                    "Read the changes. Decide what comes next.",
+                    L10n.text("android.onboardingart.read_the_changes_decide_what_comes_next.536244e6"),
                     style = TextStyle(fontSize = 12.sp),
                     color = colors.textSecondary,
                 )
@@ -295,9 +297,9 @@ private fun HeatmapArt(reduceMotion: Boolean, active: Boolean) {
 @Composable
 private fun DevicesArt(reduceMotion: Boolean, active: Boolean) {
     Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-        DeviceTile("Mac", Icons.Default.Computer, 86.dp, 58.dp, 0, reduceMotion, active)
-        DeviceTile("Tablet", Icons.Default.TabletAndroid, 52.dp, 70.dp, 80, reduceMotion, active)
-        DeviceTile("Phone", Icons.Default.PhoneAndroid, 34.dp, 62.dp, 160, reduceMotion, active)
+        DeviceTile(L10n.text("android.onboardingart.mac.8b3795aa"), Icons.Default.Computer, 86.dp, 58.dp, 0, reduceMotion, active)
+        DeviceTile(L10n.text("android.onboardingart.tablet.e34a879c"), Icons.Default.TabletAndroid, 52.dp, 70.dp, 80, reduceMotion, active)
+        DeviceTile(L10n.text("android.onboardingart.phone.63dceb88"), Icons.Default.PhoneAndroid, 34.dp, 62.dp, 160, reduceMotion, active)
     }
 }
 
@@ -443,7 +445,7 @@ private fun RemainingArt(reduceMotion: Boolean, active: Boolean) {
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("70%", style = TsType.numeric(22, FontWeight.SemiBold), color = colors.textPrimary)
-            Text("left", style = TextStyle(fontSize = 11.sp), color = colors.textSecondary)
+            Text(L10n.text("android.onboardingart.left.360f8403"), style = TextStyle(fontSize = 11.sp), color = colors.textSecondary)
         }
     }
 }
@@ -516,7 +518,7 @@ private fun WorkspacesArt(reduceMotion: Boolean, active: Boolean) {
 @Composable
 private fun SessionsArt(reduceMotion: Boolean, active: Boolean) {
     val colors = LocalTsColors.current
-    val script = listOf("$ claude", "reading src/main.rs", "patched the parser")
+    val script = listOf(L10n.text("android.onboardingart.claude.fd288973"), L10n.text("android.onboardingart.reading_src_main_rs.1c0ca90b"), L10n.text("android.onboardingart.patched_the_parser.e440392f"))
     var lines by remember(active) { mutableIntStateOf(if (reduceMotion || !active) script.size else 0) }
     var blink by remember { mutableStateOf(true) }
     LaunchedEffect(active, reduceMotion) {

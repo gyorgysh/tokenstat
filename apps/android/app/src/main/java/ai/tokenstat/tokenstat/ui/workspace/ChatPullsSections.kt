@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
 import ai.tokenstat.tokenstat.core.readBounded
 import ai.tokenstat.tokenstat.core.CoreFailure
@@ -313,7 +315,7 @@ fun ChatSection(
             for (uri in uris) {
                 val remaining = 24 * 1024 * 1024 - staged.sumOf { it.bytes }
                 if (remaining <= 0) {
-                    attachError = "Send or remove the staged files before adding more (24 MB total)."
+                    attachError = L10n.text("android.chatpullssections.send_or_remove_the_staged_files_before_add.40e8ba5e")
                     break
                 }
                 val read = withContext(Dispatchers.IO) {
@@ -324,7 +326,7 @@ fun ChatSection(
                     is AttachmentRead.Ok -> {
                         // Another picker result may have completed while this read suspended.
                         if (staged.sumOf { it.bytes } + read.attachment.bytes > 24 * 1024 * 1024) {
-                            attachError = "Send or remove the staged files before adding more (24 MB total)."
+                            attachError = L10n.text("android.chatpullssections.send_or_remove_the_staged_files_before_add.40e8ba5e")
                             break
                         }
                         staged = staged + read.attachment
@@ -365,7 +367,7 @@ fun ChatSection(
 
     fun noteFailure(thrown: Throwable): String {
         val raw = thrown.message?.trim().orEmpty()
-        return raw.ifEmpty { "The note could not be saved." }
+        return raw.ifEmpty { L10n.text("android.chatpullssections.the_note_could_not_be_saved.385b172a") }
     }
 
     /// Say why a note failed, and only when this conversation is still open
@@ -378,7 +380,7 @@ fun ChatSection(
 
     fun showNoteSentence(sentence: String, id: String) {
         if (openId != id) return
-        val text = sentence.trim().ifEmpty { "The note could not be saved." }
+        val text = sentence.trim().ifEmpty { L10n.text("android.chatpullssections.the_note_could_not_be_saved.385b172a") }
         if (sendError != text) sendError = text
     }
 
@@ -405,11 +407,11 @@ fun ChatSection(
         var menu by remember(chat.str("id")) { mutableStateOf(false) }
         val id = chat.str("id") ?: return
         Box {
-            IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Chat actions") }
+            IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, L10n.text("android.chatpullssections.chat_actions.8ba35bb8")) }
             DropdownMenu(menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(text = { Text("Rename") }, enabled = !chat.bol("running"), onClick = { menu = false; pendingRename = chat })
+                DropdownMenuItem(text = { Text(L10n.text("common.rename")) }, enabled = !chat.bol("running"), onClick = { menu = false; pendingRename = chat })
                 if (HostContracts.supportsChatFork(protocol)) {
-                    DropdownMenuItem(text = { Text("Fork chat") }, onClick = {
+                    DropdownMenuItem(text = { Text(L10n.text("android.chatpullssections.fork_chat.dfbcbb35")) }, onClick = {
                         menu = false
                         scope.launch {
                             if (!ownsProject()) return@launch
@@ -418,19 +420,19 @@ fun ChatSection(
                                     if (!ownsProject()) return@onSuccess
                                     loadChats()
                                     copied?.str("id")?.let { openId = it }
-                                }.onFailure { actionError = TunnelCopy.display(it.message ?: "The chat could not be copied.", hostLabel) }
+                                }.onFailure { actionError = TunnelCopy.display(it.message ?: L10n.text("android.chatpullssections.the_chat_could_not_be_copied.ab15685e"), hostLabel) }
                         }
                     })
                 }
                 val pinned = homeStores.isPinned(pinIdentity, peer, workspace, PinnedWork.Kind.CONVERSATION, id)
-                DropdownMenuItem(text = { Text(if (pinned) "Unpin" else "Pin") }, onClick = {
+                DropdownMenuItem(text = { Text(if (pinned) L10n.text("android.chatpullssections.unpin.ee3c7161") else L10n.text("android.chatpullssections.pin.ff1cee74")) }, onClick = {
                     menu = false
-                    if (ownsProject() && !homeStores.togglePin(pinIdentity, peer, workspace, PinnedWork.Kind.CONVERSATION, id, chat.str("title") ?: "Chat", folderName)) {
-                        actionError = "Pinned work holds eight items. Unpin one before adding another."
+                    if (ownsProject() && !homeStores.togglePin(pinIdentity, peer, workspace, PinnedWork.Kind.CONVERSATION, id, chat.str("title") ?: L10n.text("android.chatpullssections.chat.460b3a7d"), folderName)) {
+                        actionError = L10n.text("android.chatpullssections.pinned_work_holds_eight_items_unpin_one_be.e716eb5e")
                     }
                 })
-                DropdownMenuItem(text = { Text("Project sessions") }, onClick = { menu = false; onOpenSection("Sessions") })
-                DropdownMenuItem(text = { Text("Delete chat") }, onClick = { menu = false; pendingDelete = chat })
+                DropdownMenuItem(text = { Text(L10n.text("android.chatpullssections.project_sessions.82394d83")) }, onClick = { menu = false; onOpenSection("Sessions") })
+                DropdownMenuItem(text = { Text(L10n.text("android.chatpullssections.delete_chat.93291d9c")) }, onClick = { menu = false; pendingDelete = chat })
             }
         }
     }
@@ -505,7 +507,7 @@ fun ChatSection(
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) {
             if (openId == id && eventsError == null) eventsError = TunnelCopy.display(
-                failure.message ?: "The request failed.", hostLabel.ifBlank { "that computer" }) + " Still trying."
+                failure.message ?: L10n.text("android.chatpullssections.the_request_failed.db4fb447"), hostLabel.ifBlank { L10n.text("android.chatpullssections.that_computer.2b209061") }) + L10n.text("android.chatpullssections.still_trying.c29f1b24")
         }
     }
 
@@ -525,7 +527,7 @@ fun ChatSection(
             eventsError = null
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) {
-            if (openId == id) eventsError = TunnelCopy.display(failure.message ?: "Earlier messages could not be read.", hostLabel)
+            if (openId == id) eventsError = TunnelCopy.display(failure.message ?: L10n.text("android.chatpullssections.earlier_messages_could_not_be_read.59d38481"), hostLabel)
         } finally { loadingEarlier = false }
     }
     // Create, then open what was created. A "New chat" button that lands
@@ -598,17 +600,17 @@ fun ChatSection(
         val id = legacyReviewId ?: return@LaunchedEffect
         runCatching { outbox.items(legacyOutboxKey(id)) }
             .onSuccess { if (ownsProject() && legacyReviewId == id) legacyReviewed = it }
-            .onFailure { if (ownsProject()) legacyFailure = it.message ?: "Older pending writing could not be read." }
+            .onFailure { if (ownsProject()) legacyFailure = it.message ?: L10n.text("android.chatpullssections.older_pending_writing_could_not_be_read.08c6c81d") }
     }
 
     @Composable
     fun legacyNotice(id: String) {
         TsCard {
             Column {
-                Text("Older pending writing", style = MaterialTheme.typography.titleSmall)
-                Text(chats.firstOrNull { it.str("id") == id }?.str("title") ?: "Conversation no longer listed", style = MaterialTheme.typography.bodySmall)
-                Text("These device copies predate account ownership. Review them before attaching them to this account.", style = MaterialTheme.typography.bodySmall)
-                TsSecondaryButton(label = "Review copies", icon = ActionIcon.Visibility.vector, small = true,
+                Text(L10n.text("android.chatpullssections.older_pending_writing.bfc06cb4"), style = MaterialTheme.typography.titleSmall)
+                Text(chats.firstOrNull { it.str("id") == id }?.str("title") ?: L10n.text("android.chatpullssections.conversation_no_longer_listed.2e4214be"), style = MaterialTheme.typography.bodySmall)
+                Text(L10n.text("android.chatpullssections.these_device_copies_predate_account_owners.4ec5a01e"), style = MaterialTheme.typography.bodySmall)
+                TsSecondaryButton(label = L10n.text("android.chatpullssections.review_copies.4156f753"), icon = ActionIcon.Visibility.vector, small = true,
                     onClick = { legacyReviewId = id })
             }
         }
@@ -627,7 +629,7 @@ fun ChatSection(
             }
             .onFailure {
                 sendError = (it as? ChatOutboxFailure)?.message
-                    ?: "Pending messages could not be saved on this device."
+                    ?: L10n.text("android.chatpullssections.pending_messages_could_not_be_saved_on_thi.c98829a9")
             }
             .isSuccess
     }
@@ -644,7 +646,7 @@ fun ChatSection(
             whenConnected = whenConnected,
         )
         if (queued.size >= ChatOutboxRules.CAPACITY) {
-            sendError = "This conversation already has ${ChatOutboxRules.CAPACITY} messages waiting."
+            sendError = L10n.text("android.chatpullssections.this_conversation_already_has_0_messages_w.ac197c73", "${ChatOutboxRules.CAPACITY}")
             return null
         }
         if (!writeQueue(id) { it.add(item) }) return null
@@ -661,9 +663,8 @@ fun ChatSection(
     suspend fun checkReceipt(id: String, item: QueuedMessage): Boolean {
         if (!ownsProject()) return false
         if (!HostContracts.supportsReceipt(protocol)) {
-            val computer = hostLabel.ifBlank { "this computer" }
-            sendError = "Update $computer to check message delivery. It speaks protocol $protocol and needs " +
-                "${HostContracts.RECEIPT_MIN_PROTOCOL} or later. Your pending copy stays here."
+            val computer = hostLabel.ifBlank { L10n.text("android.chatpullssections.this_computer.058bf37c") }
+            sendError = L10n.text("android.chatpullssections.update_0_to_check_message_delivery_it_spea.e96de22d", "${computer}", "${protocol}", "${HostContracts.RECEIPT_MIN_PROTOCOL}")
             return false
         }
         val receipt = runCatching {
@@ -674,7 +675,7 @@ fun ChatSection(
             // A cancelled check is not a failed one. Navigating away mid-send
             // must leave the message where it was, not mark it failed.
             if (it is CancellationException) throw it
-            sendError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel.ifBlank { "that computer" })
+            sendError = TunnelCopy.display(it.message ?: L10n.text("android.chatpullssections.the_request_failed.db4fb447"), hostLabel.ifBlank { L10n.text("android.chatpullssections.that_computer.2b209061") })
             return false
         }
         if (!ownsProject()) return false
@@ -687,11 +688,9 @@ fun ChatSection(
                 return true
             }
             "needsRecovery" -> sendError =
-                "The computer could not confirm whether this message started. Review the conversation before " +
-                    "copying it into a new draft. Your pending copy stays here."
+                L10n.text("android.chatpullssections.the_computer_could_not_confirm_whether_thi.64b634e0")
             else -> sendError =
-                "Delivery is not confirmed. Check the conversation before copying this message into a new draft. " +
-                    "An unknown receipt is not proof it was never sent."
+                L10n.text("android.chatpullssections.delivery_is_not_confirmed_check_the_conver.7944f74e")
         }
         return false
     }
@@ -705,9 +704,8 @@ fun ChatSection(
         if (!ownsProject()) return false
         val id = openId ?: return false
         if (!HostContracts.supportsConfirmedSend(protocol)) {
-            val computer = hostLabel.ifBlank { "this computer" }
-            sendError = "Update $computer before sending. It speaks protocol $protocol and needs " +
-                "${HostContracts.CONFIRMED_SEND_MIN_PROTOCOL} or later. Your draft stays here."
+            val computer = hostLabel.ifBlank { L10n.text("android.chatpullssections.this_computer.058bf37c") }
+            sendError = L10n.text("android.chatpullssections.update_0_before_sending_it_speaks_protocol.d968bb23", "${computer}", "${protocol}", "${HostContracts.CONFIRMED_SEND_MIN_PROTOCOL}")
             return false
         }
         val key = outboxKey(id)
@@ -724,7 +722,7 @@ fun ChatSection(
                     val at = list.indexOfFirst { it.id == item.id }
                     if (at >= 0) list[at] = list[at].copy(delivery = ChatDelivery.NeedsReview)
                 }
-                sendError = "Review the live conversation, then choose Use latest context. Your message has not been sent."
+                sendError = L10n.text("android.chatpullssections.review_the_live_conversation_then_choose_u.00b49293")
                 return false
             }
             if (stopCurrent && chats.firstOrNull { it.str("id") == id }?.bol("running") == true) {
@@ -820,10 +818,9 @@ fun ChatSection(
             }
             authorized = authorized - deliveryId
             sendError = if (ChatOutboxRules.deliveryUnknown(code, failure?.message)) {
-                "The computer did not confirm delivery. Your queued copy stays here. Choose Check delivery before " +
-                    "doing anything else."
+                L10n.text("android.chatpullssections.the_computer_did_not_confirm_delivery_your.db42a5f9")
             } else {
-                TunnelCopy.display(failure?.message ?: "The request failed.", hostLabel.ifBlank { "that computer" })
+                TunnelCopy.display(failure?.message ?: L10n.text("android.chatpullssections.the_request_failed.db4fb447"), hostLabel.ifBlank { L10n.text("android.chatpullssections.that_computer.2b209061") })
             }
             return false
         } finally {
@@ -881,7 +878,7 @@ fun ChatSection(
         if (!steerVersions.current(id, capturedVersion)) return
         val obj = payload as? JsonObject
         if (obj == null) {
-            showNoteSentence("The note could not be saved.", id)
+            showNoteSentence(L10n.text("android.chatpullssections.the_note_could_not_be_saved.385b172a"), id)
             refreshChats()
             return
         }
@@ -976,7 +973,7 @@ fun ChatSection(
                 return true
             }
             if (payload !is JsonObject) {
-                showNoteSentence("The note could not be saved.", id)
+                showNoteSentence(L10n.text("android.chatpullssections.the_note_could_not_be_saved.385b172a"), id)
                 return true
             }
             if (!ownsProject()) return true
@@ -1050,8 +1047,8 @@ fun ChatSection(
             if (!ownsProject()) return
             if (uploaded.isFailure || file?.str("id") == null) {
                 attachError = TunnelCopy.display(
-                    uploaded.exceptionOrNull()?.message ?: "The attachment could not be sent.",
-                    hostLabel.ifBlank { "that computer" },
+                    uploaded.exceptionOrNull()?.message ?: L10n.text("android.chatpullssections.the_attachment_could_not_be_sent.deaa903b"),
+                    hostLabel.ifBlank { L10n.text("android.chatpullssections.that_computer.2b209061") },
                 )
                 return
             }
@@ -1178,7 +1175,7 @@ fun ChatSection(
         val items = runCatching { outbox.items(outboxKey(id)) }
             .onFailure {
                 sendError = (it as? ChatOutboxFailure)?.message
-                    ?: "Pending messages could not be read on this device."
+                    ?: L10n.text("android.chatpullssections.pending_messages_could_not_be_read_on_this.9053a6c1")
             }
             .getOrDefault(emptyList())
         queued = items
@@ -1211,12 +1208,12 @@ fun ChatSection(
         }
     }
 
-    val place = folderName.ifBlank { "this folder" }
+    val place = folderName.ifBlank { L10n.text("android.chatpullssections.this_folder.9d6325c8") }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // Only the list wears the section label. A conversation is a screen
         // of its own and carries its own title.
-        if (openId == null) SectionLabel("Conversations")
+        if (openId == null) SectionLabel(L10n.text("android.chatpullssections.conversations.1d432f58"))
         if (openId == null && actionError != null) {
             StickyErrorCard(message = actionError!!, onDismiss = { actionError = null })
         }
@@ -1226,7 +1223,7 @@ fun ChatSection(
             legacyNotice(openId!!)
         }
         if (!HostContracts.supportsChat(protocol)) {
-            Text("Update the host to use chat (needs protocol 4).", style = MaterialTheme.typography.bodySmall)
+            Text(L10n.text("android.chatpullssections.update_the_host_to_use_chat_needs_protocol.640e4107"), style = MaterialTheme.typography.bodySmall)
             return
         }
         if (error != null) {
@@ -1245,14 +1242,14 @@ fun ChatSection(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TsAccentButton(
-                    label = if (creating) "Starting…" else "New chat",
+                    label = if (creating) L10n.text("android.chatpullssections.starting.bbe5fc3b") else L10n.text("android.chatpullssections.new_chat.db18382a"),
                     icon = ActionIcon.Create.vector,
                     small = true,
                     enabled = !creating,
                     onClick = { scope.launch { createAndOpen() } },
                 )
                 TsSecondaryButton(
-                    label = "Refresh",
+                    label = L10n.text("common.refresh"),
                     icon = ActionIcon.Refresh.vector,
                     small = true,
                     onClick = { scope.launch { loadChats() } },
@@ -1262,11 +1259,11 @@ fun ChatSection(
             if (chats.isEmpty()) {
                 EmptyState(
                     Icons.Default.ChatBubbleOutline,
-                    "Start a chat",
-                    "Ask an agent to explore, plan, or work in $place.",
+                    L10n.text("android.chatpullssections.start_a_chat.d80b1888"),
+                    L10n.text("android.chatpullssections.ask_an_agent_to_explore_plan_or_work_in_0.c1ba0fc2", "${place}"),
                     action = {
                         TsAccentButton(
-                            label = if (creating) "Starting…" else "New chat",
+                            label = if (creating) L10n.text("android.chatpullssections.starting.bbe5fc3b") else L10n.text("android.chatpullssections.new_chat.db18382a"),
                             small = true,
                             enabled = !creating,
                             onClick = { scope.launch { createAndOpen() } },
@@ -1275,7 +1272,7 @@ fun ChatSection(
                 )
                 return
             }
-            TsSearchField(prompt = "Titles, agents, or models", query = search, onQueryChange = { search = it }, modifier = Modifier.fillMaxWidth())
+            TsSearchField(prompt = L10n.text("android.chatpullssections.titles_agents_or_models.b7ffdc79"), query = search, onQueryChange = { search = it }, modifier = Modifier.fillMaxWidth())
             // Chats opened and never used stay out of the list, apart from
             // the one that is open. Same rule as the desktop sidebar.
             val listed = chats.filterNot {
@@ -1308,13 +1305,13 @@ fun ChatSection(
             ) {
                 Box {
                     TsSecondaryButton(
-                        label = "Filter & sort",
+                        label = L10n.text("android.chatpullssections.filter_sort.f6606a98"),
                         icon = ActionIcon.Filter.vector,
                         small = true,
                         onClick = { filterOpen = true },
                     )
                     DropdownMenu(expanded = filterOpen, onDismissRequest = { filterOpen = false }) {
-                        ChatAgentMenuItem("All agents", agentFilter.isEmpty()) { agentFilter = ""; filterOpen = false }
+                        ChatAgentMenuItem(L10n.text("android.chatpullssections.all_agents.54c32d3e"), agentFilter.isEmpty()) { agentFilter = ""; filterOpen = false }
                         agentIds.forEach { backend ->
                             ChatAgentMenuItem(harnessName(backend), agentFilter == backend) {
                                 agentFilter = backend; filterOpen = false
@@ -1322,27 +1319,27 @@ fun ChatSection(
                         }
                         HorizontalDivider()
                         DropdownMenuItem(
-                            text = { Text("Running only") },
+                            text = { Text(L10n.text("android.chatpullssections.running_only.48bbf789")) },
                             trailingIcon = { TsBrandSwitch(runningOnly, { runningOnly = it }) },
                             onClick = { runningOnly = !runningOnly; filterOpen = false },
                         )
                         HorizontalDivider()
-                        ChatAgentMenuItem("Recent first", !alphabetical) { alphabetical = false; filterOpen = false }
-                        ChatAgentMenuItem("Title A–Z", alphabetical) { alphabetical = true; filterOpen = false }
+                        ChatAgentMenuItem(L10n.text("android.chatpullssections.recent_first.e23e162b"), !alphabetical) { alphabetical = false; filterOpen = false }
+                        ChatAgentMenuItem(L10n.text("android.chatpullssections.title_a_z.ab217de6"), alphabetical) { alphabetical = true; filterOpen = false }
                         if (HostContracts.supportsChatRemoveAll(protocol)) {
                             HorizontalDivider()
-                            DropdownMenuItem(text = { Text("Delete all chats…") }, onClick = { filterOpen = false; deleteAll = true })
+                            DropdownMenuItem(text = { Text(L10n.text("android.chatpullssections.delete_all_chats.9753e785")) }, onClick = { filterOpen = false; deleteAll = true })
                         }
                     }
                 }
                 Text(
-                    "${shown.size} shown",
+                    L10n.text("android.chatpullssections.0_shown.c67ec9a7", "${shown.size}"),
                     style = TextStyle(fontSize = 12.sp),
                     color = LocalTsColors.current.textSecondary,
                 )
             }
             if (shown.isEmpty()) {
-                Text("No matching conversations. Adjust your search or filters.", style = MaterialTheme.typography.bodySmall)
+                Text(L10n.text("android.chatpullssections.no_matching_conversations_adjust_your_sear.37233882"), style = MaterialTheme.typography.bodySmall)
                 return
             }
             LazyColumn(contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1401,21 +1398,21 @@ fun ChatSection(
                 IconButton(onClick = { openId = null; scope.launch { loadChats() } }) {
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
-                        "All conversations",
+                        L10n.text("android.chatpullssections.all_conversations.ecf200f4"),
                         tint = LocalTsColors.current.textPrimary,
                     )
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
                         chats.firstOrNull { it.str("id") == openId }?.str("title")?.ifBlank { null }
-                            ?: "New chat",
+                            ?: L10n.text("android.chatpullssections.new_chat.db18382a"),
                         style = MaterialTheme.typography.headlineSmall,
                         color = LocalTsColors.current.textPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        folderName.ifBlank { "Conversation" },
+                        folderName.ifBlank { L10n.text("android.chatpullssections.conversation.ccca1817") },
                         style = MaterialTheme.typography.bodySmall,
                         color = LocalTsColors.current.textSecondary,
                         maxLines = 1,
@@ -1425,7 +1422,7 @@ fun ChatSection(
                 IconButton(onClick = { showingSetup = true }) {
                     Icon(
                         ActionIcon.Settings.vector,
-                        "Chat setup",
+                        L10n.text("android.chatpullssections.chat_setup.9fa79d00"),
                         tint = LocalTsColors.current.accent,
                     )
                 }
@@ -1461,7 +1458,7 @@ fun ChatSection(
                                 actionError = null
                                 openId?.let { loadEvents(it) }
                             }.onFailure {
-                                actionError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel.ifBlank { "that computer" })
+                                actionError = TunnelCopy.display(it.message ?: L10n.text("android.chatpullssections.the_request_failed.db4fb447"), hostLabel.ifBlank { L10n.text("android.chatpullssections.that_computer.2b209061") })
                             }
                         }
                     },
@@ -1491,12 +1488,12 @@ fun ChatSection(
                     EmptyArt(EmptyArtKind.Chat)
                     Spacer(Modifier.height(Space.s))
                     Text(
-                        "Ask about ${folderName.ifBlank { "this folder" }}",
+                        L10n.text("android.chatpullssections.ask_about_0.35c322e7", "${folderName.ifBlank { L10n.text("android.chatpullssections.this_folder.9d6325c8") }}"),
                         style = MaterialTheme.typography.titleSmall,
                         color = LocalTsColors.current.textPrimary,
                     )
                     Text(
-                        "Plan a change, explore the code, or set something running.",
+                        L10n.text("android.chatpullssections.plan_a_change_explore_the_code_or_set_some.02a395e5"),
                         style = MaterialTheme.typography.bodySmall,
                         color = LocalTsColors.current.textSecondary,
                         textAlign = TextAlign.Center,
@@ -1548,7 +1545,7 @@ fun ChatSection(
                     ) {
                         if (hasEarlier) {
                             item(key = "earlier") {
-                                TsSecondaryButton(label = if (loadingEarlier) "Loading earlier messages…" else "Load earlier messages",
+                                TsSecondaryButton(label = if (loadingEarlier) L10n.text("android.chatpullssections.loading_earlier_messages.b8507b92") else L10n.text("android.chatpullssections.load_earlier_messages.33fd46b9"),
                                     icon = ActionIcon.History.vector, small = true, enabled = !loadingEarlier,
                                     onClick = { openId?.let { id -> scope.launch { loadEarlier(id) } } })
                             }
@@ -1560,7 +1557,7 @@ fun ChatSection(
                                 peer = peer,
                                 chatId = openId ?: "",
                                 hostLabel = hostLabel,
-                                defaultAgentName = openChat?.str("backend")?.let { harnessName(it) } ?: "Agent",
+                                defaultAgentName = openChat?.str("backend")?.let { harnessName(it) } ?: L10n.text("android.chatpullssections.agent.11b39c93"),
                             )
                         }
                         // The turn in progress, with the conversation's own
@@ -1603,7 +1600,7 @@ fun ChatSection(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         TsSecondaryButton(
-                            label = "Try again",
+                            label = L10n.text("android.chatpullssections.try_again.d8b8392e"),
                             small = true,
                             // A failed send leaves the queue unauthorised, so
                             // retrying asks again for exactly the head. A
@@ -1616,14 +1613,14 @@ fun ChatSection(
                                 }
                             },
                         )
-                        TextButton(onClick = { sendError = null }) { Text("Dismiss") }
+                        TextButton(onClick = { sendError = null }) { Text(L10n.text("android.chatpullssections.dismiss.48845bff")) }
                     }
                 }
             }
             attachError?.let { Banner(it, BannerSeverity.DANGER) }
             setupError?.let { message ->
                 Banner(message, BannerSeverity.WARNING)
-                TextButton(onClick = { setupError = null }) { Text("Dismiss") }
+                TextButton(onClick = { setupError = null }) { Text(L10n.text("android.chatpullssections.dismiss.48845bff")) }
             }
             val runningTurn = openChat?.bol("running") == true
             val noteForStep = ChatSteer.promisesNote(
@@ -1687,7 +1684,7 @@ fun ChatSection(
                 hint = ChatHint.hint(folderName, sending || runningTurn, note = noteForStep),
                 sending = sending,
                 parking = parkingSteer,
-                sendLabel = if (noteForStep) "Add a note for the next step" else "Send",
+                sendLabel = if (noteForStep) L10n.text("android.chatpullssections.add_a_note_for_the_next_step.4778177a") else L10n.text("android.chatpullssections.send.f6f4688f"),
                 staged = staged,
                 onPick = { attachError = null; picker.launch(arrayOf("*/*")) },
                 onRemove = { staged = staged - it },
@@ -1747,8 +1744,8 @@ fun ChatSection(
                             // back with nothing said: somebody pressing
                             // Execute saw Plan stay lit and no reason why.
                             setupError = TunnelCopy.display(
-                                it.message ?: "The request failed.",
-                                hostLabel.ifBlank { "the computer" },
+                                it.message ?: L10n.text("android.chatpullssections.the_request_failed.db4fb447"),
+                                hostLabel.ifBlank { L10n.text("android.chatpullssections.the_computer.da52d93a") },
                             )
                         }
                     }
@@ -1758,45 +1755,45 @@ fun ChatSection(
     }
     val doomed = pendingDelete
     if (doomed != null) {
-        val host = hostLabel.ifBlank { "the computer" }
+        val host = hostLabel.ifBlank { L10n.text("android.chatpullssections.the_computer.da52d93a") }
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
-            title = { Text("Delete this chat?") },
-            text = { Text("The transcript stays on $host until you delete it. This cannot be undone.") },
+            title = { Text(L10n.text("android.chatpullssections.delete_this_chat.848dad9b")) },
+            text = { Text(L10n.text("android.chatpullssections.the_transcript_stays_on_0_until_you_delete.2ccfbdf7", "${host}")) },
             confirmButton = {
                 TextButton(onClick = {
                     pendingDelete = null
                     scope.launch {
                         runCatching {
-                            check(ownsProject()) { "The account changed." }
+                            check(ownsProject()) { L10n.text("android.chatpullssections.the_account_changed.8d030a8a") }
                             model.workspaceSection(peer, "chat.remove", buildJsonObject {
                                 put("id", doomed.str("id") ?: "")
                             })
                         }.onSuccess {
                             model.chatComposers.update(projectOwner?.conversation(doomed.str("id").orEmpty()), ai.tokenstat.tokenstat.ui.logic.ChatComposerSessions.Snapshot())
                             if (openId == doomed.str("id")) openId = null
-                        }.onFailure { actionError = TunnelCopy.display(it.message ?: "The chat could not be deleted.", hostLabel) }
+                        }.onFailure { actionError = TunnelCopy.display(it.message ?: L10n.text("android.chatpullssections.the_chat_could_not_be_deleted.47401958"), hostLabel) }
                         loadChats()
                     }
-                }) { Text("Delete chat") }
+                }) { Text(L10n.text("android.chatpullssections.delete_chat.93291d9c")) }
             },
-            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Keep it") } },
+            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text(L10n.text("android.chatpullssections.keep_it.fdce5da2")) } },
         )
     }
     pendingRename?.let { chat ->
-        NameEditorDialog("Rename chat", chat.str("title") ?: "Chat", onDismiss = { pendingRename = null }) { title ->
+        NameEditorDialog(L10n.text("android.chatpullssections.rename_chat.26076241"), chat.str("title") ?: L10n.text("android.chatpullssections.chat.460b3a7d"), onDismiss = { pendingRename = null }) { title ->
             pendingRename = null
             scope.launch {
                 if (!ownsProject()) return@launch
                 runCatching { model.workspaceSection(peer, "chat.update", buildJsonObject { put("id", chat.str("id") ?: ""); put("title", title) }) }
                     .onSuccess { if (ownsProject()) loadChats() }
-                    .onFailure { actionError = TunnelCopy.display(it.message ?: "The chat could not be renamed.", hostLabel) }
+                    .onFailure { actionError = TunnelCopy.display(it.message ?: L10n.text("android.chatpullssections.the_chat_could_not_be_renamed.f5548bc0"), hostLabel) }
             }
         }
     }
     if (deleteAll) {
-        AlertDialog(onDismissRequest = { deleteAll = false }, title = { Text("Delete all chats?") },
-            text = { Text("Every chat in this project on ${hostLabel.ifBlank { "the computer" }} will be deleted. This cannot be undone.") },
+        AlertDialog(onDismissRequest = { deleteAll = false }, title = { Text(L10n.text("android.chatpullssections.delete_all_chats.7d0b4340")) },
+            text = { Text(L10n.text("android.chatpullssections.every_chat_in_this_project_on_0_will_be_de.8c6b8cf6", "${hostLabel.ifBlank { L10n.text("android.chatpullssections.the_computer.da52d93a") }}")) },
             confirmButton = { TextButton(onClick = {
                 deleteAll = false
                 scope.launch {
@@ -1806,33 +1803,33 @@ fun ChatSection(
                         .onSuccess {
                             removed.forEach { id -> model.chatComposers.update(projectOwner?.conversation(id), ai.tokenstat.tokenstat.ui.logic.ChatComposerSessions.Snapshot()) }
                             if (ownsProject()) { openId = null; loadChats() }
-                        }.onFailure { actionError = TunnelCopy.display(it.message ?: "The chats could not be deleted.", hostLabel) }
+                        }.onFailure { actionError = TunnelCopy.display(it.message ?: L10n.text("android.chatpullssections.the_chats_could_not_be_deleted.69546d3e"), hostLabel) }
                 }
-            }) { Text("Delete all chats") } },
-            dismissButton = { TextButton(onClick = { deleteAll = false }) { Text("Cancel") } })
+            }) { Text(L10n.text("android.chatpullssections.delete_all_chats.3fbb0f9c")) } },
+            dismissButton = { TextButton(onClick = { deleteAll = false }) { Text(L10n.text("common.cancel")) } })
     }
     legacyReviewId?.let { id ->
         val chat = chats.firstOrNull { it.str("id") == id }
         Dialog(onDismissRequest = { if (!recoveringLegacy) legacyReviewId = null }) {
             Surface(shape = RoundedCornerShape(cardRadiusDp)) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Review older pending writing", style = MaterialTheme.typography.titleLarge)
-                    Text("Only attach these copies if they belong to your current account and ${folderName.ifBlank { "this project" }} on ${hostLabel.ifBlank { "this computer" }}. Nothing is sent by attaching them.")
-                    if (chat == null) Text("This conversation is no longer listed on the computer. Its copies stay here; they cannot be attached until the conversation is available.", color = LocalTsColors.current.warning)
+                    Text(L10n.text("android.chatpullssections.review_older_pending_writing.381b2b9f"), style = MaterialTheme.typography.titleLarge)
+                    Text(L10n.text("android.chatpullssections.only_attach_these_copies_if_they_belong_to.02a8bbbf", "${folderName.ifBlank { L10n.text("android.chatpullssections.this_project.11453073") }}", "${hostLabel.ifBlank { L10n.text("android.chatpullssections.this_computer.058bf37c") }}"))
+                    if (chat == null) Text(L10n.text("android.chatpullssections.this_conversation_is_no_longer_listed_on_t.3dc3921d"), color = LocalTsColors.current.warning)
                     Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         legacyReviewed.forEach { item ->
                             TsCard {
                                 Column {
-                                    Text(item.text.ifEmpty { "Attachments only" })
+                                    Text(item.text.ifEmpty { L10n.text("android.chatpullssections.attachments_only.789c51ad") })
                                     item.attachments.forEach { Text(it.name, style = MaterialTheme.typography.bodySmall) }
-                                    Text(if (item.needsReceipt) "Delivery needs checking. This copy will remain receipt required." else "This copy will require review and an explicit Send now.", style = MaterialTheme.typography.bodySmall)
+                                    Text(if (item.needsReceipt) L10n.text("android.chatpullssections.delivery_needs_checking_this_copy_will_rem.02d7b466") else L10n.text("android.chatpullssections.this_copy_will_require_review_and_an_expli.44adf4a0"), style = MaterialTheme.typography.bodySmall)
                                 }
                             }
                         }
                     }
                     legacyFailure?.let { Text(it, color = LocalTsColors.current.danger) }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(enabled = !recoveringLegacy, onClick = { legacyReviewId = null }) { Text("Keep copies") }
+                        TextButton(enabled = !recoveringLegacy, onClick = { legacyReviewId = null }) { Text(L10n.text("android.chatpullssections.keep_copies.eb39fe88")) }
                         TextButton(enabled = !recoveringLegacy && chat != null && legacyReviewed.isNotEmpty() && ownsProject(), onClick = {
                             val scoped = projectOwner?.conversation(id) ?: return@TextButton
                             val reviewed = legacyReviewed.toList()
@@ -1851,12 +1848,12 @@ fun ChatSection(
                                 } catch (failure: Exception) {
                                     if (failure is CancellationException) throw failure
                                     if (ownsProject()) {
-                                        legacyFailure = failure.message ?: "The copies could not be recovered."
+                                        legacyFailure = failure.message ?: L10n.text("android.chatpullssections.the_copies_could_not_be_recovered.1dcabea7")
                                         legacyReviewed = runCatching { outbox.items(legacyOutboxKey(id)) }.getOrDefault(reviewed)
                                     }
                                 } finally { recoveringLegacy = false }
                             }
-                        }) { Text(if (recoveringLegacy) "Attaching…" else "Attach reviewed copies") }
+                        }) { Text(if (recoveringLegacy) L10n.text("android.chatpullssections.attaching.513d9a0a") else L10n.text("android.chatpullssections.attach_reviewed_copies.ba2b1f74")) }
                     }
                 }
             }
@@ -1905,9 +1902,9 @@ fun ChatSection(
 private fun ChatStatPanels(chats: List<JsonObject>) {
     val colors = LocalTsColors.current
     val panels = listOf(
-        Triple("Conversations", chats.size.toString(), Icons.Default.ChatBubbleOutline),
-        Triple("Running", chats.count { it.bol("running") }.toString(), Icons.Default.Bolt),
-        Triple("Agents", chats.mapNotNull { it.str("backend") }.toSet().size.toString(), Icons.Default.Person),
+        Triple(L10n.text("android.chatpullssections.conversations.1d432f58"), chats.size.toString(), Icons.Default.ChatBubbleOutline),
+        Triple(L10n.text("common.running"), chats.count { it.bol("running") }.toString(), Icons.Default.Bolt),
+        Triple(L10n.text("android.chatpullssections.agents.279b44d2"), chats.mapNotNull { it.str("backend") }.toSet().size.toString(), Icons.Default.Person),
     )
     // Figure and glyph share the top row, label spans the width underneath,
     // the way the Apple tiles are built. Sitting the glyph beside the label
@@ -1977,7 +1974,7 @@ private fun ChatRow(chat: JsonObject) {
                     Canvas(Modifier.size(7.dp)) { drawCircle(colors.accent) }
                 }
                 Text(
-                    chat.str("title") ?: "Untitled",
+                    chat.str("title") ?: L10n.text("android.chatpullssections.untitled.f59ab8d1"),
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -2023,7 +2020,7 @@ internal fun ApprovalCard(approval: JsonObject, onResolve: (String) -> Unit) {
     ) {
         Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
             Text(
-                if (pending) "Needs an answer" else "Decided",
+                if (pending) L10n.text("android.chatpullssections.needs_an_answer.d02bd7d7") else L10n.text("android.chatpullssections.decided.30ba702e"),
                 style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
                 color = if (pending) colors.warning else colors.textSecondary,
                 modifier = Modifier.weight(1f),
@@ -2041,9 +2038,9 @@ internal fun ApprovalCard(approval: JsonObject, onResolve: (String) -> Unit) {
         }
         if (pending) {
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                TsAccentButton(label = "Allow", small = true, onClick = { onResolve("allow") })
-                TsSecondaryButton(label = "Always allow", small = true, onClick = { onResolve("allowAlways") })
-                TsSecondaryButton(label = "Deny", small = true, onClick = { onResolve("deny") })
+                TsAccentButton(label = L10n.text("android.chatpullssections.allow.e213c161"), small = true, onClick = { onResolve("allow") })
+                TsSecondaryButton(label = L10n.text("android.chatpullssections.always_allow.977618bd"), small = true, onClick = { onResolve("allowAlways") })
+                TsSecondaryButton(label = L10n.text("android.chatpullssections.deny.05a2d733"), small = true, onClick = { onResolve("deny") })
             }
             if (note != null) {
                 Text(note, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
@@ -2098,7 +2095,7 @@ private fun ChatSetupDialog(
             brief = obj?.str("brief")
             added = obj?.str("added")
             channel = obj?.str("channel")
-        }.onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+        }.onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.chatpullssections.the_request_failed.db4fb447"), hostLabel) }
         runCatching {
             model.workspaceSection(peer, "chat.personas", personaScopeParams(workspace))
         }.onSuccess { element ->
@@ -2122,7 +2119,7 @@ private fun ChatSetupDialog(
                     put("systemPrompt", persona?.systemPrompt ?: "")
                 })
             }.onSuccess { onChanged() }
-                .onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+                .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.chatpullssections.the_request_failed.db4fb447"), hostLabel) }
         }
     }
 
@@ -2133,7 +2130,7 @@ private fun ChatSetupDialog(
                     put("id", chatId); put(field, value)
                 })
             }.onSuccess { onChanged() }
-                .onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+                .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.chatpullssections.the_request_failed.db4fb447"), hostLabel) }
         }
     }
 
@@ -2142,7 +2139,7 @@ private fun ChatSetupDialog(
             runCatching {
                 model.workspaceSection(peer, "chat.personaDefault", personaDefaultParams(workspace, persona?.id ?: ""))
             }.onSuccess { defaultId = persona?.id }
-                .onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+                .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.chatpullssections.the_request_failed.db4fb447"), hostLabel) }
         }
     }
 
@@ -2171,22 +2168,22 @@ private fun ChatSetupDialog(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Chat setup",
+                    L10n.text("android.chatpullssections.chat_setup.9fa79d00"),
                     style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
                     color = colors.textPrimary,
                     modifier = Modifier.weight(1f),
                 )
-                TsSecondaryButton(label = "Done", icon = ActionIcon.Done.vector, small = true, onClick = onDismiss)
+                TsSecondaryButton(label = L10n.text("common.done"), icon = ActionIcon.Done.vector, small = true, onClick = onDismiss)
             }
             if (error != null) Banner(error!!, BannerSeverity.DANGER)
             if (loading) {
-                Text("Loading…", color = colors.textSecondary)
+                Text(L10n.text("android.chatpullssections.loading.ba3bbbe1"), color = colors.textSecondary)
             } else {
                 // Who answers, in one field. The three settings behind it are
                 // one list with one filter, rather than three dropdowns that
                 // each hold a scroll of their own.
                 Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                    SectionLabel("Agent")
+                    SectionLabel(L10n.text("android.chatpullssections.agent.11b39c93"))
                     TsPickerField(
                         summary = chatAgentSummary(backends, chat),
                         onOpen = onPickAgent,
@@ -2199,9 +2196,9 @@ private fun ChatSetupDialog(
                 // you recognise from the transcript.
                 Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        SectionLabel("Persona", modifier = Modifier.weight(1f))
+                        SectionLabel(L10n.text("android.chatpullssections.persona.31bdeef9"), modifier = Modifier.weight(1f))
                         TsSecondaryButton(
-                            label = "Edit personas",
+                            label = L10n.text("android.chatpullssections.edit_personas.a41f17a3"),
                             icon = ActionIcon.Persona.vector,
                             small = true,
                             onClick = { showingPersonas = true },
@@ -2216,13 +2213,13 @@ private fun ChatSetupDialog(
                             size = 30.dp,
                         )
                         TsPickerField(
-                            summary = chatPersona?.name ?: "No persona",
+                            summary = chatPersona?.name ?: L10n.text("android.chatpullssections.no_persona.cce53fca"),
                             onOpen = { pickingPersona = true },
                             modifier = Modifier.weight(1f),
                         )
                     }
                     Text(
-                        "Sent to whichever agent this chat is on. It is never part of your message.",
+                        L10n.text("android.chatpullssections.sent_to_whichever_agent_this_chat_is_on_it.ab533965"),
                         style = TsType.caption,
                         color = colors.textSecondary,
                     )
@@ -2231,9 +2228,9 @@ private fun ChatSetupDialog(
                 // controls the composer carries. The iPhone setup edits
                 // them too: settings matter most before you commit.
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                    SectionLabel("How it works")
+                    SectionLabel(L10n.text("android.chatpullssections.how_it_works.9c870aa6"))
                     ChatSegmented(
-                        options = listOf("plan" to "Plan", "execute" to "Execute"),
+                        options = listOf("plan" to L10n.text("android.chatpullssections.plan.fa8ed0bd"), "execute" to L10n.text("android.chatpullssections.execute.e3a67d95")),
                         selected = chat?.str("mode")?.ifBlank { null } ?: LaunchDefaults.MODE,
                         enabled = chat?.bol("running") != true,
                         onSelect = { updateChat("mode", it) },
@@ -2241,7 +2238,7 @@ private fun ChatSetupDialog(
                     )
                     if (chatAgentForcesBypass(backends, chat?.str("backend").orEmpty())) {
                         ChatSegmented(
-                            options = listOf("bypass" to "Don't ask"),
+                            options = listOf("bypass" to L10n.text("android.chatpullssections.don_t_ask.15dae980")),
                             selected = "bypass",
                             enabled = false,
                             onSelect = {},
@@ -2249,7 +2246,7 @@ private fun ChatSetupDialog(
                         )
                     } else {
                         ChatSegmented(
-                            options = listOf("standard" to "Ask first", "bypass" to "Don't ask"),
+                            options = listOf("standard" to L10n.text("android.chatpullssections.ask_first.4a9e8cf3"), "bypass" to L10n.text("android.chatpullssections.don_t_ask.15dae980")),
                             selected = if (chat?.str("autonomy") == "bypass") "bypass" else "standard",
                             enabled = chat?.bol("running") != true,
                             onSelect = { updateChat("autonomy", it) },
@@ -2260,21 +2257,21 @@ private fun ChatSetupDialog(
                 // What the person wrote, and what tokenstat adds, kept apart:
                 // only one of the two is theirs to change.
                 Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                    SectionLabel("Brief")
+                    SectionLabel(L10n.text("android.chatpullssections.brief.ac40ae1e"))
                     Text(
-                        brief?.ifBlank { null } ?: "No brief. The agent gets the folder and your messages.",
+                        brief?.ifBlank { null } ?: L10n.text("android.chatpullssections.no_brief_the_agent_gets_the_folder_and_you.5d32d831"),
                         style = TextStyle(fontSize = 14.sp),
                         color = colors.textSecondary,
                     )
                 }
                 added?.ifBlank { null }?.let {
                     Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                        SectionLabel("What tokenstat adds")
+                        SectionLabel(L10n.text("android.chatpullssections.what_tokenstat_adds.358d9a68"))
                         Text(it, style = TextStyle(fontSize = 13.sp), color = colors.textSecondary)
                         Text(
                             when (channel) {
-                                "systemPrompt" -> "Sent as the system prompt."
-                                "turnPrefix" -> "This agent takes no system prompt, so it goes in front of each turn."
+                                "systemPrompt" -> L10n.text("android.chatpullssections.sent_as_the_system_prompt.244e160e")
+                                "turnPrefix" -> L10n.text("android.chatpullssections.this_agent_takes_no_system_prompt_so_it_go.b9c70e19")
                                 else -> ""
                             },
                             style = TextStyle(fontSize = 12.sp),
@@ -2289,18 +2286,18 @@ private fun ChatSetupDialog(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            "New chats here",
+                            L10n.text("android.chatpullssections.new_chats_here.cc6a9bf2"),
                             style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Medium),
                             color = colors.textPrimary,
                         )
                         Text(
-                            "Existing conversations keep whatever they already have.",
+                            L10n.text("android.chatpullssections.existing_conversations_keep_whatever_they.b48e4eab"),
                             style = TsType.caption,
                             color = colors.textSecondary,
                         )
                     }
                     TsPickerField(
-                        summary = personas.firstOrNull { it.id == defaultId }?.name ?: "No persona",
+                        summary = personas.firstOrNull { it.id == defaultId }?.name ?: L10n.text("android.chatpullssections.no_persona.cce53fca"),
                         onOpen = { pickingDefault = true },
                     )
                 }
@@ -2310,22 +2307,22 @@ private fun ChatSetupDialog(
     }
     if (pickingPersona) {
         TsSimplePickerSheet(
-            title = "Persona",
+            title = L10n.text("android.chatpullssections.persona.31bdeef9"),
             choices = personaPickerChoices(personas, defaultId),
             isSelected = { it == (chat?.str("personaId") ?: "") },
-            prompt = "Filter personas",
-            emptyMessage = "No personas yet. Edit personas to write one.",
+            prompt = L10n.text("android.chatpullssections.filter_personas.b1b11515"),
+            emptyMessage = L10n.text("android.chatpullssections.no_personas_yet_edit_personas_to_write_one.a43d4cb5"),
             onPick = { id -> applyPersona(personas.firstOrNull { it.id == id }) },
             onDismiss = { pickingPersona = false },
         )
     }
     if (pickingDefault) {
         TsSimplePickerSheet(
-            title = "New chats here",
+            title = L10n.text("android.chatpullssections.new_chats_here.cc6a9bf2"),
             choices = personaPickerChoices(personas, defaultId),
             isSelected = { it == (defaultId ?: "") },
-            prompt = "Filter personas",
-            emptyMessage = "No personas yet. Edit personas to write one.",
+            prompt = L10n.text("android.chatpullssections.filter_personas.b1b11515"),
+            emptyMessage = L10n.text("android.chatpullssections.no_personas_yet_edit_personas_to_write_one.a43d4cb5"),
             onPick = { id -> setDefault(personas.firstOrNull { it.id == id }) },
             onDismiss = { pickingDefault = false },
         )
@@ -2348,12 +2345,12 @@ internal fun personaPickerChoices(
     personas: List<ChatPersona>,
     defaultId: String?,
 ): List<PickerChoice<String>> =
-    listOf(PickerChoice("", "No persona", detail = "The agent answers as itself")) +
+    listOf(PickerChoice("", L10n.text("android.chatpullssections.no_persona.cce53fca"), detail = L10n.text("android.chatpullssections.the_agent_answers_as_itself.8ae72284"))) +
         personas.map {
             PickerChoice(
                 value = it.id,
                 label = it.name,
-                detail = if (it.id == defaultId) "Default for new chats here" else null,
+                detail = if (it.id == defaultId) L10n.text("android.chatpullssections.default_for_new_chats_here.a5ce506a") else null,
             )
         }
 
@@ -2477,7 +2474,7 @@ fun PullsSection(
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // The pushed header says "Pull requests" already.
         if (!HostContracts.supportsPulls(protocol)) {
-            Text("Update the host to read pull requests (needs protocol 3).", style = MaterialTheme.typography.bodySmall)
+            Text(L10n.text("android.chatpullssections.update_the_host_to_read_pull_requests_need.ab169427"), style = MaterialTheme.typography.bodySmall)
             return
         }
         val available = availability
@@ -2491,17 +2488,17 @@ fun PullsSection(
                 verticalArrangement = Arrangement.spacedBy(Space.s),
             ) {
                 Text(
-                    "Bring the review into tokenstat",
+                    L10n.text("android.chatpullssections.bring_the_review_into_tokenstat.124ca7d8"),
                     style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
                     color = LocalTsColors.current.textPrimary,
                 )
                 Text(
-                    "Read the conversation, inspect the same diff as Changes, follow checks, and review without losing the project around it.",
+                    L10n.text("android.chatpullssections.read_the_conversation_inspect_the_same_dif.a163d47d"),
                     style = TextStyle(fontSize = 12.sp),
                     color = LocalTsColors.current.textSecondary,
                 )
                 Text(
-                    "tokenstat only sees repositories selected for its GitHub App installation.",
+                    L10n.text("android.chatpullssections.tokenstat_only_sees_repositories_selected.e2bbcc73"),
                     style = TextStyle(fontSize = 12.sp),
                     color = LocalTsColors.current.textSecondary,
                 )
@@ -2534,13 +2531,13 @@ fun PullsSection(
             }
         }
         Text(
-            "${pulls.size} shown",
+            L10n.text("android.chatpullssections.0_shown.c67ec9a7", "${pulls.size}"),
             style = TextStyle(fontSize = 12.sp),
             color = LocalTsColors.current.textSecondary,
         )
         if (loading) { CircularProgressIndicator(Modifier, strokeWidth = 2.dp); return }
         if (pulls.isEmpty() && error == null) {
-            EmptyState(Icons.Default.ChatBubbleOutline, "No open pulls", "Connect GitHub on that computer to review here.")
+            EmptyState(Icons.Default.ChatBubbleOutline, L10n.text("android.chatpullssections.no_open_pulls.510714cf"), L10n.text("android.chatpullssections.connect_github_on_that_computer_to_review.03a8e2fe"))
             return
         }
         LazyColumn(contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2566,13 +2563,13 @@ fun PullsSection(
                                 Text("−$it", style = TsType.numeric(12), color = LocalTsColors.current.diffRemoved)
                             }
                             pr.get("changedFiles")?.jsonPrimitive?.longOrNull?.let {
-                                Text("$it files", style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
+                                Text(L10n.text("android.chatpullssections.0_files.fb42ce4d", "${it}"), style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
                             }
                             pr.str("state")?.takeIf { it.isNotBlank() }?.let {
                                 Text(it, style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
                             }
                             if (pr.bol("draft")) {
-                                Text("Draft", style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
+                                Text(L10n.text("android.chatpullssections.draft.ebf12ef4"), style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
                             }
                         }
                     }
@@ -2615,20 +2612,20 @@ internal fun readAttachment(context: android.content.Context, uri: android.net.U
         resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) cursor.getString(0) else null
         }
-    }.getOrNull() ?: uri.lastPathSegment ?: "Attachment"
+    }.getOrNull() ?: uri.lastPathSegment ?: L10n.text("android.chatpullssections.attachment.040d2b36")
     val bytes = try {
         resolver.openInputStream(uri)?.use { it.readBounded(byteLimit) }
-            ?: return AttachmentRead.Failed("$name could not be read.")
+            ?: return AttachmentRead.Failed(L10n.text("android.chatpullssections.0_could_not_be_read.f70f8efc", "${name}"))
     } catch (_: InputLimitExceeded) {
         return AttachmentRead.Failed(if (byteLimit < ATTACHMENT_CAP)
-            "Send or remove the staged files before adding $name (24 MB total)."
-        else "$name is larger than 12 MB, which is the most a chat can carry.")
+            L10n.text("android.chatpullssections.send_or_remove_the_staged_files_before_add.ee3166e5", "${name}")
+        else L10n.text("android.chatpullssections.0_is_larger_than_12_mb_which_is_the_most_a.d4a315eb", "${name}"))
     } catch (_: Exception) {
-        return AttachmentRead.Failed("$name could not be read.")
+        return AttachmentRead.Failed(L10n.text("android.chatpullssections.0_could_not_be_read.f70f8efc", "${name}"))
     }
-    if (bytes.isEmpty()) return AttachmentRead.Failed("$name is empty.")
+    if (bytes.isEmpty()) return AttachmentRead.Failed(L10n.text("android.chatpullssections.0_is_empty.d4d13926", "${name}"))
     if (bytes.size > ATTACHMENT_CAP) {
-        return AttachmentRead.Failed("$name is larger than 12 MB, which is the most a chat can carry.")
+        return AttachmentRead.Failed(L10n.text("android.chatpullssections.0_is_larger_than_12_mb_which_is_the_most_a.d4a315eb", "${name}"))
     }
     return AttachmentRead.Ok(
         StagedAttachment(
@@ -2648,7 +2645,7 @@ private fun liveStep(items: List<ChatDisplayItem>): String? {
                 return ChatSeat.phrase(item.state.verb, item.state.target)
             }
             is ChatDisplayItem.Edit -> if (item.state.running) {
-                return ChatSeat.phrase("Edit", item.state.path)
+                return ChatSeat.phrase(L10n.text("common.edit"), item.state.path)
             }
             else -> Unit
         }
@@ -2713,7 +2710,7 @@ private fun ChatComposer(
     /// A note is being parked. Send stays Send and stays quiet.
     parking: Boolean = false,
     /// What the send control says it will do.
-    sendLabel: String = "Send",
+    sendLabel: String = L10n.text("android.chatpullssections.send.f6f4688f"),
     staged: List<StagedAttachment>,
     onPick: () -> Unit,
     onRemove: (StagedAttachment) -> Unit,
@@ -2763,7 +2760,7 @@ private fun ChatComposer(
             // twin of the button `ClientChatComposer` shows over a saved copy.
             if (offline) {
                 TsSecondaryButton(
-                    label = "Send when connected",
+                    label = L10n.text("android.chatpullssections.send_when_connected.c2aae57a"),
                     icon = ActionIcon.Scheduled.vector,
                     small = true,
                     enabled = draft.isNotBlank(),
@@ -2788,7 +2785,7 @@ private fun ChatComposer(
                 IconButton(onClick = { expanded = !expanded }) {
                     Icon(
                         if (expanded) ActionIcon.ExitFullScreen.vector else ActionIcon.EnterFullScreen.vector,
-                        if (expanded) "Shrink the message box" else "Expand the message box",
+                        if (expanded) L10n.text("android.chatpullssections.shrink_the_message_box.2430d33f") else L10n.text("android.chatpullssections.expand_the_message_box.c0441a94"),
                         tint = colors.accent,
                         modifier = Modifier.size(18.dp),
                     )
@@ -2796,7 +2793,7 @@ private fun ChatComposer(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 ChatSegmented(
-                    options = listOf("plan" to "Plan", "execute" to "Execute"),
+                    options = listOf("plan" to L10n.text("android.chatpullssections.plan.fa8ed0bd"), "execute" to L10n.text("android.chatpullssections.execute.e3a67d95")),
                     selected = mode,
                     enabled = !locked,
                     onSelect = { onChange("mode", it) },
@@ -2808,7 +2805,7 @@ private fun ChatComposer(
                     // same control with its choice made by the agent. Never
                     // enabled: there is nothing to switch to.
                     ChatSegmented(
-                        options = listOf("bypass" to "Don't ask"),
+                        options = listOf("bypass" to L10n.text("android.chatpullssections.don_t_ask.15dae980")),
                         selected = "bypass",
                         enabled = false,
                         onSelect = {},
@@ -2816,7 +2813,7 @@ private fun ChatComposer(
                     )
                 } else {
                     ChatSegmented(
-                        options = listOf("standard" to "Ask first", "bypass" to "Don't ask"),
+                        options = listOf("standard" to L10n.text("android.chatpullssections.ask_first.4a9e8cf3"), "bypass" to L10n.text("android.chatpullssections.don_t_ask.15dae980")),
                         selected = autonomy,
                         enabled = !locked,
                         onSelect = { onChange("autonomy", it) },
@@ -2849,7 +2846,7 @@ private fun ChatComposer(
                     IconButton(onClick = { onRemove(attachment) }, modifier = Modifier.size(24.dp)) {
                         Icon(
                             ActionIcon.Dismiss.vector,
-                            "Remove ${attachment.name}",
+                            L10n.text("android.chatpullssections.remove_0.dfbfd0da", "${attachment.name}"),
                             tint = colors.textSecondary,
                             modifier = Modifier.size(15.dp),
                         )
@@ -2863,7 +2860,7 @@ private fun ChatComposer(
                 IconButton(onClick = onPick, enabled = !sending) {
                     Icon(
                         ActionIcon.Attach.vector,
-                        "Attach a file",
+                        L10n.text("android.chatpullssections.attach_a_file.21298c62"),
                         tint = if (sending) colors.textTertiary else colors.accent,
                     )
                 }
@@ -2876,7 +2873,7 @@ private fun ChatComposer(
                 )
                 if (sending) {
                     IconButton(onClick = onStop) {
-                        Icon(ActionIcon.Stop.vector, "Stop", tint = colors.danger)
+                        Icon(ActionIcon.Stop.vector, L10n.text("common.stop"), tint = colors.danger)
                     }
                 } else {
                     IconButton(

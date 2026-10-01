@@ -39,13 +39,13 @@ struct ClientHomeMachinesSection: View {
         if !hosts.isEmpty {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 HStack(alignment: .center, spacing: Theme.Space.s) {
-                    ClientSectionTitle(title: "Machines", mark: "mark_host")
+                    ClientSectionTitle(title: L10n.text("apple.clienthomemachinessection.machines.c061da19"), mark: "mark_host")
                     Spacer(minLength: 0)
                     Button {
                         navigation.destination = .machines
                     } label: {
                         HStack(spacing: 2) {
-                            Text("Devices")
+                            Text(L10n.text("common.devices"))
                             Image(systemName: "chevron.right")
                         }
                         .font(ClientType.caption.weight(.semibold))
@@ -67,7 +67,7 @@ struct ClientHomeMachinesSection: View {
                                 row(machine)
                             }
                             .buttonStyle(.plain)
-                            .accessibilityHint("Opens this computer's work")
+                            .accessibilityHint(L10n.text("apple.clienthomemachinessection.opens_this_computer_s_work.c072040d"))
                         } else {
                             Button {
                                 navigation.openDevice(machineID: machine.machineID)
@@ -121,9 +121,9 @@ struct ClientHomeMachinesSection: View {
     }
 
     private func state(of machine: Machine) -> String {
-        if machine.online == true { return "Awake" }
-        if machine.online == false { return "Asleep" }
-        return "Status unknown"
+        if machine.online == true { return L10n.text("apple.clienthomemachinessection.awake.9123b5f4") }
+        if machine.online == false { return L10n.text("apple.clienthomemachinessection.asleep.60135e8f") }
+        return L10n.text("apple.clienthomemachinessection.status_unknown.e412d872")
     }
 }
 

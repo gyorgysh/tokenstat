@@ -14,9 +14,9 @@ enum HostAgentInstaller {
         var errorDescription: String? {
             switch self {
             case .helperMissing:
-                return "The bundled tokenstat-hostd helper is not present in this build. Install the packaged app or build the host helper first."
+                return L10n.text("apple.hostagentinstaller.the_bundled_tokenstat_hostd_helper_is_not.22b80396")
             case .newerHelper:
-                return "A newer version of tokenstat manages the local helper. Open the latest app to change it."
+                return L10n.text("apple.hostagentinstaller.a_newer_version_of_tokenstat_manages_the_l.380289a5")
             case let .commandFailed(message):
                 return message
             }
@@ -123,7 +123,7 @@ enum HostAgentInstaller {
             "ProgramArguments": [helper.path],
             "KeepAlive": alwaysOn,
             "RunAtLoad": alwaysOn,
-            "ProcessType": "Interactive",
+            "ProcessType": L10n.text("apple.hostagentinstaller.interactive.39a4a7ae"),
             "StandardOutPath": logs.appendingPathComponent("hostd.out.log").path,
             "StandardErrorPath": logs.appendingPathComponent("hostd.err.log").path
         ]
@@ -440,7 +440,7 @@ enum HostAgentInstaller {
         let text = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         guard process.terminationStatus == 0 else {
             throw InstallerError.commandFailed(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? "launchctl failed with status \(process.terminationStatus)."
+                ? L10n.text("apple.hostagentinstaller.launchctl_failed_with_status_0.03e545fd", "\(process.terminationStatus)")
                 : text.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return text

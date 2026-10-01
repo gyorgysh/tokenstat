@@ -22,7 +22,7 @@ namespace Tokenstat.Install;
 /// </summary>
 internal sealed class AppUpdateModel
 {
-    public const string UpToDateMessage = "You are on the latest version.";
+    public static readonly string UpToDateMessage = L10n.Text("windows.appupdatemodel.you_are_on_the_latest_version.eeced728");
 
     public enum Stage
     {
@@ -97,7 +97,7 @@ internal sealed class AppUpdateModel
 
         if (IsReady)
         {
-            CheckNotice = "Update installed. Relaunch to finish.";
+            CheckNotice = L10n.Text("windows.appupdatemodel.update_installed_relaunch_to_finish.d191ced5");
         }
         else if (Failure is not null)
         {
@@ -105,7 +105,7 @@ internal sealed class AppUpdateModel
         }
         else if (IsAvailable && Latest != before)
         {
-            CheckNotice = $"Version {Latest} found.";
+            CheckNotice = L10n.Text("windows.appupdatemodel.version_0_found.a4c4e509", $"{Latest}");
         }
         else
         {
@@ -169,7 +169,7 @@ internal sealed class AppUpdateModel
                 var date = DateTimeOffset.FromUnixTimeSeconds(at);
                 RetryAfter = date;
                 Current = Stage.Failed;
-                Failure = $"GitHub is limiting update checks. You can try again after {date.ToLocalTime():t}.";
+                Failure = L10n.Text("windows.appupdatemodel.github_is_limiting_update_checks_you_can_t.01b98ce8", $"{date.ToLocalTime():t}");
                 Changed?.Invoke();
                 return;
             }
@@ -212,7 +212,7 @@ internal sealed class AppUpdateModel
                 new JsonObject(),
                 patience: TimeSpan.FromMinutes(5));
             var path = Str(downloaded, "path")
-                ?? throw new AppInstaller.Failure("The host did not return a download path.");
+                ?? throw new AppInstaller.Failure(L10n.Text("windows.appupdatemodel.the_host_did_not_return_a_download_path.f4dcb739"));
             Current = Stage.Installing;
             Changed?.Invoke();
             await Task.Run(() => AppInstaller.Install(path));

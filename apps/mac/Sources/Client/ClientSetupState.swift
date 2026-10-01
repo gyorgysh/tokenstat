@@ -52,15 +52,15 @@ enum ClientSetupMilestone: String, Codable {
     var summary: String {
         switch self {
         case .trusted:
-            "Its fingerprint is verified. Setup carries on from your sign-in details."
+            L10n.text("apple.clientsetupstate.its_fingerprint_is_verified_setup_carries.85d90f26")
         case .checked:
-            "It is checked and ready to install."
+            L10n.text("apple.clientsetupstate.it_is_checked_and_ready_to_install.8f2e0902")
         case .installRequested:
-            "The installer was started. Setup asks the server what actually happened before it does anything again."
+            L10n.text("apple.clientsetupstate.the_installer_was_started_setup_asks_the_s.2ca3a719")
         case .verifying:
-            "The server is installed. Setup is waiting for it to reach your account."
+            L10n.text("apple.clientsetupstate.the_server_is_installed_setup_is_waiting_f.fe7267cd")
         case .hostReady:
-            "The server answered. One last check finishes this."
+            L10n.text("apple.clientsetupstate.the_server_answered_one_last_check_finishe.a9101f9b")
         }
     }
 }
@@ -100,8 +100,8 @@ enum ClientSetupDraftError: Error, LocalizedError {
     case invalid, unsupportedVersion
     var errorDescription: String? {
         switch self {
-        case .invalid: "Saved setup is incomplete or belongs to another account."
-        case .unsupportedVersion: "Saved setup was created by a different version of tokenstat."
+        case .invalid: L10n.text("apple.clientsetupstate.saved_setup_is_incomplete_or_belongs_to_an.5a0fc6b6")
+        case .unsupportedVersion: L10n.text("apple.clientsetupstate.saved_setup_was_created_by_a_different_ver.d909f4bf")
         }
     }
 }
@@ -131,15 +131,15 @@ struct ClientSetupFailure: Equatable {
 
         var title: String {
             switch self {
-            case .checkAddress: "Check the address"
-            case .reviewFingerprint: "Review the fingerprint"
-            case .checkCredential: "Check the credential"
-            case .checkServer: "Check the server"
-            case .newCode: "Get a new code"
-            case .signInToAgent: "Sign in"
-            case .signInToAccount: "Sign in"
-            case .updateMachine: "How to update"
-            case .retry: "Try again"
+            case .checkAddress: L10n.text("apple.clientsetupstate.check_the_address.b092b174")
+            case .reviewFingerprint: L10n.text("apple.clientsetupstate.review_the_fingerprint.377df466")
+            case .checkCredential: L10n.text("apple.clientsetupstate.check_the_credential.5f42f1c7")
+            case .checkServer: L10n.text("apple.clientsetupstate.check_the_server.eb259223")
+            case .newCode: L10n.text("apple.clientsetupstate.get_a_new_code.42cc251c")
+            case .signInToAgent: L10n.text("common.sign_in")
+            case .signInToAccount: L10n.text("common.sign_in")
+            case .updateMachine: L10n.text("apple.clientsetupstate.how_to_update.d97d76cb")
+            case .retry: L10n.text("apple.clientsetupstate.try_again.d8b8392e")
             }
         }
 
@@ -208,80 +208,70 @@ struct ClientSetupFailure: Equatable {
         switch code {
         case "ssh_unreachable":
             return ClientSetupFailure(
-                explanation: "We couldn't reach this server. Check its address, and that "
-                    + "it is running and accepting connections.",
+                explanation: L10n.text("apple.clientsetupstate.we_couldn_t_reach_this_server_check_its_ad.13dd9877"),
                 action: .checkAddress,
                 details: message
             )
         case "ssh_host_key_changed":
             return ClientSetupFailure(
-                explanation: "This server's identity has changed since it was trusted. "
-                    + "That can be a reinstall, or it can be the wrong machine answering. "
-                    + "Verify the fingerprint before connecting again.",
-                changed: "Nothing was sent to it.",
+                explanation: L10n.text("apple.clientsetupstate.this_server_s_identity_has_changed_since_i.e7f60705"),
+                changed: L10n.text("apple.clientsetupstate.nothing_was_sent_to_it.80689dc8"),
                 action: .reviewFingerprint,
                 details: message
             )
         case "ssh_host_key_unverified":
             return ClientSetupFailure(
-                explanation: "This server's fingerprint has not been confirmed yet.",
+                explanation: L10n.text("apple.clientsetupstate.this_server_s_fingerprint_has_not_been_con.98cbb3d1"),
                 action: .reviewFingerprint,
                 details: message
             )
         case "ssh_auth_refused":
             return ClientSetupFailure(
-                explanation: "The server refused the key or password. Check the credential "
-                    + "and the user name you are connecting as.",
+                explanation: L10n.text("apple.clientsetupstate.the_server_refused_the_key_or_password_che.7f44f231"),
                 action: .checkCredential,
                 details: message
             )
         case "setup_pending":
             return ClientSetupFailure(
-                explanation: "This machine has not appeared on your account yet.",
-                changed: "The installer may still be running on the server.",
+                explanation: L10n.text("apple.clientsetupstate.this_machine_has_not_appeared_on_your_acco.54a9c2b8"),
+                changed: L10n.text("apple.clientsetupstate.the_installer_may_still_be_running_on_the.9ccd1cf6"),
                 action: .checkServer,
                 details: message
             )
         case "identity_mismatch":
             return ClientSetupFailure(
-                explanation: "The machine answered with a different identity than the one "
-                    + "this setup installed. Reconnect and verify the server.",
+                explanation: L10n.text("apple.clientsetupstate.the_machine_answered_with_a_different_iden.b027025e"),
                 action: .reviewFingerprint,
                 details: message
             )
         case "access_required":
             return ClientSetupFailure(
-                explanation: "This machine is on your account, but this device is not "
-                    + "allowed on it yet.",
-                changed: "The server is installed and signed in.",
+                explanation: L10n.text("apple.clientsetupstate.this_machine_is_on_your_account_but_this_d.876ba315"),
+                changed: L10n.text("apple.clientsetupstate.the_server_is_installed_and_signed_in.092d7364"),
                 action: .checkServer,
                 details: message
             )
         case "pairing_expired", "code_expired":
             return ClientSetupFailure(
-                explanation: "This pairing code has expired.",
+                explanation: L10n.text("apple.clientsetupstate.this_pairing_code_has_expired.dc34ec3b"),
                 action: .newCode,
                 details: message
             )
         case "identity_required":
             return ClientSetupFailure(
-                explanation: "Paste the full machine key the installer printed, so setup "
-                    + "finishes on the machine you installed rather than one with the "
-                    + "same name.",
+                explanation: L10n.text("apple.clientsetupstate.paste_the_full_machine_key_the_installer_p.95ca62ac"),
                 action: .retry,
                 details: message
             )
         case "account_changed", "signed_out", "auth":
             return ClientSetupFailure(
-                explanation: "This device is signed out of the account that started this "
-                    + "setup. Sign in again, then continue.",
+                explanation: L10n.text("apple.clientsetupstate.this_device_is_signed_out_of_the_account_t.cd22fc68"),
                 action: .signInToAccount,
                 details: message
             )
         case "unknown_method":
             return ClientSetupFailure(
-                explanation: "This machine is running an older tokenstat, which does not "
-                    + "know how to finish setup. Update it there to continue.",
+                explanation: L10n.text("apple.clientsetupstate.this_machine_is_running_an_older_tokenstat.e8972de3"),
                 action: .updateMachine,
                 details: message
             )
@@ -291,8 +281,7 @@ struct ClientSetupFailure: Equatable {
             let lower = message.lowercased()
             if lower.contains("unknown method") {
                 return ClientSetupFailure(
-                    explanation: "This app is running against an older helper, which does not "
-                        + "know how to do that yet. Reinstall tokenstat and try again.",
+                    explanation: L10n.text("apple.clientsetupstate.this_app_is_running_against_an_older_helpe.66cf1f69"),
                     action: .updateMachine,
                     details: message
                 )
@@ -303,8 +292,7 @@ struct ClientSetupFailure: Equatable {
                 // somebody to run a CLI command, which is not an answer a
                 // person holding an iPhone or iPad can act on.
                 return ClientSetupFailure(
-                    explanation: "This device is signed out. Sign in again, then set the "
-                        + "machine up.",
+                    explanation: L10n.text("apple.clientsetupstate.this_device_is_signed_out_sign_in_again_th.868697cc"),
                     action: .signInToAccount,
                     details: message
                 )

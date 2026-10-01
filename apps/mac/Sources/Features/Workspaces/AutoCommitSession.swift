@@ -52,7 +52,7 @@ final class AutoCommitSession {
     private(set) var limitation: String?
 
     static let legacyLimitation =
-        "This computer cannot confirm a lost start. Open Automations if the run is already going."
+        L10n.text("apple.autocommitsession.this_computer_cannot_confirm_a_lost_start.f48ddc4c")
 
     @ObservationIgnored private let storage: WorkbenchDraftFile<AutoCommitDraft>?
     @ObservationIgnored private var revision: String?

@@ -13,7 +13,7 @@ struct ClientRecentBrowserPorts: View {
                     Button(String(port), .browser) { portText = String(port) }
                 }
             } label: {
-                Label("Recent ports", systemImage: "clock.arrow.circlepath")
+                Label(L10n.text("apple.clientrecentbrowserports.recent_ports.b757062a"), systemImage: "clock.arrow.circlepath")
                     .font(ClientType.caption)
             }
             .tint(Theme.accent)

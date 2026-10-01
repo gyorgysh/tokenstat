@@ -247,31 +247,28 @@ final class ConnectionModel {
 
     /// Four words at most, for the chip.
     var title: String {
-        if isOffline { return "Offline" }
-        if serviceFailing { return "No connection" }
+        if isOffline { return L10n.text("common.offline") }
+        if serviceFailing { return L10n.text("apple.connectionmodel.no_connection.c9e1a200") }
         if peerFailing {
-            if let name = unreachableName { return "\(name) unreachable" }
-            return unreachablePeers.count > 1 ? "Computers unreachable" : "Computer unreachable"
+            if let name = unreachableName { return L10n.text("apple.connectionmodel.0_unreachable.c9592a5e", "\(name)") }
+            return unreachablePeers.count > 1 ? L10n.text("apple.connectionmodel.computers_unreachable.5c57873d") : L10n.text("apple.connectionmodel.computer_unreachable.289a05cc")
         }
-        return "Connected"
+        return L10n.text("apple.connectionmodel.connected.22965568")
     }
 
     /// One sentence, for the popover.
     var detail: String {
         if isOffline {
-            return "This device cannot reach the internet. Retrying every "
-                + "\(Int(ConnectivityModel.retryInterval.components.seconds)) seconds."
+            return L10n.text("apple.connectionmodel.this_device_cannot_reach_the_internet_retr.4fb94fa0", "\(Int(ConnectivityModel.retryInterval.components.seconds))")
         }
         if serviceFailing {
-            return "Signed in, but tokenstat is not answering. Your numbers are the last "
-                + "ones this device read."
+            return L10n.text("apple.connectionmodel.signed_in_but_tokenstat_is_not_answering_y.0b89409f")
         }
         if peerFailing {
-            let subject = unreachableName ?? "the computer"
-            return "The internet is fine and \(subject) stopped answering. It is asleep, "
-                + "or tokenstat is not running there."
+            let subject = unreachableName ?? L10n.text("apple.connectionmodel.the_computer.da52d93a")
+            return L10n.text("apple.connectionmodel.the_internet_is_fine_and_0_stopped_answeri.ff980764", "\(subject)")
         }
-        return "Everything is answering."
+        return L10n.text("apple.connectionmodel.everything_is_answering.0be29a29")
     }
 
     /// A call came back. Success clears what it proves and nothing else: one

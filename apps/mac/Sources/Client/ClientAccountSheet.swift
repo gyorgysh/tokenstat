@@ -33,11 +33,11 @@ struct ClientAccountSheet: View {
     var body: some View {
         NavigationStack {
             ClientAccountContent()
-                .navigationTitle("Account")
+                .navigationTitle(L10n.text("common.account"))
                 .navigationBarTitleDisplayMode(.large)
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { dismiss() }
+                        Button(L10n.text("common.done")) { dismiss() }
                     }
                 }
         }
@@ -62,9 +62,9 @@ enum ClientAccountPane: String, CaseIterable, Hashable {
 
     var label: String {
         switch self {
-        case .account: return "Account"
-        case .thisDevice: return "This device"
-        case .legal: return "Legal"
+        case .account: return L10n.text("common.account")
+        case .thisDevice: return L10n.text("apple.clientaccountsheet.this_device.d052579c")
+        case .legal: return L10n.text("apple.clientaccountsheet.legal.4787eaf7")
         }
     }
 }
@@ -195,13 +195,13 @@ private struct ClientAccountContent: View {
 
     private var sampleHelp: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Help").font(ClientType.sectionTitle)
+            Text(L10n.text("common.help")).font(ClientType.sectionTitle)
             Button { showSample = true } label: {
                 HStack(spacing: Theme.Space.m) {
                     Image(systemName: ActionIcon.run.symbol).foregroundStyle(Theme.accent)
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                        Text("See a sample").font(ClientType.label.weight(.semibold))
-                        Text("Explore a project with invented data, right on this device.")
+                        Text(L10n.text("apple.clientaccountsheet.see_a_sample.ae8b0f8d")).font(ClientType.label.weight(.semibold))
+                        Text(L10n.text("apple.clientaccountsheet.explore_a_project_with_invented_data_right.968c6aff"))
                             .font(ClientType.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -235,7 +235,7 @@ private struct ClientAccountContent: View {
     private var dangerZone: some View {
         ThemeRule()
             .padding(.top, Theme.Space.m)
-        Text("Danger zone")
+        Text(L10n.text("apple.clientaccountsheet.danger_zone.fd8b8dae"))
             .font(ClientType.caption.weight(.semibold))
             .foregroundStyle(Theme.danger)
             .tracking(0.7)
@@ -267,7 +267,7 @@ private struct ClientAccountContent: View {
         Button { showTabs = true } label: {
             HStack(spacing: Theme.Space.m) {
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    ClientSectionTitle(title: "Tabs", mark: "mark_device")
+                    ClientSectionTitle(title: L10n.text("apple.clientaccountsheet.tabs.8e5ea509"), mark: "mark_device")
                     Text(tabSummary)
                         .font(ClientType.body)
                         .foregroundStyle(.secondary)
@@ -284,19 +284,19 @@ private struct ClientAccountContent: View {
         .buttonStyle(.plain)
         .padding(Theme.Space.m)
         .cardSurface()
-        .accessibilityLabel("Arrange tabs")
+        .accessibilityLabel(L10n.text("apple.clientaccountsheet.arrange_tabs.c6454b2e"))
         .accessibilityValue(tabSummary)
     }
 
     private var tabSummary: String {
         let visible = tabCustomization.visibleTabs
         switch visible.count {
-        case 0: return "Home"
+        case 0: return L10n.text("common.home")
         case 1...3: return visible.map(\.label).joined(separator: ", ")
         default:
             let rest = visible.count - 2
             return visible.prefix(2).map(\.label).joined(separator: ", ")
-                + " and \(rest) more"
+                + L10n.text("apple.clientaccountsheet.and_0_more.5a1fce7b", "\(rest)")
         }
     }
 
@@ -314,7 +314,7 @@ private struct ClientAccountContent: View {
                 Avatar(url: account.avatar, name: account.title, handle: account.handle, size: 72)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: Theme.Space.s) {
-                        Text(account.title ?? "Signed in")
+                        Text(account.title ?? L10n.text("apple.clientaccountsheet.signed_in.ca566c89"))
                             .font(ClientType.screenTitle)
                             .lineLimit(2)
                         if let tier = account.tier, !tier.isEmpty {
@@ -328,7 +328,7 @@ private struct ClientAccountContent: View {
                             .textSelection(.enabled)
                     }
                     if let tier = account.tier, !tier.isEmpty {
-                        Text(tier.capitalized + " plan")
+                        Text(tier.capitalized + L10n.text("apple.clientaccountsheet.plan.56aeaecb"))
                             .font(ClientType.label)
                             .foregroundStyle(.secondary)
                     }
@@ -340,7 +340,7 @@ private struct ClientAccountContent: View {
                 Button {
                     webURL = ClientWebPages.publicProfile(host: account.host, handle: handle)
                 } label: {
-                    ActionIcon.external.label("View public profile")
+                    ActionIcon.external.label(L10n.text("apple.clientaccountsheet.view_public_profile.9acb2dbb"))
                         .font(ClientType.label.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
@@ -364,33 +364,33 @@ private struct ClientAccountContent: View {
                 } else {
                     FeatureMark(name: "mark_plan", tint: Theme.accent, size: 22)
                 }
-                Text("Plan")
+                Text(L10n.text("apple.clientaccountsheet.plan.fa8ed0bd"))
                     .font(ClientType.sectionTitle)
             }
             if let tier = account.tier, !tier.isEmpty {
                 let period = account.billing?.interval == "month" ? " monthly"
                     : account.isPaidTier ? " yearly" : ""
                 Text(tier.capitalized + period
-                    + (account.billing?.periodEnd.map { " · until \(Self.shortDay($0))" } ?? ""))
+                    + (account.billing?.periodEnd.map { L10n.text("apple.clientaccountsheet.until_0.f33ca039", "\(Self.shortDay($0))") } ?? ""))
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
             }
             if account.isAppleBilled {
-                Text("Bought on the App Store. See every plan here, then change or cancel in Apple ID subscriptions.")
+                Text(L10n.text("apple.clientaccountsheet.bought_on_the_app_store_see_every_plan_her.44164b98"))
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if let next = account.billing?.scheduledTier, !next.isEmpty {
                     let nextPeriod = account.billing?.scheduledInterval == "month" ? " monthly"
                         : " yearly"
-                    Text("Switches to \(next.capitalized)\(nextPeriod) at the next renewal.")
+                    Text(L10n.text("apple.clientaccountsheet.switches_to_0_1_at_the_next_renewal.ebb7b074", "\(next.capitalized)", "\(nextPeriod)"))
                         .font(ClientType.caption)
                         .foregroundStyle(Theme.accent)
                 }
                 Button {
                     showPaywall = true
                 } label: {
-                    ActionIcon.plans.label("See plans")
+                    ActionIcon.plans.label(L10n.text("apple.clientaccountsheet.see_plans.d9898933"))
                         .labelStyle(ActionLabelStyle())
                         .font(ClientType.label.weight(.semibold))
                         .frame(maxWidth: .infinity)
@@ -401,24 +401,24 @@ private struct ClientAccountContent: View {
                 .foregroundStyle(Theme.accent)
                 .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             } else if account.isPaddleBilled {
-                Text("You subscribed on the website. Manage that plan there.")
+                Text(L10n.text("apple.clientaccountsheet.you_subscribed_on_the_website_manage_that.e063184d"))
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else if account.isWebManagedPlan {
-                Text("This plan is not an App Store purchase. Manage it on the web.")
+                Text(L10n.text("apple.clientaccountsheet.this_plan_is_not_an_app_store_purchase_man.20f36b31"))
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                Text("The app stays free. A yearly plan unlocks more devices, longer history, and remote management.")
+                Text(L10n.text("apple.clientaccountsheet.the_app_stays_free_a_yearly_plan_unlocks_m.1b526c33"))
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button {
                     showPaywall = true
                 } label: {
-                    ActionIcon.plans.label("See plans")
+                    ActionIcon.plans.label(L10n.text("apple.clientaccountsheet.see_plans.d9898933"))
                         .labelStyle(ActionLabelStyle())
                         .font(ClientType.label.weight(.semibold))
                         .frame(maxWidth: .infinity)
@@ -445,7 +445,7 @@ private struct ClientAccountContent: View {
     private var layoutCard: some View {
         if UIDevice.current.userInterfaceIdiom == .pad {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                ClientSectionTitle(title: "Layout", mark: "mark_device")
+                ClientSectionTitle(title: L10n.text("apple.clientaccountsheet.layout.a5119091"), mark: "mark_device")
                 SegmentedTabs(
                     options: ClientLayoutPreference.allCases.map(\.rawValue),
                     selection: $layoutPreference
@@ -465,15 +465,15 @@ private struct ClientAccountContent: View {
 
     private func lastSync(_ account: Account) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            ClientSectionTitle(title: "Last sync", mark: "mark_sync")
+            ClientSectionTitle(title: L10n.text("apple.clientaccountsheet.last_sync.71967fca"), mark: "mark_sync")
             HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-                Text("From any device")
+                Text(L10n.text("apple.clientaccountsheet.from_any_device.e91c4f05"))
                     .foregroundStyle(.secondary)
-                Text(formatRelativeDate(account.lastSyncAt) ?? "Never")
+                Text(formatRelativeDate(account.lastSyncAt) ?? L10n.text("common.never"))
                     .monospacedDigit()
             }
             .font(ClientType.label)
-            Text("This device reads that data. It does not upload an archive of its own.")
+            Text(L10n.text("apple.clientaccountsheet.this_device_reads_that_data_it_does_not_up.a22bca17"))
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -485,11 +485,11 @@ private struct ClientAccountContent: View {
 
     private func devices(_ account: Account) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            ClientSectionTitle(title: "Devices", mark: "mark_device")
+            ClientSectionTitle(title: L10n.text("common.devices"), mark: "mark_device")
             Text(
                 account.machines.isEmpty
-                    ? "None linked yet. Install tokenstat on a computer and sign in there."
-                    : "\(account.machines.count) linked to this account"
+                    ? L10n.text("apple.clientaccountsheet.none_linked_yet_install_tokenstat_on_a_com.8fcd63a6")
+                    : L10n.text("apple.clientaccountsheet.0_linked_to_this_account.323c9727", "\(account.machines.count)")
             )
             .font(ClientType.body)
             .foregroundStyle(.secondary)
@@ -525,17 +525,17 @@ private struct ClientAccountContent: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     if isThis {
-                        Text("this device")
+                        Text(L10n.text("apple.clientaccountsheet.this_device.cf3cc23e"))
                             .font(ClientType.caption)
                             .foregroundStyle(Theme.accent)
                     }
                 }
                 if machine.reportsArchiveSync {
-                    Text(formatRelativeDate(machine.lastSyncAt) ?? "never synced")
+                    Text(formatRelativeDate(machine.lastSyncAt) ?? L10n.text("apple.clientaccountsheet.never_synced.ee394cab"))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                 } else if let seen = formatRelativeDate(machine.lastSeenAt) {
-                    Text("last used \(seen)")
+                    Text(L10n.text("apple.clientaccountsheet.last_used_0.acf5f8f5", "\(seen)"))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -564,7 +564,7 @@ private struct ClientAccountContent: View {
                     ProgressView()
                         .tint(Theme.danger)
                 } else {
-                    ActionIcon.signOut.label("Sign out")
+                    ActionIcon.signOut.label(L10n.text("common.sign_out"))
                         .labelStyle(ActionLabelStyle())
                         .font(ClientType.label.weight(.semibold))
                 }
@@ -583,20 +583,20 @@ private struct ClientAccountContent: View {
         }
         .buttonStyle(.plain)
         .disabled(model.isSyncing || model.isSigningOut)
-        .accessibilityHint("Signs out of this device and ends the online session")
+        .accessibilityHint(L10n.text("apple.clientaccountsheet.signs_out_of_this_device_and_ends_the_onli.521a544a"))
         .sheet(isPresented: $confirmSignOut) { WorkSignOutReview(model: model) }
     }
 
     private var signedOut: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            ClientSectionTitle(title: "Not signed in", mark: "mark_account")
-            Text("Signing in lets this device read usage from every device on your account. Only aggregate counters leave a computer.")
+            ClientSectionTitle(title: L10n.text("apple.clientaccountsheet.not_signed_in.491fc91c"), mark: "mark_account")
+            Text(L10n.text("apple.clientaccountsheet.signing_in_lets_this_device_read_usage_fro.7011d5ec"))
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
             Button {
                 model.signIn()
             } label: {
-                ActionIcon.signIn.label("Sign in")
+                ActionIcon.signIn.label(L10n.text("common.sign_in"))
                     .labelStyle(ActionLabelStyle())
                     .font(ClientType.label.weight(.semibold))
                     .frame(maxWidth: .infinity)
@@ -619,10 +619,10 @@ private struct ClientAccountContent: View {
     /// serves, and a copy in the bundle is a copy that goes stale.
     private var legalCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            ClientSectionTitle(title: "Terms and privacy", mark: "mark_license")
-            legalLink("Privacy policy", url: ClientWebPages.privacy())
+            ClientSectionTitle(title: L10n.text("apple.clientaccountsheet.terms_and_privacy.8d60f3a9"), mark: "mark_license")
+            legalLink(L10n.text("apple.clientaccountsheet.privacy_policy.ba445cff"), url: ClientWebPages.privacy())
             ThemeRule()
-            legalLink("Terms of service", url: ClientWebPages.terms())
+            legalLink(L10n.text("apple.clientaccountsheet.terms_of_service.e69e0614"), url: ClientWebPages.terms())
         }
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -660,7 +660,7 @@ private struct ClientAccountContent: View {
     /// which is the same boundary sync keeps.
     private var notificationsCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            ClientSectionTitle(title: "Notifications", mark: "mark_device")
+            ClientSectionTitle(title: L10n.text("apple.clientaccountsheet.notifications.78801183"), mark: "mark_device")
             Toggle(isOn: Binding(
                 get: { PushRegistrar.shared.isOn },
                 set: { on in
@@ -673,14 +673,14 @@ private struct ClientAccountContent: View {
                     }
                 }
             )) {
-                Text("Notify this device")
+                Text(L10n.text("apple.clientaccountsheet.notify_this_device.961006a8"))
                     .font(ClientType.label)
             }
             .tint(Theme.accent)
             .disabled(!model.signedIn || PushRegistrar.shared.isWorking)
             Text(model.signedIn
-                ? "When an agent run or a chat on one of your machines finishes, or stops to ask you something. The notification says which machine, and nothing about the work."
-                : "Sign in first. A notification has to reach this device from your account.")
+                ? L10n.text("apple.clientaccountsheet.when_an_agent_run_or_a_chat_on_one_of_your.61c29a32")
+                : L10n.text("apple.clientaccountsheet.sign_in_first_a_notification_has_to_reach.c1314d42"))
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -691,7 +691,7 @@ private struct ClientAccountContent: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if PushRegistrar.shared.isOn {
-                Button("Send a test", .preview) {
+                Button(L10n.text("apple.clientaccountsheet.send_a_test.edc01436"), .preview) {
                     Task { await PushRegistrar.shared.sendTest() }
                 }
                 .buttonStyle(.plain)
@@ -707,14 +707,14 @@ private struct ClientAccountContent: View {
 
     private var licensesCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            ClientSectionTitle(title: "Open source licenses", mark: "mark_license")
-            Text("Third-party notices for the libraries bundled in this build.")
+            ClientSectionTitle(title: L10n.text("apple.clientaccountsheet.open_source_licenses.1a1b83db"), mark: "mark_license")
+            Text(L10n.text("apple.clientaccountsheet.third_party_notices_for_the_libraries_bund.6e6b4668"))
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
             Button {
                 showLicenses = true
             } label: {
-                ActionIcon.docs.label("View licenses")
+                ActionIcon.docs.label(L10n.text("apple.clientaccountsheet.view_licenses.84534935"))
                     .labelStyle(ActionLabelStyle())
                     .font(ClientType.label.weight(.semibold))
                     .foregroundStyle(Theme.accent)
@@ -732,12 +732,12 @@ private struct ClientAccountContent: View {
 
     private var deleteAccountCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            ClientSectionTitle(title: "Delete this account", mark: "mark_delete", tint: Theme.danger)
+            ClientSectionTitle(title: L10n.text("apple.clientaccountsheet.delete_this_account.5e78b966"), mark: "mark_delete", tint: Theme.danger)
             Text(
                 model.account?.billing?.isApple == true
                     && model.account?.billing?.blocksOtherStore == true
-                    ? "Permanent. You can delete immediately on the website. Deletion does not cancel the App Store subscription, so Apple may keep charging until you cancel it separately."
-                    : "Permanent. Confirmed on the website's data settings. The account, linked providers, sessions and usage are removed outright."
+                    ? L10n.text("apple.clientaccountsheet.permanent_you_can_delete_immediately_on_th.26177f28")
+                    : L10n.text("apple.clientaccountsheet.permanent_confirmed_on_the_website_s_data.fd5ff108")
             )
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
@@ -745,7 +745,7 @@ private struct ClientAccountContent: View {
             Button {
                 openAccountDeletion()
             } label: {
-                ActionIcon.delete.label("Delete on website…")
+                ActionIcon.delete.label(L10n.text("apple.clientaccountsheet.delete_on_website.22e9668a"))
                     .font(ClientType.label.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
@@ -772,24 +772,24 @@ private struct ClientAccountContent: View {
         // an archive; the boundary is what the computers put on the account
         // and what a remote session carries. Same card chrome as Licenses.
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            ClientSectionTitle(title: "Sync privacy", mark: "mark_sync")
-            Text("Your computers put aggregate counts on the account. This device reads them. Remote folders, terminals and agents stay encrypted between devices.")
+            ClientSectionTitle(title: L10n.text("apple.clientaccountsheet.sync_privacy.9f408670"), mark: "mark_sync")
+            Text(L10n.text("apple.clientaccountsheet.your_computers_put_aggregate_counts_on_the.4e5bcb48"))
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 privacyLine(
-                    title: "On account",
-                    detail: "Counts per day, tool and model. Project names as salted hashes."
+                    title: L10n.text("apple.clientaccountsheet.on_account.b7b9c2b1"),
+                    detail: L10n.text("apple.clientaccountsheet.counts_per_day_tool_and_model_project_name.49914859")
                 )
                 privacyLine(
-                    title: "Not synced",
-                    detail: "Prompts, replies, file contents, file paths and session ids stay on the computer."
+                    title: L10n.text("apple.clientaccountsheet.not_synced.87cde3ef"),
+                    detail: L10n.text("apple.clientaccountsheet.prompts_replies_file_contents_file_paths_a.22d61c00")
                 )
                 privacyLine(
-                    title: "Remote",
-                    detail: "Folders, terminals and agents go device to device, encrypted. The relay cannot read them."
+                    title: L10n.text("apple.clientaccountsheet.remote.ffa98e02"),
+                    detail: L10n.text("apple.clientaccountsheet.folders_terminals_and_agents_go_device_to.2cab47c4")
                 )
             }
             .padding(.top, 2)
@@ -856,21 +856,21 @@ private struct ClientLicensesSheet: View {
                         .ignoresSafeArea(edges: .bottom)
                 } else if loadFailed {
                     ContentUnavailableView(
-                        "Notices missing",
+                        L10n.text("apple.clientaccountsheet.notices_missing.8fc6574b"),
                         systemImage: "doc.questionmark",
-                        description: Text("The third-party notices are generated at build time and were not found in this build.")
+                        description: Text(L10n.text("apple.clientaccountsheet.the_third_party_notices_are_generated_at_b.4594fa7d"))
                     )
                 } else {
-                    ProgressView("Loading licenses…")
+                    ProgressView(L10n.text("apple.clientaccountsheet.loading_licenses.2de539a6"))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .background(Theme.background)
-            .navigationTitle("Open source licenses")
+            .navigationTitle(L10n.text("apple.clientaccountsheet.open_source_licenses.1a1b83db"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Button(L10n.text("common.done")) { dismiss() }
                 }
             }
         }

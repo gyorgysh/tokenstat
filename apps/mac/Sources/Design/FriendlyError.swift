@@ -58,36 +58,34 @@ struct FriendlyError {
         // wrong the week it changes.
         if lower.contains("session_time_limit") {
             return FriendlyError(
-                title: "Session ended",
-                message: "Screen sessions end after a while. Connect again to carry on.",
+                title: L10n.text("apple.friendlyerror.session_ended.4a50e4c0"),
+                message: L10n.text("apple.friendlyerror.screen_sessions_end_after_a_while_connect.1255ca00"),
                 symbol: "clock.badge.exclamationmark",
-                actionTitle: "Connect again",
+                actionTitle: L10n.text("apple.friendlyerror.connect_again.7da41f19"),
                 raw: raw
             )
         }
         if lower.contains("session_idle") {
             return FriendlyError(
-                title: "Session ended while it was idle",
-                message: "This device went quiet, so the stream stopped. Connect again to "
-                    + "pick it up.",
+                title: L10n.text("apple.friendlyerror.session_ended_while_it_was_idle.24ad53cc"),
+                message: L10n.text("apple.friendlyerror.this_device_went_quiet_so_the_stream_stopp.6bd273ae"),
                 symbol: "moon.zzz",
-                actionTitle: "Connect again",
+                actionTitle: L10n.text("apple.friendlyerror.connect_again.7da41f19"),
                 raw: raw
             )
         }
         if lower.contains("screen_already_open") {
             return FriendlyError(
-                title: "A screen is already open",
-                message: "One screen at a time on an account. Close the other one and try again.",
+                title: L10n.text("apple.friendlyerror.a_screen_is_already_open.fbd0ef4f"),
+                message: L10n.text("apple.friendlyerror.one_screen_at_a_time_on_an_account_close_t.d76ae776"),
                 symbol: "display.2",
                 raw: raw
             )
         }
         if lower.contains("quota_exceeded") {
             return FriendlyError(
-                title: "Relay allowance used up",
-                message: "Check relay usage in Account to see when older traffic leaves the window. "
-                    + "Direct connections do not use this allowance.",
+                title: L10n.text("apple.friendlyerror.relay_allowance_used_up.d052225f"),
+                message: L10n.text("apple.friendlyerror.check_relay_usage_in_account_to_see_when_o.14353728"),
                 symbol: "gauge.with.dots.needle.100percent",
                 raw: raw
             )
@@ -99,10 +97,8 @@ struct FriendlyError {
         // problem rather than anything somebody did.
         if lower.contains("-34018") || lower.contains("errsecmissingentitlement") {
             return FriendlyError(
-                title: "This build cannot use the keychain",
-                message: "This copy of the app is missing the signing configuration needed for "
-                    + "protected Keychain storage. Use a build signed with its Keychain "
-                    + "entitlement and matching provisioning profile.",
+                title: L10n.text("apple.friendlyerror.this_build_cannot_use_the_keychain.d1a5c315"),
+                message: L10n.text("apple.friendlyerror.this_copy_of_the_app_is_missing_the_signin.98aa5af7"),
                 symbol: "key.slash",
                 raw: raw
             )
@@ -111,9 +107,8 @@ struct FriendlyError {
         // points at, which happens after a restore from a backup.
         if lower.contains("-25300") {
             return FriendlyError(
-                title: "The private key is not on this device",
-                message: "The record is here but the secret it points at is not, which is what "
-                    + "a restore from a backup leaves behind. Import or generate the key again.",
+                title: L10n.text("apple.friendlyerror.the_private_key_is_not_on_this_device.3db8a142"),
+                message: L10n.text("apple.friendlyerror.the_record_is_here_but_the_secret_it_point.d27bd117"),
                 symbol: "key.slash",
                 raw: raw
             )
@@ -127,12 +122,10 @@ struct FriendlyError {
         // token; signing in again from this app can.
         if lower.contains("register this device before using the vault") {
             return FriendlyError(
-                title: "This login is not tied to this computer",
-                message: "The vault lives on your account, and this sign-in predates "
-                    + "linking the two. Press Try again first. If that does not clear it, "
-                    + "sign in again from Account. Everything saved here still works.",
+                title: L10n.text("apple.friendlyerror.this_login_is_not_tied_to_this_computer.b304b378"),
+                message: L10n.text("apple.friendlyerror.the_vault_lives_on_your_account_and_this_s.e52d4845"),
                 symbol: "person.badge.key",
-                actionTitle: "Try again",
+                actionTitle: L10n.text("apple.friendlyerror.try_again.d8b8392e"),
                 raw: raw
             )
         }
@@ -141,30 +134,27 @@ struct FriendlyError {
             || lower.contains("not bound to an account device")
         {
             return FriendlyError(
-                title: "This computer is not on your account",
-                message: "Sync needs this computer linked to your account before it can hold a "
-                    + "copy of your servers. Everything still works here in the meantime.",
+                title: L10n.text("apple.friendlyerror.this_computer_is_not_on_your_account.6ce371f7"),
+                message: L10n.text("apple.friendlyerror.sync_needs_this_computer_linked_to_your_ac.5ece6b14"),
                 symbol: "person.badge.key",
-                actionTitle: "Try again",
+                actionTitle: L10n.text("apple.friendlyerror.try_again.d8b8392e"),
                 raw: raw
             )
         }
         if lower.contains("vault already exists") {
             return FriendlyError(
-                title: "There is already a vault",
-                message: "An account has one vault. Unlock the one you have, or reset it if you "
-                    + "cannot get back into it.",
+                title: L10n.text("apple.friendlyerror.there_is_already_a_vault.b9e57f99"),
+                message: L10n.text("apple.friendlyerror.an_account_has_one_vault_unlock_the_one_yo.b269036b"),
                 symbol: "lock.shield",
                 raw: raw
             )
         }
         if lower.contains("not enrolled") || lower.contains("did not enroll") {
             return FriendlyError(
-                title: "This device cannot read the vault",
-                message: "It has not been let in yet. Unlock the vault here to give this device "
-                    + "its copy of the key.",
+                title: L10n.text("apple.friendlyerror.this_device_cannot_read_the_vault.f4b4e811"),
+                message: L10n.text("apple.friendlyerror.it_has_not_been_let_in_yet_unlock_the_vaul.0e352acf"),
                 symbol: "lock.shield",
-                actionTitle: "Try again",
+                actionTitle: L10n.text("apple.friendlyerror.try_again.d8b8392e"),
                 raw: raw
             )
         }
@@ -174,21 +164,19 @@ struct FriendlyError {
         // name belongs in a log, not on a screen.
         if lower.contains("unknown method") || lower.contains("unknown_method") {
             return FriendlyError(
-                title: "Helper is out of date",
-                message: "The background helper on this machine is older than the app and does "
-                    + "not know this yet. Restart the app to replace it, then try again.",
+                title: L10n.text("apple.friendlyerror.helper_is_out_of_date.ff2cd175"),
+                message: L10n.text("apple.friendlyerror.the_background_helper_on_this_machine_is_o.2156c337"),
                 symbol: "arrow.triangle.2.circlepath",
-                actionTitle: "Try again",
+                actionTitle: L10n.text("apple.friendlyerror.try_again.d8b8392e"),
                 raw: raw
             )
         }
         if lower.contains("not approved") || lower.contains("waiting for someone to allow") {
             return FriendlyError(
-                title: "Waiting for approval",
-                message: "The other device has to say yes to this one. Open Devices there and "
-                    + "approve it, then try again.",
+                title: L10n.text("apple.friendlyerror.waiting_for_approval.10c5739b"),
+                message: L10n.text("apple.friendlyerror.the_other_device_has_to_say_yes_to_this_on.d2653756"),
                 symbol: "hand.raised",
-                actionTitle: "Try again",
+                actionTitle: L10n.text("apple.friendlyerror.try_again.d8b8392e"),
                 raw: raw
             )
         }
@@ -196,11 +184,10 @@ struct FriendlyError {
             || lower.contains("no longer includes remote")
         {
             return FriendlyError(
-                title: "Not on this plan",
-                message: "Reaching your devices from anywhere is part of a paid plan. Everything "
-                    + "else keeps working exactly as it does now.",
+                title: L10n.text("apple.friendlyerror.not_on_this_plan.92dff92e"),
+                message: L10n.text("apple.friendlyerror.reaching_your_devices_from_anywhere_is_par.bfe9ca82"),
                 symbol: "star.circle",
-                actionTitle: "See plans",
+                actionTitle: L10n.text("apple.friendlyerror.see_plans.d9898933"),
                 raw: raw,
                 opensPlans: true
             )
@@ -218,11 +205,10 @@ struct FriendlyError {
                 || lower.contains("device limit"))
         {
             return FriendlyError(
-                title: "Sign in again",
-                message: "This device's login is no longer valid. Signing in again puts it back, "
-                    + "and nothing local is lost.",
+                title: L10n.text("apple.friendlyerror.sign_in_again.51fbe1dc"),
+                message: L10n.text("apple.friendlyerror.this_device_s_login_is_no_longer_valid_sig.e2c0cd69"),
                 symbol: "person.crop.circle.badge.exclamationmark",
-                actionTitle: "Sign in",
+                actionTitle: L10n.text("common.sign_in"),
                 raw: raw
             )
         }
@@ -230,11 +216,10 @@ struct FriendlyError {
             || lower.contains("key does not match")
         {
             return FriendlyError(
-                title: "Reconnecting",
-                message: "The connection credential was refused, so this device is getting a new "
-                    + "one. It usually comes back on its own within a minute.",
+                title: L10n.text("apple.friendlyerror.reconnecting.afb118fc"),
+                message: L10n.text("apple.friendlyerror.the_connection_credential_was_refused_so_t.8e2696c5"),
                 symbol: "arrow.triangle.2.circlepath",
-                actionTitle: "Retry now",
+                actionTitle: L10n.text("apple.friendlyerror.retry_now.5148c3e2"),
                 raw: raw
             )
         }
@@ -242,19 +227,17 @@ struct FriendlyError {
             || lower.contains("not logged in") || lower.contains("token") && lower.contains("revoked")
         {
             return FriendlyError(
-                title: "Sign in again",
-                message: "This device's login is no longer valid. Signing in again puts it back, "
-                    + "and nothing local is lost.",
+                title: L10n.text("apple.friendlyerror.sign_in_again.51fbe1dc"),
+                message: L10n.text("apple.friendlyerror.this_device_s_login_is_no_longer_valid_sig.e2c0cd69"),
                 symbol: "person.crop.circle.badge.exclamationmark",
-                actionTitle: "Sign in",
+                actionTitle: L10n.text("common.sign_in"),
                 raw: raw
             )
         }
         if lower.contains("already on the tunnel") || lower.contains("key_already_live") {
             return FriendlyError(
-                title: "Connected somewhere else",
-                message: "Another copy of tokenstat is on the tunnel with this device's key. "
-                    + "Quit it, or wait a moment for it to drop.",
+                title: L10n.text("apple.friendlyerror.connected_somewhere_else.2da62c31"),
+                message: L10n.text("apple.friendlyerror.another_copy_of_tokenstat_is_on_the_tunnel.0e092a52"),
                 symbol: "person.2.slash",
                 raw: raw
             )
@@ -264,30 +247,28 @@ struct FriendlyError {
             || lower.contains("could not resolve")
         {
             return FriendlyError(
-                title: "No connection",
-                message: "This device cannot reach the network right now. It retries by itself as "
-                    + "soon as it can.",
+                title: L10n.text("apple.friendlyerror.no_connection.c9e1a200"),
+                message: L10n.text("apple.friendlyerror.this_device_cannot_reach_the_network_right.663f753c"),
                 symbol: "wifi.slash",
-                actionTitle: "Try again",
+                actionTitle: L10n.text("apple.friendlyerror.try_again.d8b8392e"),
                 raw: raw
             )
         }
         if lower.contains("timed out") || lower.contains("timeout") {
             return FriendlyError(
-                title: "It did not answer",
-                message: "The other side took too long. It is usually asleep rather than broken.",
+                title: L10n.text("apple.friendlyerror.it_did_not_answer.4f030967"),
+                message: L10n.text("apple.friendlyerror.the_other_side_took_too_long_it_is_usually.94ae09da"),
                 symbol: "clock.badge.exclamationmark",
-                actionTitle: "Try again",
+                actionTitle: L10n.text("apple.friendlyerror.try_again.d8b8392e"),
                 raw: raw
             )
         }
         if lower.contains("this mac is asleep") || lower.contains("host_asleep") {
             return FriendlyError(
-                title: "This Mac is asleep",
-                message: "That Mac has its lid closed, or tokenstat is not open. Open the app, "
-                    + "open the lid, or turn on Always-on host in Account to keep it reachable.",
+                title: L10n.text("apple.friendlyerror.this_mac_is_asleep.ceee64e8"),
+                message: L10n.text("apple.friendlyerror.that_mac_has_its_lid_closed_or_tokenstat_i.19412d9d"),
                 symbol: "moon.zzz",
-                actionTitle: "Try again",
+                actionTitle: L10n.text("apple.friendlyerror.try_again.d8b8392e"),
                 raw: raw
             )
         }
@@ -296,12 +277,10 @@ struct FriendlyError {
             || lower.contains("host daemon") || lower.contains("hostd")
         {
             return FriendlyError(
-                title: "The helper is not running",
-                message: "tokenstat's background helper handles your archive and your devices. "
-                    + "Open the app to start it, or turn on Always-on host to keep it running "
-                    + "after you quit or close the lid.",
+                title: L10n.text("apple.friendlyerror.the_helper_is_not_running.f7afe244"),
+                message: L10n.text("apple.friendlyerror.tokenstat_s_background_helper_handles_your.82c596f6"),
                 symbol: "gearshape.arrow.trianglehead.2.clockwise.rotate.90",
-                actionTitle: "Start it",
+                actionTitle: L10n.text("apple.friendlyerror.start_it.4238a078"),
                 raw: raw
             )
         }
@@ -309,10 +288,10 @@ struct FriendlyError {
             || lower.contains("disconnected")
         {
             return FriendlyError(
-                title: "Connection dropped",
-                message: "The link to the other device closed. It reconnects on its own.",
+                title: L10n.text("apple.friendlyerror.connection_dropped.9049f3d8"),
+                message: L10n.text("apple.friendlyerror.the_link_to_the_other_device_closed_it_rec.fdda8bd3"),
                 symbol: "bolt.horizontal.circle",
-                actionTitle: "Try again",
+                actionTitle: L10n.text("apple.friendlyerror.try_again.d8b8392e"),
                 raw: raw
             )
         }
@@ -320,9 +299,8 @@ struct FriendlyError {
             || lower.contains("429")
         {
             return FriendlyError(
-                title: "Asked too often",
-                message: "The account is answering fewer requests for a moment. What is on screen "
-                    + "is still good, and the next refresh will go through.",
+                title: L10n.text("apple.friendlyerror.asked_too_often.52a8ddb1"),
+                message: L10n.text("apple.friendlyerror.the_account_is_answering_fewer_requests_fo.ecb66749"),
                 symbol: "hourglass",
                 raw: raw
             )
@@ -333,10 +311,10 @@ struct FriendlyError {
             || lower.contains("1033") && lower.contains("tunnel")
         {
             return FriendlyError(
-                title: "The server is unreachable",
-                message: "The connection could not reach the server. Try again shortly.",
+                title: L10n.text("apple.friendlyerror.the_server_is_unreachable.6862e581"),
+                message: L10n.text("apple.friendlyerror.the_connection_could_not_reach_the_server.b54b3470"),
                 symbol: "arrow.triangle.2.circlepath",
-                actionTitle: "Try again",
+                actionTitle: L10n.text("apple.friendlyerror.try_again.d8b8392e"),
                 raw: raw
             )
         }
@@ -353,20 +331,19 @@ struct FriendlyError {
                 || lower.contains("530"))
         {
             return FriendlyError(
-                title: "The server could not answer",
-                message: "The request could not be completed. Try again shortly.",
+                title: L10n.text("apple.friendlyerror.the_server_could_not_answer.ffe49c76"),
+                message: L10n.text("apple.friendlyerror.the_request_could_not_be_completed_try_aga.54350986"),
                 symbol: "arrow.triangle.2.circlepath",
-                actionTitle: "Try again",
+                actionTitle: L10n.text("apple.friendlyerror.try_again.d8b8392e"),
                 raw: raw
             )
         }
         if lower.contains("device limit") || lower.contains("machine_limit") {
             return FriendlyError(
-                title: "Device limit reached",
-                message: "This account is using all the devices its plan allows. Remove one you no "
-                    + "longer have, or move up a plan.",
+                title: L10n.text("apple.friendlyerror.device_limit_reached.9993b12e"),
+                message: L10n.text("apple.friendlyerror.this_account_is_using_all_the_devices_its.b51162b6"),
                 symbol: "laptopcomputer.slash",
-                actionTitle: "Manage devices",
+                actionTitle: L10n.text("apple.friendlyerror.manage_devices.3511575c"),
                 raw: raw
             )
         }
@@ -386,12 +363,10 @@ struct FriendlyError {
                 || lower.contains("direct candidates") || lower.contains("relay"))
         {
             return FriendlyError(
-                title: "That computer is not reachable",
-                message: "It has to be awake with tokenstat running, and set up for remote "
-                    + "reach. If this worked before, wake it and try again. If it never worked, on that computer open Devices and turn on \"Reach devices from "
-                    + "anywhere\". Until that is on, it never tells the relay where it is.",
+                title: L10n.text("apple.friendlyerror.that_computer_is_not_reachable.162e2c34"),
+                message: L10n.text("apple.friendlyerror.it_has_to_be_awake_with_tokenstat_running.73405e61"),
                 symbol: "antenna.radiowaves.left.and.right.slash",
-                actionTitle: "Try again",
+                actionTitle: L10n.text("apple.friendlyerror.try_again.d8b8392e"),
                 raw: raw
             )
         }
@@ -399,10 +374,10 @@ struct FriendlyError {
         // Nothing matched. Say that something failed and show the words the
         // machine used, rather than inventing a cause.
         return FriendlyError(
-            title: "That did not work",
-            message: raw.isEmpty ? "Something went wrong and nothing said what." : raw,
+            title: L10n.text("apple.friendlyerror.that_did_not_work.93a20328"),
+            message: raw.isEmpty ? L10n.text("apple.friendlyerror.something_went_wrong_and_nothing_said_what.8776f982") : raw,
             symbol: "exclamationmark.triangle",
-            actionTitle: "Try again",
+            actionTitle: L10n.text("apple.friendlyerror.try_again.d8b8392e"),
             raw: raw
         )
     }
@@ -450,7 +425,7 @@ struct ErrorBanner: View {
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } label: {
-                    Text("Details")
+                    Text(L10n.text("apple.friendlyerror.details.45989de4"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 }

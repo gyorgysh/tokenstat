@@ -11,16 +11,16 @@ struct LocalTrafficCard: View {
     var body: some View {
         #if os(macOS)
         Card(
-            title: "This device",
-            subtitle: "How connections leave this machine",
+            title: L10n.text("apple.localtrafficcard.this_device.d052579c"),
+            subtitle: L10n.text("apple.localtrafficcard.how_connections_leave_this_machine.a5ac544a"),
             mark: "mark_activity"
         ) {
             content
         }
         #else
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            ClientSectionTitle(title: "This device", mark: "mark_activity")
-            Text("How connections leave this machine")
+            ClientSectionTitle(title: L10n.text("apple.localtrafficcard.this_device.d052579c"), mark: "mark_activity")
+            Text(L10n.text("apple.localtrafficcard.how_connections_leave_this_machine.a5ac544a"))
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
             content
@@ -37,7 +37,7 @@ struct LocalTrafficCard: View {
             if let traffic {
                 counters(traffic)
             } else {
-                Text("This computer does not report local traffic yet.")
+                Text(L10n.text("apple.localtrafficcard.this_computer_does_not_report_local_traffi.c31505cb"))
                     #if os(macOS)
                     .font(Theme.callout)
                     #else
@@ -53,10 +53,10 @@ struct LocalTrafficCard: View {
     private func counters(_ traffic: RemoteTraffic) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             VStack(spacing: Theme.Space.s) {
-                valueRow("Direct", traffic.directBytes)
-                valueRow("Relayed", traffic.relayBytes)
+                valueRow(L10n.text("apple.localtrafficcard.direct.002c7c68"), traffic.directBytes)
+                valueRow(L10n.text("apple.localtrafficcard.relayed.feb39b70"), traffic.relayBytes)
             }
-            Text("Counted on this device since tokenstat started. Direct traffic does not use the account relay allowance. The relayed figure is this machine only, not the account total.")
+            Text(L10n.text("apple.localtrafficcard.counted_on_this_device_since_tokenstat_sta.0fc360a7"))
                 #if os(macOS)
                 .font(Theme.caption)
                 #else
@@ -65,7 +65,7 @@ struct LocalTrafficCard: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if traffic.peers.isEmpty {
-                Text("No live connections right now.")
+                Text(L10n.text("apple.localtrafficcard.no_live_connections_right_now.a7f971c5"))
                     #if os(macOS)
                     .font(Theme.caption)
                     #else
@@ -97,7 +97,7 @@ struct LocalTrafficCard: View {
     @ViewBuilder
     private var refreshButton: some View {
         #if os(macOS)
-        Button(isRefreshing ? "Refreshing…" : "Refresh traffic", .refresh) {
+        Button(isRefreshing ? L10n.text("apple.localtrafficcard.refreshing.1c0def7b") : L10n.text("apple.localtrafficcard.refresh_traffic.9e5ac8c2"), .refresh) {
             Task { await runRefresh() }
         }
         .disabled(isRefreshing)
@@ -105,7 +105,7 @@ struct LocalTrafficCard: View {
         Button {
             Task { await runRefresh() }
         } label: {
-            ActionIcon.refresh.label(isRefreshing ? "Refreshing…" : "Refresh traffic")
+            ActionIcon.refresh.label(isRefreshing ? L10n.text("apple.localtrafficcard.refreshing.1c0def7b") : L10n.text("apple.localtrafficcard.refresh_traffic.9e5ac8c2"))
                 .labelStyle(ActionLabelStyle())
                 .font(ClientType.label.weight(.semibold))
                 .foregroundStyle(Theme.accent)

@@ -283,7 +283,7 @@ struct ClientSidebarRoot: View {
             }
             Section {
                 if workspaces.hosts.isEmpty {
-                    Text("No computers yet")
+                    Text(L10n.text("apple.clientsidebarroot.no_computers_yet.31d00b27"))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -316,7 +316,7 @@ struct ClientSidebarRoot: View {
                 // header style was a third typographic voice in a list that
                 // already has two.
                 HStack {
-                    Text("Machines")
+                    Text(L10n.text("apple.clientsidebarroot.machines.c061da19"))
                         .font(ClientType.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .textCase(.uppercase)
@@ -361,17 +361,17 @@ struct ClientSidebarRoot: View {
             )
         }
         commands.append(
-            ClientShortcut(id: "refresh", title: "Refresh", key: "r") {
+            ClientShortcut(id: "refresh", title: L10n.text("common.refresh"), key: "r") {
                 Task { await reload() }
             }
         )
         commands.append(
-            ClientShortcut(id: "sidebar", title: "Toggle Sidebar", key: "\\") {
+            ClientShortcut(id: "sidebar", title: L10n.text("apple.clientsidebarroot.toggle_sidebar.1d4c17db"), key: "\\") {
                 columns = columns == .detailOnly ? .all : .detailOnly
             }
         )
         commands.append(
-            ClientShortcut(id: "account", title: "Account", key: ",") {
+            ClientShortcut(id: "account", title: L10n.text("common.account"), key: ",") {
                 showAccount = true
             }
         )
@@ -544,7 +544,7 @@ struct ClientSidebarRoot: View {
                 Image(systemName: "arrow.triangle.branch")
                     .font(ClientType.caption)
                     .foregroundStyle(.tertiary)
-                Text(git.branch.map { $0.isEmpty ? "detached" : $0 } ?? "detached")
+                Text(git.branch.map { $0.isEmpty ? "detached" : $0 } ?? L10n.text("apple.clientsidebarroot.detached.88e34e4c"))
                     .font(font)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -651,7 +651,7 @@ struct ClientSidebarRoot: View {
                     scope: scope,
                     peer: peer,
                     workspaceID: chat.workspaceID,
-                    folderName: "Project",
+                    folderName: L10n.text("apple.clientsidebarroot.project.98595978"),
                     hostName: hostName,
                     chatID: chat.id
                 )
@@ -692,7 +692,7 @@ struct ClientSidebarRoot: View {
                 .toolbar {
                     ToolbarItem(placement: .navigation) {
                         Button { navigation.restoredRoute = nil } label: {
-                            ActionIcon.back.label("Back")
+                            ActionIcon.back.label(L10n.text("common.back"))
                         }
                     }
                 }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.legal
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -47,18 +49,18 @@ fun LicensesCard(onOpen: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 FeatureMark("mark_license", size = 22)
                 Text(
-                    "Open source licenses",
+                    L10n.text("android.licensessheet.open_source_licenses.1a1b83db"),
                     style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
                     color = colors.textPrimary,
                 )
             }
             Text(
-                "Third-party notices for the libraries bundled in this build.",
+                L10n.text("android.licensessheet.third_party_notices_for_the_libraries_bund.6e6b4668"),
                 style = TsType.body,
                 color = colors.textSecondary,
             )
             TsAccentButton(
-                label = "View licenses",
+                label = L10n.text("android.licensessheet.view_licenses.84534935"),
                 icon = ActionIcon.Docs.vector,
                 onClick = onOpen,
                 modifier = Modifier.fillMaxWidth(),
@@ -91,12 +93,12 @@ fun LicensesSheet(onDismiss: () -> Unit) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Open source licenses",
+                    L10n.text("android.licensessheet.open_source_licenses.1a1b83db"),
                     style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
                     color = colors.textPrimary,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = onDismiss) { Text("Done") }
+                TextButton(onClick = onDismiss) { Text(L10n.text("common.done")) }
             }
             when {
                 text != null -> SelectionContainer {
@@ -110,7 +112,7 @@ fun LicensesSheet(onDismiss: () -> Unit) {
                     )
                 }
                 loadFailed -> Text(
-                    "The third-party notices are generated at build time and were not found in this build.",
+                    L10n.text("android.licensessheet.the_third_party_notices_are_generated_at_b.4594fa7d"),
                     style = TsType.body,
                     color = colors.textSecondary,
                 )

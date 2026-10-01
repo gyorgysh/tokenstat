@@ -160,7 +160,7 @@ struct ClientSessionRow: View {
                     .font(ClientType.label.weight(.medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
-                Text(session.alive ? "Running · \(session.cwd)" : "Stopped · tap to open")
+                Text(session.alive ? L10n.text("apple.clientworkspacerows.running_0.e8f8155e", "\(session.cwd)") : L10n.text("apple.clientworkspacerows.stopped_tap_to_open.669cde36"))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

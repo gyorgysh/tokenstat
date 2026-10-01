@@ -109,7 +109,7 @@ struct PullsView: View {
             // it, and reserves the height of one: the empty strip that pushed
             // this screen down the page while Tasks and Notes sat at the top.
             #if !os(macOS)
-            .navigationTitle("Pull requests")
+            .navigationTitle(L10n.text("apple.pullsview.pull_requests.d9e3f260"))
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .task(id: "\(workspaceID)-\(peer ?? "")-\(isActive)") {
@@ -147,7 +147,7 @@ struct PullsView: View {
     private var refreshButton: some View {
         ToolbarIconButton(
             systemImage: "arrow.clockwise",
-            help: "Refresh pull requests",
+            help: L10n.text("apple.pullsview.refresh_pull_requests.d2fd16c2"),
             isBusy: model.isLoadingList
         ) {
             Task {
@@ -183,14 +183,14 @@ struct PullsView: View {
                     .frame(width: 34, height: 34)
                     .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 10))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Pull requests")
+                    Text(L10n.text("apple.pullsview.pull_requests.d9e3f260"))
                         .font(Theme.title2.weight(.semibold))
-                    Text(model.availability?.repositoryName ?? "Review the work around this branch")
+                    Text(model.availability?.repositoryName ?? L10n.text("apple.pullsview.review_the_work_around_this_branch.4ca99549"))
                         .font(Theme.callout)
                         .foregroundStyle(.secondary)
                 }
                 #else
-                Text(model.availability?.repositoryName ?? "Review the work around this branch")
+                Text(model.availability?.repositoryName ?? L10n.text("apple.pullsview.review_the_work_around_this_branch.4ca99549"))
                     .font(Theme.callout)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -218,42 +218,42 @@ struct PullsView: View {
             switch availability.state {
             case "notRepository":
                 empty(
-                    title: "This folder is not a Git repository",
-                    message: "Pull requests appear for folders with a Git repository and a GitHub origin."
+                    title: L10n.text("apple.pullsview.this_folder_is_not_a_git_repository.a1da5b0e"),
+                    message: L10n.text("apple.pullsview.pull_requests_appear_for_folders_with_a_gi.33e92947")
                 )
             case "noRemote":
                 empty(
-                    title: "No GitHub origin yet",
-                    message: "Add an origin remote to this repository, then refresh this screen."
+                    title: L10n.text("apple.pullsview.no_github_origin_yet.0478e3f8"),
+                    message: L10n.text("apple.pullsview.add_an_origin_remote_to_this_repository_th.1e168c71")
                 )
             case "signedOut":
                 connectionCard(availability)
             case "needsInstallation":
                 accessCard(
                     availability,
-                    title: "Choose repositories",
-                    message: "You are connected as @\(availability.login ?? "your GitHub account"). Now choose the repositories tokenstat may open."
+                    title: L10n.text("apple.pullsview.choose_repositories.df6de593"),
+                    message: L10n.text("apple.pullsview.you_are_connected_as_0_now_choose_the_repo.e86599a5", "\(availability.login ?? L10n.text("apple.pullsview.your_github_account.abf08edf"))")
                 )
             case "noRepositoryAccess":
                 accessCard(
                     availability,
-                    title: "Grant this repository access",
-                    message: "The connection works, but \(availability.repositoryName ?? "this repository") is not in tokenstat's selected repositories."
+                    title: L10n.text("apple.pullsview.grant_this_repository_access.481d9dab"),
+                    message: L10n.text("apple.pullsview.the_connection_works_but_0_is_not_in_token.a97dfb79", "\(availability.repositoryName ?? L10n.text("apple.pullsview.this_repository.044fb600"))")
                 )
             case "ready":
                 pullList(availability)
             default:
                 empty(
-                    title: "GitHub returned an unfamiliar state",
-                    message: "Refresh after updating tokenstat on the computer that owns this workspace."
+                    title: L10n.text("apple.pullsview.github_returned_an_unfamiliar_state.c035dfcb"),
+                    message: L10n.text("apple.pullsview.refresh_after_updating_tokenstat_on_the_co.3ab687ce")
                 )
             }
         } else if model.isLoading {
             PullListSkeleton()
         } else {
             empty(
-                title: "Pull requests are unavailable",
-                message: "Refresh to ask the project's computer again."
+                title: L10n.text("apple.pullsview.pull_requests_are_unavailable.086a162b"),
+                message: L10n.text("apple.pullsview.refresh_to_ask_the_project_s_computer_agai.dc978d57")
             )
         }
     }
@@ -284,9 +284,9 @@ struct PullsView: View {
             }
             .frame(maxWidth: .infinity)
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Text("Bring the review into tokenstat")
+                Text(L10n.text("apple.pullsview.bring_the_review_into_tokenstat.124ca7d8"))
                     .font(Theme.title3.weight(.semibold))
-                Text("Read the conversation, inspect the same diff as Changes, follow checks, and review without losing the project around it.")
+                Text(L10n.text("apple.pullsview.read_the_conversation_inspect_the_same_dif.a163d47d"))
                     .font(Theme.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -297,13 +297,13 @@ struct PullsView: View {
                         if let url = await model.beginLogin() { openURL(url) }
                     }
                 } label: {
-                    Label("Connect GitHub", systemImage: "link")
+                    Label(L10n.text("apple.pullsview.connect_github.4027e5b2"), systemImage: "link")
                 }
                 .buttonStyle(AccentButtonStyle())
                 .disabled(model.isConnecting)
             } else {
                 Label(
-                    "Connect Pull Requests on \(connectionHostName ?? "the project's computer"), then return here.",
+                    L10n.text("apple.pullsview.connect_pull_requests_on_0_then_return_her.c7a8b3e4", "\(connectionHostName ?? L10n.text("apple.pullsview.the_project_s_computer.7e755d17"))"),
                     systemImage: "laptopcomputer"
                 )
                 .font(Theme.callout)
@@ -330,11 +330,11 @@ struct PullsView: View {
                 .foregroundStyle(.secondary)
             if let raw = availability.installUrl, let url = URL(string: raw) {
                 Button { openURL(url) } label: {
-                    Label("Choose repositories", systemImage: "arrow.up.right")
+                    Label(L10n.text("apple.pullsview.choose_repositories.df6de593"), systemImage: "arrow.up.right")
                 }
                 .buttonStyle(AccentButtonStyle())
             }
-            Text("tokenstat only sees repositories selected for its GitHub App installation.")
+            Text(L10n.text("apple.pullsview.tokenstat_only_sees_repositories_selected.e2bbcc73"))
                 .font(Theme.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -351,7 +351,7 @@ struct PullsView: View {
                     .fill(Theme.success)
                     .frame(width: 7, height: 7)
                     .accessibilityHidden(true)
-                Text("@\(availability.login ?? "connected")")
+                Text("@\(availability.login ?? L10n.text("apple.pullsview.connected.12a7bd86"))")
                     .font(Theme.caption.weight(.medium))
                     .foregroundStyle(.primary)
                 Text("· \(sourceLabel(availability.source))")
@@ -360,7 +360,7 @@ struct PullsView: View {
                     .lineLimit(1)
                 Spacer()
                 if !model.rows.isEmpty {
-                    Text("\(model.rows.count) shown")
+                    Text(L10n.text("apple.pullsview.0_shown.c67ec9a7", "\(model.rows.count)"))
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                 }
@@ -370,9 +370,9 @@ struct PullsView: View {
                 // finding a card on the Account screen, which is not where
                 // anybody looks for it.
                 if canConnectHere, let url = installationURL {
-                    Button("Repositories", .external) { openURL(url) }
+                    Button(L10n.text("apple.pullsview.repositories.1e32af87"), .external) { openURL(url) }
                         .buttonStyle(SecondaryButtonStyle(small: true))
-                        .help("Choose which repositories tokenstat may open")
+                        .help(L10n.text("apple.pullsview.choose_which_repositories_tokenstat_may_op.7bbe0dd9"))
                 }
             }
 
@@ -383,9 +383,9 @@ struct PullsView: View {
                 Spacer()
                 if model.isLoadingList {
                     ProgressView().controlSize(.mini)
-                    Text(model.rows.isEmpty ? "Loading…" : "Updating…")
+                    Text(model.rows.isEmpty ? L10n.text("apple.pullsview.loading.ba3bbbe1") : L10n.text("apple.pullsview.updating.dfe40efe"))
                 } else {
-                    Text("\(model.rows.count) results")
+                    Text(L10n.text("apple.pullsview.0_results.84cbe8d0", "\(model.rows.count)"))
                 }
             }
             .font(Theme.caption)
@@ -410,7 +410,7 @@ struct PullsView: View {
                             PullRow(pull: pull)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityHint("Opens pull request details")
+                        .accessibilityHint(L10n.text("apple.pullsview.opens_pull_request_details.02632c19"))
                     }
                 }
                 .transition(.smoothIn(reduceMotion: reduceMotion))
@@ -422,7 +422,7 @@ struct PullsView: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             EmptyState(
                 symbol: model.state == .draft ? "pencil.line" : "arrow.triangle.merge",
-                title: "No \(model.state.label.lowercased()) pull requests",
+                title: L10n.text("apple.pullsview.no_0_pull_requests.980f0d9c", "\(model.state.label.lowercased())"),
                 message: emptyMessage
             )
             if model.scope != .all || model.state != .open {
@@ -432,7 +432,7 @@ struct PullsView: View {
                         model.state = .open
                     }
                 } label: {
-                    Label("Show open pull requests", systemImage: "arrow.counterclockwise")
+                    Label(L10n.text("apple.pullsview.show_open_pull_requests.b5b4db36"), systemImage: "arrow.counterclockwise")
                 }
                 .buttonStyle(AccentButtonStyle(small: true))
             }
@@ -445,19 +445,19 @@ struct PullsView: View {
 
     private var emptyMessage: String {
         switch model.scope {
-        case .all: return "Nothing in this repository matches the selected state."
-        case .mine: return "You have no pull requests matching the selected state."
-        case .assigned: return "No matching pull requests are assigned to you."
-        case .reviewRequested: return "No matching pull requests are waiting for your review."
+        case .all: return L10n.text("apple.pullsview.nothing_in_this_repository_matches_the_sel.402738e9")
+        case .mine: return L10n.text("apple.pullsview.you_have_no_pull_requests_matching_the_sel.bdbd95bf")
+        case .assigned: return L10n.text("apple.pullsview.no_matching_pull_requests_are_assigned_to.592a8c1b")
+        case .reviewRequested: return L10n.text("apple.pullsview.no_matching_pull_requests_are_waiting_for.49ddb44a")
         }
     }
 
     private func sourceLabel(_ source: String?) -> String {
         switch source {
-        case "gitCredential": return "using Git's saved credential"
-        case "environment": return "using the shell credential"
-        case "pasted": return "using a token you supplied"
-        default: return "tokenstat GitHub App"
+        case "gitCredential": return L10n.text("apple.pullsview.using_git_s_saved_credential.0e9c75dd")
+        case "environment": return L10n.text("apple.pullsview.using_the_shell_credential.f587050a")
+        case "pasted": return L10n.text("apple.pullsview.using_a_token_you_supplied.40e06d38")
+        default: return L10n.text("apple.pullsview.tokenstat_github_app.4545f151")
         }
     }
 
@@ -475,7 +475,7 @@ struct PullsView: View {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 Text(FriendlyError.from(message).message)
                     .font(Theme.callout)
-                Button("Try again") {
+                Button(L10n.text("apple.pullsview.try_again.d8b8392e")) {
                     Task { await model.load(workspaceID: workspaceID, peer: peer) }
                 }
                     .buttonStyle(AccentButtonStyle(small: true))
@@ -491,8 +491,8 @@ struct PullsView: View {
     private var loginSheet: some View {
         if let login = model.login {
             ThemedSheet(
-                title: "Connect GitHub",
-                subtitle: "Enter this one-time code in the GitHub page that just opened.",
+                title: L10n.text("apple.pullsview.connect_github.4027e5b2"),
+                subtitle: L10n.text("apple.pullsview.enter_this_one_time_code_in_the_github_pag.2babe0df"),
                 icon: .connect,
                 onClose: { Task { await model.cancelLogin() } }
             ) {
@@ -514,7 +514,7 @@ struct PullsView: View {
                         ProgressView()
                             .controlSize(.small)
                             .tint(Theme.accent)
-                        Text("Waiting for GitHub…")
+                        Text(L10n.text("apple.pullsview.waiting_for_github.d3f403f4"))
                             .font(Theme.callout)
                             .foregroundStyle(Theme.controlGlyph)
                     }
@@ -526,7 +526,7 @@ struct PullsView: View {
                     }
                 }
             } actions: {
-                Button("Cancel", .dismiss) { Task { await model.cancelLogin() } }
+                Button(L10n.text("common.cancel"), .dismiss) { Task { await model.cancelLogin() } }
                     .buttonStyle(SecondaryButtonStyle())
                     .keyboardShortcut(.cancelAction)
                 Spacer()
@@ -567,16 +567,16 @@ private struct PullFilters: View {
             ForEach(PullStateFilter.allCases) { stateButton($0) }
         }
         .fixedSize()
-        .accessibilityLabel("Pull request state")
+        .accessibilityLabel(L10n.text("apple.pullsview.pull_request_state.45faa7b6"))
     }
 
     private var scopePicker: some View {
         HStack(spacing: Theme.Space.s) {
-            Text("Show").font(Theme.caption).foregroundStyle(.secondary)
+            Text(L10n.text("apple.pullsview.show.0df6f1ca")).font(Theme.caption).foregroundStyle(.secondary)
             AppMenuPicker(options: PullScope.allCases.map { (value: $0, label: $0.label) }, selection: $scope)
         }
         .fixedSize()
-        .accessibilityLabel("Pull request scope")
+        .accessibilityLabel(L10n.text("apple.pullsview.pull_request_scope.663baf42"))
     }
 
     private func stateButton(_ option: PullStateFilter) -> some View {
@@ -702,7 +702,7 @@ private struct PullRow: View {
             Spacer(minLength: 4)
             Text("+\(pull.additions)").foregroundStyle(Theme.diffAdded)
             Text("−\(pull.deletions)").foregroundStyle(Theme.diffRemoved)
-            Text("\(pull.changedFiles) files").foregroundStyle(.tertiary)
+            Text(L10n.text("apple.pullsview.0_files.fb42ce4d", "\(pull.changedFiles)")).foregroundStyle(.tertiary)
         }
         .font(Theme.caption2.weight(.medium))
     }
@@ -718,9 +718,9 @@ private struct PullRow: View {
 
     private var reviewLabel: (text: String, symbol: String, tint: Color)? {
         switch pull.reviewDecision {
-        case "approved": return ("Approved", "checkmark", Theme.success)
-        case "changes_requested": return ("Changes requested", "exclamationmark", Theme.danger)
-        case "review_required": return ("Review needed", "eye", Theme.warning)
+        case "approved": return (L10n.text("apple.pullsview.approved.87b42e40"), "checkmark", Theme.success)
+        case "changes_requested": return (L10n.text("apple.pullsview.changes_requested.10a92a8a"), "exclamationmark", Theme.danger)
+        case "review_required": return (L10n.text("apple.pullsview.review_needed.eb0807c2"), "eye", Theme.warning)
         default: return nil
         }
     }
@@ -742,9 +742,9 @@ private struct PullChecksPill: View {
 
     private var label: String {
         switch state {
-        case .passing: return "Passing"
-        case .failing: return "Failing"
-        case .pending: return "Running"
+        case .passing: return L10n.text("apple.pullsview.passing.83e6fbae")
+        case .failing: return L10n.text("apple.pullsview.failing.3903780c")
+        case .pending: return L10n.text("common.running")
         }
     }
 
@@ -788,7 +788,7 @@ private struct PullListSkeleton: View {
                 .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
             }
         }
-        .accessibilityLabel("Loading pull requests")
+        .accessibilityLabel(L10n.text("apple.pullsview.loading_pull_requests.83ec6f00"))
     }
 }
 

@@ -71,7 +71,7 @@ struct InProcessTransport: Transport {
     /// thread it was made on with nothing left to cancel.
     func call(method: String, params: String, patience _: TimeInterval) throws -> String {
         guard let raw = tokenstat_ffi_call(method, params) else {
-            throw BridgeError.core(code: "null", message: "The core returned nothing.")
+            throw BridgeError.core(code: "null", message: L10n.text("apple.transport.the_core_returned_nothing.d880260c"))
         }
         defer { tokenstat_ffi_string_free(raw) }
         return String(cString: raw)

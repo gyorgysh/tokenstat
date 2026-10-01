@@ -81,7 +81,7 @@ struct LocalModelControl: View {
 
     /// What the button says when nothing is selected, and as the menu's own
     /// first entry.
-    private var defaultLabel: String { "Each tool's default" }
+    private var defaultLabel: String { L10n.text("apple.launchcontrols.each_tool_s_default.03e1b871") }
 
     private var buttonLabel: String {
         if let match = choices.first(where: { $0.key == selectedKey }) {
@@ -124,9 +124,9 @@ struct LocalModelControl: View {
             }
             if let errorMessage {
                 ThemeRule()
-                Text("Could not read local models: \(errorMessage)")
+                Text(L10n.text("apple.launchcontrols.could_not_read_local_models_0.15206f7a", "\(errorMessage)"))
             }
-            Button("Refresh", .refresh) { Task { await load() } }
+            Button(L10n.text("common.refresh"), .refresh) { Task { await load() } }
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "cpu")
@@ -166,42 +166,33 @@ struct LocalModelControl: View {
                 return "\(provider.name): \(localProviderStatus(provider))"
             }
             if provider.models.isEmpty {
-                return "\(provider.name): no models loaded"
+                return L10n.text("apple.launchcontrols.0_no_models_loaded.cc0537c5", "\(provider.name)")
             }
             if peer == nil && !LocalProviderPreference.isEnabled(provider.id) {
-                return "\(provider.name): turned off in Settings"
+                return L10n.text("apple.launchcontrols.0_turned_off_in_settings.b76e5c4e", "\(provider.name)")
             }
             return nil
         }
     }
 
     private func localProviderStatus(_ provider: LocalProvider) -> String {
-        let raw = provider.error ?? "not running"
+        let raw = provider.error ?? L10n.text("apple.launchcontrols.not_running.415ed734")
         if raw == "not running" || raw.hasPrefix("not running") {
             return provider.id == "lmstudio"
-                ? "not running (start the app, local server on port 1234)"
-                : "not running (start the app, port 11434)"
+                ? L10n.text("apple.launchcontrols.not_running_start_the_app_local_server_on.0f8fa880")
+                : L10n.text("apple.launchcontrols.not_running_start_the_app_port_11434.468ba7b0")
         }
         return raw
     }
 
     private var helpText: String {
         if let errorMessage {
-            return "Local model servers could not be read: \(errorMessage)"
+            return L10n.text("apple.launchcontrols.local_model_servers_could_not_be_read_0.d4ad96a9", "\(errorMessage)")
         }
         if choices.isEmpty {
-            return """
-            No local model is ready. Start LM Studio (port 1234) or Ollama \
-            (port 11434), load a model, and refresh. Claude uses LM Studio's \
-            Anthropic-compatible endpoint. Codex and OpenCode receive an \
-            explicit local provider and model.
-            """
+            return L10n.text("apple.launchcontrols.no_local_model_is_ready_start_lm_studio_po.45c025dd")
         }
-        return """
-        Which model the next session starts on. Claude uses LM Studio's \
-        Anthropic-compatible endpoint. Codex and OpenCode receive an explicit \
-        local provider and model.
-        """
+        return L10n.text("apple.launchcontrols.which_model_the_next_session_starts_on_cla.07eb2e61")
     }
 
     private func select(_ key: String) {
@@ -252,7 +243,7 @@ struct BypassPermissionsControl: View {
             HStack(spacing: 4) {
                 Image(systemName: isOn ? "lock.open.fill" : "lock.fill")
                     .font(Theme.font(11))
-                Text(isOn ? "Bypass on" : "Bypass off")
+                Text(isOn ? L10n.text("apple.launchcontrols.bypass_on.57526f50") : L10n.text("apple.launchcontrols.bypass_off.bd6707b9"))
                     .font(Theme.font(11))
                     .lineLimit(1)
             }
@@ -262,8 +253,8 @@ struct BypassPermissionsControl: View {
         .fixedSize(horizontal: true, vertical: false)
         .help(
             isOn
-                ? "Launches here skip permission prompts: shells and agents (Codex, Claude, Muse, …). Remembered for this workspace."
-                : "Launches here ask before acting. Turn on to skip permission prompts for shells and agents."
+                ? L10n.text("apple.launchcontrols.launches_here_skip_permission_prompts_shel.b6b1d520")
+                : L10n.text("apple.launchcontrols.launches_here_ask_before_acting_turn_on_to.7f74555d")
         )
     }
 }

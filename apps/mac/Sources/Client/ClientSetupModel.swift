@@ -104,7 +104,7 @@ final class ClientSetupModel {
             if !library.loaded { await library.load() }
             try Task.checkCancellation()
             guard account.signedIn else {
-                throw BridgeError.core(code: "signed_out", message: "Sign in before setting up a machine.")
+                throw BridgeError.core(code: "signed_out", message: L10n.text("apple.clientsetupmodel.sign_in_before_setting_up_a_machine.31774d13"))
             }
             // A new account has no handle. The scope falls back to the server
             // id for the account. When that is missing too, the draft goes
@@ -194,7 +194,7 @@ final class ClientSetupModel {
         if !draft.manualInstall {
             guard let saved = library.hosts.first(where: { $0.id == draft.hostID }),
                   let pin = draft.fingerprint, saved.hostKeys.contains(pin) else {
-                error = "The saved server or its trusted fingerprint changed. Start a new setup and verify it again."
+                error = L10n.text("apple.clientsetupmodel.the_saved_server_or_its_trusted_fingerprin.d5129c8b")
                 return nil
             }
             host = saved
@@ -284,13 +284,13 @@ final class ClientSetupModel {
         case .none:
             throw BridgeError.core(
                 code: "no_credential",
-                message: "Choose how to sign in to this server."
+                message: L10n.text("apple.clientsetupmodel.choose_how_to_sign_in_to_this_server.ef643f08")
             )
         case .password:
             guard !password.isEmpty else {
                 throw BridgeError.core(
                     code: "no_credential",
-                    message: "Enter the password for this server."
+                    message: L10n.text("apple.clientsetupmodel.enter_the_password_for_this_server.baf1babf")
                 )
             }
             return ["kind": "password", "password": password]
@@ -298,7 +298,7 @@ final class ClientSetupModel {
             guard let key = library.keys.first(where: { $0.id == id }) else {
                 throw BridgeError.core(
                     code: "no_credential",
-                    message: "That key is no longer in your vault."
+                    message: L10n.text("apple.clientsetupmodel.that_key_is_no_longer_in_your_vault.c88cbd34")
                 )
             }
             if key.secretRef.hasPrefix("agent:") {
@@ -338,7 +338,7 @@ final class ClientSetupModel {
         try Task.checkCancellation()
         guard account.signedIn, account.host == scope?.origin,
               ClientSetupScope.accountIdentity(handle: account.handle, id: account.accountId) == scope?.account else {
-            throw BridgeError.core(code: "account_changed", message: "Your account changed. Close setup and open it again.")
+            throw BridgeError.core(code: "account_changed", message: L10n.text("apple.clientsetupmodel.your_account_changed_close_setup_and_open.f26f7449"))
         }
         let labels = Set(account.machines.compactMap(\.label))
         let base = machineName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -383,7 +383,7 @@ final class ClientSetupModel {
             guard let saved = await library.save(host: host) else {
                 throw BridgeError.core(
                     code: "not_saved",
-                    message: library.error ?? "The fingerprint could not be saved."
+                    message: library.error ?? L10n.text("apple.clientsetupmodel.the_fingerprint_could_not_be_saved.42f0cc60")
                 )
             }
             try Task.checkCancellation()
@@ -421,7 +421,7 @@ final class ClientSetupModel {
             let auth = try await self.authPayload(library: library)
             guard let myKey = self.myKey else {
                 throw BridgeError.core(code: "identity_unavailable",
-                    message: "This device’s identity could not be loaded. Close setup and try again.")
+                    message: L10n.text("apple.clientsetupmodel.this_device_s_identity_could_not_be_loaded.75e4a4e2"))
             }
             try await self.chooseAvailableMachineName()
             try Task.checkCancellation()
@@ -472,7 +472,7 @@ final class ClientSetupModel {
                 if self.manualInstall {
                     guard let key = ClientSetupIdentity.normalize(self.manualMachineKey) else {
                         throw BridgeError.core(code: "identity_required",
-                            message: "Paste the full machine key printed by the installer.")
+                            message: L10n.text("apple.clientsetupmodel.paste_the_full_machine_key_printed_by_the.c44766a5"))
                     }
                     self.expectedPeer = key
                 } else {
@@ -497,20 +497,20 @@ final class ClientSetupModel {
                 try Task.checkCancellation()
                 guard fresh.signedIn, fresh.host == self.scope?.origin,
                       ClientSetupScope.accountIdentity(handle: fresh.handle, id: fresh.accountId) == self.scope?.account else {
-                    throw BridgeError.core(code: "account_changed", message: "Your account changed. Close setup and open it again.")
+                    throw BridgeError.core(code: "account_changed", message: L10n.text("apple.clientsetupmodel.your_account_changed_close_setup_and_open.f26f7449"))
                 }
                 if fresh.machines.contains(where: {
                     $0.isHost && ClientSetupIdentity.matches($0.publicIdentity ?? "", expected: peer)
                 }) {
                     guard try await Bridge.workspaceAccessAllowed(peer: peer) else {
                         throw BridgeError.core(code: "access_required",
-                            message: "This machine is on your account, but this device is not allowed yet. Use Add this device in Machines.")
+                            message: L10n.text("apple.clientsetupmodel.this_machine_is_on_your_account_but_this_d.91e8c55e"))
                     }
                     let status = try await Bridge.provisionStatus(peer: peer)
                     try Task.checkCancellation()
                     guard ClientSetupIdentity.matches(status.machineKey, expected: peer) else {
                         throw BridgeError.core(code: "identity_mismatch",
-                            message: "The machine answered with a different identity. Reconnect and verify the server.")
+                            message: L10n.text("apple.clientsetupmodel.the_machine_answered_with_a_different_iden.b83fb7ed"))
                     }
                     self.checkpoint(.hostReady)
                     self.finished = status
@@ -520,7 +520,7 @@ final class ClientSetupModel {
                 try await Task.sleep(for: .seconds(3))
             }
             throw BridgeError.core(code: "setup_pending",
-                message: "This machine has not appeared on your account yet. Check that the install finished, then try again.")
+                message: L10n.text("apple.clientsetupmodel.this_machine_has_not_appeared_on_your_acco.727d062b"))
         }
     }
 

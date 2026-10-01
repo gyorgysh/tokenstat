@@ -46,10 +46,10 @@ struct AutomationsView: View {
         var id: String { rawValue }
         var label: String {
             switch self {
-            case .all: return "All"
-            case .enabled: return "Enabled"
-            case .paused: return "Paused"
-            case .failing: return "Last run failed"
+            case .all: return L10n.text("apple.automationsview.all.a52ace42")
+            case .enabled: return L10n.text("common.enabled")
+            case .paused: return L10n.text("common.paused")
+            case .failing: return L10n.text("apple.automationsview.last_run_failed.d86e53b5")
             }
         }
     }
@@ -69,7 +69,7 @@ struct AutomationsView: View {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .navigationTitle("Automations")
+        .navigationTitle(L10n.text("common.automations"))
         .background(Theme.background)
         .sheet(isPresented: $creating) {
             NewAutomationSheet(model: model, folders: folders, onNavigate: onNavigate)
@@ -92,7 +92,7 @@ struct AutomationsView: View {
             }
         }
         .confirmationDialog(
-            "Delete \(jobPendingDelete?.name ?? "this automation")?",
+            L10n.text("apple.automationsview.delete_0.dc6c5ae4", "\(jobPendingDelete?.name ?? L10n.text("apple.automationsview.this_automation.0941cb02"))"),
             isPresented: Binding(
                 get: { jobPendingDelete != nil },
                 set: { if !$0 { jobPendingDelete = nil } }
@@ -100,10 +100,10 @@ struct AutomationsView: View {
             titleVisibility: .visible,
             presenting: jobPendingDelete
         ) { job in
-            Button("Delete", role: .destructive) { Task { await model.remove(job) } }
-            Button("Keep it", role: .cancel) {}
+            Button(L10n.text("common.delete"), role: .destructive) { Task { await model.remove(job) } }
+            Button(L10n.text("apple.automationsview.keep_it.fdce5da2"), role: .cancel) {}
         } message: { _ in
-            Text("The schedule goes with it. Runs it already produced stay.")
+            Text(L10n.text("apple.automationsview.the_schedule_goes_with_it_runs_it_already.a4efc8fe"))
         }
         .overlay(alignment: .bottomTrailing) {
             TransientToast(message: $model.noticeMessage, severity: .success)
@@ -144,7 +144,7 @@ struct AutomationsView: View {
     /// Search and the cuts on the left, the ways to add on the right.
     private var toolbar: some View {
         HStack(spacing: Theme.Space.s) {
-            SearchField(text: $search, prompt: showingRuns ? "Search runs" : "Search automations")
+            SearchField(text: $search, prompt: showingRuns ? L10n.text("apple.automationsview.search_runs.26d6d37f") : L10n.text("apple.automationsview.search_automations.bdff71b2"))
                 .frame(minWidth: 140, maxWidth: 260)
             if !showingRuns {
                 filterMenu
@@ -152,8 +152,8 @@ struct AutomationsView: View {
             Spacer(minLength: Theme.Space.s)
             SegmentedCapsulePicker(
                 options: [
-                    (value: false, label: "Jobs", symbol: "bolt"),
-                    (value: true, label: "Runs", symbol: ActionIcon.history.symbol),
+                    (value: false, label: L10n.text("apple.automationsview.jobs.2f17a0f8"), symbol: "bolt"),
+                    (value: true, label: L10n.text("apple.automationsview.runs.848f54e8"), symbol: ActionIcon.history.symbol),
                 ],
                 selection: $showingRuns
             )
@@ -163,7 +163,7 @@ struct AutomationsView: View {
             // leaves the words to the things people press every day.
             ToolbarIconButton(
                 systemImage: ActionIcon.settings.symbol,
-                help: "Scheduler: time limit and how many jobs run at once",
+                help: L10n.text("apple.automationsview.scheduler_time_limit_and_how_many_jobs_run.63c8f49a"),
                 isAccent: showingScheduler
             ) { showingScheduler.toggle() }
                 .popover(isPresented: $showingScheduler, arrowEdge: .bottom) {
@@ -171,11 +171,11 @@ struct AutomationsView: View {
                         .frame(width: 380)
                         .padding(Theme.Space.s)
                 }
-            Button("New automation", .create) { creating = true }
+            Button(L10n.text("apple.automationsview.new_automation.db87a63d"), .create) { creating = true }
                 .buttonStyle(AccentButtonStyle(small: true))
                 .fixedSize()
                 .disabled(folders.isEmpty)
-                .help(folders.isEmpty ? "Add a project first. An agent runs somewhere." : "Schedule an agent job")
+                .help(folders.isEmpty ? L10n.text("apple.automationsview.add_a_project_first_an_agent_runs_somewher.6ab06aa6") : L10n.text("apple.automationsview.schedule_an_agent_job.224ec5fa"))
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.vertical, Theme.Space.s)
@@ -183,19 +183,19 @@ struct AutomationsView: View {
 
     private var filterMenu: some View {
         Menu {
-            Picker("Show", selection: $filter) {
+            Picker(L10n.text("apple.automationsview.show.0df6f1ca"), selection: $filter) {
                 ForEach(JobFilter.allCases) { option in
                     Text("\(option.label)  \(jobs(matching: option).count)").tag(option)
                 }
             }
             .pickerStyle(.inline)
         } label: {
-            Label(filter == .all ? "Filter" : filter.label, systemImage: ActionIcon.filter.symbol)
+            Label(filter == .all ? L10n.text("apple.automationsview.filter.638e249f") : filter.label, systemImage: ActionIcon.filter.symbol)
                 .font(Theme.font(12))
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
-        .help("Show only some automations")
+        .help(L10n.text("apple.automationsview.show_only_some_automations.74fe7a0c"))
     }
 
     /// Ready-made jobs, one menu away rather than a section of their own.
@@ -205,13 +205,13 @@ struct AutomationsView: View {
                 Button(suggestion.title, systemImage: suggestion.symbol) { template = suggestion }
             }
         } label: {
-            Label("Templates", systemImage: "square.on.square")
+            Label(L10n.text("apple.automationsview.templates.56b564b7"), systemImage: "square.on.square")
                 .font(Theme.font(12))
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
         .disabled(folders.isEmpty)
-        .help("Start from a ready-made job")
+        .help(L10n.text("apple.automationsview.start_from_a_ready_made_job.72bf97a5"))
     }
 
     @ViewBuilder
@@ -232,8 +232,8 @@ struct AutomationsView: View {
                 } else {
                     EmptyState(
                         symbol: "text.append",
-                        title: "Nothing has run yet",
-                        message: "A run appears here the moment an automation fires, or when you press Run now on one."
+                        title: L10n.text("apple.automationsview.nothing_has_run_yet.45d9f27c"),
+                        message: L10n.text("apple.automationsview.a_run_appears_here_the_moment_an_automatio.a7ef255f")
                     )
                     .padding(Theme.Space.xl)
                 }
@@ -248,10 +248,10 @@ struct AutomationsView: View {
             } else {
                 EmptyState(
                     symbol: ActionIcon.filter.symbol,
-                    title: "No automations match",
-                    message: "Nothing here is \(filter.label.lowercased()) right now."
+                    title: L10n.text("apple.automationsview.no_automations_match.f2d793e6"),
+                    message: L10n.text("apple.automationsview.nothing_here_is_0_right_now.81efd682", "\(filter.label.lowercased())")
                 ) {
-                    Button("Show all", .filter) { filter = .all }
+                    Button(L10n.text("apple.automationsview.show_all.2150d8df"), .filter) { filter = .all }
                         .buttonStyle(SecondaryButtonStyle())
                 }
                 .padding(Theme.Space.xl)
@@ -271,7 +271,7 @@ struct AutomationsView: View {
         Table(visibleJobs, selection: jobSelection, sortOrder: $jobOrder) {
             // The agent's mark leads the name: it says who does the job, and
             // the Schedule column already says when in words.
-            TableColumn("Name", value: \.name) { job in
+            TableColumn(L10n.text("apple.automationsview.name.dcd1d522"), value: \.name) { job in
                 HStack(spacing: Theme.Space.s) {
                     HarnessMark(id: job.backend, size: 16)
                         .help(backendLabel(job.backend))
@@ -286,21 +286,21 @@ struct AutomationsView: View {
             .width(min: 120, ideal: 160)
             // Ideal widths add up to what a 1100 pt window leaves beside the
             // sidebar, so every column is on screen without scrolling sideways.
-            TableColumn("Schedule") { job in
+            TableColumn(L10n.text("apple.automationsview.schedule.f4830a1d")) { job in
                 cell(model.scheduleSummary(job.schedule))
             }
             .width(min: 90, ideal: 116)
-            TableColumn("Project") { job in
+            TableColumn(L10n.text("apple.automationsview.project.98595978")) { job in
                 cell(folderLabel(job.workspaceID))
             }
             .width(min: 70, ideal: 96)
             // A paused job has no next run, so its status sits where the
             // time would: one column answers "when does this go next".
-            TableColumn("Next run", value: \.nextRunOrder) { job in
+            TableColumn(L10n.text("apple.automationsview.next_run.b3c0ab96"), value: \.nextRunOrder) { job in
                 nextRunCell(job)
             }
             .width(min: 90, ideal: 110)
-            TableColumn("Last run", value: \.lastRunOrder) { job in
+            TableColumn(L10n.text("apple.automationsview.last_run.512a4821"), value: \.lastRunOrder) { job in
                 lastRunCell(job)
             }
             .width(min: 80, ideal: 110)
@@ -344,7 +344,7 @@ struct AutomationsView: View {
             cell(HostScheduleClock.wallClock(next, timezone: model.schedulerTimezone)
                 ?? next.formatted(date: .abbreviated, time: .shortened))
         } else {
-            cell("When you run it")
+            cell(L10n.text("apple.automationsview.when_you_run_it.5d06a91f"))
         }
     }
 
@@ -362,7 +362,7 @@ struct AutomationsView: View {
             }
             .help(last.startedAt.formatted(date: .abbreviated, time: .shortened))
         } else {
-            cell("Never")
+            cell(L10n.text("common.never"))
         }
     }
 
@@ -375,7 +375,7 @@ struct AutomationsView: View {
             HStack(spacing: 5) {
                 Image(systemName: job.enabled ? "circle.fill" : "pause.circle")
                     .font(Theme.font(job.enabled ? 6 : 11, weight: .semibold))
-                Text(job.enabled ? "Enabled" : "Paused")
+                Text(job.enabled ? L10n.text("common.enabled") : L10n.text("common.paused"))
                     .font(Theme.font(12, weight: .medium))
             }
             .foregroundStyle(job.enabled ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
@@ -388,21 +388,21 @@ struct AutomationsView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .help(job.enabled ? "Running on its schedule. Click to pause." : "Paused. It will not fire. Click to enable.")
+        .help(job.enabled ? L10n.text("apple.automationsview.running_on_its_schedule_click_to_pause.02cdad86") : L10n.text("apple.automationsview.paused_it_will_not_fire_click_to_enable.49b58042"))
     }
 
     private func actionsCell(_ job: Automation) -> some View {
         HStack(spacing: 0) {
             if let last = model.lastRun(for: job), last.isRunning {
-                ToolbarIconButton(systemImage: ActionIcon.stop.symbol, help: "Stop this run") {
+                ToolbarIconButton(systemImage: ActionIcon.stop.symbol, help: L10n.text("apple.automationsview.stop_this_run.7647f899")) {
                     Task { await model.stop(last) }
                 }
             } else {
-                ToolbarIconButton(systemImage: ActionIcon.run.symbol, help: "Run now") {
+                ToolbarIconButton(systemImage: ActionIcon.run.symbol, help: L10n.text("apple.automationsview.run_now.09913977")) {
                     Task { await model.run(job) }
                 }
             }
-            ToolbarMenuButton(help: "Actions for \(job.name)") {
+            ToolbarMenuButton(help: L10n.text("apple.automationsview.actions_for_0.29a5141b", "\(job.name)")) {
                 jobMenu(job)
             }
         }
@@ -410,14 +410,14 @@ struct AutomationsView: View {
 
     @ViewBuilder
     private func jobMenu(_ job: Automation) -> some View {
-        Button("Run now", .run) { Task { await model.run(job) } }
-        Button(job.enabled ? "Pause" : "Enable", job.enabled ? .stop : .run) {
+        Button(L10n.text("apple.automationsview.run_now.09913977"), .run) { Task { await model.run(job) } }
+        Button(job.enabled ? L10n.text("apple.automationsview.pause.858e4ba7") : L10n.text("apple.automationsview.enable.5342e09f"), job.enabled ? .stop : .run) {
             Task { await model.toggle(job) }
         }
-        Button("Run history", .history) { historyJob = job }
-        Button("Edit automation", .edit) { editingJob = job }
+        Button(L10n.text("apple.automationsview.run_history.addf321b"), .history) { historyJob = job }
+        Button(L10n.text("apple.automationsview.edit_automation.b16f31c1"), .edit) { editingJob = job }
         Divider()
-        Button("Delete automation", .delete, role: .destructive) { jobPendingDelete = job }
+        Button(L10n.text("apple.automationsview.delete_automation.f71084e7"), .delete, role: .destructive) { jobPendingDelete = job }
     }
 
     // MARK: - Runs
@@ -426,7 +426,7 @@ struct AutomationsView: View {
     /// output in the inspector.
     private var runsTable: some View {
         Table(visibleRuns, selection: runSelection, sortOrder: $runOrder) {
-            TableColumn("Automation", value: \.name) { run in
+            TableColumn(L10n.text("apple.automationsview.automation.d909750b"), value: \.name) { run in
                 HStack(spacing: Theme.Space.s) {
                     Circle()
                         .fill(Self.statusTint(run.status))
@@ -437,26 +437,26 @@ struct AutomationsView: View {
                 }
             }
             .width(min: 140, ideal: 210)
-            TableColumn("Agent") { run in
+            TableColumn(L10n.text("apple.automationsview.agent.11b39c93")) { run in
                 HStack(spacing: 6) {
                     HarnessMark(id: run.backend, size: 16)
                     cell(backendLabel(run.backend))
                 }
             }
             .width(min: 90, ideal: 130)
-            TableColumn("Project") { run in
+            TableColumn(L10n.text("apple.automationsview.project.98595978")) { run in
                 cell(folderLabel(run.workspaceID))
             }
             .width(min: 80, ideal: 120)
-            TableColumn("Started", value: \.startedAtMs) { run in
+            TableColumn(L10n.text("apple.automationsview.started.ecbc89cd"), value: \.startedAtMs) { run in
                 cell(run.startedAt.formatted(date: .abbreviated, time: .shortened))
             }
             .width(min: 110, ideal: 150)
-            TableColumn("Duration") { run in
+            TableColumn(L10n.text("apple.automationsview.duration.4fc52a3c")) { run in
                 cell(durationLabel(run))
             }
             .width(min: 70, ideal: 90)
-            TableColumn("Result", value: \.status) { run in
+            TableColumn(L10n.text("apple.automationsview.result.6e7d50e8"), value: \.status) { run in
                 StatusPill(status: run.status, text: run.endedLabel)
             }
             .width(min: 80, ideal: 100)
@@ -465,7 +465,7 @@ struct AutomationsView: View {
         .scrollContentBackground(.hidden)
         .contextMenu(forSelectionType: String.self) { ids in
             if let run = ids.first.flatMap({ id in model.runs.first { $0.id == id } }), run.isRunning {
-                Button("Stop", .stop) { Task { await model.stop(run) } }
+                Button(L10n.text("common.stop"), .stop) { Task { await model.stop(run) } }
             }
         }
     }
@@ -480,11 +480,11 @@ struct AutomationsView: View {
     }
 
     private func durationLabel(_ run: RunRecord) -> String {
-        guard run.endedAtMs != nil else { return run.isRunning ? "Running" : "" }
+        guard run.endedAtMs != nil else { return run.isRunning ? L10n.text("common.running") : "" }
         let total = Int(seconds(of: run).rounded())
-        if total < 60 { return "\(total)s" }
-        if total < 3600 { return "\(total / 60)m \(total % 60)s" }
-        return "\(total / 3600)h \((total % 3600) / 60)m"
+        if total < 60 { return L10n.text("apple.automationsview.0_s.c4c041f8", "\(total)") }
+        if total < 3600 { return L10n.text("apple.automationsview.0_m_1_s.661f2349", "\(total / 60)", "\(total % 60)") }
+        return L10n.text("apple.automationsview.0_h_1_m.d426ce3b", "\(total / 3600)", "\((total % 3600) / 60)")
     }
 
     // MARK: - Data
@@ -536,8 +536,8 @@ struct AutomationsView: View {
     }
 
     private func folderLabel(_ id: String) -> String {
-        guard let folder = folders.first(where: { $0.id == id }) else { return "Unknown" }
-        return folder.isRemote ? "\(folder.machineLabel ?? "Remote") / \(folder.name)" : folder.name
+        guard let folder = folders.first(where: { $0.id == id }) else { return L10n.text("common.unknown") }
+        return folder.isRemote ? "\(folder.machineLabel ?? L10n.text("apple.automationsview.remote.ffa98e02")) / \(folder.name)" : folder.name
     }
 
     /// The folder this board is scoped to, named on the chrome bar.
@@ -546,7 +546,7 @@ struct AutomationsView: View {
         guard let folder = folders.first(where: { $0.id == id }) else { return nil }
         return ScopeChip(
             label: folder.isRemote
-                ? "\(folder.machineLabel ?? "Remote") / \(folder.name)"
+                ? "\(folder.machineLabel ?? L10n.text("apple.automationsview.remote.ffa98e02")) / \(folder.name)"
                 : folder.name,
             symbol: folder.isRemote ? "network" : "folder.fill"
         )
@@ -559,13 +559,13 @@ struct AutomationsView: View {
 
     private var schedulerCard: some View {
         Card(
-            title: "Scheduler",
-            subtitle: "How queued jobs run on this Mac",
+            title: L10n.text("apple.automationsview.scheduler.d3a27d96"),
+            subtitle: L10n.text("apple.automationsview.how_queued_jobs_run_on_this_mac.917fd2c7"),
             mark: "mark_scheduler"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 HStack {
-                    Text("Time limit")
+                    Text(L10n.text("apple.automationsview.time_limit.e592a9ca"))
                         .font(Theme.callout)
                     Spacer()
                     TextField("180", text: $model.queueBudgetMinutes)
@@ -576,7 +576,7 @@ struct AutomationsView: View {
                         .onChange(of: model.queueBudgetMinutes) { _, _ in
                             schedulerJustSaved = false
                         }
-                    Text("minutes")
+                    Text(L10n.text("apple.automationsview.minutes.90e63d85"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -586,7 +586,7 @@ struct AutomationsView: View {
                     onChange: { schedulerJustSaved = false }
                 )
                 HStack {
-                    Text("Max concurrent jobs")
+                    Text(L10n.text("apple.automationsview.max_concurrent_jobs.86a5921e"))
                         .font(Theme.callout)
                     Spacer()
                     // Places at the table, filled by what is running now, so
@@ -604,22 +604,22 @@ struct AutomationsView: View {
                             schedulerJustSaved = false
                         }
                 }
-                Text("New jobs inherit the time limit. 0 concurrent means no cap. Extra jobs wait in the queue.")
+                Text(L10n.text("apple.automationsview.new_jobs_inherit_the_time_limit_0_concurre.54dc3738"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                 HStack(spacing: Theme.Space.s) {
                     if model.queueDirty {
-                        Text("Unsaved")
+                        Text(L10n.text("apple.automationsview.unsaved.6250d572"))
                             .font(Theme.caption.weight(.medium))
                             .foregroundStyle(Theme.warning)
                     } else if schedulerJustSaved {
-                        Label("Saved", systemImage: "checkmark")
+                        Label(L10n.text("apple.automationsview.saved.b5c120b3"), systemImage: "checkmark")
                             .font(Theme.caption.weight(.medium))
                             .foregroundStyle(Theme.success)
                     }
                     Spacer()
                     if model.queueDirty {
-                        Button(schedulerSaving ? "Saving" : "Save scheduler", .save) {
+                        Button(schedulerSaving ? L10n.text("apple.automationsview.saving.096b7362") : L10n.text("apple.automationsview.save_scheduler.24ffd545"), .save) {
                             schedulerSaving = true
                             Task {
                                 await model.saveQueue()
@@ -630,7 +630,7 @@ struct AutomationsView: View {
                         .buttonStyle(AccentButtonStyle())
                         .disabled(schedulerSaving)
                     } else {
-                        Button("Save scheduler", .save) {}
+                        Button(L10n.text("apple.automationsview.save_scheduler.24ffd545"), .save) {}
                             .buttonStyle(SecondaryButtonStyle())
                             .disabled(true)
                     }
@@ -657,24 +657,20 @@ struct AutomationsView: View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
             EmptyState(
                 symbol: "clock.arrow.trianglehead.counterclockwise.rotate.90",
-                title: "Nothing scheduled yet",
-                message: """
-                An automation is a prompt, a folder and a time. The host helper \
-                runs it and stops it at your time limit. On a laptop that helper \
-                stops when you quit tokenstat unless Always-on host is on.
-                """
+                title: L10n.text("apple.automationsview.nothing_scheduled_yet.0fee713f"),
+                message: L10n.text("apple.automationsview.an_automation_is_a_prompt_a_folder_and_a_t.8d7bb063")
             ) {
                 if folders.isEmpty {
-                    Text("Add a folder on the Projects screen first. An agent runs somewhere.")
+                    Text(L10n.text("apple.automationsview.add_a_folder_on_the_projects_screen_first.8be8d447"))
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                 } else {
-                    Button("New automation", .create) { creating = true }
+                    Button(L10n.text("apple.automationsview.new_automation.db87a63d"), .create) { creating = true }
                         .buttonStyle(AccentButtonStyle())
                 }
             }
             if !folders.isEmpty {
-                Text("Or start from one of these")
+                Text(L10n.text("apple.automationsview.or_start_from_one_of_these.cd7237a8"))
                     .font(Theme.sectionHeader)
                     .foregroundStyle(.tertiary)
                 templatesGrid
@@ -776,7 +772,7 @@ private struct AutomationHistorySheet: View {
     var body: some View {
         ThemedSheet(
             title: job.name,
-            subtitle: "Run history",
+            subtitle: L10n.text("apple.automationsview.run_history.addf321b"),
             icon: .history,
             scrolls: true,
             onClose: { dismiss() }
@@ -784,8 +780,8 @@ private struct AutomationHistorySheet: View {
             if model.runs(of: job).isEmpty {
                 EmptyState(
                     symbol: "clock",
-                    title: "No runs yet",
-                    message: "The first run will appear here with its result and output."
+                    title: L10n.text("apple.automationsview.no_runs_yet.306b45db"),
+                    message: L10n.text("apple.automationsview.the_first_run_will_appear_here_with_its_re.0f89a5fa")
                 )
             } else {
                 VStack(spacing: 0) {
@@ -796,7 +792,7 @@ private struct AutomationHistorySheet: View {
                                 .font(Theme.callout)
                             Spacer()
                             StatusPill(status: run.status, text: run.endedLabel)
-                            Button("View", .preview) {
+                            Button(L10n.text("apple.automationsview.view.dcc839a4"), .preview) {
                                 onView(run)
                                 dismiss()
                             }
@@ -809,7 +805,7 @@ private struct AutomationHistorySheet: View {
             }
         } actions: {
             Spacer()
-            Button("Done", .done) { dismiss() }
+            Button(L10n.text("common.done"), .done) { dismiss() }
                 .buttonStyle(SecondaryButtonStyle())
                 .keyboardShortcut(.defaultAction)
         }
@@ -867,10 +863,10 @@ struct NewAutomationSheet: View {
     /// the daemon's `to_monday_zero_offset`. The picker used to be one-based
     /// with Sunday at zero, so choosing Monday scheduled a Tuesday.
     private let weekdays = [
-        (0, "Monday"), (1, "Tuesday"), (2, "Wednesday"), (3, "Thursday"),
-        (4, "Friday"), (5, "Saturday"), (6, "Sunday"),
+        (0, L10n.text("apple.automationsview.monday.6a00dfc1")), (1, L10n.text("apple.automationsview.tuesday.7d8af1de")), (2, L10n.text("apple.automationsview.wednesday.c0a6cc82")), (3, L10n.text("apple.automationsview.thursday.fc266206")),
+        (4, L10n.text("apple.automationsview.friday.e21f3f37")), (5, L10n.text("apple.automationsview.saturday.dbe35c73")), (6, L10n.text("apple.automationsview.sunday.873fef76")),
     ]
-    private let dayShort = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+    private let dayShort = [L10n.text("apple.automationsview.mo.d23e867e"), L10n.text("apple.automationsview.tu.62afcc74"), L10n.text("apple.automationsview.we.f3fe997b"), L10n.text("apple.automationsview.th.3bff939c"), L10n.text("apple.automationsview.fr.eed8f901"), L10n.text("apple.automationsview.sa.a951efc7"), L10n.text("apple.automationsview.su.2d88a3a2")]
     private let intervalPresets = [15, 30, 60, 120, 360, 720, 1440]
 
     /// Presets plus the current value when it is not one of them, so editing an
@@ -895,7 +891,7 @@ struct NewAutomationSheet: View {
 
     private func intervalMenuLabel(_ seconds: UInt64) -> String {
         if seconds % 60 != 0 {
-            return "\(seconds) seconds"
+            return L10n.text("apple.automationsview.0_seconds.e549e94b", "\(seconds)")
         }
         return intervalPresetLabel(Int(seconds / 60))
     }
@@ -908,7 +904,7 @@ struct NewAutomationSheet: View {
                 (weeklyDays & (1 << bit)) != 0 ? weekdays[bit].1 : nil
             }.joined(separator: ", ")
         }
-        return weekdays.first { $0.0 == scheduleWeekday }?.1 ?? "Day"
+        return weekdays.first { $0.0 == scheduleWeekday }?.1 ?? L10n.text("apple.automationsview.day.8f2364e1")
     }
 
     private func weeklyDaySelected(_ day: Int) -> Bool {
@@ -920,7 +916,7 @@ struct NewAutomationSheet: View {
     var body: some View {
         ThemedSheet(
             title: sheetTitle,
-            subtitle: "An agent run headless in a folder, like a person launching it.",
+            subtitle: L10n.text("apple.automationsview.an_agent_run_headless_in_a_folder_like_a_p.b64c2cae"),
             icon: sheetIcon,
             scrolls: true,
             onClose: { dismiss() }
@@ -933,7 +929,7 @@ struct NewAutomationSheet: View {
                     pendingCreateBody(pending)
                 } else {
                     if let existing, model.lastRun(for: existing)?.isRunning == true {
-                        Text("A run is going. This save is for the next one.")
+                        Text(L10n.text("apple.automationsview.a_run_is_going_this_save_is_for_the_next_o.82358bf1"))
                             .font(Theme.caption)
                             .foregroundStyle(Theme.controlGlyph)
                     }
@@ -946,12 +942,12 @@ struct NewAutomationSheet: View {
                 }
             }
         } actions: {
-            Button("Cancel", .dismiss, role: .cancel) { dismiss() }
+            Button(L10n.text("common.cancel"), .dismiss, role: .cancel) { dismiss() }
                 .buttonStyle(SecondaryButtonStyle())
                 .keyboardShortcut(.cancelAction)
             if model.hasUnconfirmedCreate, existing == nil {
                 Spacer()
-                Button("Check creation", .refresh) {
+                Button(L10n.text("apple.automationsview.check_creation.61fe51e6"), .refresh) {
                     Task {
                         working = true
                         await model.checkCreate()
@@ -961,7 +957,7 @@ struct NewAutomationSheet: View {
                 }
                 .buttonStyle(SecondaryButtonStyle())
                 .disabled(working)
-                Button("Retry creation", .create) {
+                Button(L10n.text("apple.automationsview.retry_creation.0bb084c1"), .create) {
                     Task {
                         working = true
                         await model.retryCreate()
@@ -973,7 +969,7 @@ struct NewAutomationSheet: View {
                 .disabled(working)
             } else if conflictJob == nil {
                 if step > 0 {
-                    Button("Back", .back) { step -= 1 }
+                    Button(L10n.text("common.back"), .back) { step -= 1 }
                         .buttonStyle(SecondaryButtonStyle())
                 }
                 Spacer()
@@ -990,7 +986,7 @@ struct NewAutomationSheet: View {
                     }
                 } label: {
                     let icon: ActionIcon = step < 2 ? .next : (existing == nil ? .create : .save)
-                    let title = step < 2 ? "Continue" : (existing == nil ? "Create" : "Save")
+                    let title = step < 2 ? L10n.text("apple.automationsview.continue.31fbef16") : (existing == nil ? L10n.text("apple.automationsview.create.4759498a") : L10n.text("common.save"))
                     icon.label(title)
                 }
                 .buttonStyle(AccentButtonStyle())
@@ -998,14 +994,14 @@ struct NewAutomationSheet: View {
                 .disabled(!canContinue || working)
             } else if let conflictJob {
                 Spacer()
-                Button("Use computer version", .restore) {
+                Button(L10n.text("apple.automationsview.use_computer_version.f0d6599f"), .restore) {
                     apply(conflictJob)
                     self.conflictJob = nil
                     model.errorMessage = nil
                 }
                 .buttonStyle(SecondaryButtonStyle())
                 .disabled(working)
-                Button("Keep my draft", .edit) {
+                Button(L10n.text("apple.automationsview.keep_my_draft.cdb80bb9"), .edit) {
                     jobRevision = conflictJob.revision
                     self.conflictJob = nil
                     model.errorMessage = nil
@@ -1053,8 +1049,8 @@ struct NewAutomationSheet: View {
     }
 
     private var sheetTitle: String {
-        if existing == nil, model.hasUnconfirmedCreate { return "Check creation" }
-        return existing == nil ? "New automation" : "Edit automation"
+        if existing == nil, model.hasUnconfirmedCreate { return L10n.text("apple.automationsview.check_creation.61fe51e6") }
+        return existing == nil ? L10n.text("apple.automationsview.new_automation.db87a63d") : L10n.text("apple.automationsview.edit_automation.b16f31c1")
     }
 
     private var sheetIcon: ActionIcon {
@@ -1064,14 +1060,14 @@ struct NewAutomationSheet: View {
 
     private func pendingCreateBody(_ job: Automation) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("A new job was sent and is not confirmed yet.")
+            Text(L10n.text("apple.automationsview.a_new_job_was_sent_and_is_not_confirmed_ye.e2fd3d45"))
                 .font(Theme.callout.weight(.semibold))
             Text(job.name)
                 .font(Theme.callout)
             Text(model.scheduleSummary(job.schedule))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
-            Text("Check creation before making another. Retry creation sends the same request.")
+            Text(L10n.text("apple.automationsview.check_creation_before_making_another_retry.ac4fe226"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
         }
@@ -1084,7 +1080,7 @@ struct NewAutomationSheet: View {
     private func conflictBody(_ job: Automation) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Text("Changed on the computer")
+                Text(L10n.text("apple.automationsview.changed_on_the_computer.aefb92cf"))
                     .font(Theme.callout.weight(.semibold))
                 Text(job.name).font(Theme.callout)
                 Text(job.prompt).font(Theme.callout).textSelection(.enabled)
@@ -1096,7 +1092,7 @@ struct NewAutomationSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
             .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
-            Text("This job changed since you opened it. Compare the saved job before replacing it.")
+            Text(L10n.text("apple.automationsview.this_job_changed_since_you_opened_it_compa.ae02b985"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
         }
@@ -1129,37 +1125,37 @@ struct NewAutomationSheet: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             switch step {
             case 0:
-                TextField("Name", text: $name, prompt: Text("e.g. Nightly docs check"))
+                TextField(L10n.text("apple.automationsview.name.dcd1d522"), text: $name, prompt: Text(L10n.text("apple.automationsview.e_g_nightly_docs_check.138c63aa")))
                 promptEditor
             case 1:
                 if !Bridge.isHosted {
-                    setupHint("Background helper is not running. Set it up from Machines before scheduling this task.", action: "Open Devices") {
+                    setupHint(L10n.text("apple.automationsview.background_helper_is_not_running_set_it_up.2b501242"), action: L10n.text("apple.automationsview.open_devices.39961a55")) {
                         dismiss()
                         onNavigate?(.global(.machines))
                     }
                 } else if model.backends.isEmpty {
-                    setupHint("No supported agent CLI is installed yet. Install one, then reload this screen.", action: "Refresh agents") {
+                    setupHint(L10n.text("apple.automationsview.no_supported_agent_cli_is_installed_yet_in.e39f6dc7"), action: L10n.text("apple.automationsview.refresh_agents.381e4a82")) {
                         Task { await model.load() }
                     }
                 } else if model.pickerBackends(keeping: backendID).isEmpty {
-                    setupHint("Every installed agent is hidden on Projects. Show one there to pick it here.", action: "Go to Projects") {
+                    setupHint(L10n.text("apple.automationsview.every_installed_agent_is_hidden_on_project.d9f3e2ec"), action: L10n.text("apple.automationsview.go_to_projects.cad12684")) {
                         dismiss()
                         onNavigate?(.launcher)
                     }
                 } else if folders.isEmpty {
-                    setupHint("Add a project before choosing where this task should run.", action: "Go to Projects") {
+                    setupHint(L10n.text("apple.automationsview.add_a_project_before_choosing_where_this_t.28418f03"), action: L10n.text("apple.automationsview.go_to_projects.cad12684")) {
                         dismiss()
                         onNavigate?(.workspaces)
                     }
                 }
                 AppMenuPicker(
-                    title: "Agent",
+                    title: L10n.text("apple.automationsview.agent.11b39c93"),
                     options: model.pickerBackends(keeping: existing?.backend ?? backendID).map { (value: $0.id, label: $0.label) },
                     selection: $backendID
                 )
                 AppMenuPicker(
-                    title: "Project",
-                    options: [(value: "", label: "Choose a project")]
+                    title: L10n.text("apple.automationsview.project.98595978"),
+                    options: [(value: "", label: L10n.text("apple.automationsview.choose_a_project.8ba607b1"))]
                         + folders.map { (value: $0.id, label: $0.name) },
                     selection: $workspaceID
                 )
@@ -1176,30 +1172,30 @@ struct NewAutomationSheet: View {
                         }
                         if !backend.efforts.isEmpty {
                             AppMenuPicker(
-                                title: "Effort",
-                                options: [(value: "", label: "Default")]
+                                title: L10n.text("apple.automationsview.effort.4387e5d3"),
+                                options: [(value: "", label: L10n.text("apple.automationsview.default.21b111cb"))]
                                     + backend.efforts.map { (value: $0, label: $0) },
                                 selection: $effortChoice
                             )
                         }
                     }
                 }
-                Text("The agent runs on this device, in the selected workspace.")
+                Text(L10n.text("apple.automationsview.the_agent_runs_on_this_device_in_the_selec.c02bc47c"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
             default:
                 scheduleControls
                 HStack(spacing: 4) {
-                    Text("Time limit")
+                    Text(L10n.text("apple.automationsview.time_limit.e592a9ca"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                     TextField("180", text: $budgetMinutes)
                         .frame(width: 56)
                         .disabled(noTimeLimit)
-                    Text("minutes")
+                    Text(L10n.text("apple.automationsview.minutes.90e63d85"))
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
-                    BrandToggleChip(title: "No limit", isOn: $noTimeLimit)
+                    BrandToggleChip(title: L10n.text("apple.automationsview.no_limit.f7fcff0d"), isOn: $noTimeLimit)
                 }
             }
         }
@@ -1246,7 +1242,7 @@ struct NewAutomationSheet: View {
             )
             .overlay(alignment: .topLeading) {
                 if prompt.isEmpty {
-                    Text("What the agent should do. Sent as the prompt, e.g. claude -p \"…\"")
+                    Text(L10n.text("apple.automationsview.what_the_agent_should_do_sent_as_the_promp.aab6a4cf"))
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                         .padding(.top, 10)
@@ -1262,13 +1258,13 @@ struct NewAutomationSheet: View {
     @ViewBuilder
     private var scheduleControls: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Frequency")
+            Text(L10n.text("apple.automationsview.frequency.16b6668d"))
                 .font(Theme.sectionHeader)
                 .foregroundStyle(.tertiary)
                 .padding(.bottom, Theme.Space.xs)
 
             VStack(spacing: 0) {
-                frequencyRow("Repeat") {
+                frequencyRow(L10n.text("apple.automationsview.repeat.b6b7a006")) {
                     Menu {
                         ForEach(ScheduleKind.allCases, id: \.self) { kind in
                             Button {
@@ -1290,7 +1286,7 @@ struct NewAutomationSheet: View {
 
                 if scheduleKind == .interval {
                     ThemeRule()
-                    frequencyRow("Every") {
+                    frequencyRow(L10n.text("apple.automationsview.every.9b8617fd")) {
                         Menu {
                             ForEach(intervalMenuMinutes, id: \.self) { minutes in
                                 Button {
@@ -1314,7 +1310,7 @@ struct NewAutomationSheet: View {
 
                 if scheduleKind == .weekly {
                     ThemeRule()
-                    frequencyRow("On") {
+                    frequencyRow(L10n.text("apple.automationsview.on.13001175")) {
                         Menu {
                             ForEach(weekdays, id: \.0) { day in
                                 Button {
@@ -1338,7 +1334,7 @@ struct NewAutomationSheet: View {
 
                 if scheduleKind == .custom {
                     ThemeRule()
-                    frequencyRow("On") {
+                    frequencyRow(L10n.text("apple.automationsview.on.13001175")) {
                         HStack(spacing: 4) {
                             ForEach(0..<7, id: \.self) { bit in
                                 let on = (customDays & (1 << bit)) != 0
@@ -1375,15 +1371,15 @@ struct NewAutomationSheet: View {
                     || scheduleKind == .weekly
                     || scheduleKind == .custom {
                     ThemeRule()
-                    frequencyRow("At") {
-                        DatePicker("Time", selection: $scheduleTime, displayedComponents: .hourAndMinute)
+                    frequencyRow(L10n.text("apple.automationsview.at.c72c5404")) {
+                        DatePicker(L10n.text("apple.automationsview.time.33b93476"), selection: $scheduleTime, displayedComponents: .hourAndMinute)
                             .labelsHidden()
                     }
                 }
 
                 if scheduleKind == .once {
                     ThemeRule()
-                    Text("Runs only when you press Run now. Nothing is scheduled.")
+                    Text(L10n.text("apple.automationsview.runs_only_when_you_press_run_now_nothing_i.d8d3b24d"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1423,9 +1419,9 @@ struct NewAutomationSheet: View {
     private func intervalPresetLabel(_ minutes: Int) -> String {
         if minutes >= 60, minutes % 60 == 0 {
             let hours = minutes / 60
-            return hours == 1 ? "1 hour" : "\(hours) hours"
+            return hours == 1 ? L10n.text("apple.automationsview.1_hour.f8b8883f") : L10n.text("apple.automationsview.0_hours.4d0aa096", "\(hours)")
         }
-        return minutes == 1 ? "1 minute" : "\(minutes) minutes"
+        return minutes == 1 ? L10n.text("apple.automationsview.1_minute.e67b6f61") : L10n.text("apple.automationsview.0_minutes.87086105", "\(minutes)")
     }
 
     private func applySchedule(_ schedule: AutomationSchedule) {

@@ -22,7 +22,7 @@ internal static class Program
         AppDomain.CurrentDomain.ProcessExit += (_, _) => LogStartup($"Process exit; code={Environment.ExitCode}");
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {
-            LogStartup($"Unobserved task exception: {e.Exception}");
+            LogStartup(L10n.Text("windows.program.unobserved_task_exception_0.a1cada81", $"{e.Exception}"));
             e.SetObserved();
         };
         try
@@ -54,9 +54,7 @@ internal static class Program
                 // XAML may not have initialized yet. A native dialog still
                 // gives a double-click launch failure somewhere to go.
                 MessageBoxW(IntPtr.Zero,
-                    "tokenstat couldn't start. Try opening it again.\n\n" +
-                    "If the problem continues, details are in " +
-                    "%LOCALAPPDATA%\\tokenstat\\logs\\startup.log.\n\n" + ex.Message,
+                    L10n.Text("windows.program.tokenstat_couldn_t_start_try_opening_it_ag.15fd39cd", $"{ex.Message}"),
                     "tokenstat", 0x10);
             }
             catch

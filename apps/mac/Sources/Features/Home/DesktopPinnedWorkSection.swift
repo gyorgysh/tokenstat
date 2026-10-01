@@ -12,7 +12,7 @@ struct DesktopPinnedWorkSection: View {
 
     var body: some View {
         if !pins.isEmpty {
-            Card(title: "Pinned work", subtitle: "Folders and conversations you kept close", mark: "mark_pin") {
+            Card(title: L10n.text("apple.desktoppinnedworksection.pinned_work.23dd8f45"), subtitle: L10n.text("apple.desktoppinnedworksection.folders_and_conversations_you_kept_close.e3603d3c"), mark: "mark_pin") {
                 VStack(spacing: 0) {
                     ForEach(pins, id: \.key) { pin in
                         let unavailable = availability(pin)
@@ -40,11 +40,11 @@ struct DesktopPinnedWorkSection: View {
                             }
                             .buttonStyle(.plain)
                             .disabled(unavailable != nil)
-                            .accessibilityLabel("Open \(pin.label)")
-                            .help(unavailable ?? "Open \(pin.label)")
+                            .accessibilityLabel(L10n.text("apple.desktoppinnedworksection.open_0.e71b4013", "\(pin.label)"))
+                            .help(unavailable ?? L10n.text("apple.desktoppinnedworksection.open_0.e71b4013", "\(pin.label)"))
                             ToolbarIconButton(
                                 systemImage: ActionIcon.pinned.symbol,
-                                help: "Unpin \(pin.label)", isAccent: true
+                                help: L10n.text("apple.desktoppinnedworksection.unpin_0.450ccf9f", "\(pin.label)"), isAccent: true
                             ) {
                                 Task { await PinnedWorkActions.unpin(pin.reference) }
                             }

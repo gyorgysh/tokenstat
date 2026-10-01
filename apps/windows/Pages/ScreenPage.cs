@@ -87,7 +87,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
     };
     private readonly TextBox _keyBox = new()
     {
-        PlaceholderText = "Type keys for the remote machine",
+        PlaceholderText = L10n.Text("windows.screenpage.type_keys_for_the_remote_machine.5c29f8c7"),
         MinWidth = 240,
     };
 
@@ -149,7 +149,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         _stage.Children.Add(_player);
         _stage.Children.Add(_caption);
         _screenInput.Content = _stage;
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_screenInput, "Remote screen. Click to send keyboard and mouse input when control is enabled.");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_screenInput, L10n.Text("windows.screenpage.remote_screen_click_to_send_keyboard_and_m.286bed2d"));
         _screenInput.KeyDown += (_, e) => ForwardKey(e, true);
         _screenInput.KeyUp += (_, e) => ForwardKey(e, false);
         _screenInput.LostFocus += (_, _) =>
@@ -177,13 +177,13 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             Padding = new Thickness(Theme.SpaceS),
         };
         keyBar.Children.Add(_keyBox);
-        keyBar.Children.Add(ActionIconGlyph.Button("Send", ActionIcon.Send, async (_, _) =>
+        keyBar.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.screenpage.send.f6f4688f"), ActionIcon.Send, async (_, _) =>
         {
             var text = _keyBox.Text ?? "";
             _keyBox.Text = "";
             await SendTextAsync(text);
         }));
-        foreach (var special in new[] { "Esc", "Tab", "Enter", "Back" })
+        foreach (var special in new[] { L10n.Text("windows.screenpage.esc.52f878ed"), L10n.Text("windows.screenpage.tab.90ddf196"), L10n.Text("windows.screenpage.enter.dc8659db"), L10n.Text("common.back") })
         {
             var keyButton = new Button
             {
@@ -229,7 +229,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             DispatcherQueue.TryEnqueue(async () =>
             {
                 try { await CloseAsync(); }
-                catch (Exception ex) { Tokenstat.Program.LogStartup("Screen close: " + ex); }
+                catch (Exception ex) { Tokenstat.Program.LogStartup(L10n.Text("windows.screenpage.screen_close_0.1e065dda", $"{ex}")); }
             });
         };
     }
@@ -247,7 +247,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         {
             Buttons.ToolbarIcon(
                 ActionIcon.Done,
-                "Close the viewer",
+                L10n.Text("windows.screenpage.close_the_viewer.fb7de0ec"),
                 async (_, _) => await CloseAsync()),
         };
     }
@@ -271,25 +271,25 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
                 TextWrapping = TextWrapping.Wrap,
             });
             _inspector.Children.Add(Chrome.InspectorField(
-                "Picture", _streamingSince.HasValue ? "Streaming" : "Waiting"));
-            _inspector.Children.Add(Chrome.InspectorField("Route", _transport));
-            _inspector.Children.Add(Chrome.InspectorField("Quality", QualityLabel(_quality)));
+                L10n.Text("windows.screenpage.picture.9a1c54f5"), _streamingSince.HasValue ? L10n.Text("windows.screenpage.streaming.a951c594") : L10n.Text("common.waiting")));
+            _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.screenpage.route.adc74704"), _transport));
+            _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.screenpage.quality.1b2c08a8"), QualityLabel(_quality)));
             _inspector.Children.Add(Chrome.InspectorField(
-                "Control", _control ? "Controlling" : "Viewing"));
+                L10n.Text("windows.screenpage.control.32d7e820"), _control ? L10n.Text("windows.screenpage.controlling.119deec3") : L10n.Text("windows.screenpage.viewing.9dc859e8")));
             if (_displays.Count > 0)
             {
                 var selected = _displays.FirstOrDefault(d => d.Id == _selectedDisplay)
                     ?? _displays[0];
                 _inspector.Children.Add(Chrome.InspectorField(
-                    "Display", $"{selected.Name} {selected.Width}x{selected.Height}"));
+                    L10n.Text("windows.screenpage.display.34e108c0"), $"{selected.Name} {selected.Width}x{selected.Height}"));
             }
             if (_dropped > 0)
             {
-                _inspector.Children.Add(Chrome.InspectorField("Dropped", $"{_dropped:N0}"));
+                _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.screenpage.dropped.739f68fe"), $"{_dropped:N0}"));
             }
             if (_reconnects > 0)
             {
-                _inspector.Children.Add(Chrome.InspectorField("Reconnects", $"{_reconnects}"));
+                _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.screenpage.reconnects.8432cd7f"), $"{_reconnects}"));
             }
         }
         if (DispatcherQueue.HasThreadAccess)
@@ -302,15 +302,15 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
 
     private static string QualityLabel(string wire) => wire switch
     {
-        "sharp" => "Sharp",
-        "smooth" => "Smooth",
-        "dataSaver" => "Data saver",
-        _ => "Automatic",
+        "sharp" => L10n.Text("windows.screenpage.sharp.1a3c4b30"),
+        "smooth" => L10n.Text("windows.screenpage.smooth.da519387"),
+        "dataSaver" => L10n.Text("windows.screenpage.data_saver.5b444f24"),
+        _ => L10n.Text("windows.screenpage.automatic.d461a493"),
     };
 
     private async Task StartAsync()
     {
-        _caption.Text = "Connecting…";
+        _caption.Text = L10n.Text("windows.screenpage.connecting.72021eb7");
         string tier;
         try
         {
@@ -325,8 +325,8 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         }
         if (!Format.IsLegend(tier))
         {
-            Caption("Screen access requires the Legend plan.");
-            Banner("Requires Legend");
+            Caption(L10n.Text("windows.screenpage.screen_access_requires_the_legend_plan.66173f1c"));
+            Banner(L10n.Text("windows.screenpage.requires_legend.a630be5b"));
             return;
         }
 
@@ -344,8 +344,8 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         _peerId = Format.Text(identity, "key", Format.Text(identity, "publicIdentity"));
         if (string.IsNullOrEmpty(_peerId))
         {
-            Banner("This PC has no identity yet.");
-            Caption("This PC has no identity yet.");
+            Banner(L10n.Text("windows.screenpage.this_pc_has_no_identity_yet.5d41ab41"));
+            Caption(L10n.Text("windows.screenpage.this_pc_has_no_identity_yet.5d41ab41"));
             return;
         }
 
@@ -387,7 +387,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         _sessionId = Format.Text(opened, "id");
         if (string.IsNullOrEmpty(_sessionId))
         {
-            throw new InvalidOperationException("The viewer opened without an id.");
+            throw new InvalidOperationException(L10n.Text("windows.screenpage.the_viewer_opened_without_an_id.9cdf904c"));
         }
         _hostSessionId = Format.Text(opened, "sessionId");
         _transport = Format.Transport(Format.Text(opened, "transport", "relay"));
@@ -395,7 +395,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         _connectedSince = DateTime.UtcNow;
         _streamingSince = null;
         RefreshControlChip();
-        Caption("Waiting for the first picture · " + _transport);
+        Caption(L10n.Text("windows.screenpage.waiting_for_the_first_picture_0.5068452b", $"{_transport}"));
     }
 
     private async Task<string> IssueCapabilityAsync(bool control)
@@ -417,7 +417,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         var token = Format.Text(issued, "token", Format.Text(issued, "capability"));
         if (string.IsNullOrEmpty(token))
         {
-            throw new InvalidOperationException("The host did not issue a capability.");
+            throw new InvalidOperationException(L10n.Text("windows.screenpage.the_host_did_not_issue_a_capability.b8faa6a5"));
         }
         return token;
     }
@@ -464,7 +464,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             }
             if (chunk["active"] is not null && !Format.Flag(chunk, "active"))
             {
-                var reason = string.IsNullOrEmpty(error) ? "That computer stopped sharing." : error;
+                var reason = string.IsNullOrEmpty(error) ? L10n.Text("windows.screenpage.that_computer_stopped_sharing.6289600c") : error;
                 if (Actionable(reason))
                 {
                     Banner(reason);
@@ -496,8 +496,8 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
                 && (DateTime.UtcNow - _connectedSince).TotalSeconds > 8)
             {
                 await CloseViewerAsync();
-                Caption("Connected, but no picture has arrived yet. That computer may not have Screen Recording, or tokenstat may not be open on that machine.");
-                Banner("No picture arrived.");
+                Caption(L10n.Text("windows.screenpage.connected_but_no_picture_has_arrived_yet_t.388c1e4f"));
+                Banner(L10n.Text("windows.screenpage.no_picture_arrived.34793922"));
                 return;
             }
         }
@@ -544,7 +544,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
                 }
                 displays.Add(new ScreenDisplay(
                     (uint)id,
-                    Format.Text(item, "name", "Display"),
+                    Format.Text(item, "name", L10n.Text("windows.screenpage.display.34e108c0")),
                     (int)Format.Long(item, "width"),
                     (int)Format.Long(item, "height")));
             }
@@ -623,13 +623,13 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
                 mediaPlayer.MediaFailed += (_, failure) => DispatcherQueue.TryEnqueue(() =>
                 {
                     if (_closed || !ReferenceEquals(_mediaPlayer, mediaPlayer)) return;
-                    var detail = $"{failure.Error}; 0x{failure.ExtendedErrorCode?.HResult ?? 0:X8} {failure.ErrorMessage}";
-                    Program.LogStartup("Screen decoder failed: " + detail);
+                    var detail = L10n.Text("windows.screenpage.0_0x_1_2.b0acbd80", $"{failure.Error}", $"{failure.ExtendedErrorCode?.HResult ?? 0:X8}", $"{failure.ErrorMessage}");
+                    Program.LogStartup(L10n.Text("windows.screenpage.screen_decoder_failed_0.69fb566b", $"{detail}"));
                     ResetDecoderOnUi();
                     _streamingSince = null;
                     _connectedSince = DateTime.UtcNow;
-                    Caption("Waiting for a fresh video frame");
-                    Banner("Screen decoder failed: " + detail);
+                    Caption(L10n.Text("windows.screenpage.waiting_for_a_fresh_video_frame.fd71799a"));
+                    Banner(L10n.Text("windows.screenpage.screen_decoder_failed_0.69fb566b", $"{detail}"));
                 });
                 mediaPlayer.MediaOpened += (_, _) => DispatcherQueue.TryEnqueue(() =>
                 {
@@ -648,8 +648,8 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
                 _player.Visibility = Visibility.Visible;
                 _picture.Visibility = Visibility.Collapsed;
                 Caption(_dropped > 0
-                    ? $"Decoding H.264 · {_transport} · {_dropped} frames dropped"
-                    : "Decoding H.264 · " + _transport);
+                    ? L10n.Text("windows.screenpage.decoding_h_264_0_1_frames_dropped.aa9134b4", $"{_transport}", $"{_dropped}")
+                    : L10n.Text("windows.screenpage.decoding_h_264_0.7e4e49f8", $"{_transport}"));
             }
             var relativeUs = frame.TimestampMicroseconds >= _firstStampUs ? frame.TimestampMicroseconds - _firstStampUs : 0;
             var ticks = (long)Math.Min(relativeUs, (ulong)(long.MaxValue / 10)) * 10;
@@ -661,8 +661,8 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         {
             ResetDecoderOnUi();
             _picture.Visibility = Visibility.Visible;
-            Caption("This stream is H.264, but the decoder could not start: " + ex.Message);
-            Banner("The H.264 decoder could not start: " + ex.Message);
+            Caption(L10n.Text("windows.screenpage.this_stream_is_h_264_but_the_decoder_could.d8814dd8", $"{ex.Message}"));
+            Banner(L10n.Text("windows.screenpage.the_h_264_decoder_could_not_start_0.6d16f925", $"{ex.Message}"));
         }
     }
 
@@ -715,11 +715,11 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         _reconnects++;
         if (_reconnects > 3)
         {
-            Caption("Connection could not recover. " + reason);
+            Caption(L10n.Text("windows.screenpage.connection_could_not_recover_0.7c8ca1d2", $"{reason}"));
             Banner(reason);
             return;
         }
-        Caption($"Reconnecting, attempt {_reconnects} of 3. {reason}");
+        Caption(L10n.Text("windows.screenpage.reconnecting_attempt_0_of_3_1.8f4f26ac", $"{_reconnects}", $"{reason}"));
         try
         {
             await Task.Delay(TimeSpan.FromSeconds(_reconnects));
@@ -1002,7 +1002,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
                 _control = wanted;
                 RefreshControlChip();
                 UpdateHeartbeat();
-                Caption(wanted ? "Controlling · " + _name : _name);
+                Caption(wanted ? L10n.Text("windows.screenpage.controlling_0.711cd5d9", $"{_name}") : _name);
                 return;
             }
             catch
@@ -1095,7 +1095,7 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
         void show()
         {
             _controlSlot.Children.Clear();
-            _controlSlot.Children.Add(Chrome.ToggleChip("Control", _control, SetControlAsync));
+            _controlSlot.Children.Add(Chrome.ToggleChip(L10n.Text("windows.screenpage.control.32d7e820"), _control, SetControlAsync));
             RenderInspector();
         }
         if (DispatcherQueue.HasThreadAccess)
@@ -1114,10 +1114,10 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             _qualitySlot.Children.Add(Chrome.Segmented(
                 new List<(string Value, string Label)>
                 {
-                    ("auto", "Automatic"),
-                    ("sharp", "Sharp"),
-                    ("smooth", "Smooth"),
-                    ("dataSaver", "Data saver"),
+                    ("auto", L10n.Text("windows.screenpage.automatic.d461a493")),
+                    ("sharp", L10n.Text("windows.screenpage.sharp.1a3c4b30")),
+                    ("smooth", L10n.Text("windows.screenpage.smooth.da519387")),
+                    ("dataSaver", L10n.Text("windows.screenpage.data_saver.5b444f24")),
                 },
                 _quality,
                 SetQualityAsync));

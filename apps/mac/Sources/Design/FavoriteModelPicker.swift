@@ -79,7 +79,7 @@ struct FavoriteModelPicker: View {
     var body: some View {
         HStack(alignment: .bottom, spacing: Theme.Space.s) {
             AppMenuPicker(
-                title: "Model",
+                title: L10n.text("apple.favoritemodelpicker.model.5e2c614c"),
                 options: options,
                 selection: $selection
             )
@@ -101,7 +101,7 @@ struct FavoriteModelPicker: View {
         }
         let favs = favorites.ids(for: backendID).filter { ids.contains($0) }
         let rest = ids.filter { !favs.contains($0) }
-        return [(value: "", label: "Default")]
+        return [(value: "", label: L10n.text("apple.favoritemodelpicker.default.21b111cb"))]
             + favs.map { (value: $0, label: $0) }
             + rest.map { (value: $0, label: $0) }
     }
@@ -142,8 +142,8 @@ struct FavoriteModelPicker: View {
         }
         .buttonStyle(.plain)
         .disabled(selection.isEmpty)
-        .help(isFavorite ? "Remove from favorites" : "Pin this model to the top")
-        .accessibilityLabel(isFavorite ? "Remove favorite" : "Add favorite")
+        .help(isFavorite ? L10n.text("apple.favoritemodelpicker.remove_from_favorites.18720329") : L10n.text("apple.favoritemodelpicker.pin_this_model_to_the_top.7d0b6322"))
+        .accessibilityLabel(isFavorite ? L10n.text("apple.favoritemodelpicker.remove_favorite.5bc0aa08") : L10n.text("apple.favoritemodelpicker.add_favorite.65b52e8c"))
     }
 }
 
@@ -154,9 +154,9 @@ enum TaskLaunchMode: String, CaseIterable {
 
     var title: String {
         switch self {
-        case .background: "Background"
-        case .foreground: "Terminal"
-        case .chat: "Chat"
+        case .background: L10n.text("apple.favoritemodelpicker.background.ea2b8a87")
+        case .foreground: L10n.text("apple.favoritemodelpicker.terminal.e0926fda")
+        case .chat: L10n.text("apple.favoritemodelpicker.chat.460b3a7d")
         }
     }
     var symbol: String {
@@ -213,25 +213,25 @@ struct TaskRunBar: View {
             Label(placement.wrappedValue.title, systemImage: placement.wrappedValue.symbol)
         }
         .buttonStyle(SecondaryButtonStyle())
-        .accessibilityLabel("Run mode")
+        .accessibilityLabel(L10n.text("apple.favoritemodelpicker.run_mode.54ee2697"))
         .accessibilityValue(placement.wrappedValue.title)
-        .help("Choose background, terminal, or chat.")
+        .help(L10n.text("apple.favoritemodelpicker.choose_background_terminal_or_chat.2460b15b"))
     }
 
     @ViewBuilder
     private var runButton: some View {
-        Button(running ? "Starting…" : "Run", .run) {
+        Button(running ? L10n.text("apple.favoritemodelpicker.starting.bbe5fc3b") : L10n.text("common.run"), .run) {
             action(placement.wrappedValue)
         }
         .buttonStyle(AccentButtonStyle())
         .disabled(!canRun || running)
         .help(
             placement.wrappedValue == .chat
-                ? "Start a workspace chat with this task’s prompt and agent settings."
+                ? L10n.text("apple.favoritemodelpicker.start_a_workspace_chat_with_this_task_s_pr.d232a569")
                 : placement.wrappedValue == .foreground
-                ? "Open and track an interactive terminal on the connected computer."
-                : "Start as an automation. The transcript shows on Automations."
+                ? L10n.text("apple.favoritemodelpicker.open_and_track_an_interactive_terminal_on.b64ec458")
+                : L10n.text("apple.favoritemodelpicker.start_as_an_automation_the_transcript_show.05ad87c3")
         )
-        .accessibilityLabel("Run")
+        .accessibilityLabel(L10n.text("common.run"))
     }
 }

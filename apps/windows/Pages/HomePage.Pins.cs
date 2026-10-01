@@ -41,7 +41,7 @@ internal sealed partial class HomePage
         {
             var text = new StackPanel { Spacing = 2 };
             text.Children.Add(new TextBlock { Text = pin.Label, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-            text.Children.Add(new TextBlock { Text = pin.ChatId.Length == 0 ? "Project" : pin.FolderName + " · Chat", TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1, FontSize = 11, Opacity = 0.65 });
+            text.Children.Add(new TextBlock { Text = pin.ChatId.Length == 0 ? L10n.Text("windows.homepage_pins.project.98595978") : pin.FolderName + L10n.Text("windows.homepage_pins.chat.4ff6f16b"), TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1, FontSize = 11, Opacity = 0.65 });
             var button = new Button { Content = text, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
             button.Click += async (_, _) =>
             {
@@ -50,9 +50,9 @@ internal sealed partial class HomePage
                 if (pin.ChatId.Length == 0) AppServices.OpenWorkspace?.Invoke(pin.WorkspaceId, WorkspaceSection.Launcher);
                 else AppServices.OpenConversation?.Invoke(pin.WorkspaceId, pin.ChatId);
             };
-            ContextMenus.Add(ContextMenus.Menu(button), "Unpin from Home", () => PinnedWorkStore.Shared.Remove(pin.Owner, pin.ChatId));
+            ContextMenus.Add(ContextMenus.Menu(button), L10n.Text("windows.homepage_pins.unpin_from_home.df00f5de"), () => PinnedWorkStore.Shared.Remove(pin.Owner, pin.ChatId));
             list.Children.Add(button);
         }
-        _pinsHost.Children.Add(Chrome.Card("Pinned work", list, mark: Chrome.CardMark(ActionIcon.Pin)));
+        _pinsHost.Children.Add(Chrome.Card(L10n.Text("windows.homepage_pins.pinned_work.23dd8f45"), list, mark: Chrome.CardMark(ActionIcon.Pin)));
     }
 }

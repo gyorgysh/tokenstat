@@ -5,22 +5,22 @@ import Foundation
 /// Labels shared by automation and workflow schedule pickers.
 enum JobScheduleCopy {
     static let weekdayNames = [
-        "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+        L10n.text("apple.jobscheduleediting.monday.6a00dfc1"), L10n.text("apple.jobscheduleediting.tuesday.7d8af1de"), L10n.text("apple.jobscheduleediting.wednesday.c0a6cc82"), L10n.text("apple.jobscheduleediting.thursday.fc266206"), L10n.text("apple.jobscheduleediting.friday.e21f3f37"), L10n.text("apple.jobscheduleediting.saturday.dbe35c73"), L10n.text("apple.jobscheduleediting.sunday.873fef76"),
     ]
-    static let weekdayShort = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+    static let weekdayShort = [L10n.text("apple.jobscheduleediting.mo.d23e867e"), L10n.text("apple.jobscheduleediting.tu.62afcc74"), L10n.text("apple.jobscheduleediting.we.f3fe997b"), L10n.text("apple.jobscheduleediting.th.3bff939c"), L10n.text("apple.jobscheduleediting.fr.eed8f901"), L10n.text("apple.jobscheduleediting.sa.a951efc7"), L10n.text("apple.jobscheduleediting.su.2d88a3a2")]
     static let intervalPresets = [15, 30, 60, 120, 360, 720, 1440]
 
     static func intervalLabel(_ seconds: UInt64) -> String {
-        if seconds % 60 != 0 { return "\(seconds) seconds" }
+        if seconds % 60 != 0 { return L10n.text("apple.jobscheduleediting.0_seconds.e549e94b", "\(seconds)") }
         return intervalPresetLabel(Int(seconds / 60))
     }
 
     static func intervalPresetLabel(_ minutes: Int) -> String {
         if minutes >= 60, minutes % 60 == 0 {
             let hours = minutes / 60
-            return hours == 1 ? "1 hour" : "\(hours) hours"
+            return hours == 1 ? L10n.text("apple.jobscheduleediting.1_hour.f8b8883f") : L10n.text("apple.jobscheduleediting.0_hours.4d0aa096", "\(hours)")
         }
-        return minutes == 1 ? "1 minute" : "\(minutes) minutes"
+        return minutes == 1 ? L10n.text("apple.jobscheduleediting.1_minute.e67b6f61") : L10n.text("apple.jobscheduleediting.0_minutes.87086105", "\(minutes)")
     }
 }
 
@@ -87,7 +87,7 @@ extension JobScheduleEditing {
                 (weeklyDays & (1 << bit)) != 0 ? JobScheduleCopy.weekdayNames[bit] : nil
             }.joined(separator: ", ")
         }
-        guard weekday >= 0, weekday < JobScheduleCopy.weekdayNames.count else { return "Day" }
+        guard weekday >= 0, weekday < JobScheduleCopy.weekdayNames.count else { return L10n.text("apple.jobscheduleediting.day.8f2364e1") }
         return JobScheduleCopy.weekdayNames[weekday]
     }
 
@@ -99,13 +99,13 @@ extension JobScheduleEditing {
 
     var scheduleValidation: String? {
         if scheduleKind == .custom, (customDays & 0b0111_1111) == 0 {
-            return "Pick at least one day for a custom schedule."
+            return L10n.text("apple.jobscheduleediting.pick_at_least_one_day_for_a_custom_schedul.0c926625")
         }
         if scheduleKind == .interval, intervalCurrentSeconds < 60 {
-            return "An interval must be at least a minute."
+            return L10n.text("apple.jobscheduleediting.an_interval_must_be_at_least_a_minute.91844e44")
         }
         if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
-            return "Choose a real hour and minute."
+            return L10n.text("apple.jobscheduleediting.choose_a_real_hour_and_minute.13e11fdc")
         }
         return nil
     }
@@ -162,7 +162,7 @@ extension JobBudgetEditing {
     }
 
     var budgetValidation: String? {
-        budgetSeconds == nil ? "Enter a positive time limit, or choose No limit." : nil
+        budgetSeconds == nil ? L10n.text("apple.jobscheduleediting.enter_a_positive_time_limit_or_choose_no_l.3b7996e8") : nil
     }
 
     mutating func loadBudget(seconds: UInt64) {

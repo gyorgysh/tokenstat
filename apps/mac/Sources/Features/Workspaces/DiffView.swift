@@ -19,11 +19,11 @@ struct DiffView: View {
     var body: some View {
         Group {
             if diff.binary {
-                note("This is a binary file. There is nothing to show line by line.")
+                note(L10n.text("apple.diffview.this_is_a_binary_file_there_is_nothing_to.6573d54c"))
             } else if diff.hunks.isEmpty {
                 note(diff.untracked
-                     ? "This file is not tracked yet and is empty."
-                     : "No changes against HEAD.")
+                     ? L10n.text("apple.diffview.this_file_is_not_tracked_yet_and_is_empty.7354c94b")
+                     : L10n.text("apple.diffview.no_changes_against_head.84a982f2"))
             } else {
                 DiffDocumentView(diffs: [diff], fileHeaders: false) { EmptyView() }
             }

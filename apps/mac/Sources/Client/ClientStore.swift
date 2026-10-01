@@ -75,17 +75,17 @@ enum ClientStoreProduct: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .supporter: return "Supporter"
-        case .patron, .patronMonthly: return "Patron"
-        case .legend, .legendMonthly: return "Legend"
+        case .supporter: return L10n.text("apple.clientstore.supporter.2ce6c010")
+        case .patron, .patronMonthly: return L10n.text("apple.clientstore.patron.dbcd07c6")
+        case .legend, .legendMonthly: return L10n.text("apple.clientstore.legend.7482e374")
         }
     }
 
     var summary: String {
         switch self {
-        case .supporter: return "A year of heatmap across your devices, encrypted vault sync, and a public profile worth sharing."
-        case .patron, .patronMonthly: return "For people running agents on everything they own, and reaching those machines from anywhere."
-        case .legend, .legendMonthly: return "The top plan. View and control your own screen remotely, plus more devices, faster sync, and the read API."
+        case .supporter: return L10n.text("apple.clientstore.a_year_of_heatmap_across_your_devices_encr.366cc2bf")
+        case .patron, .patronMonthly: return L10n.text("apple.clientstore.for_people_running_agents_on_everything_th.071758f2")
+        case .legend, .legendMonthly: return L10n.text("apple.clientstore.the_top_plan_view_and_control_your_own_scr.d61084e5")
         }
     }
 
@@ -105,31 +105,31 @@ enum ClientStoreProduct: String, CaseIterable, Identifiable {
         switch self {
         case .supporter:
             return [
-                "Everything in Free",
-                "4 devices, added up into one profile",
-                "A year of history on your profile, not 30 days",
-                "End-to-end encrypted SSH vault sync across your devices",
-                "The supporter star next to your name",
+                L10n.text("apple.clientstore.everything_in_free.407e92c7"),
+                L10n.text("apple.clientstore.4_devices_added_up_into_one_profile.49ff8de9"),
+                L10n.text("apple.clientstore.a_year_of_history_on_your_profile_not_30_d.c88cc7eb"),
+                L10n.text("apple.clientstore.end_to_end_encrypted_ssh_vault_sync_across.cff83495"),
+                L10n.text("apple.clientstore.the_supporter_star_next_to_your_name.86fa5b88"),
             ]
         case .patron, .patronMonthly:
             return [
-                "Everything in Supporter",
-                "Remote management: your other devices, from the app",
-                "6 devices, added up into one profile",
-                "Every day you have ever synced, with no window",
-                "Profile updates every 10 minutes",
-                "The patron badge next to your name",
+                L10n.text("apple.clientstore.everything_in_supporter.ac732c35"),
+                L10n.text("apple.clientstore.remote_management_your_other_devices_from.5c8c63a3"),
+                L10n.text("apple.clientstore.6_devices_added_up_into_one_profile.71834dc6"),
+                L10n.text("apple.clientstore.every_day_you_have_ever_synced_with_no_win.f6cd292f"),
+                L10n.text("apple.clientstore.profile_updates_every_10_minutes.c3a2c533"),
+                L10n.text("apple.clientstore.the_patron_badge_next_to_your_name.628638b8"),
             ]
         case .legend, .legendMonthly:
             return [
-                "Everything in Patron",
-                "Remote screen viewing and control",
-                "Direct connection first; end-to-end encrypted relay fallback",
-                "10 devices, added up into one profile",
-                "Profile updates every 5 minutes",
-                "The legend crown next to your name",
-                "Read API: your numbers as JSON or CSV",
-                "First in line when something new lands",
+                L10n.text("apple.clientstore.everything_in_patron.e6e965d3"),
+                L10n.text("apple.clientstore.remote_screen_viewing_and_control.5b1dad2e"),
+                L10n.text("apple.clientstore.direct_connection_first_end_to_end_encrypt.5b8aed3e"),
+                L10n.text("apple.clientstore.10_devices_added_up_into_one_profile.9d901234"),
+                L10n.text("apple.clientstore.profile_updates_every_5_minutes.eae8dc37"),
+                L10n.text("apple.clientstore.the_legend_crown_next_to_your_name.26b349fa"),
+                L10n.text("apple.clientstore.read_api_your_numbers_as_json_or_csv.c424c30d"),
+                L10n.text("apple.clientstore.first_in_line_when_something_new_lands.93cc7a6b"),
             ]
         }
     }
@@ -283,7 +283,7 @@ final class ClientStore {
             await refreshIntroEligibility()
             await refreshSubscriptionStatus()
         } catch {
-            errorMessage = "Could not load App Store plans."
+            errorMessage = L10n.text("apple.clientstore.could_not_load_app_store_plans.d42d421d")
         }
     }
 
@@ -314,7 +314,7 @@ final class ClientStore {
         guard purchasingProductID == nil else { return }
         guard let raw = account.billing?.appAccountToken,
               let token = UUID(uuidString: raw) else {
-            errorMessage = "Could not start this purchase. Sign out and sign in again."
+            errorMessage = L10n.text("apple.clientstore.could_not_start_this_purchase_sign_out_and.48100444")
             return
         }
         purchasingProductID = product.id
@@ -344,9 +344,9 @@ final class ClientStore {
             case .userCancelled:
                 break
             case .pending:
-                errorMessage = "This purchase is waiting for approval."
+                errorMessage = L10n.text("apple.clientstore.this_purchase_is_waiting_for_approval.57a609e2")
             @unknown default:
-                errorMessage = "The purchase did not finish."
+                errorMessage = L10n.text("apple.clientstore.the_purchase_did_not_finish.e5a00501")
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -365,7 +365,7 @@ final class ClientStore {
                 if await handle(result) { activated = true }
             }
             if !activated {
-                errorMessage = "No App Store purchase found for this Apple ID."
+                errorMessage = L10n.text("apple.clientstore.no_app_store_purchase_found_for_this_apple.e744dcad")
             }
             await reportRenewal()
         } catch {

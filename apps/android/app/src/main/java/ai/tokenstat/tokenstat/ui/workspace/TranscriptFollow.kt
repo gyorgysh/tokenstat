@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -125,9 +127,9 @@ fun TranscriptFollowPill(
     modifier: Modifier = Modifier,
 ) {
     val label = when (pill) {
-        FollowPill.JumpToLatest -> "Jump to latest"
-        FollowPill.Follow -> "Follow"
-        FollowPill.Following -> "Following"
+        FollowPill.JumpToLatest -> L10n.text("android.transcriptfollow.jump_to_latest.86752458")
+        FollowPill.Follow -> L10n.text("android.transcriptfollow.follow.641d1ef6")
+        FollowPill.Following -> L10n.text("android.transcriptfollow.following.344b4271")
     }
     TsAccentButton(
         label = label,

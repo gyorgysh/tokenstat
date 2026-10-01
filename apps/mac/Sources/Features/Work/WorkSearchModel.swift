@@ -86,7 +86,7 @@ final class WorkSearchModel {
         guard !activeLiveHosts.isEmpty else { return nil }
         let localOnly = localHost.map { activeLiveHosts == [$0] } == true
         guard let parsed = try? WorkSearchQuery(query), !parsed.terms.isEmpty else {
-            return localOnly ? "Search includes conversations stored on this Mac." : "Enter words to search the selected computers."
+            return localOnly ? L10n.text("apple.worksearchmodel.search_includes_conversations_stored_on_th.6bb61017") : L10n.text("apple.worksearchmodel.enter_words_to_search_the_selected_compute.4d6fccfe")
         }
         let successful = liveAnswered.subtracting(liveFailures).intersection(activeLiveHosts).count
         let waiting = activeLiveHosts.subtracting(liveAnswered).count
@@ -94,11 +94,11 @@ final class WorkSearchModel {
             $0.coverage.partial || $0.nextCursor != nil
         }
         let summary = localOnly
-            ? (successful == 1 ? "This Mac searched." : (waiting > 0 ? "Searching this Mac…" : "This Mac’s work could not be searched."))
-            : "\(successful) of \(activeLiveHosts.count) computers answered."
+            ? (successful == 1 ? L10n.text("apple.worksearchmodel.this_mac_searched.8a35067e") : (waiting > 0 ? L10n.text("apple.worksearchmodel.searching_this_mac.a38e799c") : L10n.text("apple.worksearchmodel.this_mac_s_work_could_not_be_searched.f625412a")))
+            : L10n.text("apple.worksearchmodel.0_of_1_computers_answered.9ccc447f", "\(successful)", "\(activeLiveHosts.count)")
         return summary
-            + (waiting > 0 && !localOnly ? " Searching…" : "")
-            + (partial ? " Results cover the available pages." : "")
+            + (waiting > 0 && !localOnly ? L10n.text("apple.worksearchmodel.searching.f0e09dcf") : L10n.text("apple.worksearchmodel..e3b0c442"))
+            + (partial ? L10n.text("apple.worksearchmodel.results_cover_the_available_pages.6fa145b3") : "")
     }
 
     var canLoadMoreLive: Bool {
@@ -145,7 +145,7 @@ final class WorkSearchModel {
                     self.liveFailures.remove(host)
                     self.livePages[host] = page
                     let incoming = WorkSearchMerge.live(page, query: query,
-                        machineName: self.machines[host] ?? "Computer")
+                        machineName: self.machines[host] ?? L10n.text("apple.worksearchmodel.computer.76ed42d2"))
                     self.liveHits[host] = requestedCursor == nil ? incoming
                         : WorkSearchMerge.combine(saved: [], live: (self.liveHits[host] ?? []) + incoming)
                 case .failure: self.liveFailures.insert(host)
@@ -311,10 +311,10 @@ final class WorkSearchModel {
         } catch WorkSearchSavedLoader.Failure.locked {
             guard isCurrent() else { return }
             results = []
-            failure = "Unlock this device to search saved conversations, then try again."
+            failure = L10n.text("apple.worksearchmodel.unlock_this_device_to_search_saved_convers.7b55fb76")
         } catch {
             guard isCurrent() else { return }
-            failure = "Saved work could not be searched. Try again when this device is ready."
+            failure = L10n.text("apple.worksearchmodel.saved_work_could_not_be_searched_try_again.f5872e7f")
         }
     }
 
@@ -384,14 +384,14 @@ final class WorkSearchModel {
             hasUpdatedResults = false
             results = []
             canLoadMore = false
-            queryFailure = "Use 512 characters or fewer to search work."
+            queryFailure = L10n.text("apple.worksearchmodel.use_512_characters_or_fewer_to_search_work.1991abf9")
         } catch WorkSearchIndex.PageError.staleCursor {
             guard run == queryGeneration, isCurrent() else { return }
             savedWorkChanged = true
             canLoadMore = false
         } catch {
             guard run == queryGeneration, isCurrent() else { return }
-            queryFailure = "Search could not finish. Try again."
+            queryFailure = L10n.text("apple.worksearchmodel.search_could_not_finish_try_again.84c562cf")
         }
     }
 

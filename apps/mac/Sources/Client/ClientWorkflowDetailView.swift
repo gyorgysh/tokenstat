@@ -64,8 +64,8 @@ struct ClientWorkflowDetailView: View {
                     runs(of: graph)
                 } else if session.loaded {
                     ClientSectionEmpty(
-                        text: "This workflow is gone",
-                        message: "It is not in the folder any more."
+                        text: L10n.text("apple.clientworkflowdetailview.this_workflow_is_gone.f1012e17"),
+                        message: L10n.text("apple.clientworkflowdetailview.it_is_not_in_the_folder_any_more.ff5d54d4")
                     )
                 } else {
                     ProgressView()
@@ -78,12 +78,12 @@ struct ClientWorkflowDetailView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        .navigationTitle(session.selectedGraph?.name ?? "Workflow")
+        .navigationTitle(session.selectedGraph?.name ?? L10n.text("apple.clientworkflowdetailview.workflow.2e2d5c56"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if let graph = session.selectedGraph {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Edit", .edit) {
+                    Button(L10n.text("common.edit"), .edit) {
                         editor = WorkflowEditorRoute(
                             workspaceID: workspaceID, folderName: folderName, graph: graph
                         )
@@ -91,7 +91,7 @@ struct ClientWorkflowDetailView: View {
                     .labelStyle(.iconOnly)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Delete", .delete, role: .destructive) { pendingDelete = true }
+                    Button(L10n.text("common.delete"), .delete, role: .destructive) { pendingDelete = true }
                         .labelStyle(.iconOnly)
                 }
             }
@@ -108,18 +108,18 @@ struct ClientWorkflowDetailView: View {
             }
         }
         .confirmationDialog(
-            "Delete \(session.selectedGraph?.name ?? "this workflow")?",
+            L10n.text("apple.clientworkflowdetailview.delete_0.dc6c5ae4", "\(session.selectedGraph?.name ?? L10n.text("apple.clientworkflowdetailview.this_workflow.a7b5fc94"))"),
             isPresented: $pendingDelete,
             titleVisibility: .visible
         ) {
-            Button("Delete", role: .destructive) {
+            Button(L10n.text("common.delete"), role: .destructive) {
                 if let graph = session.selectedGraph {
                     Task { await session.remove(graph) }
                 }
             }
-            Button("Keep it", role: .cancel) {}
+            Button(L10n.text("apple.clientworkflowdetailview.keep_it.fdce5da2"), role: .cancel) {}
         } message: {
-            Text("The graph is removed. Past runs stay on this computer.")
+            Text(L10n.text("apple.clientworkflowdetailview.the_graph_is_removed_past_runs_stay_on_thi.63fef9bc"))
         }
         .onReceive(NotificationCenter.default.publisher(for: WorkflowEditorSession.didChange)) { _ in
             Task { await session.load() }
@@ -137,25 +137,25 @@ struct ClientWorkflowDetailView: View {
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
             HStack(alignment: .top, spacing: Theme.Space.m) {
-                ClientFactRow(label: "Schedule", value: graph.schedule.summary)
-                ClientFactRow(label: "Budget", value: ClientJobCopy.budget(graph.budgetSeconds))
+                ClientFactRow(label: L10n.text("apple.clientworkflowdetailview.schedule.f4830a1d"), value: graph.schedule.summary)
+                ClientFactRow(label: L10n.text("apple.clientworkflowdetailview.budget.1c6225ec"), value: ClientJobCopy.budget(graph.budgetSeconds))
             }
             if HostScheduleClock.clock(session.schedulerTimezone) != nil
                 || (graph.nextRun != nil && graph.enabled) {
                 HStack(alignment: .top, spacing: Theme.Space.m) {
                     if let clock = HostScheduleClock.clock(session.schedulerTimezone) {
-                        ClientFactRow(label: "Time zone", value: clock)
+                        ClientFactRow(label: L10n.text("apple.clientworkflowdetailview.time_zone.b9fe1464"), value: clock)
                     }
                     if let next = graph.nextRun, graph.enabled {
                         ClientFactRow(
-                            label: "Next",
+                            label: L10n.text("common.next"),
                             value: HostScheduleClock.nextRun(next, timezone: session.schedulerTimezone)
                         )
                     }
                 }
             }
             ClientFactRow(
-                label: "Last",
+                label: L10n.text("apple.clientworkflowdetailview.last.eb970eb0"),
                 value: ClientJobCopy.lastRunWhen(
                     session.lastRun(for: graph)?.startedAt ?? graph.lastRun
                 )
@@ -191,7 +191,7 @@ struct ClientWorkflowDetailView: View {
             all, id: \.id, startedAtMs: \.startedAtMs, isLive: \.isLive
         )
         if !history.isEmpty {
-            Text("Recent runs")
+            Text(L10n.text("apple.clientworkflowdetailview.recent_runs.237112b8"))
                 .font(ClientType.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
                 .padding(.top, Theme.Space.xs)

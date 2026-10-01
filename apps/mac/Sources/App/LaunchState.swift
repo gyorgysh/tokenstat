@@ -102,7 +102,7 @@ struct LaunchSplashView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea()
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Starting tokenstat")
+        .accessibilityLabel(L10n.text("apple.launchstate.starting_tokenstat.b284c345"))
     }
 }
 

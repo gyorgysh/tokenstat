@@ -60,7 +60,7 @@ struct ClientWorkspaceNotesView: View {
         cards.filter { $0.kind == .note && $0.column == "archive" }.count
     }
 
-    private var place: String { folderName.isEmpty ? "this folder" : folderName }
+    private var place: String { folderName.isEmpty ? L10n.text("apple.clientworkspacenotesview.this_folder.9d6325c8") : folderName }
 
     /// Offline the machine that owns these notes cannot be reached, so there
     /// is nothing to write to. Saying so beside a disabled field beats a field
@@ -75,10 +75,10 @@ struct ClientWorkspaceNotesView: View {
             list
         }
         .background(Theme.background)
-        .searchable(text: $search, prompt: "Search notes")
+        .searchable(text: $search, prompt: L10n.text("apple.clientworkspacenotesview.search_notes.6e7a2179"))
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("New note", .create) {
+                Button(L10n.text("apple.clientworkspacenotesview.new_note.76ea482f"), .create) {
                     showingArchive = false
                     showingComposer = true
                     writing = true
@@ -87,16 +87,16 @@ struct ClientWorkspaceNotesView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Picker("Sort notes", selection: $alphabetical) {
-                        Text("Newest first").tag(false)
-                        Text("Title A–Z").tag(true)
+                    Picker(L10n.text("apple.clientworkspacenotesview.sort_notes.ea06e19b"), selection: $alphabetical) {
+                        Text(L10n.text("apple.clientworkspacenotesview.newest_first.ffb6f576")).tag(false)
+                        Text(L10n.text("apple.clientworkspacenotesview.title_a_z.ab217de6")).tag(true)
                     }
                 } label: { Image(systemName: "arrow.up.arrow.down") }
-                .accessibilityLabel("Sort notes")
+                .accessibilityLabel(L10n.text("apple.clientworkspacenotesview.sort_notes.ea06e19b"))
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button(
-                    showingArchive ? "Show notes" : "Show archive",
+                    showingArchive ? L10n.text("apple.clientworkspacenotesview.show_notes.1415fb63") : L10n.text("apple.clientworkspacenotesview.show_archive.039872c4"),
                     showingArchive ? .restore : .archive
                 ) {
                     showingArchive.toggle()
@@ -108,20 +108,20 @@ struct ClientWorkspaceNotesView: View {
             }
         }
         .confirmationDialog(
-            "Delete this note?",
+            L10n.text("apple.clientworkspacenotesview.delete_this_note.f8069d7e"),
             isPresented: Binding(
                 get: { pendingDelete != nil },
                 set: { if !$0 { pendingDelete = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("Delete", role: .destructive) {
+            Button(L10n.text("common.delete"), role: .destructive) {
                 if let note = pendingDelete { Task { await delete(note) } }
                 pendingDelete = nil
             }
-            Button("Keep it", role: .cancel) { pendingDelete = nil }
+            Button(L10n.text("apple.clientworkspacenotesview.keep_it.fdce5da2"), role: .cancel) { pendingDelete = nil }
         } message: {
-            Text("Archiving keeps it. Deleting does not.")
+            Text(L10n.text("apple.clientworkspacenotesview.archiving_keeps_it_deleting_does_not.55919870"))
         }
         .sheet(item: $editing) { note in
             editor(note)
@@ -136,12 +136,12 @@ struct ClientWorkspaceNotesView: View {
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: "square.and.pencil")
                     .foregroundStyle(Theme.accent)
-                TextField("Something worth remembering", text: $draft)
+                TextField(L10n.text("apple.clientworkspacenotesview.something_worth_remembering.a56cd69e"), text: $draft)
                     .focused($writing)
                     .submitLabel(.done)
                     .onSubmit { save() }
                     .disabled(isOffline)
-                Button("Add", .create) { save() }
+                Button(L10n.text("common.add"), .create) { save() }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.plain)
                     .foregroundStyle(canSave ? Theme.accent : .secondary)
@@ -149,17 +149,17 @@ struct ClientWorkspaceNotesView: View {
             }
             HStack {
                 Text(isOffline
-                    ? "Offline. Notes are kept on \(hostName.isEmpty ? "the computer" : hostName), so this waits."
-                    : "Saves to \(place).")
+                    ? L10n.text("apple.clientworkspacenotesview.offline_notes_are_kept_on_0_so_this_waits.a2dae42d", "\(hostName.isEmpty ? L10n.text("apple.clientworkspacenotesview.the_computer.da52d93a") : hostName)")
+                    : L10n.text("apple.clientworkspacenotesview.saves_to_0.49357925", "\(place)"))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                 Spacer(minLength: Theme.Space.s)
-                Button("Close", .dismiss) {
+                Button(L10n.text("common.close"), .dismiss) {
                     showingComposer = false
                     writing = false
                 }
                 .font(ClientType.caption)
-                .accessibilityHint("Your draft stays here")
+                .accessibilityHint(L10n.text("apple.clientworkspacenotesview.your_draft_stays_here.b3e8e522"))
             }
         }
         .task { writing = true }
@@ -178,36 +178,36 @@ struct ClientWorkspaceNotesView: View {
 
     private var list: some View {
         ClientCardList(
-            title: "Notes",
+            title: L10n.text("common.notes"),
             errorMessage: errorMessage,
             isLoaded: loaded,
             isEmpty: notes.isEmpty,
-            emptyText: !search.isEmpty ? "No matching notes" : showingArchive ? "Nothing archived" : "No notes yet",
+            emptyText: !search.isEmpty ? L10n.text("apple.clientworkspacenotesview.no_matching_notes.5a859d10") : showingArchive ? L10n.text("apple.clientworkspacenotesview.nothing_archived.cd084fd7") : L10n.text("apple.clientworkspacenotesview.no_notes_yet.a092ad6b"),
             emptyArt: .notes,
             emptyMessage: showingArchive
-                ? "Notes you put away in \(place) show up here."
-                : "Keep anything worth remembering about \(place). Choose New note to start.",
+                ? L10n.text("apple.clientworkspacenotesview.notes_you_put_away_in_0_show_up_here.bab677fb", "\(place)")
+                : L10n.text("apple.clientworkspacenotesview.keep_anything_worth_remembering_about_0_ch.ca4055ff", "\(place)"),
             refreshKey: "notes-\(workspaceID)",
             reload: { await load() }
         ) {
-            ClientSectionTitle(title: showingArchive ? "Archived notes" : "Notes", mark: "mark_note")
+            ClientSectionTitle(title: showingArchive ? L10n.text("apple.clientworkspacenotesview.archived_notes.27a341f0") : L10n.text("common.notes"), mark: "mark_note")
                 .clientCardRow()
             ForEach(notes) { note in
                 row(note)
                     .clientCardRow()
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(showingArchive ? "Restore" : "Archive") {
+                        Button(showingArchive ? L10n.text("common.restore") : L10n.text("common.archive")) {
                             Task { await setArchived(note, archived: !showingArchive) }
                         }
                         .tint(Theme.accent)
-                        Button("Delete", role: .destructive) { pendingDelete = note }
+                        Button(L10n.text("common.delete"), role: .destructive) { pendingDelete = note }
                     }
                     .contextMenu {
-                        Button("Edit") { startEditing(note) }
+                        Button(L10n.text("common.edit")) { startEditing(note) }
                         if !showingArchive {
-                            Button("Make a task") { Task { await convert(note) } }
+                            Button(L10n.text("apple.clientworkspacenotesview.make_a_task.0cfbd102")) { Task { await convert(note) } }
                         }
-                        Button("Delete", role: .destructive) { pendingDelete = note }
+                        Button(L10n.text("common.delete"), role: .destructive) { pendingDelete = note }
                     }
             }
         }
@@ -256,12 +256,12 @@ struct ClientWorkspaceNotesView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Title", text: $editText, axis: .vertical)
+                    TextField(L10n.text("apple.clientworkspacenotesview.title.7e8cd205"), text: $editText, axis: .vertical)
                         .font(Theme.headline)
                         .disabled(editSaving)
-                    Picker("Note view", selection: $editPreview) {
-                        Text("Write").tag(false)
-                        Text("Preview").tag(true)
+                    Picker(L10n.text("apple.clientworkspacenotesview.note_view.a6857193"), selection: $editPreview) {
+                        Text(L10n.text("apple.clientworkspacenotesview.write.3f00927a")).tag(false)
+                        Text(L10n.text("apple.clientworkspacenotesview.preview.324b134f")).tag(true)
                     }.pickerStyle(.segmented).labelsHidden()
                     ZStack(alignment: .topLeading) {
                         ClientNoteTextEditor(text: $editBody, enabled: !editSaving && !editPreview)
@@ -271,26 +271,26 @@ struct ClientWorkspaceNotesView: View {
                             .clipped()
                             .accessibilityHidden(editPreview)
                         if editPreview {
-                            MarkdownText(editBody.isEmpty ? "Nothing written yet." : editBody)
+                            MarkdownText(editBody.isEmpty ? L10n.text("apple.clientworkspacenotesview.nothing_written_yet.4f01da04") : editBody)
                                 .textSelection(.enabled)
                                 .frame(minHeight: 280, alignment: .topLeading)
                         }
                     }
                 } footer: {
-                    Text("Markdown supported: headings, lists, links and code.")
+                    Text(L10n.text("apple.clientworkspacenotesview.markdown_supported_headings_lists_links_an.9e2568aa"))
                 }
                 if let editError {
                     Section { Text(editError).foregroundStyle(Theme.danger) }
                 }
             }
-            .navigationTitle("Note")
+            .navigationTitle(L10n.text("apple.clientworkspacenotesview.note.d8da2c49"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { editing = nil }.disabled(editSaving)
+                    Button(L10n.text("common.cancel")) { editing = nil }.disabled(editSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(editSaving ? "Saving…" : "Save") {
+                    Button(editSaving ? L10n.text("apple.clientworkspacenotesview.saving.23e39291") : L10n.text("common.save")) {
                         let text = editText.trimmingCharacters(in: .whitespacesAndNewlines)
                         let body = editBody
                         editSaving = true

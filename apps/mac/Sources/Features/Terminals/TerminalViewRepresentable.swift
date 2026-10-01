@@ -55,7 +55,7 @@ struct TerminalViewRepresentable: NSViewRepresentable {
         let exposeToVoiceOver = TerminalPreferences.exposesToVoiceOver
         nsView.setAccessibilityElement(exposeToVoiceOver)
         nsView.setAccessibilityRole(exposeToVoiceOver ? .textArea : .none)
-        nsView.setAccessibilityLabel(exposeToVoiceOver ? "Terminal output" : nil)
+        nsView.setAccessibilityLabel(exposeToVoiceOver ? L10n.text("apple.terminalviewrepresentable.terminal_output.34ad7d49") : nil)
         nsView.setAccessibilityValue(exposeToVoiceOver ? session.visibleTerminalText : nil)
     }
 

@@ -22,45 +22,45 @@ internal sealed partial class AutomationsPage
     {
         var actions = new List<UIElement>
         {
-            Buttons.ToolbarIcon(ActionIcon.Refresh, "Reload automations", async (_, _) => { LogoRefresh.Began(); await LoadAsync(); }),
+            Buttons.ToolbarIcon(ActionIcon.Refresh, L10n.Text("windows.automationspage_table.reload_automations.465e2a11"), async (_, _) => { LogoRefresh.Began(); await LoadAsync(); }),
         };
         if (!_showingRuns)
         {
             var menu = new MenuFlyout();
-            var labels = new[] { "All automations", "Enabled", "Paused", "Last run failed" };
+            var labels = new[] { L10n.Text("windows.automationspage_table.all_automations.f64b2431"), L10n.Text("common.enabled"), L10n.Text("common.paused"), L10n.Text("windows.automationspage_table.last_run_failed.d86e53b5") };
             for (var index = 0; index < labels.Length; index++)
             {
                 var value = (AutomationJobFilter)index;
                 ContextMenus.Add(menu, labels[index] + (_jobFilter == value ? " ✓" : ""), () => { _jobFilter = value; RenderList(); RaiseToolbarChanged(); });
             }
-            var filter = Buttons.ToolbarIcon(ActionIcon.Filter, "Filter: " + labels[(int)_jobFilter], (_, _) => { });
+            var filter = Buttons.ToolbarIcon(ActionIcon.Filter, L10n.Text("windows.automationspage_table.filter_0.af82fa7d", $"{labels[(int)_jobFilter]}"), (_, _) => { });
             filter.Flyout = menu;
             actions.Add(filter);
         }
         actions.Add(SegmentedCapsule.View(new List<(string Value, string Label, ActionIcon? Glyph)>
-        { ("jobs", "Jobs", ActionIcon.Scheduled), ("runs", "Runs", ActionIcon.History) }, _showingRuns ? "runs" : "jobs", value =>
+        { ("jobs", L10n.Text("windows.automationspage_table.jobs.2f17a0f8"), ActionIcon.Scheduled), ("runs", L10n.Text("windows.automationspage_table.runs.848f54e8"), ActionIcon.History) }, _showingRuns ? "runs" : "jobs", value =>
         {
             SnapshotDraft();
             _showingRuns = value == "runs";
             _historyJobId = null;
-            _searchBox.PlaceholderText = _showingRuns ? "Search runs" : "Search automations";
+            _searchBox.PlaceholderText = _showingRuns ? L10n.Text("windows.automationspage_table.search_runs.26d6d37f") : L10n.Text("windows.automationspage_table.search_automations.bdff71b2");
             RenderList(); RenderDetail(); RaiseToolbarChanged();
             return Task.CompletedTask;
         }));
         var templates = new MenuFlyout();
-        AddTemplate(templates, "Daily brief", "Summarise yesterday's usage and flag anything that needs attention.", "claude", "daily", 600, 8);
-        AddTemplate(templates, "System health check", "Check disk, memory and CPU, and confirm the tokenstat daemon is running. Report anything abnormal.", "sh", "interval", 120);
-        AddTemplate(templates, "Dependency check", "Check for outdated or vulnerable dependencies (npm audit and the package managers this project uses) and summarise what needs a bump.", "sh", "weekly", 900);
-        AddTemplate(templates, "Weekday standup", "Summarise open work and anything that blocked progress yesterday. Keep it short.", "claude", "weekdays", 600);
-        AddTemplate(templates, "Release", ReleaseTemplate, "claude", "once", 1800);
-        var templateButton = Buttons.ToolbarIcon(ActionIcon.Source, "Templates", (_, _) => { });
+        AddTemplate(templates, L10n.Text("windows.automationspage_table.daily_brief.ba6a6869"), L10n.Text("windows.automationspage_table.summarise_yesterday_s_usage_and_flag_anyth.46ae43e4"), "claude", "daily", 600, 8);
+        AddTemplate(templates, L10n.Text("windows.automationspage_table.system_health_check.04b44a8a"), L10n.Text("windows.automationspage_table.check_disk_memory_and_cpu_and_confirm_the.1eeb5edf"), "sh", "interval", 120);
+        AddTemplate(templates, L10n.Text("windows.automationspage_table.dependency_check.cb31b5a0"), L10n.Text("windows.automationspage_table.dependency_prompt"), "sh", "weekly", 900);
+        AddTemplate(templates, L10n.Text("windows.automationspage_table.weekday_standup.26dadcac"), L10n.Text("windows.automationspage_table.summarise_open_work_and_anything_that_bloc.52f7cb29"), "claude", "weekdays", 600);
+        AddTemplate(templates, L10n.Text("windows.automationspage_table.release.e020e3c6"), ReleaseTemplate, "claude", "once", 1800);
+        var templateButton = Buttons.ToolbarIcon(ActionIcon.Source, L10n.Text("windows.automationspage_table.templates.56b564b7"), (_, _) => { });
         templateButton.Flyout = templates;
         templateButton.IsEnabled = _folders.Count > 0;
         actions.Add(templateButton);
-        var scheduler = Buttons.ToolbarIcon(ActionIcon.Settings, "Scheduler: time limit and jobs at once", (_, _) => { });
+        var scheduler = Buttons.ToolbarIcon(ActionIcon.Settings, L10n.Text("windows.automationspage_table.scheduler_time_limit_and_jobs_at_once.66a28d33"), (_, _) => { });
         scheduler.Flyout = new Flyout { Content = new ScrollViewer { Content = QueueCard(), MaxHeight = 540, MaxWidth = 400 } };
         actions.Add(scheduler);
-        var create = ActionIconGlyph.Button("New automation", ActionIcon.Create, (_, _) =>
+        var create = ActionIconGlyph.Button(L10n.Text("windows.automationspage_table.new_automation.db87a63d"), ActionIcon.Create, (_, _) =>
         { _showingRuns = false; StartCreating(); RenderList(); RaiseToolbarChanged(); });
         create.IsEnabled = _folders.Count > 0;
         actions.Add(create);
@@ -82,17 +82,7 @@ internal sealed partial class AutomationsPage
         });
     }
 
-    private const string ReleaseTemplate = """
-        Ship a release of this repository.
-
-        1. Read how this repo versions itself (workspace manifests, lockfile, app marketing version, changelog if one exists). Bump to the next version the same way the last release did. Refresh the lockfile if this project requires it.
-        2. Commit the bump only. Match this repository's commit style (CONTRIBUTING, commitlint, or recent subjects). Do not mix other work into the bump.
-        3. Push the branch to GitHub. Do not force. Do not amend published history.
-        4. Wait for CI on that commit. Poll until it finishes. If anything fails, read the failing job, fix it, commit the fix, push, and wait again. Repeat until CI is green.
-        5. Only then create an annotated version tag on that commit and push the tag. Do not tag a red commit. Do not move an existing tag.
-
-        If the working tree is dirty with unrelated changes, stop and say so. If you cannot see CI, say what you could not check and stop before the tag.
-        """;
+    private static readonly string ReleaseTemplate = L10n.Text("windows.automationspage_table.ship_a_release_of_this_repository_1_read_h.ad0794e7");
 
     private void RenderTableList()
     {
@@ -104,40 +94,40 @@ internal sealed partial class AutomationsPage
             && AutomationListLogic.MatchesFilter(job, _runs, _jobFilter)), _jobSort, _jobDescending);
         if (jobs.Count == 0)
         {
-            _listHost.Children.Add(EmptyState.View("No automations match", "Create an automation, clear the search, or show all jobs.", EmptyArtKind.Automations,
-                ActionIconGlyph.Button("Show all", ActionIcon.Filter, (_, _) => { _jobFilter = AutomationJobFilter.All; _searchBox.Text = ""; RenderList(); RaiseToolbarChanged(); })));
+            _listHost.Children.Add(EmptyState.View(L10n.Text("windows.automationspage_table.no_automations_match.f2d793e6"), L10n.Text("windows.automationspage_table.create_an_automation_clear_the_search_or_s.d5ca49af"), EmptyArtKind.Automations,
+                ActionIconGlyph.Button(L10n.Text("windows.automationspage_table.show_all.2150d8df"), ActionIcon.Filter, (_, _) => { _jobFilter = AutomationJobFilter.All; _searchBox.Text = ""; RenderList(); RaiseToolbarChanged(); })));
             return;
         }
         double[] widths = [120, 90, 70, 90, 80, 64];
         var header = TableRow(widths);
-        AddCell(header, 0, SortHeader("Name", _jobSort == AutomationJobSort.Name, _jobDescending, () => SortJobsBy(AutomationJobSort.Name)));
-        AddCell(header, 1, Cell("Schedule")); AddCell(header, 2, Cell("Project"));
-        AddCell(header, 3, SortHeader("Next run", _jobSort == AutomationJobSort.NextRun, _jobDescending, () => SortJobsBy(AutomationJobSort.NextRun)));
-        AddCell(header, 4, SortHeader("Last run", _jobSort == AutomationJobSort.LastRun, _jobDescending, () => SortJobsBy(AutomationJobSort.LastRun)));
+        AddCell(header, 0, SortHeader(L10n.Text("windows.automationspage_table.name.dcd1d522"), _jobSort == AutomationJobSort.Name, _jobDescending, () => SortJobsBy(AutomationJobSort.Name)));
+        AddCell(header, 1, Cell(L10n.Text("windows.automationspage_table.schedule.f4830a1d"))); AddCell(header, 2, Cell(L10n.Text("windows.automationspage_table.project.98595978")));
+        AddCell(header, 3, SortHeader(L10n.Text("windows.automationspage_table.next_run.b3c0ab96"), _jobSort == AutomationJobSort.NextRun, _jobDescending, () => SortJobsBy(AutomationJobSort.NextRun)));
+        AddCell(header, 4, SortHeader(L10n.Text("windows.automationspage_table.last_run.512a4821"), _jobSort == AutomationJobSort.LastRun, _jobDescending, () => SortJobsBy(AutomationJobSort.LastRun)));
         var list = TableList();
         foreach (var job in jobs)
         {
             var id = Format.Text(job, "id");
             var row = TableRow(widths);
-            var name = Cell(Format.Text(job, "name", "Automation"));
+            var name = Cell(Format.Text(job, "name", L10n.Text("windows.automationspage_table.automation.d909750b")));
             name.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
             name.Opacity = Format.Flag(job, "enabled") ? 1 : 0.65;
             ToolTipService.SetToolTip(name, Format.Text(job, "prompt"));
             AddCell(row, 0, name); AddCell(row, 1, Cell(Format.Cadence(job)));
             AddCell(row, 2, Cell(FolderLabel(Format.Text(job, "workspaceId"))));
             var enabled = Format.Flag(job, "enabled");
-            AddCell(row, 3, Cell(!enabled ? "Paused" : Format.Long(job, "nextRunAtMs") > 0 ? HostTime(Format.Long(job, "nextRunAtMs")) : "When you run it"));
+            AddCell(row, 3, Cell(!enabled ? L10n.Text("common.paused") : Format.Long(job, "nextRunAtMs") > 0 ? HostTime(Format.Long(job, "nextRunAtMs")) : L10n.Text("windows.automationspage_table.when_you_run_it.5d06a91f")));
             var last = AutomationListLogic.LastRun(job, _runs);
-            var outcome = last is null ? "Never" : WorkbenchOps.RunLabel(Format.Text(last, "status"));
+            var outcome = last is null ? L10n.Text("common.never") : WorkbenchOps.RunLabel(Format.Text(last, "status"));
             var lastCell = Cell(outcome);
             if (last is not null) { lastCell.Foreground = RunBrush(last); ToolTipService.SetToolTip(lastCell, outcome + " · " + HostTime(Format.Long(last, "startedAtMs"))); }
             AddCell(row, 4, lastCell);
             var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 0 };
             var live = JobRuns(id).FirstOrDefault(WorkbenchOps.IsRunning);
-            var run = live is null ? Buttons.ToolbarIcon(ActionIcon.Run, "Run now", async (_, _) => await RunAsync(id))
-                : Buttons.ToolbarIcon(ActionIcon.Stop, "Stop this run", async (_, _) => await KillAsync(Format.Text(live, "id")));
+            var run = live is null ? Buttons.ToolbarIcon(ActionIcon.Run, L10n.Text("windows.automationspage_table.run_now.09913977"), async (_, _) => await RunAsync(id))
+                : Buttons.ToolbarIcon(ActionIcon.Stop, L10n.Text("windows.automationspage_table.stop_this_run.7647f899"), async (_, _) => await KillAsync(Format.Text(live, "id")));
             run.IsEnabled = !_working && _pendingRunOp is null;
-            actions.Children.Add(run); actions.Children.Add(ActionIconGlyph.MoreButton("Actions for " + Format.Text(job, "name"), JobMenu(job)));
+            actions.Children.Add(run); actions.Children.Add(ActionIconGlyph.MoreButton(L10n.Text("windows.automationspage_table.actions_for_0.29a5141b", $"{Format.Text(job, "name")}"), JobMenu(job)));
             AddCell(row, 5, actions);
             var item = new ListViewItem { Content = row, Tag = id, Padding = new Thickness(0), HorizontalContentAlignment = HorizontalAlignment.Stretch, ContextFlyout = JobMenu(job) };
             list.Items.Add(item);
@@ -156,28 +146,28 @@ internal sealed partial class AutomationsPage
             && (term.Length == 0 || Format.Text(run, "name").Contains(term, StringComparison.OrdinalIgnoreCase)
                 || FolderLabel(Format.Text(run, "workspaceId")).Contains(term, StringComparison.OrdinalIgnoreCase)
                 || BackendLabel(Format.Text(run, "backend")).Contains(term, StringComparison.OrdinalIgnoreCase))), _runSort, _runDescending);
-        if (runs.Count == 0) { _listHost.Children.Add(Chrome.Empty("No matching runs", "Runs appear here when an automation starts.", ActionIcon.History)); return; }
+        if (runs.Count == 0) { _listHost.Children.Add(Chrome.Empty(L10n.Text("windows.automationspage_table.no_matching_runs.4178c0ba"), L10n.Text("windows.automationspage_table.runs_appear_here_when_an_automation_starts.1a991b40"), ActionIcon.History)); return; }
         double[] widths = [120, 70, 70, 120, 65, 80];
         var header = TableRow(widths);
-        AddCell(header, 0, SortHeader("Automation", _runSort == AutomationRunSort.Name, _runDescending, () => SortRunsBy(AutomationRunSort.Name)));
-        AddCell(header, 1, Cell("Agent")); AddCell(header, 2, Cell("Project"));
-        AddCell(header, 3, SortHeader("Started", _runSort == AutomationRunSort.Started, _runDescending, () => SortRunsBy(AutomationRunSort.Started)));
-        AddCell(header, 4, Cell("Duration"));
-        AddCell(header, 5, SortHeader("Result", _runSort == AutomationRunSort.Result, _runDescending, () => SortRunsBy(AutomationRunSort.Result)));
+        AddCell(header, 0, SortHeader(L10n.Text("windows.automationspage_table.automation.d909750b"), _runSort == AutomationRunSort.Name, _runDescending, () => SortRunsBy(AutomationRunSort.Name)));
+        AddCell(header, 1, Cell(L10n.Text("windows.automationspage_table.agent.11b39c93"))); AddCell(header, 2, Cell(L10n.Text("windows.automationspage_table.project.98595978")));
+        AddCell(header, 3, SortHeader(L10n.Text("windows.automationspage_table.started.ecbc89cd"), _runSort == AutomationRunSort.Started, _runDescending, () => SortRunsBy(AutomationRunSort.Started)));
+        AddCell(header, 4, Cell(L10n.Text("windows.automationspage_table.duration.4fc52a3c")));
+        AddCell(header, 5, SortHeader(L10n.Text("windows.automationspage_table.result.6e7d50e8"), _runSort == AutomationRunSort.Result, _runDescending, () => SortRunsBy(AutomationRunSort.Result)));
         var list = TableList();
         foreach (var run in runs)
         {
             var id = Format.Text(run, "id");
             var row = TableRow(widths);
-            AddCell(row, 0, Cell(Format.Text(run, "name", "Run"))); AddCell(row, 1, Cell(BackendLabel(Format.Text(run, "backend"))));
+            AddCell(row, 0, Cell(Format.Text(run, "name", L10n.Text("common.run")))); AddCell(row, 1, Cell(BackendLabel(Format.Text(run, "backend"))));
             AddCell(row, 2, Cell(FolderLabel(Format.Text(run, "workspaceId")))); AddCell(row, 3, Cell(HostTime(Format.Long(run, "startedAtMs"))));
             var ended = Format.Long(run, "endedAtMs"); var started = Format.Long(run, "startedAtMs");
-            var duration = ended > started && started > 0 ? AutomationListLogic.Duration(started, ended) : WorkbenchOps.IsRunning(run) ? "Running" : "—";
+            var duration = ended > started && started > 0 ? AutomationListLogic.Duration(started, ended) : WorkbenchOps.IsRunning(run) ? L10n.Text("common.running") : "—";
             AddCell(row, 4, Cell(duration));
             var result = Cell(WorkbenchOps.RunLabel(Format.Text(run, "status"))); result.Foreground = RunBrush(run); AddCell(row, 5, result);
             var menu = new MenuFlyout();
-            ContextMenus.AddAsync(menu, "Transcript", async () => { _selectedRunId = id; RenderDetail(); await LoadTranscriptAsync(id, 0); });
-            if (WorkbenchOps.IsRunning(run)) ContextMenus.AddAsync(menu, "Stop", async () => await KillAsync(id));
+            ContextMenus.AddAsync(menu, L10n.Text("windows.automationspage_table.transcript.721164f0"), async () => { _selectedRunId = id; RenderDetail(); await LoadTranscriptAsync(id, 0); });
+            if (WorkbenchOps.IsRunning(run)) ContextMenus.AddAsync(menu, L10n.Text("common.stop"), async () => await KillAsync(id));
             var item = new ListViewItem { Content = row, Tag = id, Padding = new Thickness(0), HorizontalContentAlignment = HorizontalAlignment.Stretch, ContextFlyout = menu };
             list.Items.Add(item); if (_selectedRunId == id) list.SelectedItem = item;
         }
@@ -195,11 +185,11 @@ internal sealed partial class AutomationsPage
     private MenuFlyout JobMenu(JsonNode job)
     {
         var id = Format.Text(job, "id"); var menu = new MenuFlyout();
-        ContextMenus.Add(menu, "Edit", () => SelectJob(job));
-        ContextMenus.AddAsync(menu, "Run now", async () => await RunAsync(id));
-        ContextMenus.AddAsync(menu, Format.Flag(job, "enabled") ? "Pause" : "Resume", async () => await SetEnabledAsync(id, !Format.Flag(job, "enabled")));
-        ContextMenus.Add(menu, "Run history", () => { SnapshotDraft(); _showingRuns = true; _historyJobId = id; _searchBox.PlaceholderText = "Search runs"; _searchBox.Text = ""; RenderList(); RenderDetail(); RaiseToolbarChanged(); });
-        ContextMenus.Add(menu, "Delete…", () => { SelectJob(job); _confirmDelete = true; RenderDetail(); });
+        ContextMenus.Add(menu, L10n.Text("common.edit"), () => SelectJob(job));
+        ContextMenus.AddAsync(menu, L10n.Text("windows.automationspage_table.run_now.09913977"), async () => await RunAsync(id));
+        ContextMenus.AddAsync(menu, Format.Flag(job, "enabled") ? L10n.Text("windows.automationspage_table.pause.858e4ba7") : L10n.Text("common.resume"), async () => await SetEnabledAsync(id, !Format.Flag(job, "enabled")));
+        ContextMenus.Add(menu, L10n.Text("windows.automationspage_table.run_history.addf321b"), () => { SnapshotDraft(); _showingRuns = true; _historyJobId = id; _searchBox.PlaceholderText = L10n.Text("windows.automationspage_table.search_runs.26d6d37f"); _searchBox.Text = ""; RenderList(); RenderDetail(); RaiseToolbarChanged(); });
+        ContextMenus.Add(menu, L10n.Text("windows.automationspage_table.delete.9ce78fe3"), () => { SelectJob(job); _confirmDelete = true; RenderDetail(); });
         return menu;
     }
 
@@ -210,7 +200,7 @@ internal sealed partial class AutomationsPage
     { "error" => Theme.Brush(Theme.Danger), "ok" => Theme.AccentBrush, "running" or "starting" or "queued" or "stopping" => Theme.AccentBrush, _ => Theme.Brush(Theme.ControlGlyph) };
     private string HostTime(long milliseconds)
     {
-        if (milliseconds <= 0) return "Never";
+        if (milliseconds <= 0) return L10n.Text("common.never");
         try
         {
             var time = DateTimeOffset.FromUnixTimeMilliseconds(milliseconds);
@@ -222,7 +212,7 @@ internal sealed partial class AutomationsPage
             }
             return time.UtcDateTime.ToString("g") + " UTC";
         }
-        catch (ArgumentOutOfRangeException) { return "Unknown"; }
+        catch (ArgumentOutOfRangeException) { return L10n.Text("common.unknown"); }
     }
     private static TextBlock Cell(string text)
     {
@@ -232,7 +222,7 @@ internal sealed partial class AutomationsPage
     private static Button SortHeader(string title, bool selected, bool descending, Action sort)
     {
         var button = new Button { Content = title + (selected ? descending ? " ↓" : " ↑" : ""), BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), Padding = new Thickness(0, 6, 0, 6), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left };
-        button.Click += (_, _) => sort(); ToolTipService.SetToolTip(button, "Sort by " + title); return button;
+        button.Click += (_, _) => sort(); ToolTipService.SetToolTip(button, L10n.Text("windows.automationspage_table.sort_by_0.c17fa279", $"{title}")); return button;
     }
     private static Grid TableRow(double[] widths)
     {

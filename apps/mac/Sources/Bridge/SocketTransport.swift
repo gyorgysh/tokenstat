@@ -63,7 +63,7 @@ final class SocketTransport: Transport, @unchecked Sendable {
     let path: String
     private let expectedProtocolVersion: String?
 
-    var describedAs: String { "daemon at \(path)" }
+    var describedAs: String { L10n.text("apple.sockettransport.daemon_at_0.3313a150", "\(path)") }
 
     init(path: String, expectedProtocolVersion: String? = nil) {
         self.path = path
@@ -223,12 +223,12 @@ final class SocketTransport: Transport, @unchecked Sendable {
 
     private struct ProtocolMismatch: Error {
         var failure: BridgeError {
-            .core(code: "host_incompatible", message: "The local helper does not match this version of tokenstat. Reopen the latest version of tokenstat to update it, then try again.")
+            .core(code: "host_incompatible", message: L10n.text("apple.sockettransport.the_local_helper_does_not_match_this_versi.6fef0842"))
         }
     }
 
     private static func uncertainSend() -> BridgeError {
-        .core(code: "delivery_unknown", message: "The connection closed before message delivery was confirmed. Keep the pending copy and check delivery.")
+        .core(code: "delivery_unknown", message: L10n.text("apple.sockettransport.the_connection_closed_before_message_deliv.f49363c3"))
     }
 
     /// Methods whose re-delivery after a lost answer would apply the same work
@@ -263,9 +263,7 @@ final class SocketTransport: Transport, @unchecked Sendable {
     private static func silence(path: String, patience: TimeInterval) -> BridgeError {
         BridgeError.core(
             code: "host_timeout",
-            message: "The tokenstat host at \(path) said nothing for "
-                + "\(Int(patience)) seconds. It may be busy with a scan, or it may "
-                + "have stopped answering."
+            message: L10n.text("apple.sockettransport.the_tokenstat_host_at_0_said_nothing_for_1.24074cf5", "\(path)", "\(Int(patience))")
         )
     }
 
@@ -277,8 +275,7 @@ final class SocketTransport: Transport, @unchecked Sendable {
     private static func unreachable(path: String) -> BridgeError {
         BridgeError.core(
             code: "host_unreachable",
-            message: "The tokenstat host is not answering at \(path). "
-                + "tokenstat tried to restart it and will keep retrying."
+            message: L10n.text("apple.sockettransport.the_tokenstat_host_is_not_answering_at_0_t.a338f925", "\(path)")
         )
     }
 
@@ -449,7 +446,7 @@ final class SocketTransport: Transport, @unchecked Sendable {
         // `["method"]` minus its brackets is the escaped string literal, which
         // is cheaper than reaching for an encoder to quote one identifier.
         let quoted = name.dropFirst().dropLast()
-        var line = Data(#"{"id":0,"method":\#(quoted),"params":\#(body)}"#.utf8)
+        var line = Data(L10n.text("apple.sockettransport.id_0_method_0_params_1.3cb87427", "\(quoted)", "\(body)").utf8)
         line.append(0x0A)
         return line
     }
@@ -494,7 +491,7 @@ private final class Connection {
         // bytes. The daemon checks this when it binds and says so in words;
         // this end has to as well, or a too-long path reads as "no daemon".
         guard bytes.count < MemoryLayout<sockaddr_un>.size - 2 else {
-            throw TransportFailure.path("socket path is too long for a unix socket: \(path)")
+            throw TransportFailure.path(L10n.text("apple.sockettransport.socket_path_is_too_long_for_a_unix_socket.f1b38e89", "\(path)"))
         }
 
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -633,9 +630,9 @@ private enum TransportFailure: LocalizedError {
         case .path(let why):
             return why
         case .system(let operation, let code):
-            return "The host connection failed during \(operation): \(Self.text(code))"
+            return L10n.text("apple.sockettransport.the_host_connection_failed_during_0_1.3d496ab5", "\(operation)", "\(Self.text(code))")
         case .timedOut:
-            return "The host connection timed out."
+            return L10n.text("apple.sockettransport.the_host_connection_timed_out.9d74e894")
         }
     }
 

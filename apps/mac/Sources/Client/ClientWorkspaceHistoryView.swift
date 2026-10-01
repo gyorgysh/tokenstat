@@ -46,7 +46,7 @@ struct ClientWorkspaceHistoryView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        .modifier(ClientOptionalNavigationTitle(showsNavigationTitle ? "History" : nil))
+        .modifier(ClientOptionalNavigationTitle(showsNavigationTitle ? L10n.text("common.history") : nil))
         .refreshable {
             await ClientRefresh.pull("workspace-history-\(workspaceID)") { await load() }
         }
@@ -61,20 +61,20 @@ struct ClientWorkspaceHistoryView: View {
     private var content: some View {
         if !current.exists {
             ClientSectionEmpty(
-                text: "Folder missing",
-                message: "This folder is no longer on \(place)."
+                text: L10n.text("apple.clientworkspacehistoryview.folder_missing.f06c68a6"),
+                message: L10n.text("apple.clientworkspacehistoryview.this_folder_is_no_longer_on_0.ccbb9519", "\(place)")
             )
         } else if loaded, current.git?.isRepo != true {
             ClientSectionEmpty(
-                text: "Not a git repository",
+                text: L10n.text("apple.clientworkspacehistoryview.not_a_git_repository.f903b388"),
                 art: .notGit,
-                message: "This folder has no commits to browse. Make it a repository on \(place) and they will appear here."
+                message: L10n.text("apple.clientworkspacehistoryview.this_folder_has_no_commits_to_browse_make.9d24da5f", "\(place)")
             )
         } else if loaded, commits.isEmpty, errorMessage == nil {
             ClientSectionEmpty(
-                text: "No commits yet",
+                text: L10n.text("apple.clientworkspacehistoryview.no_commits_yet.f17a8736"),
                 art: .history,
-                message: "Commit selected files in Changes and the result will appear here."
+                message: L10n.text("apple.clientworkspacehistoryview.commit_selected_files_in_changes_and_the_r.99826438")
             )
         } else if loaded {
             ForEach(commits) { commit in
@@ -101,7 +101,7 @@ struct ClientWorkspaceHistoryView: View {
     }
 
     private var place: String {
-        hostName.isEmpty ? "the computer" : hostName
+        hostName.isEmpty ? L10n.text("apple.clientworkspacehistoryview.the_computer.da52d93a") : hostName
     }
 
     private func load() async {
@@ -159,7 +159,7 @@ private struct ClientCommitRow: View {
                     if commit.unpushed {
                         Image(systemName: "arrow.up.circle")
                             .foregroundStyle(Theme.accent)
-                            .accessibilityLabel("Not pushed yet")
+                            .accessibilityLabel(L10n.text("apple.clientworkspacehistoryview.not_pushed_yet.06de6fec"))
                     }
                 }
                 .font(ClientType.caption)
@@ -177,7 +177,7 @@ private struct ClientCommitRow: View {
         .contentShape(.rect)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(commit.subject)
-        .accessibilityHint("Open this commit")
+        .accessibilityHint(L10n.text("apple.clientworkspacehistoryview.open_this_commit.1459225a"))
     }
 }
 
@@ -252,7 +252,7 @@ struct ClientCommitDetailView: View {
                     .foregroundStyle(.tertiary)
                     .textSelection(.enabled)
                 if detail?.isMerge == true {
-                    Text("merge")
+                    Text(L10n.text("apple.clientworkspacehistoryview.merge.283128ac"))
                         .font(ClientType.caption.weight(.medium))
                         .foregroundStyle(Theme.secondary)
                 }
@@ -270,7 +270,7 @@ struct ClientCommitDetailView: View {
                             .font(ClientType.diffFigure)
                             .foregroundStyle(Theme.diffRemoved)
                     }
-                    Text("\(detail.files.count) file\(detail.files.count == 1 ? "" : "s")")
+                    Text((detail.files.count == 1 ? L10n.text("apple.clientworkspacehistoryview.0_file_1.ac7c9517.one", "\(detail.files.count)") : L10n.text("apple.clientworkspacehistoryview.0_file_1.ac7c9517.other", "\(detail.files.count)")))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -290,10 +290,10 @@ struct ClientCommitDetailView: View {
         } else if let detail {
             if detail.diffs.isEmpty {
                 ClientSectionEmpty(
-                    text: detail.isMerge ? "A merge with no patch of its own" : "No files in this commit",
+                    text: detail.isMerge ? L10n.text("apple.clientworkspacehistoryview.a_merge_with_no_patch_of_its_own.862cd9e3") : L10n.text("apple.clientworkspacehistoryview.no_files_in_this_commit.db8823ee"),
                     art: .history,
                     message: detail.isMerge
-                        ? "The changes live on the parents."
+                        ? L10n.text("apple.clientworkspacehistoryview.the_changes_live_on_the_parents.24d17008")
                         : nil
                 )
             } else {
@@ -320,9 +320,9 @@ struct ClientCommitDetailView: View {
             }
             .padding(Theme.Space.m)
             if diff.binary {
-                note("This is a binary file. There is nothing to show line by line.")
+                note(L10n.text("apple.clientworkspacehistoryview.this_is_a_binary_file_there_is_nothing_to.6573d54c"))
             } else if diff.hunks.isEmpty {
-                note("No line changes in this file.")
+                note(L10n.text("apple.clientworkspacehistoryview.no_line_changes_in_this_file.2406d2d9"))
             } else {
                 hunks(of: diff)
             }
@@ -362,7 +362,7 @@ struct ClientCommitDetailView: View {
                 .padding(.vertical, Theme.Space.xs)
             }
             if cut > 0 {
-                note("Showing the first \(total - cut) of \(total) lines.")
+                note(L10n.text("apple.clientworkspacehistoryview.showing_the_first_0_of_1_lines.348d454c", "\(total - cut)", "\(total)"))
             }
         }
     }

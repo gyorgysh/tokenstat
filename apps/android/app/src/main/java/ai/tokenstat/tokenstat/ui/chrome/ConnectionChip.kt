@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.chrome
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -71,7 +73,7 @@ fun ConnectionChip(connection: ConnectionUi, onRetry: () -> Unit) {
             .background(tint.copy(alpha = 0.14f))
             .clickable { open = true }
             .padding(horizontal = Space.s, vertical = 4.dp)
-            .semantics { contentDescription = "Connection: ${connection.title}" },
+            .semantics { contentDescription = L10n.text("android.connectionchip.connection_0.12c0e720", "${connection.title}") },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -95,7 +97,7 @@ fun ConnectionChip(connection: ConnectionUi, onRetry: () -> Unit) {
                         RelativeTick.start()
                         val now by RelativeTick.now.collectAsStateWithLifecycle()
                         Text(
-                            "Last answered ${RelativeClock.label(at, now)}",
+                            L10n.text("android.connectionchip.last_answered_0.7941647f", "${RelativeClock.label(at, now)}"),
                             style = TextStyle(fontSize = 12.sp),
                             color = colors.textTertiary,
                         )
@@ -104,14 +106,14 @@ fun ConnectionChip(connection: ConnectionUi, onRetry: () -> Unit) {
             },
             confirmButton = {
                 TsAccentButton(
-                    label = "Try now",
+                    label = L10n.text("android.connectionchip.try_now.549f5e23"),
                     small = true,
                     onClick = { open = false; onRetry() },
                 )
             },
             dismissButton = {
                 TextButton(onClick = { open = false }) {
-                    Text("Close", color = colors.textSecondary)
+                    Text(L10n.text("common.close"), color = colors.textSecondary)
                 }
             },
         )

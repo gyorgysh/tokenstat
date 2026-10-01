@@ -50,7 +50,7 @@ struct ClientReviewAllView: View {
                         .padding(.top, Theme.Space.xl)
                 } else {
                     if failures > 0 {
-                        Text("\(failures) file\(failures == 1 ? "" : "s") did not load. Open \(failures == 1 ? "it" : "them") individually for the diff.")
+                        Text((failures == 1 ? L10n.text("apple.clientreviewallview.0_file_1_did_not_load_open_2_individually.2acd4427.one", "\(failures)") : L10n.text("apple.clientreviewallview.0_file_1_did_not_load_open_2_individually.2acd4427.other", "\(failures)")))
                             .font(ClientType.caption)
                             .foregroundStyle(Theme.controlGlyph)
                             .fixedSize(horizontal: false, vertical: true)
@@ -59,7 +59,7 @@ struct ClientReviewAllView: View {
                         fileCard(file)
                     }
                     if leftoverFiles > 0 {
-                        Text("\(leftoverFiles) more file\(leftoverFiles == 1 ? "" : "s") changed. Open \(leftoverFiles == 1 ? "it" : "them") from Changes for the diff.")
+                        Text((leftoverFiles == 1 ? L10n.text("apple.clientreviewallview.0_more_file_1_changed_open_2_from_changes.206bca3b.one", "\(leftoverFiles)") : L10n.text("apple.clientreviewallview.0_more_file_1_changed_open_2_from_changes.206bca3b.other", "\(leftoverFiles)")))
                             .font(ClientType.caption)
                             .foregroundStyle(Theme.controlGlyph)
                             .fixedSize(horizontal: false, vertical: true)
@@ -83,7 +83,7 @@ struct ClientReviewAllView: View {
                     }
             }
         )
-        .navigationTitle("Review all")
+        .navigationTitle(L10n.text("apple.clientreviewallview.review_all.d05163fa"))
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
             await ClientRefresh.pull("workspace-review-all-\(workspaceID)") { await load() }
@@ -106,18 +106,18 @@ struct ClientReviewAllView: View {
             }
             if let diff = diffs[file.path] {
                 if diff.binary {
-                    Text("A binary file. There is nothing to show line by line.")
+                    Text(L10n.text("apple.clientreviewallview.a_binary_file_there_is_nothing_to_show_lin.d8a6c19c"))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                 } else if diff.hunks.isEmpty {
-                    Text("No changes against HEAD.")
+                    Text(L10n.text("apple.clientreviewallview.no_changes_against_head.84a982f2"))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                 } else {
                     hunks(of: diff)
                 }
             } else {
-                Text("Still loading.")
+                Text(L10n.text("apple.clientreviewallview.still_loading.fa2e3194"))
                     .font(ClientType.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -125,7 +125,7 @@ struct ClientReviewAllView: View {
                 ClientDiffView(peer: peer, workspaceID: workspaceID, hostName: hostName, file: file)
             } label: {
                 HStack {
-                    Text("Full diff")
+                    Text(L10n.text("apple.clientreviewallview.full_diff.79eeb065"))
                         .font(ClientType.label.weight(.medium))
                         .foregroundStyle(Theme.accent)
                     Spacer(minLength: 0)
@@ -178,7 +178,7 @@ struct ClientReviewAllView: View {
                 .padding(.vertical, Theme.Space.xs)
             }
             if cut > 0 {
-                Text("Showing \(total - cut) of \(total) lines here.")
+                Text(L10n.text("apple.clientreviewallview.showing_0_of_1_lines_here.f2764462", "\(total - cut)", "\(total)"))
                     .font(ClientType.caption)
                     .foregroundStyle(Theme.controlGlyph)
                     .padding(.top, Theme.Space.xs)

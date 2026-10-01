@@ -87,19 +87,19 @@ struct SSHTerminalPane: View {
         .background(Theme.background)
         .task(id: host.id) { sessions.restoreSelection(for: host.id) }
         .confirmationDialog(
-            "Close this session?",
+            L10n.text("apple.sshterminalpane.close_this_session.2b66ce2d"),
             isPresented: Binding(get: { closing != nil }, set: { if !$0 { closing = nil } }),
             titleVisibility: .visible
         ) {
-            Button("Close", role: .destructive) {
+            Button(L10n.text("common.close"), role: .destructive) {
                 if let doomed = closing {
                     closing = nil
                     Task { await sessions.close(doomed) }
                 }
             }
-            Button("Cancel", role: .cancel) { closing = nil }
+            Button(L10n.text("common.cancel"), role: .cancel) { closing = nil }
         } message: {
-            Text("Whatever is running in it stops. Nothing else on the server changes.")
+            Text(L10n.text("apple.sshterminalpane.whatever_is_running_in_it_stops_nothing_el.f25aee6b"))
         }
         .sheet(item: $asking) { snippet in
             SSHSnippetRunSheet(snippet: snippet) { command in type(command) }
@@ -146,9 +146,9 @@ struct SSHTerminalPane: View {
                 }
             }
 
-            Button("New terminal", .create) { library.connectRequest = host }
+            Button(L10n.text("apple.sshterminalpane.new_terminal.fe544556"), .create) { library.connectRequest = host }
                 .buttonStyle(SecondaryButtonStyle(small: true))
-                .help("Open another shell on \(host.label)")
+                .help(L10n.text("apple.sshterminalpane.open_another_shell_on_0.ef2411b2", "\(host.label)"))
 
             if !snippets.isEmpty {
                 Menu {
@@ -156,12 +156,12 @@ struct SSHTerminalPane: View {
                         Button(snippet.title, .run) { use(snippet) }
                     }
                 } label: {
-                    ActionIcon.run.label("Snippets")
+                    ActionIcon.run.label(L10n.text("apple.sshterminalpane.snippets.ff717209"))
                         .font(Theme.font(12))
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .help("Run a saved command in the session in front")
+                .help(L10n.text("apple.sshterminalpane.run_a_saved_command_in_the_session_in_fron.241bc4fa"))
                 .disabled(snippetTarget == nil)
             }
 
@@ -169,16 +169,16 @@ struct SSHTerminalPane: View {
 
             if !mine.isEmpty {
                 Menu {
-                    Button("Single", .layout) { sessions.setLayout(.single, for: host.id) }
-                    Button("Side by side", .compare) { sessions.setLayout(.side, for: host.id) }
-                    Button("Stacked", .compare) { sessions.setLayout(.stacked, for: host.id) }
+                    Button(L10n.text("apple.sshterminalpane.single.8888a029"), .layout) { sessions.setLayout(.single, for: host.id) }
+                    Button(L10n.text("apple.sshterminalpane.side_by_side.a3d7b387"), .compare) { sessions.setLayout(.side, for: host.id) }
+                    Button(L10n.text("apple.sshterminalpane.stacked.c2fed746"), .compare) { sessions.setLayout(.stacked, for: host.id) }
                 } label: {
-                    ActionIcon.compare.label("Split")
+                    ActionIcon.compare.label(L10n.text("apple.sshterminalpane.split.32afaa78"))
                         .font(Theme.font(12))
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .help("Show two sessions at once")
+                .help(L10n.text("apple.sshterminalpane.show_two_sessions_at_once.0cfb6b4a"))
                 .disabled(mine.count < 2)
             }
 
@@ -197,10 +197,10 @@ struct SSHTerminalPane: View {
     private var empty: some View {
         EmptyState(
             symbol: "terminal",
-            title: "No session on \(host.label)",
-            message: "Open one and it stays open here, with its own tab, until you close it."
+            title: L10n.text("apple.sshterminalpane.no_session_on_0.90ff0939", "\(host.label)"),
+            message: L10n.text("apple.sshterminalpane.open_one_and_it_stays_open_here_with_its_o.16edc392")
         ) {
-            Button("Connect", .connect) { library.connectRequest = host }
+            Button(L10n.text("common.connect"), .connect) { library.connectRequest = host }
                 .buttonStyle(AccentButtonStyle())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -265,7 +265,7 @@ private struct SSHSessionChip: View {
                     // A session that ended keeps its tab and says so. Its last
                     // screenful is often the reason somebody is looking.
                     if !session.alive {
-                        Text("ended")
+                        Text(L10n.text("apple.sshterminalpane.ended.e87ba7a0"))
                             .font(Theme.caption2)
                             .foregroundStyle(.tertiary)
                     }
@@ -276,7 +276,7 @@ private struct SSHSessionChip: View {
             .buttonStyle(.plain)
 
             if isSelected || isHovering {
-                TabCloseButton(help: "Close this session", action: onClose)
+                TabCloseButton(help: L10n.text("apple.sshterminalpane.close_this_session.fa2af1b6"), action: onClose)
             } else {
                 // Holds the width the button would take, so a tab does not
                 // resize under the pointer and shove every tab after it along.
@@ -300,9 +300,9 @@ private struct SSHSessionChip: View {
         .onHover { isHovering = $0 }
         .contextMenu {
             if let onSplit {
-                Button("Open in split", .compare) { onSplit() }
+                Button(L10n.text("apple.sshterminalpane.open_in_split.6b36cec3"), .compare) { onSplit() }
             }
-            Button("Close", .delete) { onClose() }
+            Button(L10n.text("common.close"), .delete) { onClose() }
         }
     }
 }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.activity.compose.BackHandler
 import ai.tokenstat.tokenstat.ui.chrome.HideTabBar
 
@@ -125,9 +127,9 @@ fun WorkspaceFileEditorPage(
                 savedText = content.contentOrNull.orEmpty()
                 error = null
             } else {
-                error = "That file is not in this folder any more."
+                error = L10n.text("android.workspacefileeditor.that_file_is_not_in_this_folder_any_more.da5bd527")
             }
-        }.onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+        }.onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacefileeditor.the_request_failed.db4fb447"), hostLabel) }
         loading = false
     }
 
@@ -145,7 +147,7 @@ fun WorkspaceFileEditorPage(
                 ((it["content"] as? JsonPrimitive) ?: (it["text"] as? JsonPrimitive))?.contentOrNull
             }
             if (host == null) {
-                error = "Could not re-read this file on that computer, so the save waits. Your edits are kept."
+                error = L10n.text("android.workspacefileeditor.could_not_re_read_this_file_on_that_comput.dacb7165")
                 return
             }
             when (EditorSave.decide(host, draft, saved)) {
@@ -171,7 +173,7 @@ fun WorkspaceFileEditorPage(
                 savedAt = System.currentTimeMillis()
                 error = null
                 onSavedFile()
-            }.onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+            }.onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacefileeditor.the_request_failed.db4fb447"), hostLabel) }
         } finally {
             saving = false
         }
@@ -194,7 +196,7 @@ fun WorkspaceFileEditorPage(
     Column(modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = ::requestClose, enabled = !saving) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to $folderName")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, L10n.text("android.workspacefileeditor.back_to_0.c8f69409", "${folderName}"))
             }
             Column(Modifier.weight(1f)) {
                 Text(
@@ -213,10 +215,10 @@ fun WorkspaceFileEditorPage(
                 )
             }
             IconButton(onClick = { findOpen = !findOpen }) {
-                Icon(Icons.Default.Search, "Find in file", tint = colors.accent)
+                Icon(Icons.Default.Search, L10n.text("android.workspacefileeditor.find_in_file.214c422e"), tint = colors.accent)
             }
             TsAccentButton(
-                label = if (saving) "Saving…" else "Save",
+                label = if (saving) L10n.text("android.workspacefileeditor.saving.23e39291") else L10n.text("common.save"),
                 small = true,
                 enabled = !saving && dirty && conflictHost == null,
                 onClick = { scope.launch { save() } },
@@ -273,7 +275,7 @@ fun WorkspaceFileEditorPage(
                                 savedAt = System.currentTimeMillis()
                                 onSavedFile()
                             }.onFailure {
-                                error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+                                error = TunnelCopy.display(it.message ?: L10n.text("android.workspacefileeditor.the_request_failed.db4fb447"), hostLabel)
                             }
                         } finally {
                             saving = false
@@ -283,7 +285,7 @@ fun WorkspaceFileEditorPage(
             )
         }
         if (loading) {
-            Text("Loading…", color = colors.textSecondary, modifier = Modifier.padding(Space.m))
+            Text(L10n.text("android.workspacefileeditor.loading.ba3bbbe1"), color = colors.textSecondary, modifier = Modifier.padding(Space.m))
         } else if (savedText == null && error != null) {
             StickyErrorCard(
                 message = error!!,
@@ -315,14 +317,14 @@ fun WorkspaceFileEditorPage(
     if (confirmDiscard) {
         AlertDialog(
             onDismissRequest = { confirmDiscard = false },
-            title = { Text("Discard changes?") },
-            text = { Text("This file has edits that are not saved on that computer.") },
+            title = { Text(L10n.text("android.workspacefileeditor.discard_changes.85bcf416")) },
+            text = { Text(L10n.text("android.workspacefileeditor.this_file_has_edits_that_are_not_saved_on.1290524e")) },
             confirmButton = {
                 TextButton(onClick = { confirmDiscard = false; onClose() }) {
-                    Text("Discard", color = LocalTsColors.current.danger)
+                    Text(L10n.text("android.workspacefileeditor.discard.eb1a70e3"), color = LocalTsColors.current.danger)
                 }
             },
-            dismissButton = { TextButton(onClick = { confirmDiscard = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { confirmDiscard = false }) { Text(L10n.text("common.cancel")) } },
         )
     }
 }
@@ -357,7 +359,7 @@ private fun EditorFindBar(
                 query,
                 onQuery,
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Find in file") },
+                placeholder = { Text(L10n.text("android.workspacefileeditor.find_in_file.214c422e")) },
                 singleLine = true,
             )
             countLabel?.let {
@@ -366,14 +368,14 @@ private fun EditorFindBar(
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
             IconButton(onClick = onPrevious, enabled = canNavigate, modifier = Modifier.size(44.dp)) {
-                Icon(Icons.Default.KeyboardArrowUp, "Previous match")
+                Icon(Icons.Default.KeyboardArrowUp, L10n.text("android.workspacefileeditor.previous_match.daa2f8c3"))
             }
             IconButton(onClick = onNext, enabled = canNavigate, modifier = Modifier.size(44.dp)) {
-                Icon(Icons.Default.KeyboardArrowDown, "Next match")
+                Icon(Icons.Default.KeyboardArrowDown, L10n.text("android.workspacefileeditor.next_match.825e5abd"))
             }
             Spacer(Modifier.weight(1f))
             TsSecondaryButton(
-                label = if (replacing) "Hide replace" else "Replace",
+                label = if (replacing) L10n.text("android.workspacefileeditor.hide_replace.7d07b712") else L10n.text("android.workspacefileeditor.replace.95e15439"),
                 small = true,
                 onClick = onToggleReplace,
             )
@@ -383,12 +385,12 @@ private fun EditorFindBar(
                 replaceText,
                 onReplaceText,
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Replace with") },
+                placeholder = { Text(L10n.text("android.workspacefileeditor.replace_with.8382d317")) },
                 singleLine = true,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                TsSecondaryButton(label = "Replace", small = true, enabled = canNavigate, onClick = onReplace)
-                TsSecondaryButton(label = "Replace all", small = true, enabled = canNavigate, onClick = onReplaceAll)
+                TsSecondaryButton(label = L10n.text("android.workspacefileeditor.replace.95e15439"), small = true, enabled = canNavigate, onClick = onReplace)
+                TsSecondaryButton(label = L10n.text("android.workspacefileeditor.replace_all.2ebcba96"), small = true, enabled = canNavigate, onClick = onReplaceAll)
             }
         }
     }
@@ -413,7 +415,7 @@ private fun EditorConflictCard(
         verticalArrangement = Arrangement.spacedBy(Space.s),
     ) {
         Text(
-            "This file changed on that computer.",
+            L10n.text("android.workspacefileeditor.this_file_changed_on_that_computer.c4576a6e"),
             style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
             color = colors.textPrimary,
         )
@@ -423,8 +425,8 @@ private fun EditorConflictCard(
             color = colors.textSecondary,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            TsSecondaryButton(label = "Reload computer", small = true, onClick = onReload)
-            TsAccentButton(label = "Keep my draft", small = true, onClick = onKeep)
+            TsSecondaryButton(label = L10n.text("android.workspacefileeditor.reload_computer.2bdc7487"), small = true, onClick = onReload)
+            TsAccentButton(label = L10n.text("android.workspacefileeditor.keep_my_draft.cdb80bb9"), small = true, onClick = onKeep)
         }
     }
 }
@@ -459,12 +461,12 @@ private fun EditorStatusBar(
             .padding(horizontal = Space.m, vertical = Space.s),
     ) {
         if (dirty) {
-            Text("● Unsaved", style = TextStyle(fontSize = 12.sp), color = colors.warning)
+            Text(L10n.text("android.workspacefileeditor.unsaved.32c9083f"), style = TextStyle(fontSize = 12.sp), color = colors.warning)
         } else if (savedAt != null) {
             val time = remember(savedAt) {
                 SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(savedAt))
             }
-            Text("Saved $time", style = TextStyle(fontSize = 12.sp), color = colors.textTertiary)
+            Text(L10n.text("android.workspacefileeditor.saved_0.4f0424e4", "${time}"), style = TextStyle(fontSize = 12.sp), color = colors.textTertiary)
         }
         Spacer(Modifier.weight(1f))
     }

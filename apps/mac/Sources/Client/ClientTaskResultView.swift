@@ -93,13 +93,13 @@ struct ClientTaskResultView: View {
                 } else {
                     NavigationStack {
                         resultColumn(showsFolderLinks: true, wide: false)
-                            .navigationTitle(run?.name ?? "Result")
+                            .navigationTitle(run?.name ?? L10n.text("apple.clienttaskresultview.result.6e7d50e8"))
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbarBackground(Theme.background, for: .navigationBar)
                             .toolbarBackground(.visible, for: .navigationBar)
                             .toolbar {
                                 ToolbarItem(placement: .topBarTrailing) {
-                                    Button("Done", .done) { dismiss() }
+                                    Button(L10n.text("common.done"), .done) { dismiss() }
                                 }
                             }
                             .navigationDestination(item: $pushedSurface) { surface in
@@ -147,7 +147,7 @@ struct ClientTaskResultView: View {
                         HStack(spacing: Theme.Space.s) {
                             ClientAutomationActions(session: session, pinnedRunID: runID)
                             if onOpenTerminal != nil, let ptyID = run.ptyID, !ptyID.isEmpty {
-                                Button("Open terminal", .reopen) {
+                                Button(L10n.text("apple.clienttaskresultview.open_terminal.acb1f43d"), .reopen) {
                                     Task { await attachTerminal(ptyID) }
                                 }
                                 .buttonStyle(SecondaryButtonStyle(comfortable: true))
@@ -167,8 +167,8 @@ struct ClientTaskResultView: View {
                     .cardSurface()
                 } else if session.loaded {
                     ClientSectionEmpty(
-                        text: "This run is unavailable",
-                        message: "It is no longer in this folder's run history. The folder's files and commits are still available below."
+                        text: L10n.text("apple.clienttaskresultview.this_run_is_unavailable.5bef28b2"),
+                        message: L10n.text("apple.clienttaskresultview.it_is_no_longer_in_this_folder_s_run_histo.dad904f6")
                     )
                 }
                 if showsFolderLinks {
@@ -193,7 +193,7 @@ struct ClientTaskResultView: View {
     private func wideLayout(width: CGFloat) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: Theme.Space.m) {
-                Text(run?.name ?? "Result")
+                Text(run?.name ?? L10n.text("apple.clienttaskresultview.result.6e7d50e8"))
                     .font(ClientType.screenTitle)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
@@ -209,17 +209,17 @@ struct ClientTaskResultView: View {
                 .background(Theme.controlSeat, in: Circle())
                 .overlay(Circle().strokeBorder(showsInspector ? Theme.accent.opacity(0.45) : Theme.border))
                 .contentShape(Circle())
-                .accessibilityLabel(showsInspector ? "Hide review" : "Show review")
+                .accessibilityLabel(showsInspector ? L10n.text("apple.clienttaskresultview.hide_review.d17b8f0f") : L10n.text("apple.clienttaskresultview.show_review.896b32f4"))
                 .accessibilityAddTraits(.isButton)
                 .keyboardShortcut("i", modifiers: [.command, .option])
-                Button("Done", .done) { dismiss() }
+                Button(L10n.text("common.done"), .done) { dismiss() }
                     .labelStyle(.iconOnly)
                     .foregroundStyle(Theme.controlGlyph)
                     .frame(width: 44, height: 44)
                     .background(Theme.controlSeat, in: Circle())
                     .overlay(Circle().strokeBorder(Theme.border))
                     .contentShape(Circle())
-                    .accessibilityLabel("Done")
+                    .accessibilityLabel(L10n.text("common.done"))
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.top, Theme.Space.m)
@@ -304,10 +304,10 @@ struct ClientTaskResultView: View {
                     .font(ClientType.caption)
                     .foregroundStyle(Theme.controlGlyph)
             }
-            ClientFactRow(label: "Agent", value: run.backend)
-            ClientFactRow(label: "Folder", value: route.folderLabel)
+            ClientFactRow(label: L10n.text("apple.clienttaskresultview.agent.11b39c93"), value: run.backend)
+            ClientFactRow(label: L10n.text("apple.clienttaskresultview.folder.74ccd433"), value: route.folderLabel)
             if run.isRunning {
-                Text("This run continues on \(hostName).")
+                Text(L10n.text("apple.clienttaskresultview.this_run_continues_on_0.f887356d", "\(hostName)"))
                     .font(ClientType.caption)
                     .foregroundStyle(Theme.controlGlyph)
             }
@@ -329,11 +329,11 @@ struct ClientTaskResultView: View {
     private func transcriptEmpty(_ run: RunRecord) -> String {
         if run.isRunning {
             if let ptyID = run.ptyID, !ptyID.isEmpty {
-                return "Output is in the terminal on \(hostName)."
+                return L10n.text("apple.clienttaskresultview.output_is_in_the_terminal_on_0.6e84e78a", "\(hostName)")
             }
-            return "Waiting for output…"
+            return L10n.text("apple.clienttaskresultview.waiting_for_output.f05fefe2")
         }
-        return "No readable output."
+        return L10n.text("apple.clienttaskresultview.no_readable_output.cd218ba3")
     }
 
     private func attachTerminal(_ ptyID: String) async {
@@ -343,7 +343,7 @@ struct ClientTaskResultView: View {
             attachError = nil
             onOpenTerminal(info)
         } catch {
-            attachError = "The terminal is not ready yet. Try again in a moment."
+            attachError = L10n.text("apple.clienttaskresultview.the_terminal_is_not_ready_yet_try_again_in.16240de7")
         }
     }
 

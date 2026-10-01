@@ -29,10 +29,10 @@ struct ClientLimitsCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            ClientSectionTitle(title: "Plan limits", mark: "mark_plan")
+            ClientSectionTitle(title: L10n.text("apple.clientlimitscard.plan_limits.925788cd"), mark: "mark_plan")
 
             if errorMessage != nil {
-                Text("Plan readings could not be refreshed. Pull to try again.")
+                Text(L10n.text("apple.clientlimitscard.plan_readings_could_not_be_refreshed_pull.e771bffd"))
                     .font(ClientType.caption)
                     .foregroundStyle(Theme.controlGlyph)
             }
@@ -42,8 +42,7 @@ struct ClientLimitsCard: View {
                 // Not an error. A computer posts readings only when "Share with
                 // my devices" is on under Plan limits, and only after a limits
                 // refresh or sync. Until then the honest line is empty, not zero.
-                Text("No readings yet. On a Mac, open Plan limits in Account and turn on Share with "
-                    + "my devices. Then refresh or sync.")
+                Text(L10n.text("apple.clientlimitscard.no_readings_yet_on_a_mac_open_plan_limits.467d1c76"))
                     .font(ClientType.label)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -153,9 +152,9 @@ private struct ProviderRow: View {
 
     /// When this was read, in words. A reading with no date is not a reading.
     private var observed: String {
-        guard let at = provider.observedAt else { return "no date" }
+        guard let at = provider.observedAt else { return L10n.text("apple.clientlimitscard.no_date.89be6303") }
         let ago = at.formatted(.relative(presentation: .numeric))
-        return provider.isStale ? "stale, \(ago)" : ago
+        return provider.isStale ? L10n.text("apple.clientlimitscard.stale_0.23070062", "\(ago)") : ago
     }
 }
 
@@ -184,13 +183,13 @@ private struct WindowGauge: View {
             }
             .frame(height: 6)
             if let resets = window.resetsAt {
-                Text("resets \(resets.formatted(.relative(presentation: .numeric)))")
+                Text(L10n.text("apple.clientlimitscard.resets_0.5eb38742", "\(resets.formatted(.relative(presentation: .numeric)))"))
                     .font(ClientType.caption)
                     .foregroundStyle(.tertiary)
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(window.displayLabel), \(Int(window.percent.rounded())) percent used")
+        .accessibilityLabel(L10n.text("apple.clientlimitscard.0_1_percent_used.bae57146", "\(window.displayLabel)", "\(Int(window.percent.rounded()))"))
     }
 
     /// Severity is the renderer's decision, taken from the core's thresholds

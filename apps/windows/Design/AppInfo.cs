@@ -14,7 +14,7 @@ internal static class AppInfo
 {
     public const string Product = "tokenstat";
     public const string Company = "pueev OÜ";
-    public const string Copyright = "© pueev OÜ. All rights reserved.";
+    public static readonly string Copyright = L10n.Text("windows.appinfo.pueev_o_all_rights_reserved.b1734f76");
     public const string WebsiteLabel = "tokenstat.ai";
     public const string Website = "https://tokenstat.ai/?ref=tokenstat_app";
     public const string Repository = "https://github.com/gyorgysh/tokenstat";
@@ -32,7 +32,7 @@ internal static class AppInfo
     public static class Author
     {
         public const string Name = "Gyorgy";
-        public const string Role = "AI-native product engineer";
+        public static readonly string Role = L10n.Text("windows.appinfo.ai_native_product_engineer.e8e5f442");
         public const string Site = "https://gyorgy.sh/?ref=tokenstat_app";
         public const string SiteLabel = "gyorgy.sh";
         public const string Email = "mailto:gyorgy@pueev.com";

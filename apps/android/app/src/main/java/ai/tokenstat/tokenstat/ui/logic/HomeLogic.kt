@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.logic
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.marks.formatServerDate
 import kotlin.math.roundToInt
 
@@ -120,15 +122,15 @@ object RecentPlaces {
         if (trimmed.isEmpty() || trimmed.contains("/") || trimmed.contains("\\") ||
             trimmed.any { it.isISOControl() }
         ) {
-            return "Project"
+            return L10n.text("android.homelogic.project.98595978")
         }
         return trimmed.take(80)
     }
 
     fun title(place: Place): String = when (place.id.kind) {
         Kind.WORKSPACE -> place.workspaceName
-        Kind.CHAT -> "Chat in ${place.workspaceName}"
-        Kind.TERMINAL -> if (place.id.workspaceId == null) "Terminal" else "Terminal in ${place.workspaceName}"
+        Kind.CHAT -> L10n.text("android.homelogic.chat_in_0.83a947da", "${place.workspaceName}")
+        Kind.TERMINAL -> if (place.id.workspaceId == null) L10n.text("android.homelogic.terminal.e0926fda") else L10n.text("android.homelogic.terminal_in_0.9d87a81b", "${place.workspaceName}")
     }
 
     /// The handle when there is one, else the account id. Port of
@@ -250,7 +252,7 @@ object PinnedWork {
         if (trimmed.isEmpty() || trimmed.contains("/") || trimmed.contains("\\") ||
             trimmed.any { it.isISOControl() }
         ) {
-            return "Pinned work"
+            return L10n.text("android.homelogic.pinned_work.23dd8f45")
         }
         return trimmed.take(80)
     }
@@ -267,12 +269,12 @@ object PinnedWork {
 /// balanced order leads with the two figures: they are one line deep and read
 /// at a glance, so they answer without pushing the work down a short screen.
 enum class HomeSection(val key: String, val label: String, val detail: String) {
-    CONTINUE("continue", "Continue", "The folders and conversations you were last in"),
-    PINNED("pinned", "Pinned work", "Shortcuts to the folders and conversations you pinned"),
-    MACHINES("machines", "Machines", "Which of your machines are awake"),
-    USAGE("usage", "Today and this week", "What today and this week came to"),
-    ACTIVITY("activity", "Activity", "The year, a square a day"),
-    LIMITS("limits", "Plan limits", "How much of each tool's subscription is left");
+    CONTINUE("continue", L10n.text("android.homelogic.continue.31fbef16"), L10n.text("android.homelogic.the_folders_and_conversations_you_were_las.611a8af7")),
+    PINNED("pinned", L10n.text("android.homelogic.pinned_work.23dd8f45"), L10n.text("android.homelogic.shortcuts_to_the_folders_and_conversations.395d6781")),
+    MACHINES("machines", L10n.text("android.homelogic.machines.c061da19"), L10n.text("android.homelogic.which_of_your_machines_are_awake.59492064")),
+    USAGE("usage", L10n.text("android.homelogic.today_and_this_week.2cb0c4ae"), L10n.text("android.homelogic.what_today_and_this_week_came_to.e49c5c1c")),
+    ACTIVITY("activity", L10n.text("android.homelogic.activity.38da1505"), L10n.text("android.homelogic.the_year_a_square_a_day.a3daad88")),
+    LIMITS("limits", L10n.text("android.homelogic.plan_limits.925788cd"), L10n.text("android.homelogic.how_much_of_each_tool_s_subscription_is_le.16c87cc1"));
 
     companion object {
         fun of(key: String): HomeSection? = entries.find { it.key == key }
@@ -280,9 +282,9 @@ enum class HomeSection(val key: String, val label: String, val detail: String) {
 }
 
 enum class HomePreset(val label: String) {
-    BALANCED("Balanced"),
-    WORK("Work first"),
-    USAGE("Usage first");
+    BALANCED(L10n.text("android.homelogic.balanced.5386ea5d")),
+    WORK(L10n.text("android.homelogic.work_first.c3edce98")),
+    USAGE(L10n.text("android.homelogic.usage_first.007ee7e0"));
 
     val order: List<HomeSection>
         get() = when (this) {
@@ -319,8 +321,8 @@ object DeviceCopy {
         val family = platform?.split("·")?.firstOrNull()
             ?.split(" ")?.firstOrNull()
             ?.takeIf { it.isNotEmpty() }
-        if (family != null) return "$family ${if (isHost) "computer" else "device"}"
-        return "Unnamed device"
+        if (family != null) return "$family ${if (isHost) L10n.text("android.homelogic.computer.aa973021") else L10n.text("android.homelogic.device.263a4dbe")}"
+        return L10n.text("android.homelogic.unnamed_device.6aba593f")
     }
 
     /// The account directory does not publish Always-on host as a flag, so
@@ -334,14 +336,14 @@ object DeviceCopy {
         hasKey: Boolean,
         lastSeenText: String?,
     ): String {
-        if (isThisDevice || online == true) return "Awake now"
+        if (isThisDevice || online == true) return L10n.text("android.homelogic.awake_now.64f95f4c")
         if (isHost) {
             if (hasKey) {
-                return if (lastSeenText != null) "Asleep · last seen $lastSeenText" else "Asleep"
+                return if (lastSeenText != null) L10n.text("android.homelogic.asleep_last_seen_0.6ef899b9", "${lastSeenText}") else L10n.text("android.homelogic.asleep.60135e8f")
             }
-            return "Not set up for remote"
+            return L10n.text("android.homelogic.not_set_up_for_remote.3db4bb28")
         }
-        return if (lastSeenText != null) "Last seen $lastSeenText" else "Has not reported in yet"
+        return if (lastSeenText != null) L10n.text("android.homelogic.last_seen_0.77ac00d1", "${lastSeenText}") else L10n.text("android.homelogic.has_not_reported_in_yet.88f189cb")
     }
 
     /// `m_c982…872c`. Long enough to be unique in a list of five, short
@@ -377,14 +379,14 @@ object DeviceCopy {
     }
 
     fun reach(isThisDevice: Boolean, online: Boolean?, hasKey: Boolean): String {
-        if (isThisDevice) return "This is the device you are holding."
+        if (isThisDevice) return L10n.text("android.homelogic.this_is_the_device_you_are_holding.19fe2976")
         if (online == true) {
-            return "Awake and reachable through the tunnel from this device, and from any other device signed in to this account."
+            return L10n.text("android.homelogic.awake_and_reachable_through_the_tunnel_fro.81ab5be0")
         }
         if (hasKey) {
-            return "Asleep. It has a connection key, so it can be reached from this device once it is awake. Always-on host on that computer keeps it reachable after you quit the app there."
+            return L10n.text("android.homelogic.asleep_it_has_a_connection_key_so_it_can_b.8982cace")
         }
-        return "Not set up for remote reach. Turn on \"Reach devices from anywhere\" on that computer."
+        return L10n.text("android.homelogic.not_set_up_for_remote_reach_turn_on_reach.9d22e688")
     }
 }
 
@@ -420,21 +422,21 @@ object LimitLogic {
 /// missing: a figure nobody measured is not a machine that is idle.
 object HostStatsFormat {
     fun powerLabel(charging: Boolean, percent: Int?, power: String?, failed: Boolean, hadStats: Boolean): String {
-        if (failed && !hadStats) return "n/a"
+        if (failed && !hadStats) return L10n.text("android.homelogic.n_a.a683c5c5")
         if (!hadStats) return "…"
         if (charging && percent != null) return "$percent%"
-        if (power == "ac" && percent == null) return "Plugged in"
+        if (power == "ac" && percent == null) return L10n.text("android.homelogic.plugged_in.edefc1f9")
         if (percent != null) return "$percent%"
-        if (power == "battery") return "On battery"
-        if (power == "ac") return "Plugged in"
-        return "n/a"
+        if (power == "battery") return L10n.text("android.homelogic.on_battery.51d53044")
+        if (power == "ac") return L10n.text("android.homelogic.plugged_in.edefc1f9")
+        return L10n.text("android.homelogic.n_a.a683c5c5")
     }
 
     fun ramLabel(usedBytes: Long, totalBytes: Long): String {
         val g = 1024.0 * 1024 * 1024
         val u = usedBytes / g
         val t = totalBytes / g
-        return if (t >= 10) "%.0f / %.0f GB".format(u, t) else "%.1f / %.1f GB".format(u, t)
+        return if (t >= 10) L10n.text("android.homelogic.0f_0f_gb.196931f5").format(u, t) else L10n.text("android.homelogic.1f_1f_gb.520814df").format(u, t)
     }
 
     fun cpuLabel(cpu: Double): String = "${(cpu * 100).roundToInt()}%"
@@ -442,8 +444,8 @@ object HostStatsFormat {
     /// Nil when this process has not yet observed a path, so a machine
     /// screen can stay quiet rather than invent Encrypted relay.
     fun routeLabel(route: String?): String? = when (route) {
-        "direct" -> "Direct connection"
-        "relay" -> "Encrypted relay"
+        "direct" -> L10n.text("android.homelogic.direct_connection.28d0ad54")
+        "relay" -> L10n.text("android.homelogic.encrypted_relay.153d7b1c")
         else -> null
     }
 }

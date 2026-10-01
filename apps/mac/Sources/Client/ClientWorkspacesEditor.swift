@@ -54,7 +54,7 @@ struct ClientWorkspacesEditor: View {
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 } footer: {
-                    Text("Order of Folders, Recent chats and All sessions on the connected machine. Computers stay above.")
+                    Text(L10n.text("apple.clientworkspaceseditor.order_of_folders_recent_chats_and_all_sess.1e31aba6"))
                 }
 
                 Section {
@@ -63,13 +63,13 @@ struct ClientWorkspacesEditor: View {
                     }
                     .onMove(perform: move)
                 } header: {
-                    Text("Visible · drag to reorder")
+                    Text(L10n.text("apple.clientworkspaceseditor.visible_drag_to_reorder.865ac64c"))
                 } footer: {
                     Text(footerText)
                 }
 
                 if !hidden.isEmpty {
-                    Section("Hidden") {
+                    Section(L10n.text("apple.clientworkspaceseditor.hidden.7e6fefff")) {
                         ForEach(order.filter { hidden.contains($0) }) { section in
                             row(section)
                         }
@@ -85,10 +85,10 @@ struct ClientWorkspacesEditor: View {
                                 .resizable().scaledToFit().frame(width: 24, height: 24)
                                 .accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text("All tasks")
+                                Text(L10n.text("apple.clientworkspaceseditor.all_tasks.cb664823"))
                                     .font(ClientType.body)
                                     .foregroundStyle(allTasks ? .primary : .secondary)
-                                Text("Task board for the whole computer, above the sections")
+                                Text(L10n.text("apple.clientworkspaceseditor.task_board_for_the_whole_computer_above_th.39129983"))
                                     .font(ClientType.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -100,28 +100,28 @@ struct ClientWorkspacesEditor: View {
                     }
                     .buttonStyle(.plain)
                     .listRowBackground(Color.clear)
-                    .accessibilityLabel("All tasks link")
-                    .accessibilityValue(allTasks ? "Visible" : "Hidden")
+                    .accessibilityLabel(L10n.text("apple.clientworkspaceseditor.all_tasks_link.51f07f03"))
+                    .accessibilityValue(allTasks ? L10n.text("apple.clientworkspaceseditor.visible.8411f5ab") : L10n.text("apple.clientworkspaceseditor.hidden.7e6fefff"))
                 } header: {
-                    Text("Task board")
+                    Text(L10n.text("apple.clientworkspaceseditor.task_board.8aec510a"))
                 }
 
                 Section {
-                    Button("Reset Projects", .refresh) {
+                    Button(L10n.text("apple.clientworkspaceseditor.reset_projects.86decdfb"), .refresh) {
                         beforeReset = (order, hidden, preset)
                         order = WorkspacesPreset.foldersFirst.order
                         hidden = WorkspacesPreset.foldersFirst.hidden
                         preset = .foldersFirst
-                        announcement = "Folders first restored."
+                        announcement = L10n.text("apple.clientworkspaceseditor.folders_first_restored.cad01148")
                     }
                     .listRowBackground(Color.clear)
                     if let previous = beforeReset {
-                        Button("Undo reset", .restore) {
+                        Button(L10n.text("apple.clientworkspaceseditor.undo_reset.c4961cf5"), .restore) {
                             order = previous.order
                             hidden = previous.hidden
                             preset = previous.preset
                             beforeReset = nil
-                            announcement = "Previous order restored."
+                            announcement = L10n.text("apple.clientworkspaceseditor.previous_order_restored.e51463f3")
                         }
                         .listRowBackground(Color.clear)
                     }
@@ -136,14 +136,14 @@ struct ClientWorkspacesEditor: View {
             .environment(\.editMode, .constant(.active))
             .scrollContentBackground(.hidden)
             .background(Theme.background)
-            .navigationTitle("Customize Projects")
+            .navigationTitle(L10n.text("apple.clientworkspaceseditor.customize_projects.00ab91c5"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", .dismiss) { dismiss() }
+                    Button(L10n.text("common.cancel"), .dismiss) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done", .done) {
+                    Button(L10n.text("common.done"), .done) {
                         layout.apply(order: order, hidden: hidden, preset: preset)
                         layout.setAllTasksVisible(allTasks)
                         dismiss()
@@ -155,11 +155,11 @@ struct ClientWorkspacesEditor: View {
 
     private var footerText: String {
         if visible.isEmpty {
-            return "Projects will only show computers. Switch a section back on here at any time."
+            return L10n.text("apple.clientworkspaceseditor.projects_will_only_show_computers_switch_a.638004ff")
         }
         let off = order.filter { hidden.contains($0) }
-        guard !off.isEmpty else { return "Every section is on." }
-        return "Off: \(off.map(\.label).joined(separator: ", "))."
+        guard !off.isEmpty else { return L10n.text("apple.clientworkspaceseditor.every_section_is_on.51c7661a") }
+        return L10n.text("apple.clientworkspaceseditor.off_0.8d022e73", "\(off.map(\.label).joined(separator: ", "))")
     }
 
     private var presetRow: some View {
@@ -193,7 +193,7 @@ struct ClientWorkspacesEditor: View {
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(option.label) preset")
+                .accessibilityLabel(L10n.text("apple.clientworkspaceseditor.0_preset.621d4288", "\(option.label)"))
                 .accessibilityAddTraits(preset == option ? [.isSelected] : [])
             }
         }
@@ -214,7 +214,7 @@ struct ClientWorkspacesEditor: View {
             if on { hidden.insert(section) } else { hidden.remove(section) }
             preset = nil
             beforeReset = nil
-            announcement = "\(section.label) \(on ? "hidden" : "shown")."
+            announcement = "\(section.label) \(on ? L10n.text("apple.clientworkspaceseditor.hidden.e564b408") : L10n.text("apple.clientworkspaceseditor.shown.baaf5362"))."
         } label: {
             HStack(spacing: Theme.Space.m) {
                 Image(systemName: section.symbol)
@@ -249,15 +249,15 @@ struct ClientWorkspacesEditor: View {
         }
         .listRowBackground(Color.clear)
         .accessibilityLabel(section.label)
-        .accessibilityValue(on ? "Visible, position \(place) of \(visible.count)" : "Hidden")
+        .accessibilityValue(on ? L10n.text("apple.clientworkspaceseditor.visible_position_0_of_1.0c15d01d", "\(place)", "\(visible.count)") : L10n.text("apple.clientworkspaceseditor.hidden.7e6fefff"))
         .accessibilityFocused($focusedSection, equals: section)
         .accessibilityActions {
             if on {
                 if visible.first != section {
-                    Button("Move up") { shift(section, by: -1) }
+                    Button(L10n.text("apple.clientworkspaceseditor.move_up.c66feb5e")) { shift(section, by: -1) }
                 }
                 if visible.last != section {
-                    Button("Move down") { shift(section, by: 1) }
+                    Button(L10n.text("apple.clientworkspaceseditor.move_down.40bb50da")) { shift(section, by: 1) }
                 }
             }
         }
@@ -281,7 +281,7 @@ struct ClientWorkspacesEditor: View {
     }
 
     private func announceMove(_ section: WorkspacesSection) {
-        announcement = "\(section.label) moved to position \((visible.firstIndex(of: section) ?? 0) + 1)."
+        announcement = L10n.text("apple.clientworkspaceseditor.0_moved_to_position_1.4fa1daea", "\(section.label)", "\((visible.firstIndex(of: section) ?? 0) + 1)")
         AccessibilityNotification.Announcement(announcement).post()
     }
 }
@@ -299,7 +299,7 @@ private struct WorkspacesLayoutPreview: View {
                 .padding(.bottom, 3)
                 .accessibilityHidden(true)
             if sections.isEmpty {
-                Text("Only computers will show")
+                Text(L10n.text("apple.clientworkspaceseditor.only_computers_will_show.dcb66766"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 44)
@@ -336,8 +336,8 @@ private struct WorkspacesLayoutPreview: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: sections)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(sections.isEmpty
-            ? "Preview: only hosts"
-            : "Preview: \(sections.map(\.label).joined(separator: ", "))")
+            ? L10n.text("apple.clientworkspaceseditor.preview_only_hosts.00b8c09f")
+            : L10n.text("apple.clientworkspaceseditor.preview_0.7a199109", "\(sections.map(\.label).joined(separator: ", "))"))
     }
 }
 

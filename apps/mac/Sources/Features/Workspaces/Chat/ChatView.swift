@@ -43,67 +43,67 @@ private struct ChatConversationOverview: View {
                     Image(systemName: "bubble.left.and.bubble.right")
                         .foregroundStyle(Theme.accent).font(Theme.font(22))
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Conversations").font(Theme.font(24, weight: .semibold))
-                        Text("Find and resume work in \(workspaceName ?? "this project").")
+                        Text(L10n.text("apple.chatview.conversations.1d432f58")).font(Theme.font(24, weight: .semibold))
+                        Text(L10n.text("apple.chatview.find_and_resume_work_in_0.3ebaee48", "\(workspaceName ?? L10n.text("apple.chatview.this_project.11453073"))"))
                             .font(Theme.callout).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("New chat", .create, action: onNew).buttonStyle(AccentButtonStyle())
+                    Button(L10n.text("apple.chatview.new_chat.db18382a"), .create, action: onNew).buttonStyle(AccentButtonStyle())
                         .disabled(model.isLoading || model.folderID != workspaceID)
                 }
                 if let error = model.error {
                     Text(error).font(Theme.callout).foregroundStyle(Theme.warning)
                 }
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Theme.Space.s), count: 3), spacing: Theme.Space.s) {
-                    ActivitySummaryTile(title: "Conversations", value: conversations.count, symbol: "bubble.left.and.bubble.right")
-                    ActivitySummaryTile(title: "Running", value: conversations.filter(\.running).count, symbol: "play.circle")
-                    ActivitySummaryTile(title: "Agents used", value: Set(conversations.map(\.backend)).count, symbol: "sparkles")
+                    ActivitySummaryTile(title: L10n.text("apple.chatview.conversations.1d432f58"), value: conversations.count, symbol: "bubble.left.and.bubble.right")
+                    ActivitySummaryTile(title: L10n.text("common.running"), value: conversations.filter(\.running).count, symbol: "play.circle")
+                    ActivitySummaryTile(title: L10n.text("apple.chatview.agents_used.9ba9cedc"), value: Set(conversations.map(\.backend)).count, symbol: "sparkles")
                 }
                 HStack(spacing: Theme.Space.s) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Search titles, agents, or models", text: $search).textFieldStyle(.plain)
+                    TextField(L10n.text("apple.chatview.search_titles_agents_or_models.4795e797"), text: $search).textFieldStyle(.plain)
                 }
                 .padding(Theme.Space.s)
                 .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.Space.s))
                 .overlay(RoundedRectangle(cornerRadius: Theme.Space.s).strokeBorder(Theme.border))
                 HStack(spacing: Theme.Space.m) {
-                    Picker("Agent", selection: $backend) {
-                        Text("All agents").tag("")
+                    Picker(L10n.text("apple.chatview.agent.11b39c93"), selection: $backend) {
+                        Text(L10n.text("apple.chatview.all_agents.54c32d3e")).tag("")
                         ForEach(Set(conversations.map(\.backend)).sorted(), id: \.self) { id in
                             Text(agentName(id)).tag(id)
                         }
                     }.frame(maxWidth: 200)
-                    Toggle("Running only", isOn: $runningOnly).toggleStyle(.button)
+                    Toggle(L10n.text("apple.chatview.running_only.48bbf789"), isOn: $runningOnly).toggleStyle(.button)
                     Spacer(minLength: 0)
-                    Picker("Sort", selection: $alphabetical) {
-                        Text("Recent first").tag(false)
-                        Text("Title A–Z").tag(true)
+                    Picker(L10n.text("apple.chatview.sort.bec69036"), selection: $alphabetical) {
+                        Text(L10n.text("apple.chatview.recent_first.e23e162b")).tag(false)
+                        Text(L10n.text("apple.chatview.title_a_z.ab217de6")).tag(true)
                     }.labelsHidden().frame(width: 145)
                 }
                 if model.isLoading || model.folderID != workspaceID {
                     Skeleton.CardPlaceholder(rows: 3)
                 } else if conversations.isEmpty {
-                    ContentUnavailableView("No conversations yet", systemImage: "bubble.left.and.bubble.right", description: Text("Start a chat to work with an agent in this workspace."))
+                    ContentUnavailableView(L10n.text("apple.chatview.no_conversations_yet.0d60084f"), systemImage: "bubble.left.and.bubble.right", description: Text(L10n.text("apple.chatview.start_a_chat_to_work_with_an_agent_in_this.1a00be4f")))
                         .frame(maxWidth: .infinity)
                         .padding(.top, Theme.Space.xl)
                 } else if shown.isEmpty {
-                    ContentUnavailableView("No matching conversations", systemImage: "magnifyingglass", description: Text("Try another search or adjust the filters."))
+                    ContentUnavailableView(L10n.text("apple.chatview.no_matching_conversations.8a36372a"), systemImage: "magnifyingglass", description: Text(L10n.text("apple.chatview.try_another_search_or_adjust_the_filters.cbfdef66")))
                         .frame(maxWidth: .infinity)
                         .padding(.top, Theme.Space.xl)
                 } else {
-                    Text("\(shown.count) conversations").font(Theme.caption).foregroundStyle(.secondary)
+                    Text(L10n.text("apple.chatview.0_conversations.c8fbf1b4", "\(shown.count)")).font(Theme.caption).foregroundStyle(.secondary)
                     LazyVStack(spacing: Theme.Space.s) {
                         ForEach(shown) { conversation in
                             Button { onOpen(conversation) } label: {
                                 HStack(spacing: Theme.Space.m) {
                                     HarnessMark(id: conversation.backend, size: 40)
                                     VStack(alignment: .leading, spacing: 6) {
-                                        Text(conversation.title.isEmpty ? "Untitled conversation" : conversation.title)
+                                        Text(conversation.title.isEmpty ? L10n.text("apple.chatview.untitled_conversation.31d248c4") : conversation.title)
                                             .font(Theme.font(14, weight: .semibold)).lineLimit(2)
                                         HStack(spacing: Theme.Space.s) {
                                             Text(agentName(conversation.backend)).foregroundStyle(Theme.accent)
                                             if let name = conversation.model, !name.isEmpty { Text(name).lineLimit(1) }
-                                            if conversation.running { Label("Running", systemImage: "play.fill").foregroundStyle(Theme.secondary) }
+                                            if conversation.running { Label(L10n.text("common.running"), systemImage: "play.fill").foregroundStyle(Theme.secondary) }
                                         }.font(Theme.caption).foregroundStyle(.secondary)
                                     }
                                     Spacer(minLength: Theme.Space.s)
@@ -123,7 +123,7 @@ private struct ChatConversationOverview: View {
                             })
                             #endif
                             .contextMenu {
-                                Button("Remove chat", .delete, role: .destructive) {
+                                Button(L10n.text("apple.chatview.remove_chat.4e6c56bb"), .delete, role: .destructive) {
                                     pendingRemoval = conversation
                                 }
                             }
@@ -134,22 +134,22 @@ private struct ChatConversationOverview: View {
         }
         .background(Theme.background)
         .confirmationDialog(
-            "Remove this chat?",
+            L10n.text("apple.chatview.remove_this_chat.5fe93d92"),
             isPresented: Binding(
                 get: { pendingRemoval != nil },
                 set: { if !$0 { pendingRemoval = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("Remove chat", role: .destructive) {
+            Button(L10n.text("apple.chatview.remove_chat.4e6c56bb"), role: .destructive) {
                 if let chat = pendingRemoval {
                     Task { await model.remove(chat, in: workspaceID) }
                 }
                 pendingRemoval = nil
             }
-            Button("Cancel", role: .cancel) { pendingRemoval = nil }
+            Button(L10n.text("common.cancel"), role: .cancel) { pendingRemoval = nil }
         } message: {
-            Text("This permanently deletes the transcript.")
+            Text(L10n.text("apple.chatview.this_permanently_deletes_the_transcript.470ca3e0"))
         }
         .onChange(of: workspaceID) { _, _ in
             search = ""
@@ -242,40 +242,40 @@ struct ChatView: View {
                 // New chat stays a button: it is the one thing people reach
                 // for here. The rest is one menu, so the bar has room for the
                 // project's own tabs.
-                ToolbarMenuButton(help: "More for this conversation") {
-                    Button(showingOverview ? "Back to the conversation" : "All conversations", .layout) {
+                ToolbarMenuButton(help: L10n.text("apple.chatview.more_for_this_conversation.314ed3c2")) {
+                    Button(showingOverview ? L10n.text("apple.chatview.back_to_the_conversation.481c16c4") : L10n.text("apple.chatview.all_conversations.ecf200f4"), .layout) {
                         showingOverview.toggle()
                     }
                     if !showingOverview, model.selected != nil, let reference = model.currentReference {
                         let pinned = pins.isPinned(reference)
                         let full = pins.pins(in: reference.scope).count >= PinnedWorkStore.capacity
-                        Button(pinned ? "Unpin from Home" : "Pin to Home", pinned ? .pinned : .pin) {
+                        Button(pinned ? L10n.text("apple.chatview.unpin_from_home.df00f5de") : L10n.text("apple.chatview.pin_to_home.db029e6f"), pinned ? .pinned : .pin) {
                             Task {
                                 if pinned {
                                     await PinnedWorkActions.unpin(reference)
                                 } else {
                                     await PinnedWorkActions.pin(
                                         reference,
-                                        label: model.selected?.title ?? "Chat",
-                                        folderName: workspaceName ?? "Project"
+                                        label: model.selected?.title ?? L10n.text("apple.chatview.chat.460b3a7d"),
+                                        folderName: workspaceName ?? L10n.text("apple.chatview.project.98595978")
                                     )
                                 }
                             }
                         }
                         .disabled(!pinned && full)
                         if !pinned && full {
-                            Text("Home holds eight pins. Unpin one to make room.")
+                            Text(L10n.text("apple.chatview.home_holds_eight_pins_unpin_one_to_make_ro.7d0eb1cf"))
                         }
                     }
                     if !showingOverview, model.currentReference != nil, model.savedCopy == nil {
-                        Button("Continue on another device", .device) {
+                        Button(L10n.text("apple.chatview.continue_on_another_device.b5836f9a"), .device) {
                             showingHandoff = true
                         }
                     }
                 }
                 ToolbarIconButton(
                     systemImage: "plus",
-                    help: "New chat",
+                    help: L10n.text("apple.chatview.new_chat.db18382a"),
                     isBusy: model.isCreating,
                     isEnabled: !model.isCreating
                 ) {
@@ -354,10 +354,10 @@ struct ChatView: View {
                         running: model.busy,
                         sendsAsNote: model.sendsAsNote,
                         placeholder: model.sendsAsNote
-                            ? "Add a note for the next step"
+                            ? L10n.text("apple.chatview.add_a_note_for_the_next_step.4778177a")
                             : (model.busy
-                                ? "Send after this turn"
-                                : "Ask about \(workspaceName ?? "this folder")"),
+                                ? L10n.text("apple.chatview.send_after_this_turn.012fc8c3")
+                                : L10n.text("apple.chatview.ask_about_0.35c322e7", "\(workspaceName ?? L10n.text("apple.chatview.this_folder.9d6325c8"))")),
                         onSend: { submit(from: chat) },
                         onSendNow: { submit(from: chat, sendNow: true) },
                         onStop: { Task { await model.stop() } },
@@ -460,11 +460,11 @@ struct ChatView: View {
         }
         #endif
         #if !os(macOS)
-        .navigationTitle(model.selected?.title ?? "Chat")
+        .navigationTitle(model.selected?.title ?? L10n.text("apple.chatview.chat.460b3a7d"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("New chat", .create) { Task { await model.create() } }
+                Button(L10n.text("apple.chatview.new_chat.db18382a"), .create) { Task { await model.create() } }
             }
         }
         #endif
@@ -524,11 +524,11 @@ struct ChatView: View {
                 await model.poll()
             }
         }
-        .alert("Chat unavailable", isPresented: Binding(
+        .alert(L10n.text("apple.chatview.chat_unavailable.a45aae80"), isPresented: Binding(
             get: { isActive && model.error != nil },
             set: { if !$0 && isActive { model.error = nil } }
         )) {
-            Button("OK", role: .cancel) { model.error = nil }
+            Button(L10n.text("apple.chatview.ok.565339bc"), role: .cancel) { model.error = nil }
         } message: {
             Text(model.error ?? "")
         }
@@ -571,12 +571,12 @@ struct ChatView: View {
                         else { window.ask(force: true) }
                     }
                     if hiddenAboveCount > 0 {
-                        Button("Show \(hiddenAboveCount) earlier messages", .history) {
+                        Button(L10n.text("apple.chatview.show_0_earlier_messages.2e5e4ab9", "\(hiddenAboveCount)"), .history) {
                             revealEarlier()
                         }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                         .frame(maxWidth: .infinity, alignment: .center)
-                        .accessibilityLabel("Show earlier messages")
+                        .accessibilityLabel(L10n.text("apple.chatview.show_earlier_messages.b6badd18"))
                     }
                     ForEach(rows) { item in
                         ChatEventRow(
@@ -1012,7 +1012,7 @@ struct ChatView: View {
 
     #if !os(macOS)
     private var conversationMenu: some View {
-        Menu(model.selected?.title ?? "Chat") {
+        Menu(model.selected?.title ?? L10n.text("apple.chatview.chat.460b3a7d")) {
             ForEach(model.chats) { conversation in
                 Button(conversation.title) { Task { await model.select(conversation) } }
             }
@@ -1226,7 +1226,7 @@ struct ChatView: View {
                     model.appendImportedText(text, to: owner)
                 }
             case .folder:
-                showDropNotice("Attach files, not folders")
+                showDropNotice(L10n.text("apple.chatview.attach_files_not_folders.9039f9a4"))
             }
         }
     }
@@ -1254,7 +1254,7 @@ struct ChatView: View {
     private var emptyConversation: some View {
         VStack(spacing: Theme.Space.m) {
             ChatScene(seed: model.defaultFaceSeed)
-            Text("Ask about \(workspaceName ?? "this folder")")
+            Text(L10n.text("apple.chatview.ask_about_0.35c322e7", "\(workspaceName ?? L10n.text("apple.chatview.this_folder.9d6325c8"))"))
                 .font(Theme.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -1268,14 +1268,14 @@ struct ChatView: View {
         VStack(spacing: Theme.Space.l) {
             Spacer()
             ChatScene(seed: model.defaultFaceSeed)
-            Text("Start a chat")
+            Text(L10n.text("apple.chatview.start_a_chat.d80b1888"))
                 .font(Theme.title2.weight(.semibold))
-            Text("Ask an agent to explore, plan, or work in this folder.")
+            Text(L10n.text("apple.chatview.ask_an_agent_to_explore_plan_or_work_in_th.ebcac953"))
                 .font(Theme.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
-            Button("New chat", .create) {
+            Button(L10n.text("apple.chatview.new_chat.db18382a"), .create) {
                 Task { await model.create() }
             }
             .buttonStyle(AccentButtonStyle())
@@ -1348,10 +1348,10 @@ struct ChatDropExperience: View {
                     .font(Theme.font(36, weight: .medium))
                     .foregroundStyle(Theme.accent)
                     .frame(width: 58, height: 58)
-                Text("Drop to attach")
+                Text(L10n.text("apple.chatview.drop_to_attach.34a7a637"))
                     .font(Theme.callout.weight(.semibold))
                     .foregroundStyle(Theme.accent)
-                Text("Files attach. Text and links join your message.")
+                Text(L10n.text("apple.chatview.files_attach_text_and_links_join_your_mess.66780aaf"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
             }

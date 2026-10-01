@@ -200,7 +200,7 @@ struct WorkflowEditorTarget: Hashable, Sendable, WorkflowEditorService {
         let data = try JSONEncoder().encode(graph)
         let obj = try JSONSerialization.jsonObject(with: data)
         guard let dict = obj as? [String: Any] else {
-            throw WorkflowEditorDraft.Invalid.fields("Could not encode this workflow.")
+            throw WorkflowEditorDraft.Invalid.fields(L10n.text("apple.workfloweditorservice.could_not_encode_this_workflow.6aa3a6ff"))
         }
         return dict
     }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.terminal
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 /// Pure key-bar rules shared by the agent and SSH terminals, ported from
 /// Apple `ClientTerminalKeys` (`TerminalControlCode.fold` and `spoken`).
 /// Kept free of Android imports so unit tests pin the same answers.
@@ -20,16 +22,16 @@ object TerminalKeysLogic {
     /// What a screen reader says for a glyph face. "Right arrow", not
     /// "greater than".
     fun spoken(label: String): String = when (label) {
-        "⇥" -> "Tab"
-        "⇧⇥" -> "Shift Tab"
-        "↑" -> "Up arrow"
-        "↓" -> "Down arrow"
-        "←" -> "Left arrow"
-        "→" -> "Right arrow"
-        "/" -> "Slash"
-        "-" -> "Dash"
-        "|" -> "Pipe"
-        "~" -> "Tilde"
+        "⇥" -> L10n.text("android.terminalkeyslogic.tab.90ddf196")
+        "⇧⇥" -> L10n.text("android.terminalkeyslogic.shift_tab.f3fa2578")
+        "↑" -> L10n.text("android.terminalkeyslogic.up_arrow.9d2e0b44")
+        "↓" -> L10n.text("android.terminalkeyslogic.down_arrow.2d612154")
+        "←" -> L10n.text("android.terminalkeyslogic.left_arrow.fe87c896")
+        "→" -> L10n.text("android.terminalkeyslogic.right_arrow.0611d428")
+        "/" -> L10n.text("android.terminalkeyslogic.slash.9c92721e")
+        "-" -> L10n.text("android.terminalkeyslogic.dash.8c3ea2ea")
+        "|" -> L10n.text("android.terminalkeyslogic.pipe.3725dbfe")
+        "~" -> L10n.text("android.terminalkeyslogic.tilde.66042131")
         else -> label
     }
 

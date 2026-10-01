@@ -48,7 +48,7 @@ struct ClientConnectionChip: View {
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Connection: \(connection.title)")
+            .accessibilityLabel(L10n.text("apple.clientconnectionchip.connection_0.12c0e720", "\(connection.title)"))
             .popover(isPresented: $showDetail) {
                 detail
                     .presentationCompactAdaptation(.popover)
@@ -87,11 +87,11 @@ struct ClientConnectionChip: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let seen = lastGood {
-                Text("Last answered \(seen)")
+                Text(L10n.text("apple.clientconnectionchip.last_answered_0.7941647f", "\(seen)"))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
             }
-            Button("Try now", .refresh) {
+            Button(L10n.text("apple.clientconnectionchip.try_now.549f5e23"), .refresh) {
                 connectivity.checkNow()
                 connection.reset()
                 showDetail = false

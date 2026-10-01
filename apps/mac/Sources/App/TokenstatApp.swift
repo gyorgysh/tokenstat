@@ -284,7 +284,7 @@ struct TokenstatApp: App {
             // the work belongs to the window, so this posts and the window
             // acts, rather than the menu holding a second copy of the state.
             CommandGroup(after: .newItem) {
-                Button("Add Project…") {
+                Button(L10n.text("apple.tokenstatapp.add_project.94d63fa2")) {
                     NotificationCenter.default.post(name: .addWorkspaceRequested, object: nil)
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
@@ -293,7 +293,7 @@ struct TokenstatApp: App {
             // than on each screen's bar, so the shortcut is always there and
             // the bars carry only what belongs to their screen.
             CommandGroup(after: .textEditing) {
-                Button("Search Work…") {
+                Button(L10n.text("apple.tokenstatapp.search_work.7b7bfbb6")) {
                     NotificationCenter.default.post(name: .searchWorkRequested, object: nil)
                 }
                 .keyboardShortcut("k", modifiers: [.command])
@@ -302,19 +302,19 @@ struct TokenstatApp: App {
             // acts, same shape as Add Project, so the shortcut works when a
             // text field would otherwise claim ⌘B for bold.
             CommandGroup(after: .sidebar) {
-                Button("Toggle Sidebar") {
+                Button(L10n.text("apple.tokenstatapp.toggle_sidebar.1d4c17db")) {
                     NotificationCenter.default.post(name: .toggleLeftSidebar, object: nil)
                 }
                 .keyboardShortcut("b", modifiers: [.command])
-                Button("Toggle Inspector") {
+                Button(L10n.text("apple.tokenstatapp.toggle_inspector.1d522187")) {
                     NotificationCenter.default.post(name: .toggleRightSidebar, object: nil)
                 }
                 .keyboardShortcut("b", modifiers: [.command, .option])
-                Button("Previous Conversation") {
+                Button(L10n.text("apple.tokenstatapp.previous_conversation.2afe4350")) {
                     NotificationCenter.default.post(name: .chatStepRequested, object: -1)
                 }
                 .keyboardShortcut(.upArrow, modifiers: [.command, .option])
-                Button("Next Conversation") {
+                Button(L10n.text("apple.tokenstatapp.next_conversation.379370fa")) {
                     NotificationCenter.default.post(name: .chatStepRequested, object: 1)
                 }
                 .keyboardShortcut(.downArrow, modifiers: [.command, .option])
@@ -325,7 +325,7 @@ struct TokenstatApp: App {
         #endif
 
         #if os(macOS)
-        Window("About tokenstat", id: Self.aboutWindowID) {
+        Window(L10n.text("apple.tokenstatapp.about_tokenstat.2777c642"), id: Self.aboutWindowID) {
             AboutView()
         }
         .windowResizability(.contentSize)
@@ -381,7 +381,7 @@ private struct AboutMenuItem: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Button("About tokenstat") {
+        Button(L10n.text("apple.tokenstatapp.about_tokenstat.2777c642")) {
             openWindow(id: TokenstatApp.aboutWindowID)
             NSApp.activate(ignoringOtherApps: true)
         }

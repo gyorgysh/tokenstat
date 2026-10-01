@@ -56,7 +56,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             if (_scope != DeviceScope.AllDevices || !IsLoaded) return;
             _hasContent = false;
             while (_root.Children.Count > 1) _root.Children.RemoveAt(1);
-            _status.Text = "Loading…";
+            _status.Text = L10n.Text("windows.insightspage.loading.ba3bbbe1");
             _ = LoadAsync();
         });
     }
@@ -103,11 +103,11 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
     private static readonly List<(string Value, string Label, ActionIcon? Glyph)> LocalTabs =
         new List<(string, string, ActionIcon?)>
         {
-            ("overview", "Overview", null),
-            ("models", "Models", null),
-            ("projects", "Projects", null),
-            ("harnesses", "Coding tools", null),
-            ("sessions", "Sessions", null),
+            ("overview", L10n.Text("windows.insightspage.overview.d4b1ea57"), null),
+            ("models", L10n.Text("windows.insightspage.models.d17d2d78"), null),
+            ("projects", L10n.Text("common.projects"), null),
+            ("harnesses", L10n.Text("windows.insightspage.coding_tools.6032f740"), null),
+            ("sessions", L10n.Text("windows.insightspage.sessions.6fa3cbf4"), null),
         };
 
     private static readonly List<(string Value, string Label, ActionIcon? Glyph)> Periods =
@@ -116,7 +116,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             ("7d", "7d", null),
             ("30d", "30d", null),
             ("90d", "90d", null),
-            ("all", "All", null),
+            ("all", L10n.Text("windows.insightspage.all.a52ace42"), null),
         };
 
     /// <param name="focusDay">One day to pin from a deep link, in archive
@@ -231,7 +231,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
     {
         if (_scope == DeviceScope.AllDevices)
         {
-            return new List<UIElement> { Buttons.ToolbarIcon(ActionIcon.Refresh, "Refresh account usage", async (_, _) =>
+            return new List<UIElement> { Buttons.ToolbarIcon(ActionIcon.Refresh, L10n.Text("windows.insightspage.refresh_account_usage.70ac7105"), async (_, _) =>
             {
                 _scopeGeneration++;
                 _accountReports.Clear();
@@ -251,12 +251,12 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         picker.VerticalAlignment = VerticalAlignment.Center;
         var scan = Buttons.ToolbarIcon(
             ActionIcon.Refresh,
-            "Read new sessions from supported local tools into the archive",
+            L10n.Text("windows.insightspage.read_new_sessions_from_supported_local_too.baa5d296"),
             async (_, _) => await ScanAsync());
         scan.IsEnabled = !_scanning && !_loading;
         var fetch = Buttons.ToolbarIcon(
             ActionIcon.Download,
-            "Fetch usage from remote vendors such as Cursor",
+            L10n.Text("windows.insightspage.fetch_usage_from_remote_vendors_such_as_cu.406af0cd"),
             async (_, _) => await FetchAsync());
         fetch.IsEnabled = !_fetching && !_loading;
         return new List<UIElement> { picker, scan, fetch };
@@ -270,7 +270,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         {
             _tabSlot.Content = TabStrip.View(new List<(string Value, string Label, ActionIcon? Glyph)>
             {
-                ("model", "Models", null), ("source", "Coding tools", null), ("day", "Days", null),
+                ("model", L10n.Text("windows.insightspage.models.d17d2d78"), null), ("source", L10n.Text("windows.insightspage.coding_tools.6032f740"), null), ("day", L10n.Text("windows.insightspage.days.e08c0aa8"), null),
             }, _accountCut, async value => { _accountCut = value; _visible = FirstPage; await LoadAsync(); });
             return;
         }
@@ -293,15 +293,13 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         }
         _scanning = true;
         RaiseToolbarChanged();
-        _status.Text = "Scanning local logs…";
+        _status.Text = L10n.Text("windows.insightspage.scanning_local_logs.efac0264");
         LogoRefresh.Began();
         try
         {
             var report = await AppServices.Host.CallAsync(
                 "scan", patience: TimeSpan.FromMinutes(10));
-            _status.Text = "Scan complete: added "
-                + Format.Long(report, "eventsNew") + " new events from "
-                + Format.Long(report, "filesRead") + " files.";
+            _status.Text = L10n.Text("windows.insightspage.scan_complete_added_0_new_events_from_1_fi.0eff738d", $"{Format.Long(report, "eventsNew")}", $"{Format.Long(report, "filesRead")}");
         }
         catch (Exception ex)
         {
@@ -322,7 +320,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         }
         _fetching = true;
         RaiseToolbarChanged();
-        _status.Text = "Fetching remote usage…";
+        _status.Text = L10n.Text("windows.insightspage.fetching_remote_usage.607832d5");
         LogoRefresh.Began();
         try
         {
@@ -342,7 +340,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             }
             _status.Text = details.Count > 0
                 ? string.Join(" · ", details)
-                : "Remote fetch complete.";
+                : L10n.Text("windows.insightspage.remote_fetch_complete.2bfec637");
         }
         catch (Exception ex)
         {
@@ -389,7 +387,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         {
             _root.Children.RemoveAt(1);
         }
-        _status.Text = "Loading…";
+        _status.Text = L10n.Text("windows.insightspage.loading.ba3bbbe1");
         _root.Children.Add(Motion.SkeletonCard());
 
         if (_scope == DeviceScope.AllDevices)
@@ -410,7 +408,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 if (!Format.Flag(account, "signedIn"))
                 {
                     _accountReports.Clear();
-                    throw new InvalidOperationException("Sign in to see synced usage across your devices.");
+                    throw new InvalidOperationException(L10n.Text("windows.insightspage.sign_in_to_see_synced_usage_across_your_de.ddaa4913"));
                 }
                 if (!_accountReports.ContainsKey(cut))
                 {
@@ -606,19 +604,19 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
 
     private void RenderAccount()
     {
-        _status.Text = _error ?? "Synced usage across all devices · Last 53 weeks · API list price, not an extra bill";
+        _status.Text = _error ?? L10n.Text("windows.insightspage.synced_usage_across_all_devices_last_53_we.20b8c5e2");
         _accountReports.TryGetValue(_accountCut, out var report);
         if (report is null) return;
         if (Format.Flag(report, "stale"))
         {
             var fetched = DateTimeOffset.FromUnixTimeMilliseconds(Format.Long(report, "fetchedAtMs"));
-            _root.Children.Add(new TextBlock { Text = $"Refresh unavailable. Showing usage fetched {fetched.LocalDateTime:g}.", TextWrapping = TextWrapping.Wrap });
+            _root.Children.Add(new TextBlock { Text = L10n.Text("windows.insightspage.refresh_unavailable_showing_usage_fetched.52df6716", $"{fetched.LocalDateTime:g}"), TextWrapping = TextWrapping.Wrap });
         }
         var rows = Format.Items(report, "rows") ?? new JsonArray();
-        var plural = _accountCut switch { "source" => "coding tools", "day" => "days", _ => "models" };
+        var plural = _accountCut switch { "source" => L10n.Text("windows.insightspage.coding_tools.d83c0a1b"), "day" => "days", _ => "models" };
         var box = new TextBox
         {
-            PlaceholderText = "Filter " + plural,
+            PlaceholderText = L10n.Text("windows.insightspage.filter_0.50ee55cd", $"{plural}"),
             Text = _accountFilter,
         };
         box.TextChanged += (_, _) =>
@@ -646,14 +644,14 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             : filtered.OrderByDescending(row => Format.Long(row, "valueMicros")).ToList();
         if (rows.Count == 0)
         {
-            _accountResults.Children.Add(new TextBlock { Text = "No synced usage in this period." });
+            _accountResults.Children.Add(new TextBlock { Text = L10n.Text("windows.insightspage.no_synced_usage_in_this_period.3484c8af") });
             return;
         }
         if (filtered.Count == 0)
         {
             _accountResults.Children.Add(new TextBlock
             {
-                Text = "Nothing matches \"" + term + "\".",
+                Text = L10n.Text("windows.insightspage.nothing_matches_0.d59cf718", $"{term}"),
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -664,8 +662,8 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             var ascending = new JsonArray();
             foreach (var row in filtered.OrderBy(row => Format.Text(row, "key")))
                 ascending.Add(row?.DeepClone());
-            _accountResults.Children.Add(Chrome.Card("Daily activity",
-                DailyChart(ascending, showsValue: false, showsToggle: false), "Tokens per day · cache included"));
+            _accountResults.Children.Add(Chrome.Card(L10n.Text("windows.insightspage.daily_activity.561d7c9e"),
+                DailyChart(ascending, showsValue: false, showsToggle: false), L10n.Text("windows.insightspage.tokens_per_day_cache_included.a6ebc86d")));
         }
         else
         {
@@ -680,7 +678,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         }
         _accountResults.Children.Add(new TextBlock
         {
-            Text = _accountCut switch { "source" => "Coding tools", "day" => "Days", _ => "Models" },
+            Text = _accountCut switch { "source" => L10n.Text("windows.insightspage.coding_tools.6032f740"), "day" => L10n.Text("windows.insightspage.days.e08c0aa8"), _ => L10n.Text("windows.insightspage.models.d17d2d78") },
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             FontSize = 13,
         });
@@ -692,7 +690,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         _accountResults.Children.Add(list);
         if (filtered.Count > _visible)
         {
-            var more = new Button { Content = "Show more" };
+            var more = new Button { Content = L10n.Text("windows.insightspage.show_more.f5c9bd13") };
             more.Click += (_, _) => { _visible += PageStep; RenderAccountRows(rows); };
             _accountResults.Children.Add(more);
         }
@@ -718,12 +716,12 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             item.Children.Add(labels);
             var bar = new ProgressBar { Minimum = 0, Maximum = peak, Value = tokens, Height = 8,
                 Foreground = Theme.AccentBrush, Background = Theme.AccentSoftBrush };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(bar, $"{title}: {Format.Tokens(tokens)} tokens");
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(bar, L10n.Text("windows.insightspage.0_1_tokens.115695b6", $"{title}", $"{Format.Tokens(tokens)}"));
             item.Children.Add(bar);
             chart.Children.Add(item);
         }
-        return Chrome.Card(_accountCut == "source" ? "Most used coding tools" : "Most used models",
-            chart, "Tokens · including reported cache usage");
+        return Chrome.Card(_accountCut == "source" ? L10n.Text("windows.insightspage.most_used_coding_tools.efd611f9") : L10n.Text("windows.insightspage.most_used_models.861b94dc"),
+            chart, L10n.Text("windows.insightspage.tokens_including_reported_cache_usage.a3e0a451"));
     }
 
     /// <summary>
@@ -756,10 +754,10 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         title.MaxLines = 1;
         names.Children.Add(title);
         long tokens = Format.Long(row?["counters"], "total");
-        var caption = Format.Tokens(tokens) + " tokens";
+        var caption = Format.Tokens(tokens) + L10n.Text("windows.insightspage.tokens.da61a22b");
         if (SessionsCount(row) is string sessions)
         {
-            caption += ", " + sessions + " events";
+            caption += L10n.Text("windows.insightspage.0_events.3211936f", $"{sessions}");
         }
         names.Children.Add(new TextBlock
         {
@@ -832,7 +830,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         {
             return FormatDay(key);
         }
-        return string.IsNullOrEmpty(key) ? "unknown" : key;
+        return string.IsNullOrEmpty(key) ? L10n.Text("windows.insightspage.unknown.b23a6a84") : key;
     }
 
     private static string FormatDay(string key)
@@ -890,10 +888,10 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         bool isHarness = _tab == "harnesses";
         string title = _tab switch
         {
-            "models" => "Models",
-            "projects" => "Projects",
-            "harnesses" => "Coding tools",
-            _ => "Sessions",
+            "models" => L10n.Text("windows.insightspage.models.d17d2d78"),
+            "projects" => L10n.Text("common.projects"),
+            "harnesses" => L10n.Text("windows.insightspage.coding_tools.6032f740"),
+            _ => L10n.Text("windows.insightspage.sessions.6fa3cbf4"),
         };
         _root.Children.Add(BreakdownTable(title, TabRows(_tab), showsValue, monospaced, isHarness));
     }
@@ -927,7 +925,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         row.Children.Add(day);
         var note = new TextBlock
         {
-            Text = "Every figure below is about this one day.",
+            Text = L10n.Text("windows.insightspage.every_figure_below_is_about_this_one_day.efbfc610"),
             Opacity = 0.7,
             TextWrapping = TextWrapping.Wrap,
             VerticalAlignment = VerticalAlignment.Center,
@@ -935,7 +933,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         Grid.SetColumn(note, 2);
         row.Children.Add(note);
         var clear = ActionIconGlyph.Button(
-            "Clear", ActionIcon.Dismiss, async (_, _) => await ClearFocusDayAsync());
+            L10n.Text("windows.insightspage.clear.83b12c22"), ActionIcon.Dismiss, async (_, _) => await ClearFocusDayAsync());
         clear.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(clear, 3);
         row.Children.Add(clear);
@@ -955,10 +953,10 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         if (events == 0 && _error is null)
         {
             _root.Children.Add(EmptyState.View(
-                "Nothing scanned yet",
-                "tokenstat reads the session logs the tools on this PC already write. Run a scan and this fills in.",
+                L10n.Text("windows.insightspage.nothing_scanned_yet.b0a2718e"),
+                L10n.Text("windows.insightspage.tokenstat_reads_the_session_logs_the_tools.e0d8b608"),
                 EmptyArtKind.FirstBars,
-                ActionIconGlyph.Button("Scan now", ActionIcon.Refresh, async (_, _) => await ScanAsync())));
+                ActionIconGlyph.Button(L10n.Text("windows.insightspage.scan_now.c01d65df"), ActionIcon.Refresh, async (_, _) => await ScanAsync())));
             return;
         }
         _root.Children.Add(MetricTiles(totals));
@@ -978,8 +976,8 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             {
                 Width = new GridLength(1, GridUnitType.Star),
             });
-            var left = RankingCard("Top models", models, isHarness: false, showsValue: true, "models");
-            var right = RankingCard("By coding tool", sources, isHarness: true, showsValue: false, "harnesses");
+            var left = RankingCard(L10n.Text("windows.insightspage.top_models.79489561"), models, isHarness: false, showsValue: true, "models");
+            var right = RankingCard(L10n.Text("windows.insightspage.by_coding_tool.d88bafe1"), sources, isHarness: true, showsValue: false, "harnesses");
             Grid.SetColumn(right, 1);
             row.Children.Add(left);
             row.Children.Add(right);
@@ -987,13 +985,13 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         }
         else
         {
-            _root.Children.Add(RankingCard("Top models", models, isHarness: false, showsValue: true, "models"));
-            _root.Children.Add(RankingCard("By coding tool", sources, isHarness: true, showsValue: false, "harnesses"));
+            _root.Children.Add(RankingCard(L10n.Text("windows.insightspage.top_models.79489561"), models, isHarness: false, showsValue: true, "models"));
+            _root.Children.Add(RankingCard(L10n.Text("windows.insightspage.by_coding_tool.d88bafe1"), sources, isHarness: true, showsValue: false, "harnesses"));
         }
         if (projects.Count > 0)
         {
             _root.Children.Add(RankingCard(
-                "Project activity", projects, isHarness: false, showsValue: false, "projects"));
+                L10n.Text("windows.insightspage.project_activity.3601328f"), projects, isHarness: false, showsValue: false, "projects"));
         }
     }
 
@@ -1009,12 +1007,12 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         long perDay = days > 0 ? total / days : 0;
         var tiles = new List<(string Label, string Value, string Detail)>
         {
-            ("Total tokens", Format.Tokens(total), "Including reported cache usage"),
-            ("API list price", MoneyTotal(SnapshotRows("byModel", "by_model")), "Not an extra bill"),
-            ("Sessions", Format.Long(totals, "sessions").ToString("N0", CultureInfo.InvariantCulture),
-                Format.Long(totals, "events").ToString("N0", CultureInfo.InvariantCulture) + " recorded events"),
-            ("Active days", days.ToString("N0", CultureInfo.InvariantCulture),
-                Format.Tokens(perDay) + " tokens / active day"),
+            (L10n.Text("windows.insightspage.total_tokens.e7601ca1"), Format.Tokens(total), L10n.Text("windows.insightspage.including_reported_cache_usage.44e4a309")),
+            (L10n.Text("windows.insightspage.api_list_price.060458ef"), MoneyTotal(SnapshotRows("byModel", "by_model")), L10n.Text("windows.insightspage.not_an_extra_bill.ed03e1c3")),
+            (L10n.Text("windows.insightspage.sessions.6fa3cbf4"), Format.Long(totals, "sessions").ToString("N0", CultureInfo.InvariantCulture),
+                Format.Long(totals, "events").ToString("N0", CultureInfo.InvariantCulture) + L10n.Text("windows.insightspage.recorded_events.f9e69dab")),
+            (L10n.Text("windows.insightspage.active_days.6cbebfa2"), days.ToString("N0", CultureInfo.InvariantCulture),
+                Format.Tokens(perDay) + L10n.Text("windows.insightspage.tokens_active_day.3a02a904")),
         };
         double width = _contentWidth > 0 ? _contentWidth : 800;
         int columns = width >= 760 ? 4 : width >= 380 ? 2 : 1;
@@ -1068,9 +1066,9 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
     private UIElement DailyCard(JsonArray rows)
     {
         return Chrome.Card(
-            "Usage over time",
+            L10n.Text("windows.insightspage.usage_over_time.56d901b0"),
             DailyChart(rows, _chartShowsValue, showsToggle: true),
-            "Daily tokens · cache included");
+            L10n.Text("windows.insightspage.daily_tokens_cache_included.57801e52"));
     }
 
     /// <summary>
@@ -1085,7 +1083,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         {
             stack.Children.Add(new TextBlock
             {
-                Text = "No usage in this period. Try a wider range.",
+                Text = L10n.Text("windows.insightspage.no_usage_in_this_period_try_a_wider_range.30be7846"),
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -1102,8 +1100,8 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             head.Children.Add(new TextBlock
             {
                 Text = showsValue
-                    ? "Daily API list price · not an extra bill"
-                    : "Daily token volume",
+                    ? L10n.Text("windows.insightspage.daily_api_list_price_not_an_extra_bill.c12b9c19")
+                    : L10n.Text("windows.insightspage.daily_token_volume.e3ab0b2f"),
                 FontSize = Fonts.Callout,
                 Opacity = 0.7,
                 VerticalAlignment = VerticalAlignment.Center,
@@ -1111,8 +1109,8 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             var toggle = SegmentedCapsule.View(
                 new List<(string, string, ActionIcon?)>
                 {
-                    ("tokens", "Tokens", null),
-                    ("value", "API list price", null),
+                    ("tokens", L10n.Text("windows.insightspage.tokens.a039dfb9"), null),
+                    ("value", L10n.Text("windows.insightspage.api_list_price.060458ef"), null),
                 },
                 showsValue ? "value" : "tokens",
                 value =>
@@ -1190,14 +1188,13 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         string last = Format.Text(rows[rows.Count - 1], "key");
         foot.Children.Add(new TextBlock
         {
-            Text = first == last ? first : first + " to " + last,
+            Text = first == last ? first : first + L10n.Text("windows.insightspage.to.87721689") + last,
             FontSize = Fonts.Caption,
             Opacity = 0.7,
         });
         var right = new TextBlock
         {
-            Text = "Peak " + Format.Tokens(PeakTokens(rows, peakKey)) + " · " + peakKey
-                + " · " + rows.Count + " recorded days",
+            Text = L10n.Text("windows.insightspage.peak_0_1_2_recorded_days.635832ac", $"{Format.Tokens(PeakTokens(rows, peakKey))}", $"{peakKey}", $"{rows.Count}"),
             FontSize = Fonts.Caption,
             Opacity = 0.7,
             TextAlignment = TextAlignment.Right,
@@ -1242,10 +1239,10 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         {
             stack.Children.Add(new TextBlock
             {
-                Text = "Nothing recorded yet.",
+                Text = L10n.Text("windows.insightspage.nothing_recorded_yet.17f000e0"),
                 Opacity = 0.7,
             });
-            return Chrome.Card(title, stack, "Ranked by tokens · share of this breakdown");
+            return Chrome.Card(title, stack, L10n.Text("windows.insightspage.ranked_by_tokens_share_of_this_breakdown.929721dd"));
         }
         double total = 0;
         double peak = 0;
@@ -1345,7 +1342,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             foot.Children.Add(new TextBlock
             {
                 Text = SessionsCount(row) is string sessions
-                    ? sessions + " sessions"
+                    ? sessions + L10n.Text("windows.insightspage.sessions.786a36dc")
                     : "–",
                 FontSize = Fonts.Caption,
                 Opacity = 0.7,
@@ -1354,7 +1351,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             {
                 var value = new TextBlock
                 {
-                    Text = Money(row) + " at API list price",
+                    Text = Money(row) + L10n.Text("windows.insightspage.at_api_list_price.702cf9ee"),
                     FontSize = Fonts.Caption,
                     Opacity = 0.7,
                 };
@@ -1378,7 +1375,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             stack.Children.Add(hit);
         }
         var more = ActionIconGlyph.Button(
-            "View all (" + rows.Count + ")", ActionIcon.More,
+            L10n.Text("windows.insightspage.view_all_0.41a41832", $"{rows.Count}"), ActionIcon.More,
             (_, _) =>
             {
                 _tab = tab;
@@ -1388,7 +1385,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 Render();
                 RefreshInspector();
             });
-        return Chrome.Card(title, stack, "Ranked by tokens · share of this breakdown", more);
+        return Chrome.Card(title, stack, L10n.Text("windows.insightspage.ranked_by_tokens_share_of_this_breakdown.929721dd"), more);
     }
 
     private void SelectAndOpen(string tab, string key)
@@ -1413,8 +1410,8 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         if (rows.Count == 0)
         {
             return EmptyState.View(
-                "Nothing recorded",
-                "No usage landed in this period. Scan, or widen the time range.",
+                L10n.Text("windows.insightspage.nothing_recorded.44985e2c"),
+                L10n.Text("windows.insightspage.no_usage_landed_in_this_period_scan_or_wid.59209497"),
                 EmptyArtKind.FirstBars);
         }
         var stack = new StackPanel { Spacing = 0 };
@@ -1435,21 +1432,21 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         {
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(88) });
         }
-        var nameHead = HeaderCell("NAME", TextAlignment.Left);
+        var nameHead = HeaderCell(L10n.Text("windows.insightspage.name.eaa58932"), TextAlignment.Left);
         if (isHarness)
         {
             Grid.SetColumnSpan(nameHead, 2);
         }
         header.Children.Add(nameHead);
-        var sessions = HeaderCell("SESSIONS", TextAlignment.Right);
+        var sessions = HeaderCell(L10n.Text("windows.insightspage.sessions.3068f7e5"), TextAlignment.Right);
         Grid.SetColumn(sessions, 1 + nameCol);
         header.Children.Add(sessions);
-        var tokens = HeaderCell("TOKENS", TextAlignment.Right);
+        var tokens = HeaderCell(L10n.Text("windows.insightspage.tokens.a0dd5436"), TextAlignment.Right);
         Grid.SetColumn(tokens, 2 + nameCol);
         header.Children.Add(tokens);
         if (showsValue)
         {
-            var value = HeaderCell("VALUE", TextAlignment.Right);
+            var value = HeaderCell(L10n.Text("windows.insightspage.value.8ec121c9"), TextAlignment.Right);
             Grid.SetColumn(value, 3 + nameCol);
             header.Children.Add(value);
         }
@@ -1529,7 +1526,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                     TextAlignment = TextAlignment.Right,
                     MaxLines = 1,
                 });
-                ToolTipService.SetToolTip(value, "API list price, not an extra bill");
+                ToolTipService.SetToolTip(value, L10n.Text("windows.insightspage.api_list_price_not_an_extra_bill.7ecc2b1d"));
                 Grid.SetColumn(value, 3 + nameCol);
                 line.Children.Add(value);
             }
@@ -1582,7 +1579,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 Padding = new Thickness(Theme.SpaceM, Theme.SpaceS, Theme.SpaceM, Theme.SpaceS),
             };
             more.Children.Add(ActionIconGlyph.Button(
-                "Show " + Math.Min(PageStep, hidden) + " more", ActionIcon.More,
+                L10n.Text("windows.insightspage.show_0_more.b91c3640", $"{Math.Min(PageStep, hidden)}"), ActionIcon.More,
                 (_, _) =>
                 {
                     _visible += PageStep;
@@ -1590,13 +1587,13 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 }));
             more.Children.Add(new TextBlock
             {
-                Text = hidden + " more hidden",
+                Text = hidden + L10n.Text("windows.insightspage.more_hidden.fa210562"),
                 FontSize = Fonts.Caption,
                 Opacity = 0.55,
                 VerticalAlignment = VerticalAlignment.Center,
             });
             more.Children.Add(ActionIconGlyph.Button(
-                "Show all", ActionIcon.More,
+                L10n.Text("windows.insightspage.show_all.2150d8df"), ActionIcon.More,
                 (_, _) =>
                 {
                     _visible = rows.Count;
@@ -1622,7 +1619,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         outer.Children.Add(panel);
         outer.Children.Add(new TextBlock
         {
-            Text = "API list price, not an extra bill.",
+            Text = L10n.Text("windows.insightspage.api_list_price_not_an_extra_bill.a12d94fd"),
             FontSize = Fonts.Caption,
             Opacity = 0.7,
         });
@@ -1646,9 +1643,9 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         _inspectorRoot.Children.Clear();
         if (_scope == DeviceScope.AllDevices)
         {
-            _inspectorRoot.Children.Add(Chrome.Card("All devices", new TextBlock
+            _inspectorRoot.Children.Add(Chrome.Card(L10n.Text("windows.insightspage.all_devices.0594fe82"), new TextBlock
             {
-                Text = "Aggregated model, coding tool and daily usage synced to your account. Choose This device for local projects, sessions and archive details.",
+                Text = L10n.Text("windows.insightspage.aggregated_model_coding_tool_and_daily_usa.c5f79ddb"),
                 TextWrapping = TextWrapping.Wrap,
             }));
             return;
@@ -1666,19 +1663,19 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         if (_snapshot is not null && events == 0 && _error is null && !_loading)
         {
             body.Children.Add(Chrome.Empty(
-                "Nothing scanned yet",
-                "tokenstat reads the session logs the tools on this PC already write. Run a scan and this fills in.",
+                L10n.Text("windows.insightspage.nothing_scanned_yet.b0a2718e"),
+                L10n.Text("windows.insightspage.tokenstat_reads_the_session_logs_the_tools.e0d8b608"),
                 ActionIcon.Search));
-            return Chrome.Card(_focusDay is null ? "This period" : "This day", body);
+            return Chrome.Card(_focusDay is null ? L10n.Text("windows.insightspage.this_period.8ed3e11f") : L10n.Text("windows.insightspage.this_day.16f586d3"), body);
         }
         body.Children.Add(Chrome.Stat(
-            "API list price", MoneyTotal(SnapshotRows("byModel", "by_model")), "not an extra bill"));
+            L10n.Text("windows.insightspage.api_list_price.060458ef"), MoneyTotal(SnapshotRows("byModel", "by_model")), L10n.Text("windows.insightspage.not_an_extra_bill.79d2c7ad")));
         body.Children.Add(StatPair(
-            "Tokens", Format.Tokens(Format.Long(totals?["counters"], "total")),
-            "Sessions", Format.Long(totals, "sessions").ToString("N0", CultureInfo.InvariantCulture)));
+            L10n.Text("windows.insightspage.tokens.a039dfb9"), Format.Tokens(Format.Long(totals?["counters"], "total")),
+            L10n.Text("windows.insightspage.sessions.6fa3cbf4"), Format.Long(totals, "sessions").ToString("N0", CultureInfo.InvariantCulture)));
         body.Children.Add(StatPair(
-            "Events", Format.Tokens(Format.Long(totals, "events")),
-            "Active days", Format.Long(totals, "days").ToString("N0", CultureInfo.InvariantCulture)));
+            L10n.Text("windows.insightspage.events.8d14f6e7"), Format.Tokens(Format.Long(totals, "events")),
+            L10n.Text("windows.insightspage.active_days.6cbebfa2"), Format.Long(totals, "days").ToString("N0", CultureInfo.InvariantCulture)));
         var block = _snapshot?["activeBlock"];
         if (block is JsonObject)
         {
@@ -1697,7 +1694,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 Height = 6,
                 VerticalAlignment = VerticalAlignment.Center,
             });
-            var label = Fonts.Text("Block open", Fonts.Callout, Microsoft.UI.Text.FontWeights.Medium);
+            var label = Fonts.Text(L10n.Text("windows.insightspage.block_open.1bc5df29"), Fonts.Callout, Microsoft.UI.Text.FontWeights.Medium);
             head.Children.Add(label);
             open.Children.Add(head);
             long startMs = Format.Long(block, "startMs");
@@ -1707,13 +1704,13 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
                 : "earlier";
             open.Children.Add(new TextBlock
             {
-                Text = Format.Tokens(Format.Long(block?["counters"], "total")) + " since " + since,
+                Text = Format.Tokens(Format.Long(block?["counters"], "total")) + L10n.Text("windows.insightspage.since.e9501119") + since,
                 FontSize = Fonts.Callout,
                 Opacity = 0.7,
             });
             body.Children.Add(open);
         }
-        return Chrome.Card(_focusDay is null ? "This period" : "This day", body);
+        return Chrome.Card(_focusDay is null ? L10n.Text("windows.insightspage.this_period.8ed3e11f") : L10n.Text("windows.insightspage.this_day.16f586d3"), body);
     }
 
     private UIElement SelectionCard()
@@ -1731,10 +1728,10 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         if (selected is null)
         {
             body.Children.Add(Chrome.Empty(
-                "Nothing selected",
-                "Pick a row on the left to see what it is made of: fresh input, cache, output, and what the tools did not report.",
+                L10n.Text("windows.insightspage.nothing_selected.f8c10424"),
+                L10n.Text("windows.insightspage.pick_a_row_on_the_left_to_see_what_it_is_m.4837e049"),
                 ActionIcon.Next));
-            return Chrome.Card("Selected", body);
+            return Chrome.Card(L10n.Text("windows.insightspage.selected.57fd7a0c"), body);
         }
         var key = Format.Text(selected, "key");
         var name = Fonts.Code(
@@ -1744,28 +1741,28 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         name.TextWrapping = TextWrapping.Wrap;
         name.MaxLines = 3;
         body.Children.Add(name);
-        body.Children.Add(Chrome.Stat("Value", Money(selected)));
+        body.Children.Add(Chrome.Stat(L10n.Text("windows.insightspage.value.8e37953d"), Money(selected)));
         var counters = selected?["counters"];
         var splits = new StackPanel { Spacing = Theme.SpaceS };
-        splits.Children.Add(CounterRow("Fresh input", OptLong(counters, "inputFresh")));
-        splits.Children.Add(CounterRow("Cache read", OptLong(counters, "cacheRead")));
-        splits.Children.Add(CounterRow("Cache write 5m", OptLong(counters, "cacheWrite5m")));
-        splits.Children.Add(CounterRow("Cache write 1h", OptLong(counters, "cacheWrite1h")));
-        splits.Children.Add(CounterRow("Output", OptLong(counters, "output")));
+        splits.Children.Add(CounterRow(L10n.Text("windows.insightspage.fresh_input.a5156480"), OptLong(counters, "inputFresh")));
+        splits.Children.Add(CounterRow(L10n.Text("windows.insightspage.cache_read.0008ce30"), OptLong(counters, "cacheRead")));
+        splits.Children.Add(CounterRow(L10n.Text("windows.insightspage.cache_write_5m.bf7e82f8"), OptLong(counters, "cacheWrite5m")));
+        splits.Children.Add(CounterRow(L10n.Text("windows.insightspage.cache_write_1h.80055f01"), OptLong(counters, "cacheWrite1h")));
+        splits.Children.Add(CounterRow(L10n.Text("windows.insightspage.output.b2439bcb"), OptLong(counters, "output")));
         body.Children.Add(splits);
         if (Format.Flag(counters, "hasUnknown"))
         {
             body.Children.Add(new TextBlock
             {
-                Text = "A dash means the tool does not report that counter, which is not the same as zero.",
+                Text = L10n.Text("windows.insightspage.a_dash_means_the_tool_does_not_report_that.ebcc68a5"),
                 FontSize = Fonts.Caption,
                 Opacity = 0.55,
                 TextWrapping = TextWrapping.Wrap,
             });
         }
         body.Children.Add(StatPair(
-            "Sessions", SessionsCount(selected) ?? "–",
-            "Events", Format.Tokens(Format.Long(selected, "events"))));
+            L10n.Text("windows.insightspage.sessions.6fa3cbf4"), SessionsCount(selected) ?? "–",
+            L10n.Text("windows.insightspage.events.8d14f6e7"), Format.Tokens(Format.Long(selected, "events"))));
         if (_tab == "projects")
         {
             var harnesses = HarnessesInProject(key);
@@ -1773,7 +1770,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             {
                 var group = new StackPanel { Spacing = Theme.SpaceS };
                 group.Children.Add(Fonts.Text(
-                    "Coding tools here", Fonts.Callout, Microsoft.UI.Text.FontWeights.Medium));
+                    L10n.Text("windows.insightspage.coding_tools_here.599781a1"), Fonts.Callout, Microsoft.UI.Text.FontWeights.Medium));
                 foreach (var (split, splitTokens) in harnesses)
                 {
                     var line = new Grid();
@@ -1805,7 +1802,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         {
             var group = new StackPanel { Spacing = Theme.SpaceS };
             group.Children.Add(Fonts.Text(
-                "Unpriced models", Fonts.Callout, Microsoft.UI.Text.FontWeights.Medium));
+                L10n.Text("windows.insightspage.unpriced_models.09fe601e"), Fonts.Callout, Microsoft.UI.Text.FontWeights.Medium));
             foreach (var item in unpriced)
             {
                 if (item is JsonValue value && value.TryGetValue<string>(out var model)
@@ -1816,7 +1813,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             }
             body.Children.Add(group);
         }
-        return Chrome.Card("Selected", body);
+        return Chrome.Card(L10n.Text("windows.insightspage.selected.57fd7a0c"), body);
     }
 
     private UIElement ArchiveCard()
@@ -1825,19 +1822,19 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         var info = _snapshot?["info"];
         if (info is JsonObject)
         {
-            body.Children.Add(KeyValue("Timezone", Format.Text(info, "timezone", "local")));
-            body.Children.Add(KeyValue("Core", Format.Text(info, "coreVersion", "unknown")));
-            body.Children.Add(KeyValue("Host", "daemon"));
+            body.Children.Add(KeyValue(L10n.Text("windows.insightspage.timezone.4ceca1d5"), Format.Text(info, "timezone", "local")));
+            body.Children.Add(KeyValue(L10n.Text("windows.insightspage.core.70ea1983"), Format.Text(info, "coreVersion", L10n.Text("windows.insightspage.unknown.b23a6a84"))));
+            body.Children.Add(KeyValue(L10n.Text("windows.insightspage.host.4a823118"), "daemon"));
             if (Format.Flag(info, "hasPrices"))
             {
                 body.Children.Add(KeyValue(
-                    "Rates from", Format.Text(info, "priceBookEffectiveFrom", "unknown")));
+                    L10n.Text("windows.insightspage.rates_from.755ef75c"), Format.Text(info, "priceBookEffectiveFrom", L10n.Text("windows.insightspage.unknown.b23a6a84"))));
             }
             else
             {
                 body.Children.Add(new TextBlock
                 {
-                    Text = "No price book yet, so values are estimated from the model catalog. The app refreshes the price book automatically.",
+                    Text = L10n.Text("windows.insightspage.no_price_book_yet_so_values_are_estimated.d5183a9a"),
                     FontSize = Fonts.Caption,
                     TextWrapping = TextWrapping.Wrap,
                     Opacity = 0.7,
@@ -1846,12 +1843,12 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         }
         body.Children.Add(new TextBlock
         {
-            Text = "Read from this device. Nothing left it.",
+            Text = L10n.Text("windows.insightspage.read_from_this_device_nothing_left_it.0c693058"),
             FontSize = Fonts.Caption,
             Opacity = 0.55,
             TextWrapping = TextWrapping.Wrap,
         });
-        return Chrome.Card("Archive", body);
+        return Chrome.Card(L10n.Text("common.archive"), body);
     }
 
     private static UIElement StatPair(string label1, string value1, string label2, string value2)
@@ -1888,7 +1885,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         });
         var count = Fonts.Tabular(new TextBlock
         {
-            Text = value.HasValue ? Format.Tokens(value.Value) : "n/a",
+            Text = value.HasValue ? Format.Tokens(value.Value) : L10n.Text("windows.insightspage.n_a.a683c5c5"),
             FontSize = Fonts.Subheadline,
             Opacity = value.HasValue ? 1 : 0.55,
         });
@@ -2041,26 +2038,26 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         }
         return CanonicalHarness(id) switch
         {
-            "claude_code" => "Claude Code",
-            "claude_code_rollup" or "claude_code_estimate" => "Claude Code (recovered)",
+            "claude_code" => L10n.Text("windows.insightspage.claude_code.246ef8c1"),
+            "claude_code_rollup" or "claude_code_estimate" => L10n.Text("windows.insightspage.claude_code_recovered.93f5e6b2"),
             "codex" => "Codex",
-            "grok" => "Grok Build",
+            "grok" => L10n.Text("windows.insightspage.grok_build.fd3bf01a"),
             "opencode" => "OpenCode",
             "cline" => "Cline",
             "openclaw" => "OpenClaw",
             "muse" => "Muse",
-            "devin" => "Devin CLI",
+            "devin" => L10n.Text("windows.insightspage.devin_cli.29247d05"),
             "pi" => "Pi",
-            "dsh" => "DeepSeek Harness",
+            "dsh" => L10n.Text("windows.insightspage.deepseek_harness.e562a9c5"),
             "zed" => "Zed",
-            "copilot" => "Copilot CLI",
+            "copilot" => L10n.Text("windows.insightspage.copilot_cli.c73e38d4"),
             "antigravity" => "Antigravity",
             "cursor" => "Cursor",
             "gemini" => "Gemini",
-            "hermes" => "Hermes Agent",
-            "kilo" => "Kilo Code",
-            "kimi" => "Kimi Code",
-            "qwen" => "Qwen Code",
+            "hermes" => L10n.Text("windows.insightspage.hermes_agent.873e989a"),
+            "kilo" => L10n.Text("windows.insightspage.kilo_code.83abecfd"),
+            "kimi" => L10n.Text("windows.insightspage.kimi_code.0c486180"),
+            "qwen" => L10n.Text("windows.insightspage.qwen_code.47487dbd"),
             "" => "unknown",
             var canonical => canonical,
         };

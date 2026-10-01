@@ -97,7 +97,7 @@ internal sealed class ListPage : Page
     /// </summary>
     private Border Row(JsonNode? item)
     {
-        var label = Format.Text(item, _itemKey, Format.Text(item, "id", "(item)"));
+        var label = Format.Text(item, _itemKey, Format.Text(item, "id", L10n.Text("windows.listpage.item.bf3b9bab")));
         var lines = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
         lines.Children.Add(new TextBlock
         {

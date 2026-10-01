@@ -11,17 +11,17 @@ struct ClientAutoCommitCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Auto commit")
+            Text(L10n.text("apple.clientautocommitcard.auto_commit.2559934f"))
                 .font(ClientType.label.weight(.semibold))
-            Text("The chosen agent inspects this folder and commits. File checkboxes are for Review and commit.")
+            Text(L10n.text("apple.clientautocommitcard.the_chosen_agent_inspects_this_folder_and.05747a66"))
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Runs on \(session.hostName).")
+            Text(L10n.text("apple.clientautocommitcard.runs_on_0.6b563ff8", "\(session.hostName)"))
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
             if session.backends.isEmpty {
-                Text("No agent on this computer can write a commit.")
+                Text(L10n.text("apple.clientautocommitcard.no_agent_on_this_computer_can_write_a_comm.9b85195e"))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -41,7 +41,7 @@ struct ClientAutoCommitCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if session.hasPendingLaunch {
-                Text("This start is not confirmed yet. Check it before starting another.")
+                Text(L10n.text("apple.clientautocommitcard.this_start_is_not_confirmed_yet_check_it_b.086397b5"))
                     .font(ClientType.caption)
                     .foregroundStyle(Theme.controlGlyph)
             }
@@ -63,7 +63,7 @@ struct ClientAutoCommitCard: View {
     @ViewBuilder
     private var pickerFields: some View {
         AppMenuPicker(
-            title: "Agent",
+            title: L10n.text("apple.clientautocommitcard.agent.11b39c93"),
             options: session.backends.map { (value: $0.id, label: $0.label) },
             selection: Binding(
                 get: { session.selectedBackend?.id ?? "" },
@@ -72,7 +72,7 @@ struct ClientAutoCommitCard: View {
         )
         if let backend = session.selectedBackend, !backend.models.isEmpty {
             AppMenuPicker(
-                title: "Model",
+                title: L10n.text("apple.clientautocommitcard.model.5e2c614c"),
                 options: backend.models.map { (value: $0, label: $0) },
                 selection: Binding(
                     get: { session.draft.model },
@@ -92,13 +92,13 @@ struct ClientAutoCommitCard: View {
     @ViewBuilder
     private var actionButtons: some View {
         if session.hasPendingLaunch {
-            Button("Check run", .refresh) {
+            Button(L10n.text("apple.clientautocommitcard.check_run.cece2401"), .refresh) {
                 Task { await session.checkLaunch() }
             }
             .buttonStyle(SecondaryButtonStyle(comfortable: true))
             .disabled(session.working)
             if session.canRetryLaunch {
-                Button("Retry run", .run) {
+                Button(L10n.text("apple.clientautocommitcard.retry_run.2f9c439b"), .run) {
                     Task {
                         await session.retryLaunch()
                         if let route = session.route, session.lastRun != nil || session.job != nil {
@@ -110,10 +110,10 @@ struct ClientAutoCommitCard: View {
                 .disabled(session.working)
             }
         } else if session.isRunning, let route = session.route {
-            Button("View run", .preview) { onOpen(route) }
+            Button(L10n.text("apple.clientautocommitcard.view_run.aaf7fccc"), .preview) { onOpen(route) }
                 .buttonStyle(AccentButtonStyle(comfortable: true))
         } else {
-            Button(session.working ? "Starting…" : "Auto commit", .run) {
+            Button(session.working ? L10n.text("apple.clientautocommitcard.starting.bbe5fc3b") : L10n.text("apple.clientautocommitcard.auto_commit.2559934f"), .run) {
                 Task {
                     await session.start()
                     if let route = session.route, !session.hasPendingLaunch, session.errorMessage == nil {
@@ -123,7 +123,7 @@ struct ClientAutoCommitCard: View {
             }
             .buttonStyle(SecondaryButtonStyle(comfortable: true))
             .disabled(!session.canStart)
-            .accessibilityHint("Starts a one-time agent in this folder to commit. File checkboxes are not used.")
+            .accessibilityHint(L10n.text("apple.clientautocommitcard.starts_a_one_time_agent_in_this_folder_to.db051163"))
         }
     }
 }

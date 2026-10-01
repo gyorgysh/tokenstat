@@ -180,7 +180,7 @@ internal static class TabStrip
             tab.Background = resting;
             tab.Resources["ButtonBackgroundPointerOver"] = resting;
             tab.Resources["ButtonBackgroundPressed"] = resting;
-            AutomationProperties.SetItemStatus(tab, now ? "Selected" : "Not selected");
+            AutomationProperties.SetItemStatus(tab, now ? L10n.Text("windows.tabstrip.selected.57fd7a0c") : L10n.Text("windows.tabstrip.not_selected.df12aeba"));
         }
         Paint(active);
         ToolTipService.SetToolTip(tab, label);

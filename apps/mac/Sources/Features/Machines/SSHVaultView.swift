@@ -159,7 +159,7 @@ struct SSHVaultRow: View {
                 // a second half of the label, and the label already said
                 // "locked", so the row said it twice a few points apart.
                 if vault.locked {
-                    Text("Locked")
+                    Text(L10n.text("apple.sshvaultview.locked.a424e33d"))
                         .font(Theme.caption)
                         .padding(.horizontal, 6).padding(.vertical, 1)
                         .background(Theme.accentSoft, in: Capsule())
@@ -191,30 +191,30 @@ struct SSHVaultRow: View {
     }
 
     private var label: String {
-        vault.unconfirmedRecovery ? "Recovery code not confirmed" : "Encrypted vault"
+        vault.unconfirmedRecovery ? L10n.text("apple.sshvaultview.recovery_code_not_confirmed.dc3c61fd") : L10n.text("apple.sshvaultview.encrypted_vault.31939e06")
     }
 
     /// What this vault is, in the space at the trailing edge. Nil where the
     /// leading text has already said the whole thing.
     private var detail: String? {
         if vault.unconfirmedRecovery { return nil }
-        if vault.needsRecreate { return "has to be recreated" }
+        if vault.needsRecreate { return L10n.text("apple.sshvaultview.has_to_be_recreated.edf77f46") }
         // No "locked" here: the badge beside this says that, and the row was
         // saying it twice.
         if vault.locked { return nil }
         if vault.created {
-            let records = vault.recordCount == 1 ? "1 record" : "\(vault.recordCount) records"
+            let records = vault.recordCount == 1 ? "1 record" : L10n.text("apple.sshvaultview.0_records.2cd6fd62", "\(vault.recordCount)")
             // A vault that exists on a plan that cannot write it is the state
             // somebody lands in by letting Supporter lapse, and the row used
             // to look exactly like a vault that was working. The records are
             // still there and still readable, and that is worth saying, but
             // not without saying that nothing new is going into them.
-            return canWrite ? records : "\(records) · not syncing"
+            return canWrite ? records : L10n.text("apple.sshvaultview.0_not_syncing.b60c9633", "\(records)")
         }
         // Not "Supporter and above", which named a plan and left it to the
         // reader to work out that this meant off. What is happening here is
         // that servers saved on this device stay on this device.
-        return canWrite ? "not set up" : "not syncing"
+        return canWrite ? L10n.text("apple.sshvaultview.not_set_up.ef93782b") : L10n.text("apple.sshvaultview.not_syncing.c0737345")
     }
 
     private var background: Color {
@@ -247,8 +247,8 @@ struct SSHVaultScreen: View {
 
     var body: some View {
         ThemedSheet(
-            title: "Encrypted vault",
-            subtitle: "Hosts, keys and snippets, readable only by your devices, your password and your recovery code.",
+            title: L10n.text("apple.sshvaultview.encrypted_vault.31939e06"),
+            subtitle: L10n.text("apple.sshvaultview.hosts_keys_and_snippets_readable_only_by_y.5b20e431"),
             icon: .security,
             scrolls: true,
             onClose: { dismiss() }
@@ -263,15 +263,15 @@ struct SSHVaultScreen: View {
                 // the library screen, which this sheet covers, so a sync
                 // started here would otherwise report nothing at all.
                 if let library, let problem = library.vaultError {
-                    InlineBanner(text: "Not everything synced. \(FriendlyError.from(problem).message)") {
+                    InlineBanner(text: L10n.text("apple.sshvaultview.not_everything_synced_0.4b2987c3", "\(FriendlyError.from(problem).message)")) {
                         library.vaultError = nil
                     }
                 }
                 if vault.unconfirmedRecovery {
                     action(
-                        title: "Confirm your recovery code",
-                        detail: "The code has been generated but not written down. It is the only way back in if the password is forgotten and every device is lost.",
-                        button: "Show code",
+                        title: L10n.text("apple.sshvaultview.confirm_your_recovery_code.2a50d287"),
+                        detail: L10n.text("apple.sshvaultview.the_code_has_been_generated_but_not_writte.e121ffb4"),
+                        button: L10n.text("apple.sshvaultview.show_code.c9eab29c"),
                         icon: .reveal,
                         prominent: true
                     ) { showingRecovery = true }
@@ -285,16 +285,16 @@ struct SSHVaultScreen: View {
                     let friendly = FriendlyError.from(unreachable)
                     action(
                         title: friendly.title,
-                        detail: "\(friendly.message)\n\nAnything already saved on this computer still works.",
-                        button: "Try again",
+                        detail: L10n.text("apple.sshvaultview.0_anything_already_saved_on_this_computer.403eb4a5", "\(friendly.message)"),
+                        button: L10n.text("apple.sshvaultview.try_again.d8b8392e"),
                         icon: .refresh,
                         prominent: true
                     ) { Task { await vault.registerAndRefresh() } }
                 } else if !vault.created, canWrite {
                     action(
-                        title: "Set up the vault",
-                        detail: "Creates a vault on this account, locked by a password you choose, and one recovery code. Nothing leaves the machine unencrypted.",
-                        button: "Set up vault",
+                        title: L10n.text("apple.sshvaultview.set_up_the_vault.dd2ea4f1"),
+                        detail: L10n.text("apple.sshvaultview.creates_a_vault_on_this_account_locked_by.d1530af6"),
+                        button: L10n.text("apple.sshvaultview.set_up_vault.663a7ec6"),
                         icon: .security,
                         prominent: true
                     ) { showingSetup = true }
@@ -305,25 +305,25 @@ struct SSHVaultScreen: View {
                     // how somebody finds out what their plan does. The
                     // button that is here now is the one that can help.
                     action(
-                        title: "Syncing needs Supporter",
-                        detail: "Your servers, folders, keys and snippets are saved on this device and work exactly as they do now. A vault is what carries them to your other computers and phones, encrypted so that only your devices can read them.",
-                        button: "See plans",
+                        title: L10n.text("apple.sshvaultview.syncing_needs_supporter.00d943e5"),
+                        detail: L10n.text("apple.sshvaultview.your_servers_folders_keys_and_snippets_are.be25d97f"),
+                        button: L10n.text("apple.sshvaultview.see_plans.d9898933"),
                         icon: .plans,
                         prominent: true
                     ) { Plans.open(using: openURL) }
                 } else if vault.needsRecreate {
                     action(
-                        title: "Recreate the vault",
-                        detail: "It was made before password unlock and cannot be opened by this version. Anything saved on this device stays where it is.",
-                        button: "Recreate",
+                        title: L10n.text("apple.sshvaultview.recreate_the_vault.1e58f60b"),
+                        detail: L10n.text("apple.sshvaultview.it_was_made_before_password_unlock_and_can.c713b2b8"),
+                        button: L10n.text("apple.sshvaultview.recreate.15efb691"),
                         icon: .refresh,
                         prominent: true
                     ) { showingSetup = true }
                 } else if vault.locked {
                     action(
-                        title: "Unlock the vault",
-                        detail: "Use your vault password or biometrics enabled on this device to access the account's saved servers and keys.",
-                        button: "Unlock",
+                        title: L10n.text("apple.sshvaultview.unlock_the_vault.ee6cb495"),
+                        detail: L10n.text("apple.sshvaultview.use_your_vault_password_or_biometrics_enab.0eeb1674"),
+                        button: L10n.text("apple.sshvaultview.unlock.4ac709aa"),
                         icon: .signIn,
                         prominent: true
                     ) { showingSetup = true }
@@ -331,9 +331,9 @@ struct SSHVaultScreen: View {
                     status
                     if let name = SSHVaultBiometrics.name {
                         action(
-                            title: "Unlock with \(name)",
-                            detail: "Enter your vault password to manage biometric unlock on this device.",
-                            button: "Manage biometrics",
+                            title: L10n.text("apple.sshvaultview.unlock_with_0.20a41ad2", "\(name)"),
+                            detail: L10n.text("apple.sshvaultview.enter_your_vault_password_to_manage_biomet.4c04ba28"),
+                            button: L10n.text("apple.sshvaultview.manage_biometrics.883eb089"),
                             icon: .security
                         ) { showingSetup = true }
                     }
@@ -342,9 +342,9 @@ struct SSHVaultScreen: View {
                         // screen somebody opens it to do. The three below
                         // it are maintenance.
                         action(
-                            title: "Sync now",
+                            title: L10n.text("common.sync_now"),
                             detail: syncDetail,
-                            button: library?.vaultSyncing == true ? "Syncing" : "Sync now",
+                            button: library?.vaultSyncing == true ? L10n.text("apple.sshvaultview.syncing.5c8b9e1c") : L10n.text("common.sync_now"),
                             icon: .refresh,
                             busy: library?.vaultSyncing == true
                         ) {
@@ -358,21 +358,21 @@ struct SSHVaultScreen: View {
                             }
                         }
                         action(
-                            title: "Change the password",
-                            detail: "Ask for the one you use now, then the new one. Re-encrypts the saved records and creates a new recovery code. Other devices must unlock again.",
-                            button: "Change password",
+                            title: L10n.text("apple.sshvaultview.change_the_password.0876521d"),
+                            detail: L10n.text("apple.sshvaultview.ask_for_the_one_you_use_now_then_the_new_o.3af2e414"),
+                            button: L10n.text("apple.sshvaultview.change_password.3f9c991f"),
                             icon: .edit
                         ) { changingPassword = true }
                         action(
-                            title: "New recovery code",
-                            detail: "Replaces the current code. The old one stops working as soon as the encrypted update succeeds, so save the new one before closing.",
-                            button: "New recovery code",
+                            title: L10n.text("apple.sshvaultview.new_recovery_code.5335b90e"),
+                            detail: L10n.text("apple.sshvaultview.replaces_the_current_code_the_old_one_stop.f2add631"),
+                            button: L10n.text("apple.sshvaultview.new_recovery_code.5335b90e"),
                             icon: .refresh
                         ) { confirmingRotation = true }
                         action(
-                            title: "Lock on this device",
-                            detail: "Unlock again with your vault password or biometrics enabled on this device.",
-                            button: "Lock",
+                            title: L10n.text("apple.sshvaultview.lock_on_this_device.43218e32"),
+                            detail: L10n.text("apple.sshvaultview.unlock_again_with_your_vault_password_or_b.5f957103"),
+                            button: L10n.text("apple.sshvaultview.lock.db44b8db"),
                             icon: .signOut
                         ) { Task { await vault.lock() } }
                     } else {
@@ -382,9 +382,9 @@ struct SSHVaultScreen: View {
                         // still readable, and quietly no longer receiving
                         // anything. Said plainly, with the way back.
                         action(
-                            title: "This vault has stopped syncing",
-                            detail: "It still exists on your account and this device can still read it, so nothing has been lost. What has stopped is the other direction: servers and keys you add or change here stay on this device until your plan can write to the vault again.",
-                            button: "See plans",
+                            title: L10n.text("apple.sshvaultview.this_vault_has_stopped_syncing.7a4c7ecd"),
+                            detail: L10n.text("apple.sshvaultview.it_still_exists_on_your_account_and_this_d.300cb00b"),
+                            button: L10n.text("apple.sshvaultview.see_plans.d9898933"),
                             icon: .plans,
                             prominent: true
                         ) { Plans.open(using: openURL) }
@@ -403,9 +403,9 @@ struct SSHVaultScreen: View {
                 if vault.created || vault.unreachable != nil {
                     ThemeRule()
                     action(
-                        title: "Delete the vault and start over",
+                        title: L10n.text("apple.sshvaultview.delete_the_vault_and_start_over.e49d06f1"),
                         detail: startOverDetail,
-                        button: "Delete vault",
+                        button: L10n.text("apple.sshvaultview.delete_vault.9fd7de76"),
                         icon: .delete,
                         destructive: true
                     ) { deleting = true }
@@ -430,18 +430,18 @@ struct SSHVaultScreen: View {
             }
         }
         .alert(
-            "Replace the current recovery code?",
+            L10n.text("apple.sshvaultview.replace_the_current_recovery_code.7430b0d2"),
             isPresented: $confirmingRotation
         ) {
-            SecureField("Vault password", text: $rotationPassword)
-            Button("Generate a new recovery code", role: .destructive) {
+            SecureField(L10n.text("apple.sshvaultview.vault_password.1853752f"), text: $rotationPassword)
+            Button(L10n.text("apple.sshvaultview.generate_a_new_recovery_code.0db28270"), role: .destructive) {
                 let password = rotationPassword
                 rotationPassword = ""
                 Task { await vault.rotateRecovery(password: password) }
             }
-            Button("Cancel", role: .cancel) { rotationPassword = "" }
+            Button(L10n.text("common.cancel"), role: .cancel) { rotationPassword = "" }
         } message: {
-            Text("Enter the vault password to re-encrypt your saved records and replace the recovery code. Other devices must unlock again.")
+            Text(L10n.text("apple.sshvaultview.enter_the_vault_password_to_re_encrypt_you.fec33737"))
         }
         .sheet(isPresented: $deleting) {
             SSHVaultDeleteSheet(vault: vault, tier: tier, canWrite: canWrite, library: library)
@@ -474,11 +474,11 @@ struct SSHVaultScreen: View {
     /// to know. What it can promise is the part that matters to somebody stuck:
     /// the servers on this computer are records, not secrets, and they stay.
     private var startOverDetail: String {
-        let kept = "Everything saved on this device stays where it is, and a new vault can be filled from it. Nothing on any server changes."
+        let kept = L10n.text("apple.sshvaultview.everything_saved_on_this_device_stays_wher.d5485bee")
         if vault.locked || vault.needsRecreate || vault.unreachable != nil {
-            return "You do not need the password or the recovery code for this. The vault is removed from the account, and anything in it that this device never received is gone for good.\n\n\(kept)"
+            return L10n.text("apple.sshvaultview.you_do_not_need_the_password_or_the_recove.61219aeb", "\(kept)")
         }
-        return "The vault is removed from the account and every device is asked to set up a new one. This cannot be undone.\n\n\(kept)"
+        return L10n.text("apple.sshvaultview.the_vault_is_removed_from_the_account_and.c8237a1a", "\(kept)")
     }
 
     /// What Sync now does, and what the last one did.
@@ -488,19 +488,19 @@ struct SSHVaultScreen: View {
     /// "0 records" comes looking for the thing that carries their servers into
     /// it, and until now there was nothing here to tell them or to press.
     private var syncDetail: String {
-        let what = "Puts anything saved on this device that the vault has not got into it, and takes anything your other devices have added since."
+        let what = L10n.text("apple.sshvaultview.puts_anything_saved_on_this_device_that_th.0be965fe")
         guard let library else { return what }
-        if library.vaultSyncing { return "\(what)\n\nSyncing now." }
+        if library.vaultSyncing { return L10n.text("apple.sshvaultview.0_syncing_now.a1cfcb49", "\(what)") }
         guard let when = library.vaultSyncedAt else {
-            return "\(what)\n\nNot synced yet on this device."
+            return L10n.text("apple.sshvaultview.0_not_synced_yet_on_this_device.f3015a55", "\(what)")
         }
-        return "\(what)\n\nLast synced \(RelativeClock.phrase(for: when, style: .full))."
+        return L10n.text("apple.sshvaultview.0_last_synced_1.11b24df2", "\(what)", "\(RelativeClock.phrase(for: when, style: .full))")
     }
 
     private var status: some View {
         VStack(alignment: .leading, spacing: 2) {
             Label(
-                vault.recordCount == 1 ? "1 record" : "\(vault.recordCount) records",
+                vault.recordCount == 1 ? L10n.text("apple.sshvaultview.1_record.43507739") : L10n.text("apple.sshvaultview.0_records.2cd6fd62", "\(vault.recordCount)"),
                 systemImage: "lock.shield.fill"
             )
             .font(Theme.callout.weight(.medium))
@@ -508,8 +508,8 @@ struct SSHVaultScreen: View {
             // paragraph explaining that this plan cannot write. One of the two
             // had to go, and it was not the paragraph.
             Text(canWrite
-                ? "This device is enrolled and can read and write the vault."
-                : "This device is enrolled and can read the vault. Writing to it needs Supporter or above.")
+                ? L10n.text("apple.sshvaultview.this_device_is_enrolled_and_can_read_and_w.2ee15a1d")
+                : L10n.text("apple.sshvaultview.this_device_is_enrolled_and_can_read_the_v.2d983d08"))
                 .font(Theme.caption).foregroundStyle(.secondary)
         }
     }
@@ -576,7 +576,7 @@ struct SSHVaultDeleteSheet: View {
     @State private var deleted = false
     @State private var creating = false
 
-    private static let word = "DELETE"
+    private static let word = L10n.text("apple.sshvaultview.delete.65daeb37")
 
     private var confirmed: Bool {
         typed.trimmingCharacters(in: .whitespaces).uppercased() == Self.word
@@ -588,10 +588,10 @@ struct SSHVaultDeleteSheet: View {
 
     var body: some View {
         ThemedSheet(
-            title: deleted ? "The vault is gone" : "Delete the vault and start over",
+            title: deleted ? L10n.text("apple.sshvaultview.the_vault_is_gone.ab82a5c9") : L10n.text("apple.sshvaultview.delete_the_vault_and_start_over.e49d06f1"),
             subtitle: deleted
-                ? "This account has no vault. Nothing saved on this device was touched."
-                : "For when the password is forgotten and no other device can open it.",
+                ? L10n.text("apple.sshvaultview.this_account_has_no_vault_nothing_saved_on.85cfe254")
+                : L10n.text("apple.sshvaultview.for_when_the_password_is_forgotten_and_no.fd06b159"),
             icon: .delete,
             onClose: { dismiss() }
         ) {
@@ -627,23 +627,23 @@ struct SSHVaultDeleteSheet: View {
     @ViewBuilder
     private var beforeBody: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            bullet("The vault is removed from the account. Every signed-in device is asked to set up a new one.")
-            bullet("Anything in it that this device never received cannot be recovered, by you or by anybody here.")
-            bullet("Your saved servers, folders and snippets are records rather than secrets. They stay on this device, and a new vault can be filled from them.")
-            bullet("Nothing on any server changes, and no connection is closed.")
+            bullet(L10n.text("apple.sshvaultview.the_vault_is_removed_from_the_account_ever.b635ec5b"))
+            bullet(L10n.text("apple.sshvaultview.anything_in_it_that_this_device_never_rece.eba27863"))
+            bullet(L10n.text("apple.sshvaultview.your_saved_servers_folders_and_snippets_ar.52190870"))
+            bullet(L10n.text("apple.sshvaultview.nothing_on_any_server_changes_and_no_conne.88bb63db"))
             if !strandedKeys.isEmpty {
                 Text(strandedKeys.count == 1
-                    ? "One key has no private half on this device and will be lost:"
-                    : "\(strandedKeys.count) keys have no private half on this device and will be lost:")
+                    ? L10n.text("apple.sshvaultview.one_key_has_no_private_half_on_this_device.c7b6f61e")
+                    : L10n.text("apple.sshvaultview.0_keys_have_no_private_half_on_this_device.11149f0a", "\(strandedKeys.count)"))
                     .font(Theme.caption.weight(.medium))
                     .foregroundStyle(Theme.warning)
                     .padding(.top, Theme.Space.xs)
                 ForEach(strandedKeys) { key in
-                    Text("\u{2022} \(key.label)")
+                    Text(L10n.text("apple.sshvaultview.0.b05cd7b2", "\(key.label)"))
                         .font(Theme.caption).foregroundStyle(.secondary)
                 }
             }
-            Text("Type \(Self.word) to confirm.")
+            Text(L10n.text("apple.sshvaultview.type_0_to_confirm.9d14bdfd", "\(Self.word)"))
                 .font(Theme.caption).foregroundStyle(.secondary)
                 .padding(.top, Theme.Space.xs)
             TextField(Self.word, text: $typed)
@@ -659,7 +659,7 @@ struct SSHVaultDeleteSheet: View {
     private var afterBody: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if canWrite {
-                Text("Make a new vault and put this device's servers, folders, snippets and keys into it. Your other devices join it with the new password.")
+                Text(L10n.text("apple.sshvaultview.make_a_new_vault_and_put_this_device_s_ser.f579b3e4"))
                     .font(Theme.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if let library {
@@ -667,7 +667,7 @@ struct SSHVaultDeleteSheet: View {
                         .font(Theme.caption).foregroundStyle(.secondary)
                 }
             } else {
-                Text("Making a vault needs Supporter or above. Everything saved on this device keeps working without one.")
+                Text(L10n.text("apple.sshvaultview.making_a_vault_needs_supporter_or_above_ev.ec6a00d6"))
                     .font(Theme.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -681,7 +681,7 @@ struct SSHVaultDeleteSheet: View {
             count(library.snippets.count, "snippet", "snippets"),
             count(library.keys.count - library.keysOnlyInTheVault.count, "key", "keys"),
         ].compactMap { $0 }
-        return parts.isEmpty ? "There is nothing on this device to carry across." : "Ready to carry across: " + parts.joined(separator: ", ") + "."
+        return parts.isEmpty ? L10n.text("apple.sshvaultview.there_is_nothing_on_this_device_to_carry_a.9d9460dc") : L10n.text("apple.sshvaultview.ready_to_carry_across.7fb2e43d") + parts.joined(separator: ", ") + "."
     }
 
     private func count(_ n: Int, _ one: String, _ many: String) -> String? {
@@ -690,7 +690,7 @@ struct SSHVaultDeleteSheet: View {
 
     private func bullet(_ text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.xs) {
-            Text("\u{2022}").foregroundStyle(.secondary)
+            Text(L10n.text("apple.sshvaultview..4f8865ab")).foregroundStyle(.secondary)
             Text(text)
                 .font(Theme.callout)
                 .foregroundStyle(.secondary)
@@ -700,7 +700,7 @@ struct SSHVaultDeleteSheet: View {
 
     @ViewBuilder
     private var footer: some View {
-        Button(deleted ? "Not now" : "Cancel", .dismiss) { dismiss() }
+        Button(deleted ? L10n.text("apple.sshvaultview.not_now.a0e63d7c") : L10n.text("common.cancel"), .dismiss) { dismiss() }
             .buttonStyle(SecondaryButtonStyle())
             .keyboardShortcut(.cancelAction)
         Spacer()
@@ -708,14 +708,14 @@ struct SSHVaultDeleteSheet: View {
             // The same dead button as the one on the screen behind this,
             // in the one place somebody arrives at having just lost the
             // vault they were trying to get back into.
-            Button("See plans", .plans) { Plans.open(using: openURL) }
+            Button(L10n.text("apple.sshvaultview.see_plans.d9898933"), .plans) { Plans.open(using: openURL) }
                 .buttonStyle(AccentButtonStyle())
         } else if deleted {
-            Button("Create a new vault", .create) { creating = true }
+            Button(L10n.text("apple.sshvaultview.create_a_new_vault.6c1a3d41"), .create) { creating = true }
                 .buttonStyle(AccentButtonStyle())
                 .disabled(working)
         } else {
-            Button("Delete vault", .delete) { Task { await run() } }
+            Button(L10n.text("apple.sshvaultview.delete_vault.9fd7de76"), .delete) { Task { await run() } }
                 .buttonStyle(DestructiveButtonStyle())
                 .disabled(!confirmed || working)
         }
@@ -754,21 +754,21 @@ struct SSHVaultPasswordSheet: View {
 
     var body: some View {
         ThemedSheet(
-            title: "Change vault password",
-            subtitle: "Your saved servers and keys stay exactly as they are.",
+            title: L10n.text("apple.sshvaultview.change_vault_password.2dea91a3"),
+            subtitle: L10n.text("apple.sshvaultview.your_saved_servers_and_keys_stay_exactly_a.7fcbdec6"),
             icon: .security,
             onClose: { dismiss() }
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
-                SecureField("Current password", text: $current)
+                SecureField(L10n.text("apple.sshvaultview.current_password.72ed2bd7"), text: $current)
                     .themedFieldBox()
-                SecureField("New password", text: $next)
+                SecureField(L10n.text("apple.sshvaultview.new_password.3dd9df44"), text: $next)
                     .themedFieldBox()
-                SecureField("Type the new one again", text: $again)
+                SecureField(L10n.text("apple.sshvaultview.type_the_new_one_again.489d8d4c"), text: $again)
                     .themedFieldBox()
                 VaultPasswordRules(password: next)
                 if !again.isEmpty, next != again {
-                    Text("The two do not match.")
+                    Text(L10n.text("apple.sshvaultview.the_two_do_not_match.184006b7"))
                         .font(Theme.caption)
                         .foregroundStyle(Theme.danger)
                 }
@@ -779,11 +779,11 @@ struct SSHVaultPasswordSheet: View {
                 }
             }
         } actions: {
-            Button("Cancel", .dismiss) { dismiss() }
+            Button(L10n.text("common.cancel"), .dismiss) { dismiss() }
                 .buttonStyle(SecondaryButtonStyle())
                 .keyboardShortcut(.cancelAction)
             Spacer()
-            Button("Change password", .save) {
+            Button(L10n.text("apple.sshvaultview.change_password.3f9c991f"), .save) {
                 Task {
                     working = true
                     if await vault.changePassword(current: current, to: next) { dismiss() }

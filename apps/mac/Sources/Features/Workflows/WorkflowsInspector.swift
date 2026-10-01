@@ -37,8 +37,8 @@ struct WorkflowsInspector: View {
                 } else {
                     InspectorEmptyState(
                         mark: "mark_workflow",
-                        title: "Pick a workflow or a run",
-                        subtitle: "The node outline and step transcript open here."
+                        title: L10n.text("apple.workflowsinspector.pick_a_workflow_or_a_run.a4388780"),
+                        subtitle: L10n.text("apple.workflowsinspector.the_node_outline_and_step_transcript_open.2652bf3c")
                     )
                 }
             }
@@ -53,12 +53,12 @@ struct WorkflowsInspector: View {
     }
 
     private var chromeTitle: String {
-        if model.isEditing, model.selectedNode != nil { return "Node" }
-        if model.isEditing, model.selectedEdgeID != nil { return "Edge" }
+        if model.isEditing, model.selectedNode != nil { return L10n.text("apple.workflowsinspector.node.e9337253") }
+        if model.isEditing, model.selectedEdgeID != nil { return L10n.text("apple.workflowsinspector.edge.0f82fe72") }
         switch model.selectedFocus {
-        case .run: return "Run"
-        case .graph: return "Workflow"
-        case .none: return "Workflows"
+        case .run: return L10n.text("common.run")
+        case .graph: return L10n.text("apple.workflowsinspector.workflow.2e2d5c56")
+        case .none: return L10n.text("common.workflows")
         }
     }
 
@@ -67,10 +67,10 @@ struct WorkflowsInspector: View {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let id = model.selectedEdgeID,
                    let edge = model.working?.edges.first(where: { $0.id == id }) {
-                    labeled("From", edge.from)
-                    labeled("To", edge.to)
+                    labeled(L10n.text("apple.workflowsinspector.from.21819769"), edge.from)
+                    labeled(L10n.text("apple.workflowsinspector.to.f4b06ef6"), edge.to)
                     AppMenuPicker(
-                        title: "When",
+                        title: L10n.text("apple.workflowsinspector.when.cf9c7aa2"),
                         options: [
                             (value: WorkflowEdgeWhen.ok, label: WorkflowEdgeWhen.ok.label),
                             (value: .error, label: WorkflowEdgeWhen.error.label),
@@ -81,10 +81,10 @@ struct WorkflowsInspector: View {
                             set: { model.updateSelectedEdge(when: $0) }
                         )
                     )
-                    Text("Green is on success. Red is on error. Always runs either way. A loop leaves on always after the last pass.")
+                    Text(L10n.text("apple.workflowsinspector.green_is_on_success_red_is_on_error_always.b7b8bf9c"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
-                    Button("Delete edge", .delete, role: .destructive) {
+                    Button(L10n.text("apple.workflowsinspector.delete_edge.28a5cf08"), .delete, role: .destructive) {
                         model.deleteSelection()
                     }
                     .buttonStyle(SecondaryButtonStyle())
@@ -99,7 +99,7 @@ struct WorkflowsInspector: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if model.isEditing {
-                    TextField("Name", text: Binding(
+                    TextField(L10n.text("apple.workflowsinspector.name.dcd1d522"), text: Binding(
                         get: { model.working?.name ?? graph.name },
                         set: { next in
                             model.beginGroupedEdit()
@@ -108,12 +108,12 @@ struct WorkflowsInspector: View {
                     ))
                     .textFieldStyle(.themed)
                     if graph.id.isEmpty {
-                        Text("Unsaved draft. It will not run until you save and press Run.")
+                        Text(L10n.text("apple.workflowsinspector.unsaved_draft_it_will_not_run_until_you_sa.0158bab7"))
                             .font(Theme.caption)
                             .foregroundStyle(.secondary)
                     }
                     AppMenuPicker(
-                        title: "Scope",
+                        title: L10n.text("apple.workflowsinspector.scope.b073f6c6"),
                         options: WorkflowScope.allCases.map { (value: $0, label: $0.label) },
                         selection: Binding(
                             get: { model.working?.scope ?? graph.scope },
@@ -122,7 +122,7 @@ struct WorkflowsInspector: View {
                     )
                     if (model.working?.scope ?? graph.scope) == .workspace {
                         AppMenuPicker(
-                            title: "Folder",
+                            title: L10n.text("apple.workflowsinspector.folder.74ccd433"),
                             options: folders.map { (value: $0.id, label: $0.name) },
                             selection: Binding(
                                 get: { model.working?.workspaceID ?? "" },
@@ -132,31 +132,31 @@ struct WorkflowsInspector: View {
                     }
                     WorkflowBudgetField(model: model)
                 } else if graph.id.isEmpty {
-                    TextField("Name", text: Binding(
+                    TextField(L10n.text("apple.workflowsinspector.name.dcd1d522"), text: Binding(
                         get: { model.draft?.name ?? graph.name },
                         set: { model.draft?.name = $0 }
                     ))
                     .textFieldStyle(.themed)
-                    Text("Unsaved draft. It will not run until you save and press Run.")
+                    Text(L10n.text("apple.workflowsinspector.unsaved_draft_it_will_not_run_until_you_sa.0158bab7"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 } else {
                     Text(graph.name)
                         .font(Theme.font(15, weight: .semibold))
-                    labeled("Scope", graph.scope.label)
+                    labeled(L10n.text("apple.workflowsinspector.scope.b073f6c6"), graph.scope.label)
                     if let folder = folders.first(where: { $0.id == graph.workspaceID }) {
-                        labeled("Folder", folder.name)
+                        labeled(L10n.text("apple.workflowsinspector.folder.74ccd433"), folder.name)
                     }
-                    labeled("Budget", budgetLabel(graph.budgetSeconds))
+                    labeled(L10n.text("apple.workflowsinspector.budget.1c6225ec"), budgetLabel(graph.budgetSeconds))
                 }
 
-                labeled("Nodes", "\(graph.nodes.count)")
+                labeled(L10n.text("apple.workflowsinspector.nodes.7ac36206"), "\(graph.nodes.count)")
                 if let last = model.lastRun(for: graph) {
-                    labeled("Last", last.startedAt.formatted(date: .abbreviated, time: .shortened))
+                    labeled(L10n.text("apple.workflowsinspector.last.eb970eb0"), last.startedAt.formatted(date: .abbreviated, time: .shortened))
                 }
 
                 if !model.designTranscript.isEmpty {
-                    Text("Design transcript")
+                    Text(L10n.text("apple.workflowsinspector.design_transcript.bb036940"))
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                     TranscriptView(text: model.designTranscript, empty: "")
@@ -172,23 +172,23 @@ struct WorkflowsInspector: View {
 
                 HStack(spacing: Theme.Space.s) {
                     if graph.id.isEmpty {
-                        Button("Save", .save) { Task { await model.saveWorking() } }
+                        Button(L10n.text("common.save"), .save) { Task { await model.saveWorking() } }
                             .buttonStyle(AccentButtonStyle())
-                        Button("Discard", .dismiss) { model.discardDraft() }
+                        Button(L10n.text("apple.workflowsinspector.discard.eb1a70e3"), .dismiss) { model.discardDraft() }
                             .buttonStyle(SecondaryButtonStyle())
                     } else if model.isEditing {
-                        Button("Save", .save) { Task { await model.saveWorking() } }
+                        Button(L10n.text("common.save"), .save) { Task { await model.saveWorking() } }
                             .buttonStyle(AccentButtonStyle())
                             .disabled(!model.isDirty)
                     } else if let last = model.lastRun(for: graph), last.isLive {
                         if last.isWaiting {
-                            Button("Continue", .next) { Task { await model.continueRun(last) } }
+                            Button(L10n.text("apple.workflowsinspector.continue.31fbef16"), .next) { Task { await model.continueRun(last) } }
                                 .buttonStyle(AccentButtonStyle())
                         }
-                        Button("Stop", .stop) { Task { await model.stop(last) } }
+                        Button(L10n.text("common.stop"), .stop) { Task { await model.stop(last) } }
                             .buttonStyle(SecondaryButtonStyle())
                     } else {
-                        Button("Run", .run) { running = graph }
+                        Button(L10n.text("common.run"), .run) { running = graph }
                             .buttonStyle(AccentButtonStyle())
                     }
                 }
@@ -206,13 +206,13 @@ struct WorkflowsInspector: View {
                         .font(Theme.font(15, weight: .semibold))
                     Spacer()
                     if run.isWaiting {
-                        Button("Continue", .next) { Task { await model.continueRun(run) } }
+                        Button(L10n.text("apple.workflowsinspector.continue.31fbef16"), .next) { Task { await model.continueRun(run) } }
                             .buttonStyle(AccentButtonStyle())
                     }
                     if run.isLive {
-                        Button("Stop", .stop) { Task { await model.stop(run) } }
+                        Button(L10n.text("common.stop"), .stop) { Task { await model.stop(run) } }
                             .buttonStyle(SecondaryButtonStyle())
-                            .help("Kill this run now")
+                            .help(L10n.text("apple.workflowsinspector.kill_this_run_now.87db925a"))
                     }
                     StatusPill(status: run.status, text: run.endedLabel)
                 }
@@ -225,8 +225,8 @@ struct WorkflowsInspector: View {
                 Text(run.startedAt.formatted(date: .abbreviated, time: .shortened))
                     .font(Theme.caption)
                     .foregroundStyle(.tertiary)
-                BrandToggleChip(title: "Follow", isOn: $followLive)
-                    .help("Keep the transcript pinned to the newest line")
+                BrandToggleChip(title: L10n.text("apple.workflowsinspector.follow.641d1ef6"), isOn: $followLive)
+                    .help(L10n.text("apple.workflowsinspector.keep_the_transcript_pinned_to_the_newest_l.91faa696"))
             }
             .padding(Theme.Space.m)
 
@@ -272,9 +272,9 @@ struct WorkflowsInspector: View {
     }
 
     private func budgetLabel(_ seconds: UInt64) -> String {
-        if seconds == 0 { return "No limit" }
+        if seconds == 0 { return L10n.text("apple.workflowsinspector.no_limit.f7fcff0d") }
         let minutes = max(1, seconds / 60)
-        return "\(minutes) min"
+        return L10n.text("apple.workflowsinspector.0_min.96d15cf8", "\(minutes)")
     }
 }
 
@@ -323,7 +323,7 @@ private struct WorkflowBudgetField: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.xs) {
-            Text("Time limit")
+            Text(L10n.text("apple.workflowsinspector.time_limit.e592a9ca"))
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
             TextField("180", text: $minutes)
@@ -332,10 +332,10 @@ private struct WorkflowBudgetField: View {
                 .multilineTextAlignment(.trailing)
                 .disabled(noLimit)
                 .onSubmit { commit() }
-            Text("minutes")
+            Text(L10n.text("apple.workflowsinspector.minutes.90e63d85"))
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
-            BrandToggleChip(title: "No limit", isOn: $noLimit)
+            BrandToggleChip(title: L10n.text("apple.workflowsinspector.no_limit.f7fcff0d"), isOn: $noLimit)
                 .onChange(of: noLimit) { _, on in
                     guard !applying else { return }
                     if on {
@@ -402,8 +402,8 @@ private struct WorkflowNodeInspector: View {
                 HStack {
                     StatusPill(status: step.status, text: step.endedLabel)
                     Spacer(minLength: 0)
-                    BrandToggleChip(title: "Follow", isOn: $followLive)
-                        .help("Keep the newest output in view, and follow the live step")
+                    BrandToggleChip(title: L10n.text("apple.workflowsinspector.follow.641d1ef6"), isOn: $followLive)
+                        .help(L10n.text("apple.workflowsinspector.keep_the_newest_output_in_view_and_follow.bf0a2c03"))
                 }
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.vertical, Theme.Space.s)
@@ -422,7 +422,7 @@ private struct WorkflowNodeInspector: View {
             if model.selectedNode != nil {
                 ThemeRule()
                 HStack {
-                    Button("Delete node", .delete, role: .destructive) {
+                    Button(L10n.text("apple.workflowsinspector.delete_node.b50c024f"), .delete, role: .destructive) {
                         model.deleteSelection()
                     }
                     .buttonStyle(SecondaryButtonStyle())
@@ -476,7 +476,7 @@ private struct WorkflowNodeInspector: View {
         Text(node.kind.label)
             .font(Theme.caption.weight(.semibold))
             .foregroundStyle(.tertiary)
-        TextField("Title", text: $title)
+        TextField(L10n.text("apple.workflowsinspector.title.7e8cd205"), text: $title)
             .textFieldStyle(.themed)
             .onChange(of: title) { _, next in
                 guard !applying else { return }
@@ -485,7 +485,7 @@ private struct WorkflowNodeInspector: View {
 
         switch node.kind {
         case .input:
-            Text("The starting prompt fills {{input}} when you press Run.")
+            Text(L10n.text("apple.workflowsinspector.the_starting_prompt_fills_input_when_you_p.25eaf312"))
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
         case .agent:
@@ -497,7 +497,7 @@ private struct WorkflowNodeInspector: View {
         case .command:
             commandFields(node)
         case .gate:
-            Text("The run pauses here. Continue or Stop from the canvas.")
+            Text(L10n.text("apple.workflowsinspector.the_run_pauses_here_continue_or_stop_from.fb46b053"))
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
         case .condition:
@@ -505,7 +505,7 @@ private struct WorkflowNodeInspector: View {
         case .loop:
             loopFields(node)
         case .mcp:
-            Text("Reserved. This kind cannot be saved yet.")
+            Text(L10n.text("apple.workflowsinspector.reserved_this_kind_cannot_be_saved_yet.3dc62a35"))
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
         }
@@ -514,7 +514,7 @@ private struct WorkflowNodeInspector: View {
     @ViewBuilder
     private func agentFields(_ node: WorkflowNode) -> some View {
         AppMenuPicker(
-            title: "Agent",
+            title: L10n.text("apple.workflowsinspector.agent.11b39c93"),
             options: model.pickerBackends(keeping: node.backend).map { (value: $0.id, label: $0.label) },
             selection: Binding(
                 get: { node.backend ?? "" },
@@ -549,8 +549,8 @@ private struct WorkflowNodeInspector: View {
             }
             if !backend.efforts.isEmpty {
                 AppMenuPicker(
-                    title: "Effort",
-                    options: [(value: "", label: "Default")]
+                    title: L10n.text("apple.workflowsinspector.effort.4387e5d3"),
+                    options: [(value: "", label: L10n.text("apple.workflowsinspector.default.21b111cb"))]
                         + backend.efforts.map { (value: $0, label: $0) },
                     selection: Binding(
                         get: { node.effort ?? "" },
@@ -561,14 +561,14 @@ private struct WorkflowNodeInspector: View {
                 )
             }
         }
-        labeledField("Prompt", text: $prompt, axis: .vertical) { next in
+        labeledField(L10n.text("apple.workflowsinspector.prompt.5c391238"), text: $prompt, axis: .vertical) { next in
             write(node.id) { $0.prompt = next }
         }
         AppMenuPicker(
-            title: "Wait",
+            title: L10n.text("apple.workflowsinspector.wait.26b83994"),
             options: [
-                (value: "exit", label: "Until the process exits"),
-                (value: "output", label: "Until output matches"),
+                (value: "exit", label: L10n.text("apple.workflowsinspector.until_the_process_exits.5c4be6c2")),
+                (value: "output", label: L10n.text("apple.workflowsinspector.until_output_matches.6f886c69")),
             ],
             selection: Binding(
                 get: { node.wait ?? "exit" },
@@ -578,11 +578,11 @@ private struct WorkflowNodeInspector: View {
             )
         )
         if node.wait == "output" {
-            labeledField("Match", text: $waitPattern) { next in
+            labeledField(L10n.text("apple.workflowsinspector.match.03c0e806"), text: $waitPattern) { next in
                 write(node.id) { $0.waitPattern = next.isEmpty ? nil : next }
             }
         }
-        Text("{{input}} is the starting prompt. {{nodeId.output}} is an earlier step.")
+        Text(L10n.text("apple.workflowsinspector.input_is_the_starting_prompt_nodeid_output.98d8c50d"))
             .font(Theme.caption)
             .foregroundStyle(.secondary)
     }
@@ -590,11 +590,11 @@ private struct WorkflowNodeInspector: View {
     @ViewBuilder
     private func conditionFields(_ node: WorkflowNode) -> some View {
         AppMenuPicker(
-            title: "Test",
+            title: L10n.text("apple.workflowsinspector.test.532eaabd"),
             options: [
-                (value: "contains", label: "Contains"),
-                (value: "equals", label: "Equals"),
-                (value: "matches", label: "Matches"),
+                (value: "contains", label: L10n.text("apple.workflowsinspector.contains.2eaecb3d")),
+                (value: "equals", label: L10n.text("apple.workflowsinspector.equals.f939ae3d")),
+                (value: "matches", label: L10n.text("apple.workflowsinspector.matches.98abff28")),
             ],
             selection: Binding(
                 get: { node.test ?? "contains" },
@@ -603,23 +603,23 @@ private struct WorkflowNodeInspector: View {
                 }
             )
         )
-        labeledField("Pattern", text: $conditionPattern, axis: .vertical) { next in
+        labeledField(L10n.text("apple.workflowsinspector.pattern.4288ade7"), text: $conditionPattern, axis: .vertical) { next in
             write(node.id) { $0.pattern = next }
         }
-        Text("Then is on success. Else is on error. The test reads the previous step.")
+        Text(L10n.text("apple.workflowsinspector.then_is_on_success_else_is_on_error_the_te.3401ac56"))
             .font(Theme.caption)
             .foregroundStyle(.secondary)
     }
 
     @ViewBuilder
     private func loopFields(_ node: WorkflowNode) -> some View {
-        labeledField("Times", text: $loopTimes) { next in
+        labeledField(L10n.text("apple.workflowsinspector.times.0c0fd31c"), text: $loopTimes) { next in
             write(node.id) { $0.times = UInt32(next) ?? 3 }
         }
-        labeledField("Until", text: $loopUntil) { next in
+        labeledField(L10n.text("apple.workflowsinspector.until.7caf856e"), text: $loopUntil) { next in
             write(node.id) { $0.until = next.isEmpty ? nil : next }
         }
-        Text("The green out is the body. The run leaves on the always edge after the last pass, or when Until matches. At most 20 passes.")
+        Text(L10n.text("apple.workflowsinspector.the_green_out_is_the_body_the_run_leaves_o.27202079"))
             .font(Theme.caption)
             .foregroundStyle(.secondary)
     }
@@ -627,7 +627,7 @@ private struct WorkflowNodeInspector: View {
     @ViewBuilder
     private func automationFields(_ node: WorkflowNode) -> some View {
         AppMenuPicker(
-            title: "Automation",
+            title: L10n.text("apple.workflowsinspector.automation.d909750b"),
             options: model.jobs.map { (value: $0.id, label: $0.name) },
             selection: Binding(
                 get: { node.automationID ?? "" },
@@ -636,10 +636,10 @@ private struct WorkflowNodeInspector: View {
                 }
             )
         )
-        labeledField("Prompt override", text: $promptOverride, axis: .vertical) { next in
+        labeledField(L10n.text("apple.workflowsinspector.prompt_override.b992708e"), text: $promptOverride, axis: .vertical) { next in
             write(node.id) { $0.promptOverride = next.isEmpty ? nil : next }
         }
-        Text("A timer cannot commit. This step runs because you press Run.")
+        Text(L10n.text("apple.workflowsinspector.a_timer_cannot_commit_this_step_runs_becau.0f4f14da"))
             .font(Theme.caption)
             .foregroundStyle(.secondary)
     }
@@ -647,7 +647,7 @@ private struct WorkflowNodeInspector: View {
     @ViewBuilder
     private func httpFields(_ node: WorkflowNode) -> some View {
         AppMenuPicker(
-            title: "Method",
+            title: L10n.text("apple.workflowsinspector.method.52a0f9b6"),
             options: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"].map { (value: $0, label: $0) },
             selection: Binding(
                 get: { node.method ?? "GET" },
@@ -656,26 +656,26 @@ private struct WorkflowNodeInspector: View {
                 }
             )
         )
-        labeledField("URL", text: $url) { next in
+        labeledField(L10n.text("apple.workflowsinspector.url.e7a241de"), text: $url) { next in
             write(node.id) { $0.url = next }
         }
-        labeledField("Headers", text: $headers, axis: .vertical) { next in
+        labeledField(L10n.text("apple.workflowsinspector.headers.194e9fe6"), text: $headers, axis: .vertical) { next in
             write(node.id) { $0.headers = Self.parseHeaders(next) }
         }
-        labeledField("Body", text: $bodyText, axis: .vertical) { next in
+        labeledField(L10n.text("apple.workflowsinspector.body.6ccaa641"), text: $bodyText, axis: .vertical) { next in
             write(node.id) { $0.body = next.isEmpty ? nil : next }
         }
-        Text("This leaves the machine only because you press Run. Authorization is a header you type.")
+        Text(L10n.text("apple.workflowsinspector.this_leaves_the_machine_only_because_you_p.902dc077"))
             .font(Theme.caption)
             .foregroundStyle(.secondary)
     }
 
     @ViewBuilder
     private func commandFields(_ node: WorkflowNode) -> some View {
-        labeledField("Command", text: $command, axis: .vertical) { next in
+        labeledField(L10n.text("apple.workflowsinspector.command.71316697"), text: $command, axis: .vertical) { next in
             write(node.id) { $0.command = next }
         }
-        Text("Runs in the folder, as you. A timer cannot commit.")
+        Text(L10n.text("apple.workflowsinspector.runs_in_the_folder_as_you_a_timer_cannot_c.c658a7be"))
             .font(Theme.caption)
             .foregroundStyle(.secondary)
     }

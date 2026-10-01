@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.tasks
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -76,7 +78,7 @@ fun TaskFields(
             { onFields(fields.copy(title = it)) },
             modifier = Modifier.fillMaxWidth(),
             enabled = enabled,
-            label = { Text("Task title") },
+            label = { Text(L10n.text("android.taskeditor.task_title.11622e0f")) },
             textStyle = TsType.cardTitle,
         )
         OutlinedTextField(
@@ -84,40 +86,40 @@ fun TaskFields(
             { onFields(fields.copy(prompt = it)) },
             modifier = Modifier.fillMaxWidth(),
             enabled = enabled,
-            label = { Text(if (fields.backend == "sh") "Command" else "Prompt") },
+            label = { Text(if (fields.backend == "sh") L10n.text("android.taskeditor.command.71316697") else L10n.text("android.taskeditor.prompt.5c391238")) },
             minLines = 6,
         )
-        Text("Task settings", style = TsType.body.copy(fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
+        Text(L10n.text("android.taskeditor.task_settings.b8a028c3"), style = TsType.body.copy(fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-            ChoiceChip("Uncategorized", fields.workspaceID.isEmpty(), { onFields(fields.copy(workspaceID = "")) })
+            ChoiceChip(L10n.text("android.taskeditor.uncategorized.8d40d123"), fields.workspaceID.isEmpty(), { onFields(fields.copy(workspaceID = "")) })
             folders.forEach { folder ->
                 ChoiceChip(folder.name.ifBlank { folder.id }, fields.workspaceID == folder.id, { onFields(fields.copy(workspaceID = folder.id)) })
             }
             if (fields.workspaceID.isNotEmpty() && folders.none { it.id == fields.workspaceID }) {
-                ChoiceChip("Unavailable folder", true, {})
+                ChoiceChip(L10n.text("android.taskeditor.unavailable_folder.6454a349"), true, {})
             }
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-            listOf("low" to "Low", "normal" to "Normal", "high" to "High").forEach { (value, label) ->
+            listOf("low" to L10n.text("android.taskeditor.low.f793de20"), "normal" to L10n.text("android.taskeditor.normal.a7248eeb"), "high" to L10n.text("android.taskeditor.high.c4ebc6d4")).forEach { (value, label) ->
                 ChoiceChip(label, fields.priority == value, { onFields(fields.copy(priority = value)) })
             }
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-            ChoiceChip("Choose later", fields.backend.isEmpty(), { onFields(fields.copy(backend = "", model = "", effort = "")) })
+            ChoiceChip(L10n.text("android.taskeditor.choose_later.64f99c1c"), fields.backend.isEmpty(), { onFields(fields.copy(backend = "", model = "", effort = "")) })
             backends.forEach { backend ->
                 ChoiceChip(backend.label.ifBlank { backend.id }, fields.backend == backend.id, {
                     if (backend.id != fields.backend) onFields(fields.copy(backend = backend.id, model = "", effort = ""))
                 })
             }
             if (fields.backend.isNotEmpty() && backends.none { it.id == fields.backend }) {
-                ChoiceChip("${fields.backend} · Unavailable", true, {})
+                ChoiceChip(L10n.text("android.taskeditor.0_unavailable.1212b25c", "${fields.backend}"), true, {})
             }
         }
         val backend = backends.firstOrNull { it.id == fields.backend }
         if (backend != null && (backend.models.isNotEmpty() || fields.model.isNotEmpty())) {
             val options = (backend.models + listOf(fields.model).filter { it.isNotEmpty() }).distinct()
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-                ChoiceChip("Default", fields.model.isEmpty(), { onFields(fields.copy(model = "")) })
+                ChoiceChip(L10n.text("android.taskeditor.default.21b111cb"), fields.model.isEmpty(), { onFields(fields.copy(model = "")) })
                 options.forEach { model ->
                     ChoiceChip(
                         model,
@@ -128,7 +130,7 @@ fun TaskFields(
             }
             if (fields.model.isNotEmpty() && !backend.models.contains(fields.model)) {
                 Text(
-                    "This computer does not list the saved model. Keep it or choose another.",
+                    L10n.text("android.taskeditor.this_computer_does_not_list_the_saved_mode.479cd2e2"),
                     style = TsType.caption,
                     color = LocalTsColors.current.textSecondary,
                 )
@@ -138,11 +140,11 @@ fun TaskFields(
             val options = (listOf("") + backend.efforts + listOf(fields.effort).filter { it.isNotEmpty() }).distinct()
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
                 options.forEach { effort ->
-                    ChoiceChip(if (effort.isEmpty()) "Default" else effort, fields.effort == effort, { onFields(fields.copy(effort = effort)) })
+                    ChoiceChip(if (effort.isEmpty()) L10n.text("android.taskeditor.default.21b111cb") else effort, fields.effort == effort, { onFields(fields.copy(effort = effort)) })
                 }
             }
         }
-        BrandToggleChip("No time limit", fields.noTimeLimit, { onFields(fields.copy(noTimeLimit = !fields.noTimeLimit)) })
+        BrandToggleChip(L10n.text("android.taskeditor.no_time_limit.436b4b94"), fields.noTimeLimit, { onFields(fields.copy(noTimeLimit = !fields.noTimeLimit)) })
         if (!fields.noTimeLimit) {
             TimeLimitChips(
                 minutesText = if (fields.budgetUnit == "minutes") fields.budgetValue else "",
@@ -155,11 +157,11 @@ fun TaskFields(
                 { onFields(fields.copy(budgetValue = it)) },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = enabled,
-                label = { Text("Time limit") },
+                label = { Text(L10n.text("android.taskeditor.time_limit.e592a9ca")) },
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-                ChoiceChip("Minutes", fields.budgetUnit == "minutes", { onFields(fields.copy(budgetUnit = "minutes")) })
-                ChoiceChip("Seconds", fields.budgetUnit == "seconds", { onFields(fields.copy(budgetUnit = "seconds")) })
+                ChoiceChip(L10n.text("android.taskeditor.minutes.4f846a84"), fields.budgetUnit == "minutes", { onFields(fields.copy(budgetUnit = "minutes")) })
+                ChoiceChip(L10n.text("android.taskeditor.seconds.381a8e96"), fields.budgetUnit == "seconds", { onFields(fields.copy(budgetUnit = "seconds")) })
             }
         }
         if (showValidation && fields.validation != null) {
@@ -250,9 +252,9 @@ fun TaskEditorScreen(
             val card = readCurrent()
             if (card == null) {
                 missing = true
-                error = "This task was deleted on the computer. Your draft is still here."
+                error = L10n.text("android.taskeditor.this_task_was_deleted_on_the_computer_your.d9041f3d")
             } else if (card.revision == null) {
-                error = "This computer did not return the task's revision. Reload it before saving."
+                error = L10n.text("android.taskeditor.this_computer_did_not_return_the_task_s_re.ec042ca5")
             } else {
                 baseline = card
                 current = card
@@ -271,7 +273,7 @@ fun TaskEditorScreen(
                 }
             loaded = true
         } catch (e: Exception) {
-            error = TunnelCopy.display(e.message ?: "The request failed.", hostLabel)
+            error = TunnelCopy.display(e.message ?: L10n.text("android.taskeditor.the_request_failed.db4fb447"), hostLabel)
         } finally {
             working = false
         }
@@ -285,9 +287,9 @@ fun TaskEditorScreen(
             current = fresh
             if (fresh == null) {
                 missing = true
-                error = "This task was deleted on the computer. Your draft is still here."
+                error = L10n.text("android.taskeditor.this_task_was_deleted_on_the_computer_your.d9041f3d")
             } else if (fresh.revision == null) {
-                error = "This computer did not return the task's revision. Reload it before saving."
+                error = L10n.text("android.taskeditor.this_computer_did_not_return_the_task_s_re.ec042ca5")
             } else {
                 val base = baseline
                 val draft = fields
@@ -305,7 +307,7 @@ fun TaskEditorScreen(
                             // edit can win.
                             pendingEdit = false
                             conflict = fresh.revision != base.revision
-                            if (!conflict) error = "The task has not changed. Your draft is ready to save again."
+                            if (!conflict) error = L10n.text("android.taskeditor.the_task_has_not_changed_your_draft_is_rea.c2632d0f")
                         }
                     } else if (fresh.revision != base.revision) {
                         if (draft != null && !draft.matches(base)) {
@@ -319,7 +321,7 @@ fun TaskEditorScreen(
                 }
             }
         } catch (e: Exception) {
-            error = TunnelCopy.display(e.message ?: "The request failed.", hostLabel)
+            error = TunnelCopy.display(e.message ?: L10n.text("android.taskeditor.the_request_failed.db4fb447"), hostLabel)
         } finally {
             working = false
         }
@@ -351,7 +353,7 @@ fun TaskEditorScreen(
             error = null
             onSaved()
         } catch (e: Exception) {
-            error = "Check the saved task before trying again. Your draft is still here. ${TunnelCopy.display(e.message ?: "", hostLabel)}"
+            error = L10n.text("android.taskeditor.check_the_saved_task_before_trying_again_y.5af9adad", "${TunnelCopy.display(e.message ?: "", hostLabel)}")
         } finally {
             working = false
         }
@@ -399,7 +401,7 @@ fun TaskEditorScreen(
             val outcome = TaskRunOutcome.parse(element as JsonObject)
             return acceptOutcome(outcome, submission)
         } catch (e: Exception) {
-            error = "The run result is not confirmed. Check this request before starting another run. ${TunnelCopy.display(e.message ?: "", hostLabel)}"
+            error = L10n.text("android.taskeditor.the_run_result_is_not_confirmed_check_this.b7631660", "${TunnelCopy.display(e.message ?: "", hostLabel)}")
             return null
         } finally {
             working = false
@@ -415,12 +417,12 @@ fun TaskEditorScreen(
                 put("operationId", submission.operationID)
             })
             if (element is JsonNull) {
-                error = "The computer has not accepted this run request. Retry the same request when the connection is ready."
+                error = L10n.text("android.taskeditor.the_computer_has_not_accepted_this_run_req.956da73e")
             } else {
                 acceptOutcome(TaskRunOutcome.parse(element as JsonObject), submission)
             }
         } catch (e: Exception) {
-            error = "The run result is still unavailable. Your request is kept on this device. ${TunnelCopy.display(e.message ?: "", hostLabel)}"
+            error = L10n.text("android.taskeditor.the_run_result_is_still_unavailable_your_r.294ee202", "${TunnelCopy.display(e.message ?: "", hostLabel)}")
         } finally {
             working = false
         }
@@ -443,7 +445,7 @@ fun TaskEditorScreen(
             error = null
             onSaved()
         } catch (e: Exception) {
-            error = "The stop was not confirmed. Reload this task before trying again. ${TunnelCopy.display(e.message ?: "", hostLabel)}"
+            error = L10n.text("android.taskeditor.the_stop_was_not_confirmed_reload_this_tas.ea360237", "${TunnelCopy.display(e.message ?: "", hostLabel)}")
         } finally {
             working = false
         }
@@ -484,28 +486,28 @@ fun TaskEditorScreen(
     ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Task", style = TsType.cardTitle, color = LocalTsColors.current.textPrimary)
+                    Text(L10n.text("android.taskeditor.task.4bc74b21"), style = TsType.cardTitle, color = LocalTsColors.current.textPrimary)
                     Text(hostLabel, style = TsType.caption, color = LocalTsColors.current.textSecondary)
                 }
                 IconButton(onClick = onBack) {
-                    Icon(ActionIcon.Back.vector, "Back", tint = LocalTsColors.current.controlGlyph)
+                    Icon(ActionIcon.Back.vector, L10n.text("common.back"), tint = LocalTsColors.current.controlGlyph)
                 }
             }
             if (error != null) {
                 Banner(error!!, BannerSeverity.DANGER)
                 if (!pendingEdit) {
-                    TsSecondaryButton(label = "Reload task", small = true, onClick = { scope.launch { load() } })
+                    TsSecondaryButton(label = L10n.text("android.taskeditor.reload_task.58d8bf39"), small = true, onClick = { scope.launch { load() } })
                 }
             }
             if (working) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     CircularProgressIndicator()
-                    Text("Updating task", color = LocalTsColors.current.textSecondary)
+                    Text(L10n.text("android.taskeditor.updating_task.5befd393"), color = LocalTsColors.current.textSecondary)
                 }
             }
             if (loaded && !supportsExecution) {
                 Text(
-                    "Update $hostLabel's tokenstat to run and stop tasks from here.",
+                    L10n.text("android.taskeditor.update_0_s_tokenstat_to_run_and_stop_tasks.597ff76e", "${hostLabel}"),
                     style = TsType.caption,
                     color = LocalTsColors.current.textSecondary,
                 )
@@ -517,7 +519,7 @@ fun TaskEditorScreen(
                 TsCard {
                     Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                         Text(
-                            if (delegate.isRunning) delegate.label else "Last run · ${delegate.label}",
+                            if (delegate.isRunning) delegate.label else L10n.text("android.taskeditor.last_run_0.f8973a05", "${delegate.label}"),
                             style = TsType.body.copy(fontWeight = FontWeight.SemiBold),
                             color = LocalTsColors.current.textPrimary,
                         )
@@ -526,7 +528,7 @@ fun TaskEditorScreen(
                             Text(runError, style = TsType.caption, color = LocalTsColors.current.danger, maxLines = 3)
                         } else {
                             Text(
-                                if (delegate.isRunning) "This run continues on the connected computer." else "The result remains linked to this task.",
+                                if (delegate.isRunning) L10n.text("android.taskeditor.this_run_continues_on_the_connected_comput.5bbf94b0") else L10n.text("android.taskeditor.the_result_remains_linked_to_this_task.54407ca7"),
                                 style = TsType.caption,
                                 color = LocalTsColors.current.textSecondary,
                             )
@@ -547,17 +549,17 @@ fun TaskEditorScreen(
             if (conflict && snapshot != null) {
                 TsCard {
                     Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                        Text("Changed on the computer", style = TsType.body.copy(fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
+                        Text(L10n.text("android.taskeditor.changed_on_the_computer.aefb92cf"), style = TsType.body.copy(fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
                         Text(snapshot.title, color = LocalTsColors.current.textPrimary)
                         Text(snapshot.notes, color = LocalTsColors.current.textPrimary)
                         Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                            TsSecondaryButton(label = "Use computer version", small = true, onClick = {
+                            TsSecondaryButton(label = L10n.text("android.taskeditor.use_computer_version.f0d6599f"), small = true, onClick = {
                                 baseline = snapshot
                                 fields = TaskEditorDraft.fromCard(snapshot)
                                 conflict = false
                                 error = null
                             })
-                            TsSecondaryButton(label = "Keep my draft", small = true, onClick = {
+                            TsSecondaryButton(label = L10n.text("android.taskeditor.keep_my_draft.cdb80bb9"), small = true, onClick = {
                                 baseline = snapshot
                                 conflict = false
                                 error = null
@@ -570,19 +572,19 @@ fun TaskEditorScreen(
             val pending = pendingRun
             when {
                 pendingEdit -> {
-                    TsAccentButton(label = "Check saved task", enabled = !working, onClick = {
+                    TsAccentButton(label = L10n.text("android.taskeditor.check_saved_task.6d057bda"), enabled = !working, onClick = {
                         scope.launch { refresh(); onSaved() }
                     })
                 }
                 pending != null -> {
                     Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                        TsSecondaryButton(label = "Check run", enabled = !working, onClick = {
+                        TsSecondaryButton(label = L10n.text("android.taskeditor.check_run.cece2401"), enabled = !working, onClick = {
                             scope.launch {
                                 reconcileRun()
                                 openOutcome(lastRun)
                             }
                         })
-                        TsAccentButton(label = "Retry same request", enabled = !working, onClick = {
+                        TsAccentButton(label = L10n.text("android.taskeditor.retry_same_request.16003a1a"), enabled = !working, onClick = {
                             scope.launch { openOutcome(submitRun(pending)) }
                         })
                     }
@@ -591,12 +593,12 @@ fun TaskEditorScreen(
                     if (delegate?.isRunning == true) {
                         Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                             TsSecondaryButton(
-                                label = if (delegate.status == "stopping") "Stopping…" else "Stop",
+                                label = if (delegate.status == "stopping") L10n.text("android.taskeditor.stopping.bbe85741") else L10n.text("common.stop"),
                                 icon = ActionIcon.Stop.vector,
                                 enabled = supportsExecution && !working,
                                 onClick = { scope.launch { stop(); onSaved() } },
                             )
-                            TsAccentButton(label = "View run", icon = ActionIcon.Preview.vector, onClick = {
+                            TsAccentButton(label = L10n.text("android.taskeditor.view_run.aaf7fccc"), icon = ActionIcon.Preview.vector, onClick = {
                                 scope.launch {
                                     val terminal = lastRun?.takeIf { it.runID == delegate.runId }
                                     val pty = terminal?.ptyID
@@ -610,13 +612,13 @@ fun TaskEditorScreen(
                         }
                     } else if (supportsExecution) {
                         if (delegate != null) {
-                            TsSecondaryButton(label = "View last result", icon = ActionIcon.Preview.vector, onClick = {
+                            TsSecondaryButton(label = L10n.text("android.taskeditor.view_last_result.1e6894ea"), icon = ActionIcon.Preview.vector, onClick = {
                                 onViewRun(delegate.runId, base?.workspaceID ?: "")
                             })
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                             TsSecondaryButton(
-                                label = "Run in background",
+                                label = L10n.text("android.taskeditor.run_in_background.c7b156d3"),
                                 icon = ActionIcon.Run.vector,
                                 enabled = canRun,
                                 onClick = {
@@ -627,7 +629,7 @@ fun TaskEditorScreen(
                                 },
                             )
                             TsSecondaryButton(
-                                label = "Run in terminal",
+                                label = L10n.text("android.taskeditor.run_in_terminal.f0b4acbf"),
                                 icon = ActionIcon.Run.vector,
                                 enabled = canRun,
                                 onClick = {
@@ -640,7 +642,7 @@ fun TaskEditorScreen(
                         }
                     }
                     TsAccentButton(
-                        label = "Save task",
+                        label = L10n.text("android.taskeditor.save_task.42a9eb31"),
                         icon = ActionIcon.Save.vector,
                         enabled = canSave,
                         onClick = { scope.launch { save() } },
@@ -731,7 +733,7 @@ fun TaskCreateScreen(
 
     fun confirm(result: TaskCreationOutcome, operationID: String) {
         if (result.operationID != operationID) {
-            error = "The computer returned a different creation. Check this task again."
+            error = L10n.text("android.taskeditor.the_computer_returned_a_different_creation.61eecd53")
             return
         }
         outcome = result
@@ -772,10 +774,10 @@ fun TaskCreateScreen(
             }.getOrNull()
             if (receipt != null && receipt !is JsonNull) {
                 runCatching { confirm(TaskCreationOutcome.parse(receipt as JsonObject), operationID) }
-                    .onFailure { error = "The creation has not been confirmed. Check the computer before trying again. ${TunnelCopy.display(e.message ?: "", hostLabel)}" }
+                    .onFailure { error = L10n.text("android.taskeditor.the_creation_has_not_been_confirmed_check.2a4e0d3e", "${TunnelCopy.display(e.message ?: "", hostLabel)}") }
             } else {
                 canRetry = true
-                error = "The creation has not been confirmed. Check the computer before trying again. ${TunnelCopy.display(e.message ?: "", hostLabel)}"
+                error = L10n.text("android.taskeditor.the_creation_has_not_been_confirmed_check.2a4e0d3e", "${TunnelCopy.display(e.message ?: "", hostLabel)}")
             }
         } finally {
             working = false
@@ -792,12 +794,12 @@ fun TaskCreateScreen(
             val element = model.workspaceSection(peer, "todo.creationReceipt", buildJsonObject { put("operationId", operationID) })
             if (element is JsonNull) {
                 canRetry = true
-                notice = "The computer has no creation receipt yet. You can retry this same task safely."
+                notice = L10n.text("android.taskeditor.the_computer_has_no_creation_receipt_yet_y.9772be6d")
             } else {
                 confirm(TaskCreationOutcome.parse(element as JsonObject), operationID)
             }
         } catch (e: Exception) {
-            error = TunnelCopy.display(e.message ?: "The request failed.", hostLabel)
+            error = TunnelCopy.display(e.message ?: L10n.text("android.taskeditor.the_request_failed.db4fb447"), hostLabel)
         } finally {
             working = false
         }
@@ -813,16 +815,16 @@ fun TaskCreateScreen(
     ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("New task", style = TsType.cardTitle, color = LocalTsColors.current.textPrimary)
+                    Text(L10n.text("android.taskeditor.new_task.3e992276"), style = TsType.cardTitle, color = LocalTsColors.current.textPrimary)
                     Text(hostLabel, style = TsType.caption, color = LocalTsColors.current.textSecondary)
                 }
                 IconButton(onClick = onBack) {
-                    Icon(ActionIcon.Back.vector, "Back", tint = LocalTsColors.current.controlGlyph)
+                    Icon(ActionIcon.Back.vector, L10n.text("common.back"), tint = LocalTsColors.current.controlGlyph)
                 }
             }
             if (!supported) {
                 Banner(
-                    "Update $hostLabel's tokenstat to create tasks from here. Your draft stays on this device.",
+                    L10n.text("android.taskeditor.update_0_s_tokenstat_to_create_tasks_from.e02717bd", "${hostLabel}"),
                     BannerSeverity.WARNING,
                 )
             }
@@ -831,8 +833,8 @@ fun TaskCreateScreen(
                 Text(notice!!, style = TsType.caption, color = LocalTsColors.current.textSecondary)
             }
             if (outcome != null) {
-                Text("Task added.", style = TsType.body, color = LocalTsColors.current.textPrimary)
-                TsAccentButton(label = "Done", onClick = onBack)
+                Text(L10n.text("android.taskeditor.task_added.d37be00e"), style = TsType.body, color = LocalTsColors.current.textPrimary)
+                TsAccentButton(label = L10n.text("common.done"), onClick = onBack)
             } else {
                 TaskFields(
                     fields = fields,
@@ -844,16 +846,16 @@ fun TaskCreateScreen(
                 Spacer(Modifier.padding(top = Space.s))
                 Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     if (pending != null) {
-                        TsSecondaryButton(label = "Check", enabled = !working, onClick = { scope.launch { readReceipt() } })
+                        TsSecondaryButton(label = L10n.text("android.taskeditor.check.9d60841e"), enabled = !working, onClick = { scope.launch { readReceipt() } })
                     }
                     if (canRetry) {
-                        TsAccentButton(label = "Retry same task", enabled = !working, onClick = {
+                        TsAccentButton(label = L10n.text("android.taskeditor.retry_same_task.895a4f9d"), enabled = !working, onClick = {
                             val operationID = pending ?: return@TsAccentButton
                             scope.launch { submit(operationID) }
                         })
                     } else if (pending == null) {
                         TsAccentButton(
-                            label = if (working) "Creating…" else "Create task",
+                            label = if (working) L10n.text("android.taskeditor.creating.c79ed949") else L10n.text("android.taskeditor.create_task.6f541e1b"),
                             enabled = supported && !working && fields.validation == null,
                             onClick = {
                                 val operationID = TaskOperations.creationID()
@@ -962,7 +964,7 @@ fun TaskRunScreen(
                     loadTranscript(runID, status in setOf("starting", "queued", "running", "stopping"))
                 }
             }
-            .onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+            .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.taskeditor.the_request_failed.db4fb447"), hostLabel) }
         loading = false
     }
 
@@ -985,38 +987,38 @@ fun TaskRunScreen(
     ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) {
-                    Icon(ActionIcon.Back.vector, "Back", tint = LocalTsColors.current.controlGlyph)
+                    Icon(ActionIcon.Back.vector, L10n.text("common.back"), tint = LocalTsColors.current.controlGlyph)
                 }
                 Text(
-                    run?.optStr("name") ?: "Result",
+                    run?.optStr("name") ?: L10n.text("android.taskeditor.result.6e7d50e8"),
                     style = TsType.cardTitle,
                     color = LocalTsColors.current.textPrimary,
                     modifier = Modifier.weight(1f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                TextButton(onClick = onBack) { Text("Done") }
+                TextButton(onClick = onBack) { Text(L10n.text("common.done")) }
             }
             if (error != null) {
                 Banner(error!!, BannerSeverity.DANGER)
-                TsSecondaryButton(label = "Reload", small = true, onClick = { scope.launch { load() } })
+                TsSecondaryButton(label = L10n.text("android.taskeditor.reload.bdc090ec"), small = true, onClick = { scope.launch { load() } })
             }
             if (loading && !loaded) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     CircularProgressIndicator()
-                    Text("Loading result", color = LocalTsColors.current.textSecondary)
+                    Text(L10n.text("android.taskeditor.loading_result.9f43a300"), color = LocalTsColors.current.textSecondary)
                 }
             }
             val current = run
             if (current != null) {
-                TsCard(title = "Run") {
+                TsCard(title = L10n.text("common.run")) {
                     Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                         Text(runStatusLabel(current.optStr("status") ?: ""), color = LocalTsColors.current.textPrimary)
-                        Text("Agent: ${current.optStr("backend") ?: ""}", style = TsType.caption, color = LocalTsColors.current.textSecondary)
-                        Text("Folder: ${route.folderLabel}", style = TsType.caption, color = LocalTsColors.current.textSecondary)
+                        Text(L10n.text("android.taskeditor.agent_0.10f2263c", "${current.optStr("backend") ?: ""}"), style = TsType.caption, color = LocalTsColors.current.textSecondary)
+                        Text(L10n.text("android.taskeditor.folder_0.164efc52", "${route.folderLabel}"), style = TsType.caption, color = LocalTsColors.current.textSecondary)
                         if ((current.optStr("status") ?: "") in setOf("starting", "queued", "running", "stopping")) {
                             Text(
-                                "This run continues on $hostLabel.",
+                                L10n.text("android.taskeditor.this_run_continues_on_0.f887356d", "${hostLabel}"),
                                 style = TsType.caption,
                                 color = LocalTsColors.current.textSecondary,
                             )
@@ -1025,20 +1027,20 @@ fun TaskRunScreen(
                 }
                 val pty = current.optStr("ptyId")
                 if (!pty.isNullOrEmpty()) {
-                    TsSecondaryButton(label = "Open terminal", icon = ActionIcon.Reopen.vector, small = true, onClick = {
+                    TsSecondaryButton(label = L10n.text("android.taskeditor.open_terminal.acb1f43d"), icon = ActionIcon.Reopen.vector, small = true, onClick = {
                         onOpenTerminal(pty)
                     })
                 }
                 if (attachError != null) {
                     Text(attachError!!, style = TsType.caption, color = LocalTsColors.current.danger)
                 }
-                TsCard(title = "Transcript") {
+                TsCard(title = L10n.text("android.taskeditor.transcript.721164f0")) {
                     Text(
                         transcript.ifBlank {
                             val status = current.optStr("status") ?: ""
                             if (status in setOf("starting", "queued", "running", "stopping")) {
-                                if (!pty.isNullOrEmpty()) "Output is in the terminal on $hostLabel." else "Waiting for output…"
-                            } else "No readable output."
+                                if (!pty.isNullOrEmpty()) L10n.text("android.taskeditor.output_is_in_the_terminal_on_0.6e84e78a", "${hostLabel}") else L10n.text("android.taskeditor.waiting_for_output.f05fefe2")
+                            } else L10n.text("android.taskeditor.no_readable_output.cd218ba3")
                         },
                         style = TsType.mono(12),
                         color = LocalTsColors.current.textPrimary,
@@ -1046,9 +1048,9 @@ fun TaskRunScreen(
                     )
                 }
             } else if (loaded) {
-                TsCard(title = "This run is unavailable") {
+                TsCard(title = L10n.text("android.taskeditor.this_run_is_unavailable.5bef28b2")) {
                     Text(
-                        "It is no longer in this folder's run history. The folder's files and commits are still available below.",
+                        L10n.text("android.taskeditor.it_is_no_longer_in_this_folder_s_run_histo.dad904f6"),
                         style = TsType.caption,
                         color = LocalTsColors.current.textSecondary,
                         modifier = Modifier.padding(Space.m),
@@ -1057,13 +1059,13 @@ fun TaskRunScreen(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 TsSecondaryButton(
-                    label = "Changes",
+                    label = L10n.text("android.taskeditor.changes.bbd4b6a8"),
                     small = true,
                     enabled = route.canReviewWorkspace,
                     onClick = { onOpenSection("Changes") },
                 )
                 TsSecondaryButton(
-                    label = "History",
+                    label = L10n.text("common.history"),
                     small = true,
                     enabled = route.canReviewWorkspace,
                     onClick = { onOpenSection("History") },
@@ -1078,13 +1080,13 @@ fun TaskRunScreen(
     }
 
 private fun runStatusLabel(status: String): String = when (status) {
-    "starting" -> "Starting"
-    "queued" -> "Queued"
-    "running" -> "Running"
-    "stopping" -> "Stopping"
-    "ok" -> "Done"
-    "stopped" -> "Stopped"
-    "error" -> "Failed"
-    "interrupted" -> "Interrupted by restart"
+    "starting" -> L10n.text("android.taskeditor.starting.aeed4d26")
+    "queued" -> L10n.text("common.queued")
+    "running" -> L10n.text("common.running")
+    "stopping" -> L10n.text("android.taskeditor.stopping.a71ee1d4")
+    "ok" -> L10n.text("common.done")
+    "stopped" -> L10n.text("android.taskeditor.stopped.1a4f630a")
+    "error" -> L10n.text("common.failed")
+    "interrupted" -> L10n.text("android.taskeditor.interrupted_by_restart.012812fe")
     else -> status
 }

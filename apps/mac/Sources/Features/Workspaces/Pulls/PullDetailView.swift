@@ -20,7 +20,7 @@ struct PullDetailView: View {
         VStack(spacing: 0) {
             #if os(macOS)
             DetailChromeBar(scope: scope, leading: {
-                Button(action: onBack) { ActionIcon.back.label("Pull requests") }
+                Button(action: onBack) { ActionIcon.back.label(L10n.text("apple.pulldetailview.pull_requests.d9e3f260")) }
                     .buttonStyle(SecondaryButtonStyle(small: true))
             }) {
                 detailActions
@@ -84,27 +84,27 @@ struct PullDetailView: View {
         .refreshable {
             await model.load(workspaceID: workspaceID, peer: peer, number: summary.number, refresh: true)
         }
-        .confirmationDialog("Close this pull request?", isPresented: $model.confirmingClose, titleVisibility: .visible) {
-            Button("Close pull request", role: .destructive) {
+        .confirmationDialog(L10n.text("apple.pulldetailview.close_this_pull_request.54b5c0b1"), isPresented: $model.confirmingClose, titleVisibility: .visible) {
+            Button(L10n.text("apple.pulldetailview.close_pull_request.672e174d"), role: .destructive) {
                 Task { await model.setOpen(false, workspaceID: workspaceID, peer: peer, number: summary.number) }
             }
-            Button("Cancel", role: .cancel) {}
+            Button(L10n.text("common.cancel"), role: .cancel) {}
         } message: {
-            Text("Other people will see it as closed. You can reopen it later.")
+            Text(L10n.text("apple.pulldetailview.other_people_will_see_it_as_closed_you_can.7b0cb552"))
         }
-        .confirmationDialog("Merge this pull request?", isPresented: $model.confirmingMerge, titleVisibility: .visible) {
-            Button("Merge with \(model.mergeMethod.title.lowercased())") {
+        .confirmationDialog(L10n.text("apple.pulldetailview.merge_this_pull_request.6ea40a2a"), isPresented: $model.confirmingMerge, titleVisibility: .visible) {
+            Button(L10n.text("apple.pulldetailview.merge_with_0.9456a9db", "\(model.mergeMethod.title.lowercased())")) {
                 Task { await model.merge(workspaceID: workspaceID, peer: peer, number: summary.number) }
             }
-            Button("Cancel", role: .cancel) {}
+            Button(L10n.text("common.cancel"), role: .cancel) {}
         } message: {
-            Text("This changes the shared repository and cannot be undone from tokenstat.")
+            Text(L10n.text("apple.pulldetailview.this_changes_the_shared_repository_and_can.ef54ace2"))
         }
     }
 
     private var topBar: some View {
         HStack(spacing: Theme.Space.s) {
-            Button(action: onBack) { ActionIcon.back.label("Pull requests") }
+            Button(action: onBack) { ActionIcon.back.label(L10n.text("apple.pulldetailview.pull_requests.d9e3f260")) }
                 .buttonStyle(SecondaryButtonStyle(small: true))
             Spacer()
             detailActions
@@ -114,10 +114,10 @@ struct PullDetailView: View {
     @ViewBuilder
     private var detailActions: some View {
         if let raw = model.detail?.url, let url = URL(string: raw) {
-            Button { openURL(url) } label: { ActionIcon.external.label("Open on GitHub") }
+            Button { openURL(url) } label: { ActionIcon.external.label(L10n.text("apple.pulldetailview.open_on_github.03f69885")) }
                 .buttonStyle(SecondaryButtonStyle(small: true))
         }
-        ToolbarIconButton(systemImage: "arrow.clockwise", help: "Refresh pull request", isBusy: model.loading) {
+        ToolbarIconButton(systemImage: "arrow.clockwise", help: L10n.text("apple.pulldetailview.refresh_pull_request.fc146ac9"), isBusy: model.loading) {
             Task { await model.load(workspaceID: workspaceID, peer: peer, number: summary.number, refresh: true) }
         }
     }
@@ -145,7 +145,7 @@ struct PullDetailView: View {
                 }
             }
             HStack(spacing: Theme.Space.s) {
-                Text(detail.draft ? "Draft" : detail.state.capitalized)
+                Text(detail.draft ? L10n.text("apple.pulldetailview.draft.ebf12ef4") : detail.state.capitalized)
                     .font(Theme.caption.weight(.semibold))
                     .foregroundStyle(detail.state == "closed" ? Theme.danger : detail.state == "merged" ? Theme.secondary : Theme.accent)
                 branch(detail.headRef)
@@ -154,7 +154,7 @@ struct PullDetailView: View {
                 Spacer()
                 changeCount("+\(detail.additions)", tint: Theme.diffAdded)
                 changeCount("−\(detail.deletions)", tint: Theme.diffRemoved)
-                changeCount("\(detail.changedFiles) files", tint: .secondary)
+                changeCount(L10n.text("apple.pulldetailview.0_files.fb42ce4d", "\(detail.changedFiles)"), tint: .secondary)
             }
         }
         .padding(Theme.cardPadding)
@@ -172,7 +172,7 @@ struct PullDetailView: View {
 
     private func openingTime(_ detail: PullDetail) -> some View {
         HStack(spacing: Theme.Space.s) {
-            Text("opened #\(detail.number)")
+            Text(L10n.text("apple.pulldetailview.opened_0.095c9540", "\(detail.number)"))
             if let date = detail.createdDate {
                 Text("·").foregroundStyle(.tertiary)
                 RelativeTimeText(date: date, unitsStyle: .abbreviated)
@@ -232,7 +232,7 @@ struct PullDetailView: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             PullConversationCard(actor: detail.author, date: detail.createdDate) {
                 if detail.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("No description was added.").font(Theme.body).foregroundStyle(.tertiary)
+                    Text(L10n.text("apple.pulldetailview.no_description_was_added.68442d50")).font(Theme.body).foregroundStyle(.tertiary)
                 } else { MarkdownText(detail.body) }
             }
             ForEach(model.events) { event in TimelineCard(event: event) }
@@ -241,7 +241,7 @@ struct PullDetailView: View {
             if model.nextCursor != nil {
                 Button {
                     Task { await model.moreTimeline(workspaceID: workspaceID, peer: peer, number: summary.number) }
-                } label: { ActionIcon.more.label("Earlier activity") }
+                } label: { ActionIcon.more.label(L10n.text("apple.pulldetailview.earlier_activity.2e9839ac")) }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .frame(maxWidth: .infinity)
             }
@@ -260,7 +260,7 @@ struct PullDetailView: View {
             if model.loadingDiff { contentSkeleton }
             else if let error = model.diffError { inlineError(error) }
             else if model.diffs.isEmpty {
-                EmptyState(symbol: "doc.text.magnifyingglass", title: "No text changes", message: "This pull request has no line-by-line diff to show.")
+                EmptyState(symbol: "doc.text.magnifyingglass", title: L10n.text("apple.pulldetailview.no_text_changes.08722a9e"), message: L10n.text("apple.pulldetailview.this_pull_request_has_no_line_by_line_diff.680bf131"))
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: Theme.Space.xs) {
@@ -303,7 +303,7 @@ struct PullDetailView: View {
                     Image(systemName: checksSymbol(detail)).foregroundStyle(checksTint(detail)).font(Theme.fixed(18, weight: .semibold))
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(detail.checks.isEmpty ? "No checks reported" : "\(passed) of \(detail.checks.count) checks passed")
+                    Text(detail.checks.isEmpty ? L10n.text("apple.pulldetailview.no_checks_reported.8454518f") : L10n.text("apple.pulldetailview.0_of_1_checks_passed.17ecc810", "\(passed)", "\(detail.checks.count)"))
                         .font(Theme.body.weight(.semibold))
                     Text(checksMessage(detail)).font(Theme.caption).foregroundStyle(.secondary)
                 }
@@ -326,17 +326,17 @@ struct PullDetailView: View {
         return "checkmark"
     }
     private func checksMessage(_ detail: PullDetail) -> String {
-        if detail.checks.isEmpty { return "The head commit does not publish a check suite." }
-        if detail.checks.contains(where: { $0.state == "failing" }) { return "Something needs attention before this is ready." }
-        if detail.checks.contains(where: { $0.state == "pending" }) { return "The remaining work is still running." }
-        return "Everything reported by the head commit is green."
+        if detail.checks.isEmpty { return L10n.text("apple.pulldetailview.the_head_commit_does_not_publish_a_check_s.3a467ede") }
+        if detail.checks.contains(where: { $0.state == "failing" }) { return L10n.text("apple.pulldetailview.something_needs_attention_before_this_is_r.1400a527") }
+        if detail.checks.contains(where: { $0.state == "pending" }) { return L10n.text("apple.pulldetailview.the_remaining_work_is_still_running.1c81cb2a") }
+        return L10n.text("apple.pulldetailview.everything_reported_by_the_head_commit_is.6083342c")
     }
 
     private func errorCard(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             inlineError(message)
             Button { Task { await model.load(workspaceID: workspaceID, peer: peer, number: summary.number, refresh: true) } }
-                label: { ActionIcon.refresh.label("Try again") }
+                label: { ActionIcon.refresh.label(L10n.text("apple.pulldetailview.try_again.d8b8392e")) }
                 .buttonStyle(AccentButtonStyle(small: true))
         }
     }
@@ -376,7 +376,7 @@ struct PullDetailView: View {
                             .font(Theme.callout).foregroundStyle(.secondary)
                         HStack(spacing: Theme.Space.s) {
                             ProgressView().controlSize(.small)
-                            Text("Loading conversation…").font(Theme.caption).foregroundStyle(.secondary)
+                            Text(L10n.text("apple.pulldetailview.loading_conversation.5eb1e4a3")).font(Theme.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -403,7 +403,7 @@ struct PullDetailView: View {
 
             contentSkeleton
         }
-        .accessibilityLabel("Loading pull request")
+        .accessibilityLabel(L10n.text("apple.pulldetailview.loading_pull_request.bc1bbd8d"))
     }
 
     private var contentSkeleton: some View {
@@ -450,7 +450,7 @@ private struct DetailTabs: View {
                     Button { withAnimation(.snappy(duration: 0.22)) { selection = tab } } label: {
                         HStack(spacing: 7) {
                             Image(systemName: tab.symbol)
-                            Text(tab.rawValue)
+                            Text(L10n.enumLabel(tab))
                             if tab == .checks, checks > 0 {
                                 Text("\(checks)")
                                     .foregroundStyle(Theme.accent.opacity(selection == tab ? 1 : 0.48))
@@ -527,19 +527,19 @@ private struct TimelineCard: View {
     private var sentence: String {
         let suffix = event.subject.map { " · \($0)" } ?? ""
         let verb = switch event.kind {
-        case "committed": "committed"
-        case "labeled": "added a label"
-        case "unlabeled": "removed a label"
-        case "assigned": "assigned"
-        case "unassigned": "unassigned"
-        case "reviewRequested": "requested a review"
-        case "forcePushed": "force-pushed"
-        case "renamed": "renamed the pull request"
-        case "readyForReview": "marked this ready for review"
-        case "closed": "closed the pull request"
-        case "reopened": "reopened the pull request"
-        case "merged": "merged the pull request"
-        default: "updated the pull request"
+        case "committed": L10n.text("apple.pulldetailview.committed.cc962289")
+        case "labeled": L10n.text("apple.pulldetailview.added_a_label.d94d0d1f")
+        case "unlabeled": L10n.text("apple.pulldetailview.removed_a_label.9b424566")
+        case "assigned": L10n.text("apple.pulldetailview.assigned.2ebb9294")
+        case "unassigned": L10n.text("apple.pulldetailview.unassigned.2f23e841")
+        case "reviewRequested": L10n.text("apple.pulldetailview.requested_a_review.366ef14e")
+        case "forcePushed": L10n.text("apple.pulldetailview.force_pushed.13045511")
+        case "renamed": L10n.text("apple.pulldetailview.renamed_the_pull_request.03cbfb8e")
+        case "readyForReview": L10n.text("apple.pulldetailview.marked_this_ready_for_review.9851474a")
+        case "closed": L10n.text("apple.pulldetailview.closed_the_pull_request.0ee2b89d")
+        case "reopened": L10n.text("apple.pulldetailview.reopened_the_pull_request.7a38a97b")
+        case "merged": L10n.text("apple.pulldetailview.merged_the_pull_request.e32d2898")
+        default: L10n.text("apple.pulldetailview.updated_the_pull_request.b58c4a83")
         }
         return "\(event.actor.login) \(verb)\(suffix)"
     }
@@ -550,15 +550,15 @@ private struct PullInspector: View {
     let detail: PullDetail
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
-            section("REVIEW", icon: "eye") {
+            section(L10n.text("apple.pulldetailview.review.182e4992"), icon: "eye") {
                 inspectorValue(reviewText, tint: reviewTint)
                 ForEach(detail.reviews) { review in actorRow(review.author, note: review.state.replacingOccurrences(of: "_", with: " ").capitalized) }
-                ForEach(detail.reviewRequests) { actor in actorRow(actor, note: "Requested") }
+                ForEach(detail.reviewRequests) { actor in actorRow(actor, note: L10n.text("apple.pulldetailview.requested.2d9e2828")) }
             }
-            if !detail.assignees.isEmpty { section("ASSIGNEES", icon: "person.2") { ForEach(detail.assignees) { actor in actorRow(actor, note: nil) } } }
-            if !detail.labels.isEmpty { section("LABELS", icon: "tag") { FlowLabels(labels: detail.labels) } }
-            if detail.state == "open" { section("MERGE", icon: "arrow.triangle.merge") {
-                inspectorValue(detail.mergeable == "mergeable" ? "Ready to merge" : detail.mergeState.replacingOccurrences(of: "_", with: " ").capitalized, tint: detail.mergeable == "mergeable" ? Theme.success : Theme.warning)
+            if !detail.assignees.isEmpty { section(L10n.text("apple.pulldetailview.assignees.6549675b"), icon: "person.2") { ForEach(detail.assignees) { actor in actorRow(actor, note: nil) } } }
+            if !detail.labels.isEmpty { section(L10n.text("apple.pulldetailview.labels.47399b60"), icon: "tag") { FlowLabels(labels: detail.labels) } }
+            if detail.state == "open" { section(L10n.text("apple.pulldetailview.merge.fc2b737d"), icon: "arrow.triangle.merge") {
+                inspectorValue(detail.mergeable == "mergeable" ? L10n.text("apple.pulldetailview.ready_to_merge.28f7384e") : detail.mergeState.replacingOccurrences(of: "_", with: " ").capitalized, tint: detail.mergeable == "mergeable" ? Theme.success : Theme.warning)
             } }
         }
         .padding(Theme.cardPadding).frame(maxWidth: .infinity, alignment: .leading)
@@ -580,7 +580,7 @@ private struct PullInspector: View {
     private func inspectorValue(_ text: String, tint: Color) -> some View { Label(text, systemImage: "circle.fill").font(Theme.caption.weight(.medium)).foregroundStyle(tint) }
     private var reviewText: String {
         if detail.state != "open" { return detail.state.capitalized }
-        switch detail.reviewDecision { case "approved": return "Approved"; case "changes_requested": return "Changes requested"; default: return detail.draft ? "Draft" : "Review pending" }
+        switch detail.reviewDecision { case "approved": return L10n.text("apple.pulldetailview.approved.87b42e40"); case "changes_requested": return L10n.text("apple.pulldetailview.changes_requested.10a92a8a"); default: return detail.draft ? L10n.text("apple.pulldetailview.draft.ebf12ef4") : L10n.text("apple.pulldetailview.review_pending.9834120e") }
     }
     private var reviewTint: Color { switch detail.reviewDecision { case "approved": Theme.success; case "changes_requested": Theme.danger; default: Theme.warning } }
 }
@@ -595,16 +595,16 @@ private struct PullCommentComposer: View {
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: ActionIcon.comment.symbol)
                     .foregroundStyle(Theme.accent)
-                Text("Join the conversation")
+                Text(L10n.text("apple.pulldetailview.join_the_conversation.a0a9b316"))
                     .font(Theme.callout.weight(.semibold))
             }
-            composerField("Write a comment…", text: $text, minHeight: 92)
+            composerField(L10n.text("apple.pulldetailview.write_a_comment.d21c3e2f"), text: $text, minHeight: 92)
             HStack {
-                Text("Markdown is supported")
+                Text(L10n.text("apple.pulldetailview.markdown_is_supported.c08eb344"))
                     .font(Theme.caption2)
                     .foregroundStyle(.tertiary)
                 Spacer()
-                Button("Comment", .comment, action: send)
+                Button(L10n.text("apple.pulldetailview.comment.44f5e3fb"), .comment, action: send)
                     .buttonStyle(AccentButtonStyle(small: true))
                     .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || busy)
             }
@@ -626,7 +626,7 @@ private struct PullActionPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Label("ACTIONS", systemImage: "sparkles")
+            Label(L10n.text("apple.pulldetailview.actions.1ba13aa6"), systemImage: "sparkles")
                 .font(Theme.caption2.weight(.semibold))
                 .tracking(0.7)
                 .foregroundStyle(.tertiary)
@@ -634,18 +634,18 @@ private struct PullActionPanel: View {
             if detail.state == "open" {
                 reviewActions
                 if detail.draft {
-                    Button("Ready for review", .done) {
+                    Button(L10n.text("apple.pulldetailview.ready_for_review.75c2a5c8"), .done) {
                         Task { await model.ready(workspaceID: workspaceID, peer: peer, number: detail.number) }
                     }
                     .buttonStyle(AccentButtonStyle(small: true))
                     .disabled(model.actionBusy)
                 }
                 mergeActions
-                Button("Close pull request", .dismiss) { model.confirmingClose = true }
+                Button(L10n.text("apple.pulldetailview.close_pull_request.672e174d"), .dismiss) { model.confirmingClose = true }
                     .buttonStyle(DestructiveButtonStyle(small: true))
                     .disabled(model.actionBusy)
             } else if detail.state == "closed" {
-                Button("Reopen pull request", .reopen) {
+                Button(L10n.text("apple.pulldetailview.reopen_pull_request.6126288e"), .reopen) {
                     Task { await model.setOpen(true, workspaceID: workspaceID, peer: peer, number: detail.number) }
                 }
                 .buttonStyle(AccentButtonStyle(small: true))
@@ -662,31 +662,31 @@ private struct PullActionPanel: View {
 
     private var reviewActions: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Review")
+            Text(L10n.text("apple.pulldetailview.review.aff0766a"))
                 .font(Theme.caption.weight(.semibold))
-            Button("Approve", .approve) {
+            Button(L10n.text("apple.pulldetailview.approve.6007acbe"), .approve) {
                 Task { await model.review(.approve, workspaceID: workspaceID, peer: peer, number: detail.number) }
             }
             .buttonStyle(SecondaryButtonStyle(small: true))
             .disabled(model.actionBusy)
-            Button("Request changes", .edit) { model.beginReview(.requestChanges) }
+            Button(L10n.text("apple.pulldetailview.request_changes.cb5d9f98"), .edit) { model.beginReview(.requestChanges) }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .disabled(model.actionBusy)
-            Button("Comment review", .comment) { model.beginReview(.comment) }
+            Button(L10n.text("apple.pulldetailview.comment_review.f8950d66"), .comment) { model.beginReview(.comment) }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .disabled(model.actionBusy)
             if let mode = model.reviewMode {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     composerField(
-                        mode == .requestChanges ? "Explain what needs to change…" : "Add a review note…",
+                        mode == .requestChanges ? L10n.text("apple.pulldetailview.explain_what_needs_to_change.5e9e1223") : L10n.text("apple.pulldetailview.add_a_review_note.dd5bee74"),
                         text: $model.reviewDraft,
                         minHeight: 82
                     )
                     HStack {
-                        Button("Cancel", .dismiss) { model.cancelReview() }
+                        Button(L10n.text("common.cancel"), .dismiss) { model.cancelReview() }
                             .buttonStyle(SecondaryButtonStyle(small: true))
                         Spacer()
-                        Button("Send review", .send) {
+                        Button(L10n.text("apple.pulldetailview.send_review.e61e3577"), .send) {
                             Task { await model.review(mode, workspaceID: workspaceID, peer: peer, number: detail.number) }
                         }
                         .buttonStyle(AccentButtonStyle(small: true))
@@ -701,14 +701,14 @@ private struct PullActionPanel: View {
 
     private var mergeActions: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Merge method")
+            Text(L10n.text("apple.pulldetailview.merge_method.889b19c3"))
                 .font(Theme.caption.weight(.semibold))
             SegmentedTabs(
                 options: PullMergeMethod.allCases,
                 selection: $model.mergeMethod,
                 title: \PullMergeMethod.title
             )
-            Button("Merge pull request", .merge) { model.confirmingMerge = true }
+            Button(L10n.text("apple.pulldetailview.merge_pull_request.4aa62232"), .merge) { model.confirmingMerge = true }
                 .buttonStyle(AccentButtonStyle(small: true))
                 .disabled(detail.draft || model.actionBusy)
         }
@@ -717,16 +717,16 @@ private struct PullActionPanel: View {
 
     private var checkoutActions: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Local checkout")
+            Text(L10n.text("apple.pulldetailview.local_checkout.416562be"))
                 .font(Theme.caption.weight(.semibold))
-            TextField("Local branch name", text: $model.checkoutBranch)
+            TextField(L10n.text("apple.pulldetailview.local_branch_name.a33a6eba"), text: $model.checkoutBranch)
                 .textFieldStyle(.plain)
                 .font(Theme.monoText(11, weight: .medium, relativeTo: .caption))
                 .padding(.horizontal, 10)
                 .frame(height: Theme.Control.height)
                 .background(Theme.background, in: RoundedRectangle(cornerRadius: 9))
                 .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.border))
-            Button("Check out locally", .checkout) {
+            Button(L10n.text("apple.pulldetailview.check_out_locally.433de9bf"), .checkout) {
                 Task { await model.checkout(workspaceID: workspaceID, peer: peer, number: detail.number) }
             }
             .buttonStyle(SecondaryButtonStyle(small: true))
@@ -782,7 +782,7 @@ private struct CheckRow: View {
             }
             Spacer()
             Text(check.state.capitalized).font(Theme.caption.weight(.semibold)).foregroundStyle(tint)
-            if let raw = check.url, let url = URL(string: raw) { Button { openURL(url) } label: { Image(systemName: ActionIcon.external.symbol).accessibilityLabel("Open check") }.buttonStyle(.plain).foregroundStyle(Theme.accent) }
+            if let raw = check.url, let url = URL(string: raw) { Button { openURL(url) } label: { Image(systemName: ActionIcon.external.symbol).accessibilityLabel(L10n.text("apple.pulldetailview.open_check.130779b8")) }.buttonStyle(.plain).foregroundStyle(Theme.accent) }
         }
         .padding(Theme.Space.m).background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
@@ -864,7 +864,7 @@ private final class PullDetailModel {
 
     func comment(workspaceID: String, peer: String?, number: UInt32) async {
         let body = commentDraft
-        if await perform("Comment posted", refresh: true, workspaceID: workspaceID, peer: peer, number: number, action: {
+        if await perform(L10n.text("apple.pulldetailview.comment_posted.f79769cc"), refresh: true, workspaceID: workspaceID, peer: peer, number: number, action: {
             try await Bridge.pullComment(workspaceID: workspaceID, peer: peer, number: number, body: body)
         }) {
             commentDraft = ""
@@ -879,9 +879,9 @@ private final class PullDetailModel {
     ) async {
         let body = verdict == .approve ? "" : reviewDraft
         let message = switch verdict {
-        case .approve: "Review approved"
-        case .requestChanges: "Changes requested"
-        case .comment: "Review comment posted"
+        case .approve: L10n.text("apple.pulldetailview.review_approved.0978fd61")
+        case .requestChanges: L10n.text("apple.pulldetailview.changes_requested.10a92a8a")
+        case .comment: L10n.text("apple.pulldetailview.review_comment_posted.b23f0868")
         }
         if await perform(message, refresh: true, workspaceID: workspaceID, peer: peer, number: number, action: {
             try await Bridge.pullReview(
@@ -894,19 +894,19 @@ private final class PullDetailModel {
     }
 
     func ready(workspaceID: String, peer: String?, number: UInt32) async {
-        _ = await perform("Ready for review", refresh: true, workspaceID: workspaceID, peer: peer, number: number) {
+        _ = await perform(L10n.text("apple.pulldetailview.ready_for_review.75c2a5c8"), refresh: true, workspaceID: workspaceID, peer: peer, number: number) {
             try await Bridge.pullReady(workspaceID: workspaceID, peer: peer, number: number)
         }
     }
 
     func setOpen(_ open: Bool, workspaceID: String, peer: String?, number: UInt32) async {
-        _ = await perform(open ? "Pull request reopened" : "Pull request closed", refresh: true, workspaceID: workspaceID, peer: peer, number: number) {
+        _ = await perform(open ? L10n.text("apple.pulldetailview.pull_request_reopened.03ed9cfc") : L10n.text("apple.pulldetailview.pull_request_closed.2babc563"), refresh: true, workspaceID: workspaceID, peer: peer, number: number) {
             try await Bridge.pullSetOpen(workspaceID: workspaceID, peer: peer, number: number, open: open)
         }
     }
 
     func merge(workspaceID: String, peer: String?, number: UInt32) async {
-        _ = await perform("Pull request merged", refresh: true, workspaceID: workspaceID, peer: peer, number: number) {
+        _ = await perform(L10n.text("apple.pulldetailview.pull_request_merged.5f0f1f6d"), refresh: true, workspaceID: workspaceID, peer: peer, number: number) {
             try await Bridge.pullMerge(
                 workspaceID: workspaceID, peer: peer, number: number, method: mergeMethod
             )
@@ -924,7 +924,7 @@ private final class PullDetailModel {
                 workspaceID: workspaceID, peer: peer, number: number, branch: checkoutBranch
             )
             if outcome.ok {
-                actionNotice = "Checked out \(checkoutBranch)"
+                actionNotice = L10n.text("apple.pulldetailview.checked_out_0.d61914af", "\(checkoutBranch)")
             } else {
                 actionError = outcome.message
             }

@@ -461,7 +461,7 @@ private struct MarkdownListRow: View {
             Image(systemName: checked ? "checkmark.square.fill" : "square")
                 .font(Theme.font(13, weight: .semibold, relativeTo: .body))
                 .foregroundStyle(checked ? Theme.accent : Theme.stateIdle)
-                .accessibilityLabel(checked ? "Completed" : "Not completed")
+                .accessibilityLabel(checked ? L10n.text("common.completed") : L10n.text("apple.markdowntext.not_completed.01925024"))
         } else if let ordinal = item.ordinal {
             Text("\(ordinal).")
                 .font(Theme.numeric(11, weight: .semibold))
@@ -910,9 +910,9 @@ private struct MarkdownCodeBlock: View {
                                 .foregroundStyle(Theme.accent)
                             Spacer(minLength: 0)
                             #if os(macOS)
-                            RowCopyButton(text: source, help: "Copy code", visible: hovering)
+                            RowCopyButton(text: source, help: L10n.text("apple.markdowntext.copy_code.49a0053f"), visible: hovering)
                             #else
-                            RowCopyButton(text: source, help: "Copy code")
+                            RowCopyButton(text: source, help: L10n.text("apple.markdowntext.copy_code.49a0053f"))
                             #endif
                         }
                         .padding(.horizontal, Theme.Space.m)
@@ -954,14 +954,14 @@ private struct MarkdownCodeBlock: View {
             // Fences without a language have no header row; the copy action
             // lives overlaid instead, on the same block hover.
             if language == nil {
-                RowCopyButton(text: source, help: "Copy code", visible: hovering)
+                RowCopyButton(text: source, help: L10n.text("apple.markdowntext.copy_code.49a0053f"), visible: hovering)
                     .padding(Theme.Space.xs)
             }
         }
         .onHover { hovering = $0 }
         #endif
         .contextMenu {
-            Button("Copy code") { ChatClipboard.copy(source) }
+            Button(L10n.text("apple.markdowntext.copy_code.49a0053f")) { ChatClipboard.copy(source) }
         }
         .task(id: key) {
             // `ForEach` identifies blocks by their position in one message.
@@ -1099,7 +1099,7 @@ private struct MarkdownTable: View {
                         .background(index.isMultiple(of: 2) ? Theme.panel : Theme.accentSoft.opacity(0.34))
                 }
                 if overflow > 0 {
-                    Text("+\(overflow) more rows")
+                    Text(L10n.text("apple.markdowntext.0_more_rows.cc46c841", "\(overflow)"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, Theme.Space.m)
@@ -1921,7 +1921,7 @@ enum ChatClipboard {
 /// right-click menu on the row) is the whole-message path: no drag needed.
 struct RowCopyButton: View {
     let text: String
-    var help: String = "Copy"
+    var help: String = L10n.text("common.copy")
     var visible: Bool = true
     @State private var hovering = false
     @State private var copied = false
@@ -1952,7 +1952,7 @@ struct RowCopyButton: View {
         .animation(.easeOut(duration: 0.15), value: opacity)
         .allowsHitTesting(visible || copied)
         .accessibilityHidden(!(visible || copied))
-        .help(copied ? "Copied" : help)
+        .help(copied ? L10n.text("apple.markdowntext.copied.8d525e5f") : help)
         #if os(macOS)
         .onHover { hovering = $0 }
         #endif

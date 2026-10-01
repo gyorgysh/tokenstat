@@ -50,7 +50,7 @@ struct ClientCloneRepository: View {
             }
         }
         .background(Theme.background)
-        .navigationTitle("Clone a repository")
+        .navigationTitle(L10n.text("apple.clientclonerepository.clone_a_repository.749e5d4d"))
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: $picking) {
             ClientFolderPickerForClone(peer: peer, hostName: hostName) { chosen in
@@ -75,11 +75,10 @@ struct ClientCloneRepository: View {
     private var form: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                Text("Clone onto \(hostName)")
+                Text(L10n.text("apple.clientclonerepository.clone_onto_0.56da4378", "\(hostName)"))
                     .font(Theme.title.weight(.semibold))
                 Text(
-                    "tokenstat runs git on that machine and registers the folder when it "
-                    + "finishes. You watch the whole thing."
+                    L10n.text("apple.clientclonerepository.tokenstat_runs_git_on_that_machine_and_reg.c316bf55")
                 )
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
@@ -99,7 +98,7 @@ struct ClientCloneRepository: View {
                             picking = true
                         } label: {
                             HStack {
-                                Text(parent ?? "Choose a folder")
+                                Text(parent ?? L10n.text("apple.clientclonerepository.choose_a_folder.5c71b8cd"))
                                     .font(Theme.monoText(13))
                                     .foregroundStyle(parent == nil ? .secondary : .primary)
                                     .lineLimit(1)
@@ -113,7 +112,7 @@ struct ClientCloneRepository: View {
                         .buttonStyle(.plain)
                     }
                     field("Folder name") {
-                        TextField("taken from the address", text: $name)
+                        TextField(L10n.text("apple.clientclonerepository.taken_from_the_address.1d24ffb4"), text: $name)
                             .textFieldStyle(.themed)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
@@ -123,8 +122,7 @@ struct ClientCloneRepository: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .cardSurface()
                 Text(
-                    "A private repository asks for its credentials in the terminal, and you "
-                    + "can answer there."
+                    L10n.text("apple.clientclonerepository.a_private_repository_asks_for_its_credenti.7173fc9d")
                 )
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
@@ -135,7 +133,7 @@ struct ClientCloneRepository: View {
         }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: Theme.Space.s) {
-                Button(working ? "Starting…" : "Clone", .download) { Task { await start() } }
+                Button(working ? L10n.text("apple.clientclonerepository.starting.bbe5fc3b") : L10n.text("apple.clientclonerepository.clone.5779f32f"), .download) { Task { await start() } }
                     .clientProminentStyle()
                     .disabled(!ready || working)
             }
@@ -163,7 +161,7 @@ struct ClientCloneRepository: View {
             if let error {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     Text(error).font(ClientType.caption).foregroundStyle(Theme.controlGlyph)
-                    Button("Check status again", .refresh) { statusAttempt += 1 }
+                    Button(L10n.text("apple.clientclonerepository.check_status_again.84baa61b"), .refresh) { statusAttempt += 1 }
                         .buttonStyle(SecondaryButtonStyle())
                 }
                 .padding(Theme.Space.m)
@@ -172,13 +170,13 @@ struct ClientCloneRepository: View {
             ThemeRule()
             VStack(spacing: Theme.Space.s) {
                 if status?.state == "done", let id = status?.workspaceId {
-                    Button("Open the folder", .next) {
+                    Button(L10n.text("apple.clientclonerepository.open_the_folder.e241ab00"), .next) {
                         onCloned?(id)
                         dismiss()
                     }
                     .clientProminentStyle()
                 } else if status?.state == "failed" {
-                    Button("Back", .back) { self.session = nil; status = nil }
+                    Button(L10n.text("common.back"), .back) { self.session = nil; status = nil }
                         .clientProminentStyle()
                 }
             }
@@ -189,11 +187,11 @@ struct ClientCloneRepository: View {
     }
 
     private var headline: String {
-        if error != nil { return "Clone status unavailable" }
+        if error != nil { return L10n.text("apple.clientclonerepository.clone_status_unavailable.a25ebbc8") }
         return switch status?.state {
-        case "done": "Cloned. The folder is registered on \(hostName)."
-        case "failed": status?.error ?? "The clone did not finish."
-        default: "Cloning onto \(hostName)…"
+        case "done": L10n.text("apple.clientclonerepository.cloned_the_folder_is_registered_on_0.9404dac1", "\(hostName)")
+        case "failed": status?.error ?? L10n.text("apple.clientclonerepository.the_clone_did_not_finish.fa812d0f")
+        default: L10n.text("apple.clientclonerepository.cloning_onto_0.fd24885d", "\(hostName)")
         }
     }
 
@@ -257,7 +255,7 @@ struct ClientCloneRepository: View {
         }
         guard !Task.isCancelled else { return }
         if status?.state == "running" || status == nil {
-            self.error = "Status checks stopped after 30 minutes. The clone may still be running. Check the terminal or check its status again."
+            self.error = L10n.text("apple.clientclonerepository.status_checks_stopped_after_30_minutes_the.aff07dba")
         }
     }
 }
@@ -283,7 +281,7 @@ private struct ClientFolderPickerForClone: View {
             if let listing {
                 HStack(spacing: Theme.Space.s) {
                     if let parent = listing.parent {
-                        Button("Up", .back) { Task { await load(parent) } }
+                        Button(L10n.text("apple.clientclonerepository.up.55490a4b"), .back) { Task { await load(parent) } }
                             .font(ClientType.label)
                             .buttonStyle(.plain)
                             .tint(Theme.accent)
@@ -328,24 +326,24 @@ private struct ClientFolderPickerForClone: View {
             }
         }
         .background(Theme.background)
-        .navigationTitle("Where it lands")
+        .navigationTitle(L10n.text("apple.clientclonerepository.where_it_lands.452fbb26"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button("New folder", .create) { naming = true }
+                Button(L10n.text("apple.clientclonerepository.new_folder.cf28f49e"), .create) { naming = true }
                     .disabled(listing == nil || creating)
             }
         }
-        .alert("New folder", isPresented: $naming) {
-            TextField("Name", text: $newFolder)
-            Button("Cancel", role: .cancel) { newFolder = "" }
-            Button("Create") { Task { await create() } }
+        .alert(L10n.text("apple.clientclonerepository.new_folder.cf28f49e"), isPresented: $naming) {
+            TextField(L10n.text("apple.clientclonerepository.name.dcd1d522"), text: $newFolder)
+            Button(L10n.text("common.cancel"), role: .cancel) { newFolder = "" }
+            Button(L10n.text("apple.clientclonerepository.create.4759498a")) { Task { await create() } }
         } message: {
-            Text("It is made on \(hostName), inside the folder you are looking at.")
+            Text(L10n.text("apple.clientclonerepository.it_is_made_on_0_inside_the_folder_you_are.7077098c", "\(hostName)"))
         }
         .safeAreaInset(edge: .bottom) {
             if let listing {
-                Button("Land it here", .approve) {
+                Button(L10n.text("apple.clientclonerepository.land_it_here.40ae2d76"), .approve) {
                     onChosen(listing.path)
                     dismiss()
                 }
@@ -392,7 +390,7 @@ private struct ClientFolderPickerForClone: View {
         newFolder = ""
         guard !name.isEmpty, let here = listing?.path else { return }
         guard !name.contains("/"), !name.contains("\\"), name != "..", name != "." else {
-            self.error = "A folder name is one name, without a path in it."
+            self.error = L10n.text("apple.clientclonerepository.a_folder_name_is_one_name_without_a_path_i.d41badd4")
             return
         }
         generation &+= 1

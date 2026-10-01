@@ -27,7 +27,7 @@ extension TaskEditorTarget: TaskBoardService {
     func boardBackends() async throws -> [AgentBackend] { try await taskBackends() }
     func moveTask(_ card: TodoCard, column: String, order: Int64?) async throws -> TodoCard {
         guard await supportsEditing(), let revision = card.revision else {
-            throw TaskEditorDraft.Invalid.fields("Update this computer's tokenstat to move tasks safely from here.")
+            throw TaskEditorDraft.Invalid.fields(L10n.text("apple.taskboardservice.update_this_computer_s_tokenstat_to_move_t.5e9a0aa0"))
         }
         var params: [String: Any] = ["id": card.id, "expectedRevision": revision, "column": column]
         if let order { params["order"] = order }
@@ -35,7 +35,7 @@ extension TaskEditorTarget: TaskBoardService {
     }
     func deleteTask(_ card: TodoCard) async throws {
         guard await RemoteHostFeature.taskDeletion.isSupported(peer: peer), let revision = card.revision else {
-            throw TaskEditorDraft.Invalid.fields("Update this computer's tokenstat to delete the reviewed task safely.")
+            throw TaskEditorDraft.Invalid.fields(L10n.text("apple.taskboardservice.update_this_computer_s_tokenstat_to_delete.cb8e4fb9"))
         }
         let _: TaskBoardRemoval = try await call("todo.delete", ["id": card.id, "expectedRevision": revision], as: TaskBoardRemoval.self)
     }

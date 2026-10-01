@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.core
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 
-internal class InputLimitExceeded : IOException("Input exceeds the allowed size")
+internal class InputLimitExceeded : IOException(L10n.text("android.boundedinput.input_exceeds_the_allowed_size.7e6c0697"))
 
 /** Check the limit while reading, including providers that do not report a size. */
 internal fun InputStream.readBounded(limit: Int): ByteArray {

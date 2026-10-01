@@ -37,9 +37,9 @@ struct ChatQueueStrip: View {
                     .lineLimit(2)
                 Spacer(minLength: 0)
                 if items.count > 1 {
-                    Button("View pending", .more) { showingQueue = true }
+                    Button(L10n.text("apple.chatqueuestrip.view_pending.ed59515e"), .more) { showingQueue = true }
                         .buttonStyle(SecondaryButtonStyle(small: true))
-                        .help("Review messages waiting to send after this turn")
+                        .help(L10n.text("apple.chatqueuestrip.review_messages_waiting_to_send_after_this.fe4d5f59"))
                 }
             }
             if let next = items.first {
@@ -83,13 +83,13 @@ struct ChatQueueStrip: View {
     }
 
     private var title: String {
-        if offline, items.first?.needsReceipt == true { return "Delivery needs checking · Reconnect to review" }
-        if offline { return items.first?.whenConnected == true ? "Waiting for connection · Cancel by removing the copy" : "Paused · Reconnect to review delivery" }
-        if items.first?.needsReceipt == true { return "Delivery needs checking" }
-        if items.first?.delivery == .needsReview { return "Review the conversation before sending" }
-        if items.first?.delivery == .ready { return "Ready · Choose Send now when you are ready" }
-        if paused { return "Paused on this device · Choose Send now to continue" }
-        return items.count <= 1 ? "Waiting to send after this turn" : "Waiting to send after this turn · \(items.count)"
+        if offline, items.first?.needsReceipt == true { return L10n.text("apple.chatqueuestrip.delivery_needs_checking_reconnect_to_revie.c2182f4e") }
+        if offline { return items.first?.whenConnected == true ? L10n.text("apple.chatqueuestrip.waiting_for_connection_cancel_by_removing.e4b6b3d3") : L10n.text("apple.chatqueuestrip.paused_reconnect_to_review_delivery.1f9b08dc") }
+        if items.first?.needsReceipt == true { return L10n.text("apple.chatqueuestrip.delivery_needs_checking.62805e9a") }
+        if items.first?.delivery == .needsReview { return L10n.text("apple.chatqueuestrip.review_the_conversation_before_sending.62bc9ce3") }
+        if items.first?.delivery == .ready { return L10n.text("apple.chatqueuestrip.ready_choose_send_now_when_you_are_ready.f283a341") }
+        if paused { return L10n.text("apple.chatqueuestrip.paused_on_this_device_choose_send_now_to_c.29cb28cc") }
+        return items.count <= 1 ? L10n.text("apple.chatqueuestrip.waiting_to_send_after_this_turn.103f59e4") : L10n.text("apple.chatqueuestrip.waiting_to_send_after_this_turn_0.a42fb840", "\(items.count)")
     }
 }
 
@@ -104,14 +104,14 @@ struct ChatSteerNoteBanner: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(spacing: Theme.Space.s) {
-                Text("On the next step")
+                Text(L10n.text("apple.chatqueuestrip.on_the_next_step.78ea7972"))
                     .font(Theme.caption.weight(.medium))
                     .foregroundStyle(Theme.accent)
                     .lineLimit(1)
                 Spacer(minLength: 0)
-                Button("Remove", .dismiss, action: onRemove)
+                Button(L10n.text("common.remove"), .dismiss, action: onRemove)
                     .buttonStyle(SecondaryButtonStyle(small: true))
-                    .help("Remove this note")
+                    .help(L10n.text("apple.chatqueuestrip.remove_this_note.80951b12"))
             }
             Text(note)
                 .font(Theme.callout)
@@ -125,7 +125,7 @@ struct ChatSteerNoteBanner: View {
                 .strokeBorder(Theme.accent.opacity(0.35), lineWidth: 1)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("On the next step. \(note)")
+        .accessibilityLabel(L10n.text("apple.chatqueuestrip.on_the_next_step_0.81127e40", "\(note)"))
     }
 }
 
@@ -146,8 +146,8 @@ private struct ChatPendingMessagesSheet: View {
     var body: some View {
         #if os(macOS)
         ThemedSheet(
-            title: "Pending messages",
-            subtitle: "New queues wait for this turn. Send when connected keeps your explicit choice; other reopened messages stay paused.",
+            title: L10n.text("apple.chatqueuestrip.pending_messages.d71048f1"),
+            subtitle: L10n.text("apple.chatqueuestrip.new_queues_wait_for_this_turn_send_when_co.97bd8c08"),
             icon: .scheduled,
             scrolls: false,
             onClose: onClose
@@ -155,7 +155,7 @@ private struct ChatPendingMessagesSheet: View {
             queueList
         } actions: {
             Spacer(minLength: 0)
-            Button("Done", .done) { onClose() }
+            Button(L10n.text("common.done"), .done) { onClose() }
                 .buttonStyle(AccentButtonStyle())
                 .keyboardShortcut(.defaultAction)
         }
@@ -164,11 +164,11 @@ private struct ChatPendingMessagesSheet: View {
         NavigationStack {
             queueList
                 .background(Theme.background)
-                .navigationTitle("Pending messages")
+                .navigationTitle(L10n.text("apple.chatqueuestrip.pending_messages.d71048f1"))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Done", .done) { onClose() }
+                        Button(L10n.text("common.done"), .done) { onClose() }
                     }
                 }
         }
@@ -201,9 +201,9 @@ private struct ChatPendingMessagesSheet: View {
                 }
                 .onMove(perform: onMove)
             } header: {
-                Text("Drag to reorder. Messages marked Send when connected keep that choice. Other reopened messages stay paused.")
+                Text(L10n.text("apple.chatqueuestrip.drag_to_reorder_messages_marked_send_when.07ceb60d"))
             } footer: {
-                Text("Send now stops the current turn. Check delivery never resends a message.")
+                Text(L10n.text("apple.chatqueuestrip.send_now_stops_the_current_turn_check_deli.e8ba1f87"))
             }
         }
         .listStyle(.plain)
@@ -225,7 +225,7 @@ private struct ChatPendingMessagesSheet: View {
                 ForEach(items) { item in
                     macQueueRow(item)
                 }
-                Text("Send now stops the current turn. Check delivery never resends a message.")
+                Text(L10n.text("apple.chatqueuestrip.send_now_stops_the_current_turn_check_deli.e8ba1f87"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -245,16 +245,16 @@ private struct ChatPendingMessagesSheet: View {
                 .foregroundStyle(.tertiary)
                 .frame(width: 20, height: 30)
                 .contentShape(.rect)
-                .help("Drag to reorder, or focus and press Command–Up or Command–Down")
+                .help(L10n.text("apple.chatqueuestrip.drag_to_reorder_or_focus_and_press_command.c1dd048f"))
                 .focusable()
-                .accessibilityLabel("Reorder message")
-                .accessibilityValue("Message \(items.firstIndex(where: { $0.id == item.id }).map { $0 + 1 } ?? 1) of \(items.count)")
+                .accessibilityLabel(L10n.text("apple.chatqueuestrip.reorder_message.66f1eea2"))
+                .accessibilityValue(L10n.text("apple.chatqueuestrip.message_0_of_1.5a65876d", "\(items.firstIndex(where: { $0.id == item.id }).map { $0 + 1 } ?? 1)", "\(items.count)"))
                 .accessibilityActions {
                     if items.first?.id != item.id {
-                        Button("Move up") { shift(item, by: -1) }
+                        Button(L10n.text("apple.chatqueuestrip.move_up.c66feb5e")) { shift(item, by: -1) }
                     }
                     if items.last?.id != item.id {
-                        Button("Move down") { shift(item, by: 1) }
+                        Button(L10n.text("apple.chatqueuestrip.move_down.40bb50da")) { shift(item, by: 1) }
                     }
                 }
                 .onKeyPress(.upArrow, phases: .down) { press in
@@ -356,37 +356,37 @@ private struct ChatQueueRow: View {
                     .padding(.leading, compact ? 24 : 0)
             }
             if offline {
-                Text("Reconnect to send or check delivery. You can still copy, edit unsent text, or remove the local copy.")
+                Text(L10n.text("apple.chatqueuestrip.reconnect_to_send_or_check_delivery_you_ca.418c13de"))
                     .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
             }
             if item.needsReceipt {
-                Text("That computer has not confirmed this message. Check delivery, or copy its text after reviewing the conversation. Removing this copy does not cancel a message already sent.")
+                Text(L10n.text("apple.chatqueuestrip.that_computer_has_not_confirmed_this_messa.143c63eb"))
                     .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
             } else if item.delivery == .needsReview {
-                Text("Review the live conversation first. Use latest context prepares this message without sending it.")
+                Text(L10n.text("apple.chatqueuestrip.review_the_live_conversation_first_use_lat.92fd9e6f"))
                     .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
             } else if item.delivery == .ready {
-                Text("Ready with the conversation context you last opened. Send when you are ready.")
+                Text(L10n.text("apple.chatqueuestrip.ready_with_the_conversation_context_you_la.c69bb317"))
                     .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
             } else if item.delivery == .failed {
-                Text("The last attempt was refused. Your message is still here.")
+                Text(L10n.text("apple.chatqueuestrip.the_last_attempt_was_refused_your_message.4ef87f5b"))
                     .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
             }
             HStack(spacing: Theme.Space.s) {
-                Button("Copy", .copy) { copyText() }
+                Button(L10n.text("common.copy"), .copy) { copyText() }
                     .buttonStyle(SecondaryButtonStyle(small: true))
                 Spacer(minLength: 0)
                 Group {
                     if item.delivery == .needsReview {
-                        Button("Use latest context", .refresh, action: onSendNow)
+                        Button(L10n.text("apple.chatqueuestrip.use_latest_context.a29959ec"), .refresh, action: onSendNow)
                     } else {
-                        Button(item.needsReceipt ? "Check delivery" : "Send now", .send, action: onSendNow)
+                        Button(item.needsReceipt ? L10n.text("apple.chatqueuestrip.check_delivery.b8e3662d") : L10n.text("apple.chatqueuestrip.send_now.58803287"), .send, action: onSendNow)
                     }
                 }
                     .buttonStyle(AccentButtonStyle(small: true))
                     .disabled(offline)
-                    .help(item.needsReceipt ? "Ask the host whether it accepted this message" : item.delivery == .needsReview ? "Prepare this message using the conversation you last opened, without sending it" : "Stop this turn so this message goes out next")
-                Button(item.needsReceipt ? "Remove copy" : "Remove", .delete, action: onRemove)
+                    .help(item.needsReceipt ? L10n.text("apple.chatqueuestrip.ask_the_host_whether_it_accepted_this_mess.9803fa8c") : item.delivery == .needsReview ? L10n.text("apple.chatqueuestrip.prepare_this_message_using_the_conversatio.cf0e4a1d") : L10n.text("apple.chatqueuestrip.stop_this_turn_so_this_message_goes_out_ne.d09eed4c"))
+                Button(item.needsReceipt ? L10n.text("apple.chatqueuestrip.remove_copy.63d1aef0") : L10n.text("common.remove"), .delete, action: onRemove)
                     .buttonStyle(DestructiveButtonStyle(small: true))
                     .environment(\.compactActions, compact)
             }
@@ -404,7 +404,7 @@ private struct ChatQueueRow: View {
                 .font(Theme.font(12, weight: .medium))
                 .foregroundStyle(Theme.accent)
                 .frame(width: 16, height: 28)
-            TextField("Message", text: $draft, axis: .vertical)
+            TextField(L10n.text("apple.chatqueuestrip.message.2f77668a"), text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(Theme.body)
                 .lineLimit(1...2)
@@ -417,7 +417,7 @@ private struct ChatQueueRow: View {
     /// A themed box on the sheet, so the field is the same object as every
     /// other editor and not a label sitting on a tinted card.
     private var sheetField: some View {
-        TextField("Message", text: $draft, axis: .vertical)
+        TextField(L10n.text("apple.chatqueuestrip.message.2f77668a"), text: $draft, axis: .vertical)
             .textFieldStyle(.themedMultiline)
             .lineLimit(1...6)
             .onChange(of: draft) { _, text in
@@ -437,6 +437,6 @@ private struct ChatQueueRow: View {
     private var attachmentLabel: String {
         let names = item.attachments.map(\.name)
         if names.count == 1 { return names[0] }
-        return "\(names.count) attached"
+        return L10n.text("apple.chatqueuestrip.0_attached.62e5c2f9", "\(names.count)")
     }
 }

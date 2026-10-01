@@ -89,8 +89,8 @@ struct ComposerLimitsBadge: View {
                         .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
-                    .help("How much of the \(harnessName(provider.source)) subscription is left.")
-                    .accessibilityLabel("\(harnessName(provider.source)) limits: \(summaryText(for: headline))")
+                    .help(L10n.text("apple.composerlimitsbadge.how_much_of_the_0_subscription_is_left.9b6329e3", "\(harnessName(provider.source))"))
+                    .accessibilityLabel(L10n.text("apple.composerlimitsbadge.0_limits_1.5d5c8479", "\(harnessName(provider.source))", "\(summaryText(for: headline))"))
                     .popover(isPresented: $showingDetail, arrowEdge: .bottom) {
                         ComposerLimitsDetail(
                             source: provider.source,
@@ -134,7 +134,7 @@ struct ComposerLimitsBadge: View {
     }
 
     private func summaryText(for rows: [(display: String, window: UsageWindow)]) -> String {
-        rows.map { "\($0.display) \(Int($0.window.percent.rounded())) percent" }
+        rows.map { L10n.text("apple.composerlimitsbadge.0_1_percent.f674c60d", "\($0.display)", "\(Int($0.window.percent.rounded()))") }
             .joined(separator: ", ")
     }
 
@@ -211,7 +211,7 @@ private struct ComposerLimitsDetail: View {
                     }
                 }
                 Spacer(minLength: Theme.Space.s)
-                Button("Refresh", .refresh, action: refresh)
+                Button(L10n.text("common.refresh"), .refresh, action: refresh)
                     .buttonStyle(SecondaryButtonStyle(small: true))
                     .environment(\.compactActions, true)
                     .disabled(refreshing)
@@ -223,7 +223,7 @@ private struct ComposerLimitsDetail: View {
             }
             footer
             } else {
-                Text("No readings for this agent yet.")
+                Text(L10n.text("apple.composerlimitsbadge.no_readings_for_this_agent_yet.1090da6b"))
                     .font(Theme.font(11))
                     .foregroundStyle(.tertiary)
             }
@@ -244,7 +244,7 @@ private struct ComposerLimitsDetail: View {
                     .foregroundStyle(window.severity.tint)
                     .contentTransition(.numericText())
                 if let resets = window.resetsAt {
-                    Text("· resets \(RelativeClock.phrase(for: resets))")
+                    Text(L10n.text("apple.composerlimitsbadge.resets_0.7a4480e9", "\(RelativeClock.phrase(for: resets))"))
                         .font(Theme.font(11))
                         .foregroundStyle(.tertiary)
                 }
@@ -260,7 +260,7 @@ private struct ComposerLimitsDetail: View {
             .frame(height: 6)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(tag), \(Int(window.percent.rounded())) percent used")
+        .accessibilityLabel(L10n.text("apple.composerlimitsbadge.0_1_percent_used.bae57146", "\(tag)", "\(Int(window.percent.rounded()))"))
     }
 
     /// When the numbers were read. A reading with no date is not a reading,
@@ -270,8 +270,8 @@ private struct ComposerLimitsDetail: View {
         Group {
             if let provider, let observed = provider.observedAt {
                 Text(provider.isStale
-                    ? "Stale, read \(RelativeClock.phrase(for: observed, style: .abbreviated))"
-                    : "Read \(RelativeClock.phrase(for: observed, style: .abbreviated))")
+                    ? L10n.text("apple.composerlimitsbadge.stale_read_0.b645f8bb", "\(RelativeClock.phrase(for: observed, style: .abbreviated))")
+                    : L10n.text("apple.composerlimitsbadge.read_0.dd1de208", "\(RelativeClock.phrase(for: observed, style: .abbreviated))"))
                     .font(Theme.font(11))
                     .foregroundStyle(provider.isStale ? Theme.warning : .secondary)
             } else if let note = provider?.note {

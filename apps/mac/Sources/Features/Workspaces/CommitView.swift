@@ -51,7 +51,7 @@ struct CommitView: View {
                     .foregroundStyle(.tertiary)
                     .textSelection(.enabled)
                 if detail.isMerge {
-                    Text("merge")
+                    Text(L10n.text("apple.commitview.merge.283128ac"))
                         .font(Theme.font(11, weight: .medium))
                         .foregroundStyle(Theme.secondary)
                 }
@@ -62,7 +62,7 @@ struct CommitView: View {
                 Text("−\(detail.removed)")
                     .font(Theme.numeric(12, weight: .medium))
                     .foregroundStyle(Theme.danger)
-                Text("· \(detail.files.count) file\(detail.files.count == 1 ? "" : "s")")
+                Text((detail.files.count == 1 ? L10n.text("apple.commitview.0_file_1.ac963029.one", "\(detail.files.count)") : L10n.text("apple.commitview.0_file_1.ac963029.other", "\(detail.files.count)")))
                     .font(Theme.font(12))
                     .foregroundStyle(.secondary)
             }
@@ -74,8 +74,8 @@ struct CommitView: View {
 
     private var empty: some View {
         Text(detail.isMerge
-             ? "A merge, so there is nothing of its own to show. Its changes belong to the commits it brought in."
-             : "This commit changed no files.")
+             ? L10n.text("apple.commitview.a_merge_so_there_is_nothing_of_its_own_to.6435e3f6")
+             : L10n.text("apple.commitview.this_commit_changed_no_files.9786b223"))
             .font(Theme.callout)
             .foregroundStyle(.secondary)
             .padding(Theme.Space.m)

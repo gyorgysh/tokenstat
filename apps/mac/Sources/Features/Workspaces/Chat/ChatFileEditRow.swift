@@ -58,7 +58,7 @@ struct ChatFileEditRow: View {
                         .padding(Theme.Space.s)
                         .background(Theme.background, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     if shownCut > 0 {
-                        Text("… \(shownCut) more lines")
+                        Text(L10n.text("apple.chatfileeditrow.0_more_lines.c352841d", "\(shownCut)"))
                             .font(Self.bodyFont)
                             .foregroundStyle(.tertiary)
                     }
@@ -110,12 +110,12 @@ struct ChatFileEditRow: View {
                 DiffStat(added: Int(state.added), removed: Int(state.removed), font: Self.diffFont)
             }
             if state.running {
-                Text(SeatStep.word(verb: "Edit", running: true))
+                Text(SeatStep.word(verb: L10n.text("common.edit"), running: true))
                     .font(Self.metaFont)
                     .foregroundStyle(Theme.accent)
                     .fixedSize()
             } else if state.failed {
-                Text("Failed")
+                Text(L10n.text("common.failed"))
                     .font(Self.metaFont)
                     .foregroundStyle(Theme.danger)
                     .fixedSize()
@@ -127,7 +127,7 @@ struct ChatFileEditRow: View {
                     .fixedSize()
             }
             if !state.patch.isEmpty && !state.running {
-                Button(expanded ? "Hide changes" : "Show changes", .preview) {
+                Button(expanded ? L10n.text("apple.chatfileeditrow.hide_changes.c960be38") : L10n.text("apple.chatfileeditrow.show_changes.b12a6ef8"), .preview) {
                     toggled = true
                     if expanded {
                         shownText = nil
@@ -162,7 +162,7 @@ struct ChatFileEditRow: View {
         var parts = [state.fileName]
         if let label = state.changeLabel { parts.append(label) }
         if state.added + state.removed > 0 {
-            parts.append("\(state.added) added, \(state.removed) removed")
+            parts.append(L10n.text("apple.chatfileeditrow.0_added_1_removed.b84e338d", "\(state.added)", "\(state.removed)"))
         }
         if state.running { parts.append("editing") }
         if state.failed { parts.append("failed") }

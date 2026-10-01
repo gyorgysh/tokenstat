@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.browser
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import java.net.URI
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
@@ -42,7 +44,7 @@ class BrowserListenerPool {
         }
         if (entry == null) {
             val url = try {
-                listen().also { require(validListener(it)) { "The browser listener returned an invalid address." } }
+                listen().also { require(validListener(it)) { L10n.text("android.browserlisteners.the_browser_listener_returned_an_invalid_a.a911e003") } }
             } catch (error: Exception) {
                 val uncertain = Held("", accountScope, retire)
                 held[endpoint] = uncertain

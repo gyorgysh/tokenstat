@@ -325,7 +325,7 @@ final class SSHLibraryModel {
         guard let data = try? JSONEncoder().encode(envelope),
               let plaintext = String(data: data, encoding: .utf8)
         else {
-            vaultError = "This record could not be prepared for the vault."
+            vaultError = L10n.text("apple.sshlibrarymodel.this_record_could_not_be_prepared_for_the.1bf4a7df")
             return
         }
         do {

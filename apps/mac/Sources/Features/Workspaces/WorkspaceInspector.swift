@@ -122,10 +122,10 @@ struct WorkspaceInspector: View {
             InspectorChromeBar(onClose: onClose) {
                 HStack(spacing: 3) {
                     if chat != nil {
-                        inspectorTab("Chat", selected: showingChatSettings) { showingChatSettings = true }
+                        inspectorTab(L10n.text("apple.workspaceinspector.chat.460b3a7d"), selected: showingChatSettings) { showingChatSettings = true }
                     }
                     ForEach(InspectorTab.allCases) { item in
-                        inspectorTab(item.rawValue, selected: !showingChatSettings && tab.wrappedValue == item) {
+                        inspectorTab(L10n.enumLabel(item), selected: !showingChatSettings && tab.wrappedValue == item) {
                             tab.wrappedValue = item
                         }
                     }
@@ -175,7 +175,7 @@ struct WorkspaceInspector: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? [.isSelected] : [])
-        .help(title == "Chat" ? "Chat settings" : title)
+        .help(title == "Chat" ? L10n.text("apple.workspaceinspector.chat_settings.17de0faa") : title)
     }
 
     // The band above this panel is the window titlebar. AppKit owns the
@@ -187,7 +187,7 @@ struct WorkspaceInspector: View {
             if !showsChatOverview, chat.selected != nil, chat.folderID == folder?.id {
                 ChatInspector(model: chat, folder: folder, onClose: onClose, showsHeader: false)
             } else {
-                InspectorEmptyState(title: "Open a conversation", subtitle: "Chat settings appear here when a conversation is open.")
+                InspectorEmptyState(title: L10n.text("apple.workspaceinspector.open_a_conversation.6de86c4a"), subtitle: L10n.text("apple.workspaceinspector.chat_settings_appear_here_when_a_conversat.258869ce"))
             }
         } else {
         switch tab.wrappedValue {
@@ -237,22 +237,22 @@ struct WorkspaceHistoryView: View {
             if !folder.exists {
                 InspectorEmptyState(
                     systemImage: "exclamationmark.triangle",
-                    title: "Folder missing",
-                    subtitle: "The folder no longer exists on disk.",
+                    title: L10n.text("apple.workspaceinspector.folder_missing.f06c68a6"),
+                    subtitle: L10n.text("apple.workspaceinspector.the_folder_no_longer_exists_on_disk.54b54492"),
                     tint: Theme.warning
                 )
             } else if folder.git?.isRepo != true {
                 InspectorEmptyState(
                     systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90",
-                    title: "No git history",
-                    subtitle: "This folder is not a git repository, so there are no commits to browse."
+                    title: L10n.text("apple.workspaceinspector.no_git_history.ea733651"),
+                    subtitle: L10n.text("apple.workspaceinspector.this_folder_is_not_a_git_repository_so_the.d5100e52")
                 )
             } else if let commits = model.history[folder.id] {
                 if commits.isEmpty {
                     InspectorEmptyState(
                         systemImage: "clock",
-                        title: "No commits yet",
-                        subtitle: "Make your first commit and it will appear here."
+                        title: L10n.text("apple.workspaceinspector.no_commits_yet.f17a8736"),
+                        subtitle: L10n.text("apple.workspaceinspector.make_your_first_commit_and_it_will_appear.2ac31904")
                     )
                 } else {
                     ScrollView {
@@ -280,7 +280,7 @@ struct WorkspaceHistoryView: View {
             } else if let error = model.historyError(for: folder.id) {
                 InspectorEmptyState(
                     systemImage: "exclamationmark.circle",
-                    title: "Could not load history",
+                    title: L10n.text("apple.workspaceinspector.could_not_load_history.c4dfa2b1"),
                     subtitle: error,
                     tint: Theme.danger
                 )
@@ -291,8 +291,8 @@ struct WorkspaceHistoryView: View {
         } else {
             InspectorEmptyState(
                 systemImage: "sidebar.right",
-                title: "No workspace selected",
-                subtitle: "Pick a workspace from the list on the left."
+                title: L10n.text("apple.workspaceinspector.no_workspace_selected.12b33b8c"),
+                subtitle: L10n.text("apple.workspaceinspector.pick_a_workspace_from_the_list_on_the_left.ba048561")
             )
         }
     }
@@ -387,13 +387,13 @@ private struct CommitRow: View {
                 Image(systemName: "arrow.up.circle")
                     .font(Theme.font(11))
                     .foregroundStyle(Theme.accent)
-                    .help("Not pushed yet")
+                    .help(L10n.text("apple.workspaceinspector.not_pushed_yet.06de6fec"))
             }
         }
         .padding(.horizontal, Theme.Space.xs)
         .padding(.vertical, Theme.Space.xs)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(.rect)
-        .help("Open this commit")
+        .help(L10n.text("apple.workspaceinspector.open_this_commit.1459225a"))
     }
 }

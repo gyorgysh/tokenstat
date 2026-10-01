@@ -130,16 +130,16 @@ struct ClientTabEditor: View {
                     }
                     .onMove { customization.move(from: $0, to: $1) }
                 } header: {
-                    Text("Drag to reorder. Uncheck what you never open.")
+                    Text(L10n.text("apple.clienttabcustomization.drag_to_reorder_uncheck_what_you_never_ope.ce93af9a"))
                 } footer: {
                     if customization.hidden.isEmpty {
-                        Text("Every tab is on.")
+                        Text(L10n.text("apple.clienttabcustomization.every_tab_is_on.07e49fd9"))
                     } else {
-                        Text("Off: \(offSummary). A hidden tab appears temporarily when you open it from another screen. At least one tab always stays on.")
+                        Text(L10n.text("apple.clienttabcustomization.off_0_a_hidden_tab_appears_temporarily_whe.e422c93c", "\(offSummary)"))
                     }
                 }
                 Section {
-                    Button("Reset tabs", .refresh) {
+                    Button(L10n.text("apple.clienttabcustomization.reset_tabs.e5fcb0cc"), .refresh) {
                         customization.reset()
                         refusedTab = nil
                     }
@@ -152,23 +152,23 @@ struct ClientTabEditor: View {
             // themselves; the list is only the scroll behind them.
             .scrollContentBackground(.hidden)
             .background(Theme.background)
-            .navigationTitle("Tabs")
+            .navigationTitle(L10n.text("apple.clienttabcustomization.tabs.8e5ea509"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Button(L10n.text("common.done")) { dismiss() }
                 }
             }
             .alert(
-                "One tab stays on",
+                L10n.text("apple.clienttabcustomization.one_tab_stays_on.6676423c"),
                 isPresented: Binding(
                     get: { refusedTab != nil },
                     set: { if !$0 { refusedTab = nil } }
                 )
             ) {
-                Button("OK", role: .cancel) { refusedTab = nil }
+                Button(L10n.text("apple.clienttabcustomization.ok.565339bc"), role: .cancel) { refusedTab = nil }
             } message: {
-                Text("Hiding \(refusedTab?.label ?? "that tab") too would leave the bar empty.")
+                Text(L10n.text("apple.clienttabcustomization.hiding_0_too_would_leave_the_bar_empty.2725d7a6", "\(refusedTab?.label ?? L10n.text("apple.clienttabcustomization.that_tab.0b250f11"))"))
             }
         }
     }
@@ -212,8 +212,8 @@ struct ClientTabEditor: View {
         .buttonStyle(.plain)
         .listRowBackground(Color.clear)
         .disabled(lastStanding)
-        .accessibilityLabel("\(tab.label) tab")
-        .accessibilityValue(on ? "On" : "Off")
+        .accessibilityLabel(L10n.text("apple.clienttabcustomization.0_tab.3ee52bc7", "\(tab.label)"))
+        .accessibilityValue(on ? L10n.text("apple.clienttabcustomization.on.13001175") : L10n.text("apple.clienttabcustomization.off.ca7981b4"))
     }
 }
 

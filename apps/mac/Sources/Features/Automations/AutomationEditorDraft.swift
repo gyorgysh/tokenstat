@@ -92,22 +92,22 @@ struct AutomationEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, 
 
     var validation: String? {
         if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Give this job a name."
+            return L10n.text("apple.automationeditordraft.give_this_job_a_name.8453c6c7")
         }
         if name.utf8.count > 4096 {
-            return "Shorten the name to 4 KiB or less."
+            return L10n.text("apple.automationeditordraft.shorten_the_name_to_4_kib_or_less.5579d8cf")
         }
         if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Write what the agent should do."
+            return L10n.text("apple.automationeditordraft.write_what_the_agent_should_do.308a8211")
         }
         if prompt.utf8.count > 1024 * 1024 {
-            return "Shorten the prompt to 1 MiB or less."
+            return L10n.text("apple.automationeditordraft.shorten_the_prompt_to_1_mib_or_less.dba63070")
         }
         if workspaceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Choose a folder for this job."
+            return L10n.text("apple.automationeditordraft.choose_a_folder_for_this_job.62a1a81c")
         }
         if backend.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Choose an agent for this job."
+            return L10n.text("apple.automationeditordraft.choose_an_agent_for_this_job.d585332f")
         }
         if let scheduleValidation { return scheduleValidation }
         if let budgetValidation { return budgetValidation }
@@ -135,7 +135,7 @@ struct AutomationEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, 
         revision: UInt64 = 0
     ) throws -> Automation {
         guard validation == nil, let budgetSeconds else {
-            throw Invalid.fields(validation ?? "Check this job's settings.")
+            throw Invalid.fields(validation ?? L10n.text("apple.automationeditordraft.check_this_job_s_settings.3b738ad9"))
         }
         let cleaned = TodoCard.cleanModelID(model)
         return Automation(

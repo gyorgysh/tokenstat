@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.core
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network

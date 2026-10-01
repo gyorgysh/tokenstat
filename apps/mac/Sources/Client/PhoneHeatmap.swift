@@ -73,11 +73,11 @@ struct PhoneHeatmap: View {
             gridRow
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Activity calendar")
+        .accessibilityLabel(L10n.text("apple.phoneheatmap.activity_calendar.60b300fd"))
         // The grid's own summary, so VoiceOver does not have to walk a year of
         // cells to learn what it is looking at.
         .accessibilityValue(summary)
-        .accessibilityHint("Hold a day to read its date and amount, lift to open it")
+        .accessibilityHint(L10n.text("apple.phoneheatmap.hold_a_day_to_read_its_date_and_amount_lif.d2f63c75"))
     }
 
     /// The line above the grid: what the finger is on, or how to use it.
@@ -101,15 +101,15 @@ struct PhoneHeatmap: View {
                 Text(shortDate(focus.day.date))
                     .font(Theme.font(13, weight: .semibold))
                 Text(focus.day.value == 0
-                    ? "nothing recorded"
-                    : "\(formatSpend(focus.day.value)) at API list price")
+                    ? L10n.text("apple.phoneheatmap.nothing_recorded.ef5e03f6")
+                    : L10n.text("apple.phoneheatmap.0_at_api_list_price.1faebace", "\(formatSpend(focus.day.value))"))
                     .font(Theme.font(12))
                     .foregroundStyle(.secondary)
             } else {
                 Image(systemName: "hand.draw")
                     .font(Theme.font(11))
                     .foregroundStyle(.tertiary)
-                Text("Swipe for the whole year, hold a day to read it")
+                Text(L10n.text("apple.phoneheatmap.swipe_for_the_whole_year_hold_a_day_to_rea.90159e22"))
                     .font(Theme.font(11))
                     .foregroundStyle(.tertiary)
             }
@@ -167,15 +167,14 @@ struct PhoneHeatmap: View {
     }
 
     private var summary: String {
-        var text = "\(calendar.activeDays) active days, \(formatSpend(calendar.total)) at API list price, "
-            + "\(spokenDate(calendar.first)) to \(spokenDate(calendar.last)). "
+        var text = L10n.text("apple.phoneheatmap.0_active_days_1_at_api_list_price_2_to_3.99c7149b", "\(calendar.activeDays)", "\(formatSpend(calendar.total))", "\(spokenDate(calendar.first))", "\(spokenDate(calendar.last))")
         if calendar.isHistoryLocked {
             let days = calendar.historyDays ?? 30
-            text += "Last \(days) days are clear. Older days keep the year shape only on Free. "
+            text += L10n.text("apple.phoneheatmap.last_0_days_are_clear_older_days_keep_the.5d9eddd2", "\(days)")
         }
         // Says what is inside, because what is inside is not every square.
         // See `accessibleDays`.
-        text += "Days with activity are listed."
+        text += L10n.text("apple.phoneheatmap.days_with_activity_are_listed.6dc67e87")
         return text
     }
 
@@ -306,7 +305,7 @@ struct PhoneHeatmap: View {
                     // dash zero eight dash eleven" is not a date anybody
                     // hears. The amount is in the label too, so intensity is
                     // never carried by colour alone.
-                    Text("\(spokenDate(day.date)), \(formatSpend(day.value)) at API list price")
+                    Text(L10n.text("apple.phoneheatmap.0_1_at_api_list_price.c7adc814", "\(spokenDate(day.date))", "\(formatSpend(day.value))"))
                 }
             }
         }
@@ -444,9 +443,9 @@ struct PhoneHeatmap: View {
 
     private static func rowLabel(_ row: Int) -> String {
         switch row {
-        case 0: return "M"
-        case 2: return "W"
-        case 4: return "F"
+        case 0: return L10n.text("apple.phoneheatmap.m.08f27188")
+        case 2: return L10n.text("apple.phoneheatmap.w.fcb5f40d")
+        case 4: return L10n.text("apple.phoneheatmap.f.f67ab10a")
         default: return ""
         }
     }

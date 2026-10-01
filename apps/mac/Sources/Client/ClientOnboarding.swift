@@ -31,54 +31,39 @@ struct ClientOnboarding: View {
     private static let pages: [OnboardingPage] = [
         OnboardingPage(
             art: .intro,
-            topic: "Welcome",
-            title: "Your coding agents,\nwithin reach.",
-            body: "Run coding agents on your computer or a server. Pick up the "
-                + "conversation, work on your projects, and see your AI usage "
-                + "from your iPhone or iPad."
+            topic: L10n.text("apple.clientonboarding.welcome.0e2226b5"),
+            title: L10n.text("apple.clientonboarding.your_coding_agents_within_reach.e0c0e724"),
+            body: L10n.text("apple.clientonboarding.run_coding_agents_on_your_computer_or_a_se.e496252a")
         ),
         OnboardingPage(
             art: .agents,
-            topic: "Agents",
-            title: "Keep the conversation going",
-            body: "Give an agent a task, follow its progress, and reply when it "
-                + "needs you. Return to the same chat later, or open a live "
-                + "terminal when you want to work directly."
+            topic: L10n.text("apple.clientonboarding.agents.279b44d2"),
+            title: L10n.text("apple.clientonboarding.keep_the_conversation_going.4656fe2c"),
+            body: L10n.text("apple.clientonboarding.give_an_agent_a_task_follow_its_progress_a.1c37d4c6")
         ),
         OnboardingPage(
             art: .workspaces,
-            topic: "Projects",
-            title: "Go from the chat\nto the code",
-            body: "Open a folder or clone a repository. Read and edit files, "
-                + "review changes, and keep tasks beside the code. Your "
-                + "projects stay on the machine that runs them."
+            topic: L10n.text("common.projects"),
+            title: L10n.text("apple.clientonboarding.go_from_the_chat_to_the_code.612842a3"),
+            body: L10n.text("apple.clientonboarding.open_a_folder_or_clone_a_repository_read_a.1ff55f95")
         ),
         OnboardingPage(
             art: .onTheGo,
-            topic: "Machines",
-            title: "Choose where the work runs",
-            body: "Use a computer you own or a cloud server. Connect it from "
-                + "this device, with guided setup for a server. That machine "
-                + "needs to be awake while you work; your iPhone or iPad is "
-                + "how you reach it."
+            topic: L10n.text("apple.clientonboarding.machines.c061da19"),
+            title: L10n.text("apple.clientonboarding.choose_where_the_work_runs.0e0fe3ac"),
+            body: L10n.text("apple.clientonboarding.use_a_computer_you_own_or_a_cloud_server_c.d1c3ffac")
         ),
         OnboardingPage(
             art: .heatmap,
-            topic: "Usage",
-            title: "Know where the tokens go",
-            body: "See activity and estimated cost by tool, model, and project, "
-                + "plus supported plans’ usage and reset times. Synced numbers "
-                + "stay available with every computer asleep. Plan usage is "
-                + "shown separately from cost."
+            topic: L10n.text("apple.clientonboarding.usage.8d59829c"),
+            title: L10n.text("apple.clientonboarding.know_where_the_tokens_go.fc548566"),
+            body: L10n.text("apple.clientonboarding.see_activity_and_estimated_cost_by_tool_mo.feb3684a")
         ),
         OnboardingPage(
             art: .privacy,
-            topic: "Privacy",
-            title: "Your machines.\nYour say.",
-            body: "Remote work travels over an end-to-end encrypted connection. "
-                + "You choose which devices can open your work and which usage "
-                + "totals to sync. Your account stays private unless you turn "
-                + "on a public profile."
+            topic: L10n.text("apple.clientonboarding.privacy.54a57c31"),
+            title: L10n.text("apple.clientonboarding.your_machines_your_say.71812757"),
+            body: L10n.text("apple.clientonboarding.remote_work_travels_over_an_end_to_end_enc.6cfdbc5b")
         ),
     ]
 
@@ -106,7 +91,7 @@ struct ClientOnboarding: View {
             // A way past the pitch for anyone who does not want it. On the last
             // page it would duplicate the button below, so it goes.
             if page < Self.pages.count - 1 {
-                Button("Skip") { finish() }
+                Button(L10n.text("common.skip")) { finish() }
                     .font(ClientType.label)
                     .tint(Theme.accent)
             }
@@ -122,7 +107,7 @@ struct ClientOnboarding: View {
                 Text(Self.pages[page].topic)
                     .font(ClientType.label.weight(.semibold))
                 Spacer()
-                Text("\(page + 1) of \(Self.pages.count)")
+                Text(L10n.text("apple.clientonboarding.0_of_1.9fea8201", "\(page + 1)", "\(Self.pages.count)"))
                     .font(ClientType.caption.monospacedDigit())
             }
             .foregroundStyle(Theme.accent)
@@ -139,13 +124,13 @@ struct ClientOnboarding: View {
         .padding(.bottom, Theme.Space.s)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.28), value: page)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(Self.pages[page].topic), page \(page + 1) of \(Self.pages.count)")
+        .accessibilityLabel(L10n.text("apple.clientonboarding.0_page_1_of_2.065b6e28", "\(Self.pages[page].topic)", "\(page + 1)", "\(Self.pages.count)"))
     }
 
     private var footer: some View {
         VStack(spacing: Theme.Space.m) {
             if page == Self.pages.count - 1 {
-                Text("Next, sign in. You can connect a machine whenever you are ready.")
+                Text(L10n.text("apple.clientonboarding.next_sign_in_you_can_connect_a_machine_whe.71155587"))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -155,7 +140,7 @@ struct ClientOnboarding: View {
                 : AnyLayout(HStackLayout(spacing: Theme.Space.m))
             layout {
                 if page > 0 {
-                    Button("Back", .back) {
+                    Button(L10n.text("common.back"), .back) {
                         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) { page -= 1 }
                     }
                     .buttonStyle(.bordered)
@@ -168,7 +153,7 @@ struct ClientOnboarding: View {
                         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) { page += 1 }
                     }
                 } label: {
-                    ActionIcon.next.label(page == Self.pages.count - 1 ? "Get started" : "Continue")
+                    ActionIcon.next.label(page == Self.pages.count - 1 ? L10n.text("apple.clientonboarding.get_started.61e8d44a") : L10n.text("apple.clientonboarding.continue.31fbef16"))
                         .labelStyle(ActionLabelStyle())
                         .frame(maxWidth: .infinity)
                 }

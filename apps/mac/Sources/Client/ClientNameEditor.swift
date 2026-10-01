@@ -14,15 +14,15 @@ struct ClientNameEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Name", text: $name).disabled(saving)
+                TextField(L10n.text("apple.clientnameeditor.name.dcd1d522"), text: $name).disabled(saving)
                 if let error { Text(error).foregroundStyle(Theme.danger) }
             }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }
+                ToolbarItem(placement: .cancellationAction) { Button(L10n.text("common.cancel")) { dismiss() }.disabled(saving) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", .save) {
+                    Button(L10n.text("common.save"), .save) {
                         saving = true
                         Task {
                             do { try await save(clean); dismiss() }
@@ -44,9 +44,9 @@ struct ClientProjectRename: ViewModifier {
     @State private var owner = WorkSessionContext.shared.scope
     func body(content: Content) -> some View {
         content.contextMenu {
-            Button("Rename project", .edit) { showing = true }
+            Button(L10n.text("apple.clientnameeditor.rename_project.2a0478ee"), .edit) { showing = true }
         }.sheet(isPresented: $showing) {
-            ClientNameEditor(title: "Rename project", initial: folder.name) { name in
+            ClientNameEditor(title: L10n.text("apple.clientnameeditor.rename_project.2a0478ee"), initial: folder.name) { name in
                 guard owner != nil, owner == WorkSessionContext.shared.scope else { throw ClientActionOwnership.changed }
                 let id = "remote:\(peer):\(ClientRemote.rawWorkspaceID(of: folder) ?? folder.id)"
                 _ = try await Bridge.renameWorkspace(id: id, name: name)
@@ -64,9 +64,9 @@ struct ClientProjectRenameButton: View {
     @State private var showing = false
     @State private var owner = WorkSessionContext.shared.scope
     var body: some View {
-        Button("Rename project", .edit) { showing = true }
+        Button(L10n.text("apple.clientnameeditor.rename_project.2a0478ee"), .edit) { showing = true }
         .sheet(isPresented: $showing) {
-            ClientNameEditor(title: "Rename project", initial: folder.name) { name in
+            ClientNameEditor(title: L10n.text("apple.clientnameeditor.rename_project.2a0478ee"), initial: folder.name) { name in
                 guard owner != nil, owner == WorkSessionContext.shared.scope else { throw ClientActionOwnership.changed }
                 _ = try await Bridge.renameWorkspace(id: "remote:\(peer):\(ClientRemote.rawWorkspaceID(of: folder) ?? folder.id)", name: name)
                 guard owner == WorkSessionContext.shared.scope else { throw ClientActionOwnership.changed }
@@ -78,6 +78,6 @@ struct ClientProjectRenameButton: View {
 
 enum ClientActionOwnership: LocalizedError {
     case changed
-    var errorDescription: String? { "The account changed. Open this project again to continue." }
+    var errorDescription: String? { L10n.text("apple.clientnameeditor.the_account_changed_open_this_project_agai.5ed7dc73") }
 }
 #endif

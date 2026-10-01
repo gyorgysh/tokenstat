@@ -12,12 +12,12 @@ struct LaunchSettings: View {
 
     var body: some View {
         #if os(macOS)
-        Card(title: "Startup", subtitle: "When tokenstat opens", mark: "mark_local") {
+        Card(title: L10n.text("apple.launchsettings.startup.65d48235"), subtitle: L10n.text("apple.launchsettings.when_tokenstat_opens.18072775"), mark: "mark_local") {
             controls
         }
         #else
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            ClientSectionTitle(title: "Startup", mark: "mark_local")
+            ClientSectionTitle(title: L10n.text("apple.launchsettings.startup.65d48235"), mark: "mark_local")
             controls
         }
         .padding(Theme.Space.m)
@@ -28,14 +28,14 @@ struct LaunchSettings: View {
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Toggle("Reopen last location", isOn: $restoreLocation)
+            Toggle(L10n.text("apple.launchsettings.reopen_last_location.1d524ca3"), isOn: $restoreLocation)
                 .toggleStyle(.brandCheckbox)
                 .font(Theme.callout)
                 #if os(iOS)
                 .frame(minHeight: 44)
                 #endif
                 .tint(Theme.accent)
-            Text("Open where you left off on this device. When off, new launches start on Home. Applies next launch; unavailable locations open Home.")
+            Text(L10n.text("apple.launchsettings.open_where_you_left_off_on_this_device_whe.26b59662"))
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

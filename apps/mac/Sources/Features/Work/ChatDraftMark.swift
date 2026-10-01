@@ -23,7 +23,7 @@ struct ChatDraftMark: View {
                     ? Theme.font(size, weight: .semibold, relativeTo: .caption2)
                     : Theme.fit(size, weight: .semibold))
                 .foregroundStyle(Theme.accent)
-                .accessibilityLabel("Unsent draft")
+                .accessibilityLabel(L10n.text("apple.chatdraftmark.unsent_draft.13256c6b"))
         }
     }
 }

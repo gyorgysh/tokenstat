@@ -19,8 +19,8 @@ struct ClientRestoredRouteView: View {
                     ? { navigation.restoredRoute = nil } : nil)
                 .id(route)
         } else {
-            ClientEmptyState(kind: .unreachable, title: "This place is unavailable",
-                message: "Return to your projects to choose where to continue.")
+            ClientEmptyState(kind: .unreachable, title: L10n.text("apple.clientrestoredrouteview.this_place_is_unavailable.4b4de423"),
+                message: L10n.text("apple.clientrestoredrouteview.return_to_your_projects_to_choose_where_to.d0ff81a3"))
                 .padding(Theme.Space.m)
         }
     }
@@ -35,7 +35,7 @@ struct ClientRestoredRouteView: View {
         }
         return ClientRecentPlaces.Place(id: .init(peer: reference.hostIdentity,
             workspaceID: reference.workspaceID, kind: kind, itemID: reference.itemID),
-            workspaceName: "Project", openedAt: Date())
+            workspaceName: L10n.text("apple.clientrestoredrouteview.project.98595978"), openedAt: Date())
     }
 }
 /// Only the selected tab owns the push. Inactive stacks cannot dismiss another

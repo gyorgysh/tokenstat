@@ -90,21 +90,21 @@ struct WorkflowCanvas: View {
         .focusEffectDisabled()
         .onExitCommand { armed = nil }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Workflow canvas")
+        .accessibilityLabel(L10n.text("apple.workflowcanvas.workflow_canvas.75b08a9f"))
     }
 
     @ViewBuilder
     private var emptyHint: some View {
         if let graph = model.working, graph.nodes.count <= 1 || graph.edges.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                Text("The run goes top to bottom")
+                Text(L10n.text("apple.workflowcanvas.the_run_goes_top_to_bottom.a11e63c8"))
                     .font(Theme.callout.weight(.medium))
-                Text("The top card is the starting prompt. Press + under a card to add the next step. Green is on success. Red is on error.")
+                Text(L10n.text("apple.workflowcanvas.the_top_card_is_the_starting_prompt_press.cb076e94"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if !exampleRecipes.isEmpty {
-                    Text("Or drop in an example")
+                    Text(L10n.text("apple.workflowcanvas.or_drop_in_an_example.86d075f4"))
                         .font(Theme.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                         .padding(.top, 4)
@@ -127,7 +127,7 @@ struct WorkflowCanvas: View {
 
     private var zoomChrome: some View {
         HStack(spacing: 8) {
-            Button("Fit", .layout) { fit() }
+            Button(L10n.text("apple.workflowcanvas.fit.9f872ed4"), .layout) { fit() }
                 .buttonStyle(SecondaryButtonStyle(small: true))
             Text("\(Int((zoom * 100).rounded()))%")
                 .font(Theme.caption.monospacedDigit())
@@ -219,7 +219,7 @@ struct WorkflowCanvas: View {
     }
 
     private func addButton(for node: WorkflowNode) -> some View {
-        Button("Add step", .create) {
+        Button(L10n.text("apple.workflowcanvas.add_step.839bd5e0"), .create) {
             model.selectNode(node.id)
             addingAfter = node.id
         }
@@ -255,7 +255,7 @@ struct WorkflowCanvas: View {
             .frame(width: WorkflowNodeMetrics.port * 2, height: WorkflowNodeMetrics.port * 2)
             .contentShape(Circle().scale(1.8))
             .accessibilityLabel(portLabel(inPort: inPort, node: node, when: when))
-            .help(inPort ? "Input" : portHelp(when))
+            .help(inPort ? L10n.text("apple.workflowcanvas.input.36ecb4f8") : portHelp(when))
         if inPort {
             dot.onTapGesture { completeArmed(to: node.id) }
         } else {
@@ -266,18 +266,18 @@ struct WorkflowCanvas: View {
 
     private func portHelp(_ when: WorkflowEdgeWhen) -> String {
         switch when {
-        case .ok: return "Drag or click, then click the next card. On success."
-        case .error: return "Drag or click, then click the next card. On error."
-        case .always: return "Drag or click, then click the next card. After the last pass."
+        case .ok: return L10n.text("apple.workflowcanvas.drag_or_click_then_click_the_next_card_on.dfd820fd")
+        case .error: return L10n.text("apple.workflowcanvas.drag_or_click_then_click_the_next_card_on.51cffded")
+        case .always: return L10n.text("apple.workflowcanvas.drag_or_click_then_click_the_next_card_aft.feece34f")
         }
     }
 
     private func portLabel(inPort: Bool, node: WorkflowNode, when: WorkflowEdgeWhen) -> String {
-        if inPort { return "Input of \(node.displayTitle)" }
+        if inPort { return L10n.text("apple.workflowcanvas.input_of_0.d65afa9f", "\(node.displayTitle)") }
         switch when {
-        case .ok: return "On success of \(node.displayTitle)"
-        case .error: return "On error of \(node.displayTitle)"
-        case .always: return "After the last pass of \(node.displayTitle)"
+        case .ok: return L10n.text("apple.workflowcanvas.on_success_of_0.b14c07dd", "\(node.displayTitle)")
+        case .error: return L10n.text("apple.workflowcanvas.on_error_of_0.b254883e", "\(node.displayTitle)")
+        case .always: return L10n.text("apple.workflowcanvas.after_the_last_pass_of_0.21772ead", "\(node.displayTitle)")
         }
     }
 
@@ -547,7 +547,7 @@ struct WorkflowAddMenu: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            tile(title: "Input", subtitle: "Starting prompt", mark: "mark_todo") {
+            tile(title: L10n.text("apple.workflowcanvas.input.36ecb4f8"), subtitle: L10n.text("apple.workflowcanvas.starting_prompt.407bec2f"), mark: "mark_todo") {
                 model.addNode(kind: .input)
             }
             ForEach(model.pickerBackends()) { backend in
@@ -555,25 +555,25 @@ struct WorkflowAddMenu: View {
                     model.addNode(kind: .agent, backend: backend.id)
                     onPick()
                 } label: {
-                    row(title: backend.label, subtitle: "Agent") {
+                    row(title: backend.label, subtitle: L10n.text("apple.workflowcanvas.agent.11b39c93")) {
                         HarnessMark(id: backend.id, size: 18)
                     }
                 }
                 .buttonStyle(.plain)
             }
-            tile(title: "HTTP", subtitle: "Host-owned request", mark: "mark_sync") {
+            tile(title: L10n.text("apple.workflowcanvas.http.56d6f321"), subtitle: L10n.text("apple.workflowcanvas.host_owned_request.f7355983"), mark: "mark_sync") {
                 model.addNode(kind: .http)
             }
-            tile(title: "Command", subtitle: "Shell in the folder", mark: "mark_terminal") {
+            tile(title: L10n.text("apple.workflowcanvas.command.71316697"), subtitle: L10n.text("apple.workflowcanvas.shell_in_the_folder.b6875024"), mark: "mark_terminal") {
                 model.addNode(kind: .command)
             }
-            tile(title: "Gate", subtitle: "Wait for you", mark: "mark_note") {
+            tile(title: L10n.text("apple.workflowcanvas.gate.fa77a525"), subtitle: L10n.text("apple.workflowcanvas.wait_for_you.d955a62d"), mark: "mark_note") {
                 model.addNode(kind: .gate)
             }
-            tile(title: "If", subtitle: "Then or else", mark: "mark_plan") {
+            tile(title: L10n.text("apple.workflowcanvas.if.1e3abf61"), subtitle: L10n.text("apple.workflowcanvas.then_or_else.2318a255"), mark: "mark_plan") {
                 model.addNode(kind: .condition)
             }
-            tile(title: "Loop", subtitle: "Repeat a body", mark: "mark_scheduler") {
+            tile(title: L10n.text("apple.workflowcanvas.loop.f2f6a018"), subtitle: L10n.text("apple.workflowcanvas.repeat_a_body.a05cb63b"), mark: "mark_scheduler") {
                 model.addNode(kind: .loop)
             }
             ForEach(model.jobs) { job in
@@ -581,7 +581,7 @@ struct WorkflowAddMenu: View {
                     model.addNode(kind: .automation, automationID: job.id)
                     onPick()
                 } label: {
-                    row(title: job.name, subtitle: "Run automation") {
+                    row(title: job.name, subtitle: L10n.text("apple.workflowcanvas.run_automation.4c10763f")) {
                         FeatureMark(name: "mark_automation", tint: Theme.accent, size: 18)
                     }
                 }

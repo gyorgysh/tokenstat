@@ -359,7 +359,7 @@ final class ClientAutomationSession {
             }
             retryableLaunchIDs.insert(submission.jobID)
             errorMessage = ClientTunnelCopy.display(
-                "The computer did not confirm this run. Check it before starting another. \(error.localizedDescription)",
+                L10n.text("apple.clientautomationsession.the_computer_did_not_confirm_this_run_chec.562edaf9", "\(error.localizedDescription)"),
                 host: hostName
             )
         }
@@ -367,7 +367,7 @@ final class ClientAutomationSession {
 
     private func confirmLaunch(_ outcome: AutomationRunOutcome, submission: AutomationRunSubmission) async {
         guard outcome.operationID == submission.operationID else {
-            errorMessage = ClientTunnelCopy.display("The computer returned a different run. Check this job again.", host: hostName)
+            errorMessage = ClientTunnelCopy.display(L10n.text("apple.clientautomationsession.the_computer_returned_a_different_run_chec.56b93a0a"), host: hostName)
             return
         }
         pendingLaunches[submission.jobID] = nil

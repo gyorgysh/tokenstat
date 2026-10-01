@@ -50,7 +50,7 @@ struct ClientInsightsView: View {
         // On iOS 26 this lands in the bottom bar beside the tabs, which is the
         // half of the screen a thumb reaches. Long model identifiers are
         // exactly the thing worth filtering.
-        .searchable(text: $search, prompt: "Filter \(model.cut.plural)")
+        .searchable(text: $search, prompt: L10n.text("apple.clientinsightsview.filter_0.50ee55cd", "\(model.cut.plural)"))
         .task { await model.load() }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
             Task { await model.refresh() }
@@ -81,9 +81,9 @@ struct ClientInsightsView: View {
                 // emptiness leaves somebody to find that on their own.
                 ClientEmptyState(
                     kind: .nothingYet,
-                    title: "Nothing recorded yet",
-                    message: "Add a computer to this account and what it counts shows up here.",
-                    actionTitle: "How to start",
+                    title: L10n.text("apple.clientinsightsview.nothing_recorded_yet.cb77e288"),
+                    message: L10n.text("apple.clientinsightsview.add_a_computer_to_this_account_and_what_it.1769a0a7"),
+                    actionTitle: L10n.text("apple.clientinsightsview.how_to_start.69f36336"),
                     actionIcon: .home,
                     action: { navigation.destination = .home },
                     art: .firstBars
@@ -94,16 +94,16 @@ struct ClientInsightsView: View {
                 if model.cut == .day && !shown.isEmpty {
                     let days = shown.sorted { $0.key < $1.key }
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
-                        ClientSectionTitle(title: "Daily activity", mark: "mark_activity")
-                        Text("Tokens per day · cache included").font(ClientType.caption).foregroundStyle(.secondary)
+                        ClientSectionTitle(title: L10n.text("apple.clientinsightsview.daily_activity.561d7c9e"), mark: "mark_activity")
+                        Text(L10n.text("apple.clientinsightsview.tokens_per_day_cache_included.a6ebc86d")).font(ClientType.caption).foregroundStyle(.secondary)
                         Chart(days) { day in
                             if let position = InsightDayAxis.position(day.key) {
-                                RectangleMark(xStart: .value("Day", position - 0.4), xEnd: .value("Day", position + 0.4),
-                                        yStart: .value("Tokens", UInt64(0)), yEnd: .value("Tokens", day.counters.total))
+                                RectangleMark(xStart: .value(L10n.text("apple.clientinsightsview.day.8f2364e1"), position - 0.4), xEnd: .value(L10n.text("apple.clientinsightsview.day.8f2364e1"), position + 0.4),
+                                        yStart: .value(L10n.text("apple.clientinsightsview.tokens.a039dfb9"), UInt64(0)), yEnd: .value(L10n.text("apple.clientinsightsview.tokens.a039dfb9"), day.counters.total))
                                     .foregroundStyle(Theme.accent.gradient)
                                     .cornerRadius(3)
                                     .accessibilityLabel(day.key)
-                                    .accessibilityValue("\(formatTokens(day.counters.total)) tokens")
+                                    .accessibilityValue(L10n.text("apple.clientinsightsview.0_tokens.624f11b9", "\(formatTokens(day.counters.total))"))
                             }
                         }
                         .chartXScale(domain: InsightDayAxis.domain(days.map(\.key)))
@@ -128,7 +128,7 @@ struct ClientInsightsView: View {
                 }
                 if model.cut != .day && !shown.isEmpty { tokenChart(shown) }
                 if shown.isEmpty {
-                    Text("Nothing matches \"\(search)\".")
+                    Text(L10n.text("apple.clientinsightsview.nothing_matches_0.d59cf718", "\(search)"))
                         .font(ClientType.label)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -154,11 +154,11 @@ struct ClientInsightsView: View {
         } else if let message = model.errorMessage {
             ClientEmptyState(
                 kind: model.needsSignIn ? .needsAccount : .unreachable,
-                title: connectivity.isOffline ? "You are offline" : "Could not load your usage",
+                title: connectivity.isOffline ? L10n.text("apple.clientinsightsview.you_are_offline.4d5c9439") : L10n.text("apple.clientinsightsview.could_not_load_your_usage.45467004"),
                 message: connectivity.isOffline
-                    ? "This updates by itself when the connection is back."
+                    ? L10n.text("apple.clientinsightsview.this_updates_by_itself_when_the_connection.afd97997")
                     : FriendlyError.from(message).message,
-                actionTitle: connectivity.isOffline ? nil : "Try again",
+                actionTitle: connectivity.isOffline ? nil : L10n.text("apple.clientinsightsview.try_again.d8b8392e"),
                 actionIcon: .refresh,
                 action: connectivity.isOffline ? nil : { Task { await model.refresh() } }
             )
@@ -167,7 +167,7 @@ struct ClientInsightsView: View {
 
     private func summary(_ rows: [Bucket]) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            ClientSectionTitle(title: "This period", mark: "mark_insights")
+            ClientSectionTitle(title: L10n.text("apple.clientinsightsview.this_period.8ed3e11f"), mark: "mark_insights")
                 .padding(.bottom, 4)
             Text(rows.totalValue.formatted)
                 .font(ClientType.figure)
@@ -175,7 +175,7 @@ struct ClientInsightsView: View {
                 .contentTransition(.numericText())
                 .minimumScaleFactor(0.6)
                 .lineLimit(1)
-            Text("at API list price, across every device")
+            Text(L10n.text("apple.clientinsightsview.at_api_list_price_across_every_device.956db3fc"))
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
             ClientStatPanels(panels: ClientInsightFacts.panels(
@@ -205,8 +205,8 @@ struct ClientInsightsView: View {
         let ranked = Array(rows.sorted { $0.counters.total > $1.counters.total }.prefix(8))
         let peak = max(1, ranked.map(\.counters.total).max() ?? 1)
         return VStack(alignment: .leading, spacing: Theme.Space.m) {
-            ClientSectionTitle(title: "Most used \(model.cut.plural)", mark: "mark_insights")
-            Text("Tokens · including reported cache usage")
+            ClientSectionTitle(title: L10n.text("apple.clientinsightsview.most_used_0.ad293687", "\(model.cut.plural)"), mark: "mark_insights")
+            Text(L10n.text("apple.clientinsightsview.tokens_including_reported_cache_usage.a3e0a451"))
                 .font(ClientType.caption).foregroundStyle(.secondary)
             ForEach(ranked) { row in
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
@@ -220,7 +220,7 @@ struct ClientInsightsView: View {
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(model.cut.title(for: row.key))
-                .accessibilityValue("\(formatTokens(row.counters.total)) tokens")
+                .accessibilityValue(L10n.text("apple.clientinsightsview.0_tokens.624f11b9", "\(formatTokens(row.counters.total))"))
             }
         }
         .padding(Theme.Space.m).cardSurface()
@@ -262,7 +262,7 @@ private struct InsightRow: View {
                     // Compact, because these are read at a glance and compared,
                     // not audited. "1.6B" beside a name is a size; the full
                     // ten digits is a wall the eye slides off.
-                    Text("\(formatTokens(row.counters.total)) tokens, \(row.events.formatted()) events")
+                    Text(L10n.text("apple.clientinsightsview.0_tokens_1_events.8b30d61d", "\(formatTokens(row.counters.total))", "\(row.events.formatted())"))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -290,8 +290,7 @@ private struct InsightRow: View {
         .cardSurface()
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(cut.title(for: row.key)), \(row.value.formatted) at API list price, "
-                + "\(formatTokens(row.counters.total)) tokens"
+            L10n.text("apple.clientinsightsview.0_1_at_api_list_price_2_tokens.a64f3739", "\(cut.title(for: row.key))", "\(row.value.formatted)", "\(formatTokens(row.counters.total))")
         )
     }
 }
@@ -315,11 +314,11 @@ final class ClientInsightsModel {
 
         var label: String {
             switch self {
-            case .model: return "Models"
+            case .model: return L10n.text("apple.clientinsightsview.models.d17d2d78")
             // Same label as the Mac Insights tab. A different word here
             // makes the two screens look like different breakdowns.
-            case .source: return "Coding tools"
-            case .day: return "Days"
+            case .source: return L10n.text("apple.clientinsightsview.coding_tools.6032f740")
+            case .day: return L10n.text("apple.clientinsightsview.days.e08c0aa8")
             }
         }
 
@@ -367,7 +366,7 @@ final class ClientInsightsModel {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .full
         let phrase = formatter.localizedString(for: fetchedAt, relativeTo: Date())
-        return "The refresh did not go through. Showing what this device last fetched, \(phrase)."
+        return L10n.text("apple.clientinsightsview.the_refresh_did_not_go_through_showing_wha.790fad9d", "\(phrase)")
     }
 
     func load() async {

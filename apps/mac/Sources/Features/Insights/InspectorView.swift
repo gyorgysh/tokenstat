@@ -17,7 +17,7 @@ struct InspectorView: View {
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
-                InspectorTitle(title: "Insights", symbol: "chart.bar.xaxis")
+                InspectorTitle(title: L10n.text("common.insights"), symbol: "chart.bar.xaxis")
                 Spacer(minLength: 0)
             }
             ScrollView {
@@ -41,7 +41,7 @@ struct InspectorView: View {
     /// it. Home is cards, Insights is cards, and the inspector is now the same
     /// object at sidebar width.
     private var period: some View {
-        Card(title: "This period", subtitle: nil, mark: "mark_insights") {
+        Card(title: L10n.text("apple.inspectorview.this_period.8ed3e11f"), subtitle: nil, mark: "mark_insights") {
             if isEmptyArchive {
                 nothingScanned
             } else {
@@ -67,20 +67,17 @@ struct InspectorView: View {
     private var nothingScanned: some View {
         EmptyState(
             symbol: "tray",
-            title: "Nothing scanned yet",
-            message: """
-            tokenstat reads the session logs the tools on this machine already \
-            write. Run a scan and this fills in.
-            """
+            title: L10n.text("apple.inspectorview.nothing_scanned_yet.b0a2718e"),
+            message: L10n.text("apple.inspectorview.tokenstat_reads_the_session_logs_the_tools.bdd2445b")
         )
     }
 
     private var periodFigures: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             Stat(
-                label: "API list price",
+                label: L10n.text("apple.inspectorview.api_list_price.060458ef"),
                 value: model.periodValue.formatted,
-                note: "not an extra bill",
+                note: L10n.text("apple.inspectorview.not_an_extra_bill.79d2c7ad"),
                 tint: Theme.accent,
                 // 26pt reads at full size; below the display fit it stops
                 // shrinking the value and drops a step instead, which keeps
@@ -92,12 +89,12 @@ struct InspectorView: View {
             // inspector is squeezed by a small window. A fixed pair of rows
             // was what ran past the pane's edge at a low effective resolution.
             statPair(
-                "Tokens", formatTokens(model.totals?.counters.total ?? 0),
-                "Sessions", "\(model.totals?.sessions ?? 0)"
+                L10n.text("apple.inspectorview.tokens.a039dfb9"), formatTokens(model.totals?.counters.total ?? 0),
+                L10n.text("apple.inspectorview.sessions.6fa3cbf4"), "\(model.totals?.sessions ?? 0)"
             )
             statPair(
-                "Events", formatTokens(model.totals?.events ?? 0),
-                "Active days", "\(model.totals?.days ?? 0)"
+                L10n.text("apple.inspectorview.events.8d14f6e7"), formatTokens(model.totals?.events ?? 0),
+                L10n.text("apple.inspectorview.active_days.6cbebfa2"), "\(model.totals?.days ?? 0)"
             )
 
             if let block = model.activeBlock {
@@ -105,10 +102,10 @@ struct InspectorView: View {
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
                     HStack(spacing: Theme.Space.xs) {
                         Circle().fill(Theme.secondary).frame(width: 6, height: 6)
-                        Text("Block open")
+                        Text(L10n.text("apple.inspectorview.block_open.1bc5df29"))
                             .font(Theme.caption.weight(.medium))
                     }
-                    Text("\(formatTokens(block.counters.total)) since \(block.start.formatted(date: .omitted, time: .shortened))")
+                    Text(L10n.text("apple.inspectorview.0_since_1.8570f4f3", "\(formatTokens(block.counters.total))", "\(block.start.formatted(date: .omitted, time: .shortened))"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -123,17 +120,14 @@ struct InspectorView: View {
     /// here were a feature you had to discover by accident.
     @ViewBuilder
     private var selection: some View {
-        Card(title: "Selected", subtitle: nil, mark: "mark_activity") {
+        Card(title: L10n.text("apple.inspectorview.selected.57fd7a0c"), subtitle: nil, mark: "mark_activity") {
             if let row = model.selected {
                 selection(row)
             } else {
                 EmptyState(
                     symbol: "hand.tap",
-                    title: "Nothing selected",
-                    message: """
-                    Pick a row on the left to see what it is made of: fresh \
-                    input, cache, output, and what the tools did not report.
-                    """
+                    title: L10n.text("apple.inspectorview.nothing_selected.f8c10424"),
+                    message: L10n.text("apple.inspectorview.pick_a_row_on_the_left_to_see_what_it_is_m.4837e049")
                 )
             }
         }
@@ -141,33 +135,33 @@ struct InspectorView: View {
 
     private func selection(_ row: Bucket) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Text(row.key.isEmpty ? "unknown" : row.key)
+            Text(row.key.isEmpty ? L10n.text("apple.inspectorview.unknown.b23a6a84") : row.key)
                 .font(Theme.mono(12))
                 .textSelection(.enabled)
                 .lineLimit(3)
 
-            Stat(label: "Value", value: row.value.formatted, size: 18)
+            Stat(label: L10n.text("apple.inspectorview.value.8e37953d"), value: row.value.formatted, size: 18)
 
             // Counters split out one by one. This is the view where the
             // difference between "not reported" and "zero" is visible, and a
             // dash is the whole point: it means the tool never said.
             VStack(spacing: Theme.Space.xs) {
-                CounterRow(label: "Fresh input", value: row.counters.inputFresh)
-                CounterRow(label: "Cache read", value: row.counters.cacheRead)
-                CounterRow(label: "Cache write 5m", value: row.counters.cacheWrite5m)
-                CounterRow(label: "Cache write 1h", value: row.counters.cacheWrite1h)
-                CounterRow(label: "Output", value: row.counters.output)
+                CounterRow(label: L10n.text("apple.inspectorview.fresh_input.a5156480"), value: row.counters.inputFresh)
+                CounterRow(label: L10n.text("apple.inspectorview.cache_read.0008ce30"), value: row.counters.cacheRead)
+                CounterRow(label: L10n.text("apple.inspectorview.cache_write_5m.bf7e82f8"), value: row.counters.cacheWrite5m)
+                CounterRow(label: L10n.text("apple.inspectorview.cache_write_1h.80055f01"), value: row.counters.cacheWrite1h)
+                CounterRow(label: L10n.text("apple.inspectorview.output.b2439bcb"), value: row.counters.output)
             }
 
             if row.counters.hasUnknown {
-                Text("A dash means the tool does not report that counter, which is not the same as zero.")
+                Text(L10n.text("apple.inspectorview.a_dash_means_the_tool_does_not_report_that.ebcc68a5"))
                     .font(Theme.caption)
                     .foregroundStyle(.tertiary)
             }
 
             statPair(
-                "Sessions", "\(row.sessions)",
-                "Events", formatTokens(row.events)
+                L10n.text("apple.inspectorview.sessions.6fa3cbf4"), "\(row.sessions)",
+                L10n.text("apple.inspectorview.events.8d14f6e7"), formatTokens(row.events)
             )
 
             // Which agents produced this project's usage. Only meaningful on
@@ -176,7 +170,7 @@ struct InspectorView: View {
                 let harnesses = model.harnesses(inProject: row.key)
                 if !harnesses.isEmpty {
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                        Text("Coding tools here")
+                        Text(L10n.text("apple.inspectorview.coding_tools_here.599781a1"))
                             .font(Theme.caption.weight(.medium))
                         ForEach(harnesses) { h in
                             HStack(spacing: Theme.Space.s) {
@@ -195,7 +189,7 @@ struct InspectorView: View {
 
             if !row.unpricedModels.isEmpty {
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    Text("Unpriced models")
+                    Text(L10n.text("apple.inspectorview.unpriced_models.09fe601e"))
                         .font(Theme.caption.weight(.medium))
                     ForEach(row.unpricedModels, id: \.self) { model in
                         Text(model)
@@ -237,7 +231,7 @@ struct InspectorView: View {
     }
 
     private var archive: some View {
-        Card(title: "Archive", subtitle: nil, mark: "mark_archive") {
+        Card(title: L10n.text("common.archive"), subtitle: nil, mark: "mark_archive") {
             archiveRows
         }
     }
@@ -254,12 +248,12 @@ struct InspectorView: View {
                 if info.hasPrices {
                     KeyValue(key: "Rates from", value: info.priceBookEffectiveFrom)
                 } else {
-                    Text("No price book yet, so values are estimated from the model catalog. The app refreshes the price book automatically; the first fetch can take a moment on a fresh install.")
+                    Text(L10n.text("apple.inspectorview.no_price_book_yet_so_values_are_estimated.3e76ee99"))
                         .font(Theme.caption)
                         .foregroundStyle(Theme.warning)
                 }
             }
-            Text("Read from this device. Nothing left it.")
+            Text(L10n.text("apple.inspectorview.read_from_this_device_nothing_left_it.0c693058"))
                 .font(Theme.caption)
                 .foregroundStyle(.tertiary)
                 .padding(.top, Theme.Space.xs)
@@ -277,7 +271,7 @@ private struct CounterRow: View {
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
             Spacer()
-            Text(value.map { formatTokens($0) } ?? "n/a")
+            Text(value.map { formatTokens($0) } ?? L10n.text("apple.inspectorview.n_a.a683c5c5"))
                 .font(Theme.numeric(11))
                 .foregroundStyle(value == nil ? .tertiary : .primary)
         }

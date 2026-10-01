@@ -23,7 +23,7 @@ internal sealed partial class WorkspaceTabsPage
         _companionHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var caption = new TextBlock { VerticalAlignment = VerticalAlignment.Center };
         _companionHeader.Children.Add(caption);
-        var close = Buttons.ToolbarIcon(ActionIcon.Dismiss, "Close companion pane", (_, _) => { _companion = null; RefreshChrome(); });
+        var close = Buttons.ToolbarIcon(ActionIcon.Dismiss, L10n.Text("windows.workspacetabspage_companion.close_companion_pane.319641bf"), (_, _) => { _companion = null; RefreshChrome(); });
         Grid.SetColumn(close, 1); _companionHeader.Children.Add(close);
         _companionHeader.Tag = caption;
         _inspector.Children.Add(_companionHeader);
@@ -31,15 +31,16 @@ internal sealed partial class WorkspaceTabsPage
     private void ShowCompanion(string kind)
     {
         _companion = kind;
-        if (_companionHeader.Tag is TextBlock caption) caption.Text = kind;
+        if (_companionHeader.Tag is TextBlock caption) caption.Text = kind == "Browser"
+            ? L10n.Text("common.browser") : L10n.Text("windows.workspacetabspage_companion.terminal.e0926fda");
         RefreshChrome();
         DetailsRequested?.Invoke();
     }
     private IList<UIElement> CompanionActions(IList<UIElement> actions)
     {
         if (ActivePage is not ChatPage) return actions;
-        actions.Add(Buttons.ToolbarIcon(ActionIcon.Browser, "Browser beside chat", (_, _) => ShowCompanion("Browser"), _companion == "Browser"));
-        var terminal = Buttons.ToolbarIcon(ActionIcon.Source, "Terminal beside chat", (_, _) => ShowCompanion("Terminal"), _companion == "Terminal");
+        actions.Add(Buttons.ToolbarIcon(ActionIcon.Browser, L10n.Text("windows.workspacetabspage_companion.browser_beside_chat.84f3340a"), (_, _) => ShowCompanion("Browser"), _companion == "Browser"));
+        var terminal = Buttons.ToolbarIcon(ActionIcon.Source, L10n.Text("windows.workspacetabspage_companion.terminal_beside_chat.40991a3f"), (_, _) => ShowCompanion("Terminal"), _companion == "Terminal");
         terminal.Content = new FontIcon { Glyph = "\uE756", FontSize = 16 };
         actions.Add(terminal);
         return actions;

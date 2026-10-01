@@ -55,11 +55,11 @@ struct SSHSessionInspector: View {
                 accessory
             } content: {
                 if editing != nil {
-                    Button("Snippets", .back) { editing = nil }
+                    Button(L10n.text("apple.sshsessioninspector.snippets.ff717209"), .back) { editing = nil }
                         .buttonStyle(.plain)
                         .padding(.leading, Theme.Space.s)
                 } else {
-                    InspectorTitle(title: "Snippets", symbol: "text.badge.plus")
+                    InspectorTitle(title: L10n.text("apple.sshsessioninspector.snippets.ff717209"), symbol: "text.badge.plus")
                 }
                 Spacer(minLength: 0)
             }
@@ -81,28 +81,28 @@ struct SSHSessionInspector: View {
             deleting = nil
         }
         .confirmationDialog(
-            "Delete this snippet?",
+            L10n.text("apple.sshsessioninspector.delete_this_snippet.58a04ce8"),
             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
             titleVisibility: .visible
         ) {
-            Button("Delete", role: .destructive) {
+            Button(L10n.text("common.delete"), role: .destructive) {
                 guard let doomed = deleting else { return }
                 deleting = nil
                 Task { await model.delete(snippet: doomed) }
             }
-            Button("Cancel", role: .cancel) { deleting = nil }
+            Button(L10n.text("common.cancel"), role: .cancel) { deleting = nil }
         } message: {
-            Text("It is removed from every device signed in to this account. Nothing on the server changes.")
+            Text(L10n.text("apple.sshsessioninspector.it_is_removed_from_every_device_signed_in.49df64ed"))
         }
     }
 
     @ViewBuilder
     private var accessory: some View {
         if editing == nil, let host {
-            Button("Server settings", .settings) { editing = .host(host.id) }
+            Button(L10n.text("apple.sshsessioninspector.server_settings.3e8fb11e"), .settings) { editing = .host(host.id) }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .padding(.trailing, Theme.Space.xs)
-                .help("Address, authentication and settings for \(host.label)")
+                .help(L10n.text("apple.sshsessioninspector.address_authentication_and_settings_for_0.993a6dcc", "\(host.label)"))
         }
     }
 
@@ -133,10 +133,10 @@ struct SSHSessionInspector: View {
             // footer were all clipped off the edges.
             InspectorEmptyState(
                 systemImage: "text.append",
-                title: "No snippets yet",
-                subtitle: "Save a command you run often and it lands here, one click from the prompt."
+                title: L10n.text("apple.sshsessioninspector.no_snippets_yet.6e213185"),
+                subtitle: L10n.text("apple.sshsessioninspector.save_a_command_you_run_often_and_it_lands.226f24dc")
             ) {
-                Button("Add snippet", .create) { editing = .newSnippet }
+                Button(L10n.text("apple.sshsessioninspector.add_snippet.a1f802b9"), .create) { editing = .newSnippet }
                     .buttonStyle(AccentButtonStyle(small: true))
                     .padding(.top, Theme.Space.xs)
             }
@@ -147,14 +147,14 @@ struct SSHSessionInspector: View {
                     ForEach(available) { snippet in row(snippet) }
                     Text(
                         target == nil
-                            ? "Open a session on this server to run a snippet in it."
-                            : "A snippet runs in the session in front. One with {{braces}} asks for its values first."
+                            ? L10n.text("apple.sshsessioninspector.open_a_session_on_this_server_to_run_a_sni.e33cc3bd")
+                            : L10n.text("apple.sshsessioninspector.a_snippet_runs_in_the_session_in_front_one.86b1e21a")
                     )
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, Theme.Space.xs)
-                    Button("Add snippet", .create) { editing = .newSnippet }
+                    Button(L10n.text("apple.sshsessioninspector.add_snippet.a1f802b9"), .create) { editing = .newSnippet }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                 }
                 .padding(Theme.Space.m)
@@ -181,7 +181,7 @@ struct SSHSessionInspector: View {
                     // A snippet scoped to this server, rather than one of the
                     // general ones listed under it.
                     if snippet.hostIDs.contains(hostID) {
-                        Text("this server")
+                        Text(L10n.text("apple.sshsessioninspector.this_server.98bf14a4"))
                             .font(Theme.font(10))
                             .foregroundStyle(.tertiary)
                     }
@@ -205,20 +205,20 @@ struct SSHSessionInspector: View {
         .buttonStyle(.plain)
         .help(snippet.command)
         .contextMenu {
-            Button("Run it", .run) { run(snippet) }
+            Button(L10n.text("apple.sshsessioninspector.run_it.958ca26c"), .run) { run(snippet) }
                 .disabled(target == nil)
-            Button("Copy command", .copy) {
+            Button(L10n.text("apple.sshsessioninspector.copy_command.9a01feec"), .copy) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(snippet.command, forType: .string)
             }
             ThemeRule()
-            Button("Edit", .edit) { editing = .snippet(snippet.id) }
+            Button(L10n.text("common.edit"), .edit) { editing = .snippet(snippet.id) }
             // Deleting from here used to mean opening the editor and finding
             // the button in its footer, which is a long way round for a card
             // that is right under the pointer. Behind a confirmation, unlike
             // the library's own rows: this menu sits beside a live shell and a
             // mis-click here is a mis-click during work.
-            Button("Delete", .delete, role: .destructive) { deleting = snippet }
+            Button(L10n.text("common.delete"), .delete, role: .destructive) { deleting = snippet }
         }
     }
 

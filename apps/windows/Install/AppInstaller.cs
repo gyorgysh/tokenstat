@@ -60,7 +60,7 @@ internal static class AppInstaller
     {
         if (!File.Exists(zipPath))
         {
-            throw new Failure("The download is missing.");
+            throw new Failure(L10n.Text("windows.appinstaller.the_download_is_missing.9c5859b5"));
         }
 
         var dest = SelfInstall.IsRunningFromInstall
@@ -85,7 +85,7 @@ internal static class AppInstaller
             var stagedExe = Path.Combine(staging, "Tokenstat.exe");
             if (!File.Exists(stagedExe) || !File.Exists(Path.Combine(staging, "tokenstat-hostd.exe")))
             {
-                throw new Failure("The download did not contain the complete tokenstat app.");
+                throw new Failure(L10n.Text("windows.appinstaller.the_download_did_not_contain_the_complete.484b8f83"));
             }
             VerifyPublisher(CurrentExe(), stagedExe);
             WritePending(dest, staging);
@@ -172,10 +172,10 @@ internal static class AppInstaller
         using var helperProcess = Process.Start(new ProcessStartInfo
         {
             FileName = "powershell.exe",
-            Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{helper}\"",
+            Arguments = L10n.Text("windows.appinstaller.noprofile_executionpolicy_bypass_file_0.7b39de3b", $"{helper}"),
             UseShellExecute = false,
             CreateNoWindow = true,
-        }) ?? throw new Failure("Could not start the update helper. Please try relaunching again.");
+        }) ?? throw new Failure(L10n.Text("windows.appinstaller.could_not_start_the_update_helper_please_t.e9b2275b"));
         Environment.Exit(0);
     }
 
@@ -310,11 +310,11 @@ internal static class AppInstaller
         var offered = AuthenticodePublisher(stagedExe);
         if (offered is null)
         {
-            throw new Failure("The download is not signed, and the installed one is.");
+            throw new Failure(L10n.Text("windows.appinstaller.the_download_is_not_signed_and_the_install.28926973"));
         }
         if (!string.Equals(offered, currentPublisher, StringComparison.OrdinalIgnoreCase))
         {
-            throw new Failure("The download was signed by somebody else.");
+            throw new Failure(L10n.Text("windows.appinstaller.the_download_was_signed_by_somebody_else.976f71f6"));
         }
     }
 
@@ -339,17 +339,17 @@ internal static class AppInstaller
             RedirectStandardOutput = true,
             StandardOutputEncoding = Encoding.UTF8,
             RedirectStandardError = true,
-        }) ?? throw new Failure("Could not verify the update signature.");
+        }) ?? throw new Failure(L10n.Text("windows.appinstaller.could_not_verify_the_update_signature.b4c48a1c"));
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
         if (!process.WaitForExit(30000))
         {
             try { process.Kill(entireProcessTree: true); } catch { /* Already exited. */ }
-            throw new Failure("Signature verification timed out. Please try again.");
+            throw new Failure(L10n.Text("windows.appinstaller.signature_verification_timed_out_please_tr.a59201e9"));
         }
         if (process.ExitCode != 0)
         {
-            throw new Failure("Could not verify the update signature. Please try again.");
+            throw new Failure(L10n.Text("windows.appinstaller.could_not_verify_the_update_signature_plea.7cfc799a"));
         }
         return ReadVerifiedPublisher(output.GetAwaiter().GetResult());
     }
@@ -365,7 +365,7 @@ internal static class AppInstaller
         var subject = result?["subject"]?.GetValue<string>();
         if (status != "Valid" || string.IsNullOrWhiteSpace(subject))
         {
-            throw new Failure("The app signature could not be verified. Download a fresh copy of tokenstat.");
+            throw new Failure(L10n.Text("windows.appinstaller.the_app_signature_could_not_be_verified_do.75facb06"));
         }
         return subject;
     }

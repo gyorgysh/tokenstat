@@ -21,7 +21,7 @@ enum BridgeError: LocalizedError {
         case let .core(_, message):
             return message
         case let .decoding(method, underlying):
-            return "Could not read the response to \(method): \(underlying)"
+            return L10n.text("apple.bridge.could_not_read_the_response_to_0_1.cd118b6b", "\(method)", "\(underlying)")
         }
     }
 }
@@ -366,7 +366,7 @@ enum Bridge {
             let failure = envelope.error
             throw BridgeError.core(
                 code: failure?.code ?? "unknown",
-                message: failure?.message ?? "The core rejected the call without saying why."
+                message: failure?.message ?? L10n.text("apple.bridge.the_core_rejected_the_call_without_saying.e1b9fc0b")
             )
         }
         return result
@@ -806,11 +806,11 @@ enum Bridge {
                     throw BridgeError.core(
                         code: envelope.error?.code ?? "unknown",
                         message: envelope.error?.message
-                            ?? "The core rejected the call without saying why."
+                            ?? L10n.text("apple.bridge.the_core_rejected_the_call_without_saying.e1b9fc0b")
                     )
                 }
                 guard let result = envelope.result else {
-                    throw BridgeError.decoding(method: method, underlying: "missing result")
+                    throw BridgeError.decoding(method: method, underlying: L10n.text("apple.bridge.missing_result.95b97874"))
                 }
                 return result
             }
@@ -852,7 +852,7 @@ enum Bridge {
             throw BridgeError.core(
                 code: envelope.error?.code ?? "unknown",
                 message: envelope.error?.message
-                    ?? "The core rejected the call without saying why."
+                    ?? L10n.text("apple.bridge.the_core_rejected_the_call_without_saying.e1b9fc0b")
             )
         }
         return envelope.result
@@ -1186,7 +1186,7 @@ extension Bridge {
     static func createChat(
         workspaceID: String,
         backend: String,
-        title: String = "New chat",
+        title: String = L10n.text("apple.bridge.new_chat.db18382a"),
         mode: String = "plan",
         autonomy: String = "standard",
         model: String? = nil,
@@ -1216,7 +1216,7 @@ extension Bridge {
     static func forkChat(id: String, peer: String? = nil) async throws -> ChatConversation {
         guard await RemoteHostFeature.chatFork.isSupported(peer: peer) else {
             throw NSError(domain: "Chat", code: 26, userInfo: [
-                NSLocalizedDescriptionKey: "Update the project's computer to fork chats."
+                NSLocalizedDescriptionKey: L10n.text("apple.bridge.update_the_project_s_computer_to_fork_chat.4d57279f")
             ])
         }
         return try await chatInvoke(peer: peer, "chat.fork", ["id": id], as: ChatConversation.self)
@@ -1260,11 +1260,11 @@ extension Bridge {
         let route = chatRoute(workspaceID: workspaceID, peer: peer)
         let scope = await WorkSessionContext.shared.scope
         guard await RemoteHostFeature.chatRemoveAll.isSupported(peer: route.peer) else {
-            throw NSError(domain: "Chat", code: 26, userInfo: [NSLocalizedDescriptionKey: "Update the project's computer to delete all chats."])
+            throw NSError(domain: L10n.text("apple.bridge.chat.460b3a7d"), code: 26, userInfo: [NSLocalizedDescriptionKey: L10n.text("apple.bridge.update_the_project_s_computer_to_delete_al.91053fe4")])
         }
         let currentScope = await WorkSessionContext.shared.scope
         guard scope == currentScope else {
-            throw NSError(domain: "Chat", code: 1, userInfo: [NSLocalizedDescriptionKey: "The account changed before deleting chats."])
+            throw NSError(domain: "Chat", code: 1, userInfo: [NSLocalizedDescriptionKey: L10n.text("apple.bridge.the_account_changed_before_deleting_chats.9dd002c6")])
         }
         return try await chatInvoke(
             peer: route.peer,
@@ -1295,7 +1295,7 @@ extension Bridge {
         if let expectedRevision { params["expectedRevision"] = expectedRevision }
         if let clientMessageCreatedAt {
             guard let milliseconds = Int64(exactly: (clientMessageCreatedAt.timeIntervalSince1970 * 1000).rounded(.towardZero)) else {
-                throw BridgeError.core(code: "invalid_message_time", message: "The saved message time could not be read. Your pending copy stays here.")
+                throw BridgeError.core(code: "invalid_message_time", message: L10n.text("apple.bridge.the_saved_message_time_could_not_be_read_y.79fe7261"))
             }
             params["clientMessageCreatedAtMs"] = milliseconds
         }
@@ -1641,7 +1641,7 @@ extension Bridge {
         // an attachment must fit in one request in any case.
         if let values = try? file.resourceValues(forKeys: [.fileSizeKey]),
            let size = values.fileSize, size > 25 * 1024 * 1024 {
-            throw BridgeError.core(code: "attachment_too_large", message: "This file is too large to attach (\(size / 1_048_576) MB). Files must be under 25 MB.")
+            throw BridgeError.core(code: "attachment_too_large", message: L10n.text("apple.bridge.this_file_is_too_large_to_attach_0_mb_file.f594c26b", "\(size / 1_048_576)"))
         }
         let data = try Data(contentsOf: file)
         return try await attachToChat(
@@ -2786,7 +2786,7 @@ private extension Encodable {
         let data = try JSONEncoder().encode(self)
         let obj = try JSONSerialization.jsonObject(with: data)
         guard let dict = obj as? [String: Any] else {
-            throw BridgeError.decoding(method: "encode", underlying: "expected a JSON object")
+            throw BridgeError.decoding(method: "encode", underlying: L10n.text("apple.bridge.expected_a_json_object.a07d4035"))
         }
         return dict
     }
@@ -3130,7 +3130,7 @@ extension Bridge {
         guard let version = Int(spoken.protocolVersion), version > 0 else {
             throw BridgeError.core(
                 code: "invalid_protocol",
-                message: "The paired computer returned an invalid protocol version."
+                message: L10n.text("apple.bridge.the_paired_computer_returned_an_invalid_pr.198899ef")
             )
         }
         return version
@@ -3540,7 +3540,7 @@ extension Bridge {
         guard let key else {
             throw BridgeError.core(
                 code: "jump_needs_key",
-                message: "\(host.label) is used to reach other servers, so it needs a saved key rather than a password."
+                message: L10n.text("apple.bridge.0_is_used_to_reach_other_servers_so_it_nee.ab2795d6", "\(host.label)")
             )
         }
         let auth: [String: Any]
@@ -3693,7 +3693,7 @@ extension Bridge {
             as: Stopped.self
         )
         guard reply.stopped else {
-            throw NSError(domain: "Browser", code: 1, userInfo: [NSLocalizedDescriptionKey: "The previous preview connection could not be closed. Try again."])
+            throw NSError(domain: L10n.text("common.browser"), code: 1, userInfo: [NSLocalizedDescriptionKey: L10n.text("apple.bridge.the_previous_preview_connection_could_not.c878d33d")])
         }
     }
 

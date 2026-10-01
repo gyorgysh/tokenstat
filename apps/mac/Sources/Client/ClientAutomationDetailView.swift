@@ -64,8 +64,8 @@ struct ClientAutomationDetailView: View {
                     runs(of: job)
                 } else if session.loaded {
                     ClientSectionEmpty(
-                        text: "This job is gone",
-                        message: "It is not in the folder any more."
+                        text: L10n.text("apple.clientautomationdetailview.this_job_is_gone.b3e6a44a"),
+                        message: L10n.text("apple.clientautomationdetailview.it_is_not_in_the_folder_any_more.ff5d54d4")
                     )
                 } else {
                     ProgressView()
@@ -78,12 +78,12 @@ struct ClientAutomationDetailView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        .navigationTitle(session.selectedJob?.name ?? "Automation")
+        .navigationTitle(session.selectedJob?.name ?? L10n.text("apple.clientautomationdetailview.automation.d909750b"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if let job = session.selectedJob {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Edit", .edit) {
+                    Button(L10n.text("common.edit"), .edit) {
                         editor = AutomationEditorRoute(
                             workspaceID: workspaceID, folderName: folderName, job: job
                         )
@@ -91,7 +91,7 @@ struct ClientAutomationDetailView: View {
                     .labelStyle(.iconOnly)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Delete", .delete, role: .destructive) { pendingDelete = true }
+                    Button(L10n.text("common.delete"), .delete, role: .destructive) { pendingDelete = true }
                         .labelStyle(.iconOnly)
                 }
             }
@@ -108,18 +108,18 @@ struct ClientAutomationDetailView: View {
             }
         }
         .confirmationDialog(
-            "Delete \(session.selectedJob?.name ?? "this job")?",
+            L10n.text("apple.clientautomationdetailview.delete_0.dc6c5ae4", "\(session.selectedJob?.name ?? L10n.text("apple.clientautomationdetailview.this_job.c627fafe"))"),
             isPresented: $pendingDelete,
             titleVisibility: .visible
         ) {
-            Button("Delete", role: .destructive) {
+            Button(L10n.text("common.delete"), role: .destructive) {
                 if let job = session.selectedJob {
                     Task { await session.remove(job) }
                 }
             }
-            Button("Keep it", role: .cancel) {}
+            Button(L10n.text("apple.clientautomationdetailview.keep_it.fdce5da2"), role: .cancel) {}
         } message: {
-            Text("The schedule goes with it. Runs it already produced stay.")
+            Text(L10n.text("apple.clientautomationdetailview.the_schedule_goes_with_it_runs_it_already.a4efc8fe"))
         }
         .refreshable {
             await ClientRefresh.pull("automation-detail-\(jobID)") { await session.load() }
@@ -142,27 +142,27 @@ struct ClientAutomationDetailView: View {
                     .foregroundStyle(.secondary)
             }
             HStack(alignment: .top, spacing: Theme.Space.m) {
-                ClientFactRow(label: "Backend", value: job.backend)
-                ClientFactRow(label: "Schedule", value: job.schedule.summary)
+                ClientFactRow(label: L10n.text("apple.clientautomationdetailview.backend.2fb4019a"), value: job.backend)
+                ClientFactRow(label: L10n.text("apple.clientautomationdetailview.schedule.f4830a1d"), value: job.schedule.summary)
             }
             if let model = job.model, !model.isEmpty {
-                ClientFactRow(label: "Model", value: model)
+                ClientFactRow(label: L10n.text("apple.clientautomationdetailview.model.5e2c614c"), value: model)
             }
             HStack(alignment: .top, spacing: Theme.Space.m) {
-                ClientFactRow(label: "Budget", value: ClientJobCopy.budget(job.budgetSeconds))
+                ClientFactRow(label: L10n.text("apple.clientautomationdetailview.budget.1c6225ec"), value: ClientJobCopy.budget(job.budgetSeconds))
                 if let clock = HostScheduleClock.clock(session.schedulerTimezone) {
-                    ClientFactRow(label: "Time zone", value: clock)
+                    ClientFactRow(label: L10n.text("apple.clientautomationdetailview.time_zone.b9fe1464"), value: clock)
                 }
             }
             HStack(alignment: .top, spacing: Theme.Space.m) {
                 if let next = job.nextRun, job.enabled {
                     ClientFactRow(
-                        label: "Next",
+                        label: L10n.text("common.next"),
                         value: HostScheduleClock.nextRun(next, timezone: session.schedulerTimezone)
                     )
                 }
                 ClientFactRow(
-                    label: "Last",
+                    label: L10n.text("apple.clientautomationdetailview.last.eb970eb0"),
                     value: ClientJobCopy.lastRunWhen(
                         session.lastRun(for: job)?.startedAt ?? job.lastRun
                     )
@@ -191,7 +191,7 @@ struct ClientAutomationDetailView: View {
             all, id: \.id, startedAtMs: \.startedAtMs, isLive: \.isRunning
         )
         if !history.isEmpty {
-            Text("Recent runs")
+            Text(L10n.text("apple.clientautomationdetailview.recent_runs.237112b8"))
                 .font(ClientType.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
                 .padding(.top, Theme.Space.xs)

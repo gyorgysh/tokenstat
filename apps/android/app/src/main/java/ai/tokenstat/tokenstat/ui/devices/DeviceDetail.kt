@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.devices
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.components.ForegroundEffect
 import ai.tokenstat.tokenstat.ui.chrome.HideTopBar
 
@@ -136,7 +138,7 @@ fun DeviceDetailScreen(
     fun saveName() {
         val id = machine.string("id")
         if (id.isNullOrEmpty()) {
-            renameError = "This device has no id on the account yet."
+            renameError = L10n.text("android.devicedetail.this_device_has_no_id_on_the_account_yet.5edab834")
             return
         }
         savingName = true
@@ -202,7 +204,7 @@ fun DeviceDetailScreen(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = colors.textPrimary)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, L10n.text("common.back"), tint = colors.textPrimary)
             }
             Text(currentName, style = MaterialTheme.typography.headlineSmall, color = colors.textPrimary)
         }
@@ -227,7 +229,7 @@ fun DeviceDetailScreen(
             val connectedPeer by model.workspacesConnection.connectedPeer.collectAsStateWithLifecycle()
             if (connectedPeer != null && connectedPeer.equals(peer, ignoreCase = true)) {
                 TsSecondaryButton(
-                    label = "Disconnect",
+                    label = L10n.text("common.disconnect"),
                     icon = ActionIcon.Disconnect.vector,
                     onClick = { model.workspacesConnection.disconnect() },
                 )
@@ -286,7 +288,7 @@ private fun SpendCard(usage: DeviceUsage?, accountTotalMicros: Long) {
         Box(Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    if (usage != null) money(usage.valueMicros) else "n/a",
+                    if (usage != null) money(usage.valueMicros) else L10n.text("android.devicedetail.n_a.a683c5c5"),
                     style = TsType.numeric(26, FontWeight.SemiBold),
                     color = colors.accent,
                     maxLines = 1,
@@ -294,9 +296,9 @@ private fun SpendCard(usage: DeviceUsage?, accountTotalMicros: Long) {
                 )
                 Text(
                     if (usage != null) {
-                        "at API list price, ${deviceWindowPhrase(usage.days)}"
+                        L10n.text("android.devicedetail.at_api_list_price_0.32cb2c25", "${deviceWindowPhrase(usage.days)}")
                     } else {
-                        "This device's share has not been fetched."
+                        L10n.text("android.devicedetail.this_device_s_share_has_not_been_fetched.6aa4e138")
                     },
                     style = TsType.caption,
                     color = colors.textSecondary,
@@ -323,7 +325,7 @@ private fun SpendCard(usage: DeviceUsage?, accountTotalMicros: Long) {
 @Composable
 private fun ReachCard(isThis: Boolean, online: Boolean?, hasKey: Boolean) {
     TsCard {
-        SectionTitle(title = "Reach", mark = "mark_host")
+        SectionTitle(title = L10n.text("android.devicedetail.reach.2068b81b"), mark = "mark_host")
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Space.s),
@@ -388,11 +390,11 @@ private fun HostHeaderCard(
         }
         if (state.canRemote) {
             DeviceActionRow(
-                title = "Open work",
+                title = L10n.text("android.devicedetail.open_work.536b133a"),
                 subtitle = if (online == true) {
-                    "Folders, terminals and sessions on this computer."
+                    L10n.text("android.devicedetail.folders_terminals_and_sessions_on_this_com.d3339016")
                 } else {
-                    "It is asleep. Opening this will wake nothing, but it will try."
+                    L10n.text("android.devicedetail.it_is_asleep_opening_this_will_wake_nothin.9373e7fd")
                 },
                 icon = ActionIcon.Reveal,
                 onClick = onOpenWork,
@@ -415,27 +417,27 @@ private fun HostHeaderCard(
                 ActionSeat(icon = ActionIcon.Reveal)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        "Open work",
+                        L10n.text("android.devicedetail.open_work.536b133a"),
                         style = TsType.subheadline,
                         fontWeight = FontWeight.Medium,
                         color = colors.textPrimary,
                     )
                     Text(
-                        "Opening folders and terminals on this computer is on Patron.",
+                        L10n.text("android.devicedetail.opening_folders_and_terminals_on_this_comp.995676db"),
                         style = TsType.caption,
                         color = colors.textSecondary,
                     )
-                    TextLink(label = "See plans", icon = ActionIcon.Plans, onClick = onPlans)
+                    TextLink(label = L10n.text("android.devicedetail.see_plans.d9898933"), icon = ActionIcon.Plans, onClick = onPlans)
                 }
             }
         }
         if (!(isHeadless || DeviceCopy.isHeadlessPlatform(platform))) {
             DeviceActionRow(
-                title = "View screen",
+                title = L10n.text("android.devicedetail.view_screen.56dea3b5"),
                 subtitle = if ((state.account?.string("tier") ?: "").equals("legend", ignoreCase = true)) {
-                    "End-to-end encrypted from this device."
+                    L10n.text("android.devicedetail.end_to_end_encrypted_from_this_device.54caee7b")
                 } else {
-                    "Requires Legend."
+                    L10n.text("android.devicedetail.requires_legend.ba9f23f7")
                 },
                 icon = ActionIcon.Preview,
                 onClick = onViewScreen,
@@ -485,24 +487,24 @@ private fun IdentityCard(
 ) {
     val colors = LocalTsColors.current
     TsCard {
-        SectionTitle(title = "What this is", mark = "mark_device")
+        SectionTitle(title = L10n.text("android.devicedetail.what_this_is.45d2766e"), mark = "mark_device")
         if (renaming) {
-            Text("Name", style = TsType.caption, color = colors.textSecondary)
+            Text(L10n.text("android.devicedetail.name.dcd1d522"), style = TsType.caption, color = colors.textSecondary)
             OutlinedTextField(
                 value = draft,
                 onValueChange = onDraftChange,
-                placeholder = { Text("Name this device") },
+                placeholder = { Text(L10n.text("android.devicedetail.name_this_device.ab6b2bc7")) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 TsAccentButton(
-                    label = if (savingName) "Saving…" else "Save",
+                    label = if (savingName) L10n.text("android.devicedetail.saving.23e39291") else L10n.text("common.save"),
                     enabled = !savingName,
                     onClick = onSaveName,
                 )
                 TsSecondaryButton(
-                    label = "Cancel",
+                    label = L10n.text("common.cancel"),
                     onClick = {
                         onRenamingChange(false)
                         onRenameErrorChange(null)
@@ -510,15 +512,15 @@ private fun IdentityCard(
                 )
             }
             Text(
-                "Empty puts back the name the device gives itself.",
+                L10n.text("android.devicedetail.empty_puts_back_the_name_the_device_gives.9bb5bd6d"),
                 style = TsType.caption,
                 color = colors.textTertiary,
             )
         } else {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 DetailLine(
-                    label = "Name",
-                    value = currentLabel?.ifEmpty { null } ?: "not named on this account",
+                    label = L10n.text("android.devicedetail.name.dcd1d522"),
+                    value = currentLabel?.ifEmpty { null } ?: L10n.text("android.devicedetail.not_named_on_this_account.3695693d"),
                     modifier = Modifier.weight(1f),
                 )
                 Spacer(Modifier.width(Space.s))
@@ -526,7 +528,7 @@ private fun IdentityCard(
                 // server with nothing but the CLI on it has no other way
                 // to be named.
                 TextLink(
-                    label = "Rename",
+                    label = L10n.text("common.rename"),
                     icon = ActionIcon.Edit,
                     onClick = {
                         onDraftChange(currentLabel ?: "")
@@ -537,21 +539,21 @@ private fun IdentityCard(
         }
         renameError?.let { Text(it, style = TsType.caption, color = colors.danger) }
         machine.string("platform")?.let {
-            DetailLine(label = "What it runs", value = it)
+            DetailLine(label = L10n.text("android.devicedetail.what_it_runs.ba619d80"), value = it)
         }
         machine.string("id")?.let {
-            DetailLine(label = "Device id", value = it)
+            DetailLine(label = L10n.text("android.devicedetail.device_id.4ad41656"), value = it)
         }
         // Hosts upload an archive, so their sync time is a product fact.
         // Phones never do: lastSyncAt there is not a fact.
         if (isHost) {
             DetailLine(
-                label = "Last sync",
+                label = L10n.text("android.devicedetail.last_sync.71967fca"),
                 value = DeviceCopy.lastSync(true, machine.string("lastSyncAt")),
             )
         } else {
             formatRelativeDate(machine.string("lastSeenAt"))?.let { seen ->
-                DetailLine(label = "Last used", value = seen)
+                DetailLine(label = L10n.text("android.devicedetail.last_used.830ec7f8"), value = seen)
             }
         }
     }
@@ -583,16 +585,16 @@ private fun DetailLine(label: String, value: String, modifier: Modifier = Modifi
 @Composable
 private fun FoldersCard(onChoose: () -> Unit, onClone: () -> Unit) {
     TsCard {
-        SectionTitle(title = "Projects", mark = "mark_folder")
+        SectionTitle(title = L10n.text("common.projects"), mark = "mark_folder")
         DeviceActionRow(
-            title = "Choose a folder",
-            subtitle = "Register a folder already on this computer.",
+            title = L10n.text("android.devicedetail.choose_a_folder.5c71b8cd"),
+            subtitle = L10n.text("android.devicedetail.register_a_folder_already_on_this_computer.31c7d112"),
             icon = ActionIcon.Reveal,
             onClick = onChoose,
         )
         DeviceActionRow(
-            title = "Clone a repository",
-            subtitle = "Run git on this computer and register the folder.",
+            title = L10n.text("android.devicedetail.clone_a_repository.749e5d4d"),
+            subtitle = L10n.text("android.devicedetail.run_git_on_this_computer_and_register_the.d6fc5a8e"),
             icon = ActionIcon.Download,
             onClick = onClone,
         )
@@ -662,22 +664,22 @@ fun DevicesHeader(machineCount: Int, machineLimit: Int?, canRemote: Boolean) {
     val colors = LocalTsColors.current
     val tint = capacityTint(machineCount, machineLimit)
     val planLine = if (!canRemote) {
-        "Remote control is on Patron. Usage from every linked device is already here."
+        L10n.text("android.devicedetail.remote_control_is_on_patron_usage_from_eve.5dc0dfc8")
     } else {
         null
     }
     Column(
         verticalArrangement = Arrangement.spacedBy(Space.s),
         modifier = Modifier.semantics(mergeDescendants = true) {
-            val parts = mutableListOf("Devices")
-            if (machineLimit != null) parts.add("$machineCount of $machineLimit devices")
-            else parts.add(if (machineCount == 1) "1 device" else "$machineCount devices")
+            val parts = mutableListOf(L10n.text("common.devices"))
+            if (machineLimit != null) parts.add(L10n.text("android.devicedetail.0_of_1_devices.bd266bff", "${machineCount}", "${machineLimit}"))
+            else parts.add(if (machineCount == 1) "1 device" else L10n.text("android.devicedetail.0_devices.f3bf57aa", "${machineCount}"))
             if (planLine != null) parts.add(planLine)
             contentDescription = parts.joinToString(". ")
         },
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            SectionTitle(title = "Devices", mark = "mark_device")
+            SectionTitle(title = L10n.text("common.devices"), mark = "mark_device")
             Spacer(Modifier.weight(1f))
             Spacer(Modifier.width(Space.s))
             if (machineLimit != null) {
@@ -702,7 +704,7 @@ fun DevicesHeader(machineCount: Int, machineLimit: Int?, canRemote: Boolean) {
                         .padding(horizontal = 10.dp, vertical = 5.dp),
                 ) {
                     Text(
-                        if (machineCount == 1) "1 device" else "$machineCount devices",
+                        if (machineCount == 1) L10n.text("android.devicedetail.1_device.b97db9d5") else L10n.text("android.devicedetail.0_devices.f3bf57aa", "${machineCount}"),
                         style = TsType.caption,
                         fontWeight = FontWeight.Medium,
                         color = colors.textSecondary,
@@ -757,7 +759,7 @@ private fun rememberHostStats(model: AppViewModel, peer: String): Triple<JsonObj
     var failed by remember(peer) { mutableStateOf(false) }
     var route by remember(peer) { mutableStateOf<String?>(null) }
     ForegroundEffect(peer) {
-        runCatching { model.prepareHost(peer, "Computer") }
+        runCatching { model.prepareHost(peer, L10n.text("android.devicedetail.computer.76ed42d2")) }
         while (true) {
             runCatching { model.hostStats(peer) }
                 .onSuccess { stats = it; failed = false }
@@ -834,7 +836,7 @@ private fun HostStatsCells(stats: JsonObject?, failed: Boolean, route: String?) 
                 )
                 Text(power, style = TsType.numeric(16), color = colors.textPrimary, maxLines = 1)
             }
-            Text("Power", style = TsType.caption, color = colors.textSecondary)
+            Text(L10n.text("android.devicedetail.power.848e9656"), style = TsType.caption, color = colors.textSecondary)
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             if (cpu != null) {
@@ -852,9 +854,9 @@ private fun HostStatsCells(stats: JsonObject?, failed: Boolean, route: String?) 
                     )
                 }
             } else {
-                Text("n/a", style = TsType.numeric(16), color = colors.textTertiary)
+                Text(L10n.text("android.devicedetail.n_a.a683c5c5"), style = TsType.numeric(16), color = colors.textTertiary)
             }
-            Text("CPU", style = TsType.caption, color = colors.textSecondary)
+            Text(L10n.text("android.devicedetail.cpu.db9a4c7d"), style = TsType.caption, color = colors.textSecondary)
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             if (ramUsed != null && ramTotal != null && ramTotal > 0) {
@@ -877,14 +879,14 @@ private fun HostStatsCells(stats: JsonObject?, failed: Boolean, route: String?) 
                     )
                 }
             } else {
-                Text("n/a", style = TsType.numeric(16), color = colors.textTertiary)
+                Text(L10n.text("android.devicedetail.n_a.a683c5c5"), style = TsType.numeric(16), color = colors.textTertiary)
             }
-            Text("Memory", style = TsType.caption, color = colors.textSecondary)
+            Text(L10n.text("android.devicedetail.memory.c3963aed"), style = TsType.caption, color = colors.textSecondary)
         }
     }
     ConnectionRouteMark(route)
     Text(
-        "Read from this computer over the encrypted tunnel. It is not uploaded with usage.",
+        L10n.text("android.devicedetail.read_from_this_computer_over_the_encrypted.2e1e5e7b"),
         style = TsType.caption,
         color = colors.textTertiary,
     )
@@ -936,7 +938,7 @@ private fun SoftwareCard(model: AppViewModel, peer: String) {
         scope.launch {
             phase = UpdatePhase.Checking
             applied = null
-            runCatching { model.prepareHost(peer, "Computer") }
+            runCatching { model.prepareHost(peer, L10n.text("android.devicedetail.computer.76ed42d2")) }
             // A host older than these methods must not be discovered by
             // showing somebody its `unknown method` error.
             val version = probeVersion() ?: run {
@@ -987,14 +989,14 @@ private fun SoftwareCard(model: AppViewModel, peer: String) {
     LaunchedEffect(peer, retry) { load() }
     if (!supported) return
     TsCard {
-        SectionTitle(title = "Software", mark = "mark_sync")
+        SectionTitle(title = L10n.text("android.devicedetail.software.9b3289a3"), mark = "mark_sync")
         when (val p = phase) {
             UpdatePhase.Checking -> Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Space.s),
             ) {
                 CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = colors.accent)
-                Text("Looking for a newer release", style = TsType.caption, color = colors.textSecondary)
+                Text(L10n.text("android.devicedetail.looking_for_a_newer_release.7e1ada06"), style = TsType.caption, color = colors.textSecondary)
             }
             UpdatePhase.Ready -> state?.let { UpdateReadyBody(it) }
             UpdatePhase.Installing -> Row(
@@ -1003,7 +1005,7 @@ private fun SoftwareCard(model: AppViewModel, peer: String) {
             ) {
                 CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = colors.accent)
                 Text(
-                    "Downloading, checking and installing. This takes a minute.",
+                    L10n.text("android.devicedetail.downloading_checking_and_installing_this_t.c0e97360"),
                     style = TsType.caption,
                     color = colors.textSecondary,
                 )
@@ -1019,21 +1021,21 @@ private fun SoftwareCard(model: AppViewModel, peer: String) {
                 // there would be offering work that is already done.
                 if (phase == UpdatePhase.Done) {
                     if (applied?.bool("restartPending") == true && s.bool("canRestart")) {
-                        TsAccentButton(label = "Restart", icon = ActionIcon.Refresh.vector, onClick = { apply(true) })
+                        TsAccentButton(label = L10n.text("android.devicedetail.restart.6b983a81"), icon = ActionIcon.Refresh.vector, onClick = { apply(true) })
                     }
                 } else if (s.bool("restartPending")) {
                     // The only thing left is the restart, and it ends
                     // whatever that machine is running, so it is never
                     // automatic here.
                     if (s.bool("canRestart")) {
-                        TsAccentButton(label = "Restart", icon = ActionIcon.Refresh.vector, onClick = { apply(true) })
+                        TsAccentButton(label = L10n.text("android.devicedetail.restart.6b983a81"), icon = ActionIcon.Refresh.vector, onClick = { apply(true) })
                     }
                 } else if (s.bool("newer") && !s.bool("appManaged")) {
-                    TsAccentButton(label = "Install", icon = ActionIcon.Download.vector, onClick = { apply(false) })
+                    TsAccentButton(label = L10n.text("android.devicedetail.install.569ca49f"), icon = ActionIcon.Download.vector, onClick = { apply(false) })
                 } else if (s.bool("appManaged") && s.bool("newer")) {
-                    TsAccentButton(label = "Fetch", icon = ActionIcon.Download.vector, onClick = { apply(false) })
+                    TsAccentButton(label = L10n.text("android.devicedetail.fetch.cd7d61bf"), icon = ActionIcon.Download.vector, onClick = { apply(false) })
                 }
-                TsSecondaryButton(label = "Check again", icon = ActionIcon.Refresh.vector, onClick = { retry += 1 })
+                TsSecondaryButton(label = L10n.text("android.devicedetail.check_again.fb7099ad"), icon = ActionIcon.Refresh.vector, onClick = { retry += 1 })
             }
         }
     }
@@ -1068,27 +1070,27 @@ private fun UpdateNote(text: String, tone: UpdateTone) {
 /// Counted rather than "some work": a person deciding whether to end their
 /// own sessions wants the number.
 private fun updateWorkPhrase(count: Int): String =
-    if (count == 1) "One thing is" else "$count things are"
+    if (count == 1) L10n.text("android.devicedetail.one_thing_is.cda2ad7f") else L10n.text("android.devicedetail.0_things_are.ce038154", "${count}")
 
 private fun updatePendingSentence(state: JsonObject): String {
-    val installed = "Version ${state.string("latest").orEmpty()} is installed and waiting."
-    if (!state.bool("canRestart")) return "$installed Restart it there to use it."
+    val installed = L10n.text("android.devicedetail.version_0_is_installed_and_waiting.87629ce8", "${state.string("latest").orEmpty()}")
+    if (!state.bool("canRestart")) return L10n.text("android.devicedetail.0_restart_it_there_to_use_it.258c3248", "${installed}")
     val live = state.int("liveWork") ?: 0
     return if (live > 0) {
-        "$installed ${updateWorkPhrase(live)} running, so it restarts when they finish."
+        L10n.text("android.devicedetail.0_1_running_so_it_restarts_when_they_finis.3d730cfa", "${installed}", "${updateWorkPhrase(live)}")
     } else {
-        "$installed It restarts on its own shortly."
+        L10n.text("android.devicedetail.0_it_restarts_on_its_own_shortly.0d399003", "${installed}")
     }
 }
 
 private fun updateInstalledWaitingSentence(applied: JsonObject): String {
-    val version = applied.string("to") ?: "The new version"
+    val version = applied.string("to") ?: L10n.text("android.devicedetail.the_new_version.c8c06a3b")
     val live = applied.int("liveWork") ?: 0
-    if (!applied.bool("canRestart")) return "Installed $version. Restart it there to use it."
+    if (!applied.bool("canRestart")) return L10n.text("android.devicedetail.installed_0_restart_it_there_to_use_it.a0ac537c", "${version}")
     return if (live > 0) {
-        "Installed $version. ${updateWorkPhrase(live)} running, so it restarts when they finish."
+        L10n.text("android.devicedetail.installed_0_1_running_so_it_restarts_when.ae74cc9c", "${version}", "${updateWorkPhrase(live)}")
     } else {
-        "Installed $version. It restarts shortly."
+        L10n.text("android.devicedetail.installed_0_it_restarts_shortly.b1c4d920", "${version}")
     }
 }
 
@@ -1102,7 +1104,7 @@ private fun UpdateReadyBody(state: JsonObject) {
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                if (state.bool("restartPending")) "Running ${state.string("hostVersion")}" else state.string("hostVersion").orEmpty(),
+                if (state.bool("restartPending")) L10n.text("android.devicedetail.running_0.015ef2e2", "${state.string("hostVersion")}") else state.string("hostVersion").orEmpty(),
                 style = TsType.numeric(16),
                 color = colors.textPrimary,
             )
@@ -1120,27 +1122,27 @@ private fun UpdateReadyBody(state: JsonObject) {
             // a version the running process does not have.
             UpdateNote(updatePendingSentence(state), UpdateTone.WAITING)
         } else if (state.bool("newer")) {
-            UpdateNote("Version ${state.string("latest")} is available.", UpdateTone.AVAILABLE)
+            UpdateNote(L10n.text("android.devicedetail.version_0_is_available.874abce6", "${state.string("latest")}"), UpdateTone.AVAILABLE)
         } else {
-            UpdateNote("Up to date.", UpdateTone.PLAIN)
+            UpdateNote(L10n.text("android.devicedetail.up_to_date.50620fd9"), UpdateTone.PLAIN)
         }
         // Additive, not instead of the line above: an application-managed
         // helper that is current should still say so, and one that is
         // behind should say both things.
         if (state.bool("appManaged")) {
             UpdateNote(
-                "The tokenstat application there owns its helper and replaces it when it updates itself.",
+                L10n.text("android.devicedetail.the_tokenstat_application_there_owns_its_h.c214574e"),
                 UpdateTone.PLAIN,
             )
         } else {
             if (state.bool("newer") && !state.bool("canRestart")) {
                 UpdateNote(
-                    "It installs but cannot restart itself, so it keeps running the version it started with until it is restarted.",
+                    L10n.text("android.devicedetail.it_installs_but_cannot_restart_itself_so_i.f14f8d70"),
                     UpdateTone.WAITING,
                 )
             }
             if (state.bool("autoApply")) {
-                UpdateNote("Checks daily on its own.", UpdateTone.PLAIN)
+                UpdateNote(L10n.text("android.devicedetail.checks_daily_on_its_own.bfd7c539"), UpdateTone.PLAIN)
             }
         }
     }
@@ -1155,11 +1157,11 @@ private fun UpdateDoneBody(applied: JsonObject) {
         when {
             detail != null -> Text(detail, style = TsType.caption, color = colors.textSecondary)
             applied.bool("restarting") -> UpdateNote(
-                "Installed ${applied.string("to") ?: "the new version"}. Restarting on it now, so this may go quiet for a moment.",
+                L10n.text("android.devicedetail.installed_0_restarting_on_it_now_so_this_m.4a3fb7f6", "${applied.string("to") ?: L10n.text("android.devicedetail.the_new_version.b455aa8f")}"),
                 UpdateTone.AVAILABLE,
             )
             appImage.isNotEmpty() && applied.bool("appManaged") ->
-                UpdateNote("The application's download is ready on that machine.", UpdateTone.AVAILABLE)
+                UpdateNote(L10n.text("android.devicedetail.the_application_s_download_is_ready_on_tha.bc948717"), UpdateTone.AVAILABLE)
             else -> UpdateNote(updateInstalledWaitingSentence(applied), UpdateTone.WAITING)
         }
     }

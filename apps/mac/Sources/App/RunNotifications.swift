@@ -396,7 +396,7 @@ final class RunNotifications {
         guard isOn else { return nil }
         switch authorization {
         case .denied:
-            return "Notifications are turned off for tokenstat in System Settings."
+            return L10n.text("apple.runnotifications.notifications_are_turned_off_for_tokenstat.c726e897")
         case .none, .notDetermined:
             return nil
         default:
@@ -470,8 +470,9 @@ final class RunNotifications {
             if !before.pending, chat.pending, !watching {
                 post(
                     "chat.\(id)",
-                    title: "Waiting for you",
-                    body: "\(chat.title) needs an answer.",
+                    title: L10n.text("apple.runnotifications.waiting_for_you.9f760ab2"),
+                    identifierTitle: "Waiting for you",
+                    body: L10n.text("apple.runnotifications.0_needs_an_answer.c42f4cd9", "\(chat.title)"),
                     extras: chatExtras(id: id, workspaceID: chat.workspaceID, waiting: true)
                 )
             }
@@ -480,15 +481,17 @@ final class RunNotifications {
             case "ok":
                 post(
                     "chat.\(id)",
-                    title: "Chat finished",
-                    body: "\(chat.title) is done.",
+                    title: L10n.text("apple.runnotifications.chat_finished.a49ea476"),
+                    identifierTitle: "Chat finished",
+                    body: L10n.text("apple.runnotifications.0_is_done.2eff6579", "\(chat.title)"),
                     extras: chatExtras(id: id, workspaceID: chat.workspaceID, waiting: false)
                 )
             case "error":
                 post(
                     "chat.\(id)",
-                    title: "Chat did not finish",
-                    body: "\(chat.title) did not finish cleanly.",
+                    title: L10n.text("apple.runnotifications.chat_did_not_finish.45962bbc"),
+                    identifierTitle: "Chat did not finish",
+                    body: L10n.text("apple.runnotifications.0_did_not_finish_cleanly.c823f56e", "\(chat.title)"),
                     extras: chatExtras(id: id, workspaceID: chat.workspaceID, waiting: false)
                 )
             default:
@@ -526,12 +529,12 @@ final class RunNotifications {
             guard before == "running" || before == "queued" else { continue }
             switch run.status {
             case "ok":
-                post(run.id, title: "Run finished", body: "\(run.name) is done.")
+                post(run.id, title: L10n.text("apple.runnotifications.run_finished.22488bd9"), identifierTitle: "Run finished", body: L10n.text("apple.runnotifications.0_is_done.2eff6579", "\(run.name)"))
             case "error":
                 let code = run.exitCode.map { " (exit \($0))" } ?? ""
-                post(run.id, title: "Run failed", body: "\(run.name) did not finish cleanly\(code).")
+                post(run.id, title: L10n.text("apple.runnotifications.run_failed.97fddf2d"), identifierTitle: "Run failed", body: L10n.text("apple.runnotifications.0_did_not_finish_cleanly_1.25a03a73", "\(run.name)", "\(code)"))
             case "waiting":
-                post(run.id, title: "Waiting for you", body: "\(run.name) needs an answer to carry on.")
+                post(run.id, title: L10n.text("apple.runnotifications.waiting_for_you.9f760ab2"), identifierTitle: "Waiting for you", body: L10n.text("apple.runnotifications.0_needs_an_answer_to_carry_on.6eb7efc2", "\(run.name)"))
             default:
                 // "stopped" is somebody at this keyboard. They know.
                 continue
@@ -560,8 +563,9 @@ final class RunNotifications {
         }
         post(
             "session.\(sessionID)",
-            title: "Waiting for you",
-            body: "\(name) is asking a question.",
+            title: L10n.text("apple.runnotifications.waiting_for_you.9f760ab2"),
+            identifierTitle: "Waiting for you",
+            body: L10n.text("apple.runnotifications.0_is_asking_a_question.34dd0503", "\(name)"),
             extras: extras
         )
     }
@@ -597,6 +601,7 @@ final class RunNotifications {
     private func post(
         _ runID: String,
         title: String,
+        identifierTitle: String,
         body: String,
         extras: [String: String] = [:]
     ) {
@@ -611,7 +616,7 @@ final class RunNotifications {
             content.userInfo = ["ts": extras]
         }
         let request = UNNotificationRequest(
-            identifier: "run.\(runID).\(title)",
+            identifier: "run.\(runID).\(identifierTitle)",
             content: content,
             trigger: nil
         )
@@ -621,7 +626,7 @@ final class RunNotifications {
     /// The settings button. Posts through the same path a real run would, so
     /// a test that arrives proves the real one will.
     func sendTest() {
-        post("test", title: "Notifications are on", body: "This is the only test notification.")
+        post("test", title: L10n.text("apple.runnotifications.notifications_are_on.ceaaed4b"), identifierTitle: "Notifications are on", body: L10n.text("apple.runnotifications.this_is_the_only_test_notification.45933459"))
     }
 }
 #endif
@@ -691,7 +696,7 @@ final class PushRegistrar {
         guard granted else {
             isOn = false
             UserDefaults.standard.set(false, forKey: Self.onKey)
-            errorMessage = "Notifications are off for tokenstat in Settings."
+            errorMessage = L10n.text("apple.runnotifications.notifications_are_off_for_tokenstat_in_set.aa162b5c")
             return
         }
         isOn = true
@@ -778,14 +783,14 @@ final class PushRegistrar {
         do {
             let result = try await Bridge.pushTest()
             if !result.signedIn {
-                errorMessage = "Sign in first. A notification has to reach this device from your account."
+                errorMessage = L10n.text("apple.runnotifications.sign_in_first_a_notification_has_to_reach.c1314d42")
             } else if !result.enabled {
                 // The server, not this device. Saying "check your settings"
                 // here would send somebody looking for a switch that is
                 // already on.
-                errorMessage = "Notifications are not switched on for the service yet. Nothing is wrong with this device."
+                errorMessage = L10n.text("apple.runnotifications.notifications_are_not_switched_on_for_the.b82ba3c6")
             } else if result.sent == 0 {
-                errorMessage = "The account has no device to notify yet."
+                errorMessage = L10n.text("apple.runnotifications.the_account_has_no_device_to_notify_yet.bf208fe3")
             } else {
                 errorMessage = nil
             }

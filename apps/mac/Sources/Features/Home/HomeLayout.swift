@@ -24,12 +24,12 @@ enum HomeSection: String, CaseIterable, Identifiable, Codable, Sendable {
 
     var label: String {
         switch self {
-        case .continueWork: "Continue"
-        case .pinnedWork: "Pinned work"
-        case .machines: "Machines"
-        case .usage: "Today and this week"
-        case .activity: "Activity"
-        case .limits: "Plan limits"
+        case .continueWork: L10n.text("apple.homelayout.continue.31fbef16")
+        case .pinnedWork: L10n.text("apple.homelayout.pinned_work.23dd8f45")
+        case .machines: L10n.text("apple.homelayout.machines.c061da19")
+        case .usage: L10n.text("apple.homelayout.today_and_this_week.2cb0c4ae")
+        case .activity: L10n.text("apple.homelayout.activity.38da1505")
+        case .limits: L10n.text("apple.homelayout.plan_limits.925788cd")
         }
     }
 
@@ -37,12 +37,12 @@ enum HomeSection: String, CaseIterable, Identifiable, Codable, Sendable {
     /// repeating its name.
     var detail: String {
         switch self {
-        case .continueWork: "The folders and conversations you were last in"
-        case .pinnedWork: "Shortcuts to the folders and conversations you pinned"
-        case .machines: "Which of your machines are awake"
-        case .usage: "What today and this week came to"
-        case .activity: "The year, a square a day"
-        case .limits: "How much of each tool's subscription is left"
+        case .continueWork: L10n.text("apple.homelayout.the_folders_and_conversations_you_were_las.611a8af7")
+        case .pinnedWork: L10n.text("apple.homelayout.shortcuts_to_the_folders_and_conversations.395d6781")
+        case .machines: L10n.text("apple.homelayout.which_of_your_machines_are_awake.59492064")
+        case .usage: L10n.text("apple.homelayout.what_today_and_this_week_came_to.e49c5c1c")
+        case .activity: L10n.text("apple.homelayout.the_year_a_square_a_day.a3daad88")
+        case .limits: L10n.text("apple.homelayout.how_much_of_each_tool_s_subscription_is_le.16c87cc1")
         }
     }
 
@@ -73,9 +73,9 @@ enum HomePreset: String, CaseIterable, Identifiable, Codable, Sendable {
 
     var label: String {
         switch self {
-        case .balanced: "Balanced"
-        case .work: "Work first"
-        case .usage: "Usage first"
+        case .balanced: L10n.text("apple.homelayout.balanced.5386ea5d")
+        case .work: L10n.text("apple.homelayout.work_first.c3edce98")
+        case .usage: L10n.text("apple.homelayout.usage_first.007ee7e0")
         }
     }
 

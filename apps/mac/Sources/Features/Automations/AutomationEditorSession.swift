@@ -111,7 +111,7 @@ final class AutomationEditorSession {
         guard loaded, isCreate, !dirty, !creating, !working, otherDraft == nil,
               fields.model.isEmpty, fields.effort.isEmpty,
               draft.workspaceID == workspaceID else {
-            noticeMessage = "Your existing automation draft is still here. Finish or clear it before choosing a template."
+            noticeMessage = L10n.text("apple.automationeditorsession.your_existing_automation_draft_is_still_he.4ba2f1a1")
             return false
         }
         fields = draft
@@ -131,7 +131,7 @@ final class AutomationEditorSession {
         working = true
         defer { working = false }
         guard let storage else {
-            errorMessage = "Waiting for this account and computer to be verified before saving work."
+            errorMessage = L10n.text("apple.automationeditorsession.waiting_for_this_account_and_computer_to_b.f97b4242")
             return
         }
         do {
@@ -251,7 +251,7 @@ final class AutomationEditorSession {
             await confirmCreated(created)
         } catch {
             if Self.isUncertain(error) {
-                errorMessage = "The computer did not confirm this job. Check this folder's automations before creating another."
+                errorMessage = L10n.text("apple.automationeditorsession.the_computer_did_not_confirm_this_job_chec.8f3afcaa")
             } else {
                 saved.pendingCreate = false
                 errorMessage = Self.display(error)
@@ -334,7 +334,7 @@ final class AutomationEditorSession {
     func pickerBackends() -> [AgentBackend] {
         var values = backends
         if !fields.backend.isEmpty, !values.contains(where: { $0.id == fields.backend }) {
-            values.append(AgentBackend(id: fields.backend, label: "\(fields.backend) · Unavailable", command: fields.backend))
+            values.append(AgentBackend(id: fields.backend, label: L10n.text("apple.automationeditorsession.0_unavailable.1212b25c", "\(fields.backend)"), command: fields.backend))
         }
         if let at = values.firstIndex(where: { $0.id == "sh" }) {
             values.append(values.remove(at: at))
@@ -396,7 +396,7 @@ final class AutomationEditorSession {
             current = try await service.automation(id: id)
             missing = current == nil
             if missing {
-                errorMessage = "This job was deleted on the computer. Your draft is still here."
+                errorMessage = L10n.text("apple.automationeditorsession.this_job_was_deleted_on_the_computer_your.282b1669")
                 conflict = false
                 return
             }
@@ -407,7 +407,7 @@ final class AutomationEditorSession {
             if supportsReceipts {
                 await reconcileChecked(current)
             } else if let baseline = saved.baseline, !fields.matches(baseline), !fields.matches(current) {
-                noticeMessage = "This job also changed on the computer. Saving overwrites that copy."
+                noticeMessage = L10n.text("apple.automationeditorsession.this_job_also_changed_on_the_computer_savi.b2db22f7")
             }
         } catch {
             errorMessage = Self.display(error)
@@ -426,7 +426,7 @@ final class AutomationEditorSession {
             } else {
                 saved.pendingEdit = nil
                 conflict = current.revision != saved.baseline?.revision
-                errorMessage = conflict ? nil : "The job has not changed. Your draft is ready to save again."
+                errorMessage = conflict ? nil : L10n.text("apple.automationeditorsession.the_job_has_not_changed_your_draft_is_read.d675494f")
                 _ = await persist()
             }
         } else if current.revision != saved.baseline?.revision {
@@ -471,7 +471,7 @@ final class AutomationEditorSession {
             }
             if Self.isUncertain(error) {
                 canRetryCreate = true
-                errorMessage = "The computer did not confirm this job. Check creation before making another."
+                errorMessage = L10n.text("apple.automationeditorsession.the_computer_did_not_confirm_this_job_chec.8bc0a151")
             } else {
                 saved.pendingCreate = false
                 saved.pendingCreation = nil
@@ -492,7 +492,7 @@ final class AutomationEditorSession {
                 } else {
                     canRetryCreate = true
                     errorMessage = nil
-                    noticeMessage = "The computer has no creation receipt yet. You can retry this same job safely."
+                    noticeMessage = L10n.text("apple.automationeditorsession.the_computer_has_no_creation_receipt_yet_y.7dc58baa")
                 }
             } catch {
                 errorMessage = Self.display(error)
@@ -511,7 +511,7 @@ final class AutomationEditorSession {
             if let match {
                 await confirmCreated(match)
             } else {
-                errorMessage = "This job is not in the folder yet. It may still arrive, or it may never have been created. Do not create another until you have checked."
+                errorMessage = L10n.text("apple.automationeditorsession.this_job_is_not_in_the_folder_yet_it_may_s.be2696cb")
             }
         } catch {
             errorMessage = Self.display(error)
@@ -520,7 +520,7 @@ final class AutomationEditorSession {
 
     private func confirmCreation(_ outcome: AutomationCreationOutcome, operationID: String) async throws {
         guard outcome.operationID == operationID else {
-            throw AutomationEditorDraft.Invalid.fields("The computer returned a different creation. Check this job again.")
+            throw AutomationEditorDraft.Invalid.fields(L10n.text("apple.automationeditorsession.the_computer_returned_a_different_creation.540bca8e"))
         }
         saved.pendingCreate = false
         saved.pendingCreation = nil
@@ -536,7 +536,7 @@ final class AutomationEditorSession {
             announceCreated(job)
         } else {
             missing = true
-            noticeMessage = "This job was created and then removed from the folder."
+            noticeMessage = L10n.text("apple.automationeditorsession.this_job_was_created_and_then_removed_from.0dc26744")
         }
         _ = await persist()
         NotificationCenter.default.post(name: Self.didChange, object: target)
@@ -560,9 +560,9 @@ final class AutomationEditorSession {
 
     private func announceCreated(_ created: Automation) {
         if let place = HostScheduleClock.place(schedulerTimezone) {
-            noticeMessage = "\(created.name) will run \(created.schedule.summary) in \(place)."
+            noticeMessage = L10n.text("apple.automationeditorsession.0_will_run_1_in_2.9f9e0264", "\(created.name)", "\(created.schedule.summary)", "\(place)")
         } else {
-            noticeMessage = "\(created.name) will run \(created.schedule.summary)."
+            noticeMessage = L10n.text("apple.automationeditorsession.0_will_run_1.0536f940", "\(created.name)", "\(created.schedule.summary)")
         }
     }
 
@@ -574,7 +574,7 @@ final class AutomationEditorSession {
         restoring = true
         fields = AutomationEditorDraft(updated)
         restoring = false
-        noticeMessage = "Saved \(updated.name)."
+        noticeMessage = L10n.text("apple.automationeditorsession.saved_0.d851298f", "\(updated.name)")
         _ = await persist()
         NotificationCenter.default.post(name: Self.didChange, object: target)
     }
@@ -596,7 +596,7 @@ final class AutomationEditorSession {
                 return
             }
         }
-        errorMessage = "Check the saved job before trying again. Your draft is still here. \(Self.display(error))"
+        errorMessage = L10n.text("apple.automationeditorsession.check_the_saved_job_before_trying_again_yo.9d030666", "\(Self.display(error))")
     }
 
     private func restore(_ value: SavedAutomationDraft) {

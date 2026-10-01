@@ -30,14 +30,14 @@ enum HostStatsFormat {
     }
 
     static func powerLabel(_ stats: HostStats?, failed: Bool) -> String {
-        if failed, stats == nil { return "n/a" }
-        guard let stats else { return "\u{2026}" }
+        if failed, stats == nil { return L10n.text("apple.hoststatsbar.n_a.a683c5c5") }
+        guard let stats else { return L10n.text("apple.hoststatsbar..b4935894") }
         if stats.charging == true, let percent = stats.percent { return "\(percent)%" }
-        if stats.power == "ac", stats.percent == nil { return "Plugged in" }
+        if stats.power == "ac", stats.percent == nil { return L10n.text("apple.hoststatsbar.plugged_in.edefc1f9") }
         if let percent = stats.percent { return "\(percent)%" }
-        if stats.power == "battery" { return "On battery" }
-        if stats.power == "ac" { return "Plugged in" }
-        return "n/a"
+        if stats.power == "battery" { return L10n.text("apple.hoststatsbar.on_battery.51d53044") }
+        if stats.power == "ac" { return L10n.text("apple.hoststatsbar.plugged_in.edefc1f9") }
+        return L10n.text("apple.hoststatsbar.n_a.a683c5c5")
     }
 
     /// What the memory figure counts, in one line.
@@ -46,7 +46,7 @@ enum HostStatsFormat {
     /// reading that eight are left and everything else is spoken for, which is
     /// not what any of the three platforms measures: the cache and the
     /// purgeable pages are available and are not in this number.
-    static let ramExplanation = "Memory in use by apps, wired and compressed. Cached files are not counted, so the rest is available."
+    static let ramExplanation = L10n.text("apple.hoststatsbar.memory_in_use_by_apps_wired_and_compressed.d6cddcc1")
 
     static func ramLabel(used: UInt64, total: UInt64) -> String {
         let g = 1024.0 * 1024 * 1024
@@ -148,8 +148,8 @@ struct HostStatsBar: View {
                     .foregroundStyle(.secondary)
             }
             Text(local
-                ? "Sampled on this machine. Not uploaded with usage."
-                : "Read from this computer over the encrypted tunnel. It is not uploaded with usage.")
+                ? L10n.text("apple.hoststatsbar.sampled_on_this_machine_not_uploaded_with.122c8f2c")
+                : L10n.text("apple.hoststatsbar.read_from_this_computer_over_the_encrypted.2e1e5e7b"))
                 .font(Theme.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -178,7 +178,7 @@ struct HostStatsBar: View {
                     .foregroundStyle(Theme.accent)
             }
             .labelStyle(.titleAndIcon)
-            Text("Power")
+            Text(L10n.text("apple.hoststatsbar.power.848e9656"))
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
         }
@@ -196,11 +196,11 @@ struct HostStatsBar: View {
                         .monospacedDigit()
                 }
             } else {
-                Text("n/a")
+                Text(L10n.text("apple.hoststatsbar.n_a.a683c5c5"))
                     .font(statFont)
                     .foregroundStyle(.tertiary)
             }
-            Text("CPU")
+            Text(L10n.text("apple.hoststatsbar.cpu.db9a4c7d"))
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
         }
@@ -220,11 +220,11 @@ struct HostStatsBar: View {
                         .minimumScaleFactor(0.7)
                 }
             } else {
-                Text("n/a")
+                Text(L10n.text("apple.hoststatsbar.n_a.a683c5c5"))
                     .font(statFont)
                     .foregroundStyle(.tertiary)
             }
-            Text("Memory")
+            Text(L10n.text("apple.hoststatsbar.memory.c3963aed"))
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
         }
@@ -236,9 +236,9 @@ struct HostStatsBar: View {
 
     private var ramVoiceOver: String {
         guard let used = stats?.ramUsedBytes, let total = stats?.ramTotalBytes, total > 0 else {
-            return "Memory not available"
+            return L10n.text("apple.hoststatsbar.memory_not_available.2fe84030")
         }
-        return "Memory \(HostStatsFormat.ramLabel(used: used, total: total)) used. \(HostStatsFormat.ramExplanation)"
+        return L10n.text("apple.hoststatsbar.memory_0_used_1.e0f0e4c2", "\(HostStatsFormat.ramLabel(used: used, total: total))", "\(HostStatsFormat.ramExplanation)")
     }
 
     private var statFont: Font {
@@ -381,10 +381,10 @@ struct HostStatsStrip: View {
     }
 
     private var voiceOverLabel: String {
-        var parts = ["Power \(HostStatsFormat.powerLabel(stats, failed: failed))"]
-        if let cpu = stats?.cpu { parts.append("CPU \(HostStatsFormat.cpuLabel(cpu))") }
+        var parts = [L10n.text("apple.hoststatsbar.power_0.3aefb7b4", "\(HostStatsFormat.powerLabel(stats, failed: failed))")]
+        if let cpu = stats?.cpu { parts.append(L10n.text("apple.hoststatsbar.cpu_0.ceaa5d7d", "\(HostStatsFormat.cpuLabel(cpu))")) }
         if let used = stats?.ramUsedBytes, let total = stats?.ramTotalBytes, total > 0 {
-            parts.append("Memory \(HostStatsFormat.ramLabel(used: used, total: total)) used. \(HostStatsFormat.ramExplanation)")
+            parts.append(L10n.text("apple.hoststatsbar.memory_0_used_1.e0f0e4c2", "\(HostStatsFormat.ramLabel(used: used, total: total))", "\(HostStatsFormat.ramExplanation)"))
         }
         if let label = RemoteTrafficPeer.knownLabel(route) { parts.append(label) }
         return parts.joined(separator: ", ")

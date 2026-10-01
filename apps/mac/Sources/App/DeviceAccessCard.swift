@@ -31,8 +31,8 @@ struct DeviceAccessCard: View {
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(model.pending.count > 1
-                        ? "\(model.pending.count) permission requests"
-                        : "Permission request")
+                        ? L10n.text("apple.deviceaccesscard.0_permission_requests.5d8938e4", "\(model.pending.count)")
+                        : L10n.text("apple.deviceaccesscard.permission_request.93dfd0b5"))
                         .font(Theme.callout.weight(.medium))
                         .foregroundStyle(.primary)
                     Text(request.displayName)
@@ -41,9 +41,9 @@ struct DeviceAccessCard: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: Theme.Space.s)
-                Button("View", .preview) { model.askAboutOldest() }
+                Button(L10n.text("apple.deviceaccesscard.view.dcc839a4"), .preview) { model.askAboutOldest() }
                     .buttonStyle(AccentButtonStyle(small: true))
-                    .help("Answer this request")
+                    .help(L10n.text("apple.deviceaccesscard.answer_this_request.9f9a1d73"))
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.vertical, Theme.Space.s)

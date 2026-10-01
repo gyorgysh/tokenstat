@@ -15,7 +15,7 @@ struct GitCommitComposer: View {
 
     var body: some View {
         NavigationStack {
-            ThemedSheet(title: "Review and commit", subtitle: context, icon: .commit,
+            ThemedSheet(title: L10n.text("apple.gitcommitcomposer.review_and_commit.96f097b7"), subtitle: context, icon: .commit,
                         onClose: { dismiss() }) {
                 GeometryReader { geometry in
                     let split = geometry.size.width >= 820 && !typeSize.isAccessibilitySize
@@ -30,7 +30,7 @@ struct GitCommitComposer: View {
                                 GitReviewedFileView(service: session.service, review: review, path: path)
                                     .id(path + review.tree)
                             } else {
-                                Text("Select a file to review its changes.")
+                                Text(L10n.text("apple.gitcommitcomposer.select_a_file_to_review_its_changes.4a928544"))
                                     .font(Theme.callout).foregroundStyle(.secondary)
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                             }
@@ -63,36 +63,36 @@ struct GitCommitComposer: View {
             if let saveError = session.saveError {
                 message(saveError, danger: true)
                 if session.canCompareSavedVersion {
-                    Button("Compare saved draft", .compare) { Task { await session.compareSavedVersion() } }
+                    Button(L10n.text("apple.gitcommitcomposer.compare_saved_draft.8b57a4df"), .compare) { Task { await session.compareSavedVersion() } }
                         .buttonStyle(SecondaryButtonStyle())
                 }
             }
             if let alternative = session.savedAlternative {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    Text("Saved draft").font(Theme.callout.weight(.semibold))
-                    Text(alternative.draft.title.isEmpty ? "No commit title" : alternative.draft.title)
+                    Text(L10n.text("apple.gitcommitcomposer.saved_draft.41c82369")).font(Theme.callout.weight(.semibold))
+                    Text(alternative.draft.title.isEmpty ? L10n.text("apple.gitcommitcomposer.no_commit_title.b59e212a") : alternative.draft.title)
                         .font(Theme.callout)
                     Text(alternative.draft.details).font(Theme.callout).foregroundStyle(.secondary)
                     if alternative.draft.submitted != nil {
-                        Text("This saved draft includes a submitted commit.").font(Theme.caption).foregroundStyle(Theme.accent)
+                        Text(L10n.text("apple.gitcommitcomposer.this_saved_draft_includes_a_submitted_comm.2af74385")).font(Theme.caption).foregroundStyle(Theme.accent)
                     }
-                    Button("Use saved draft", .restore) { session.useSavedVersion() }
+                    Button(L10n.text("apple.gitcommitcomposer.use_saved_draft.31f362c2"), .restore) { session.useSavedVersion() }
                         .buttonStyle(SecondaryButtonStyle()).disabled(!session.canUseSavedVersion)
-                    Button("Keep my current writing", .save) { Task { await session.keepCurrentVersion() } }
+                    Button(L10n.text("apple.gitcommitcomposer.keep_my_current_writing.e20b63c4"), .save) { Task { await session.keepCurrentVersion() } }
                         .buttonStyle(SecondaryButtonStyle()).disabled(!session.canKeepCurrentVersion)
                 }.padding(Theme.Space.m).background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
             }
             if let error = session.errorMessage { message(error, danger: true) }
             if let outcome = session.outcome { message(outcome.message, danger: !outcome.succeeded) }
             if session.draft.message.utf8.count > 128 * 1024 {
-                message("Shorten the commit message to 128 KiB or less before committing.", danger: true)
+                message(L10n.text("apple.gitcommitcomposer.shorten_the_commit_message_to_128_kib_or_l.ffe20f8c"), danger: true)
             }
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Text("Commit title").font(Theme.callout.weight(.semibold))
-                TextField("Describe the change", text: $session.draft.title, axis: .vertical)
+                Text(L10n.text("apple.gitcommitcomposer.commit_title.30459372")).font(Theme.callout.weight(.semibold))
+                TextField(L10n.text("apple.gitcommitcomposer.describe_the_change.beaee364"), text: $session.draft.title, axis: .vertical)
                     .textFieldStyle(.themed).lineLimit(1...3)
-                    .accessibilityLabel("Commit title")
-                Text("Description (optional)").font(Theme.caption).foregroundStyle(.secondary)
+                    .accessibilityLabel(L10n.text("apple.gitcommitcomposer.commit_title.30459372"))
+                Text(L10n.text("apple.gitcommitcomposer.description_optional.f6cbe2f0")).font(Theme.caption).foregroundStyle(.secondary)
                 TextEditor(text: $session.draft.details)
                     .font(Theme.callout)
                     .scrollContentBackground(.hidden)
@@ -100,11 +100,11 @@ struct GitCommitComposer: View {
                     .padding(Theme.Space.s)
                     .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                     .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
-                    .accessibilityLabel("Commit description")
+                    .accessibilityLabel(L10n.text("apple.gitcommitcomposer.commit_description.ddbdf616"))
             }
             .disabled(!session.loaded || session.working || session.draft.submitted != nil)
             if let review = session.review {
-                Text("\(review.paths.count) selected \(review.paths.count == 1 ? "file" : "files")")
+                Text(L10n.text("apple.gitcommitcomposer.0_selected_1.3a4c3bb6", "\(review.paths.count)", "\(review.paths.count == 1 ? L10n.text("apple.gitcommitcomposer.file.3b9c358f") : "files")"))
                     .font(Theme.callout.weight(.semibold))
                 VStack(spacing: 0) {
                     ForEach(review.includedPaths, id: \.self) { path in
@@ -126,7 +126,7 @@ struct GitCommitComposer: View {
                     }
                 }
             } else if session.working {
-                ProgressView("Preparing review").frame(maxWidth: .infinity)
+                ProgressView(L10n.text("apple.gitcommitcomposer.preparing_review.6cafe23d")).frame(maxWidth: .infinity)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -154,7 +154,7 @@ struct GitCommitComposer: View {
     @ViewBuilder
     private var actions: some View {
         if session.draft.submitted != nil {
-            Button(session.canRetrySubmission ? "Retry same submission" : "Check outcome", .refresh) {
+            Button(session.canRetrySubmission ? L10n.text("apple.gitcommitcomposer.retry_same_submission.3dbca561") : L10n.text("apple.gitcommitcomposer.check_outcome.9200a2fd"), .refresh) {
                 Task {
                     if session.canRetrySubmission { await session.retrySubmission() }
                     else { await session.checkOutcome(recover: true) }
@@ -163,13 +163,13 @@ struct GitCommitComposer: View {
             }
             .buttonStyle(AccentButtonStyle(comfortable: true)).disabled(session.working)
         } else if session.outcome?.succeeded == true {
-            Button("Done", .done) { dismiss() }.buttonStyle(AccentButtonStyle(comfortable: true))
+            Button(L10n.text("common.done"), .done) { dismiss() }.buttonStyle(AccentButtonStyle(comfortable: true))
         } else {
             if session.review == nil {
-                Button("Review selected files", .compare) { Task { await session.prepareReview() } }
+                Button(L10n.text("apple.gitcommitcomposer.review_selected_files.fb340554"), .compare) { Task { await session.prepareReview() } }
                     .buttonStyle(AccentButtonStyle(comfortable: true)).disabled(session.working)
             } else {
-                Button("Commit \(session.review?.paths.count ?? 0) \(session.review?.paths.count == 1 ? "file" : "files")", .commit) {
+                Button(L10n.text("apple.gitcommitcomposer.commit_0_1.ed71a626", "\(session.review?.paths.count ?? 0)", "\(session.review?.paths.count == 1 ? L10n.text("apple.gitcommitcomposer.file.3b9c358f") : "files")"), .commit) {
                     Task {
                         await session.submit()
                         if session.outcome?.succeeded == true { await onCommitted() }
@@ -194,17 +194,17 @@ struct GitReviewedFileView: View {
             if let error {
                 VStack(spacing: Theme.Space.m) {
                     Text(error).font(Theme.callout).foregroundStyle(Theme.danger)
-                    Button("Try again", .refresh) { Task { await load() } }.buttonStyle(SecondaryButtonStyle())
+                    Button(L10n.text("apple.gitcommitcomposer.try_again.d8b8392e"), .refresh) { Task { await load() } }.buttonStyle(SecondaryButtonStyle())
                 }.padding(Theme.Space.m)
             } else if let diff {
                 #if os(macOS)
                 DiffView(diff: diff)
                 #else
                 if diff.binary {
-                    Text("Binary file · included in this reviewed selection")
+                    Text(L10n.text("apple.gitcommitcomposer.binary_file_included_in_this_reviewed_sele.7b9e8582"))
                         .font(ClientType.body).foregroundStyle(.secondary).padding(Theme.Space.m)
                 } else if rows.isEmpty {
-                    Text("No text changes in this file.").font(ClientType.body).foregroundStyle(.secondary)
+                    Text(L10n.text("apple.gitcommitcomposer.no_text_changes_in_this_file.9c538f4a")).font(ClientType.body).foregroundStyle(.secondary)
                 } else {
                     GeometryReader { geometry in
                         ScrollView([.horizontal, .vertical]) {
@@ -225,7 +225,7 @@ struct GitReviewedFileView: View {
                     }
                 }
                 #endif
-            } else { ProgressView("Reading reviewed changes") }
+            } else { ProgressView(L10n.text("apple.gitcommitcomposer.reading_reviewed_changes.9c829fac")) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)

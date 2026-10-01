@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.logic
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import android.content.Context
 import ai.tokenstat.tokenstat.core.readBounded
 import java.nio.file.Files
@@ -135,23 +137,23 @@ object ChatOutboxRules {
     fun title(items: List<QueuedMessage>, paused: Boolean, offline: Boolean): String {
         val first = items.firstOrNull()
         if (offline && first?.needsReceipt == true) {
-            return "Delivery needs checking · Reconnect to review"
+            return L10n.text("android.chatoutbox.delivery_needs_checking_reconnect_to_revie.c2182f4e")
         }
         if (offline) {
             return if (first?.whenConnected == true) {
-                "Waiting for connection · Cancel by removing the copy"
+                L10n.text("android.chatoutbox.waiting_for_connection_cancel_by_removing.e4b6b3d3")
             } else {
-                "Paused · Reconnect to review delivery"
+                L10n.text("android.chatoutbox.paused_reconnect_to_review_delivery.1f9b08dc")
             }
         }
-        if (first?.needsReceipt == true) return "Delivery needs checking"
-        if (first?.delivery == ChatDelivery.NeedsReview) return "Review the conversation before sending"
-        if (first?.delivery == ChatDelivery.Ready) return "Ready · Choose Send now when you are ready"
-        if (paused) return "Paused on this device · Choose Send now to continue"
+        if (first?.needsReceipt == true) return L10n.text("android.chatoutbox.delivery_needs_checking.62805e9a")
+        if (first?.delivery == ChatDelivery.NeedsReview) return L10n.text("android.chatoutbox.review_the_conversation_before_sending.62bc9ce3")
+        if (first?.delivery == ChatDelivery.Ready) return L10n.text("android.chatoutbox.ready_choose_send_now_when_you_are_ready.f283a341")
+        if (paused) return L10n.text("android.chatoutbox.paused_on_this_device_choose_send_now_to_c.29cb28cc")
         return if (items.size <= 1) {
-            "Waiting to send after this turn"
+            L10n.text("android.chatoutbox.waiting_to_send_after_this_turn.103f59e4")
         } else {
-            "Waiting to send after this turn · ${items.size}"
+            L10n.text("android.chatoutbox.waiting_to_send_after_this_turn_0.a42fb840", "${items.size}")
         }
     }
 
@@ -181,19 +183,19 @@ object ChatOutboxRules {
     ): List<QueuedMessage> {
         if (legacy != reviewed) {
             throw ChatOutboxFailure(ChatOutboxFailure.Reason.Conflict,
-                "These saved messages changed. Review them again before recovering them.")
+                L10n.text("android.chatoutbox.these_saved_messages_changed_review_them_a.07553b5d"))
         }
         if (!valid(legacy) || !valid(scoped)) {
-            throw ChatOutboxFailure(ChatOutboxFailure.Reason.Invalid, "That queue is not valid.")
+            throw ChatOutboxFailure(ChatOutboxFailure.Reason.Invalid, L10n.text("android.chatoutbox.that_queue_is_not_valid.f77ac6ee"))
         }
         val ids = scoped.map { it.id }.toSet()
         if (legacy.any { it.id in ids }) {
             throw ChatOutboxFailure(ChatOutboxFailure.Reason.Conflict,
-                "This conversation already has a message with the same identity. Both copies have been kept.")
+                L10n.text("android.chatoutbox.this_conversation_already_has_a_message_wi.3f3dc86a"))
         }
         if (legacy.size > CAPACITY - scoped.size) {
             throw ChatOutboxFailure(ChatOutboxFailure.Reason.Full,
-                "This conversation cannot hold all the recovered messages. Remove a queued message before recovering them.")
+                L10n.text("android.chatoutbox.this_conversation_cannot_hold_all_the_reco.525857cf"))
         }
         return scoped + legacy.map { item ->
             item.copy(
@@ -284,11 +286,11 @@ class FileChatOutbox internal constructor(
         if (items.size > ChatOutboxRules.CAPACITY) {
             throw ChatOutboxFailure(
                 ChatOutboxFailure.Reason.Full,
-                "This conversation already has ${ChatOutboxRules.CAPACITY} messages waiting.",
+                L10n.text("android.chatoutbox.this_conversation_already_has_0_messages_w.ac197c73", "${ChatOutboxRules.CAPACITY}"),
             )
         }
         if (!ChatOutboxRules.valid(items)) {
-            throw ChatOutboxFailure(ChatOutboxFailure.Reason.Invalid, "That queue is not valid.")
+            throw ChatOutboxFailure(ChatOutboxFailure.Reason.Invalid, L10n.text("android.chatoutbox.that_queue_is_not_valid.f77ac6ee"))
         }
         if (items.isEmpty()) queues.remove(key) else queues[key] = items
         write(queues)
@@ -328,7 +330,7 @@ class FileChatOutbox internal constructor(
     } catch (error: Exception) {
         if (error is ChatOutboxFailure) throw error
         throw ChatOutboxFailure(ChatOutboxFailure.Reason.Unavailable,
-            "Pending messages could not be read on this device.")
+            L10n.text("android.chatoutbox.pending_messages_could_not_be_read_on_this.9053a6c1"))
     }
 
     private fun readChecked(): Map<String, List<QueuedMessage>> {
@@ -336,37 +338,37 @@ class FileChatOutbox internal constructor(
         val raw = runCatching { file.inputStream().use { it.readBounded(byteLimit).toString(Charsets.UTF_8) } }.getOrNull()
             ?: throw ChatOutboxFailure(
                 ChatOutboxFailure.Reason.Unavailable,
-                "Pending messages could not be read on this device.",
+                L10n.text("android.chatoutbox.pending_messages_could_not_be_read_on_this.9053a6c1"),
             )
         if (raw.toByteArray(Charsets.UTF_8).size > byteLimit) {
             throw ChatOutboxFailure(
                 ChatOutboxFailure.Reason.Unavailable,
-                "Pending messages could not be read on this device.",
+                L10n.text("android.chatoutbox.pending_messages_could_not_be_read_on_this.9053a6c1"),
             )
         }
         val root = runCatching { Json.parseToJsonElement(raw).jsonObject }.getOrNull()
             ?: throw ChatOutboxFailure(
                 ChatOutboxFailure.Reason.Unavailable,
-                "Pending messages could not be read on this device.",
+                L10n.text("android.chatoutbox.pending_messages_could_not_be_read_on_this.9053a6c1"),
             )
         if (root["version"]?.jsonPrimitive?.contentOrNull != "1") {
             throw ChatOutboxFailure(
                 ChatOutboxFailure.Reason.Unavailable,
-                "Pending messages were saved in a format this version cannot read.",
+                L10n.text("android.chatoutbox.pending_messages_were_saved_in_a_format_th.9b35ddce"),
             )
         }
         val queues = root["queues"] as? JsonObject
             ?: throw ChatOutboxFailure(
                 ChatOutboxFailure.Reason.Unavailable,
-                "Pending messages could not be read on this device.",
+                L10n.text("android.chatoutbox.pending_messages_could_not_be_read_on_this.9053a6c1"),
             )
         val out = mutableMapOf<String, List<QueuedMessage>>()
         for ((key, value) in queues) {
-            val rows = value as? JsonArray ?: error("Invalid queue")
-            val items = rows.map { decode(it as? JsonObject ?: error("Invalid message"))
-                ?: error("Invalid message") }
+            val rows = value as? JsonArray ?: error(L10n.text("android.chatoutbox.invalid_queue.2402eabe"))
+            val items = rows.map { decode(it as? JsonObject ?: error(L10n.text("android.chatoutbox.invalid_message.84f51149")))
+                ?: error(L10n.text("android.chatoutbox.invalid_message.84f51149")) }
             // Refuse the entire mutation: dropping a damaged sibling queue loses drafts.
-            check(ChatOutboxRules.valid(items)) { "Invalid queue" }
+            check(ChatOutboxRules.valid(items)) { L10n.text("android.chatoutbox.invalid_queue.2402eabe") }
             if (items.isNotEmpty()) out[key] = items
         }
         return out
@@ -386,7 +388,7 @@ class FileChatOutbox internal constructor(
         }
         val text = root.toString()
         if (text.toByteArray(Charsets.UTF_8).size > byteLimit) {
-            throw ChatOutboxFailure(ChatOutboxFailure.Reason.Full, "The queue is too large to save.")
+            throw ChatOutboxFailure(ChatOutboxFailure.Reason.Full, L10n.text("android.chatoutbox.the_queue_is_too_large_to_save.79be0ca8"))
         }
         runCatching {
             directory.mkdirs()
@@ -402,7 +404,7 @@ class FileChatOutbox internal constructor(
         }.onFailure {
             throw ChatOutboxFailure(
                 ChatOutboxFailure.Reason.Unavailable,
-                "Pending messages could not be saved on this device.",
+                L10n.text("android.chatoutbox.pending_messages_could_not_be_saved_on_thi.c98829a9"),
             )
         }
     }
@@ -462,10 +464,10 @@ class InMemoryChatOutbox : ChatOutbox {
         mutate(items)
         if (items == original) return original
         if (items.size > ChatOutboxRules.CAPACITY) {
-            throw ChatOutboxFailure(ChatOutboxFailure.Reason.Full, "That queue is full.")
+            throw ChatOutboxFailure(ChatOutboxFailure.Reason.Full, L10n.text("android.chatoutbox.that_queue_is_full.03116014"))
         }
         if (!ChatOutboxRules.valid(items)) {
-            throw ChatOutboxFailure(ChatOutboxFailure.Reason.Invalid, "That queue is not valid.")
+            throw ChatOutboxFailure(ChatOutboxFailure.Reason.Invalid, L10n.text("android.chatoutbox.that_queue_is_not_valid.f77ac6ee"))
         }
         if (items.isEmpty()) queues.remove(key) else queues[key] = items.toList()
         return items
@@ -492,6 +494,6 @@ class InMemoryChatOutbox : ChatOutbox {
 
 private fun checkRecoveryKeys(legacyKey: String, scopedKey: String) {
     if (legacyKey.isBlank() || scopedKey.isBlank() || legacyKey == scopedKey) {
-        throw ChatOutboxFailure(ChatOutboxFailure.Reason.Invalid, "The recovery destination is not valid.")
+        throw ChatOutboxFailure(ChatOutboxFailure.Reason.Invalid, L10n.text("android.chatoutbox.the_recovery_destination_is_not_valid.751fd4d7"))
     }
 }

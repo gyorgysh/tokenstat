@@ -40,7 +40,7 @@ final class WorkHandoffConnection {
 
     private func requireCurrent() throws {
         guard isCurrent else {
-            throw Unavailable(message: "Open this conversation again to continue sharing.")
+            throw Unavailable(message: L10n.text("apple.workhandoffconnection.open_this_conversation_again_to_continue_s.53cad0f1"))
         }
     }
 
@@ -50,12 +50,12 @@ final class WorkHandoffConnection {
         let allowed = try await Bridge.workspaceAccessAllowed(peer: peer)
         try requireCurrent()
         guard allowed else {
-            throw Unavailable(message: "Allow workspace access on the other computer to share this work.")
+            throw Unavailable(message: L10n.text("apple.workhandoffconnection.allow_workspace_access_on_the_other_comput.11972404"))
         }
         let version = try await Bridge.peerProtocolVersion(peer)
         try requireCurrent()
         guard version >= RemoteHostFeature.handoff.minimumProtocol else {
-            throw Unavailable(message: "Update tokenstat on the other computer to continue work between devices.")
+            throw Unavailable(message: L10n.text("apple.workhandoffconnection.update_tokenstat_on_the_other_computer_to.18d0bb2e"))
         }
     }
 
@@ -63,7 +63,7 @@ final class WorkHandoffConnection {
         WorkHandoffModel(reference: reference, ownsDestination: { [weak self] in self?.isCurrent ?? false },
             fetch: { [weak self] in
                 guard let self else {
-                    throw Unavailable(message: "Open this conversation again to continue sharing.")
+                    throw Unavailable(message: L10n.text("apple.workhandoffconnection.open_this_conversation_again_to_continue_s.53cad0f1"))
                 }
                 try await prepare()
                 let result = try await Bridge.workHandoff(workspaceID: reference.workspaceID,
@@ -72,7 +72,7 @@ final class WorkHandoffConnection {
                 return result
             }, put: { [weak self] request in
                 guard let self else {
-                    throw Unavailable(message: "Open this conversation again to continue sharing.")
+                    throw Unavailable(message: L10n.text("apple.workhandoffconnection.open_this_conversation_again_to_continue_s.53cad0f1"))
                 }
                 try await prepare()
                 let result = try await Bridge.putWorkHandoff(workspaceID: reference.workspaceID,
@@ -90,7 +90,7 @@ final class WorkHandoffConnection {
             conversationID: conversationID, attachmentIDs: draft.attachmentIDs, peer: peer)
         try requireCurrent()
         guard result.map(\.id) == draft.attachmentIDs else {
-            throw Unavailable(message: "Some shared files are no longer available. Your draft has not changed.")
+            throw Unavailable(message: L10n.text("apple.workhandoffconnection.some_shared_files_are_no_longer_available.dc133b25"))
         }
         return result
     }

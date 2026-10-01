@@ -52,7 +52,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         files.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         var filesTitle = new TextBlock
         {
-            Text = "Files",
+            Text = L10n.Text("common.files"),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         };
         var treeList = _tree;
@@ -135,7 +135,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
     /// The folder these files belong to.
     /// </summary>
     public UIElement? ToolbarScope =>
-        Chrome.ScopeChip(string.IsNullOrEmpty(_folderName) ? "Files" : _folderName);
+        Chrome.ScopeChip(string.IsNullOrEmpty(_folderName) ? L10n.Text("common.files") : _folderName);
 
     public IList<UIElement> ToolbarActions()
     {
@@ -143,7 +143,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         {
             Buttons.ToolbarIcon(
                 ActionIcon.Refresh,
-                "Reload the file tree",
+                L10n.Text("windows.editorpage.reload_the_file_tree.6272b83d"),
                 async (_, _) =>
                 {
                     LogoRefresh.Began();
@@ -151,7 +151,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
                 }),
             Buttons.ToolbarIcon(
                 ActionIcon.Save,
-                "Save the current file",
+                L10n.Text("windows.editorpage.save_the_current_file.c0bb863c"),
                 async (_, _) =>
                 {
                     if (CurrentTab() is EditorTab tab)
@@ -178,12 +178,12 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         {
             _inspector.Children.Add(new TextBlock
             {
-                Text = "Open files",
+                Text = L10n.Text("windows.editorpage.open_files.3faecf01"),
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             });
             _inspector.Children.Add(new TextBlock
             {
-                Text = "Pick a file from the tree to open it here.",
+                Text = L10n.Text("windows.editorpage.pick_a_file_from_the_tree_to_open_it_here.7c67aca6"),
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -191,7 +191,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         }
         _inspector.Children.Add(new TextBlock
         {
-            Text = $"Open files ({_open.Count})",
+            Text = L10n.Text("windows.editorpage.open_files_0.a2365b78", $"{_open.Count}"),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         foreach (var tab in _open)
@@ -216,12 +216,12 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         {
             if (!string.IsNullOrEmpty(current.Language))
             {
-                _inspector.Children.Add(Chrome.InspectorField("Language", current.Language));
+                _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.editorpage.language.a4fe6526"), current.Language));
             }
-            _inspector.Children.Add(Chrome.InspectorField("Lines", $"{current.LineTotal:N0}"));
-            _inspector.Children.Add(Chrome.InspectorField("Indent", $"{current.IndentWidth} spaces"));
+            _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.editorpage.lines.3b26a542"), $"{current.LineTotal:N0}"));
+            _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.editorpage.indent.7cfcf052"), L10n.Text("windows.editorpage.0_spaces.5d820ea8", $"{current.IndentWidth}")));
             _inspector.Children.Add(Chrome.InspectorField(
-                "State", current.IsDirty ? "Unsaved changes" : "Saved"));
+                L10n.Text("windows.editorpage.state.a3b50c47"), current.IsDirty ? L10n.Text("windows.editorpage.unsaved_changes.a710c2b9") : L10n.Text("windows.editorpage.saved.b5c120b3")));
         }
     }
 
@@ -258,7 +258,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
     {
         _tree.RootNodes.Clear();
         _pageStatus.Children.Clear();
-        _treeCrumb.Text = string.IsNullOrEmpty(_folderName) ? "Root" : _folderName;
+        _treeCrumb.Text = string.IsNullOrEmpty(_folderName) ? L10n.Text("windows.editorpage.root.44cb005e") : _folderName;
         await ExpandAsync(null, "");
     }
 
@@ -290,14 +290,14 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
                 var entryPath = Format.Text(entry, "path");
                 var menu = ContextMenus.Menu(label);
                 if (isDirectory)
-                    ContextMenus.AddAsync(menu, "Expand / collapse", async () =>
+                    ContextMenus.AddAsync(menu, L10n.Text("windows.editorpage.expand_collapse.89a9830b"), async () =>
                     {
                         if (node.HasUnrealizedChildren) await ExpandAsync(node, entryPath);
                         node.IsExpanded = !node.IsExpanded;
                     });
-                else ContextMenus.AddAsync(menu, "Open in tab", async () => await OpenAsync(entryPath));
-                ContextMenus.Copy(menu, "Copy relative path", () => entryPath);
-                ContextMenus.AddAsync(menu, "Refresh", async () => await ExpandAsync(parent, path));
+                else ContextMenus.AddAsync(menu, L10n.Text("windows.editorpage.open_in_tab.0e5d9596"), async () => await OpenAsync(entryPath));
+                ContextMenus.Copy(menu, L10n.Text("windows.editorpage.copy_relative_path.d6fac84c"), () => entryPath);
+                ContextMenus.AddAsync(menu, L10n.Text("common.refresh"), async () => await ExpandAsync(parent, path));
                 nodes.Add(node);
             }
             if (parent is not null) parent.HasUnrealizedChildren = false;
@@ -334,7 +334,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         {
             _pageStatus.Children.Clear();
             _pageStatus.Children.Add(Chrome.Banner(
-                $"This file is too large to edit here ({content.Length:N0} characters).",
+                L10n.Text("windows.editorpage.this_file_is_too_large_to_edit_here_0_char.e28b61ba", $"{content.Length:N0}"),
                 Theme.Warning,
                 Symbol.Important));
             return;
@@ -356,9 +356,9 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             RenderInspector();
         };
         var tabMenu = ContextMenus.Menu(item);
-        ContextMenus.AddAsync(tabMenu, "Save", async () => await tab.SaveAsync());
-        ContextMenus.Copy(tabMenu, "Copy path", () => path);
-        ContextMenus.AddAsync(tabMenu, "Close", async () => await CloseTabAsync(tab));
+        ContextMenus.AddAsync(tabMenu, L10n.Text("common.save"), async () => await tab.SaveAsync());
+        ContextMenus.Copy(tabMenu, L10n.Text("windows.editorpage.copy_path.720ff416"), () => path);
+        ContextMenus.AddAsync(tabMenu, L10n.Text("common.close"), async () => await CloseTabAsync(tab));
         item.Tag = tab;
         _tabs.TabItems.Add(item);
         _tabs.SelectedItem = item;
@@ -386,17 +386,17 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
     {
         if (tab.IsSaving)
         {
-            PageBanner("Wait for the save to finish, then close the tab.");
+            PageBanner(L10n.Text("windows.editorpage.wait_for_the_save_to_finish_then_close_the.3fd9e1de"));
             return;
         }
         if (tab.IsDirty)
         {
             var dialog = new ContentDialog
             {
-                Title = $"Discard changes to {tab.Name}?",
-                Content = "Unsaved edits are lost.",
-                PrimaryButtonText = "Discard",
-                CloseButtonText = "Cancel",
+                Title = L10n.Text("windows.editorpage.discard_changes_to_0.8a656753", $"{tab.Name}"),
+                Content = L10n.Text("windows.editorpage.unsaved_edits_are_lost.66a73889"),
+                PrimaryButtonText = L10n.Text("windows.editorpage.discard.eb1a70e3"),
+                CloseButtonText = L10n.Text("common.cancel"),
                 DefaultButton = ContentDialogButton.Close,
             };
             if (await Chrome.ShowDialog(_tabs, dialog) != ContentDialogResult.Primary)
@@ -451,8 +451,8 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             Visibility = Visibility.Collapsed,
         };
         private readonly Grid _find = new() { Visibility = Visibility.Collapsed };
-        private readonly TextBox _findQuery = new() { PlaceholderText = "Find in file", MinWidth = 200 };
-        private readonly TextBox _replaceBox = new() { PlaceholderText = "Replace with", MinWidth = 200 };
+        private readonly TextBox _findQuery = new() { PlaceholderText = L10n.Text("windows.editorpage.find_in_file.214c422e"), MinWidth = 200 };
+        private readonly TextBox _replaceBox = new() { PlaceholderText = L10n.Text("windows.editorpage.replace_with.8382d317"), MinWidth = 200 };
         private readonly TextBlock _findCount = new() { Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center };
         private readonly TextBlock _status = new() { Opacity = 0.7, FontSize = 12 };
         private readonly Grid _view = new();
@@ -521,22 +521,22 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
                 Spacing = Theme.SpaceS,
                 Padding = new Thickness(0, 0, 0, Theme.SpaceS),
             };
-            chrome.Children.Add(Buttons.ToolbarIcon(ActionIcon.Save, "Save file (Ctrl+S)", async (_, _) => await SaveAsync()));
-            chrome.Children.Add(Buttons.ToolbarIcon(ActionIcon.Search, "Find in file (Ctrl+F)", (_, _) => ToggleFind()));
+            chrome.Children.Add(Buttons.ToolbarIcon(ActionIcon.Save, L10n.Text("windows.editorpage.save_file_ctrl_s.8185eecf"), async (_, _) => await SaveAsync()));
+            chrome.Children.Add(Buttons.ToolbarIcon(ActionIcon.Search, L10n.Text("windows.editorpage.find_in_file_ctrl_f.3d78712f"), (_, _) => ToggleFind()));
             _status.TextTrimming = TextTrimming.CharacterEllipsis;
             _status.Margin = new Thickness(8, 4, 8, 4);
 
             var editorMenu = ContextMenus.Menu(_box);
-            ContextMenus.Add(editorMenu, "Undo", () => _box.Document.Undo(), () => _box.Document.CanUndo());
-            ContextMenus.Add(editorMenu, "Redo", () => _box.Document.Redo(), () => _box.Document.CanRedo());
+            ContextMenus.Add(editorMenu, L10n.Text("windows.editorpage.undo.a8283ade"), () => _box.Document.Undo(), () => _box.Document.CanUndo());
+            ContextMenus.Add(editorMenu, L10n.Text("windows.editorpage.redo.74273989"), () => _box.Document.Redo(), () => _box.Document.CanRedo());
             editorMenu.Items.Add(new MenuFlyoutSeparator());
-            ContextMenus.Add(editorMenu, "Cut", () => _box.Document.Selection.Cut());
-            ContextMenus.Add(editorMenu, "Copy", () => _box.Document.Selection.Copy());
-            ContextMenus.Add(editorMenu, "Paste", () => _box.Document.Selection.Paste(0));
-            ContextMenus.Add(editorMenu, "Select all", () => _box.Document.Selection.SetRange(0, int.MaxValue));
+            ContextMenus.Add(editorMenu, L10n.Text("windows.editorpage.cut.1f45f025"), () => _box.Document.Selection.Cut());
+            ContextMenus.Add(editorMenu, L10n.Text("common.copy"), () => _box.Document.Selection.Copy());
+            ContextMenus.Add(editorMenu, L10n.Text("windows.editorpage.paste.f3380f7b"), () => _box.Document.Selection.Paste(0));
+            ContextMenus.Add(editorMenu, L10n.Text("windows.editorpage.select_all.1fc9a387"), () => _box.Document.Selection.SetRange(0, int.MaxValue));
             editorMenu.Items.Add(new MenuFlyoutSeparator());
-            ContextMenus.Add(editorMenu, "Find in file…", ToggleFind);
-            ContextMenus.AddAsync(editorMenu, "Save", async () => await SaveAsync());
+            ContextMenus.Add(editorMenu, L10n.Text("windows.editorpage.find_in_file.a3268b39"), ToggleFind);
+            ContextMenus.AddAsync(editorMenu, L10n.Text("common.save"), async () => await SaveAsync());
             BuildFindBar();
             BuildConflictCard();
 
@@ -720,19 +720,19 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             var queryRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
             queryRow.Children.Add(_findQuery);
             queryRow.Children.Add(_findCount);
-            queryRow.Children.Add(ActionIconGlyph.Button("Previous", ActionIcon.Back, (_, _) => MoveMatch(-1)));
-            queryRow.Children.Add(ActionIconGlyph.Button("Next", ActionIcon.Next, (_, _) => MoveMatch(1)));
-            queryRow.Children.Add(ActionIconGlyph.Button("Close find", ActionIcon.Dismiss, (_, _) =>
+            queryRow.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.editorpage.previous.a57b08a4"), ActionIcon.Back, (_, _) => MoveMatch(-1)));
+            queryRow.Children.Add(ActionIconGlyph.Button(L10n.Text("common.next"), ActionIcon.Next, (_, _) => MoveMatch(1)));
+            queryRow.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.editorpage.close_find.eb903c9f"), ActionIcon.Dismiss, (_, _) =>
             {
                 _find.Visibility = Visibility.Collapsed;
             }));
             var replaceRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
             replaceRow.Children.Add(_replaceBox);
-            replaceRow.Children.Add(ActionIconGlyph.Button("Replace", ActionIcon.Edit, (_, _) => ReplaceCurrent()));
-            replaceRow.Children.Add(ActionIconGlyph.Button("Replace all", ActionIcon.Edit, (_, _) => ReplaceAll()));
+            replaceRow.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.editorpage.replace.95e15439"), ActionIcon.Edit, (_, _) => ReplaceCurrent()));
+            replaceRow.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.editorpage.replace_all.2ebcba96"), ActionIcon.Edit, (_, _) => ReplaceAll()));
             replaceRow.Children.Add(new TextBlock
             {
-                Text = "Replace all is one undo, in this file only.",
+                Text = L10n.Text("windows.editorpage.replace_all_is_one_undo_in_this_file_only.f9398675"),
                 Opacity = 0.7,
                 FontSize = 12,
                 VerticalAlignment = VerticalAlignment.Center,
@@ -755,7 +755,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         {
             _conflict.Children.Add(new TextBlock
             {
-                Text = "This file changed on that computer.",
+                Text = L10n.Text("windows.editorpage.this_file_changed_on_that_computer.c4576a6e"),
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             });
             var summary = new TextBlock { TextWrapping = TextWrapping.Wrap, Opacity = 0.8 };
@@ -763,9 +763,9 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             _conflict.Children.Add(summary);
             var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
             actions.Children.Add(ActionIconGlyph.Button(
-                "Reload computer", ActionIcon.Restore, async (_, _) => await ResolveConflictAsync(keepMine: false)));
+                L10n.Text("windows.editorpage.reload_computer.2bdc7487"), ActionIcon.Restore, async (_, _) => await ResolveConflictAsync(keepMine: false)));
             actions.Children.Add(ActionIconGlyph.Button(
-                "Keep my draft", ActionIcon.Edit, async (_, _) => await ResolveConflictAsync(keepMine: true)));
+                L10n.Text("windows.editorpage.keep_my_draft.cdb80bb9"), ActionIcon.Edit, async (_, _) => await ResolveConflictAsync(keepMine: true)));
             _conflict.Children.Add(actions);
         }
 
@@ -795,7 +795,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             }
             if (_matches.Count == 0)
             {
-                _findCount.Text = query.Length > 0 ? "No results" : "";
+                _findCount.Text = query.Length > 0 ? L10n.Text("windows.editorpage.no_results.a43619f3") : "";
             }
             else
             {
@@ -888,7 +888,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             if (source.Length > 200_000)
             {
                 _highlightSpans = null;
-                _highlightNote = "Syntax highlighting paused for this large file.";
+                _highlightNote = L10n.Text("windows.editorpage.syntax_highlighting_paused_for_this_large.cc3ec854");
                 RefreshStatus();
                 return;
             }
@@ -916,7 +916,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             if (_highlightSpans?.Count > 2_500)
             {
                 _highlightSpans = null;
-                _highlightNote = "Syntax highlighting paused for this large file.";
+                _highlightNote = L10n.Text("windows.editorpage.syntax_highlighting_paused_for_this_large.cc3ec854");
             }
             _highlightedText = source;
             ApplyHighlightColors();
@@ -993,7 +993,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
                 }
                 catch
                 {
-                    StatusError("Could not re-read this file on that computer, so the save waits. Your edits are kept.");
+                    StatusError(L10n.Text("windows.editorpage.could_not_re_read_this_file_on_that_comput.dacb7165"));
                     return;
                 }
                 var draft = Norm(_text);
@@ -1116,11 +1116,11 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             var mineText = Norm(_text);
             var mine = LineCount(mineText);
             var theirs = LineCount(host);
-            var summary = $"Yours has {mine} lines, that computer has {theirs}. Saving is off until you choose.";
+            var summary = L10n.Text("windows.editorpage.yours_has_0_lines_that_computer_has_1_savi.66339948", $"{mine}", $"{theirs}");
             var first = FirstDifference(mineText, host);
             if (first.HasValue)
             {
-                summary += $" First difference: line {first}.";
+                summary += L10n.Text("windows.editorpage.first_difference_line_0.42e7b04c", $"{first}");
             }
             foreach (var child in _conflict.Children)
             {

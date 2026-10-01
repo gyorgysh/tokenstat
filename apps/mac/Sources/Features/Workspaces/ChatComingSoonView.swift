@@ -23,7 +23,7 @@ struct ChatComingSoonView: View {
         VStack(spacing: Theme.Space.m) {
             Spacer(minLength: 0)
             ChatScene(seed: personaSeed(for: folderName ?? "chat"))
-            Text("Chat is on the way")
+            Text(L10n.text("apple.chatcomingsoonview.chat_is_on_the_way.b1d7ba9c"))
                 .font(Theme.title3.weight(.semibold))
             Text(message)
                 .font(Theme.callout)
@@ -37,15 +37,15 @@ struct ChatComingSoonView: View {
         .padding(Theme.Space.l)
         .background(Theme.background)
         #if os(macOS)
-        .navigationTitle("Chat")
+        .navigationTitle(L10n.text("apple.chatcomingsoonview.chat.460b3a7d"))
         #endif
     }
 
     private var message: String {
         if let folderName, !folderName.isEmpty {
-            return "A friendlier way to talk to the agents already running in \(folderName), without a terminal in between."
+            return L10n.text("apple.chatcomingsoonview.a_friendlier_way_to_talk_to_the_agents_alr.8d3a19d6", "\(folderName)")
         }
-        return "A friendlier way to talk to the agents already running in this folder, without a terminal in between."
+        return L10n.text("apple.chatcomingsoonview.a_friendlier_way_to_talk_to_the_agents_alr.e1682232")
     }
 }
 

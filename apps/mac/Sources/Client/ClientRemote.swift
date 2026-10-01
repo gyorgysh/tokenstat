@@ -26,9 +26,9 @@ enum ClientTunnelCopy {
     static func waiting(_ name: String?) -> String {
         let host = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if host.isEmpty {
-            return "Waiting for the computer to come back on the tunnel."
+            return L10n.text("apple.clientremote.waiting_for_the_computer_to_come_back_on_t.cab8d5a0")
         }
-        return "Waiting for \(host) to come back on the tunnel."
+        return L10n.text("apple.clientremote.waiting_for_0_to_come_back_on_the_tunnel.0f402193", "\(host)")
     }
 
     static func display(_ message: String, host: String?) -> String {

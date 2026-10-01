@@ -17,7 +17,7 @@ extension TaskEditorTarget: TaskRunService {
 
     func runTask(id: String, revision: UInt64, operationID: String, placement: TaskRunPlacement) async throws -> TaskRunOutcome {
         guard await supportsTaskExecution() else {
-            throw TaskEditorDraft.Invalid.fields("Update this computer's tokenstat to run tasks safely from here.")
+            throw TaskEditorDraft.Invalid.fields(L10n.text("apple.taskrunservice.update_this_computer_s_tokenstat_to_run_ta.626d0e60"))
         }
         return try await call(
             "todo.runTask",
@@ -33,7 +33,7 @@ extension TaskEditorTarget: TaskRunService {
 
     func stopTask(id: String, revision: UInt64, runID: String) async throws -> TodoCard {
         guard await supportsTaskExecution() else {
-            throw TaskEditorDraft.Invalid.fields("Update this computer's tokenstat to stop this run safely.")
+            throw TaskEditorDraft.Invalid.fields(L10n.text("apple.taskrunservice.update_this_computer_s_tokenstat_to_stop_t.0ab49a08"))
         }
         return try await call(
             "todo.stopTask",
@@ -44,7 +44,7 @@ extension TaskEditorTarget: TaskRunService {
 
     func taskTerminal(ptyID: String) async throws -> PtySessionInfo {
         guard !ptyID.isEmpty else {
-            throw TaskEditorDraft.Invalid.fields("The interactive terminal is not ready yet. Try again in a moment.")
+            throw TaskEditorDraft.Invalid.fields(L10n.text("apple.taskrunservice.the_interactive_terminal_is_not_ready_yet.995670b6"))
         }
         #if os(macOS)
         return try await Bridge.ptyInfo(id: ptyID)

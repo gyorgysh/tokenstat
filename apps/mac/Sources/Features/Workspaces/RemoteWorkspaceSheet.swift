@@ -79,31 +79,26 @@ struct RemoteWorkspaceSheet: View {
                 } else if let peer {
                     routeRow(
                         .clone,
-                        title: "Clone a repository",
-                        body: "tokenstat runs git on \(name(of: peer)) and registers the folder "
-                            + "when it finishes. A private repository asks for its credentials "
-                            + "on that machine."
+                        title: L10n.text("apple.remoteworkspacesheet.clone_a_repository.749e5d4d"),
+                        body: L10n.text("apple.remoteworkspacesheet.tokenstat_runs_git_on_0_and_registers_the.db91ece2", "\(name(of: peer))")
                     )
                     routeRow(
                         .register,
-                        title: "A folder already on the machine",
-                        body: "Browse \(name(of: peer))'s disk and register a folder that is "
-                            + "there. Nothing is copied and nothing is changed."
+                        title: L10n.text("apple.remoteworkspacesheet.a_folder_already_on_the_machine.d5432a67"),
+                        body: L10n.text("apple.remoteworkspacesheet.browse_0_s_disk_and_register_a_folder_that.69323555", "\(name(of: peer))")
                     )
                 } else if let hosts {
                     if hosts.isEmpty, (peers ?? []).isEmpty {
                         emptyState(
                             symbol: "display.2",
-                            title: "No paired computer yet",
-                            body: "Pair one on the Machines screen first. Folders live on "
-                                + "computers, so this list waits until one shows up."
+                            title: L10n.text("apple.remoteworkspacesheet.no_paired_computer_yet.083bc1fd"),
+                            body: L10n.text("apple.remoteworkspacesheet.pair_one_on_the_machines_screen_first_fold.c62b2a53")
                         )
                     } else if hosts.isEmpty {
                         emptyState(
                             symbol: "iphone",
-                            title: "Only companions so far",
-                            body: "The paired devices are phones and tablets, and folders live "
-                                + "on computers. Pair one on the Machines screen."
+                            title: L10n.text("apple.remoteworkspacesheet.only_companions_so_far.444bd195"),
+                            body: L10n.text("apple.remoteworkspacesheet.the_paired_devices_are_phones_and_tablets.4825e956")
                         )
                     } else {
                         ForEach(hosts) { candidate in
@@ -130,14 +125,14 @@ struct RemoteWorkspaceSheet: View {
                 } else {
                     HStack(spacing: Theme.Space.s) {
                         ProgressView().controlSize(.small)
-                        Text("Finding paired machines…")
+                        Text(L10n.text("apple.remoteworkspacesheet.finding_paired_machines.1f213e19"))
                             .font(Theme.body)
                             .foregroundStyle(.secondary)
                     }
                 }
             }
         } actions: {
-            Button("Back", .back) {
+            Button(L10n.text("common.back"), .back) {
                 if route != nil {
                     route = nil
                 } else if peer != nil {
@@ -154,17 +149,17 @@ struct RemoteWorkspaceSheet: View {
     }
 
     private var title: String {
-        if route == .clone { return "Clone onto a machine" }
-        if route == .register { return "Register a folder" }
-        if peer != nil { return "What should it get" }
-        return "On another machine"
+        if route == .clone { return L10n.text("apple.remoteworkspacesheet.clone_onto_a_machine.bf7c1211") }
+        if route == .register { return L10n.text("apple.remoteworkspacesheet.register_a_folder.9d6c5376") }
+        if peer != nil { return L10n.text("apple.remoteworkspacesheet.what_should_it_get.3706ac2c") }
+        return L10n.text("apple.remoteworkspacesheet.on_another_machine.4b887bce")
     }
 
     private var subtitle: String {
         if let peer {
-            return "The folder ends up on \(name(of: peer)), and in this sidebar."
+            return L10n.text("apple.remoteworkspacesheet.the_folder_ends_up_on_0_and_in_this_sideba.77353e3c", "\(name(of: peer))")
         }
-        return "Give a paired machine its first folder."
+        return L10n.text("apple.remoteworkspacesheet.give_a_paired_machine_its_first_folder.5c325657")
     }
 
     private func routeRow(_ value: Route, title: String, body: String) -> some View {
@@ -253,7 +248,7 @@ private struct RemoteFolderRegisterView: View {
             }
             RemoteFolderBrowser(
                 peer: peer,
-                selectTitle: working ? "Registering…" : "Register this folder",
+                selectTitle: working ? L10n.text("apple.remoteworkspacesheet.registering.6bf4d89b") : L10n.text("apple.remoteworkspacesheet.register_this_folder.e273b524"),
                 selectEnabled: !working,
                 onSelect: { path in
                     lastPath = path
@@ -328,7 +323,7 @@ private struct RemoteCloneView: View {
                     .textFieldStyle(.themed)
                 RemoteFolderBrowser(
                     peer: peer,
-                    selectTitle: "Clone here",
+                    selectTitle: L10n.text("apple.remoteworkspacesheet.clone_here.d17ed090"),
                     selectEnabled: true,
                     allowNewFolder: true,
                     onSelect: { path in parent = path }
@@ -341,20 +336,20 @@ private struct RemoteCloneView: View {
                         .lineLimit(1)
                         .truncationMode(.head)
                 }
-                TextField("Folder name, taken from the address when empty", text: $name)
+                TextField(L10n.text("apple.remoteworkspacesheet.folder_name_taken_from_the_address_when_em.ca117041"), text: $name)
                     .textFieldStyle(.themed)
-                Button(working ? "Starting…" : "Clone", .download) { Task { await start() } }
+                Button(working ? L10n.text("apple.remoteworkspacesheet.starting.bbe5fc3b") : L10n.text("apple.remoteworkspacesheet.clone.5779f32f"), .download) { Task { await start() } }
                     .buttonStyle(AccentButtonStyle())
                     .disabled(!ready)
             }
             if status?.state == "done" {
-                Button("Done", .approve) {
+                Button(L10n.text("common.done"), .approve) {
                     model.refreshRemotePeer(peer.key)
                     onDone()
                 }
                 .buttonStyle(AccentButtonStyle())
             } else if status?.state == "failed" {
-                Button("Back", .back) { status = nil }
+                Button(L10n.text("common.back"), .back) { status = nil }
                     .buttonStyle(SecondaryButtonStyle())
             }
         }
@@ -363,14 +358,14 @@ private struct RemoteCloneView: View {
 
     private var headline: String {
         switch status?.state {
-        case "done": "Cloned. The folder is registered on the machine."
+        case "done": L10n.text("apple.remoteworkspacesheet.cloned_the_folder_is_registered_on_the_mac.10a55abe")
         case "failed":
             if let raw = status?.error, !raw.isEmpty {
                 FriendlyError.from(raw).title
             } else {
-                "The clone did not finish."
+                L10n.text("apple.remoteworkspacesheet.the_clone_did_not_finish.fa812d0f")
             }
-        default: "Cloning…"
+        default: L10n.text("apple.remoteworkspacesheet.cloning.2c3cf7cb")
         }
     }
 
@@ -419,7 +414,7 @@ private struct RemoteCloneView: View {
         guard !Task.isCancelled else { return }
         if status?.state == "running" || status == nil {
             let path = status?.path ?? parent ?? ""
-            status = RemoteCloneStatus(state: "failed", path: path, workspaceId: nil, error: "The clone timed out. Check the machine, or try again.")
+            status = RemoteCloneStatus(state: "failed", path: path, workspaceId: nil, error: L10n.text("apple.remoteworkspacesheet.the_clone_timed_out_check_the_machine_or_t.2a14f7ca"))
         }
     }
 }
@@ -448,7 +443,7 @@ private struct RemoteFolderBrowser: View {
             if let listing {
                 HStack(spacing: Theme.Space.s) {
                     if listing.parent != nil {
-                        Button("Up", .back) { path = listing.parent }
+                        Button(L10n.text("apple.remoteworkspacesheet.up.55490a4b"), .back) { path = listing.parent }
                             .buttonStyle(.plain)
                             .foregroundStyle(Theme.accent)
                     }
@@ -458,7 +453,7 @@ private struct RemoteFolderBrowser: View {
                         .truncationMode(.head)
                     Spacer(minLength: 0)
                     if allowNewFolder {
-                        Button("New folder", .create) { naming = true }
+                        Button(L10n.text("apple.remoteworkspacesheet.new_folder.cf28f49e"), .create) { naming = true }
                             .buttonStyle(.plain)
                             .foregroundStyle(Theme.accent)
                             .disabled(listing.path.isEmpty)
@@ -482,7 +477,7 @@ private struct RemoteFolderBrowser: View {
                                 Text(entry.name)
                                     .font(Theme.body)
                                 if entry.isRegistered {
-                                    Text("registered")
+                                    Text(L10n.text("apple.remoteworkspacesheet.registered.b1a9e561"))
                                         .font(Theme.caption)
                                         .foregroundStyle(.tertiary)
                                 }
@@ -506,10 +501,10 @@ private struct RemoteFolderBrowser: View {
             .buttonStyle(SecondaryButtonStyle())
             .disabled(!selectEnabled || path == nil)
         }
-        .alert("New folder", isPresented: $naming) {
-            TextField("Name", text: $newName)
-            Button("Cancel", role: .cancel) { newName = "" }
-            Button("Create") { Task { await create() } }
+        .alert(L10n.text("apple.remoteworkspacesheet.new_folder.cf28f49e"), isPresented: $naming) {
+            TextField(L10n.text("apple.remoteworkspacesheet.name.dcd1d522"), text: $newName)
+            Button(L10n.text("common.cancel"), role: .cancel) { newName = "" }
+            Button(L10n.text("apple.remoteworkspacesheet.create.4759498a")) { Task { await create() } }
         }
         .task(id: path) {
             // Seeding the initial path from the first answer restarts this
@@ -540,7 +535,7 @@ private struct RemoteFolderBrowser: View {
         newName = ""
         guard !trimmed.isEmpty, let here = listing?.path, !here.isEmpty else { return }
         guard !trimmed.contains("/"), trimmed != "..", trimmed != "." else {
-            self.error = "A folder name is one name, without a path in it."
+            self.error = L10n.text("apple.remoteworkspacesheet.a_folder_name_is_one_name_without_a_path_i.d41badd4")
             return
         }
         do {

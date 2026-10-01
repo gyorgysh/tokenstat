@@ -210,17 +210,17 @@ internal sealed class RunNotifications
             {
                 continue;
             }
-            var name = Format.Text(run, "name", "Run");
+            var name = Format.Text(run, "name", L10n.Text("common.run"));
             switch (current[id])
             {
                 case "ok":
-                    Post(id, "Run finished", $"{name} is done.");
+                    Post(id, L10n.Text("windows.runnotifications.run_finished.22488bd9"), L10n.Text("windows.runnotifications.0_is_done.2eff6579", $"{name}"));
                     break;
                 case "error":
-                    Post(id, "Run failed", $"{name} did not finish cleanly{ExitCode(run)}.");
+                    Post(id, L10n.Text("windows.runnotifications.run_failed.97fddf2d"), L10n.Text("windows.runnotifications.0_did_not_finish_cleanly_1.25a03a73", $"{name}", $"{ExitCode(run)}"));
                     break;
                 case "waiting" when workflows:
-                    Post(id, "Waiting for you", $"{name} needs an answer to carry on.");
+                    Post(id, L10n.Text("windows.runnotifications.waiting_for_you.9f760ab2"), L10n.Text("windows.runnotifications.0_needs_an_answer_to_carry_on.6eb7efc2", $"{name}"));
                     break;
                 default:
                     // Stopped is somebody at this keyboard. They know.
@@ -236,7 +236,7 @@ internal sealed class RunNotifications
         {
             return "";
         }
-        return $" (exit {Format.Long(run, "exitCode")})";
+        return L10n.Text("windows.runnotifications.exit_0.32dc93f6", $"{Format.Long(run, "exitCode")}");
     }
 
     /// <summary>
@@ -246,7 +246,7 @@ internal sealed class RunNotifications
     public void SendTest()
     {
         EnsureRegistered();
-        Post("test", "Notifications are on", "This is the only test notification.");
+        Post("test", L10n.Text("windows.runnotifications.notifications_are_on.ceaaed4b"), L10n.Text("windows.runnotifications.this_is_the_only_test_notification.45933459"));
     }
 
     private static void Post(string runId, string title, string body)

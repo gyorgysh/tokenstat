@@ -179,15 +179,15 @@ final class ScreenAccess {
 
         var title: String {
             switch self {
-            case .screenRecording: "Screen Recording"
-            case .accessibility: "Accessibility"
+            case .screenRecording: L10n.text("apple.screenaccess.screen_recording.bc3c7428")
+            case .accessibility: L10n.text("apple.screenaccess.accessibility.d3368cbf")
             }
         }
 
         var need: String {
             switch self {
-            case .screenRecording: "Needed for another device to see this screen."
-            case .accessibility: "Needed for another device to click and type on this screen."
+            case .screenRecording: L10n.text("apple.screenaccess.needed_for_another_device_to_see_this_scre.368b885b")
+            case .accessibility: L10n.text("apple.screenaccess.needed_for_another_device_to_click_and_typ.7a99e357")
             }
         }
 
@@ -196,9 +196,9 @@ final class ScreenAccess {
         var settingsHint: String {
             switch self {
             case .screenRecording:
-                "macOS only asks once. Switch tokenstat on under Privacy & Security → Screen & System Audio Recording."
+                L10n.text("apple.screenaccess.macos_only_asks_once_switch_tokenstat_on_u.a62eeed0")
             case .accessibility:
-                "macOS only asks once. Switch tokenstat on under Privacy & Security → Accessibility."
+                L10n.text("apple.screenaccess.macos_only_asks_once_switch_tokenstat_on_u.edc64440")
             }
         }
     }

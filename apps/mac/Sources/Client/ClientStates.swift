@@ -134,13 +134,13 @@ struct RemoteReachRecoveryCard: View {
                 .background(Theme.accentSoft.opacity(0.58), in: RoundedRectangle(cornerRadius: 18))
 
             VStack(spacing: 5) {
-                Text("Connect this Mac")
+                Text(L10n.text("apple.clientstates.connect_this_mac.58977503"))
                     .font(ClientType.screenTitle)
-                Text("\(name) is not ready for remote access yet.")
+                Text(L10n.text("apple.clientstates.0_is_not_ready_for_remote_access_yet.0ee4e80e", "\(name)"))
                     .font(ClientType.label)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                Text("Complete these steps on the Mac, then check again here.")
+                Text(L10n.text("apple.clientstates.complete_these_steps_on_the_mac_then_check.6e8b0c07"))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -149,17 +149,17 @@ struct RemoteReachRecoveryCard: View {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 recoveryStep(
                     symbol: "laptopcomputer",
-                    title: "Wake the Mac and open tokenstat",
-                    detail: "The Mac must be awake while tokenstat is running."
+                    title: L10n.text("apple.clientstates.wake_the_mac_and_open_tokenstat.7773a239"),
+                    detail: L10n.text("apple.clientstates.the_mac_must_be_awake_while_tokenstat_is_r.37455629")
                 )
                 recoveryStep(
                     symbol: "switch.2",
-                    title: "Turn on Remote Reach on the Mac",
-                    detail: "In tokenstat, open Devices and switch on “Reach devices from anywhere.”"
+                    title: L10n.text("apple.clientstates.turn_on_remote_reach_on_the_mac.8c2936e6"),
+                    detail: L10n.text("apple.clientstates.in_tokenstat_open_devices_and_switch_on_re.7a95dd7c")
                 )
             }
 
-            Button("Check connection", .refresh, action: retry)
+            Button(L10n.text("apple.clientstates.check_connection.be5dff52"), .refresh, action: retry)
                 .labelStyle(ActionLabelStyle())
                 .clientProminentStyle()
                 .controlSize(.large)
@@ -170,7 +170,7 @@ struct RemoteReachRecoveryCard: View {
         .padding(Theme.Space.l)
         .cardSurface()
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Connect \(name). On the Mac, wake it, open tokenstat, then turn on Reach devices from anywhere in Devices.")
+        .accessibilityLabel(L10n.text("apple.clientstates.connect_0_on_the_mac_wake_it_open_tokensta.114d6e96", "\(name)"))
     }
 
     private func recoveryStep(symbol: String, title: String, detail: String) -> some View {
@@ -214,10 +214,10 @@ struct HeadlessReachRecoveryCard: View {
                 .background(Theme.accentSoft.opacity(0.58), in: RoundedRectangle(cornerRadius: 18))
 
             VStack(spacing: 5) {
-                Text("\(name) is not answering")
+                Text(L10n.text("apple.clientstates.0_is_not_answering.2426fffb", "\(name)"))
                     .font(ClientType.screenTitle)
                     .multilineTextAlignment(.center)
-                Text("Check that the server is running and connected to the internet, then check its tokenstat service.")
+                Text(L10n.text("apple.clientstates.check_that_the_server_is_running_and_conne.5c93826d"))
                     .font(ClientType.label)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -227,27 +227,25 @@ struct HeadlessReachRecoveryCard: View {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 headlessStep(
                     symbol: "terminal",
-                    title: "Ask the machine how it is",
-                    detail: "`tokenstat host` says whether the service is running, which "
-                        + "account it is on, and what the tunnel is doing."
+                    title: L10n.text("apple.clientstates.ask_the_machine_how_it_is.67356998"),
+                    detail: L10n.text("apple.clientstates.tokenstat_host_says_whether_the_service_is.52f3ccf5")
                 )
                 headlessStep(
                     symbol: "text.alignleft",
-                    title: "Read its log",
-                    detail: "`tokenstat host logs` is the rest of the answer when the status "
-                        + "line is not enough."
+                    title: L10n.text("apple.clientstates.read_its_log.1c7925a3"),
+                    detail: L10n.text("apple.clientstates.tokenstat_host_logs_is_the_rest_of_the_ans.db288ccb")
                 )
             }
 
             VStack(spacing: Theme.Space.s) {
-                Button("Check connection", .refresh, action: retry)
+                Button(L10n.text("apple.clientstates.check_connection.be5dff52"), .refresh, action: retry)
                     .labelStyle(ActionLabelStyle())
                     .clientProminentStyle()
                     .controlSize(.large)
                     .tint(Theme.accent)
                     .frame(maxWidth: .infinity)
                 if let openShell {
-                    Button("Open a shell there", .connect, action: openShell)
+                    Button(L10n.text("apple.clientstates.open_a_shell_there.f22bdb4a"), .connect, action: openShell)
                         .font(ClientType.label)
                         .tint(Theme.accent)
                 }
@@ -258,8 +256,7 @@ struct HeadlessReachRecoveryCard: View {
         .cardSurface()
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
-            "\(name) is not answering. On the machine, run tokenstat host for its status, "
-            + "and tokenstat host logs to read its log."
+            L10n.text("apple.clientstates.0_is_not_answering_on_the_machine_run_toke.45df52d4", "\(name)")
         )
     }
 
@@ -317,10 +314,8 @@ struct ClientErrorCard: View {
 
     private var offlineError: FriendlyError {
         FriendlyError(
-            title: "You are offline",
-            message: "This device cannot reach the internet. It retries every "
-                + "\(Int(ConnectivityModel.retryInterval.components.seconds)) seconds, and "
-                + "everything comes back on its own.",
+            title: L10n.text("apple.clientstates.you_are_offline.4d5c9439"),
+            message: L10n.text("apple.clientstates.this_device_cannot_reach_the_internet_it_r.51fd6d77", "\(Int(ConnectivityModel.retryInterval.components.seconds))"),
             symbol: "wifi.slash",
             actionTitle: nil,
             raw: message.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -347,7 +342,7 @@ struct ClientErrorCard: View {
             }
             HStack(spacing: Theme.Space.m) {
                 if error.opensPlans {
-                    Button(error.actionTitle ?? "See plans", .plans) {
+                    Button(error.actionTitle ?? L10n.text("apple.clientstates.see_plans.d9898933"), .plans) {
                         NotificationCenter.default.post(name: .tokenstatOpenPaywall, object: nil)
                     }
                     .font(ClientType.caption.weight(.semibold))
@@ -358,7 +353,7 @@ struct ClientErrorCard: View {
                         .tint(Theme.accent)
                 }
                 if error.raw != error.message, !error.raw.isEmpty {
-                    Button(showingDetail ? "Hide details" : "Details") {
+                    Button(showingDetail ? L10n.text("apple.clientstates.hide_details.c9722a7a") : L10n.text("apple.clientstates.details.45989de4")) {
                         showingDetail.toggle()
                     }
                     .font(ClientType.caption)
@@ -463,21 +458,21 @@ struct ClientAwaitingAccessCard: View {
     var body: some View {
         VStack(spacing: Theme.Space.s) {
             ClientEmptyArt(kind: .workspaceAccess)
-            Text("Waiting for \(hostName)")
+            Text(L10n.text("apple.clientstates.waiting_for_0.758c485c", "\(hostName)"))
                 .font(ClientType.sectionTitle)
                 .multilineTextAlignment(.center)
-            Text("Open tokenstat on that computer and approve this device. The request is waiting in the sidebar and in Devices. This screen connects on its own once it is answered.")
+            Text(L10n.text("apple.clientstates.open_tokenstat_on_that_computer_and_approv.50e33097"))
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             if isHeadless {
-                Text("No screen on that machine? Approve over SSH instead.")
+                Text(L10n.text("apple.clientstates.no_screen_on_that_machine_approve_over_ssh.decd9d2e"))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
-            Button("How to approve", .help) {
+            Button(L10n.text("apple.clientstates.how_to_approve.e0fc7247"), .help) {
                 showHelp = true
             }
             .font(ClientType.label.weight(.semibold))
@@ -507,7 +502,7 @@ struct ClientAccessApprovalSteps: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("How to approve")
+            Text(L10n.text("apple.clientstates.how_to_approve.e0fc7247"))
                 .font(ClientType.label.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -515,47 +510,47 @@ struct ClientAccessApprovalSteps: View {
             if isHeadless {
                 approvalStep(
                     symbol: "terminal",
-                    step: "Step 1",
-                    title: "SSH into \(hostName)",
-                    detail: "Any shell on that machine works. The request is already waiting there."
+                    step: L10n.text("apple.clientstates.step_1.25a8d454"),
+                    title: L10n.text("apple.clientstates.ssh_into_0.58c4c22e", "\(hostName)"),
+                    detail: L10n.text("apple.clientstates.any_shell_on_that_machine_works_the_reques.9be4733a")
                 )
                 commandRow(command: approveCommand, id: "approve")
                 approvalStep(
                     symbol: "checkmark.seal",
-                    step: "Step 2",
-                    title: "Pick this device from the list",
-                    detail: "The command numbers every pending request, so there is no key to paste."
+                    step: L10n.text("apple.clientstates.step_2.649474af"),
+                    title: L10n.text("apple.clientstates.pick_this_device_from_the_list.f2e28a88"),
+                    detail: L10n.text("apple.clientstates.the_command_numbers_every_pending_request.5b26031c")
                 )
                 approvalStep(
                     symbol: "link",
-                    step: "Step 3",
-                    title: "Come back here",
-                    detail: "This screen connects on its own once the request is answered."
+                    step: L10n.text("apple.clientstates.step_3.394c36dd"),
+                    title: L10n.text("apple.clientstates.come_back_here.31e13990"),
+                    detail: L10n.text("apple.clientstates.this_screen_connects_on_its_own_once_the_r.c29ea855")
                 )
                 fallbackCard(
                     symbol: "key",
-                    title: "No SSH either?",
-                    detail: "Run the invite command on that machine, then enter the code via “I have a code”.",
+                    title: L10n.text("apple.clientstates.no_ssh_either.982ea806"),
+                    detail: L10n.text("apple.clientstates.run_the_invite_command_on_that_machine_the.b69af1fb"),
                     command: inviteCommand,
                     commandId: "invite"
                 )
             } else {
                 approvalStep(
                     symbol: "laptopcomputer",
-                    step: "Step 1",
-                    title: "Open tokenstat on \(hostName)",
-                    detail: "The request is waiting in the sidebar and in Devices."
+                    step: L10n.text("apple.clientstates.step_1.25a8d454"),
+                    title: L10n.text("apple.clientstates.open_tokenstat_on_0.f177e632", "\(hostName)"),
+                    detail: L10n.text("apple.clientstates.the_request_is_waiting_in_the_sidebar_and.bbffc02f")
                 )
                 approvalStep(
                     symbol: "checkmark.seal",
-                    step: "Step 2",
-                    title: "Approve this device",
-                    detail: "This screen connects on its own once it is answered."
+                    step: L10n.text("apple.clientstates.step_2.649474af"),
+                    title: L10n.text("apple.clientstates.approve_this_device.d95a103a"),
+                    detail: L10n.text("apple.clientstates.this_screen_connects_on_its_own_once_it_is.8764a57a")
                 )
                 fallbackCard(
                     symbol: "terminal",
-                    title: "Remote machine?",
-                    detail: "SSH in and run the approve command, then pick this device.",
+                    title: L10n.text("apple.clientstates.remote_machine.76ba9cb7"),
+                    detail: L10n.text("apple.clientstates.ssh_in_and_run_the_approve_command_then_pi.d5ad392a"),
                     command: approveCommand,
                     commandId: "approve"
                 )
@@ -603,7 +598,7 @@ struct ClientAccessApprovalSteps: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Button(copied == id ? "Copied" : "Copy", copied == id ? .done : .copy) {
+            Button(copied == id ? L10n.text("apple.clientstates.copied.8d525e5f") : L10n.text("common.copy"), copied == id ? .done : .copy) {
                 UIPasteboard.general.string = command
                 copied = id
             }
@@ -617,7 +612,7 @@ struct ClientAccessApprovalSteps: View {
             RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border, lineWidth: 1)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Run \(command) on \(hostName)")
+        .accessibilityLabel(L10n.text("apple.clientstates.run_0_on_1.a4d886c6", "\(command)", "\(hostName)"))
     }
 
     /// The secondary path as its own card, so it never reads as small print
@@ -647,7 +642,7 @@ struct ClientAccessApprovalSteps: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Button(copied == commandId ? "Copied" : "Copy", copied == commandId ? .done : .copy) {
+                Button(copied == commandId ? L10n.text("apple.clientstates.copied.8d525e5f") : L10n.text("common.copy"), copied == commandId ? .done : .copy) {
                     UIPasteboard.general.string = command
                     copied = commandId
                 }
@@ -699,11 +694,11 @@ struct ClientAccessApprovalSheet: View {
                     VStack(spacing: Theme.Space.s) {
                         ClientEmptyArt(kind: .workspaceAccess)
                             .frame(maxWidth: .infinity)
-                        Text("Waiting for approval")
+                        Text(L10n.text("apple.clientstates.waiting_for_approval.10c5739b"))
                             .font(ClientType.screenTitle)
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: .infinity)
-                        Text("Request sent to \(hostName). Approve it there and this screen will connect on its own.")
+                        Text(L10n.text("apple.clientstates.request_sent_to_0_approve_it_there_and_thi.47b6d31a", "\(hostName)"))
                             .font(ClientType.label)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -716,7 +711,7 @@ struct ClientAccessApprovalSheet: View {
                                 Image(systemName: isRateLimited ? "hourglass" : "paperplane")
                                     .foregroundStyle(Theme.accent)
                             }
-                            Text(isRequesting ? "Asking…" : (isRateLimited ? "Asked. Waiting out the limit" : "Request is waiting on that computer"))
+                            Text(isRequesting ? L10n.text("apple.clientstates.asking.0b832840") : (isRateLimited ? L10n.text("apple.clientstates.asked_waiting_out_the_limit.e35403b3") : L10n.text("apple.clientstates.request_is_waiting_on_that_computer.f7f30f1f")))
                                 .font(ClientType.caption.weight(.medium))
                                 .foregroundStyle(.secondary)
                         }
@@ -732,7 +727,7 @@ struct ClientAccessApprovalSheet: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else if justAsked {
-                        Text("Asked. Approve this device on \(hostName).")
+                        Text(L10n.text("apple.clientstates.asked_approve_this_device_on_0.6fe2e4ea", "\(hostName)"))
                             .font(ClientType.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -749,10 +744,10 @@ struct ClientAccessApprovalSheet: View {
                             HStack(spacing: Theme.Space.m) {
                                 ActionSeat(icon: .pair, size: 34)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("I have a code")
+                                    Text(L10n.text("apple.clientstates.i_have_a_code.b090f9d2"))
                                         .font(ClientType.label.weight(.semibold))
                                         .foregroundStyle(.primary)
-                                    Text("Enter an invite code from that machine instead.")
+                                    Text(L10n.text("apple.clientstates.enter_an_invite_code_from_that_machine_ins.a9c8d05d"))
                                         .font(ClientType.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -774,16 +769,16 @@ struct ClientAccessApprovalSheet: View {
                 .padding(Theme.Space.m)
             }
             .background(Theme.background)
-            .navigationTitle("Approve this device")
+            .navigationTitle(L10n.text("apple.clientstates.approve_this_device.d95a103a"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done", .dismiss) { dismiss() }
+                    Button(L10n.text("common.done"), .dismiss) { dismiss() }
                 }
             }
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: Theme.Space.s) {
-                    Button(copied ? "Copied" : "Copy approve command", copied ? .done : .copy) {
+                    Button(copied ? L10n.text("apple.clientstates.copied.8d525e5f") : L10n.text("apple.clientstates.copy_approve_command.0605ab3a"), copied ? .done : .copy) {
                         UIPasteboard.general.string = approveCommand
                         copied = true
                     }
@@ -793,7 +788,7 @@ struct ClientAccessApprovalSheet: View {
                     .tint(Theme.accent)
                     .frame(maxWidth: .infinity)
                     if onRequestAgain != nil {
-                        Button(isRequesting ? "Asking…" : "Request again", .refresh) {
+                        Button(isRequesting ? L10n.text("apple.clientstates.asking.0b832840") : L10n.text("apple.clientstates.request_again.23a3baf6"), .refresh) {
                             justAsked = true
                             onRequestAgain?()
                         }

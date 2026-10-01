@@ -479,7 +479,7 @@ struct RootView: View {
                 }
                 return BridgeError.core(
                     code: "offline",
-                    message: "This device is offline."
+                    message: L10n.text("apple.rootview.this_device_is_offline.84b7cf97")
                 )
             }
         }
@@ -823,7 +823,7 @@ struct RootView: View {
                     liveWidth: $sidebarLiveWidth,
                     range: ShellMetrics.sidebarRange,
                     showsLine: !ShellMetrics.usesGlass,
-                    help: "Drag to resize the sidebar. Double-click to reset."
+                    help: L10n.text("apple.rootview.drag_to_resize_the_sidebar_double_click_to.8259cca6")
                 )
                 .offset(x: ShellMetrics.usesGlass ? 0 : 3)
             } else if !ShellMetrics.usesGlass {
@@ -982,10 +982,10 @@ struct RootView: View {
     }
 
     private var railAccountLabel: String {
-        guard account.signedIn else { return "Account, sign in to tokenstat" }
-        let name = account.account?.title ?? "Signed in"
-        guard let tier = railAccountTier else { return "Account, \(name)" }
-        return "Account, \(name), \(tier.capitalized) plan"
+        guard account.signedIn else { return L10n.text("apple.rootview.account_sign_in_to_tokenstat.7888d723") }
+        let name = account.account?.title ?? L10n.text("apple.rootview.signed_in.ca566c89")
+        guard let tier = railAccountTier else { return L10n.text("apple.rootview.account_0.1342b321", "\(name)") }
+        return L10n.text("apple.rootview.account_0_1_plan.75429042", "\(name)", "\(tier.capitalized)")
     }
 
     /// Leading toggles injected into every destination's chrome bar.
@@ -1007,7 +1007,7 @@ struct RootView: View {
         switch route {
         case .global(.home), .global(.insights), .global(.automations), .global(.workflows): return nil
         case let .global(section): return section.label
-        case .workspacesOverview: return "All projects"
+        case .workspacesOverview: return L10n.text("apple.rootview.all_projects.4b87271b")
         default: return nil
         }
     }
@@ -1020,8 +1020,8 @@ struct RootView: View {
             // One place on the rail, two kinds of unattended work.
             return AnyView(ChromeTabStrip(
                 tabs: [
-                    ChromeTab(id: GlobalSection.automations.rawValue, label: "Automations", symbol: "bolt"),
-                    ChromeTab(id: GlobalSection.workflows.rawValue, label: "Workflows",
+                    ChromeTab(id: GlobalSection.automations.rawValue, label: L10n.text("common.automations"), symbol: "bolt"),
+                    ChromeTab(id: GlobalSection.workflows.rawValue, label: L10n.text("common.workflows"),
                               symbol: GlobalSection.workflows.symbol),
                 ],
                 selected: route.globalSection?.rawValue
@@ -1100,8 +1100,8 @@ struct RootView: View {
             isOpen: isLeftSidebarOpen,
             action: toggleLeftSidebar,
             help: isLeftSidebarOpen
-                ? "Hide Sidebar (⌘B)"
-                : "Show Sidebar (⌘B)"
+                ? L10n.text("apple.rootview.hide_sidebar_b.630ce4d6")
+                : L10n.text("apple.rootview.show_sidebar_b.4de58db8")
         )
     }
 
@@ -1109,32 +1109,32 @@ struct RootView: View {
     private var rightInspectorToolbarButton: some View {
         HStack(spacing: Theme.Space.xs) {
         if supportsWorkspaceBrowser {
-            ToolbarIconButton(systemImage: "globe", help: "Browser, open a web preview beside this project", isAccent: showsWorkspaceBrowser) {
+            ToolbarIconButton(systemImage: "globe", help: L10n.text("apple.rootview.browser_open_a_web_preview_beside_this_pro.fc5d34f3"), isAccent: showsWorkspaceBrowser) {
                 if showsWorkspaceBrowser { browserWorkspaceID = nil }
                 else {
                     terminalWorkspaceID = nil
                     browserWorkspaceID = route.workspaceID
                 }
             }
-            .accessibilityLabel("Browser")
-            ToolbarIconButton(systemImage: "terminal", help: "Shell or agent beside this chat", isAccent: showsWorkspaceTerminal) {
+            .accessibilityLabel(L10n.text("common.browser"))
+            ToolbarIconButton(systemImage: "terminal", help: L10n.text("apple.rootview.shell_or_agent_beside_this_chat.2a4ad70d"), isAccent: showsWorkspaceTerminal) {
                 if showsWorkspaceTerminal { terminalWorkspaceID = nil }
                 else {
                     browserWorkspaceID = nil
                     terminalWorkspaceID = route.workspaceID
                 }
             }
-            .accessibilityLabel("Terminal beside chat")
+            .accessibilityLabel(L10n.text("apple.rootview.terminal_beside_chat.40991a3f"))
         }
         SidebarToggleButton(
             edge: .trailing,
             isOpen: isRightSidebarOpen && !showsWorkspaceCompanion,
             action: toggleRightSidebar,
-            help: showsWorkspaceCompanion ? "Show Inspector" : isRightSidebarOpen
-                ? "Hide Inspector (⌥⌘B)"
+            help: showsWorkspaceCompanion ? L10n.text("apple.rootview.show_inspector.aa711c1a") : isRightSidebarOpen
+                ? L10n.text("apple.rootview.hide_inspector_b.ff55655a")
                 : (inspectorFits
-                    ? "Show Inspector (⌥⌘B)"
-                    : "Peek Inspector (⌥⌘B)")
+                    ? L10n.text("apple.rootview.show_inspector_b.6cabbee7")
+                    : L10n.text("apple.rootview.peek_inspector_b.f0aab686"))
         )
         }
     }
@@ -1593,7 +1593,7 @@ struct RootView: View {
                             width: $inspectorWidth,
                             liveWidth: $inspectorLiveWidth,
                             range: ShellMetrics.inspectorRange,
-                            help: "Drag to resize the inspector. Double-click to reset."
+                            help: L10n.text("apple.rootview.drag_to_resize_the_inspector_double_click.9aa43689")
                         )
                         .offset(x: -3)
                     }
@@ -1682,8 +1682,8 @@ struct RootView: View {
     @ViewBuilder private var workspaceBrowserPane: some View {
         if let id = route.workspaceID {
             VStack(spacing: 0) {
-                InspectorChromeBar(onClose: { browserWorkspaceID = nil }, closeLabel: "Close browser") {
-                    InspectorTitle(title: "Browser", symbol: "globe")
+                InspectorChromeBar(onClose: { browserWorkspaceID = nil }, closeLabel: L10n.text("apple.rootview.close_browser.dd33033e")) {
+                    InspectorTitle(title: L10n.text("common.browser"), symbol: "globe")
                     Spacer(minLength: 0)
                 }
                 ProjectBrowserView(workspaceID: id, initialURL: workspaceBrowserURLs[id] ?? "", allowsExternalNavigation: true) {
@@ -1739,7 +1739,7 @@ struct RootView: View {
                 browserLiveWidth = nil
                 browserResizeStart = nil
             }
-            .accessibilityLabel(showsWorkspaceTerminal ? "Terminal pane width" : "Browser width")
+            .accessibilityLabel(showsWorkspaceTerminal ? L10n.text("apple.rootview.terminal_pane_width.663c8e5d") : L10n.text("apple.rootview.browser_width.77c8499c"))
             .accessibilityAdjustableAction { direction in
                 browserPaneWidth = max(320, min(1000, fittedBrowserWidth + (direction == .increment ? 40 : -40)))
             }
@@ -1982,7 +1982,7 @@ struct RootView: View {
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .help(isExpanded ? "Collapse sessions" : "Expand sessions")
+            .help(isExpanded ? L10n.text("apple.rootview.collapse_sessions.1976b67d") : L10n.text("apple.rootview.expand_sessions.3675e61a"))
 
             SidebarRow(
                 label: host.label,
@@ -1996,12 +1996,12 @@ struct RootView: View {
             ) { navigate(to: .sshTerminals(host: host.id)) }
         }
         .contextMenu {
-            Button("New terminal", .create) { ssh.connectRequest = host }
-            Button("Close all sessions", .delete, role: .destructive) {
+            Button(L10n.text("apple.rootview.new_terminal.fe544556"), .create) { ssh.connectRequest = host }
+            Button(L10n.text("apple.rootview.close_all_sessions.d07695b4"), .delete, role: .destructive) {
                 sshHostPendingClose = host
             }
             ThemeRule()
-            Button(isExpanded ? "Collapse" : "Expand", .collapse) {
+            Button(isExpanded ? L10n.text("common.collapse") : L10n.text("common.expand"), .collapse) {
                 if isExpanded {
                     expandedSSHHosts.remove(host.id)
                 } else {
@@ -2022,7 +2022,7 @@ struct RootView: View {
                 }
                 .padding(.leading, 18)
                 .contextMenu {
-                    Button("Close", .delete, role: .destructive) {
+                    Button(L10n.text("common.close"), .delete, role: .destructive) {
                         Task { await sshSessions.close(session) }
                     }
                 }
@@ -2115,23 +2115,23 @@ struct RootView: View {
             .padding(.horizontal, Theme.Space.m)
             .chromeBarMetrics()
             SidebarMenuRow(
-                label: "New chat",
+                label: L10n.text("apple.rootview.new_chat.db18382a"),
                 symbol: "square.and.pencil",
-                help: "Choose which project the new chat belongs to"
+                help: L10n.text("apple.rootview.choose_which_project_the_new_chat_belongs.e9b181c8")
             ) {
                 if workspaces.folders.isEmpty {
-                    Button("Add project…", .create) { workspaces.requestAdd() }
+                    Button(L10n.text("apple.rootview.add_project.43079d4a"), .create) { workspaces.requestAdd() }
                 } else {
-                    Section("Start a chat in") {
+                    Section(L10n.text("apple.rootview.start_a_chat_in.5761d474")) {
                         ForEach(workspaces.folders) { folder in
-                            Button("\(folder.name) · \(folder.machineLabel ?? "This Mac")", .create) { startNewChat(in: folder) }
+                            Button("\(folder.name) · \(folder.machineLabel ?? L10n.text("apple.rootview.this_mac.79a4aefc"))", .create) { startNewChat(in: folder) }
                                 .help(folder.path)
                         }
                     }
                 }
             }
             SidebarRow(
-                label: "Search",
+                label: L10n.text("common.search"),
                 symbol: "magnifyingglass",
                 trailing: "⌘K",
                 isSelected: false
@@ -2179,7 +2179,7 @@ struct RootView: View {
         // directory, and a folder an agent touched once is not somewhere
         // anyone wants a terminal.
         SidebarGroupHeader(
-            title: "Projects",
+            title: L10n.text("common.projects"),
             count: workspaces.folders.count,
             isExpanded: nil
         ) {} trailing: {
@@ -2196,13 +2196,13 @@ struct RootView: View {
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .help("Add a project folder")
-            .accessibilityLabel("Add a project folder")
+            .help(L10n.text("apple.rootview.add_a_project_folder.1fb6a975"))
+            .accessibilityLabel(L10n.text("apple.rootview.add_a_project_folder.1fb6a975"))
             #endif
         }
 
         if workspaces.folders.isEmpty {
-            Text("No folders yet.")
+            Text(L10n.text("apple.rootview.no_folders_yet.d890b00a"))
                 .font(Theme.caption)
                 .foregroundStyle(.tertiary)
                 .padding(.horizontal, Theme.Space.m)
@@ -2231,7 +2231,7 @@ struct RootView: View {
             HStack(spacing: Theme.Space.xs) {
                 Image(systemName: "plus.circle")
                     .font(Theme.font(11, weight: .semibold))
-                Text("Add project…")
+                Text(L10n.text("apple.rootview.add_project.43079d4a"))
                     .font(Theme.callout)
                 Spacer(minLength: 0)
             }
@@ -2304,7 +2304,7 @@ struct RootView: View {
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .help(isExpanded ? "Collapse project" : "Expand project")
+            .help(isExpanded ? L10n.text("apple.rootview.collapse_project.96385e6d") : L10n.text("apple.rootview.expand_project.1e7feb92"))
 
             WorkspaceRow(
                 folder: folder,
@@ -2356,7 +2356,7 @@ struct RootView: View {
         .contextMenu {
             ThemeRule()
             // "Remove" and not "Delete": the folder stays.
-            Button("Remove from tokenstat", .delete, role: .destructive) {
+            Button(L10n.text("apple.rootview.remove_from_tokenstat.24f9beb7"), .delete, role: .destructive) {
                 workspacePendingRemove = folder
             }
         }
@@ -2411,7 +2411,7 @@ struct RootView: View {
                 }
             }
             if chat.sidebarChats(in: folder.id).isEmpty, sessions.isEmpty {
-                Text("No chats yet")
+                Text(L10n.text("apple.rootview.no_chats_yet.269208e4"))
                     .font(Theme.fit(12))
                     .foregroundStyle(.tertiary)
                     .padding(.leading, Theme.Space.xl + Theme.Space.s)
@@ -2434,7 +2434,7 @@ struct RootView: View {
     private var liveServersSection: some View {
         let hosts = sshLiveHosts
         if !hosts.isEmpty {
-            SidebarGroupHeader(title: "Servers", count: hosts.count, isExpanded: nil) {}
+            SidebarGroupHeader(title: L10n.text("apple.rootview.servers.68d7beb6"), count: hosts.count, isExpanded: nil) {}
             ForEach(hosts) { host in
                 sshLiveHostRow(host)
             }
@@ -2473,26 +2473,26 @@ struct RootView: View {
     /// the update check reflect what is happening at the moment it opens.
     private var accountMenuItems: [NativeMenuItem] {
         let checkUpdates = NativeMenuItem(
-            appUpdate.isChecking ? "Checking for updates…" : "Check for updates",
+            appUpdate.isChecking ? L10n.text("apple.rootview.checking_for_updates.497a1998") : L10n.text("apple.rootview.check_for_updates.f26f3275"),
             isEnabled: !appUpdate.isChecking
         ) {
             Task { await appUpdate.checkNow() }
         }
         guard account.signedIn else {
             return [
-                NativeMenuItem("Sign in to tokenstat.ai") {
+                NativeMenuItem(L10n.text("apple.rootview.sign_in_to_tokenstat_ai.6276dc4d")) {
                     navigate(to: .global(.account))
                     account.signIn()
                 },
                 .separator,
-                NativeMenuItem("Account") { navigate(to: .global(.account)) },
+                NativeMenuItem(L10n.text("common.account")) { navigate(to: .global(.account)) },
                 .separator,
                 checkUpdates,
             ]
         }
         return [
             NativeMenuItem(
-                "Sync now",
+                L10n.text("common.sync_now"),
                 isEnabled: !account.isSyncing && account.syncCooldownUntil == nil
             ) {
                 Task { await account.sync() }
@@ -2500,8 +2500,8 @@ struct RootView: View {
             .separator,
             checkUpdates,
             .separator,
-            NativeMenuItem("Sign out") { Task { await account.signOut() } },
-            NativeMenuItem("Account settings") { navigate(to: .global(.account)) },
+            NativeMenuItem(L10n.text("common.sign_out")) { Task { await account.signOut() } },
+            NativeMenuItem(L10n.text("apple.rootview.account_settings.a587aa1f")) { navigate(to: .global(.account)) },
         ]
     }
     #endif
@@ -2596,11 +2596,11 @@ struct RootView: View {
                 PullsView(
                     workspaceID: id,
                     connectionHostName: folder?.isRemote == true
-                        ? "the project's computer"
+                        ? L10n.text("apple.rootview.the_project_s_computer.7e755d17")
                         : nil,
                     workspaceName: folder.map {
                         $0.isRemote
-                            ? "\($0.machineLabel ?? "Remote") / \($0.name)"
+                            ? "\($0.machineLabel ?? L10n.text("apple.rootview.remote.ffa98e02")) / \($0.name)"
                             : $0.name
                     },
                     workspaceIsRemote: folder?.isRemote == true,
@@ -2666,11 +2666,11 @@ struct RootView: View {
             PullsView(
                 workspaceID: id,
                 connectionHostName: folder?.isRemote == true
-                    ? "the project's computer"
+                    ? L10n.text("apple.rootview.the_project_s_computer.7e755d17")
                     : nil,
                 workspaceName: folder.map {
                     $0.isRemote
-                        ? "\($0.machineLabel ?? "Remote") / \($0.name)"
+                        ? "\($0.machineLabel ?? L10n.text("apple.rootview.remote.ffa98e02")) / \($0.name)"
                         : $0.name
                 },
                 workspaceIsRemote: folder?.isRemote == true
@@ -2764,10 +2764,10 @@ struct RootView: View {
                 // rather than pretending the screen is empty.
                 EmptyState(
                     symbol: "server.rack",
-                    title: "That server is no longer saved",
-                    message: "Any session still running on it is listed under Hosts."
+                    title: L10n.text("apple.rootview.that_server_is_no_longer_saved.eb00734a"),
+                    message: L10n.text("apple.rootview.any_session_still_running_on_it_is_listed.9386c35e")
                 ) {
-                    Button("Hosts", .back) { openSSH(.hosts(folder: nil)) }
+                    Button(L10n.text("apple.rootview.hosts.bba9af13"), .back) { openSSH(.hosts(folder: nil)) }
                         .buttonStyle(AccentButtonStyle())
                 }
             }
@@ -2894,7 +2894,7 @@ struct RootView: View {
     private func launchTaskInFront(_ launch: InteractiveTaskLaunch) {
         #if os(macOS)
         guard let folder = workspaces.folders.first(where: { $0.id == launch.workspaceID }) else {
-            todo.errorMessage = "Choose a project first."
+            todo.errorMessage = L10n.text("apple.rootview.choose_a_project_first.090d7849")
             return
         }
         Task {
@@ -2906,7 +2906,7 @@ struct RootView: View {
                     effort: launch.effort
                 )
                 guard let command = argv.first else {
-                    todo.errorMessage = "The agent command was empty."
+                    todo.errorMessage = L10n.text("apple.rootview.the_agent_command_was_empty.793c23f6")
                     return
                 }
                 navigate(to: .workspace(id: folder.id, section: .sessions)) {
@@ -2921,7 +2921,7 @@ struct RootView: View {
                 )
                 if session == nil {
                     todo.errorMessage = terminals.errorMessage
-                        ?? "Could not start a terminal."
+                        ?? L10n.text("apple.rootview.could_not_start_a_terminal.6e9cc764")
                     return
                 }
                 // OpenCode 2 seeds the prompt box but does not submit it.
@@ -2946,7 +2946,7 @@ struct RootView: View {
         #if os(macOS)
         guard let workspaceID = info.workspaceID,
               workspaces.folders.contains(where: { $0.id == workspaceID }) else {
-            todo.errorMessage = "This task's project is unavailable. The run is still active."
+            todo.errorMessage = L10n.text("apple.rootview.this_task_s_project_is_unavailable_the_run.af0a2ce5")
             return
         }
         _ = terminals.open(info)
@@ -2962,29 +2962,29 @@ struct RootView: View {
     private func projectActions(_ folder: WorkspaceFolder) -> [NativeMenuItem] {
         var items = SidebarPinAction.items(reference: pinReference(for: folder), name: folder.name, folderName: folder.name)
         if let reference = pinReference(for: folder) {
-            items.append(.init("Saved work on this device", icon: .archive) {
+            items.append(.init(L10n.text("apple.rootview.saved_work_on_this_device.6942a15d"), icon: .archive) {
                 savedFolder = .init(reference: reference, name: folder.name)
             })
         }
         items.append(.separator)
         if !folder.isRemote {
-            items.append(.init("Reveal in Finder", icon: .reveal) { workspaces.revealInFinder(folder) })
+            items.append(.init(L10n.text("apple.rootview.reveal_in_finder.cc849385"), icon: .reveal) { workspaces.revealInFinder(folder) })
         } else if let peer = folder.machineID, !peer.isEmpty {
-            items.append(.init("Disconnect from \(folder.machineLabel ?? "this computer")", icon: .disconnect) {
+            items.append(.init(L10n.text("apple.rootview.disconnect_from_0.cc8c176c", "\(folder.machineLabel ?? L10n.text("apple.rootview.this_computer.058bf37c"))"), icon: .disconnect) {
                 NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: peer)
             })
         }
         items.append(.separator)
-        items.append(.init("New chat", icon: .create) { startNewChat(in: folder) })
-        items.append(.init("New terminal…", icon: .create) {
+        items.append(.init(L10n.text("apple.rootview.new_chat.db18382a"), icon: .create) { startNewChat(in: folder) })
+        items.append(.init(L10n.text("apple.rootview.new_terminal.9456c8eb"), icon: .create) {
             openSection(.sessions, in: folder.id) { workspaces.showLauncher(in: folder.id) }
         })
         if folder.git?.isRepo == true {
-            items.append(.init("Worktrees…", icon: .source) { worktreeProject = folder })
+            items.append(.init(L10n.text("apple.rootview.worktrees.c336cb52"), icon: .source) { worktreeProject = folder })
         }
-        items.append(.init("Delete all chats…", icon: .delete, destructive: true) { workspacePendingChatRemoval = folder })
+        items.append(.init(L10n.text("apple.rootview.delete_all_chats.9753e785"), icon: .delete, destructive: true) { workspacePendingChatRemoval = folder })
         items.append(.separator)
-        items.append(.init("Remove from tokenstat…", icon: .delete, destructive: true) { workspacePendingRemove = folder })
+        items.append(.init(L10n.text("apple.rootview.remove_from_tokenstat.195e6064"), icon: .delete, destructive: true) { workspacePendingRemove = folder })
         return items
     }
 
@@ -2998,13 +2998,13 @@ struct RootView: View {
             guard scope == WorkSessionContext.shared.scope else { return }
             let profiles = peer.map { catalog.remoteAvailable(for: $0) } ?? catalog.available
             guard let shell = profiles.first(where: { $0.id == "shell" }) ?? (peer == nil ? .shellFallback : nil) else {
-                terminals.errorMessage = "Reconnect the project's computer to open a new shell."
+                terminals.errorMessage = L10n.text("apple.rootview.reconnect_the_project_s_computer_to_open_a.5d2cf5ef")
                 return
             }
             openSection(.sessions, in: folder.id)
             if let copy = await terminals.start(workspace: folder, command: shell.command,
                                                 args: shell.args, rows: session.rows, cols: session.cols) {
-                SidebarTerminalNames.shared.rename(copy.workReference, to: "\(session.customName ?? "Shell") (copy)",
+                SidebarTerminalNames.shared.rename(copy.workReference, to: L10n.text("apple.rootview.0_copy.c242571e", "\(session.customName ?? L10n.text("apple.rootview.shell.a7332854"))"),
                                                    folderName: folder.name)
             }
         }
@@ -3137,7 +3137,7 @@ struct RootView: View {
                 HStack {
                     // Count only the rows this expander reveals. The rest
                     // of the archive belongs to See all chats.
-                    Button(expanded ? "Show less" : "Show \(min(conversations.count, ChatHistoryWindow.inlineLimit) - window.count) more") {
+                    Button(expanded ? L10n.text("apple.rootview.show_less.94ea9b1d") : L10n.text("apple.rootview.show_0_more.b91c3640", "\(min(conversations.count, ChatHistoryWindow.inlineLimit) - window.count)")) {
                         if expanded {
                             expandedChatHistories.remove(folder.id)
                         } else {
@@ -3151,7 +3151,7 @@ struct RootView: View {
                     // Past the warm ten the rest live in the full chat
                     // window, where search, filters and sorting exist.
                     if conversations.count > ChatHistoryWindow.inlineLimit {
-                        Button("See all chats", .search) {
+                        Button(L10n.text("apple.rootview.see_all_chats.e705024a"), .search) {
                             openSection(.chat, in: folder.id) {
                                 showingChatOverview = true
                             }
@@ -3315,10 +3315,10 @@ struct RootView: View {
             if let conversation, let folderID, chat.isUnused(conversation, in: folderID) { return nil }
             let title = conversation?.title
             let machine = reference.hostIdentity == WorkSessionContext.shared.localHostIdentity
-                ? "This Mac" : folder?.machineLabel ?? "Remote machine"
+                ? L10n.text("apple.rootview.this_mac.79a4aefc") : folder?.machineLabel ?? L10n.text("apple.rootview.remote_machine.d9dd1af3")
             return DesktopHomeDestination(
-                reference: reference, title: title ?? "Conversation in \(folder?.name ?? "a previous folder")",
-                subtitle: "\(folder?.name ?? "Folder") · \(machine)",
+                reference: reference, title: title ?? L10n.text("apple.rootview.conversation_in_0.ad84a8f5", "\(folder?.name ?? L10n.text("apple.rootview.a_previous_folder.b0435053"))"),
+                subtitle: "\(folder?.name ?? L10n.text("apple.rootview.folder.74ccd433")) · \(machine)",
                 unavailable: workAvailabilityMessage(reference)
             )
         }
@@ -3374,7 +3374,7 @@ struct RootView: View {
         )
         let folder = workspaces.folders.first { $0.id == folderID }
         let machine = pin.reference.hostIdentity == WorkSessionContext.shared.localHostIdentity
-            ? "This Mac" : folder?.machineLabel ?? "Remote machine"
+            ? L10n.text("apple.rootview.this_mac.79a4aefc") : folder?.machineLabel ?? L10n.text("apple.rootview.remote_machine.d9dd1af3")
         return pin.reference.kind == .workspace ? machine : "\(pin.folderName) · \(machine)"
     }
 
@@ -3395,12 +3395,12 @@ struct RootView: View {
     private func workAvailabilityMessage(_ reference: WorkReference) -> String? {
         switch desktopAvailability(reference) {
         case .live, .savedCopy: nil
-        case .accessRequired: "Verify this account and its project access"
-        case .hostRemoved: "This machine is no longer linked"
-        case .itemDeleted: "This work is no longer available"
-        case .unsupportedHost: "Update the host to open this work"
-        case .reconnecting: "Reconnecting to the machine"
-        case .unavailable: "Connect the machine and open its folder in Projects"
+        case .accessRequired: L10n.text("apple.rootview.verify_this_account_and_its_project_access.e7a9f207")
+        case .hostRemoved: L10n.text("apple.rootview.this_machine_is_no_longer_linked.b502d162")
+        case .itemDeleted: L10n.text("apple.rootview.this_work_is_no_longer_available.81259506")
+        case .unsupportedHost: L10n.text("apple.rootview.update_the_host_to_open_this_work.596b980e")
+        case .reconnecting: L10n.text("apple.rootview.reconnecting_to_the_machine.ff19692f")
+        case .unavailable: L10n.text("apple.rootview.connect_the_machine_and_open_its_folder_in.04907021")
         }
     }
 
@@ -3408,7 +3408,7 @@ struct RootView: View {
         if let message = workAvailabilityMessage(pin.reference) { return message }
         #if os(macOS)
         if pin.reference.kind == .terminal, terminalForPin(pin) == nil {
-            return "This terminal session has ended"
+            return L10n.text("apple.rootview.this_terminal_session_has_ended.022b26e2")
         }
         #endif
         return nil
@@ -3763,25 +3763,25 @@ private struct RemoveWorkspaceConfirm: View {
         Color.clear
             .frame(width: 0, height: 0)
             .confirmationDialog(
-                "Remove from tokenstat?",
+                L10n.text("apple.rootview.remove_from_tokenstat.ab2e2b74"),
                 isPresented: Binding(
                     get: { folder != nil },
                     set: { if !$0 { folder = nil } }
                 ),
                 titleVisibility: .visible
             ) {
-                Button("Remove", role: .destructive) {
+                Button(L10n.text("common.remove"), role: .destructive) {
                     if let folder {
                         remove(folder)
                     }
                     folder = nil
                 }
-                Button("Keep it", role: .cancel) {
+                Button(L10n.text("apple.rootview.keep_it.fdce5da2"), role: .cancel) {
                     folder = nil
                 }
             } message: {
                 Text(
-                    "Remove \(folder?.name ?? "this folder") from the sidebar? The folder on disk is not deleted."
+                    L10n.text("apple.rootview.remove_0_from_the_sidebar_the_folder_on_di.aef7692a", "\(folder?.name ?? L10n.text("apple.rootview.this_folder.9d6325c8"))")
                 )
             }
     }
@@ -3795,20 +3795,20 @@ private struct RemoveAllChatsConfirm: View {
         Color.clear
             .frame(width: 0, height: 0)
             .confirmationDialog(
-                "Remove every chat?",
+                L10n.text("apple.rootview.remove_every_chat.fc1af6bd"),
                 isPresented: Binding(
                     get: { folder != nil },
                     set: { if !$0 { folder = nil } }
                 ),
                 titleVisibility: .visible
             ) {
-                Button("Remove all chats", role: .destructive) {
+                Button(L10n.text("apple.rootview.remove_all_chats.c32cefb3"), role: .destructive) {
                     if let folder { remove(folder) }
                     folder = nil
                 }
-                Button("Cancel", role: .cancel) { folder = nil }
+                Button(L10n.text("common.cancel"), role: .cancel) { folder = nil }
             } message: {
-                Text("This permanently deletes every chat transcript in \(folder?.name ?? "this project").")
+                Text(L10n.text("apple.rootview.this_permanently_deletes_every_chat_transc.1579eb9d", "\(folder?.name ?? L10n.text("apple.rootview.this_project.11453073"))"))
             }
     }
 }
@@ -3823,22 +3823,22 @@ private struct CloseSessionConfirm: View {
         Color.clear
             .frame(width: 0, height: 0)
             .confirmationDialog(
-                "Stop this session?",
+                L10n.text("apple.rootview.stop_this_session.5efe50c8"),
                 isPresented: Binding(
                     get: { session != nil },
                     set: { if !$0 { session = nil } }
                 ),
                 titleVisibility: .visible
             ) {
-                Button("Stop and close", role: .destructive) {
+                Button(L10n.text("apple.rootview.stop_and_close.52b40c33"), role: .destructive) {
                     if let session {
                         close(session)
                     }
                     session = nil
                 }
-                Button("Cancel", role: .cancel) { session = nil }
+                Button(L10n.text("common.cancel"), role: .cancel) { session = nil }
             } message: {
-                Text("The process will be killed. A stopped session can still close in one click.")
+                Text(L10n.text("apple.rootview.the_process_will_be_killed_a_stopped_sessi.bf3e9249"))
             }
     }
 }
@@ -3856,20 +3856,20 @@ private struct CloseSSHSessionsConfirm: View {
         Color.clear
             .frame(width: 0, height: 0)
             .confirmationDialog(
-                "Close every session on this server?",
+                L10n.text("apple.rootview.close_every_session_on_this_server.306d4ecd"),
                 isPresented: Binding(
                     get: { host != nil },
                     set: { if !$0 { host = nil } }
                 ),
                 titleVisibility: .visible
             ) {
-                Button("Close all", role: .destructive) {
+                Button(L10n.text("apple.rootview.close_all.5d1552a8"), role: .destructive) {
                     if let host {
                         close(host)
                     }
                     host = nil
                 }
-                Button("Cancel", role: .cancel) { host = nil }
+                Button(L10n.text("common.cancel"), role: .cancel) { host = nil }
             } message: {
                 Text(message)
             }
@@ -3879,7 +3879,7 @@ private struct CloseSSHSessionsConfirm: View {
         guard let host else { return "" }
         let count = sessionCount(host)
         let noun = count == 1 ? "session" : "sessions"
-        return "Close \(count) \(noun) on \(host.label)? Anything still running in them stops."
+        return L10n.text("apple.rootview.close_0_1_on_2_anything_still_running_in_t.402ac91d", "\(count)", "\(noun)", "\(host.label)")
     }
 }
 
@@ -4226,12 +4226,12 @@ private struct StateBadge: View {
 
     private var label: String {
         switch state {
-        case .none: return "No sessions"
-        case .working: return "Working"
-        case .starting: return "Starting"
-        case .idle: return "Idle"
-        case .needsAttention: return "Needs attention"
-        case .stopped: return "Stopped"
+        case .none: return L10n.text("apple.rootview.no_sessions.f857df8f")
+        case .working: return L10n.text("common.working")
+        case .starting: return L10n.text("apple.rootview.starting.aeed4d26")
+        case .idle: return L10n.text("common.idle")
+        case .needsAttention: return L10n.text("apple.rootview.needs_attention.c1ebc781")
+        case .stopped: return L10n.text("apple.rootview.stopped.1a4f630a")
         }
     }
 
@@ -4383,7 +4383,7 @@ private struct WorkspaceRow: View {
 
     private var label: String {
         folder.isRemote
-            ? "\(folder.machineLabel ?? "Remote") / \(folder.name)"
+            ? "\(folder.machineLabel ?? L10n.text("apple.rootview.remote.ffa98e02")) / \(folder.name)"
             : folder.name
     }
 
@@ -4411,7 +4411,7 @@ private struct WorkspaceRow: View {
             .buttonStyle(.plain)
             HStack(spacing: 4) {
                 SidebarRowActions(name: folder.name, visible: isHovering,
-                                  deleteTitle: "Remove project", delete: remove,
+                                  deleteTitle: L10n.text("apple.rootview.remove_project.704e7388"), delete: remove,
                                   hover: { _ in }, actions: { menu })
                 Button(action: newChat) {
                     Image(systemName: "square.and.pencil")
@@ -4423,8 +4423,8 @@ private struct WorkspaceRow: View {
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                .help("New chat in \(folder.name)")
-                .accessibilityLabel("New chat in \(folder.name)")
+                .help(L10n.text("apple.rootview.new_chat_in_0.2436f7d3", "\(folder.name)"))
+                .accessibilityLabel(L10n.text("apple.rootview.new_chat_in_0.2436f7d3", "\(folder.name)"))
                 .opacity(isHovering ? 1 : 0)
                 .allowsHitTesting(isHovering)
                 .accessibilityHidden(!isHovering)
@@ -4439,42 +4439,42 @@ private struct WorkspaceRow: View {
         .onHover { isHovering = $0 }
         .sidebarContextMenu(items: { menu })
         .sidebarHoverCard(hovering: isHovering, enabled: !renaming, suppressOpening: controlsHovered) {
-            SidebarDetailCard(title: folder.name, subtitle: "Project", symbol: "folder",
+            SidebarDetailCard(title: folder.name, subtitle: L10n.text("apple.rootview.project.98595978"), symbol: "folder",
                               path: folder.path, fields: detailFields) {
                 if !folder.isRemote {
-                    Button("Open in Finder", .reveal, action: reveal)
+                    Button(L10n.text("apple.rootview.open_in_finder.91fd498d"), .reveal, action: reveal)
                         .buttonStyle(AccentButtonStyle())
                 }
             }
         }
         .sheet(isPresented: $renaming) {
-            SidebarRenameSheet(title: "Rename project", currentName: folder.name, save: rename)
+            SidebarRenameSheet(title: L10n.text("apple.rootview.rename_project.2a0478ee"), currentName: folder.name, save: rename)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(label). \(folder.subtitle ?? "No branch")")
+        .accessibilityLabel("\(label). \(folder.subtitle ?? L10n.text("apple.rootview.no_branch.db114adc"))")
     }
 
     private var menu: [NativeMenuItem] {
-        [.init("Rename…", icon: .edit) { renaming = true }] + actions()
+        [.init(L10n.text("apple.rootview.rename.6fa62b3d"), icon: .edit) { renaming = true }] + actions()
     }
 
     private var detailFields: [SidebarDetailField] {
         var fields = [
-            SidebarDetailField(title: "Computer", value: folder.sidebarComputer, symbol: "laptopcomputer"),
-            SidebarDetailField(title: "Chats", value: summary?.chats.map { String($0) } ?? "Not loaded yet", symbol: "bubble.left.and.bubble.right"),
-            SidebarDetailField(title: "Active terminals", value: String(summary?.sessions ?? activeTerminals), symbol: "terminal"),
+            SidebarDetailField(title: L10n.text("apple.rootview.computer.76ed42d2"), value: folder.sidebarComputer, symbol: "laptopcomputer"),
+            SidebarDetailField(title: L10n.text("common.chats"), value: summary?.chats.map { String($0) } ?? "Not loaded yet", symbol: "bubble.left.and.bubble.right"),
+            SidebarDetailField(title: L10n.text("apple.rootview.active_terminals.f3f30a21"), value: String(summary?.sessions ?? activeTerminals), symbol: "terminal"),
         ]
         if let git = folder.git, git.isRepo {
-            fields.append(.init(title: "Branch", value: git.branch.flatMap { $0.isEmpty ? nil : $0 } ?? "Detached HEAD", symbol: "arrow.triangle.branch"))
-            fields.append(.init(title: "Changed files", value: String(git.files.count), symbol: "doc.badge.ellipsis"))
+            fields.append(.init(title: L10n.text("apple.rootview.branch.52656e81"), value: git.branch.flatMap { $0.isEmpty ? nil : $0 } ?? "Detached HEAD", symbol: "arrow.triangle.branch"))
+            fields.append(.init(title: L10n.text("apple.rootview.changed_files.5d4041aa"), value: String(git.files.count), symbol: "doc.badge.ellipsis"))
             if !git.files.isEmpty {
-                fields.append(.init(title: "Lines", value: "+\(git.added) −\(git.removed)\(git.partial ? " (partial)" : "")", symbol: "plus.forwardslash.minus"))
+                fields.append(.init(title: L10n.text("apple.rootview.lines.3b26a542"), value: "+\(git.added) −\(git.removed)\(git.partial ? " (partial)" : "")", symbol: "plus.forwardslash.minus"))
             }
             if git.ahead > 0 || git.behind > 0 {
-                fields.append(.init(title: "Upstream", value: "\(git.ahead) ahead · \(git.behind) behind", symbol: "arrow.up.arrow.down"))
+                fields.append(.init(title: L10n.text("apple.rootview.upstream.94adc696"), value: "\(git.ahead) ahead · \(git.behind) behind", symbol: "arrow.up.arrow.down"))
             }
         } else {
-            fields.append(.init(title: "Git", value: folder.exists ? "Not a repository" : "Folder missing", symbol: "questionmark.folder"))
+            fields.append(.init(title: L10n.text("apple.rootview.git.b949c922"), value: folder.exists ? "Not a repository" : "Folder missing", symbol: "questionmark.folder"))
         }
         return fields
     }
@@ -4556,7 +4556,7 @@ private struct SidebarGroupHeader<Trailing: View>: View {
                     }
                     .buttonStyle(.plain)
                     .onHover { isHovering = $0 }
-                    .help(isExpanded ? "Collapse \(title)" : "Expand \(title)")
+                    .help(isExpanded ? L10n.text("apple.rootview.collapse_0.61eb8723", "\(title)") : L10n.text("apple.rootview.expand_0.e1580a27", "\(title)"))
                 } else {
                     header(chevron: nil)
                 }
@@ -4626,7 +4626,7 @@ private struct ChatSidebarConversationRow: View {
                 HStack(spacing: Theme.Space.xs) {
                     HStack(spacing: Theme.Space.s) {
                         HarnessMark(id: conversation.backend, size: DisplayFit.dp(16))
-                        Text(conversation.title.isEmpty ? "Untitled conversation" : conversation.title)
+                        Text(conversation.title.isEmpty ? L10n.text("apple.rootview.untitled_conversation.31d248c4") : conversation.title)
                             .font(Theme.fit(13, weight: isSelected ? .medium : .regular))
                             .foregroundStyle(isSelected ? Color.primary : Theme.controlGlyph)
                             .lineLimit(1)
@@ -4649,11 +4649,11 @@ private struct ChatSidebarConversationRow: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(conversation.title.isEmpty ? "Untitled conversation" : conversation.title)
+            .accessibilityLabel(conversation.title.isEmpty ? L10n.text("apple.rootview.untitled_conversation.31d248c4") : conversation.title)
             // Only this small control intercepts clicks on the full row.
             SidebarRowActions(name: conversation.title, visible: isHovering,
                               canDelete: !conversation.running && !copying,
-                              deleteTitle: "Delete chat", delete: { confirmsRemoval = true },
+                              deleteTitle: L10n.text("apple.rootview.delete_chat.93291d9c"), delete: { confirmsRemoval = true },
                               hover: { controlsHovered = $0 }, actions: { menu })
             .padding(.trailing, Theme.Space.s + 2)
         }
@@ -4681,28 +4681,28 @@ private struct ChatSidebarConversationRow: View {
             SidebarChatDetailCard(conversation: conversation, folder: folder)
         }
         .sheet(isPresented: $renaming) {
-            SidebarRenameSheet(title: "Rename chat", currentName: conversation.title, save: rename)
+            SidebarRenameSheet(title: L10n.text("apple.rootview.rename_chat.26076241"), currentName: conversation.title, save: rename)
         }
-        .alert("Couldn’t fork this chat", isPresented: Binding(
+        .alert(L10n.text("apple.rootview.couldn_t_fork_this_chat.3aace6d2"), isPresented: Binding(
             get: { actionError != nil }, set: { if !$0 { actionError = nil } }
         )) {
-            Button("OK", role: .cancel) { actionError = nil }
+            Button(L10n.text("apple.rootview.ok.565339bc"), role: .cancel) { actionError = nil }
         } message: { Text(actionError ?? "") }
         .confirmationDialog(
-            "Delete this chat?",
+            L10n.text("apple.rootview.delete_this_chat.848dad9b"),
             isPresented: $confirmsRemoval,
             titleVisibility: .visible
         ) {
-            Button("Delete chat", role: .destructive, action: remove)
-            Button("Cancel", role: .cancel) {}
+            Button(L10n.text("apple.rootview.delete_chat.93291d9c"), role: .destructive, action: remove)
+            Button(L10n.text("common.cancel"), role: .cancel) {}
         } message: {
-            Text("This permanently deletes the transcript.")
+            Text(L10n.text("apple.rootview.this_permanently_deletes_the_transcript.470ca3e0"))
         }
     }
     private var menu: [NativeMenuItem] {
-        var items = [NativeMenuItem("Rename…", icon: .edit) { renaming = true }]
+        var items = [NativeMenuItem(L10n.text("apple.rootview.rename.6fa62b3d"), icon: .edit) { renaming = true }]
         items += SidebarPinAction.items(reference: draft, name: conversation.title, folderName: folder.name)
-        items.append(.init(copying ? "Forking…" : "Fork chat", icon: .copy, isEnabled: !conversation.running && !copying) {
+        items.append(.init(copying ? L10n.text("apple.rootview.forking.b24686d8") : L10n.text("apple.rootview.fork_chat.dfbcbb35"), icon: .copy, isEnabled: !conversation.running && !copying) {
             guard !copying else { return }
             copying = true
             Task {
@@ -4712,7 +4712,7 @@ private struct ChatSidebarConversationRow: View {
             }
         })
         items.append(.separator)
-        items.append(.init("Delete chat…", icon: .delete, isEnabled: !conversation.running && !copying,
+        items.append(.init(L10n.text("apple.rootview.delete_chat.f618c627"), icon: .delete, isEnabled: !conversation.running && !copying,
                            destructive: true) { confirmsRemoval = true })
         return items
     }
@@ -4730,13 +4730,13 @@ extension ChatSidebarConversationRow {
                 if let since = runningSince {
                     TurnElapsedText(since: since)
                 } else {
-                    Text("Working")
+                    Text(L10n.text("common.working"))
                 }
             }
             .font(Theme.numeric(11))
             .foregroundStyle(Theme.accent)
             .fixedSize()
-            .accessibilityLabel("Working")
+            .accessibilityLabel(L10n.text("common.working"))
         } else {
             Text(CompactAge.text(ms: conversation.lastMessageAtMs ?? conversation.updatedAtMs))
                 .font(Theme.numeric(11))
@@ -4763,7 +4763,7 @@ private struct ActiveWorkflowRow: View {
                         .font(Theme.fit(RowMetrics.title, weight: isSelected ? .semibold : .regular))
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    Text("\(run.steps.count) steps")
+                    Text(L10n.text("apple.rootview.0_steps.5cd7f90f", "\(run.steps.count)"))
                         .font(Theme.numeric(RowMetrics.meta))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -4780,7 +4780,7 @@ private struct ActiveWorkflowRow: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
-        .help("Open this running workflow")
+        .help(L10n.text("apple.rootview.open_this_running_workflow.5320e2a2"))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(run.name). \(run.endedLabel)")
     }
@@ -4845,9 +4845,9 @@ private struct ActiveAutomationRow: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
-        .help("Open this running job")
+        .help(L10n.text("apple.rootview.open_this_running_job.562692ab"))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(job.name). \(backendLabel). Working")
+        .accessibilityLabel(L10n.text("apple.rootview.0_1_working.6e868daa", "\(job.name)", "\(backendLabel)"))
     }
 
     private var background: some View {
@@ -4949,17 +4949,17 @@ private struct ActiveSessionRow: View {
             return "0% ctx"
         }
         guard let window = meter.contextWindow, window > 0 else {
-            return "\(formatTokens(used)) ctx"
+            return L10n.text("apple.rootview.0_ctx.a68da93d", "\(formatTokens(used))")
         }
         let pct = Int((Double(used) / Double(window) * 100).rounded())
-        return "\(meter.contextEstimated ? "~" : "")\(pct)% ctx"
+        return L10n.text("apple.rootview.0_1_ctx.a6e7a82e", "\(meter.contextEstimated ? "~" : "")", "\(pct)")
     }
 
     /// CPU and RAM, for the tooltip and as the line-two fallback.
     private var resourceStats: String? {
         var parts: [String] = []
         if let cpu = session.cpuPercent {
-            parts.append("CPU \(Int(cpu.rounded()))%")
+            parts.append(L10n.text("apple.rootview.cpu_0.bc621b54", "\(Int(cpu.rounded()))"))
         }
         if let memory = session.memoryMb, memory >= 1 {
             // Gigabytes past a thousand: an agent with a language server and
@@ -4983,12 +4983,12 @@ private struct ActiveSessionRow: View {
         if session.meter?.costMicros != nil {
             lines.append(
                 session.meter?.isPlan == true
-                    ? "Covered by your plan. API list price, not an extra bill."
-                    : "API list price, not an extra bill."
+                    ? L10n.text("apple.rootview.covered_by_your_plan_api_list_price_not_an.ed0c7f17")
+                    : L10n.text("apple.rootview.api_list_price_not_an_extra_bill.a12d94fd")
             )
         }
         if session.meter?.contextEstimated == true {
-            lines.append("Context window estimated from related models.")
+            lines.append(L10n.text("apple.rootview.context_window_estimated_from_related_mode.9d7879e3"))
         }
         return lines.joined(separator: "\n")
     }
@@ -5002,7 +5002,7 @@ private struct ActiveSessionRow: View {
            window > 0
         {
             let pct = Int((Double(used) / Double(window) * 100).rounded())
-            parts.append("context \(pct) percent")
+            parts.append(L10n.text("apple.rootview.context_0_percent.abe03309", "\(pct)"))
         }
         parts.append(session.state.label)
         return parts.joined(separator: ". ")
@@ -5030,7 +5030,7 @@ private struct ActiveSessionRow: View {
             }
             .buttonStyle(.plain)
             SidebarRowActions(name: title, visible: isHovering,
-                              deleteTitle: session.alive ? "Stop and close" : "Close terminal",
+                              deleteTitle: session.alive ? L10n.text("apple.rootview.stop_and_close.52b40c33") : L10n.text("apple.rootview.close_terminal.7d02fb04"),
                               delete: close, hover: { controlsHovered = $0 }, actions: { menu })
                 .padding(.trailing, Theme.Space.s + 2)
         }
@@ -5039,12 +5039,12 @@ private struct ActiveSessionRow: View {
         .onHover { isHovering = $0 }
         .sidebarContextMenu(items: { menu })
         .sidebarHoverCard(hovering: isHovering, enabled: !renaming, suppressOpening: controlsHovered) {
-            SidebarDetailCard(title: title, subtitle: dynamicTitle.map { "Terminal · \($0)" } ?? "Terminal",
+            SidebarDetailCard(title: title, subtitle: dynamicTitle.map { L10n.text("apple.rootview.terminal_0.f851d42b", "\($0)") } ?? L10n.text("apple.rootview.terminal.e0926fda"),
                               symbol: "terminal", path: session.reportedCwd ?? session.cwd,
                               fields: detailFields) { EmptyView() }
         }
         .sheet(isPresented: $renaming) {
-            SidebarRenameSheet(title: "Rename terminal", currentName: title) { name in
+            SidebarRenameSheet(title: L10n.text("apple.rootview.rename_terminal.68e0c2a6"), currentName: title) { name in
                 SidebarTerminalNames.shared.rename(session.workReference, to: name, folderName: folder.name)
             }
         }
@@ -5053,36 +5053,36 @@ private struct ActiveSessionRow: View {
     }
 
     private var menu: [NativeMenuItem] {
-        var items = [NativeMenuItem("Rename…", icon: .edit, isEnabled: session.workReference != nil) { renaming = true }]
+        var items = [NativeMenuItem(L10n.text("apple.rootview.rename.6fa62b3d"), icon: .edit, isEnabled: session.workReference != nil) { renaming = true }]
         items += SidebarPinAction.items(reference: session.workReference, name: title, folderName: folder.name)
-        items.append(.init("Duplicate into new shell", icon: .copy, isEnabled: !session.isPending, action: duplicate))
+        items.append(.init(L10n.text("apple.rootview.duplicate_into_new_shell.67042025"), icon: .copy, isEnabled: !session.isPending, action: duplicate))
         items.append(.separator)
-        items.append(.init(session.alive ? "Stop and close…" : "Close", icon: .delete,
+        items.append(.init(session.alive ? L10n.text("apple.rootview.stop_and_close.9712e7bb") : L10n.text("common.close"), icon: .delete,
                            destructive: true, action: close))
         return items
     }
 
     private var detailFields: [SidebarDetailField] {
         var fields = [
-            SidebarDetailField(title: "Project", value: folder.name, symbol: "folder"),
-            SidebarDetailField(title: "Computer", value: folder.sidebarComputer, symbol: "laptopcomputer"),
-            SidebarDetailField(title: "Status", value: session.state.label, symbol: "circle.dotted"),
-            SidebarDetailField(title: "Command", value: session.command, symbol: "terminal"),
+            SidebarDetailField(title: L10n.text("apple.rootview.project.98595978"), value: folder.name, symbol: "folder"),
+            SidebarDetailField(title: L10n.text("apple.rootview.computer.76ed42d2"), value: folder.sidebarComputer, symbol: "laptopcomputer"),
+            SidebarDetailField(title: L10n.text("apple.rootview.status.920e413c"), value: session.state.label, symbol: "circle.dotted"),
+            SidebarDetailField(title: L10n.text("apple.rootview.command.71316697"), value: session.command, symbol: "terminal"),
         ]
         if let meter = session.meter {
-            fields.append(.init(title: "Tokens", value: meter.tokens.formatted(), symbol: "number"))
-            fields.append(.init(title: "Context", value: contextText, symbol: "gauge.with.dots.needle.50percent"))
-            if let model = meter.model { fields.append(.init(title: "Model", value: model, symbol: "sparkles")) }
+            fields.append(.init(title: L10n.text("apple.rootview.tokens.a039dfb9"), value: meter.tokens.formatted(), symbol: "number"))
+            fields.append(.init(title: L10n.text("apple.rootview.context.a6e600a1"), value: contextText, symbol: "gauge.with.dots.needle.50percent"))
+            if let model = meter.model { fields.append(.init(title: L10n.text("apple.rootview.model.5e2c614c"), value: model, symbol: "sparkles")) }
             if let cost = meter.costMicros {
-                fields.append(.init(title: "List price", value: Money(micros: cost, estimated: meter.estimated,
+                fields.append(.init(title: L10n.text("apple.rootview.list_price.5d5835fd"), value: Money(micros: cost, estimated: meter.estimated,
                                                                     complete: meter.complete).formatted,
                                     symbol: "dollarsign.circle"))
             }
         } else {
-            fields.append(.init(title: "Tokens", value: "Not reported by this terminal", symbol: "number"))
+            fields.append(.init(title: L10n.text("apple.rootview.tokens.a039dfb9"), value: "Not reported by this terminal", symbol: "number"))
         }
         if let resources = resourceStats {
-            fields.append(.init(title: "Resources", value: resources, symbol: "cpu"))
+            fields.append(.init(title: L10n.text("apple.rootview.resources.e89b30aa"), value: resources, symbol: "cpu"))
         }
         return fields
     }

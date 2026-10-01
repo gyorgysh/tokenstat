@@ -16,7 +16,7 @@ struct TaskCreationDestination: View {
         Group {
             if let session, session.target == target, session.initialFolder == workspaceID, session.column == column {
                 TaskCreationView(session: session, hostName: hostName, onCreated: onCreated)
-            } else { ProgressView("Opening new task").font(Theme.callout) }
+            } else { ProgressView(L10n.text("apple.taskcreationview.opening_new_task.f5798e7b")).font(Theme.callout) }
         }
         .modalFrame(width: 1000, height: 760)
         .task(id: identity) {
@@ -36,7 +36,7 @@ struct TaskCreationView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        ThemedSheet(title: session.saved.outcome == nil ? "New task" : "Task created", subtitle: hostName, icon: .create,
+        ThemedSheet(title: session.saved.outcome == nil ? L10n.text("apple.taskcreationview.new_task.3e992276") : L10n.text("apple.taskcreationview.task_created.a3e3e968"), subtitle: hostName, icon: .create,
                     onClose: { Task { await session.flush(); dismiss() } }) {
             GeometryReader { geometry in
                 let wide = geometry.size.width >= 760 && !typeSize.isAccessibilitySize
@@ -48,9 +48,9 @@ struct TaskCreationView: View {
                         } else {
                             TaskFieldsView(fields: $session.fields, backends: session.backends, folders: session.folders,
                                            wide: wide, minimumHeight: wide ? max(320, geometry.size.height - 120) : max(220, geometry.size.height * 0.45),
-                                           draftStatus: session.persistedFields == session.fields ? "Draft kept on this device" : "Saving draft on this device…",
+                                           draftStatus: session.persistedFields == session.fields ? L10n.text("apple.taskcreationview.draft_kept_on_this_device.980c4050") : L10n.text("apple.taskcreationview.saving_draft_on_this_device.40996e62"),
                                            showValidation: !session.fields.title.isEmpty || !session.fields.prompt.isEmpty,
-                                           timeLimitStatus: session.saved.needsDefault ? "Connect to this computer to load its default time limit." : nil)
+                                           timeLimitStatus: session.saved.needsDefault ? L10n.text("apple.taskcreationview.connect_to_this_computer_to_load_its_defau.811c4f8f") : nil)
                                 .disabled(!session.canEdit)
                         }
                     }
@@ -58,7 +58,7 @@ struct TaskCreationView: View {
             }
         } actions: {
             if let outcome = session.saved.outcome {
-                Button("Done", .done) {
+                Button(L10n.text("common.done"), .done) {
                     Task {
                         await onCreated(outcome.card)
                         if await session.finish(operationID: outcome.operationID) { dismiss() }
@@ -67,14 +67,14 @@ struct TaskCreationView: View {
                 .buttonStyle(AccentButtonStyle(comfortable: true))
                 .disabled(session.working || session.otherDraft != nil)
             } else if session.saved.pending != nil {
-                Button("Check creation", .refresh) { Task { await session.check() } }
+                Button(L10n.text("apple.taskcreationview.check_creation.61fe51e6"), .refresh) { Task { await session.check() } }
                     .buttonStyle(SecondaryButtonStyle(comfortable: true)).disabled(session.working)
                 if session.canRetry {
-                    Button("Retry creation", .create) { Task { await session.retry() } }
+                    Button(L10n.text("apple.taskcreationview.retry_creation.0bb084c1"), .create) { Task { await session.retry() } }
                         .buttonStyle(AccentButtonStyle(comfortable: true)).disabled(session.working || session.otherDraft != nil)
                 }
             } else {
-                Button("Create task", .create) { Task { await session.create() } }
+                Button(L10n.text("apple.taskcreationview.create_task.6f541e1b"), .create) { Task { await session.create() } }
                     .buttonStyle(AccentButtonStyle(comfortable: true)).disabled(!session.canCreate)
             }
         }
@@ -84,28 +84,28 @@ struct TaskCreationView: View {
     }
 
     @ViewBuilder private var notices: some View {
-        if session.working { ProgressView(session.saved.pending == nil ? "Preparing task" : "Confirming creation").font(Theme.callout) }
+        if session.working { ProgressView(session.saved.pending == nil ? L10n.text("apple.taskcreationview.preparing_task.8ae683d9") : L10n.text("apple.taskcreationview.confirming_creation.d539f921")).font(Theme.callout) }
         if let message = session.noticeMessage {
             Text(message).font(Theme.callout).foregroundStyle(Theme.controlGlyph)
         }
         if let message = session.errorMessage {
             Text(message).font(Theme.callout).foregroundStyle(Theme.danger).textSelection(.enabled)
             if session.saved.pending == nil {
-                Button("Reload options", .refresh) { Task { await session.load() } }
+                Button(L10n.text("apple.taskcreationview.reload_options.e9ed25ed"), .refresh) { Task { await session.load() } }
                     .buttonStyle(SecondaryButtonStyle(comfortable: true)).disabled(session.working)
             }
         }
         if let other = session.otherDraft {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Text("Draft from another window").font(Theme.callout.weight(.semibold))
+                Text(L10n.text("apple.taskcreationview.draft_from_another_window.8b70bae9")).font(Theme.callout.weight(.semibold))
                 Text(other.value.fields.title).font(Theme.callout)
                 Text(other.value.fields.prompt).font(Theme.callout).textSelection(.enabled)
-                Text("Choose which draft to continue. A creation already sent must be checked first.")
+                Text(L10n.text("apple.taskcreationview.choose_which_draft_to_continue_a_creation.6be102c4"))
                     .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
-                Button("Use saved draft", .restore) { Task { await session.resolveDiskConflict(keepMine: false) } }
+                Button(L10n.text("apple.taskcreationview.use_saved_draft.31f362c2"), .restore) { Task { await session.resolveDiskConflict(keepMine: false) } }
                     .buttonStyle(SecondaryButtonStyle(comfortable: true)).disabled(session.working)
                 if other.value.pending == nil {
-                    Button("Keep my draft", .edit) { Task { await session.resolveDiskConflict(keepMine: true) } }
+                    Button(L10n.text("apple.taskcreationview.keep_my_draft.cdb80bb9"), .edit) { Task { await session.resolveDiskConflict(keepMine: true) } }
                         .buttonStyle(SecondaryButtonStyle(comfortable: true)).disabled(session.working)
                 }
             }
@@ -114,15 +114,15 @@ struct TaskCreationView: View {
 
     private func confirmation(_ outcome: TaskCreationOutcome) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Text(outcome.card?.title ?? session.saved.pending?.fields.title ?? "Task")
+            Text(outcome.card?.title ?? session.saved.pending?.fields.title ?? L10n.text("apple.taskcreationview.task.4bc74b21"))
                 .font(Theme.title3.weight(.semibold))
             if let card = outcome.card {
-                let folder = card.workspaceID.isEmpty ? "Uncategorized" : session.folders.first(where: { $0.id == card.workspaceID })?.name ?? "its saved folder"
-                Text("Saved to \(folder) on \(hostName).")
+                let folder = card.workspaceID.isEmpty ? L10n.text("apple.taskcreationview.uncategorized.8d40d123") : session.folders.first(where: { $0.id == card.workspaceID })?.name ?? L10n.text("apple.taskcreationview.its_saved_folder.6cb0b217")
+                Text(L10n.text("apple.taskcreationview.saved_to_0_on_1.6c8c44f7", "\(folder)", "\(hostName)"))
                     .font(Theme.callout).foregroundStyle(Theme.controlGlyph)
                 Text(card.notes).font(Theme.callout).textSelection(.enabled)
             } else {
-                Text("The computer confirmed this task was created and later deleted. It has not been recreated.")
+                Text(L10n.text("apple.taskcreationview.the_computer_confirmed_this_task_was_creat.44f7ed5f"))
                     .font(Theme.callout).foregroundStyle(Theme.controlGlyph)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)

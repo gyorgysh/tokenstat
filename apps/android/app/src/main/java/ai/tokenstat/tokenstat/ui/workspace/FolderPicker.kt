@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.activity.compose.BackHandler
 import ai.tokenstat.tokenstat.ui.chrome.HideTabBar
 
@@ -143,21 +145,21 @@ fun FolderPickerScreen(
 
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 8.dp)) {
-            IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+            IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, L10n.text("common.back")) }
             Text(
-                "Choose a folder",
+                L10n.text("android.folderpicker.choose_a_folder.5c71b8cd"),
                 style = MaterialTheme.typography.headlineSmall,
                 color = colors.textPrimary,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = { menu = true }) { Icon(ActionIcon.More.vector, "Options") }
+            IconButton(onClick = { menu = true }) { Icon(ActionIcon.More.vector, L10n.text("android.folderpicker.options.d0db8b5e")) }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(
-                    text = { Text(if (showHidden) "Hide dotfiles" else "Show dotfiles") },
+                    text = { Text(if (showHidden) L10n.text("android.folderpicker.hide_dotfiles.6f372c94") else L10n.text("android.folderpicker.show_dotfiles.13e0a8dc")) },
                     onClick = { menu = false; showHidden = !showHidden },
                 )
                 DropdownMenuItem(
-                    text = { Text("New folder here") },
+                    text = { Text(L10n.text("android.folderpicker.new_folder_here.8d63070d")) },
                     enabled = listing != null,
                     onClick = { menu = false; naming = true },
                 )
@@ -167,7 +169,7 @@ fun FolderPickerScreen(
             Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     current.str("parent")?.let { parent ->
-                        TextButton(onClick = { scope.launch { load(parent) } }) { Text("Up") }
+                        TextButton(onClick = { scope.launch { load(parent) } }) { Text(L10n.text("android.folderpicker.up.55490a4b")) }
                     }
                     Text(
                         current.str("path") ?: "",
@@ -202,8 +204,8 @@ fun FolderPickerScreen(
             if (entries.isEmpty() && !loading) {
                 item {
                     Text(
-                        if ((listing?.get("entries") as? JsonArray).isNullOrEmpty()) "This folder is empty."
-                        else "Everything here is a dotfile. Show them from the menu.",
+                        if ((listing?.get("entries") as? JsonArray).isNullOrEmpty()) L10n.text("android.folderpicker.this_folder_is_empty.bd88d713")
+                        else L10n.text("android.folderpicker.everything_here_is_a_dotfile_show_them_fro.49521138"),
                         color = colors.textSecondary,
                         modifier = Modifier.padding(16.dp),
                     )
@@ -238,7 +240,7 @@ fun FolderPickerScreen(
                             overflow = TextOverflow.Ellipsis,
                         )
                         if (entry.bol("isRegistered") == true) {
-                            Text("already registered", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+                            Text(L10n.text("android.folderpicker.already_registered.7a14f6c9"), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
                         }
                     }
                     if (isDir) Icon(Icons.Default.ChevronRight, null, tint = colors.textSecondary)
@@ -248,7 +250,7 @@ fun FolderPickerScreen(
             if (listing?.bol("truncated") == true) {
                 item {
                     Text(
-                        "Only the first 2000 entries are shown.",
+                        L10n.text("android.folderpicker.only_the_first_2000_entries_are_shown.9134432a"),
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.textSecondary,
                         modifier = Modifier.padding(16.dp),
@@ -259,7 +261,7 @@ fun FolderPickerScreen(
         listing?.let { current ->
             Column(Modifier.fillMaxWidth().padding(16.dp)) {
                 TsAccentButton(
-                    label = if (loading) "Working…" else "Use this folder",
+                    label = if (loading) L10n.text("android.folderpicker.working.5474eef8") else L10n.text("android.folderpicker.use_this_folder.30cbaeca"),
                     icon = ActionIcon.Approve.vector,
                     enabled = !loading,
                     onClick = { current.str("path")?.let { scope.launch { add(it) } } },
@@ -271,21 +273,21 @@ fun FolderPickerScreen(
     if (naming) {
         AlertDialog(
             onDismissRequest = { naming = false; newFolder = "" },
-            title = { Text("New folder") },
+            title = { Text(L10n.text("android.folderpicker.new_folder.cf28f49e")) },
             text = {
                 Column {
-                    Text("It is made on $hostName, inside the folder you are looking at.")
+                    Text(L10n.text("android.folderpicker.it_is_made_on_0_inside_the_folder_you_are.7077098c", "${hostName}"))
                     Spacer(Modifier.height(Space.s))
-                    OutlinedTextField(newFolder, { newFolder = it }, label = { Text("Name") }, singleLine = true)
+                    OutlinedTextField(newFolder, { newFolder = it }, label = { Text(L10n.text("android.folderpicker.name.dcd1d522")) }, singleLine = true)
                 }
             },
             confirmButton = {
-                TsAccentButton(label = "Create", small = true, enabled = newFolder.isNotBlank(), onClick = {
+                TsAccentButton(label = L10n.text("android.folderpicker.create.4759498a"), small = true, enabled = newFolder.isNotBlank(), onClick = {
                     scope.launch { create() }
                 })
             },
             dismissButton = {
-                TsSecondaryButton(label = "Cancel", small = true, onClick = { naming = false; newFolder = "" })
+                TsSecondaryButton(label = L10n.text("common.cancel"), small = true, onClick = { naming = false; newFolder = "" })
             },
         )
     }

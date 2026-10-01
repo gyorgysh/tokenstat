@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.billing
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import android.app.Activity
 import android.content.Context
 import ai.tokenstat.tokenstat.core.CoreClient
@@ -144,11 +146,11 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
     fun purchase(activity: Activity, product: PlanProduct) {
         val token = appAccountToken?.trim().orEmpty()
         if (token.isEmpty()) {
-            mutableState.value = mutableState.value.copy(error = "Sign in before buying a plan.")
+            mutableState.value = mutableState.value.copy(error = L10n.text("android.playbillingmanager.sign_in_before_buying_a_plan.3ac13e51"))
             return
         }
         if (token.length > 64) {
-            mutableState.value = mutableState.value.copy(error = "This account token is too long for Play Billing.")
+            mutableState.value = mutableState.value.copy(error = L10n.text("android.playbillingmanager.this_account_token_is_too_long_for_play_bi.baea9663"))
             return
         }
         scope.launch {
@@ -162,7 +164,7 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
                 )
             }.getOrElse { error ->
                 if (error is CancellationException) throw error
-                mutableState.value = mutableState.value.copy(error = "Could not check your Play subscription. Please try again.")
+                mutableState.value = mutableState.value.copy(error = L10n.text("android.playbillingmanager.could_not_check_your_play_subscription_ple.85eea382"))
                 return@launch
             }
             // A failed lookup does not mean there is no subscription to replace.

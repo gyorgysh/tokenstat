@@ -23,17 +23,17 @@ enum WorkspacesSection: String, CaseIterable, Identifiable, Codable, Sendable {
 
     var label: String {
         switch self {
-        case .folders: "Folders"
-        case .recentChats: "Recent chats"
-        case .sessions: "All sessions"
+        case .folders: L10n.text("apple.workspaceslayout.folders.c4d6bb20")
+        case .recentChats: L10n.text("apple.workspaceslayout.recent_chats.2ccfecbc")
+        case .sessions: L10n.text("apple.workspaceslayout.all_sessions.78648d4d")
         }
     }
 
     var detail: String {
         switch self {
-        case .folders: "Projects on the connected computer"
-        case .recentChats: "Chats opened recently"
-        case .sessions: "Terminals and agents running now"
+        case .folders: L10n.text("apple.workspaceslayout.projects_on_the_connected_computer.458f1f5f")
+        case .recentChats: L10n.text("apple.workspaceslayout.chats_opened_recently.0953f969")
+        case .sessions: L10n.text("apple.workspaceslayout.terminals_and_agents_running_now.ac545246")
         }
     }
 
@@ -56,9 +56,9 @@ enum WorkspacesPreset: String, CaseIterable, Identifiable, Codable, Sendable {
 
     var label: String {
         switch self {
-        case .foldersFirst: "Folders first"
-        case .chatsFirst: "Chats first"
-        case .sessionsFirst: "Sessions first"
+        case .foldersFirst: L10n.text("apple.workspaceslayout.folders_first.6f94fb69")
+        case .chatsFirst: L10n.text("apple.workspaceslayout.chats_first.82395c40")
+        case .sessionsFirst: L10n.text("apple.workspaceslayout.sessions_first.c0b0e0e8")
         }
     }
 

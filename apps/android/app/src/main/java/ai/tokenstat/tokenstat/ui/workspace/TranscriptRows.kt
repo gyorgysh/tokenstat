@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
@@ -116,7 +118,7 @@ internal fun TranscriptItemRow(
             ) {
                 HorizontalDivider(Modifier.weight(1f), color = LocalTsColors.current.border)
                 Text(
-                    "${harnessName(item.backend)} · new turn",
+                    L10n.text("android.transcriptrows.0_new_turn.9f36f0a8", "${harnessName(item.backend)}"),
                     style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium),
                     color = LocalTsColors.current.accent,
                 )
@@ -158,7 +160,7 @@ internal fun TranscriptItemRow(
         is ChatDisplayItem.Usage -> {
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 Text(
-                    "${item.input} in · ${item.output} out",
+                    L10n.text("android.transcriptrows.0_in_1_out.f48051a0", "${item.input}", "${item.output}"),
                     style = TextStyle(fontSize = 12.sp),
                     color = LocalTsColors.current.textSecondary,
                 )
@@ -221,7 +223,7 @@ private fun AssistantPanel(text: String, agentName: String) {
             }, modifier = Modifier.size(28.dp)) {
                 Icon(
                     if (copied) Icons.Default.Check else ActionIcon.Copy.vector,
-                    "Copy response",
+                    L10n.text("android.transcriptrows.copy_response.f0f755af"),
                     tint = colors.textSecondary,
                     modifier = Modifier.size(16.dp),
                 )
@@ -248,14 +250,14 @@ private fun HandoffRow(to: String, brief: String) {
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
             Text(
-                "Handed to ${to.ifBlank { "another agent" }}",
+                L10n.text("android.transcriptrows.handed_to_0.902d7234", "${to.ifBlank { L10n.text("android.transcriptrows.another_agent.03a23179") }}"),
                 style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium),
                 color = colors.accent,
                 modifier = Modifier.weight(1f),
             )
             if (brief.isNotBlank()) {
                 Text(
-                    if (expanded) "Hide" else "What it was told",
+                    if (expanded) L10n.text("android.transcriptrows.hide.ac20a57b") else L10n.text("android.transcriptrows.what_it_was_told.4b2128b2"),
                     style = TextStyle(fontSize = 12.sp),
                     color = colors.textSecondary,
                     modifier = Modifier.clickable { expanded = !expanded },
@@ -356,9 +358,9 @@ private fun TranscriptToolRow(state: ChatToolState) {
                 DiffStat(added = added, removed = removed)
             }
             if (state.running && !ChatSeat.speaks(state.verb)) {
-                Text("Running", style = TsType.mono(10), color = colors.accent, maxLines = 1)
+                Text(L10n.text("common.running"), style = TsType.mono(10), color = colors.accent, maxLines = 1)
             } else if (state.failed) {
-                Text("Failed", style = TsType.mono(10), color = colors.danger, maxLines = 1)
+                Text(L10n.text("common.failed"), style = TsType.mono(10), color = colors.danger, maxLines = 1)
             }
             if (!state.running) {
                 val time = state.duration
@@ -369,9 +371,9 @@ private fun TranscriptToolRow(state: ChatToolState) {
             if (state.snippet.isNotEmpty() && !state.running) {
                 TsAccentButton(
                     label = if (showSnippet) {
-                        if (hasDiff) "Hide edit" else if (snippetIsOutput) "Hide output" else "Hide edit"
+                        if (hasDiff) L10n.text("android.transcriptrows.hide_edit.e9dbd4f5") else if (snippetIsOutput) L10n.text("android.transcriptrows.hide_output.64876c47") else L10n.text("android.transcriptrows.hide_edit.e9dbd4f5")
                     } else {
-                        if (hasDiff) "Show edit" else if (snippetIsOutput) "Show output" else "Show edit"
+                        if (hasDiff) L10n.text("android.transcriptrows.show_edit.8da806e1") else if (snippetIsOutput) L10n.text("android.transcriptrows.show_output.9dbbb249") else L10n.text("android.transcriptrows.show_edit.8da806e1")
                     },
                     small = true,
                     onClick = {
@@ -519,9 +521,9 @@ private fun TranscriptEditCard(state: ChatEditState) {
                     DiffStat(added = state.added, removed = state.removed)
                 }
                 if (state.running) {
-                    Text(ChatSeat.word("Edit", true), style = TextStyle(fontSize = 12.sp), color = colors.accent, maxLines = 1)
+                    Text(ChatSeat.word(L10n.text("common.edit"), true), style = TextStyle(fontSize = 12.sp), color = colors.accent, maxLines = 1)
                 } else if (state.failed) {
-                    Text("Failed", style = TextStyle(fontSize = 12.sp), color = colors.danger, maxLines = 1)
+                    Text(L10n.text("common.failed"), style = TextStyle(fontSize = 12.sp), color = colors.danger, maxLines = 1)
                 }
                 if (!state.running) {
                     val time = state.duration
@@ -531,7 +533,7 @@ private fun TranscriptEditCard(state: ChatEditState) {
                 }
                 if (state.patch.isNotEmpty() && !state.running) {
                     TsAccentButton(
-                        label = if (expanded) "Hide changes" else "Show changes",
+                        label = if (expanded) L10n.text("android.transcriptrows.hide_changes.c960be38") else L10n.text("android.transcriptrows.show_changes.b12a6ef8"),
                         small = true,
                         onClick = {
                             toggled = true
@@ -574,7 +576,7 @@ private fun TranscriptEditCard(state: ChatEditState) {
                 }
                 if (cut > 0) {
                     Text(
-                        "… $cut more lines",
+                        L10n.text("android.transcriptrows.0_more_lines.c352841d", "${cut}"),
                         style = TsType.mono(11),
                         color = colors.textSecondary,
                     )
@@ -608,7 +610,7 @@ private fun AttachmentRow(
             )
             val detail = listOfNotNull(
                 item.mediaType,
-                item.size?.let { "$it bytes" },
+                item.size?.let { L10n.text("android.transcriptrows.0_bytes.5ad0649b", "${it}") },
             ).joinToString(" · ")
             if (detail.isNotBlank()) {
                 Text(detail, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
@@ -617,10 +619,10 @@ private fun AttachmentRow(
                 Text(failure!!, style = TextStyle(fontSize = 12.sp), color = colors.danger)
             }
             if (downloaded) {
-                Text("Downloaded", style = TextStyle(fontSize = 12.sp), color = colors.accent)
+                Text(L10n.text("android.transcriptrows.downloaded.f0b0738f"), style = TextStyle(fontSize = 12.sp), color = colors.accent)
             } else {
                 TsSecondaryButton(
-                    label = if (busy) "…" else if (failure == null) "Download" else "Retry",
+                    label = if (busy) "…" else if (failure == null) L10n.text("android.transcriptrows.download.d6eafe82") else L10n.text("common.retry"),
                     small = true,
                     enabled = !busy && item.attachmentId.isNotBlank(),
                     onClick = {
@@ -636,7 +638,7 @@ private fun AttachmentRow(
                                 } ?: 0) > 0
                                 failure = null
                             }.onFailure {
-                                failure = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+                                failure = TunnelCopy.display(it.message ?: L10n.text("android.transcriptrows.the_request_failed.db4fb447"), hostLabel)
                             }
                             busy = false
                         }

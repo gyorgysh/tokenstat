@@ -28,14 +28,14 @@ struct AboutView: View {
                 .padding(.top, Theme.Space.xs)
 
             VStack(spacing: Theme.Space.xs) {
-                Text("tokenstat")
+                Text(L10n.text("apple.aboutview.tokenstat.63d30539"))
                     .font(Theme.title.bold())
-                Text("Version \(AppInfo.versionString)")
+                Text(L10n.text("apple.aboutview.version_0.9699394c", "\(AppInfo.versionString)"))
                     .font(Theme.callout)
                     .foregroundStyle(.secondary)
             }
 
-            Text("Token usage from every AI coding agent on this Mac, read locally.")
+            Text(L10n.text("apple.aboutview.token_usage_from_every_ai_coding_agent_on.cf23dcb0"))
                 .font(Theme.callout)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
@@ -49,7 +49,7 @@ struct AboutView: View {
             links
 
             VStack(spacing: 2) {
-                Text("Source-available licence")
+                Text(L10n.text("apple.aboutview.source_available_licence.55d415e8"))
                 Text(AppInfo.copyright)
             }
             .font(Theme.caption)
@@ -75,7 +75,7 @@ struct AboutView: View {
             }
 
             VStack(alignment: .leading, spacing: 1) {
-                Text("Made by")
+                Text(L10n.text("apple.aboutview.made_by.25a23917"))
                     .font(Theme.callout)
                 Link(AppInfo.Author.name, destination: AppInfo.Author.site)
                     .font(Theme.title3.weight(.semibold))
@@ -90,12 +90,12 @@ struct AboutView: View {
     /// Mail, the product site, and the source, separated by hairlines.
     private var links: some View {
         HStack(spacing: Theme.Space.s) {
-            linkItem("Contact", symbol: "envelope", destination: AppInfo.Author.email)
+            linkItem(L10n.text("apple.aboutview.contact.2b5c3d26"), symbol: "envelope", destination: AppInfo.Author.email)
             separator
             linkItem(AppInfo.websiteLabel, symbol: "globe", destination: AppInfo.website)
             separator
             linkItem(
-                "Source",
+                L10n.text("apple.aboutview.source.0e570ca6"),
                 symbol: "chevron.left.forwardslash.chevron.right",
                 destination: AppInfo.repository
             )

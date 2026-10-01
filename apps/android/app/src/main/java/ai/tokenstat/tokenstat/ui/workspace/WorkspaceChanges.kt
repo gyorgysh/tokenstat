@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.material3.Icon
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
 
@@ -162,7 +164,7 @@ fun ChangesSection(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                state.branch ?: "Changes",
+                state.branch ?: L10n.text("android.workspacechanges.changes.bbd4b6a8"),
                 style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
                 color = LocalTsColors.current.textPrimary,
                 modifier = Modifier.weight(1f),
@@ -171,7 +173,7 @@ fun ChangesSection(
                 TextButton(
                     enabled = state.loaded,
                     onClick = { showingReviewAll = true },
-                ) { Text("Review all", color = LocalTsColors.current.accent) }
+                ) { Text(L10n.text("android.workspacechanges.review_all.d05163fa"), color = LocalTsColors.current.accent) }
             }
             if (files.isNotEmpty()) {
                 TextButton(
@@ -179,7 +181,7 @@ fun ChangesSection(
                     onClick = { state.selectAll() },
                 ) {
                     Text(
-                        if (state.selection == allPaths) "Deselect all" else "Select all",
+                        if (state.selection == allPaths) L10n.text("android.workspacechanges.deselect_all.96754949") else L10n.text("android.workspacechanges.select_all.1fc9a387"),
                         color = LocalTsColors.current.accent,
                     )
                 }
@@ -189,8 +191,8 @@ fun ChangesSection(
         if (state.loaded && files.isEmpty() && state.error == null) {
             EmptyState(
                 Icons.Default.Difference,
-                "Nothing to commit",
-                "Every file in this folder matches the last commit.",
+                L10n.text("android.workspacechanges.nothing_to_commit.f377a9f6"),
+                L10n.text("android.workspacechanges.every_file_in_this_folder_matches_the_last.fffbaf63"),
                 art = { EmptyArt(EmptyArtKind.Changes) },
             )
         }
@@ -224,7 +226,7 @@ fun ChangesSection(
                             Modifier
                                 .size(44.dp)
                                 .clickable(role = Role.Checkbox, onClick = { state.select(path) })
-                                .semantics { contentDescription = "Select $path, ${if (picked) "on" else "off"}" },
+                                .semantics { contentDescription = L10n.text("android.workspacechanges.select_0_1.028ca175", "${path}", "${if (picked) "on" else "off"}") },
                             contentAlignment = Alignment.Center,
                         ) {
                             BrandCheckDisc(on = picked)
@@ -247,7 +249,7 @@ fun ChangesSection(
                     modifier = Modifier.weight(1f),
                 )
                 TsSecondaryButton(
-                    label = if (state.operationId == null) "Review and commit" else "Check commit",
+                    label = if (state.operationId == null) L10n.text("android.workspacechanges.review_and_commit.96f097b7") else L10n.text("android.workspacechanges.check_commit.d65b2b26"),
                     small = true,
                     enabled = state.loaded && (state.selection.isNotEmpty() || state.operationId != null),
                     onClick = { showingComposer = true },
@@ -256,7 +258,7 @@ fun ChangesSection(
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                state.branch ?: "Current branch",
+                state.branch ?: L10n.text("android.workspacechanges.current_branch.7c5b2da1"),
                 style = TextStyle(fontSize = 12.sp),
                 color = LocalTsColors.current.textSecondary,
                 modifier = Modifier.weight(1f),
@@ -392,7 +394,7 @@ fun FileDiffPage(
                 put("id", workspace); put("path", path)
             }) as? JsonObject
         }.onSuccess { diff = it; error = null }
-            .onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+            .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacechanges.the_request_failed.db4fb447"), hostLabel) }
         loading = false
     }
     LaunchedEffect(path) { load() }
@@ -402,10 +404,10 @@ fun FileDiffPage(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack, modifier = Modifier.weight(1f)) {
-                Text("← Changes", modifier = Modifier.fillMaxWidth())
+                Text(L10n.text("android.workspacechanges.changes.47127cfb"), modifier = Modifier.fillMaxWidth())
             }
             if (onEdit != null && diff != null && diff!!.bol("binary") != true) {
-                TsAccentButton(label = "Edit", small = true, onClick = onEdit)
+                TsAccentButton(label = L10n.text("common.edit"), small = true, onClick = onEdit)
             }
         }
         Text(path, style = TsType.mono(13), color = LocalTsColors.current.textPrimary)
@@ -417,11 +419,11 @@ fun FileDiffPage(
             )
         }
         if (loading) {
-            Text("Loading…", color = LocalTsColors.current.textSecondary)
+            Text(L10n.text("android.workspacechanges.loading.ba3bbbe1"), color = LocalTsColors.current.textSecondary)
         } else if (diff != null) {
             HunkDiffView(diff!!)
         } else if (error == null) {
-            Text("That file is not in this folder any more.", color = LocalTsColors.current.textSecondary)
+            Text(L10n.text("android.workspacechanges.that_file_is_not_in_this_folder_any_more.da5bd527"), color = LocalTsColors.current.textSecondary)
         }
     }
 }
@@ -434,7 +436,7 @@ fun HunkDiffView(diff: JsonObject, maxLines: Int = 2000) {
     val colors = LocalTsColors.current
     if (diff.bol("binary")) {
         Text(
-            "This is a binary file. There is nothing to show line by line.",
+            L10n.text("android.workspacechanges.this_is_a_binary_file_there_is_nothing_to.6573d54c"),
             color = colors.textSecondary,
         )
         return
@@ -442,8 +444,8 @@ fun HunkDiffView(diff: JsonObject, maxLines: Int = 2000) {
     val hunks = asObjects(diff["hunks"])
     if (hunks.isEmpty()) {
         Text(
-            if (diff.bol("untracked")) "This file is not tracked yet and is empty."
-            else "No changes against HEAD.",
+            if (diff.bol("untracked")) L10n.text("android.workspacechanges.this_file_is_not_tracked_yet_and_is_empty.7354c94b")
+            else L10n.text("android.workspacechanges.no_changes_against_head.84a982f2"),
             color = colors.textSecondary,
         )
         return
@@ -510,7 +512,7 @@ fun HunkDiffView(diff: JsonObject, maxLines: Int = 2000) {
         }
         if (total > maxLines) {
             Text(
-                "Showing the first $maxLines of $total lines.",
+                L10n.text("android.workspacechanges.showing_the_first_0_of_1_lines.348d454c", "${maxLines}", "${total}"),
                 style = TextStyle(fontSize = 12.sp),
                 color = colors.textSecondary,
             )

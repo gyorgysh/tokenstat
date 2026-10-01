@@ -70,17 +70,17 @@ internal static class Sections
 
     public static string Label(this GlobalSection section) => section switch
     {
-        GlobalSection.Home => "Home",
-        GlobalSection.Insights => "Insights",
-        GlobalSection.Machines => "Devices",
-        GlobalSection.Ssh => "SSH",
-        GlobalSection.Search => "Search",
-        GlobalSection.Todo => "Tasks",
-        GlobalSection.Notes => "Notes",
-        GlobalSection.Workflows => "Workflows",
-        GlobalSection.Automations => "Automations",
-        GlobalSection.Account => "Account",
-        GlobalSection.About => "About",
+        GlobalSection.Home => L10n.Text("common.home"),
+        GlobalSection.Insights => L10n.Text("common.insights"),
+        GlobalSection.Machines => L10n.Text("common.devices"),
+        GlobalSection.Ssh => L10n.Text("windows.route.ssh.01c4d3c2"),
+        GlobalSection.Search => L10n.Text("common.search"),
+        GlobalSection.Todo => L10n.Text("common.tasks"),
+        GlobalSection.Notes => L10n.Text("common.notes"),
+        GlobalSection.Workflows => L10n.Text("common.workflows"),
+        GlobalSection.Automations => L10n.Text("common.automations"),
+        GlobalSection.Account => L10n.Text("common.account"),
+        GlobalSection.About => L10n.Text("windows.route.about.4efca0d1"),
         _ => section.ToString(),
     };
 
@@ -102,18 +102,18 @@ internal static class Sections
 
     public static string Label(this WorkspaceSection section) => section switch
     {
-        WorkspaceSection.Launcher => "Launcher",
-        WorkspaceSection.Sessions => "Terminals",
-        WorkspaceSection.Chat => "Chats",
-        WorkspaceSection.Changes => "Changes",
-        WorkspaceSection.History => "History",
-        WorkspaceSection.Pulls => "Pull requests",
-        WorkspaceSection.Todo => "Tasks",
-        WorkspaceSection.Notes => "Notes",
-        WorkspaceSection.Workflows => "Workflows",
-        WorkspaceSection.Automations => "Automations",
-        WorkspaceSection.Files => "Files",
-        WorkspaceSection.Browser => "Browser",
+        WorkspaceSection.Launcher => L10n.Text("windows.route.launcher.22614ace"),
+        WorkspaceSection.Sessions => L10n.Text("common.terminals"),
+        WorkspaceSection.Chat => L10n.Text("common.chats"),
+        WorkspaceSection.Changes => L10n.Text("windows.route.changes.bbd4b6a8"),
+        WorkspaceSection.History => L10n.Text("common.history"),
+        WorkspaceSection.Pulls => L10n.Text("windows.route.pull_requests.d9e3f260"),
+        WorkspaceSection.Todo => L10n.Text("common.tasks"),
+        WorkspaceSection.Notes => L10n.Text("common.notes"),
+        WorkspaceSection.Workflows => L10n.Text("common.workflows"),
+        WorkspaceSection.Automations => L10n.Text("common.automations"),
+        WorkspaceSection.Files => L10n.Text("common.files"),
+        WorkspaceSection.Browser => L10n.Text("common.browser"),
         _ => section.ToString(),
     };
 
@@ -135,10 +135,10 @@ internal static class Sections
 
     public static string Label(this SSHSection section) => section switch
     {
-        SSHSection.Hosts => "Hosts",
-        SSHSection.Keys => "Keys",
-        SSHSection.Snippets => "Snippets",
-        SSHSection.KnownHosts => "Trusted servers",
+        SSHSection.Hosts => L10n.Text("windows.route.hosts.bba9af13"),
+        SSHSection.Keys => L10n.Text("windows.route.keys.f0d66a79"),
+        SSHSection.Snippets => L10n.Text("windows.route.snippets.ff717209"),
+        SSHSection.KnownHosts => L10n.Text("windows.route.trusted_servers.b101ed86"),
         _ => section.ToString(),
     };
 }

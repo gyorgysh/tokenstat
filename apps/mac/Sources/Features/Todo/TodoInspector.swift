@@ -28,12 +28,12 @@ struct TodoInspector: View {
                         Text(card.columnLabel).font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                         Spacer()
                         Menu {
-                            ForEach([("backlog", "To Do"), ("doing", "Doing"), ("done", "Done"), ("archive", "Archive")], id: \.0) { column, title in
+                            ForEach([("backlog", L10n.text("apple.todoinspector.to_do.150d92c4")), ("doing", L10n.text("apple.todoinspector.doing.cd742c53")), ("done", L10n.text("common.done")), ("archive", L10n.text("common.archive"))], id: \.0) { column, title in
                                 if card.column != column {
                                     Button(title, .move) { Task { await model.move(card, to: column) } }
                                 }
                             }
-                        } label: { ActionLabel(title: "Move", icon: .move) }
+                        } label: { ActionLabel(title: L10n.text("apple.todoinspector.move.6ecc3df6"), icon: .move) }
                         .buttonStyle(SecondaryButtonStyle())
                     }
                     if let delegate = card.delegate {
@@ -43,18 +43,18 @@ struct TodoInspector: View {
                         }
                         HStack {
                             if delegate.isRunning {
-                                Button("Stop", .stop) { Task { await model.stop(card) } }.buttonStyle(SecondaryButtonStyle())
+                                Button(L10n.text("common.stop"), .stop) { Task { await model.stop(card) } }.buttonStyle(SecondaryButtonStyle())
                             }
-                            Button("View run", .preview) { onViewRun?(delegate.runId, card.workspaceID) }.buttonStyle(SecondaryButtonStyle())
+                            Button(L10n.text("apple.todoinspector.view_run.aaf7fccc"), .preview) { onViewRun?(delegate.runId, card.workspaceID) }.buttonStyle(SecondaryButtonStyle())
                         }
                     }
                 }.padding(Theme.Space.m)
             } else {
                 InspectorChromeBar(onClose: onClose) {
-                    InspectorTitle(title: "Task", symbol: "checklist")
+                    InspectorTitle(title: L10n.text("apple.todoinspector.task.4bc74b21"), symbol: "checklist")
                     Spacer(minLength: 0)
                 }
-                InspectorEmptyState(mark: "mark_todo", title: "Pick a task", subtitle: "Edit its prompt, settings and run here.")
+                InspectorEmptyState(mark: "mark_todo", title: L10n.text("apple.todoinspector.pick_a_task.dab569d2"), subtitle: L10n.text("apple.todoinspector.edit_its_prompt_settings_and_run_here.459576ae"))
             }
         }
         .background(Theme.background)

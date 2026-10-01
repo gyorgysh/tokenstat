@@ -122,7 +122,7 @@ final class ProjectBrowserSession: Identifiable {
     func intercept(_ request: URLRequest, isMainFrame: Bool) -> Bool {
         guard let url = request.url, intercepts(url) else { return false }
         guard isMainFrame, (request.httpMethod ?? "GET").uppercased() == "GET" else {
-            error = "Open this service's address first. This request cannot be forwarded safely."
+            error = L10n.text("apple.projectbrowsersession.open_this_service_s_address_first_this_req.4a65188f")
             return true
         }
         Task { await open(canonicalURL(url.absoluteString)) }
@@ -139,16 +139,16 @@ final class ProjectBrowserSession: Identifiable {
               ["http", "https"].contains(parsed.scheme?.lowercased() ?? ""),
               parsed.host?.isEmpty == false, parsed.user == nil, parsed.password == nil,
               (1...65535).contains(parsed.port ?? (parsed.scheme?.lowercased() == "https" ? 443 : 80)) else {
-            error = "Enter a valid web address or a port from 1 to 65535."
+            error = L10n.text("apple.projectbrowsersession.enter_a_valid_web_address_or_a_port_from_1.e9b5ccfb")
             return
         }
         if peer != nil {
             guard owner != nil else {
-                error = "Account and computer details are still loading. Try again."
+                error = L10n.text("apple.projectbrowsersession.account_and_computer_details_are_still_loa.b02ad4d1")
                 return
             }
             if let target, !["127.0.0.1", "::1"].contains(target.bridgeHost) {
-                error = "Use localhost, 127.0.0.1 or ::1 for a service on the project computer."
+                error = L10n.text("apple.projectbrowsersession.use_localhost_127_0_0_1_or_1_for_a_service.2d6046af")
                 return
             }
         }

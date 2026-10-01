@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.tasks
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import java.util.UUID
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
@@ -49,13 +51,13 @@ data class TaskDelegate(
     val isRunning: Boolean get() = status in setOf("starting", "queued", "running", "stopping")
 
     val label: String get() = when (status) {
-        "starting" -> "Starting"
-        "queued" -> "Queued"
-        "running" -> "Running"
-        "stopping" -> "Stopping"
-        "ok" -> "Done"
-        "stopped" -> "Stopped"
-        "error" -> "Failed"
+        "starting" -> L10n.text("android.taskmodels.starting.aeed4d26")
+        "queued" -> L10n.text("common.queued")
+        "running" -> L10n.text("common.running")
+        "stopping" -> L10n.text("android.taskmodels.stopping.a71ee1d4")
+        "ok" -> L10n.text("common.done")
+        "stopped" -> L10n.text("android.taskmodels.stopped.1a4f630a")
+        "error" -> L10n.text("common.failed")
         else -> status
     }
 
@@ -96,10 +98,10 @@ data class TaskCard(
     val isArchived: Boolean get() = column == "archive"
 
     val columnLabel: String get() = when (column) {
-        "doing" -> "Doing"
-        "done" -> "Done"
-        "archive" -> "Archive"
-        else -> "To Do"
+        "doing" -> L10n.text("android.taskmodels.doing.cd742c53")
+        "done" -> L10n.text("common.done")
+        "archive" -> L10n.text("common.archive")
+        else -> L10n.text("android.taskmodels.to_do.150d92c4")
     }
 
     /// What an agent should do. Notes first, title if the notes are empty.
@@ -239,12 +241,12 @@ data class TaskEditorDraft(
     }
 
     val validation: String? get() {
-        if (title.trim().isEmpty()) return "Give this task a title."
-        if (title.toByteArray().size > 4096) return "Shorten the title to 4 KiB or less."
-        if (prompt.toByteArray().size > 1024 * 1024) return "Shorten the prompt to 1 MiB or less."
-        if (budgetSeconds == null) return "Enter a positive time limit, or choose No limit."
-        if (budgetUnit != "minutes" && budgetUnit != "seconds") return "Choose minutes or seconds for the time limit."
-        if (priority != "low" && priority != "normal" && priority != "high") return "Choose a task priority."
+        if (title.trim().isEmpty()) return L10n.text("android.taskmodels.give_this_task_a_title.30531d14")
+        if (title.toByteArray().size > 4096) return L10n.text("android.taskmodels.shorten_the_title_to_4_kib_or_less.f40e37a7")
+        if (prompt.toByteArray().size > 1024 * 1024) return L10n.text("android.taskmodels.shorten_the_prompt_to_1_mib_or_less.dba63070")
+        if (budgetSeconds == null) return L10n.text("android.taskmodels.enter_a_positive_time_limit_or_choose_no_l.3b7996e8")
+        if (budgetUnit != "minutes" && budgetUnit != "seconds") return L10n.text("android.taskmodels.choose_minutes_or_seconds_for_the_time_lim.18aaf5a6")
+        if (priority != "low" && priority != "normal" && priority != "high") return L10n.text("android.taskmodels.choose_a_task_priority.d4cee784")
         return null
     }
 
@@ -272,10 +274,10 @@ sealed class TaskBoardFolder {
 }
 
 enum class TaskBoardAttention(val label: String) {
-    ALL("All tasks"),
-    RUNNING("Running"),
-    NEEDS_ATTENTION("Needs attention"),
-    HIGH_PRIORITY("High priority"),
+    ALL(L10n.text("android.taskmodels.all_tasks.cb664823")),
+    RUNNING(L10n.text("common.running")),
+    NEEDS_ATTENTION(L10n.text("android.taskmodels.needs_attention.c1ebc781")),
+    HIGH_PRIORITY(L10n.text("android.taskmodels.high_priority.b699a8c8")),
     ;
 
     fun contains(card: TaskCard): Boolean = when (this) {
@@ -323,12 +325,12 @@ data class TaskBoardFilter(
 /// Run readiness: why the saved card cannot start, or null when the checks
 /// this client can see are satisfied. Port of `TaskEditorSession.runReadiness`.
 fun taskRunReadiness(card: TaskCard, folders: List<FolderRef>): String? {
-    if (card.workspaceID.trim().isEmpty()) return "Assign a folder before running this task."
+    if (card.workspaceID.trim().isEmpty()) return L10n.text("android.taskmodels.assign_a_folder_before_running_this_task.6d7e591f")
     val folder = folders.firstOrNull { it.id == card.workspaceID }
-    if (folder != null && !folder.exists) return "This folder is no longer available on the computer."
-    if (folders.isNotEmpty() && folder == null) return "This folder is no longer available on the computer."
-    if (card.backend.trim().isEmpty()) return "Choose an agent before running this task."
-    if (card.promptForRun.isEmpty()) return "Write a prompt before running this task."
+    if (folder != null && !folder.exists) return L10n.text("android.taskmodels.this_folder_is_no_longer_available_on_the.9a90a747")
+    if (folders.isNotEmpty() && folder == null) return L10n.text("android.taskmodels.this_folder_is_no_longer_available_on_the.9a90a747")
+    if (card.backend.trim().isEmpty()) return L10n.text("android.taskmodels.choose_an_agent_before_running_this_task.8c283f81")
+    if (card.promptForRun.isEmpty()) return L10n.text("android.taskmodels.write_a_prompt_before_running_this_task.756d3037")
     return null
 }
 
@@ -364,13 +366,13 @@ sealed class RunAcceptance {
 
 fun acceptTaskRun(outcome: TaskRunOutcome, operationID: String, cardID: String): RunAcceptance {
     if (outcome.operationID != operationID || outcome.cardID != cardID) {
-        return RunAcceptance.Rejected("The computer returned a different task run. Check the original run before continuing.")
+        return RunAcceptance.Rejected(L10n.text("android.taskmodels.the_computer_returned_a_different_task_run.0580d53a"))
     }
     if (!outcome.hasRun && outcome.card == null) {
-        return RunAcceptance.Rejected("This task was deleted before the request could start. No run was launched.")
+        return RunAcceptance.Rejected(L10n.text("android.taskmodels.this_task_was_deleted_before_the_request_c.291a0c1e"))
     }
     if (!outcome.hasRun) {
-        return RunAcceptance.Pending("The computer accepted this request but has not recorded its run yet. Check again or retry the same request.")
+        return RunAcceptance.Pending(L10n.text("android.taskmodels.the_computer_accepted_this_request_but_has.582c4fe2"))
     }
     return RunAcceptance.Accepted(outcome)
 }
@@ -404,11 +406,11 @@ data class TaskResultRoute(
 
     fun reviewMessage(): String? = when (reviewState) {
         ReviewState.READY -> null
-        ReviewState.UNCATEGORIZED -> "This task has no folder. Assign one to review files and history."
+        ReviewState.UNCATEGORIZED -> L10n.text("android.taskmodels.this_task_has_no_folder_assign_one_to_revi.ec78820b")
         ReviewState.FOLDER_MISSING -> {
             val host = hostName.trim()
-            if (host.isEmpty()) "This folder is no longer available on the connected computer."
-            else "This folder is no longer available on $host."
+            if (host.isEmpty()) L10n.text("android.taskmodels.this_folder_is_no_longer_available_on_the.be3071ed")
+            else L10n.text("android.taskmodels.this_folder_is_no_longer_available_on_0.70d7366a", "${host}")
         }
     }
 
@@ -417,20 +419,20 @@ data class TaskResultRoute(
     val folderLabel: String get() {
         val name = folderName.trim()
         if (name.isNotEmpty()) return name
-        if (workspaceID.isEmpty()) return "Uncategorized"
-        return "Folder"
+        if (workspaceID.isEmpty()) return L10n.text("android.taskmodels.uncategorized.8d40d123")
+        return L10n.text("android.taskmodels.folder.74ccd433")
     }
 
     fun preservesRun(selectedRunID: String?): Boolean = runID.isNotEmpty() && selectedRunID == runID
 
     fun changesCaption(): String {
-        if (reviewState != ReviewState.READY) return reviewMessage() ?: "Changes"
+        if (reviewState != ReviewState.READY) return reviewMessage() ?: L10n.text("android.taskmodels.changes.bbd4b6a8")
         val count = changeCount
         if (count != null) {
-            if (count == 0) return "Working tree matches the last commit"
-            return if (count == 1) "1 file to review" else "$count files to review"
+            if (count == 0) return L10n.text("android.taskmodels.working_tree_matches_the_last_commit.419b69e6")
+            return if (count == 1) L10n.text("android.taskmodels.1_file_to_review.0d600164") else L10n.text("android.taskmodels.0_files_to_review.b2f93852", "${count}")
         }
-        return "Uncommitted files in this folder"
+        return L10n.text("android.taskmodels.uncommitted_files_in_this_folder.9b817339")
     }
 }
 
@@ -465,4 +467,4 @@ object RunHistory {
 
 /// The row that opens the complete run history from a short preview.
 /// Port of `ClientAllRunsRow`.
-fun allRunsLabel(count: Int): String = if (count == 1) "All runs" else "All $count runs"
+fun allRunsLabel(count: Int): String = if (count == 1) L10n.text("android.taskmodels.all_runs.33866ac3") else L10n.text("android.taskmodels.all_0_runs.8e631c72", "${count}")

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.persona
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -100,7 +102,7 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                 personas = list
                 defaultId = current
             }
-            .onFailure { failure = it.message ?: "The request failed." }
+            .onFailure { failure = it.message ?: L10n.text("android.personasheet.the_request_failed.db4fb447") }
         runCatching { model.workspaceSection(peer, "chat.backends", buildJsonObject {}) }
             .onSuccess { element -> backends = parsePersonaBackends(element) }
             .onFailure { backends = emptyList() }
@@ -155,7 +157,7 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                     }
                     select(saved)
                 }
-                .onFailure { failure = it.message ?: "The request failed." }
+                .onFailure { failure = it.message ?: L10n.text("android.personasheet.the_request_failed.db4fb447") }
             saving = false
         }
     }
@@ -173,7 +175,7 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                     startNew()
                     reconcileSelection()
                 }
-                .onFailure { failure = it.message ?: "The request failed." }
+                .onFailure { failure = it.message ?: L10n.text("android.personasheet.the_request_failed.db4fb447") }
             saving = false
         }
     }
@@ -196,7 +198,7 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                     if (suppliedName.isEmpty()) draft = draft.copy(name = result.name)
                     draft = draft.copy(systemPrompt = result.systemPrompt)
                 }
-            }.onFailure { failure = it.message ?: "The request failed." }
+            }.onFailure { failure = it.message ?: L10n.text("android.personasheet.the_request_failed.db4fb447") }
             improving = false
         }
     }
@@ -211,7 +213,7 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                 // An empty id means no persona, and comes back as null rather
                 // than as an error.
                 defaultId = if (element is JsonNull) null else parseChatPersona(element)?.id ?: persona?.id
-            }.onFailure { failure = it.message ?: "The request failed." }
+            }.onFailure { failure = it.message ?: L10n.text("android.personasheet.the_request_failed.db4fb447") }
             saving = false
         }
     }
@@ -229,20 +231,20 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        "Personas",
+                        L10n.text("android.personasheet.personas.fa2ea3fb"),
                         style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
                         color = colors.textPrimary,
                     )
                     Text(
-                        "Choose how new chats in this folder should behave.",
+                        L10n.text("android.personasheet.choose_how_new_chats_in_this_folder_should.feb16e26"),
                         style = TextStyle(fontSize = 12.sp),
                         color = colors.textSecondary,
                     )
                 }
-                TsSecondaryButton(label = "Done", small = true, onClick = onDismiss)
+                TsSecondaryButton(label = L10n.text("common.done"), small = true, onClick = onDismiss)
             }
             if (loading) {
-                Text("Loading…", style = TextStyle(fontSize = 14.sp), color = colors.textSecondary)
+                Text(L10n.text("android.personasheet.loading.ba3bbbe1"), style = TextStyle(fontSize = 14.sp), color = colors.textSecondary)
                 return@Column
             }
             Column(
@@ -255,17 +257,17 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                 ) {
                     Box {
                         val label = if (isNew) {
-                            "New persona"
+                            L10n.text("android.personasheet.new_persona.044eafe2")
                         } else {
-                            draft.name + if (isDefault) " · Default" else ""
+                            draft.name + if (isDefault) L10n.text("android.personasheet.default.2a7e0b7b") else ""
                         }
-                        TsSecondaryButton(label = label.ifEmpty { "Choose" }, small = true, onClick = { pickerOpen = true })
+                        TsSecondaryButton(label = label.ifEmpty { L10n.text("android.personasheet.choose.c7f93783") }, small = true, onClick = { pickerOpen = true })
                         DropdownMenu(expanded = pickerOpen, onDismissRequest = { pickerOpen = false }) {
                             if (isNew) {
-                                DropdownMenuItem(text = { Text("New persona") }, onClick = { pickerOpen = false })
+                                DropdownMenuItem(text = { Text(L10n.text("android.personasheet.new_persona.044eafe2")) }, onClick = { pickerOpen = false })
                             }
                             personas.forEach { persona ->
-                                val suffix = if (persona.id == defaultId) " · Default" else ""
+                                val suffix = if (persona.id == defaultId) L10n.text("android.personasheet.default.2a7e0b7b") else L10n.text("android.personasheet..e3b0c442")
                                 DropdownMenuItem(
                                     text = { Text(persona.name + suffix) },
                                     onClick = {
@@ -277,7 +279,7 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                         }
                     }
                     TsSecondaryButton(
-                        label = "New persona",
+                        label = L10n.text("android.personasheet.new_persona.044eafe2"),
                         small = true,
                         enabled = !improving && !saving,
                         onClick = ::startNew,
@@ -296,7 +298,7 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                             draft.name,
                             { draft = draft.copy(name = it) },
                             modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("Name") },
+                            placeholder = { Text(L10n.text("android.personasheet.name.dcd1d522")) },
                             singleLine = true,
                             enabled = !improving && !saving,
                         )
@@ -305,14 +307,14 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             TsSecondaryButton(
-                                label = "Reroll",
+                                label = L10n.text("android.personasheet.reroll.18363dbe"),
                                 small = true,
                                 enabled = !improving && !saving,
                                 onClick = { draft = draft.copy(seed = personaSeed("${draft.id}-${java.util.UUID.randomUUID()}")) },
                             )
                             if (isDefault) {
                                 Text(
-                                    "Default",
+                                    L10n.text("android.personasheet.default.21b111cb"),
                                     style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium),
                                     color = colors.accent,
                                     modifier = Modifier
@@ -323,7 +325,7 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                             }
                             Spacer(Modifier.weight(1f))
                             Text(
-                                "Every folder",
+                                L10n.text("android.personasheet.every_folder.9836340c"),
                                 style = TextStyle(fontSize = 12.sp),
                                 color = colors.textSecondary,
                             )
@@ -338,7 +340,7 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                     Text(
-                        "What should it be good at, and how should it work?",
+                        L10n.text("android.personasheet.what_should_it_be_good_at_and_how_should_i.b3533c88"),
                         style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
                         color = colors.textPrimary,
                     )
@@ -346,12 +348,12 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                         draft.systemPrompt,
                         { draft = draft.copy(systemPrompt = it) },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Someone who explains Rust errors patiently and never rewrites more than I asked for") },
+                        placeholder = { Text(L10n.text("android.personasheet.someone_who_explains_rust_errors_patiently.cee24939")) },
                         minLines = 3,
                         enabled = !improving && !saving,
                     )
                     Text(
-                        "Sent to whichever agent the chat is on. It is never part of your message.",
+                        L10n.text("android.personasheet.sent_to_whichever_agent_the_chat_is_on_it.19125f42"),
                         style = TextStyle(fontSize = 12.sp),
                         color = colors.textSecondary,
                     )
@@ -385,12 +387,12 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                     ) {
                         PersonaMark(seed = faceSeedFor(draft), size = 30.dp)
                         Text(
-                            "Improving...",
+                            L10n.text("android.personasheet.improving.e1129ace"),
                             style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Medium),
                             color = colors.textPrimary,
                         )
                         Text(
-                            "One turn on ${backends.firstOrNull { it.id == drafter }?.label ?: drafter}.",
+                            L10n.text("android.personasheet.one_turn_on_0.7deee84a", "${backends.firstOrNull { it.id == drafter }?.label ?: drafter}"),
                             style = TextStyle(fontSize = 12.sp),
                             color = colors.textSecondary,
                         )
@@ -398,7 +400,7 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                 }
                 if (saving) {
                     Text(
-                        "Saving changes…",
+                        L10n.text("android.personasheet.saving_changes.39520758"),
                         style = TextStyle(fontSize = 12.sp),
                         color = colors.controlGlyph,
                     )
@@ -410,12 +412,12 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "Improve with",
+                            L10n.text("android.personasheet.improve_with.893197e0"),
                             style = TextStyle(fontSize = 14.sp),
                             color = colors.textPrimary,
                         )
                         Box {
-                            val backendLabel = backends.firstOrNull { it.id == drafter }?.label ?: drafter.ifEmpty { "None" }
+                            val backendLabel = backends.firstOrNull { it.id == drafter }?.label ?: drafter.ifEmpty { L10n.text("android.personasheet.none.dc937b59") }
                             TsSecondaryButton(
                                 label = backendLabel,
                                 small = true,
@@ -436,7 +438,7 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                         }
                     }
                     Text(
-                        "One short turn on that agent, in a temporary folder. It never touches your project.",
+                        L10n.text("android.personasheet.one_short_turn_on_that_agent_in_a_temporar.6be85303"),
                         style = TextStyle(fontSize = 12.sp),
                         color = colors.textSecondary,
                     )
@@ -448,12 +450,12 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            "New chats here",
+                            L10n.text("android.personasheet.new_chats_here.cc6a9bf2"),
                             style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Medium),
                             color = colors.textPrimary,
                         )
                         Text(
-                            "Existing conversations keep whatever they already have.",
+                            L10n.text("android.personasheet.existing_conversations_keep_whatever_they.b48e4eab"),
                             style = TextStyle(fontSize = 12.sp),
                             color = colors.textSecondary,
                         )
@@ -461,14 +463,14 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                     Box {
                         val current = defaultId?.let { id -> personas.firstOrNull { it.id == id } }
                         TsSecondaryButton(
-                            label = current?.name ?: "No persona",
+                            label = current?.name ?: L10n.text("android.personasheet.no_persona.cce53fca"),
                             small = true,
                             enabled = !improving && !saving,
                             onClick = { defaultOpen = true },
                         )
                         DropdownMenu(expanded = defaultOpen, onDismissRequest = { defaultOpen = false }) {
                             DropdownMenuItem(
-                                text = { Text("No persona") },
+                                text = { Text(L10n.text("android.personasheet.no_persona.cce53fca")) },
                                 onClick = {
                                     defaultOpen = false
                                     setDefault(null)
@@ -487,12 +489,12 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                     }
                 }
                 if (confirmingDelete) {
-                    Banner("Delete “${draft.name}”? This cannot be undone.", BannerSeverity.DANGER)
+                    Banner(L10n.text("android.personasheet.delete_0_this_cannot_be_undone.90a170bf", "${draft.name}"), BannerSeverity.DANGER)
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                     if (canDelete || confirmingDelete) {
                         TsSecondaryButton(
-                            label = if (confirmingDelete) "Confirm delete" else "Delete",
+                            label = if (confirmingDelete) L10n.text("android.personasheet.confirm_delete.da00fa96") else L10n.text("common.delete"),
                             enabled = !improving && !saving,
                             onClick = {
                                 if (confirmingDelete) remove() else confirmingDelete = true
@@ -501,12 +503,12 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                         TsSecondaryButton(
-                            label = "Improve with agent",
+                            label = L10n.text("android.personasheet.improve_with_agent.6ccc3e33"),
                             enabled = canImprove,
                             onClick = ::improve,
                         )
                         Spacer(Modifier.weight(1f))
-                        TsAccentButton(label = "Save as written", enabled = canSave, onClick = ::save)
+                        TsAccentButton(label = L10n.text("android.personasheet.save_as_written.96a0d96e"), enabled = canSave, onClick = ::save)
                     }
                 }
             }

@@ -286,7 +286,7 @@ internal static class HostProcess
             Process.Start(new ProcessStartInfo
             {
                 FileName = "powershell.exe",
-                Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Bin \"{hostd}\"",
+                Arguments = L10n.Text("windows.hostprocess.noprofile_executionpolicy_bypass_file_0_bi.46ca77c6", $"{script}", $"{hostd}"),
                 UseShellExecute = false,
                 CreateNoWindow = true,
             })?.WaitForExit(8000);

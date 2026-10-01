@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.logic
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 /// Pure workspace rules shared by the files, changes, and notes sections.
 /// Ports the UI-thread-free cores of `ClientWorkspaceSections.swift`
 /// (selection counting), `GitCommitSession.swift` (draft message, commit
@@ -11,7 +13,7 @@ package ai.tokenstat.tokenstat.ui.logic
 /// File selection counting, mirroring the Changes footer
 /// ("N of M selected") and the Select all toggle.
 object FileSelection {
-    fun label(selected: Int, total: Int): String = "$selected of $total selected"
+    fun label(selected: Int, total: Int): String = L10n.text("android.workspacelogic.0_of_1_selected.d06c59a5", "${selected}", "${total}")
 
     fun toggle(current: Set<String>, path: String): Set<String> =
         if (current.contains(path)) current - path else current + path
@@ -64,24 +66,22 @@ object ReviewClip {
         if (totalLines <= limit) Clip(totalLines, 0) else Clip(limit, totalLines - limit)
 
     fun leftoverLine(total: Int, shown: Int): String =
-        "Showing $shown of $total lines here."
+        L10n.text("android.workspacelogic.showing_0_of_1_lines_here.f2764462", "${shown}", "${total}")
 
     fun failureLine(failures: Int): String =
-        "$failures file${if (failures == 1) "" else "s"} did not load. " +
-            "Open ${if (failures == 1) "it" else "them"} individually for the diff."
+        L10n.text("android.workspacelogic.0_file_1_did_not_load_open_2_individually.2acd4427", "${failures}", "${if (failures == 1) "" else "s"}", "${if (failures == 1) "it" else "them"}")
 
     fun leftoverFilesLine(leftover: Int): String =
-        "$leftover more file${if (leftover == 1) "" else "s"} changed. " +
-            "Open ${if (leftover == 1) "it" else "them"} from Changes for the diff."
+        L10n.text("android.workspacelogic.0_more_file_1_changed_open_2_from_changes.206bca3b", "${leftover}", "${if (leftover == 1) "" else "s"}", "${if (leftover == 1) "it" else "them"}")
 }
 
 /// Push button words from `GitPushControl`: a submitted push is checked,
 /// otherwise the outgoing count decides.
 object PushLabel {
     fun label(submitted: Boolean, outgoing: Long): String = when {
-        submitted -> "Check push"
-        outgoing > 0 -> "Push $outgoing"
-        else -> "Push…"
+        submitted -> L10n.text("android.workspacelogic.check_push.c821c305")
+        outgoing > 0 -> L10n.text("android.workspacelogic.push_0.a738ad29", "${outgoing}")
+        else -> L10n.text("android.workspacelogic.push.92363252")
     }
 }
 
@@ -97,12 +97,12 @@ object OperationState {
 /// lowercase single words.
 object ChangeKinds {
     fun label(kind: String): String = when (kind.lowercase()) {
-        "added" -> "Added"
-        "modified" -> "Modified"
-        "deleted" -> "Deleted"
-        "renamed" -> "Renamed"
-        "untracked" -> "Untracked"
-        "conflicted" -> "Conflicted"
+        "added" -> L10n.text("android.workspacelogic.added.6b02e0d3")
+        "modified" -> L10n.text("android.workspacelogic.modified.e8ce5dca")
+        "deleted" -> L10n.text("android.workspacelogic.deleted.b48ff39c")
+        "renamed" -> L10n.text("android.workspacelogic.renamed.05487af3")
+        "untracked" -> L10n.text("android.workspacelogic.untracked.c7ba5477")
+        "conflicted" -> L10n.text("android.workspacelogic.conflicted.916a464e")
         else -> kind.replaceFirstChar { it.uppercase() }
     }
 }

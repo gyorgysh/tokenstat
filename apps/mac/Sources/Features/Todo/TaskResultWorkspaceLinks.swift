@@ -16,7 +16,7 @@ struct TaskResultWorkspaceLinks: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if showsContext {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("This folder")
+                    Text(L10n.text("apple.taskresultworkspacelinks.this_folder.ab7db04c"))
                         .font(Theme.callout.weight(.semibold))
                     Text(contextLine)
                         .font(Theme.caption)
@@ -49,8 +49,8 @@ struct TaskResultWorkspaceLinks: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityHint(surface == .changes
-                        ? "Opens uncommitted files for this folder"
-                        : "Opens commits for this folder")
+                        ? L10n.text("apple.taskresultworkspacelinks.opens_uncommitted_files_for_this_folder.9ca505db")
+                        : L10n.text("apple.taskresultworkspacelinks.opens_commits_for_this_folder.a55a945b"))
                 }
             }
         }

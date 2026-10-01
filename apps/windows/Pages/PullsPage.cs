@@ -41,9 +41,9 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
     public PullsPage(string workspaceId)
     {
         _workspaceId = workspaceId;
-        _scope.ItemsSource = new[] { "All", "Mine", "Assigned", "Review requested" };
+        _scope.ItemsSource = new[] { L10n.Text("windows.pullspage.all.a52ace42"), L10n.Text("windows.pullspage.mine.f57afb7d"), L10n.Text("windows.pullspage.assigned.8191888d"), L10n.Text("windows.pullspage.review_requested.744f7028") };
         _scope.SelectedIndex = 0;
-        _state.ItemsSource = new[] { "Open", "Merged", "Closed", "Draft" };
+        _state.ItemsSource = new[] { L10n.Text("common.open"), L10n.Text("windows.pullspage.merged.bd0a0620"), L10n.Text("windows.pullspage.closed.c21ead06"), L10n.Text("windows.pullspage.draft.ebf12ef4") };
         _state.SelectedIndex = 0;
         _scope.SelectionChanged += async (_, _) => await LoadListAsync();
         _state.SelectionChanged += async (_, _) => await LoadListAsync();
@@ -66,7 +66,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
     /// The folder these pull requests belong to.
     /// </summary>
     public UIElement? ToolbarScope =>
-        Chrome.ScopeChip(string.IsNullOrEmpty(_folderName) ? "Pull requests" : _folderName);
+        Chrome.ScopeChip(string.IsNullOrEmpty(_folderName) ? L10n.Text("windows.pullspage.pull_requests.d9e3f260") : _folderName);
 
     public IList<UIElement> ToolbarActions()
     {
@@ -74,7 +74,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         {
             Buttons.ToolbarIcon(
                 ActionIcon.Refresh,
-                "Reload pull requests",
+                L10n.Text("windows.pullspage.reload_pull_requests.d07529a2"),
                 async (_, _) =>
                 {
                     LogoRefresh.Began();
@@ -112,40 +112,40 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
                 TextWrapping = TextWrapping.Wrap,
             });
             _inspector.Children.Add(Chrome.InspectorField(
-                "State",
+                L10n.Text("windows.pullspage.state.a3b50c47"),
                 Format.Flag(detail, "draft")
-                    ? "Draft"
+                    ? L10n.Text("windows.pullspage.draft.ebf12ef4")
                     : Format.Text(detail, "state", "open")));
             _inspector.Children.Add(Chrome.InspectorField(
-                "Branch",
+                L10n.Text("windows.pullspage.branch.52656e81"),
                 $"{Format.Text(detail, "headRef")} → {Format.Text(detail, "baseRef")}"));
             _inspector.Children.Add(Chrome.InspectorField(
-                "Changes",
+                L10n.Text("windows.pullspage.changes.bbd4b6a8"),
                 $"+{Format.Long(detail, "additions")} −{Format.Long(detail, "deletions")}"));
             _inspector.Children.Add(Chrome.InspectorField(
-                "Files", $"{Format.Long(detail, "changedFiles")}"));
+                L10n.Text("common.files"), $"{Format.Long(detail, "changedFiles")}"));
             var checks = detail["checks"] as JsonArray;
-            _inspector.Children.Add(Chrome.InspectorField("Checks", $"{checks?.Count ?? 0}"));
+            _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.pullspage.checks.de07d072"), $"{checks?.Count ?? 0}"));
             return;
         }
         _inspector.Children.Add(new TextBlock
         {
-            Text = "Pull requests",
+            Text = L10n.Text("windows.pullspage.pull_requests.d9e3f260"),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         if (!string.IsNullOrEmpty(_repo))
         {
-            _inspector.Children.Add(Chrome.InspectorField("Repository", _repo));
+            _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.pullspage.repository.13d6ff07"), _repo));
         }
         if (!string.IsNullOrEmpty(_login))
         {
-            _inspector.Children.Add(Chrome.InspectorField("Connected", "@" + _login, SourceLabel(_source)));
+            _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.pullspage.connected.22965568"), "@" + _login, SourceLabel(_source)));
         }
         _inspector.Children.Add(new TextBlock
         {
             Text = _listCount == 0
-                ? "Nothing listed under these filters."
-                : $"{_listCount} {(_listCount == 1 ? "pull request" : "pull requests")} listed.",
+                ? L10n.Text("windows.pullspage.nothing_listed_under_these_filters.d5f659c5")
+                : L10n.Text("windows.pullspage.0_1_listed.6a7bf1bb", $"{_listCount}", $"{(_listCount == 1 ? L10n.Text("windows.pullspage.pull_request.763fae51") : L10n.Text("windows.pullspage.pull_requests.dcf2de55"))}"),
             Opacity = 0.7,
             TextWrapping = TextWrapping.Wrap,
         });
@@ -207,7 +207,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         _root.Children.Clear();
         _openNumber = null;
         _detail = null;
-        _root.Children.Add(Header("Review the work around this branch"));
+        _root.Children.Add(Header(L10n.Text("windows.pullspage.review_the_work_around_this_branch.4ca99549")));
         var skeleton = Motion.SkeletonCard();
         _root.Children.Add(skeleton);
         _folderName = await FolderNameAsync();
@@ -229,7 +229,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
                     _source = Format.Text(availability, "source");
                     RenderInspector();
                     _root.Children[0] = Header(
-                        Format.Text(availability, "repo", "Pull requests"));
+                        Format.Text(availability, "repo", L10n.Text("windows.pullspage.pull_requests.d9e3f260")));
                     _root.Children.Add(ConnectionLine(availability));
                     _root.Children.Add(FilterBar());
                     rows = Motion.SkeletonCard();
@@ -247,20 +247,20 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
                     break;
                 case "notRepository":
                     _root.Children.Add(Chrome.Empty(
-                        "This folder is not a Git repository",
-                        "Pull requests appear for folders with a Git repository and a GitHub origin.",
+                        L10n.Text("windows.pullspage.this_folder_is_not_a_git_repository.a1da5b0e"),
+                        L10n.Text("windows.pullspage.pull_requests_appear_for_folders_with_a_gi.33e92947"),
                         ActionIcon.Merge));
                     break;
                 case "noRemote":
                     _root.Children.Add(Chrome.Empty(
-                        "No GitHub origin yet",
-                        "Add an origin remote to this repository, then refresh this screen.",
+                        L10n.Text("windows.pullspage.no_github_origin_yet.0478e3f8"),
+                        L10n.Text("windows.pullspage.add_an_origin_remote_to_this_repository_th.1e168c71"),
                         ActionIcon.Merge));
                     break;
                 default:
                     _root.Children.Add(Chrome.Empty(
-                        "Pull requests are unavailable",
-                        "Refresh to ask that computer again.",
+                        L10n.Text("windows.pullspage.pull_requests_are_unavailable.086a162b"),
+                        L10n.Text("windows.pullspage.refresh_to_ask_that_computer_again.2549ff1a"),
                         ActionIcon.Merge));
                     break;
             }
@@ -297,7 +297,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         var titles = new StackPanel { Spacing = 2, Margin = new Thickness(Theme.SpaceM, 0, 0, 0) };
         titles.Children.Add(new TextBlock
         {
-            Text = "Pull requests",
+            Text = L10n.Text("windows.pullspage.pull_requests.d9e3f260"),
             FontSize = Fonts.PageTitle,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
@@ -348,8 +348,8 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
                 Spacing = Theme.SpaceM,
                 Children =
                 {
-                    LabeledControl("Scope", _scope),
-                    LabeledControl("State", _state),
+                    LabeledControl(L10n.Text("windows.pullspage.scope.b073f6c6"), _scope),
+                    LabeledControl(L10n.Text("windows.pullspage.state.a3b50c47"), _state),
                 },
             },
         };
@@ -396,8 +396,8 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         if (rows is null || rows.Count == 0)
         {
             _root.Children.Add(Chrome.Empty(
-                $"No {states[Math.Max(0, _state.SelectedIndex)]} pull requests",
-                "Nothing in this repository matches the selected scope and state.",
+                L10n.Text("windows.pullspage.no_0_pull_requests.980f0d9c", $"{states[Math.Max(0, _state.SelectedIndex)]}"),
+                L10n.Text("windows.pullspage.nothing_in_this_repository_matches_the_sel.667ebd03"),
                 ActionIcon.Merge));
             return;
         }
@@ -440,7 +440,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         });
         body.Children.Add(Fonts.Tabular(new TextBlock
         {
-            Text = $"+{Format.Long(pull, "additions")}   −{Format.Long(pull, "deletions")}   {Format.Long(pull, "changedFiles")} files   {Format.Long(pull, "comments")} comments",
+            Text = L10n.Text("windows.pullspage.0_1_2_files_3_comments.d4b8ddd5", $"{Format.Long(pull, "additions")}", $"{Format.Long(pull, "deletions")}", $"{Format.Long(pull, "changedFiles")}", $"{Format.Long(pull, "comments")}"),
             FontSize = 11,
             Foreground = Theme.Brush(tint),
         }));
@@ -471,13 +471,13 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         var body = new StackPanel { Spacing = Theme.SpaceM };
         body.Children.Add(new TextBlock
         {
-            Text = "Read the conversation, inspect the same diff as Changes, follow checks, and review without losing the project around it.",
+            Text = L10n.Text("windows.pullspage.read_the_conversation_inspect_the_same_dif.a163d47d"),
             TextWrapping = TextWrapping.Wrap,
             Opacity = 0.74,
         });
         body.Children.Add(ActionIconGlyph.PrimaryButton(
-            "Connect GitHub", ActionIcon.Connect, async (_, _) => await StartLoginAsync()));
-        return Chrome.Card("Bring the review into tokenstat", body);
+            L10n.Text("windows.pullspage.connect_github.4027e5b2"), ActionIcon.Connect, async (_, _) => await StartLoginAsync()));
+        return Chrome.Card(L10n.Text("windows.pullspage.bring_the_review_into_tokenstat.124ca7d8"), body);
     }
 
     private UIElement AccessCard(JsonNode availability, string state)
@@ -486,8 +486,8 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         body.Children.Add(new TextBlock
         {
             Text = state == "needsInstallation"
-                ? "Choose the repositories tokenstat may open."
-                : "The connection works, but this repository is not in tokenstat's selected repositories.",
+                ? L10n.Text("windows.pullspage.choose_the_repositories_tokenstat_may_open.367af525")
+                : L10n.Text("windows.pullspage.the_connection_works_but_this_repository_i.ac88cdf2"),
             TextWrapping = TextWrapping.Wrap,
             Opacity = 0.74,
         });
@@ -495,9 +495,9 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         if (!string.IsNullOrEmpty(url))
         {
             body.Children.Add(ActionIconGlyph.PrimaryButton(
-                "Choose repositories", ActionIcon.External, (_, _) => Open(url)));
+                L10n.Text("windows.pullspage.choose_repositories.df6de593"), ActionIcon.External, (_, _) => Open(url)));
         }
-        return Chrome.Card("Grant repository access", body, "Only repositories selected for the GitHub App are visible.");
+        return Chrome.Card(L10n.Text("windows.pullspage.grant_repository_access.a46c65fe"), body, L10n.Text("windows.pullspage.only_repositories_selected_for_the_github.beb8f49c"));
     }
 
     private async Task StartLoginAsync()
@@ -511,13 +511,13 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
             if (!string.IsNullOrEmpty(url)) Open(url);
             _root.Children.Insert(1, Chrome.Banner(
                 string.IsNullOrEmpty(code)
-                    ? "Complete the connection in your browser."
-                    : $"Enter {code} in the GitHub page that just opened.",
+                    ? L10n.Text("windows.pullspage.complete_the_connection_in_your_browser.a8e8f600")
+                    : L10n.Text("windows.pullspage.enter_0_in_the_github_page_that_just_opene.69c61db4", $"{code}"),
                 Theme.Accent,
                 Symbol.Contact));
             _loginPoll = new CancellationTokenSource();
             _root.Children.Insert(2, ActionIconGlyph.Button(
-                "Cancel sign-in", ActionIcon.Dismiss, async (_, _) => await CancelLoginAsync()));
+                L10n.Text("windows.pullspage.cancel_sign_in.9effa0b7"), ActionIcon.Dismiss, async (_, _) => await CancelLoginAsync()));
             var token = _loginPoll.Token;
             while (!token.IsCancellationRequested)
             {
@@ -563,8 +563,8 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         _openNumber = number;
         _detail = null;
         var chrome = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        chrome.Children.Add(ActionIconGlyph.Button("Pull requests", ActionIcon.Back, async (_, _) => await LoadAsync()));
-        chrome.Children.Add(ActionIconGlyph.Button("Refresh", ActionIcon.Refresh, async (_, _) => await ShowDetailAsync(number, true)));
+        chrome.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.pullspage.pull_requests.d9e3f260"), ActionIcon.Back, async (_, _) => await LoadAsync()));
+        chrome.Children.Add(ActionIconGlyph.Button(L10n.Text("common.refresh"), ActionIcon.Refresh, async (_, _) => await ShowDetailAsync(number, true)));
         _root.Children.Add(chrome);
         try
         {
@@ -586,19 +586,19 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
             var tabs = new TabView();
             tabs.TabItems.Add(new TabViewItem
             {
-                Header = "Conversation",
+                Header = L10n.Text("windows.pullspage.conversation.ccca1817"),
                 IsClosable = false,
                 Content = Conversation(detail, timeline, number),
             });
             tabs.TabItems.Add(new TabViewItem
             {
-                Header = $"Changes ({Format.Long(detail, "changedFiles")})",
+                Header = L10n.Text("windows.pullspage.changes_0.eb1957f0", $"{Format.Long(detail, "changedFiles")}"),
                 IsClosable = false,
                 Content = LazyDiff(),
             });
             tabs.TabItems.Add(new TabViewItem
             {
-                Header = $"Checks ({(detail["checks"] as JsonArray)?.Count ?? 0})",
+                Header = L10n.Text("windows.pullspage.checks_0.22b4d740", $"{(detail["checks"] as JsonArray)?.Count ?? 0}"),
                 IsClosable = false,
                 Content = Checks(detail),
             });
@@ -632,12 +632,12 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         });
         body.Children.Add(new TextBlock
         {
-            Text = $"{Format.Text(actor, "login")} opened #{Format.Long(detail, "number")}",
+            Text = L10n.Text("windows.pullspage.0_opened_1.0dd2dd2e", $"{Format.Text(actor, "login")}", $"{Format.Long(detail, "number")}"),
             Opacity = 0.68,
         });
         body.Children.Add(new TextBlock
         {
-            Text = $"{Format.Text(detail, "headRef")}  →  {Format.Text(detail, "baseRef")}    +{Format.Long(detail, "additions")}  −{Format.Long(detail, "deletions")}  ·  {Format.Long(detail, "changedFiles")} files",
+            Text = L10n.Text("windows.pullspage.0_1_2_3_4_files.5fc1c874", $"{Format.Text(detail, "headRef")}", $"{Format.Text(detail, "baseRef")}", $"{Format.Long(detail, "additions")}", $"{Format.Long(detail, "deletions")}", $"{Format.Long(detail, "changedFiles")}"),
             Foreground = Theme.AccentBrush,
             TextWrapping = TextWrapping.Wrap,
         });
@@ -657,10 +657,10 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         var stack = new StackPanel { Spacing = Theme.SpaceM, Padding = new Thickness(0, Theme.SpaceM, 0, Theme.SpaceM) };
         var description = Format.Text(detail, "body");
         stack.Children.Add(Chrome.Card(
-            Format.Text(detail["author"], "login", "Author"),
+            Format.Text(detail["author"], "login", L10n.Text("windows.pullspage.author.d95082a2")),
             new TextBlock
             {
-                Text = string.IsNullOrWhiteSpace(description) ? "No description was added." : description,
+                Text = string.IsNullOrWhiteSpace(description) ? L10n.Text("windows.pullspage.no_description_was_added.68442d50") : description,
                 TextWrapping = TextWrapping.Wrap,
                 IsTextSelectionEnabled = true,
                 Opacity = string.IsNullOrWhiteSpace(description) ? 0.6 : 1,
@@ -668,7 +668,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         foreach (var entry in Format.Items(timeline, "events") ?? new JsonArray())
         {
             if (entry is null) continue;
-            var actor = Format.Text(entry["actor"], "login", "Someone");
+            var actor = Format.Text(entry["actor"], "login", L10n.Text("windows.pullspage.someone.864c855e"));
             var kind = Format.Text(entry, "kind");
             var body = Format.Text(entry, "body", Format.Text(entry, "subject"));
             stack.Children.Add(Chrome.Card(
@@ -682,7 +682,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         }
         var comment = new TextBox
         {
-            PlaceholderText = "Add to the conversation…",
+            PlaceholderText = L10n.Text("windows.pullspage.add_to_the_conversation.c38f0aa8"),
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             MinHeight = 96,
@@ -690,13 +690,13 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         var composer = new StackPanel { Spacing = Theme.SpaceS };
         composer.Children.Add(comment);
         var composerActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        composerActions.Children.Add(ActionIconGlyph.PrimaryButton("Comment", ActionIcon.Comment, async (_, _) =>
+        composerActions.Children.Add(ActionIconGlyph.PrimaryButton(L10n.Text("windows.pullspage.comment.44f5e3fb"), ActionIcon.Comment, async (_, _) =>
         {
             if (string.IsNullOrWhiteSpace(comment.Text)) return;
             await WriteAsync("pulls.comment", number, new JsonObject { ["body"] = comment.Text.Trim() });
             await ShowDetailAsync(number, true);
         }));
-        composerActions.Children.Add(ActionIconGlyph.Button("Approve", ActionIcon.Approve, async (_, _) =>
+        composerActions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.pullspage.approve.6007acbe"), ActionIcon.Approve, async (_, _) =>
         {
             await WriteAsync("pulls.review", number, new JsonObject
             {
@@ -704,12 +704,12 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
             });
             await ShowDetailAsync(number, true);
         }));
-        composerActions.Children.Add(ActionIconGlyph.Button("Request changes", ActionIcon.Comment, async (_, _) =>
+        composerActions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.pullspage.request_changes.cb5d9f98"), ActionIcon.Comment, async (_, _) =>
         {
             if (string.IsNullOrWhiteSpace(comment.Text))
             {
                 _root.Children.Insert(1, Chrome.Banner(
-                    "Say what needs to change before requesting changes.",
+                    L10n.Text("windows.pullspage.say_what_needs_to_change_before_requesting.24b6014c"),
                     Theme.Warning,
                     Symbol.Important));
                 return;
@@ -721,7 +721,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
             await ShowDetailAsync(number, true);
         }));
         composer.Children.Add(composerActions);
-        stack.Children.Add(Chrome.Card("Join the conversation", composer));
+        stack.Children.Add(Chrome.Card(L10n.Text("windows.pullspage.join_the_conversation.a0a9b316"), composer));
         return new ScrollViewer { MaxHeight = 600, Content = stack };
     }
 
@@ -778,7 +778,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
             }
             if (stack.Children.Count == 0)
             {
-                stack.Children.Add(Chrome.Empty("No text changes", "This pull request has no line-by-line diff to show.", ActionIcon.Compare));
+                stack.Children.Add(Chrome.Empty(L10n.Text("windows.pullspage.no_text_changes.08722a9e"), L10n.Text("windows.pullspage.this_pull_request_has_no_line_by_line_diff.680bf131"), ActionIcon.Compare));
             }
             holder.Children.Clear();
             holder.Children.Add(new ScrollViewer { MaxHeight = 620, Content = stack });
@@ -812,12 +812,12 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
             var state = Format.Text(check, "state", "pending");
             var tint = state == "passing" ? Theme.Success : state == "failing" ? Theme.Danger : Theme.Warning;
             stack.Children.Add(Chrome.Banner(
-                $"{Format.Text(check, "name", "Check")} · {state}", tint,
+                $"{Format.Text(check, "name", L10n.Text("windows.pullspage.check.9d60841e"))} · {state}", tint,
                 state == "passing" ? Symbol.Accept : state == "failing" ? Symbol.Cancel : Symbol.Clock));
         }
         if (stack.Children.Count == 0)
         {
-            stack.Children.Add(Chrome.Empty("No checks reported", "The head commit does not publish a check suite.", ActionIcon.Done));
+            stack.Children.Add(Chrome.Empty(L10n.Text("windows.pullspage.no_checks_reported.8454518f"), L10n.Text("windows.pullspage.the_head_commit_does_not_publish_a_check_s.3a467ede"), ActionIcon.Done));
         }
         return new ScrollViewer { MaxHeight = 600, Content = stack };
     }
@@ -827,19 +827,19 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         var url = Format.Text(detail, "url");
         if (!string.IsNullOrEmpty(url))
-            row.Children.Add(ActionIconGlyph.Button("Open on GitHub", ActionIcon.External, (_, _) => Open(url)));
-        row.Children.Add(ActionIconGlyph.Button("Checkout", ActionIcon.Checkout, async (_, _) => await CheckoutAsync(detail, number)));
+            row.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.pullspage.open_on_github.03f69885"), ActionIcon.External, (_, _) => Open(url)));
+        row.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.pullspage.checkout.99e71f48"), ActionIcon.Checkout, async (_, _) => await CheckoutAsync(detail, number)));
         if (Format.Flag(detail, "draft"))
-            row.Children.Add(ActionIconGlyph.Button("Mark ready", ActionIcon.Approve, async (_, _) => await ConfirmWriteAsync("Mark this pull request ready?", "pulls.ready", number)));
+            row.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.pullspage.mark_ready.6bb3f90b"), ActionIcon.Approve, async (_, _) => await ConfirmWriteAsync(L10n.Text("windows.pullspage.mark_this_pull_request_ready.be4a94ce"), "pulls.ready", number)));
         var state = Format.Text(detail, "state", "open");
         if (state == "open")
         {
-            row.Children.Add(ActionIconGlyph.Button("Close", ActionIcon.CancelPlan, async (_, _) => await ConfirmWriteAsync("Close this pull request?", "pulls.close", number)));
-            row.Children.Add(ActionIconGlyph.PrimaryButton("Merge", ActionIcon.Merge, async (_, _) => await MergeAsync(number)));
+            row.Children.Add(ActionIconGlyph.Button(L10n.Text("common.close"), ActionIcon.CancelPlan, async (_, _) => await ConfirmWriteAsync(L10n.Text("windows.pullspage.close_this_pull_request.54b5c0b1"), "pulls.close", number)));
+            row.Children.Add(ActionIconGlyph.PrimaryButton(L10n.Text("windows.pullspage.merge.8851aaa7"), ActionIcon.Merge, async (_, _) => await MergeAsync(number)));
         }
         else if (state == "closed")
-            row.Children.Add(ActionIconGlyph.Button("Reopen", ActionIcon.Reopen, async (_, _) => await ConfirmWriteAsync("Reopen this pull request?", "pulls.reopen", number)));
-        return Chrome.Card("Actions", row, "Shared repository changes happen only after a labelled press.");
+            row.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.pullspage.reopen.a886d1dc"), ActionIcon.Reopen, async (_, _) => await ConfirmWriteAsync(L10n.Text("windows.pullspage.reopen_this_pull_request.f7945627"), "pulls.reopen", number)));
+        return Chrome.Card(L10n.Text("windows.pullspage.actions.ff8059dc"), row, L10n.Text("windows.pullspage.shared_repository_changes_happen_only_afte.a0dfb107"));
     }
 
     private async Task CheckoutAsync(JsonNode detail, long number)
@@ -847,10 +847,10 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         var branch = new TextBox { Text = Format.Text(detail, "headRef"), MinWidth = 280 };
         var dialog = new ContentDialog
         {
-            Title = "Checkout pull request",
+            Title = L10n.Text("windows.pullspage.checkout_pull_request.89f37076"),
             Content = branch,
-            PrimaryButtonText = "Checkout",
-            CloseButtonText = "Cancel",
+            PrimaryButtonText = L10n.Text("windows.pullspage.checkout.99e71f48"),
+            CloseButtonText = L10n.Text("common.cancel"),
             DefaultButton = ContentDialogButton.Primary,
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary) return;
@@ -862,7 +862,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
             });
             var ok = Format.Flag(outcome, "ok");
             _root.Children.Insert(1, Chrome.Banner(
-                Format.Text(outcome, "message", ok ? "Checked out." : "Checkout failed."),
+                Format.Text(outcome, "message", ok ? L10n.Text("windows.pullspage.checked_out.0f450a04") : L10n.Text("windows.pullspage.checkout_failed.ccd97c13")),
                 ok ? Theme.Success : Theme.Warning,
                 ok ? Symbol.Accept : Symbol.Important));
         }
@@ -871,13 +871,13 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
 
     private async Task MergeAsync(long number)
     {
-        var method = new ComboBox { ItemsSource = new[] { "Merge commit", "Squash", "Rebase" }, SelectedIndex = 0, MinWidth = 220 };
+        var method = new ComboBox { ItemsSource = new[] { L10n.Text("windows.pullspage.merge_commit.8e9d44a6"), L10n.Text("windows.pullspage.squash.9f9a8456"), L10n.Text("windows.pullspage.rebase.9eb5b275") }, SelectedIndex = 0, MinWidth = 220 };
         var dialog = new ContentDialog
         {
-            Title = "Merge pull request?",
+            Title = L10n.Text("windows.pullspage.merge_pull_request.a17cd5dc"),
             Content = method,
-            PrimaryButtonText = "Merge",
-            CloseButtonText = "Cancel",
+            PrimaryButtonText = L10n.Text("windows.pullspage.merge.8851aaa7"),
+            CloseButtonText = L10n.Text("common.cancel"),
             DefaultButton = ContentDialogButton.Primary,
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary) return;
@@ -891,8 +891,8 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         var dialog = new ContentDialog
         {
             Title = title,
-            PrimaryButtonText = "Continue",
-            CloseButtonText = "Cancel",
+            PrimaryButtonText = L10n.Text("windows.pullspage.continue.31fbef16"),
+            CloseButtonText = L10n.Text("common.cancel"),
             DefaultButton = ContentDialogButton.Close,
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary) return;
@@ -918,27 +918,27 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
 
     private static string SourceLabel(string source) => source switch
     {
-        "gitCredential" => "using Git's saved credential",
-        "environment" => "using the shell credential",
-        "pasted" => "using a token you supplied",
-        _ => "tokenstat GitHub App",
+        "gitCredential" => L10n.Text("windows.pullspage.using_git_s_saved_credential.0e9c75dd"),
+        "environment" => L10n.Text("windows.pullspage.using_the_shell_credential.f587050a"),
+        "pasted" => L10n.Text("windows.pullspage.using_a_token_you_supplied.40e06d38"),
+        _ => L10n.Text("windows.pullspage.tokenstat_github_app.4545f151"),
     };
 
     private static string TimelineTitle(string actor, string kind) => kind switch
     {
-        "commented" => actor + " commented",
-        "reviewed" => actor + " reviewed",
-        "committed" => actor + " committed",
+        "commented" => actor + L10n.Text("windows.pullspage.commented.70aa99ac"),
+        "reviewed" => actor + L10n.Text("windows.pullspage.reviewed.f026d217"),
+        "committed" => actor + L10n.Text("windows.pullspage.committed.be720d21"),
         _ => actor,
     };
 
     private static string TimelineSentence(string kind) => kind switch
     {
-        "readyForReview" => "Marked this pull request ready for review.",
-        "merged" => "Merged this pull request.",
-        "closed" => "Closed this pull request.",
-        "reopened" => "Reopened this pull request.",
-        _ => "Updated this pull request.",
+        "readyForReview" => L10n.Text("windows.pullspage.marked_this_pull_request_ready_for_review.a50f4b42"),
+        "merged" => L10n.Text("windows.pullspage.merged_this_pull_request.07969d08"),
+        "closed" => L10n.Text("windows.pullspage.closed_this_pull_request.ec9188a9"),
+        "reopened" => L10n.Text("windows.pullspage.reopened_this_pull_request.232c0bb1"),
+        _ => L10n.Text("windows.pullspage.updated_this_pull_request.88c34d43"),
     };
 
     private static void Open(string url)

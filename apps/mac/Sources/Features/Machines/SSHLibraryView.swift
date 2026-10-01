@@ -50,6 +50,27 @@ struct SSHLibraryView: View {
         case keys = "Keys"
         case snippets = "Snippets"
         var id: String { rawValue }
+        var searchPrompt: String {
+            switch self {
+            case .hosts: L10n.text("apple.sshlibraryview.search_hosts")
+            case .keys: L10n.text("apple.sshlibraryview.search_keys")
+            case .snippets: L10n.text("apple.sshlibraryview.search_snippets")
+            }
+        }
+        var addTitle: String {
+            switch self {
+            case .hosts: L10n.text("apple.sshlibraryview.add_host")
+            case .keys: L10n.text("apple.sshlibraryview.add_key")
+            case .snippets: L10n.text("apple.sshlibraryview.add_snippet")
+            }
+        }
+        var emptyTitle: String {
+            switch self {
+            case .hosts: L10n.text("apple.sshlibraryview.no_hosts_yet")
+            case .keys: L10n.text("apple.sshlibraryview.no_keys_yet")
+            case .snippets: L10n.text("apple.sshlibraryview.no_snippets_yet")
+            }
+        }
     }
 
     @Environment(ClientStore.self) private var store
@@ -125,7 +146,7 @@ struct SSHLibraryView: View {
     /// the right one.
     private var content: some View {
         listSide
-            .navigationTitle("SSH")
+            .navigationTitle(L10n.text("apple.sshlibraryview.ssh.01c4d3c2"))
             .toolbar { toolbarContent }
             // Pushed onto whichever stack this screen was opened from, rather
             // than onto one of its own: Devices already owns a stack, and a
@@ -143,7 +164,7 @@ struct SSHLibraryView: View {
                     // whole server had no way to reach it.
                     if let host = model.hosts.first(where: { $0.id == id }) {
                         ToolbarItem(placement: .primaryAction) {
-                            Button("Connect", .connect) { connecting = host }
+                            Button(L10n.text("common.connect"), .connect) { connecting = host }
                         }
                     }
                 }
@@ -187,7 +208,7 @@ struct SSHLibraryView: View {
             // device later overwrote look like the save had never happened.
             if let vaultError = model.vaultError {
                 let friendly = FriendlyError.from(vaultError)
-                InlineBanner(text: "Saved on this device, but not synced. \(friendly.message)") {
+                InlineBanner(text: L10n.text("apple.sshlibraryview.saved_on_this_device_but_not_synced_0.97b249b6", "\(friendly.message)")) {
                     model.vaultError = nil
                 }
                 .padding(.horizontal, Theme.Space.m)
@@ -225,7 +246,7 @@ struct SSHLibraryView: View {
             // where there are three tabs a person has to be able to tell
             // apart and select. The tabs say what they are.
             SegmentedTabs(options: Section.allCases, selection: $section)
-            SearchField(text: $model.search, prompt: "Search \(section.rawValue.lowercased())")
+            SearchField(text: $model.search, prompt: section.searchPrompt)
         }
         .padding(Theme.Space.m)
     }
@@ -240,16 +261,16 @@ struct SSHLibraryView: View {
                 // this row a shell somebody left running is running with
                 // nothing on any screen that mentions it.
                 if !model.searching, !sessions.sessions.isEmpty {
-                    SwiftUI.Section("Open sessions") {
+                    SwiftUI.Section(L10n.text("apple.sshlibraryview.open_sessions.8bf47766")) {
                         ForEach(sessions.sessions) { session in sessionRow(session) }
                     }
                 }
                 if !model.searching, !model.recentHosts.isEmpty {
-                    SwiftUI.Section("Recent") {
+                    SwiftUI.Section(L10n.text("apple.sshlibraryview.recent.690dbe9d")) {
                         ForEach(model.recentHosts) { host in hostRow(host, depth: 0) }
                     }
                 }
-                SwiftUI.Section(model.searching ? "Results" : "All servers") {
+                SwiftUI.Section(model.searching ? L10n.text("apple.sshlibraryview.results.219c4a6c") : L10n.text("apple.sshlibraryview.all_servers.3205261a")) {
                     ForEach(rows) { row in
                         switch row.kind {
                         case let .folder(folder):
@@ -332,10 +353,10 @@ struct SSHLibraryView: View {
             if expanded.contains(folder.id) { expanded.remove(folder.id) } else { expanded.insert(folder.id) }
         }
         .contextMenu {
-            Button("Rename folder") { open(.folder(folder.id)) }
-            Button("Add server here") { open(.newHost(folder: folder.id)) }
-            Button("Add sub-folder") { open(.newFolder(parent: folder.id)) }
-            Button("Delete folder", role: .destructive) {
+            Button(L10n.text("apple.sshlibraryview.rename_folder.7249f19c")) { open(.folder(folder.id)) }
+            Button(L10n.text("apple.sshlibraryview.add_server_here.a85b2f00")) { open(.newHost(folder: folder.id)) }
+            Button(L10n.text("apple.sshlibraryview.add_sub_folder.768dadd9")) { open(.newFolder(parent: folder.id)) }
+            Button(L10n.text("apple.sshlibraryview.delete_folder.39f35f2d"), role: .destructive) {
                 Task { await model.delete(folder: folder) }
             }
         }
@@ -350,7 +371,7 @@ struct SSHLibraryView: View {
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 1) {
                 Text(session.title).lineLimit(1)
-                Text(session.alive ? "Running" : "Ended")
+                Text(session.alive ? L10n.text("common.running") : L10n.text("apple.sshlibraryview.ended.7cdc804e"))
                     .font(Theme.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
@@ -363,7 +384,7 @@ struct SSHLibraryView: View {
             showingTerminal = true
         }
         .swipeActions(edge: .trailing) {
-            Button("End", role: .destructive) { Task { await sessions.close(session) } }
+            Button(L10n.text("apple.sshlibraryview.end.f4db1e48"), role: .destructive) { Task { await sessions.close(session) } }
         }
         .themedRow()
     }
@@ -379,20 +400,20 @@ struct SSHLibraryView: View {
             .contentShape(.rect)
             .onTapGesture { open(.host(host.id)) }
             .contextMenu {
-                Button("Connect") { connecting = host }
-                Button(host.favorite ? "Remove from favourites" : "Add to favourites") {
+                Button(L10n.text("common.connect")) { connecting = host }
+                Button(host.favorite ? L10n.text("apple.sshlibraryview.remove_from_favourites.a5bdeced") : L10n.text("apple.sshlibraryview.add_to_favourites.9e619bff")) {
                     var updated = host
                     updated.favorite.toggle()
                     Task { _ = await model.save(host: updated) }
                 }
-                Button("Edit") { open(.host(host.id)) }
-                Button("Delete", role: .destructive) { Task { await model.delete(host: host) } }
+                Button(L10n.text("common.edit")) { open(.host(host.id)) }
+                Button(L10n.text("common.delete"), role: .destructive) { Task { await model.delete(host: host) } }
             }
             .swipeActions(edge: .trailing) {
-                Button("Delete", role: .destructive) { Task { await model.delete(host: host) } }
+                Button(L10n.text("common.delete"), role: .destructive) { Task { await model.delete(host: host) } }
             }
             .swipeActions(edge: .leading) {
-                Button("Connect") { connecting = host }.tint(Theme.accent)
+                Button(L10n.text("common.connect")) { connecting = host }.tint(Theme.accent)
             }
         .themedRow()
     }
@@ -423,15 +444,15 @@ struct SSHLibraryView: View {
         // offered: copying the public key, which is the reason to open one at
         // all, had no shortcut whatsoever.
         .contextMenu {
-            Button("Edit") { open(.key(key.id)) }
-            Button("Copy public key") { copyToPasteboard(key.publicKey) }
+            Button(L10n.text("common.edit")) { open(.key(key.id)) }
+            Button(L10n.text("apple.sshlibraryview.copy_public_key.5f2f4548")) { copyToPasteboard(key.publicKey) }
             if !key.fingerprint.isEmpty {
-                Button("Copy fingerprint") { copyToPasteboard(key.fingerprint) }
+                Button(L10n.text("apple.sshlibraryview.copy_fingerprint.71ab1ba9")) { copyToPasteboard(key.fingerprint) }
             }
-            Button("Delete", role: .destructive) { Task { await model.delete(key: key) } }
+            Button(L10n.text("common.delete"), role: .destructive) { Task { await model.delete(key: key) } }
         }
         .swipeActions(edge: .trailing) {
-            Button("Delete", role: .destructive) { Task { await model.delete(key: key) } }
+            Button(L10n.text("common.delete"), role: .destructive) { Task { await model.delete(key: key) } }
         }
         .themedRow()
     }
@@ -449,17 +470,17 @@ struct SSHLibraryView: View {
         .contentShape(.rect)
         .onTapGesture { open(.snippet(snippet.id)) }
         .contextMenu {
-            Button("Edit") { open(.snippet(snippet.id)) }
-            Button("Copy command") { copyToPasteboard(snippet.command) }
-            Button(snippet.runOnConnect ? "Do not run on connect" : "Run on connect") {
+            Button(L10n.text("common.edit")) { open(.snippet(snippet.id)) }
+            Button(L10n.text("apple.sshlibraryview.copy_command.9a01feec")) { copyToPasteboard(snippet.command) }
+            Button(snippet.runOnConnect ? L10n.text("apple.sshlibraryview.do_not_run_on_connect.7917a1db") : L10n.text("apple.sshlibraryview.run_on_connect.185c4e03")) {
                 var updated = snippet
                 updated.runOnConnect.toggle()
                 Task { _ = await model.save(snippet: updated) }
             }
-            Button("Delete", role: .destructive) { Task { await model.delete(snippet: snippet) } }
+            Button(L10n.text("common.delete"), role: .destructive) { Task { await model.delete(snippet: snippet) } }
         }
         .swipeActions(edge: .trailing) {
-            Button("Delete", role: .destructive) { Task { await model.delete(snippet: snippet) } }
+            Button(L10n.text("common.delete"), role: .destructive) { Task { await model.delete(snippet: snippet) } }
         }
         .themedRow()
     }
@@ -472,21 +493,21 @@ struct SSHLibraryView: View {
     private var toolbarContent: some ToolbarContent {
         if let onClose {
             ToolbarItem(placement: .cancellationAction) {
-                InspectorCloseButton(action: onClose, help: "Close", label: "Close SSH library")
+                InspectorCloseButton(action: onClose, help: L10n.text("common.close"), label: L10n.text("apple.sshlibraryview.close_ssh_library.23516468"))
             }
         }
         ToolbarItem(placement: .primaryAction) {
             Menu {
-                Button("Add \(section.rawValue.dropLast().lowercased())") { open(addRoute) }
+                Button(section.addTitle) { open(addRoute) }
                 if section == .hosts {
-                    Button("Add folder") { open(.newFolder(parent: nil)) }
+                    Button(L10n.text("apple.sshlibraryview.add_folder.5bbfc5a6")) { open(.newFolder(parent: nil)) }
                     ThemeRule()
-                    Button("Import from ssh config") { open(.importConfig) }
-                    Button("Import cloud servers") { open(.importCloud) }
-                    Button("Trusted servers") { open(.knownHosts) }
+                    Button(L10n.text("apple.sshlibraryview.import_from_ssh_config.1b6e8c38")) { open(.importConfig) }
+                    Button(L10n.text("apple.sshlibraryview.import_cloud_servers.34d6891a")) { open(.importCloud) }
+                    Button(L10n.text("apple.sshlibraryview.trusted_servers.b101ed86")) { open(.knownHosts) }
                 }
             } label: {
-                Label("Add", systemImage: "plus")
+                Label(L10n.text("common.add"), systemImage: "plus")
             }
         }
     }
@@ -540,30 +561,30 @@ struct SSHLibraryView: View {
         }
     }
 
-    private var emptyTitle: String { "No \(section.rawValue.lowercased()) yet" }
+    private var emptyTitle: String { section.emptyTitle }
 
     private var emptyMessage: String {
         switch section {
-        case .hosts: "Add a server once, then connect without retyping its address and username."
-        case .keys: "Generate or import an SSH key to authenticate without a password."
-        case .snippets: "Save commands you use often and run them from a terminal."
+        case .hosts: L10n.text("apple.sshlibraryview.add_a_server_once_then_connect_without_ret.ceca4076")
+        case .keys: L10n.text("apple.sshlibraryview.generate_or_import_an_ssh_key_to_authentic.406e6d7d")
+        case .snippets: L10n.text("apple.sshlibraryview.save_commands_you_use_often_and_run_them_f.a621eb59")
         }
     }
 
     private var emptyActionTitle: String {
         switch section {
-        case .hosts: "Add host"
-        case .keys: "Add key"
-        case .snippets: "Add snippet"
+        case .hosts: L10n.text("apple.sshlibraryview.add_host.7da3f6f4")
+        case .keys: L10n.text("apple.sshlibraryview.add_key.12626d65")
+        case .snippets: L10n.text("apple.sshlibraryview.add_snippet.a1f802b9")
         }
     }
 
     private var vaultUpgrade: some View {
         ClientEmptyState(
             kind: .needsAccount,
-            title: "Sync SSH between your devices",
-            message: "An encrypted vault keeps hosts and keys on every device signed in to this account. Supporter and above.",
-            actionTitle: "See plans",
+            title: L10n.text("apple.sshlibraryview.sync_ssh_between_your_devices.8bd160ae"),
+            message: L10n.text("apple.sshlibraryview.an_encrypted_vault_keeps_hosts_and_keys_on.75c5e63a"),
+            actionTitle: L10n.text("apple.sshlibraryview.see_plans.d9898933"),
             actionIcon: .plans,
             action: { store.showPaywall = true },
             art: .vault
@@ -661,11 +682,11 @@ struct SSHHostRow: View {
             if let onConnect {
                 // Keep the primary action visible for pointer and keyboard use.
                 #if os(macOS)
-                Button("Connect", .connect, action: onConnect)
+                Button(L10n.text("common.connect"), .connect, action: onConnect)
                     .buttonStyle(SecondaryButtonStyle(small: true))
-                    .accessibilityLabel("Connect to \(host.label)")
+                    .accessibilityLabel(L10n.text("apple.sshlibraryview.connect_to_0.fee15415", "\(host.label)"))
                 #else
-                Button("Connect", .connect, action: onConnect)
+                Button(L10n.text("common.connect"), .connect, action: onConnect)
                     .buttonStyle(AccentButtonStyle())
                     .frame(minHeight: 44)
                 #endif
@@ -704,7 +725,7 @@ struct SearchField: View {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Clear search")
+                .accessibilityLabel(L10n.text("apple.sshlibraryview.clear_search.3b7ea517"))
             }
         }
         .padding(.horizontal, Theme.Space.s)
@@ -737,7 +758,7 @@ struct InlineBanner: View {
                     Image(systemName: "xmark").font(Theme.font(10))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Dismiss")
+                .accessibilityLabel(L10n.text("apple.sshlibraryview.dismiss.48845bff"))
             }
         }
         .padding(Theme.Space.s)

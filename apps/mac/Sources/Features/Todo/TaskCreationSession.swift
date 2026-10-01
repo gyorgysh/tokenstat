@@ -57,7 +57,7 @@ final class TaskCreationSession {
         guard !working else { return }
         working = true
         defer { working = false }
-        guard let storage else { errorMessage = "Waiting for this account and computer to be verified before saving work."; return }
+        guard let storage else { errorMessage = L10n.text("apple.taskcreationsession.waiting_for_this_account_and_computer_to_b.f97b4242"); return }
         do {
             if !loaded {
                 let record = try await storage.load()
@@ -69,7 +69,7 @@ final class TaskCreationSession {
             ready = false
             guard try await service.supportsCreation() else {
                 ready = false
-                errorMessage = "Update this computer's tokenstat to create tasks from here. Your draft stays on this device."
+                errorMessage = L10n.text("apple.taskcreationsession.update_this_computer_s_tokenstat_to_create.b3cb8a00")
                 return
             }
             async let defaults = service.creationDefaults()
@@ -119,7 +119,7 @@ final class TaskCreationSession {
         guard let pending = saved.pending else { return }
         canRetry = false; errorMessage = nil; noticeMessage = nil
         do { try await confirm(service.createTask(pending), operationID: pending.operationID) }
-        catch { errorMessage = "The creation has not been confirmed. Check the computer before trying again. \(error.localizedDescription)" }
+        catch { errorMessage = L10n.text("apple.taskcreationsession.the_creation_has_not_been_confirmed_check.2a4e0d3e", "\(error.localizedDescription)") }
     }
 
     private func readReceipt() async {
@@ -131,13 +131,13 @@ final class TaskCreationSession {
             } else {
                 canRetry = true
                 errorMessage = nil
-                noticeMessage = "The computer has no creation receipt yet. You can retry this same task safely."
+                noticeMessage = L10n.text("apple.taskcreationsession.the_computer_has_no_creation_receipt_yet_y.9772be6d")
             }
         } catch { errorMessage = error.localizedDescription }
     }
 
     private func confirm(_ outcome: TaskCreationOutcome, operationID: String) async throws {
-        guard outcome.operationID == operationID else { throw TaskEditorDraft.Invalid.fields("The computer returned a different creation. Check this task again.") }
+        guard outcome.operationID == operationID else { throw TaskEditorDraft.Invalid.fields(L10n.text("apple.taskcreationsession.the_computer_returned_a_different_creation.61eecd53")) }
         saved.outcome = outcome
         canRetry = false; errorMessage = nil; noticeMessage = nil
         _ = await persist()

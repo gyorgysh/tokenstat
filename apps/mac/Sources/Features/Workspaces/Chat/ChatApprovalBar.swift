@@ -38,7 +38,7 @@ struct ChatApprovalBar: View {
                     Text(waitingTitle)
                         .font(Theme.callout.weight(.semibold))
                     Spacer(minLength: Theme.Space.s)
-                    Button("Show in conversation", .reveal) { showInTranscript(approval) }
+                    Button(L10n.text("apple.chatapprovalbar.show_in_conversation.de5ab267"), .reveal) { showInTranscript(approval) }
                         .buttonStyle(.plain)
                         .font(Theme.caption.weight(.medium))
                         .foregroundStyle(Theme.accent)
@@ -87,7 +87,7 @@ struct ChatApprovalBar: View {
     /// way a count fixes for free.
     private var waitingTitle: String {
         approvals.count > 1
-            ? "Waiting for you · \(approvals.count) requests"
-            : "Waiting for you"
+            ? L10n.text("apple.chatapprovalbar.waiting_for_you_0_requests.6adc5e7a", "\(approvals.count)")
+            : L10n.text("apple.chatapprovalbar.waiting_for_you.9f760ab2")
     }
 }

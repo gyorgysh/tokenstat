@@ -58,13 +58,13 @@ struct NotesInspector: View {
                 if showsBack || note != nil {
                     HStack {
                         if showsBack {
-                            Button("All notes", .back, action: onClose).buttonStyle(SecondaryButtonStyle(small: true))
+                            Button(L10n.text("apple.notesinspector.all_notes.71ecec88"), .back, action: onClose).buttonStyle(SecondaryButtonStyle(small: true))
                         }
                         Spacer()
                         if note != nil {
-                            Picker("Note view", selection: $preview) {
-                                Text("Write").tag(false)
-                                Text("Preview").tag(true)
+                            Picker(L10n.text("apple.notesinspector.note_view.a6857193"), selection: $preview) {
+                                Text(L10n.text("apple.notesinspector.write.3f00927a")).tag(false)
+                                Text(L10n.text("apple.notesinspector.preview.324b134f")).tag(true)
                             }.pickerStyle(.segmented).labelsHidden().frame(width: 160)
                         }
                     }.padding(Theme.Space.m)
@@ -72,7 +72,7 @@ struct NotesInspector: View {
                 }
             } else {
                 InspectorChromeBar(onClose: onClose) {
-                    InspectorTitle(title: "Note", symbol: "note.text", tint: Theme.secondary)
+                    InspectorTitle(title: L10n.text("apple.notesinspector.note.d8da2c49"), symbol: "note.text", tint: Theme.secondary)
                     Spacer(minLength: 0)
                 }
             }
@@ -82,8 +82,8 @@ struct NotesInspector: View {
                 } else {
                     InspectorEmptyState(
                         mark: "mark_note",
-                        title: "Pick a note",
-                        subtitle: "Choose one from the list, or start a new one."
+                        title: L10n.text("apple.notesinspector.pick_a_note.0dcc361f"),
+                        subtitle: L10n.text("apple.notesinspector.choose_one_from_the_list_or_start_a_new_on.82a2c66d")
                     )
                 }
             }
@@ -114,20 +114,20 @@ struct NotesInspector: View {
             Task { await model.saveNoteDraft(id) }
         }
         .confirmationDialog(
-            "Delete this note?",
+            L10n.text("apple.notesinspector.delete_this_note.f8069d7e"),
             isPresented: $confirmingDelete,
             titleVisibility: .visible
         ) {
-            Button("Delete", role: .destructive) {
+            Button(L10n.text("common.delete"), role: .destructive) {
                 guard let note else { return }
                 Task {
                     await model.remove(note)
                     model.selectedCardID = nil
                 }
             }
-            Button("Cancel", role: .cancel) {}
+            Button(L10n.text("common.cancel"), role: .cancel) {}
         } message: {
-            Text("It is gone for good. Archive keeps it and takes it off the list.")
+            Text(L10n.text("apple.notesinspector.it_is_gone_for_good_archive_keeps_it_and_t.83c8d93b"))
         }
         .sheet(isPresented: $converting) {
             if let note {
@@ -144,7 +144,7 @@ struct NotesInspector: View {
     private func noteBody(_ note: TodoCard) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                TextField("Title", text: $titleDraft)
+                TextField(L10n.text("apple.notesinspector.title.7e8cd205"), text: $titleDraft)
                     .textFieldStyle(.plain)
                     .font(Theme.font(15, weight: .semibold))
                     .focused($focused, equals: .title)
@@ -152,9 +152,9 @@ struct NotesInspector: View {
                     .onAppear { syncDrafts() }
 
                 if !embedded {
-                    Picker("Note view", selection: $preview) {
-                        Text("Write").tag(false)
-                        Text("Preview").tag(true)
+                    Picker(L10n.text("apple.notesinspector.note_view.a6857193"), selection: $preview) {
+                        Text(L10n.text("apple.notesinspector.write.3f00927a")).tag(false)
+                        Text(L10n.text("apple.notesinspector.preview.324b134f")).tag(true)
                     }.pickerStyle(.segmented).labelsHidden()
                 }
                 ZStack(alignment: .topLeading) {
@@ -166,13 +166,13 @@ struct NotesInspector: View {
                         .clipped()
                         .accessibilityHidden(preview)
                     if preview {
-                        MarkdownText(notesDraft.isEmpty ? "Nothing written yet." : notesDraft)
+                        MarkdownText(notesDraft.isEmpty ? L10n.text("apple.notesinspector.nothing_written_yet.4f01da04") : notesDraft)
                             .textSelection(.enabled)
                             .frame(minHeight: embedded ? 300 : 120, alignment: .topLeading)
                     }
                 }
                 if !preview {
-                    Text("Markdown supported: headings, lists, links and code.")
+                    Text(L10n.text("apple.notesinspector.markdown_supported_headings_lists_links_an.9e2568aa"))
                         .font(Theme.caption).foregroundStyle(.tertiary)
                 }
 
@@ -190,8 +190,8 @@ struct NotesInspector: View {
                 // A note belongs somewhere, and until now the only way to
                 // change where was to write it again in the right place.
                 AppMenuPicker(
-                    title: "Project",
-                    options: [(value: "", label: "Unassigned")]
+                    title: L10n.text("apple.notesinspector.project.98595978"),
+                    options: [(value: "", label: L10n.text("apple.notesinspector.unassigned.14d33bd0"))]
                         + folders.map { (value: $0.id, label: $0.name) },
                     selection: $placeID
                 )
@@ -225,7 +225,7 @@ struct NotesInspector: View {
 
     private func written(_ note: TodoCard) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("Written")
+            Text(L10n.text("apple.notesinspector.written.4c6031d1"))
                 .font(Theme.caption)
                 .foregroundStyle(.tertiary)
             RelativeTimeText(
@@ -239,16 +239,16 @@ struct NotesInspector: View {
     @ViewBuilder
     private func actions(_ note: TodoCard) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Button("Make a task", .move) { converting = true }
+            Button(L10n.text("apple.notesinspector.make_a_task.0cfbd102"), .move) { converting = true }
                 .buttonStyle(AccentButtonStyle())
             HStack(spacing: Theme.Space.s) {
                 if note.column == "archive" {
-                    Button("Restore", .restore) {
+                    Button(L10n.text("common.restore"), .restore) {
                         Task { await model.archiveNote(note, archived: false) }
                     }
                     .buttonStyle(SecondaryButtonStyle())
                 } else {
-                    Button("Archive", .archive) {
+                    Button(L10n.text("common.archive"), .archive) {
                         Task { await model.archiveNote(note, archived: true) }
                     }
                     .buttonStyle(SecondaryButtonStyle())
@@ -257,7 +257,7 @@ struct NotesInspector: View {
                 // a note is the only permanent thing this pane can do, and a
                 // misclick a few points to the right of Archive must not be
                 // the way somebody finds that out.
-                Button("Delete", .delete) { confirmingDelete = true }
+                Button(L10n.text("common.delete"), .delete) { confirmingDelete = true }
                     .buttonStyle(DestructiveButtonStyle())
             }
         }

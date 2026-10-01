@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.marks
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
@@ -45,7 +47,7 @@ fun TierMark(tier: String, markSize: Int = 15) {
     Canvas(
         Modifier
             .size(markSize.dp)
-            .semantics { contentDescription = "${tier.lowercase().replaceFirstChar { it.uppercase() }} tier" },
+            .semantics { contentDescription = L10n.text("android.tiermark.0_tier.c75a2e12", "${tier.lowercase().replaceFirstChar { it.uppercase() }}") },
     ) {
         val unit = size.minDimension / 24f
         fun pt(x: Float, y: Float) = Offset(x * unit, y * unit)

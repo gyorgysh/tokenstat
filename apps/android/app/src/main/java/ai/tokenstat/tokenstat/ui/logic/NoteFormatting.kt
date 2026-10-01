@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.logic
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 /** Selection-preserving editing actions; note contents remain portable Markdown. */
 internal enum class NoteFormat(val label: String, val prefix: String, val suffix: String = "", val placeholder: String, val lines: Boolean = false) {
-    Heading("Heading", "## ", placeholder = "Heading", lines = true),
-    Bold("Bold", "**", "**", "text"),
-    Italic("Italic", "*", "*", "text"),
-    Bullet("Bulleted list", "- ", placeholder = "List item", lines = true),
-    Checklist("Checklist", "- [ ] ", placeholder = "To do", lines = true),
-    Quote("Quote", "> ", placeholder = "Quote", lines = true),
-    Code("Code", "`", "`", "code");
+    Heading(L10n.text("android.noteformatting.heading.b34f17f0"), "## ", placeholder = L10n.text("android.noteformatting.heading.b34f17f0"), lines = true),
+    Bold(L10n.text("android.noteformatting.bold.94fee62e"), "**", "**", "text"),
+    Italic(L10n.text("android.noteformatting.italic.9bf37cb5"), "*", "*", "text"),
+    Bullet(L10n.text("android.noteformatting.bulleted_list.ce51b395"), "- ", placeholder = L10n.text("android.noteformatting.list_item.201333ac"), lines = true),
+    Checklist(L10n.text("android.noteformatting.checklist.73460304"), "- [ ] ", placeholder = L10n.text("android.noteformatting.to_do.100ec1bc"), lines = true),
+    Quote(L10n.text("android.noteformatting.quote.eb4cdebd"), "> ", placeholder = L10n.text("android.noteformatting.quote.eb4cdebd"), lines = true),
+    Code(L10n.text("android.noteformatting.code.340f4630"), "`", "`", "code");
 
     data class Edit(val text: String, val start: Int, val end: Int)
 

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.chrome
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import android.content.Context
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -187,11 +189,11 @@ object TabVisibility {
 
 /// One line in the account sheet, saying which tabs this device shows.
 fun tabSummary(visibleLabels: List<String>): String = when (visibleLabels.size) {
-    0 -> "Home"
+    0 -> L10n.text("common.home")
     in 1..3 -> visibleLabels.joinToString(", ")
     else -> {
         val rest = visibleLabels.size - 2
-        visibleLabels.take(2).joinToString(", ") + " and $rest more"
+        visibleLabels.take(2).joinToString(", ") + L10n.text("android.tabcustomization.and_0_more.5a1fce7b", "${rest}")
     }
 }
 
@@ -205,7 +207,7 @@ fun TabsCard(summary: String, onOpen: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.xs), modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     Icon(ActionIcon.Device.vector, null, tint = colors.accent)
-                    Text("Tabs", style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
+                    Text(L10n.text("android.tabcustomization.tabs.8e5ea509"), style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
                 }
                 Text(summary, style = TsType.body, color = colors.textSecondary)
             }
@@ -251,14 +253,14 @@ fun TabEditorSheet(tabs: List<TabDef>, customization: TabCustomization, onDismis
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Tabs",
+                    L10n.text("android.tabcustomization.tabs.8e5ea509"),
                     style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
                     color = colors.textPrimary,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = onDismiss) { Text("Done") }
+                TextButton(onClick = onDismiss) { Text(L10n.text("common.done")) }
             }
-            Text("Drag to reorder. Uncheck what you never open.", style = TsType.body, color = colors.textSecondary)
+            Text(L10n.text("android.tabcustomization.drag_to_reorder_uncheck_what_you_never_ope.ce93af9a"), style = TsType.body, color = colors.textSecondary)
             // One detector for the whole list, in the column's own frame,
             // which never translates. Tracking the finger inside the dragged
             // row instead measures it in that row's moving frame, where it
@@ -362,13 +364,13 @@ fun TabEditorSheet(tabs: List<TabDef>, customization: TabCustomization, onDismis
             val off = customization.order.filter { customization.hidden.contains(it) }
                 .mapNotNull { id -> tabs.find { it.id == id }?.label }
             Text(
-                if (off.isEmpty()) "Every tab is on."
-                else "Off: ${off.joinToString(", ")}. A hidden tab appears temporarily when you open it from another screen. At least one tab always stays on.",
+                if (off.isEmpty()) L10n.text("android.tabcustomization.every_tab_is_on.07e49fd9")
+                else L10n.text("android.tabcustomization.off_0_a_hidden_tab_appears_temporarily_whe.e422c93c", "${off.joinToString(", ")}"),
                 style = TsType.body,
                 color = colors.textSecondary,
             )
             TsAccentButton(
-                label = "Reset tabs",
+                label = L10n.text("android.tabcustomization.reset_tabs.e5fcb0cc"),
                 icon = ActionIcon.Refresh.vector,
                 onClick = { customization.reset(); refused = null },
             )
@@ -377,9 +379,9 @@ fun TabEditorSheet(tabs: List<TabDef>, customization: TabCustomization, onDismis
     refused?.let { def ->
         AlertDialog(
             onDismissRequest = { refused = null },
-            title = { Text("One tab stays on") },
-            text = { Text("Hiding ${def.label} too would leave the bar empty.") },
-            confirmButton = { TextButton(onClick = { refused = null }) { Text("OK") } },
+            title = { Text(L10n.text("android.tabcustomization.one_tab_stays_on.6676423c")) },
+            text = { Text(L10n.text("android.tabcustomization.hiding_0_too_would_leave_the_bar_empty.2725d7a6", "${def.label}")) },
+            confirmButton = { TextButton(onClick = { refused = null }) { Text(L10n.text("android.tabcustomization.ok.565339bc")) } },
         )
     }
 }
@@ -414,7 +416,7 @@ private fun TabEditorRow(
             BrandCheckDisc(on = on, modifier = Modifier.alpha(if (dimmed) 0.35f else 1f))
             Icon(
                 Icons.Default.DragHandle,
-                "Reorder",
+                L10n.text("android.tabcustomization.reorder.14ac200e"),
                 tint = colors.textTertiary,
             )
         }

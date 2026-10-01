@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.notifications
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -68,24 +70,24 @@ object PushPayload {
     /// The banner text, composed here from the reason. The machine id is
     /// never shown: it names a key, not a computer.
     fun title(reason: String): String = when (reason) {
-        RUN_FINISHED -> "Run finished"
-        RUN_FAILED -> "Run failed"
-        RUN_NEEDS_INPUT -> "Waiting for you"
-        CHAT_FINISHED -> "Chat finished"
-        CHAT_FAILED -> "Chat did not finish"
-        SCREEN_ACCESS -> "Screen access"
-        TEST -> "Notifications are on"
-        else -> "tokenstat"
+        RUN_FINISHED -> L10n.text("android.pushpayload.run_finished.22488bd9")
+        RUN_FAILED -> L10n.text("android.pushpayload.run_failed.97fddf2d")
+        RUN_NEEDS_INPUT -> L10n.text("android.pushpayload.waiting_for_you.9f760ab2")
+        CHAT_FINISHED -> L10n.text("android.pushpayload.chat_finished.a49ea476")
+        CHAT_FAILED -> L10n.text("android.pushpayload.chat_did_not_finish.45962bbc")
+        SCREEN_ACCESS -> L10n.text("android.pushpayload.screen_access.1a2a63ae")
+        TEST -> L10n.text("android.pushpayload.notifications_are_on.ceaaed4b")
+        else -> L10n.text("android.pushpayload.tokenstat.63d30539")
     }
 
     fun body(reason: String): String = when (reason) {
-        RUN_FINISHED -> "An agent run finished on one of your machines."
-        RUN_FAILED -> "An agent run did not finish cleanly."
-        RUN_NEEDS_INPUT -> "An agent needs an answer to carry on."
-        CHAT_FINISHED -> "An agent finished a turn."
-        CHAT_FAILED -> "An agent turn did not finish cleanly."
-        SCREEN_ACCESS -> "A device asks you to review screen permission."
-        TEST -> "This is the only test notification."
-        else -> "One of your agents needs attention."
+        RUN_FINISHED -> L10n.text("android.pushpayload.an_agent_run_finished_on_one_of_your_machi.bd252a8c")
+        RUN_FAILED -> L10n.text("android.pushpayload.an_agent_run_did_not_finish_cleanly.30ab9f80")
+        RUN_NEEDS_INPUT -> L10n.text("android.pushpayload.an_agent_needs_an_answer_to_carry_on.18bb10e5")
+        CHAT_FINISHED -> L10n.text("android.pushpayload.an_agent_finished_a_turn.8ee8f80d")
+        CHAT_FAILED -> L10n.text("android.pushpayload.an_agent_turn_did_not_finish_cleanly.29db4c02")
+        SCREEN_ACCESS -> L10n.text("android.pushpayload.a_device_asks_you_to_review_screen_permiss.a24eb340")
+        TEST -> L10n.text("android.pushpayload.this_is_the_only_test_notification.45933459")
+        else -> L10n.text("android.pushpayload.one_of_your_agents_needs_attention.6137b683")
     }
 }

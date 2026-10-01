@@ -43,12 +43,12 @@ struct ClientAddThisDevice: View {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 ClientEmptyArt(kind: granted ? .serverReady : .workspaceAccess)
                     .frame(maxWidth: .infinity)
-                Text(granted ? "You are in" : "Add this device")
+                Text(granted ? L10n.text("apple.clientaddthisdevice.you_are_in.0c6dac04") : L10n.text("apple.clientaddthisdevice.add_this_device.c93a44d1"))
                     .font(Theme.title.weight(.semibold))
-                Text(granted
-                    ? "\(hostName) has let this device open its work."
-                    : "On \(hostName), run `tokenstat host access invite`. It prints one code, "
-                    + "good for fifteen minutes and for one device.")
+                Text(LocalizedStringKey(granted
+                    ? L10n.text("apple.clientaddthisdevice.0_has_let_this_device_open_its_work.cd7156ad", "\(hostName)")
+                    : L10n.text("apple.clientaddthisdevice.on_0_run_tokenstat_host_access_invite_it_p.b7c9caf7", "\(hostName)")
+                    + L10n.text("apple.clientaddthisdevice.good_for_fifteen_minutes_and_for_one_devic.514498e6")))
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -57,15 +57,14 @@ struct ClientAddThisDevice: View {
                 }
                 if !granted {
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
-                        TextField("WXYZ-2345", text: $code)
+                        TextField(L10n.text("apple.clientaddthisdevice.wxyz_2345.5e7774a6"), text: $code)
                             .textFieldStyle(.themed)
                             .font(Theme.monoText(20, relativeTo: .title3))
                             .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
                             .disabled(working)
                         Text(
-                            "The machine checks this code over your encrypted connection. "
-                            + "tokenstat.ai cannot see it and cannot let a device in."
+                            L10n.text("apple.clientaddthisdevice.the_machine_checks_this_code_over_your_enc.c96bb0a1")
                         )
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
@@ -80,18 +79,18 @@ struct ClientAddThisDevice: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Theme.background)
-        .navigationTitle("Add this device")
+        .navigationTitle(L10n.text("apple.clientaddthisdevice.add_this_device.c93a44d1"))
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: Theme.Space.s) {
                 if granted {
-                    Button("Open \(hostName)", .next) {
+                    Button(L10n.text("apple.clientaddthisdevice.open_0.e71b4013", "\(hostName)"), .next) {
                         onGranted?()
                         dismiss()
                     }
                     .clientProminentStyle()
                 } else {
-                    Button(working ? "Checking…" : "Use this code", .approve) {
+                    Button(working ? L10n.text("apple.clientaddthisdevice.checking.ec963ffc") : L10n.text("apple.clientaddthisdevice.use_this_code.34617e30"), .approve) {
                         Task { await redeem() }
                     }
                     .clientProminentStyle()

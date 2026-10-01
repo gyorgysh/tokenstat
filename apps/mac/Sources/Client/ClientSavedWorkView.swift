@@ -30,16 +30,16 @@ struct ClientSavedWorkView: View {
         NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    Text("Saved for \(owner.name)")
+                    Text(L10n.text("apple.clientsavedworkview.saved_for_0.82b04e6b", "\(owner.name)"))
                         .font(Theme.title.weight(.semibold))
-                    Text("Copies kept on this device. Read, copy, or draft a reply here. Verify your account to return to live work.")
+                    Text(L10n.text("apple.clientsavedworkview.copies_kept_on_this_device_read_copy_or_dr.f3575091"))
                         .font(ClientType.body)
                         .foregroundStyle(.secondary)
                     if let failure {
                         ClientErrorCard(message: failure) { Task { await load() } }
                     } else if loaded, records.isEmpty {
-                        ClientEmptyState(kind: .nothingYet, title: "No saved work",
-                            message: "Conversations and changes you open while connected can be kept here for later.")
+                        ClientEmptyState(kind: .nothingYet, title: L10n.text("apple.clientsavedworkview.no_saved_work.6fc69db7"),
+                            message: L10n.text("apple.clientsavedworkview.conversations_and_changes_you_open_while_c.52743616"))
                     }
                     ForEach(rows) { row in
                         NavigationLink(value: row.reference) {
@@ -48,9 +48,9 @@ struct ClientSavedWorkView: View {
                                     .foregroundStyle(Theme.accent)
                                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
                                     Text(row.title).font(ClientType.label.weight(.semibold)).lineLimit(2)
-                                    Text(owner.hosts[row.reference.hostIdentity] ?? "Machine")
+                                    Text(owner.hosts[row.reference.hostIdentity] ?? L10n.text("apple.clientsavedworkview.machine.8f1cc42d"))
                                         .font(ClientType.caption).foregroundStyle(.secondary)
-                                    Text("Saved \(RelativeClock.phrase(for: row.savedAt, style: .full))")
+                                    Text(L10n.text("apple.clientsavedworkview.saved_0.4f0424e4", "\(RelativeClock.phrase(for: row.savedAt, style: .full))"))
                                         .font(ClientType.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer(minLength: 0)
@@ -66,11 +66,11 @@ struct ClientSavedWorkView: View {
                     if loading {
                         ClientWireframe.Rows(count: 3)
                     } else if offset < records.count {
-                        Button("Show more", .more) { Task { await loadNext() } }
+                        Button(L10n.text("apple.clientsavedworkview.show_more.f5c9bd13"), .more) { Task { await loadNext() } }
                             .buttonStyle(SecondaryButtonStyle())
                     }
                     if unavailable > 0 {
-                        Text("Some saved copies could not be opened. They may have been removed or may need this device to be unlocked.")
+                        Text(L10n.text("apple.clientsavedworkview.some_saved_copies_could_not_be_opened_they.67a356c8"))
                             .font(ClientType.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -95,15 +95,15 @@ struct ClientSavedWorkView: View {
                     }
                 }
             }
-            .navigationTitle("Saved work")
+            .navigationTitle(L10n.text("apple.clientsavedworkview.saved_work.9204cce7"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button("Search work", .searchAll) { Task { await openSearch() } }
+                    Button(L10n.text("apple.clientsavedworkview.search_work.cc46cedc"), .searchAll) { Task { await openSearch() } }
                         .disabled(loading)
                 }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
+                    Button(L10n.text("common.close")) { dismiss() }
                 }
             }
             .task { if !loaded { await load() } }
@@ -134,7 +134,7 @@ struct ClientSavedWorkView: View {
                 let key = await WorkCacheKey.existingKeyInBackground(for: scope)
                 guard stillOwned, generation == SavedWorkAccess.shared.generation, !Task.isCancelled else { return }
                 if key == nil {
-                    failure = "Saved work is unavailable on this device. Unlock it and try again, or verify your account when you can connect."
+                    failure = L10n.text("apple.clientsavedworkview.saved_work_is_unavailable_on_this_device_u.397728eb")
                     return
                 }
             }
@@ -147,7 +147,7 @@ struct ClientSavedWorkView: View {
             await loadNext()
         } catch {
             guard stillOwned, !Task.isCancelled else { return }
-            failure = "Saved work could not be read. Try again on this device."
+            failure = L10n.text("apple.clientsavedworkview.saved_work_could_not_be_read_try_again_on.849d8f15")
         }
     }
 
@@ -203,8 +203,8 @@ private struct ClientSavedChangeDestination: View {
             if let change {
                 WorkViewedChangeSheet(change: change, ownsSession: { SavedWorkAccess.shared.reader == owner })
             } else if loaded {
-                Text("This saved change is no longer available.").font(Theme.callout)
-            } else { ProgressView("Opening saved change") }
+                Text(L10n.text("apple.clientsavedworkview.this_saved_change_is_no_longer_available.5ab9a7b4")).font(Theme.callout)
+            } else { ProgressView(L10n.text("apple.clientsavedworkview.opening_saved_change.250d7b03")) }
         }
         .task {
             defer { loaded = true }
@@ -230,8 +230,8 @@ private struct ClientSavedWorkConversation: View {
             if WorkCacheAccess.canRead(reference), model.savedCopy != nil, let id = reference.itemID {
                 ClientChatThread(model: model, chatID: id, folderName: "", hostName: hostName)
             } else if loaded {
-                ClientEmptyState(kind: .unreachable, title: "Saved copy unavailable",
-                    message: "This copy could not be opened. Any draft you saved is kept separately on this device.")
+                ClientEmptyState(kind: .unreachable, title: L10n.text("apple.clientsavedworkview.saved_copy_unavailable.ca325085"),
+                    message: L10n.text("apple.clientsavedworkview.this_copy_could_not_be_opened_any_draft_yo.9fed3d94"))
                     .padding(Theme.Space.m)
             } else {
                 ClientWireframe.Rows(count: 5).padding(Theme.Space.m)

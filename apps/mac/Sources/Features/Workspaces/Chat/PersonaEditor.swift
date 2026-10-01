@@ -23,8 +23,8 @@ struct PersonaEditor: View {
     var body: some View {
         #if os(macOS)
         ThemedSheet(
-            title: "Personas",
-            subtitle: "Choose how new chats in this workspace should behave.",
+            title: L10n.text("apple.personaeditor.personas.fa2ea3fb"),
+            subtitle: L10n.text("apple.personaeditor.choose_how_new_chats_in_this_workspace_sho.c3a9ed44"),
             icon: .persona,
             onClose: close
         ) {
@@ -40,11 +40,11 @@ struct PersonaEditor: View {
                     .padding(Theme.Modal.bodyPadding)
             }
             .background(Theme.background)
-            .navigationTitle("Personas")
+            .navigationTitle(L10n.text("apple.personaeditor.personas.fa2ea3fb"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { close() }
+                    Button(L10n.text("common.done")) { close() }
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -67,7 +67,7 @@ struct PersonaEditor: View {
                 improvingRow
             }
             if saving {
-                Text("Saving changes…")
+                Text(L10n.text("apple.personaeditor.saving_changes.39520758"))
                     .font(Theme.caption)
                     .foregroundStyle(Theme.controlGlyph)
             }
@@ -112,7 +112,7 @@ struct PersonaEditor: View {
                 options: personaOptions,
                 selection: selectedID
             )
-            Button("New persona", .create) { startNew() }
+            Button(L10n.text("apple.personaeditor.new_persona.044eafe2"), .create) { startNew() }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .disabled(improving || saving)
         }
@@ -127,9 +127,9 @@ struct PersonaEditor: View {
     private var workspaceDefaultRow: some View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("New chats here")
+                Text(L10n.text("apple.personaeditor.new_chats_here.cc6a9bf2"))
                     .font(Theme.callout.weight(.medium))
-                Text("Existing conversations keep whatever they already have.")
+                Text(L10n.text("apple.personaeditor.existing_conversations_keep_whatever_they.b48e4eab"))
                     .font(Theme.caption)
                     .foregroundStyle(Theme.controlGlyph)
                     .fixedSize(horizontal: false, vertical: true)
@@ -146,7 +146,7 @@ struct PersonaEditor: View {
     }
 
     private var defaultOptions: [(value: String, label: String)] {
-        var options: [(value: String, label: String)] = [(value: "", label: "No persona")]
+        var options: [(value: String, label: String)] = [(value: "", label: L10n.text("apple.personaeditor.no_persona.cce53fca"))]
         for persona in model.personas {
             options.append((value: persona.id, label: persona.name))
         }
@@ -190,15 +190,15 @@ struct PersonaEditor: View {
                 pokeable: true
             )
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                TextField("Name", text: $draft.name)
+                TextField(L10n.text("apple.personaeditor.name.dcd1d522"), text: $draft.name)
                     .themedFieldBox()
                     .disabled(improving || saving)
                 HStack(spacing: Theme.Space.s) {
-                    Button("Reroll", .refresh) { rerollFace() }
+                    Button(L10n.text("apple.personaeditor.reroll.18363dbe"), .refresh) { rerollFace() }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                         .disabled(improving || saving)
                     if isDefault {
-                        Text("Default")
+                        Text(L10n.text("apple.personaeditor.default.21b111cb"))
                             .font(Theme.caption.weight(.medium))
                             .foregroundStyle(Theme.accent)
                             .padding(.horizontal, 8)
@@ -206,13 +206,13 @@ struct PersonaEditor: View {
                             .background(Theme.accentSoft, in: Capsule())
                     }
                     Spacer(minLength: 0)
-                    Toggle("Every folder", isOn: sharedBinding)
+                    Toggle(L10n.text("apple.personaeditor.every_folder.9836340c"), isOn: sharedBinding)
                         .toggleStyle(.switch)
                         .controlSize(.mini)
                         .font(Theme.caption)
                         .foregroundStyle(Theme.controlGlyph)
                         .disabled(improving || saving)
-                        .help("Off, this persona belongs to this folder. On, every folder can pick it.")
+                        .help(L10n.text("apple.personaeditor.off_this_persona_belongs_to_this_folder_on.9f140f73"))
                 }
             }
         }
@@ -220,7 +220,7 @@ struct PersonaEditor: View {
 
     private var briefBlock: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("What should it be good at, and how should it work?")
+            Text(L10n.text("apple.personaeditor.what_should_it_be_good_at_and_how_should_i.b3533c88"))
                 .font(Theme.callout.weight(.semibold))
                 .foregroundStyle(.primary)
             ThemedEditor(
@@ -232,7 +232,7 @@ struct PersonaEditor: View {
             .disabled(improving || saving)
             .overlay(alignment: .topLeading) {
                 if draft.systemPrompt.isEmpty {
-                    Text("Someone who explains Rust errors patiently and never rewrites more than I asked for")
+                    Text(L10n.text("apple.personaeditor.someone_who_explains_rust_errors_patiently.cee24939"))
                         .font(Theme.callout)
                         .foregroundStyle(Theme.controlGlyph.opacity(0.7))
                         .padding(.horizontal, Theme.Space.s)
@@ -240,7 +240,7 @@ struct PersonaEditor: View {
                         .allowsHitTesting(false)
                 }
             }
-            Text("Sent to whichever agent the chat is on. It is never part of your message.")
+            Text(L10n.text("apple.personaeditor.sent_to_whichever_agent_the_chat_is_on_it.19125f42"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
                 .fixedSize(horizontal: false, vertical: true)
@@ -262,10 +262,10 @@ struct PersonaEditor: View {
     private var improvingRow: some View {
         HStack(spacing: Theme.Space.s) {
             PersonaMark(seed: faceSeed, size: 30, state: .thinking)
-            Text("Improving...")
+            Text(L10n.text("apple.personaeditor.improving.e1129ace"))
                 .font(Theme.callout.weight(.medium))
                 .foregroundStyle(.primary)
-            Text("One turn on \(model.backend(for: drafter)?.label ?? drafter).")
+            Text(L10n.text("apple.personaeditor.one_turn_on_0.7deee84a", "\(model.backend(for: drafter)?.label ?? drafter)"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
         }
@@ -275,12 +275,12 @@ struct PersonaEditor: View {
     private var improveAgentRow: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             AppMenuPicker(
-                title: "Improve with",
+                title: L10n.text("apple.personaeditor.improve_with.893197e0"),
                 options: draftBackends.map { (value: $0.id, label: $0.label) },
                 selection: $drafter
             )
             .disabled(improving || draftBackends.isEmpty)
-            Text("One short turn on that agent, in a temporary folder. It never touches your project.")
+            Text(L10n.text("apple.personaeditor.one_short_turn_on_that_agent_in_a_temporar.6be85303"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
                 .fixedSize(horizontal: false, vertical: true)
@@ -293,15 +293,15 @@ struct PersonaEditor: View {
     @ViewBuilder
     private var macFooter: some View {
         if canDelete {
-            Button("Delete", .delete, role: .destructive) { deleteCurrent() }
+            Button(L10n.text("common.delete"), .delete, role: .destructive) { deleteCurrent() }
                 .buttonStyle(DestructiveButtonStyle(small: true))
                 .disabled(improving || saving)
         }
         Spacer()
-        Button("Improve with agent", .persona) { improve() }
+        Button(L10n.text("apple.personaeditor.improve_with_agent.6ccc3e33"), .persona) { improve() }
             .buttonStyle(SecondaryButtonStyle(small: true))
             .disabled(!canImprove)
-        Button("Save as written", .save) { save() }
+        Button(L10n.text("apple.personaeditor.save_as_written.96a0d96e"), .save) { save() }
             .buttonStyle(AccentButtonStyle(small: true))
             .disabled(!canSave)
             .keyboardShortcut(.defaultAction)
@@ -311,18 +311,18 @@ struct PersonaEditor: View {
         VStack(spacing: Theme.Space.m) {
             HStack(spacing: Theme.Space.s) {
                 if canDelete {
-                    Button("Delete", .delete, role: .destructive) { deleteCurrent() }
+                    Button(L10n.text("common.delete"), .delete, role: .destructive) { deleteCurrent() }
                         .buttonStyle(DestructiveButtonStyle())
                         .disabled(improving || saving)
                 }
                 Spacer(minLength: 0)
             }
             HStack(spacing: Theme.Space.s) {
-                Button("Improve with agent", .persona) { improve() }
+                Button(L10n.text("apple.personaeditor.improve_with_agent.6ccc3e33"), .persona) { improve() }
                     .buttonStyle(SecondaryButtonStyle())
                     .disabled(!canImprove)
                 Spacer(minLength: 0)
-                Button("Save as written", .save) { save() }
+                Button(L10n.text("apple.personaeditor.save_as_written.96a0d96e"), .save) { save() }
                     .buttonStyle(AccentButtonStyle())
                     .disabled(!canSave)
             }
@@ -376,10 +376,10 @@ struct PersonaEditor: View {
     private var personaOptions: [(value: String, label: String)] {
         var options: [(value: String, label: String)] = []
         if isNew {
-            options.append((value: "", label: "New persona"))
+            options.append((value: "", label: L10n.text("apple.personaeditor.new_persona.044eafe2")))
         }
         for persona in model.personas {
-            let suffix = persona.id == model.defaultPersonaID ? " · Default" : ""
+            let suffix = persona.id == model.defaultPersonaID ? L10n.text("apple.personaeditor.default.2a7e0b7b") : L10n.text("apple.personaeditor..e3b0c442")
             options.append((value: persona.id, label: persona.name + suffix))
         }
         return options
@@ -401,10 +401,10 @@ struct PersonaEditor: View {
     }
 
     private static let startingPoints: [(String, String)] = [
-        ("Reviewer", "Reviews changes carefully, says what is wrong before what is fine, and never rewrites more than was asked."),
-        ("Explainer", "Explains what code does in plain language, with a short example, and checks understanding before moving on."),
-        ("Refactorer", "Finds duplication and unclear naming, proposes the smallest change that fixes it, and never mixes a refactor with a behaviour change."),
-        ("Rubber duck", "Asks questions rather than answering them, and helps me find the problem myself."),
+        (L10n.text("apple.personaeditor.reviewer.d29f4677"), L10n.text("apple.personaeditor.reviews_changes_carefully_says_what_is_wro.cc7172db")),
+        (L10n.text("apple.personaeditor.explainer.cccedca5"), L10n.text("apple.personaeditor.explains_what_code_does_in_plain_language.0aac8304")),
+        (L10n.text("apple.personaeditor.refactorer.b197da46"), L10n.text("apple.personaeditor.finds_duplication_and_unclear_naming_propo.964ba2cf")),
+        (L10n.text("apple.personaeditor.rubber_duck.6a174e81"), L10n.text("apple.personaeditor.asks_questions_rather_than_answering_them.bf150882")),
     ]
 
     // MARK: - Behaviour

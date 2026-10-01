@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.marks
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.StartOffset
 import androidx.compose.animation.core.animateFloat
@@ -200,8 +202,8 @@ fun Wordmark(
             LogoMark(size = size)
             Spacer(Modifier.width((size * 0.75f).dp))
         }
-        Text("token", style = face, color = colors.textPrimary)
-        Text("stat", style = face, color = colors.accent)
+        Text(L10n.text("android.marks.token.3c469e9d"), style = face, color = colors.textPrimary)
+        Text(L10n.text("android.marks.stat.40460da8"), style = face, color = colors.accent)
         if (fills) Spacer(Modifier.weight(1f))
     }
 }
@@ -319,7 +321,7 @@ fun Avatar(
                     Modifier
                 } else {
                     Modifier.semantics {
-                        contentDescription = if (signedIn) "Account, $name" else "Sign in to tokenstat"
+                        contentDescription = if (signedIn) L10n.text("android.marks.account_0.1342b321", "${name}") else L10n.text("android.marks.sign_in_to_tokenstat.9a950fc4")
                     }
                 },
             ),
@@ -339,7 +341,7 @@ fun Avatar(
         ) {
             if (signedIn) {
                 Text(
-                    avatarInitials(name) ?: "t",
+                    avatarInitials(name) ?: L10n.text("android.marks.t.e3b98a4d"),
                     style = TextStyle(fontSize = (size * 0.42f).sp, fontWeight = FontWeight.SemiBold),
                     color = Color.White,
                 )

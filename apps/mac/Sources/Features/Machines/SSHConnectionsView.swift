@@ -40,47 +40,47 @@ struct CloudImportForm: View {
                     if let error {
                         InlineBanner(text: error, kind: .danger) { self.error = nil }
                     }
-                    SSHEditorSection(title: "Provider") {
-                        SSHEditorField(label: "Import from") {
-                            Picker("Provider", selection: $provider) {
+                    SSHEditorSection(title: L10n.text("apple.sshconnectionsview.provider.472590ae")) {
+                        SSHEditorField(label: L10n.text("apple.sshconnectionsview.import_from.f9e4378d")) {
+                            Picker(L10n.text("apple.sshconnectionsview.provider.472590ae"), selection: $provider) {
                                 ForEach(providers, id: \.self) {
                                     Text($0.rawValue).tag($0)
                                 }
                             }
                         }
                         if provider == .digitalOcean {
-                            SSHEditorField(label: "Read-only API token") {
-                                SecureField("Read-only API token", text: $token)
+                            SSHEditorField(label: L10n.text("apple.sshconnectionsview.read_only_api_token.8a4f07c1")) {
+                                SecureField(L10n.text("apple.sshconnectionsview.read_only_api_token.8a4f07c1"), text: $token)
                                     .themedFieldBox()
                             }
                             if let tokens = URL(string: "https://cloud.digitalocean.com/account/api/tokens") {
-                                Link("Where to find the token", destination: tokens)
+                                Link(L10n.text("apple.sshconnectionsview.where_to_find_the_token.625cfc6d"), destination: tokens)
                                     .font(Theme.caption)
                             }
                         } else {
-                            SSHEditorField(label: "AWS CLI profile") {
-                                TextField("AWS CLI profile", text: $profile)
+                            SSHEditorField(label: L10n.text("apple.sshconnectionsview.aws_cli_profile.d16d28fb")) {
+                                TextField(L10n.text("apple.sshconnectionsview.aws_cli_profile.d16d28fb"), text: $profile)
                                     .textFieldStyle(.themed)
                             }
-                            SSHEditorField(label: "Region") {
-                                TextField("Region (optional)", text: $region)
+                            SSHEditorField(label: L10n.text("apple.sshconnectionsview.region.d3a008ef")) {
+                                TextField(L10n.text("apple.sshconnectionsview.region_optional.c59b0326"), text: $region)
                                     .textFieldStyle(.themed)
                             }
                         }
-                        SSHEditorField(label: "SSH username") {
-                            TextField("SSH username", text: $username)
+                        SSHEditorField(label: L10n.text("apple.sshconnectionsview.ssh_username.04940ab1")) {
+                            TextField(L10n.text("apple.sshconnectionsview.ssh_username.04940ab1"), text: $username)
                                 .textFieldStyle(.themed)
                         }
                         SSHEditorNote(
                             text: provider == .digitalOcean
-                                ? "Only the Droplets list is read. The token is used once and is not saved."
-                                : "Uses your existing AWS CLI profile and only calls describe-instances. AWS keys never enter tokenstat."
+                                ? L10n.text("apple.sshconnectionsview.only_the_droplets_list_is_read_the_token_i.1d8d25ff")
+                                : L10n.text("apple.sshconnectionsview.uses_your_existing_aws_cli_profile_and_onl.a7164176")
                         )
                     }
                     if let importedCount {
-                        SSHEditorSection(title: "Imported") {
+                        SSHEditorSection(title: L10n.text("apple.sshconnectionsview.imported.321f179c")) {
                             Label(
-                                importedCount == 1 ? "Imported 1 server" : "Imported \(importedCount) servers",
+                                importedCount == 1 ? L10n.text("apple.sshconnectionsview.imported_1_server.4d9265c1") : L10n.text("apple.sshconnectionsview.imported_0_servers.16ce8b58", "\(importedCount)"),
                                 systemImage: "checkmark.circle.fill"
                             )
                             .foregroundStyle(Theme.success)
@@ -88,14 +88,14 @@ struct CloudImportForm: View {
                     } else if importing {
                         HStack(spacing: Theme.Space.s) {
                             ProgressView().controlSize(.small)
-                            Text("Reading server list…")
+                            Text(L10n.text("apple.sshconnectionsview.reading_server_list.1f5b0d80"))
                                 .font(Theme.callout)
                                 .foregroundStyle(.secondary)
                         }
                     }
                 }
                 SSHEditorFooter(
-                    saveTitle: importedCount == nil ? "Import" : "Done",
+                    saveTitle: importedCount == nil ? L10n.text("apple.sshconnectionsview.import.2cff9baa") : L10n.text("common.done"),
                     saveIcon: importedCount == nil ? .download : .done,
                     canSave: importedCount != nil
                         || (!(provider == .digitalOcean && token.isEmpty) && !username.isEmpty),
@@ -107,7 +107,7 @@ struct CloudImportForm: View {
                     onDelete: nil
                 )
             }
-            .navigationTitle("Import cloud servers")
+            .navigationTitle(L10n.text("apple.sshconnectionsview.import_cloud_servers.34d6891a"))
         }
     }
     private func run() async {
@@ -174,10 +174,10 @@ struct SSHRecoveryWordsSheet: View {
 
     var body: some View {
         ThemedSheet(
-            title: step == .read ? "Save your recovery code" : "Type the recovery code",
+            title: step == .read ? L10n.text("apple.sshconnectionsview.save_your_recovery_code.1060e6a8") : L10n.text("apple.sshconnectionsview.type_the_recovery_code.4bf47928"),
             subtitle: step == .read
-                ? "This is the only way back if the password is forgotten and every device is lost."
-                : "The code is off screen on purpose. Type it from where you saved it.",
+                ? L10n.text("apple.sshconnectionsview.this_is_the_only_way_back_if_the_password.a17a92ac")
+                : L10n.text("apple.sshconnectionsview.the_code_is_off_screen_on_purpose_type_it.348fd90a"),
             icon: .security,
             onClose: { dismiss() }
         ) {
@@ -186,29 +186,29 @@ struct SSHRecoveryWordsSheet: View {
                 case .read: readStep
                 case .confirm: confirmStep
                 }
-                Text("Close without confirming to look at the code later. Discard deletes the vault so you can create a new one.")
+                Text(L10n.text("apple.sshconnectionsview.close_without_confirming_to_look_at_the_co.2bb960f3"))
                     .font(Theme.caption)
                     .foregroundStyle(Theme.controlGlyph)
                     .fixedSize(horizontal: false, vertical: true)
             }
         } actions: {
-            Button("Discard this vault", .delete) { confirmingDiscard = true }
+            Button(L10n.text("apple.sshconnectionsview.discard_this_vault.0b59b7f2"), .delete) { confirmingDiscard = true }
                 .buttonStyle(DestructiveButtonStyle())
             Spacer()
             if step == .read {
-                Button("I have saved this", .next) { step = .confirm }
+                Button(L10n.text("apple.sshconnectionsview.i_have_saved_this.81674b57"), .next) { step = .confirm }
                     .buttonStyle(AccentButtonStyle())
             } else {
-                Button("Done", .done) { onConfirmed(); dismiss() }
+                Button(L10n.text("common.done"), .done) { onConfirmed(); dismiss() }
                     .buttonStyle(AccentButtonStyle())
                     .disabled(!codesMatch)
             }
         }
         .modalFrame(width: 580, height: 520)
-        .confirmationDialog("Delete this vault?", isPresented: $confirmingDiscard, titleVisibility: .visible) {
-            Button("Delete vault", role: .destructive) { onDiscard(); dismiss() }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("Every encrypted SSH secret in the vault is permanently lost. This cannot be undone.") }
+        .confirmationDialog(L10n.text("apple.sshconnectionsview.delete_this_vault.f09b8aad"), isPresented: $confirmingDiscard, titleVisibility: .visible) {
+            Button(L10n.text("apple.sshconnectionsview.delete_vault.9fd7de76"), role: .destructive) { onDiscard(); dismiss() }
+            Button(L10n.text("common.cancel"), role: .cancel) {}
+        } message: { Text(L10n.text("apple.sshconnectionsview.every_encrypted_ssh_secret_in_the_vault_is.d87ca6a9")) }
     }
 
     /// The code's ten groups, which is how it is written and how it is read
@@ -241,13 +241,13 @@ struct SSHRecoveryWordsSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.panel.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("Recovery code \(groups.joined(separator: ", "))")
-            Text("Store this offline in a password manager or on paper. Do not rely on this screen or a screenshot.")
+            .accessibilityLabel(L10n.text("apple.sshconnectionsview.recovery_code_0.50509e6e", "\(groups.joined(separator: ", "))"))
+            Text(L10n.text("apple.sshconnectionsview.store_this_offline_in_a_password_manager_o.d8bc24cf"))
                 .font(Theme.callout).foregroundStyle(.secondary)
             HStack {
-                Button(copied ? "Copied" : "Copy", .copy) { copyCode() }
+                Button(copied ? L10n.text("apple.sshconnectionsview.copied.8d525e5f") : L10n.text("common.copy"), .copy) { copyCode() }
                     .buttonStyle(SecondaryButtonStyle(small: true))
-                Text("The clipboard may be visible to other apps; clear it after saving.")
+                Text(L10n.text("apple.sshconnectionsview.the_clipboard_may_be_visible_to_other_apps.271cf95f"))
                     .font(Theme.caption).foregroundStyle(.secondary)
             }
         }
@@ -255,24 +255,24 @@ struct SSHRecoveryWordsSheet: View {
 
     private var confirmStep: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Text("Enter the recovery code exactly as it was written.")
+            Text(L10n.text("apple.sshconnectionsview.enter_the_recovery_code_exactly_as_it_was.c76633d2"))
                 .font(Theme.callout)
-            TextField("Recovery code", text: $typed)
+            TextField(L10n.text("apple.sshconnectionsview.recovery_code.5bda8302"), text: $typed)
                 .textFieldStyle(.themedMono(14))
                 #if !os(macOS)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 #endif
             if typedAnything {
-                Text(codesMatch ? "Recovery code matches." : "That is not what was generated.")
+                Text(codesMatch ? L10n.text("apple.sshconnectionsview.recovery_code_matches.b974b57c") : L10n.text("apple.sshconnectionsview.that_is_not_what_was_generated.cd8d7d81"))
                     .font(Theme.caption).foregroundStyle(codesMatch ? Theme.success : Theme.danger)
             }
-            Button("Show the code again", .reveal) {
+            Button(L10n.text("apple.sshconnectionsview.show_the_code_again.2e6e5f4c"), .reveal) {
                 step = .read
                 typed = ""
             }
             .buttonStyle(SecondaryButtonStyle(small: true))
-            Text("Going back is fine. It clears what was typed, so the code still has to be read from where you saved it.")
+            Text(L10n.text("apple.sshconnectionsview.going_back_is_fine_it_clears_what_was_type.14ac8de0"))
                 .font(Theme.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -351,16 +351,16 @@ struct SSHVaultSetupSheet: View {
     private var blocker: (message: String, field: Field)? {
         if stale { return nil }
         if exists && !forgot {
-            if password.isEmpty { return ("Enter your vault password.", .password) }
+            if password.isEmpty { return (L10n.text("apple.sshconnectionsview.enter_your_vault_password.dfbd4b8d"), .password) }
             return nil
         }
         if exists, forgot, enteredRecovery.trimmingCharacters(in: .whitespaces).isEmpty {
-            return ("Enter the recovery code you saved.", .recovery)
+            return (L10n.text("apple.sshconnectionsview.enter_the_recovery_code_you_saved.c0574998"), .recovery)
         }
-        if password.isEmpty { return ("Choose a password for the vault.", .password) }
+        if password.isEmpty { return (L10n.text("apple.sshconnectionsview.choose_a_password_for_the_vault.5033a4fd"), .password) }
         if let problem = problems.first { return (problem, .password) }
-        if confirmPassword.isEmpty { return ("Type the password again to confirm it.", .confirmPassword) }
-        if !matches { return ("The two passwords do not match.", .confirmPassword) }
+        if confirmPassword.isEmpty { return (L10n.text("apple.sshconnectionsview.type_the_password_again_to_confirm_it.bea821f3"), .confirmPassword) }
+        if !matches { return (L10n.text("apple.sshconnectionsview.the_two_passwords_do_not_match.e140908a"), .confirmPassword) }
         return nil
     }
 
@@ -377,18 +377,18 @@ struct SSHVaultSetupSheet: View {
     }
 
     private var title: String {
-        if passwordAccepted { return "Vault unlocked" }
-        if stale { return "This vault has to be recreated" }
-        return exists ? "Unlock your vault" : "Create your vault"
+        if passwordAccepted { return L10n.text("apple.sshconnectionsview.vault_unlocked.47d615a3") }
+        if stale { return L10n.text("apple.sshconnectionsview.this_vault_has_to_be_recreated.e5a4662d") }
+        return exists ? L10n.text("apple.sshconnectionsview.unlock_your_vault.67a7b04b") : L10n.text("apple.sshconnectionsview.create_your_vault.de203ed0")
     }
 
     private var subtitle: String {
         if stale {
-            return "It was made before password unlock and cannot be opened by this version."
+            return L10n.text("apple.sshconnectionsview.it_was_made_before_password_unlock_and_can.7595435d")
         }
         return exists
-            ? "Your saved servers and keys, securely on this device."
-            : "One password protects every saved server and key, on all your devices."
+            ? L10n.text("apple.sshconnectionsview.your_saved_servers_and_keys_securely_on_th.4d9ca3a8")
+            : L10n.text("apple.sshconnectionsview.one_password_protects_every_saved_server_a.8bb557dc")
     }
 
     var body: some View {
@@ -400,7 +400,7 @@ struct SSHVaultSetupSheet: View {
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
                 if passwordAccepted {
-                    Text("Your vault is unlocked.")
+                    Text(L10n.text("apple.sshconnectionsview.your_vault_is_unlocked.d11c3267"))
                 } else if stale {
                     staleBody
                 } else if exists {
@@ -429,29 +429,29 @@ struct SSHVaultSetupSheet: View {
             biometricSaved = biometricAccount.map(SSHVaultBiometrics.contains) ?? false
             enableBiometrics = biometricSaved
         }
-        .confirmationDialog("Delete this vault?", isPresented: $confirmingReset, titleVisibility: .visible) {
-            Button("Delete vault", role: .destructive) { Task { await resetVault() } }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("The vault is removed from the account and every device is asked to set up a new one. Anything in it that this device never received is gone for good. Your saved servers, folders and snippets stay on this device.") }
+        .confirmationDialog(L10n.text("apple.sshconnectionsview.delete_this_vault.f09b8aad"), isPresented: $confirmingReset, titleVisibility: .visible) {
+            Button(L10n.text("apple.sshconnectionsview.delete_vault.9fd7de76"), role: .destructive) { Task { await resetVault() } }
+            Button(L10n.text("common.cancel"), role: .cancel) {}
+        } message: { Text(L10n.text("apple.sshconnectionsview.the_vault_is_removed_from_the_account_and.0c2c6b7a")) }
     }
 
     // MARK: - The three states
 
     private var createBody: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            SecureField("Vault password", text: $password)
+            SecureField(L10n.text("apple.sshconnectionsview.vault_password.1853752f"), text: $password)
                 .themedFieldBox()
                 .focused($focus, equals: .password)
                 .shake(on: refusals)
-            SecureField("Type it again", text: $confirmPassword)
+            SecureField(L10n.text("apple.sshconnectionsview.type_it_again.3b2acc21"), text: $confirmPassword)
                 .themedFieldBox()
                 .focused($focus, equals: .confirmPassword)
                 .shake(on: refusals)
             VaultPasswordRules(password: password)
             if !confirmPassword.isEmpty, !matches {
-                Text("The two do not match.").font(Theme.caption).foregroundStyle(Theme.danger)
+                Text(L10n.text("apple.sshconnectionsview.the_two_do_not_match.184006b7")).font(Theme.caption).foregroundStyle(Theme.danger)
             }
-            Text("tokenstat never sees this password. It is what decrypts the vault, so nobody here can reset it or read what it protects.")
+            Text(L10n.text("apple.sshconnectionsview.tokenstat_never_sees_this_password_it_is_w.ba584970"))
                 .font(Theme.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -467,12 +467,12 @@ struct SSHVaultSetupSheet: View {
                         .frame(width: 64, height: 64)
                         .background(Theme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                         .accessibilityHidden(true)
-                    Text("Unlock with \(biometricName)")
+                    Text(L10n.text("apple.sshconnectionsview.unlock_with_0.20a41ad2", "\(biometricName)"))
                         .font(Theme.headline)
-                    Text("Confirm it’s you to open your vault.")
+                    Text(L10n.text("apple.sshconnectionsview.confirm_it_s_you_to_open_your_vault.f5a7fe62"))
                         .font(Theme.callout)
                         .foregroundStyle(.secondary)
-                    Button("Use password instead", .signIn) {
+                    Button(L10n.text("apple.sshconnectionsview.use_password_instead.e354ddfe"), .signIn) {
                         usePassword = true
                         error = nil
                         focus = .password
@@ -482,43 +482,43 @@ struct SSHVaultSetupSheet: View {
                 }
                 .frame(maxWidth: .infinity)
             } else if forgot {
-                Text("Enter your recovery code and choose a new password. The code is the line you were given when the vault was created.")
+                Text(L10n.text("apple.sshconnectionsview.enter_your_recovery_code_and_choose_a_new.00f1a937"))
                     .font(Theme.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                TextField("Recovery code", text: $enteredRecovery)
+                TextField(L10n.text("apple.sshconnectionsview.recovery_code.5bda8302"), text: $enteredRecovery)
                     .textFieldStyle(.themedMono(12))
                     .focused($focus, equals: .recovery)
                     .shake(on: refusals)
-                SecureField("New password", text: $password)
+                SecureField(L10n.text("apple.sshconnectionsview.new_password.3dd9df44"), text: $password)
                     .themedFieldBox()
                     .focused($focus, equals: .password)
                     .shake(on: refusals)
-                SecureField("Type it again", text: $confirmPassword)
+                SecureField(L10n.text("apple.sshconnectionsview.type_it_again.3b2acc21"), text: $confirmPassword)
                     .themedFieldBox()
                     .focused($focus, equals: .confirmPassword)
                     .shake(on: refusals)
                 VaultPasswordRules(password: password)
                 if !confirmPassword.isEmpty, !matches {
-                    Text("The two do not match.").font(Theme.caption).foregroundStyle(Theme.danger)
+                    Text(L10n.text("apple.sshconnectionsview.the_two_do_not_match.184006b7")).font(Theme.caption).foregroundStyle(Theme.danger)
                 }
-                Text("The code is spent once this works, and you are given a fresh one.")
+                Text(L10n.text("apple.sshconnectionsview.the_code_is_spent_once_this_works_and_you.97746e7d"))
                     .font(Theme.caption).foregroundStyle(.secondary)
-                Button("Use the password instead", .back) { forgot = false }
+                Button(L10n.text("apple.sshconnectionsview.use_the_password_instead.8dd1f753"), .back) { forgot = false }
                     .buttonStyle(SecondaryButtonStyle(small: true))
             } else {
-                Text("Vault password")
+                Text(L10n.text("apple.sshconnectionsview.vault_password.1853752f"))
                     .font(Theme.headline)
-                SecureField("Vault password", text: $password)
+                SecureField(L10n.text("apple.sshconnectionsview.vault_password.1853752f"), text: $password)
                     .themedFieldBox()
                     .focused($focus, equals: .password)
                     .shake(on: refusals)
                     .onSubmit { attempt() }
                 HStack {
-                    Button("Forgot password?", .help) { forgot = true; error = nil }
+                    Button(L10n.text("apple.sshconnectionsview.forgot_password.30c1d8d3"), .help) { forgot = true; error = nil }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                     Spacer(minLength: 0)
                     if biometricSaved, let biometricName {
-                        Button("Use \(biometricName)", .security) {
+                        Button(L10n.text("apple.sshconnectionsview.use_0.8ed7565b", "\(biometricName)"), .security) {
                             usePassword = false
                             password = ""
                             error = nil
@@ -530,7 +530,7 @@ struct SSHVaultSetupSheet: View {
                 .disabled(working)
             }
             if !biometricUnlock {
-                Text("Your password stays on this device.")
+                Text(L10n.text("apple.sshconnectionsview.your_password_stays_on_this_device.2993dce7"))
                     .font(Theme.caption).foregroundStyle(.secondary)
             }
         }
@@ -538,10 +538,10 @@ struct SSHVaultSetupSheet: View {
 
     private func biometricPreference(name: String) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Toggle("Use \(name) next time", isOn: $enableBiometrics)
+            Toggle(L10n.text("apple.sshconnectionsview.use_0_next_time.e5e01f34", "\(name)"), isOn: $enableBiometrics)
                 .toggleStyle(.brandCheckbox)
                 .font(Theme.callout)
-            Text("Only on this device. You can always use your vault password.")
+            Text(L10n.text("apple.sshconnectionsview.only_on_this_device_you_can_always_use_you.79952bd2"))
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -555,10 +555,10 @@ struct SSHVaultSetupSheet: View {
 
     private var staleBody: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Earlier vaults were opened with 24 recovery words. This one is opened with a password you choose, so the old vault cannot be carried across.")
+            Text(L10n.text("apple.sshconnectionsview.earlier_vaults_were_opened_with_24_recover.b0bef388"))
                 .font(Theme.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Deleting it loses whatever it holds. Anything saved on this device stays where it is.")
+            Text(L10n.text("apple.sshconnectionsview.deleting_it_loses_whatever_it_holds_anythi.e7eb49b2"))
                 .font(Theme.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -566,14 +566,14 @@ struct SSHVaultSetupSheet: View {
 
     @ViewBuilder
     private var footer: some View {
-        Button("Cancel", .dismiss) { dismiss() }
+        Button(L10n.text("common.cancel"), .dismiss) { dismiss() }
             .buttonStyle(SecondaryButtonStyle())
             .keyboardShortcut(.cancelAction)
         if exists && !passwordAccepted && (forgot || stale) {
             // The way out when the password is gone and no other device
             // can open it. Deleting needs neither, so it is offered here
             // rather than only after a successful unlock.
-            Button("Delete vault", .delete) { confirmingReset = true }
+            Button(L10n.text("apple.sshconnectionsview.delete_vault.9fd7de76"), .delete) { confirmingReset = true }
                 .buttonStyle(DestructiveButtonStyle())
                 .disabled(working)
         }
@@ -582,10 +582,10 @@ struct SSHVaultSetupSheet: View {
         // do different things and read differently, and a glyph chosen by
         // an expression is a glyph nobody can grep for.
         if passwordAccepted {
-            Button("Done", .done) { dismiss() }
+            Button(L10n.text("common.done"), .done) { dismiss() }
                 .buttonStyle(AccentButtonStyle())
         } else if biometricUnlock, let biometricName {
-            Button(working ? "Unlocking…" : "Unlock with \(biometricName)", .security) {
+            Button(working ? L10n.text("apple.sshconnectionsview.unlocking.a4114da0") : L10n.text("apple.sshconnectionsview.unlock_with_0.20a41ad2", "\(biometricName)"), .security) {
                 Task { await unlockWithBiometrics() }
             }
             .buttonStyle(AccentButtonStyle())
@@ -595,12 +595,12 @@ struct SSHVaultSetupSheet: View {
             .disabled(working || biometricAccount == nil)
             .keyboardShortcut(.defaultAction)
         } else if exists && !stale {
-            Button(working ? "Unlocking…" : "Unlock with password", .signIn) { attempt() }
+            Button(working ? L10n.text("apple.sshconnectionsview.unlocking.a4114da0") : L10n.text("apple.sshconnectionsview.unlock_with_password.f4ab8ea2"), .signIn) { attempt() }
                 .buttonStyle(AccentButtonStyle())
                 .disabled(working)
                 .keyboardShortcut(.defaultAction)
         } else if !stale {
-            Button("Create vault", .create) { attempt() }
+            Button(L10n.text("apple.sshconnectionsview.create_vault.c8c44253"), .create) { attempt() }
                 .buttonStyle(AccentButtonStyle())
                 .disabled(working)
                 .keyboardShortcut(.defaultAction)
@@ -626,7 +626,7 @@ struct SSHVaultSetupSheet: View {
         do {
             if let biometricAccount = enrollmentAccount {
                 guard try await SSHVaultBiometrics.accountKey() == biometricAccount else {
-                    error = "The signed-in account changed. Reopen the vault to unlock it."
+                    error = L10n.text("apple.sshconnectionsview.the_signed_in_account_changed_reopen_the_v.0d1b7357")
                     return
                 }
             }
@@ -670,7 +670,7 @@ struct SSHVaultSetupSheet: View {
                 status = fresh
                 password = ""
                 confirmPassword = ""
-                self.error = "That account already has a vault. Enter its password to open it here."
+                self.error = L10n.text("apple.sshconnectionsview.that_account_already_has_a_vault_enter_its.2a836a76")
             }
         }
     }
@@ -683,7 +683,7 @@ struct SSHVaultSetupSheet: View {
         do {
             let saved = try await SSHVaultBiometrics.load(account: biometricAccount)
             guard try await SSHVaultBiometrics.accountKey() == biometricAccount else {
-                error = "The signed-in account changed. Reopen the vault to unlock it."
+                error = L10n.text("apple.sshconnectionsview.the_signed_in_account_changed_reopen_the_v.0d1b7357")
                 return
             }
             recovery = try await Bridge.unlockSSHVault(password: saved, tier: tier).recovery
@@ -696,7 +696,7 @@ struct SSHVaultSetupSheet: View {
                 biometricSaved = false
                 enableBiometrics = false
             }
-            self.error = "\(error.localizedDescription) You can always unlock with your vault password."
+            self.error = L10n.text("apple.sshconnectionsview.0_you_can_always_unlock_with_your_vault_pa.ac01e224", "\(error.localizedDescription)")
         }
     }
 
@@ -734,24 +734,24 @@ enum VaultPassword {
     static func problems(_ password: String) -> [String] {
         let scalars = password.unicodeScalars
         var out: [String] = []
-        if scalars.count < minLength { out.append("At least \(minLength) characters") }
+        if scalars.count < minLength { out.append(L10n.text("apple.sshconnectionsview.at_least_0_characters.8fa59f2f", "\(minLength)")) }
         if !scalars.contains(where: { Character($0).isUppercase }) {
-            out.append("An uppercase letter")
+            out.append(L10n.text("apple.sshconnectionsview.an_uppercase_letter.a61f4d4b"))
         }
         if !scalars.contains(where: { $0.isASCII && Character($0).isNumber }) {
-            out.append("A number")
+            out.append(L10n.text("apple.sshconnectionsview.a_number.a3c9dfa2"))
         }
         if !scalars.contains(where: { !CharacterSet.alphanumerics.contains($0) && !CharacterSet.whitespacesAndNewlines.contains($0) }) {
-            out.append("A special character")
+            out.append(L10n.text("apple.sshconnectionsview.a_special_character.9b79cde5"))
         }
         return out
     }
 
     static let all = [
-        "At least \(minLength) characters",
-        "An uppercase letter",
-        "A number",
-        "A special character",
+        L10n.text("apple.sshconnectionsview.at_least_0_characters.8fa59f2f", "\(minLength)"),
+        L10n.text("apple.sshconnectionsview.an_uppercase_letter.a61f4d4b"),
+        L10n.text("apple.sshconnectionsview.a_number.a3c9dfa2"),
+        L10n.text("apple.sshconnectionsview.a_special_character.9b79cde5"),
     ]
 }
 
@@ -809,10 +809,10 @@ struct SSHConnectForm: View {
                     InlineBanner(text: error, kind: .danger) { self.error = nil }
                 }
                 if host.hostKeys.isEmpty {
-                    SSHEditorSection(title: "Server identity") {
-                        SSHEditorNote(text: "Verify the server identity before sending credentials.")
+                    SSHEditorSection(title: L10n.text("apple.sshconnectionsview.server_identity.fa4fb0a3")) {
+                        SSHEditorNote(text: L10n.text("apple.sshconnectionsview.verify_the_server_identity_before_sending.6988fa53"))
                         if let offeredFingerprint {
-                            SSHEditorField(label: "Fingerprint") {
+                            SSHEditorField(label: L10n.text("apple.sshconnectionsview.fingerprint.ba7af0b7")) {
                                 Text(offeredFingerprint)
                                     .font(Theme.mono(11))
                                     .textSelection(.enabled)
@@ -820,20 +820,20 @@ struct SSHConnectForm: View {
                         }
                     }
                 } else {
-                    SSHEditorSection(title: "Authentication") {
-                        SSHEditorField(label: "Use") {
-                            Picker("Authentication", selection: $selectedKeyID) {
-                                Text("Password").tag("")
+                    SSHEditorSection(title: L10n.text("apple.sshconnectionsview.authentication.66880d2d")) {
+                        SSHEditorField(label: L10n.text("apple.sshconnectionsview.use.c36d819e")) {
+                            Picker(L10n.text("apple.sshconnectionsview.authentication.66880d2d"), selection: $selectedKeyID) {
+                                Text(L10n.text("apple.sshconnectionsview.password.e7cf3ef4")).tag("")
                                 ForEach(model.keys) { Text($0.label).tag($0.id) }
                             }
                         }
                         if selectedKeyID.isEmpty {
-                            SSHEditorField(label: "Password") {
-                                SecureField("Password", text: $password)
+                            SSHEditorField(label: L10n.text("apple.sshconnectionsview.password.e7cf3ef4")) {
+                                SecureField(L10n.text("apple.sshconnectionsview.password.e7cf3ef4"), text: $password)
                                     .themedFieldBox()
                             }
                         }
-                        SSHEditorNote(text: "Passwords are used for this connection and are never saved.")
+                        SSHEditorNote(text: L10n.text("apple.sshconnectionsview.passwords_are_used_for_this_connection_and.47e746d5"))
                     }
                 }
             }
@@ -841,7 +841,7 @@ struct SSHConnectForm: View {
             .opacity(working ? 0.6 : 1)
             .animation(.easeOut(duration: 0.15), value: working)
         } actions: {
-            Button("Cancel", .dismiss) { cancelAndClose() }
+            Button(L10n.text("common.cancel"), .dismiss) { cancelAndClose() }
                 .buttonStyle(SecondaryButtonStyle())
                 .keyboardShortcut(.cancelAction)
             Spacer()
@@ -882,19 +882,19 @@ struct SSHConnectForm: View {
 
     private var connectSubtitle: String {
         if host.hostKeys.isEmpty {
-            return "Confirm the server fingerprint before sending credentials."
+            return L10n.text("apple.sshconnectionsview.confirm_the_server_fingerprint_before_send.0f8d28e8")
         }
-        return "Passwords are used for this connection and are never saved."
+        return L10n.text("apple.sshconnectionsview.passwords_are_used_for_this_connection_and.47e746d5")
     }
 
     private var connectActionTitle: String {
-        if !host.hostKeys.isEmpty { return "Connect" }
-        return offeredFingerprint == nil ? "Show fingerprint" : "Trust fingerprint"
+        if !host.hostKeys.isEmpty { return L10n.text("common.connect") }
+        return offeredFingerprint == nil ? L10n.text("apple.sshconnectionsview.show_fingerprint.60097c5e") : L10n.text("apple.sshconnectionsview.trust_fingerprint.aaa68662")
     }
 
     private var connectBusyTitle: String {
-        if !host.hostKeys.isEmpty { return "Connecting…" }
-        return offeredFingerprint == nil ? "Checking…" : "Trusting…"
+        if !host.hostKeys.isEmpty { return L10n.text("apple.sshconnectionsview.connecting.72021eb7") }
+        return offeredFingerprint == nil ? L10n.text("apple.sshconnectionsview.checking.ec963ffc") : L10n.text("apple.sshconnectionsview.trusting.b033578b")
     }
 
     private var connectActionIcon: ActionIcon {
@@ -974,7 +974,7 @@ struct SSHConnectForm: View {
             // mode when persistence failed, or the trust action disappears
             // and Connect can proceed with a fingerprint that was never kept.
             host.hostKeys = []
-            error = model.error ?? "The trusted fingerprint could not be saved."
+            error = model.error ?? L10n.text("apple.sshconnectionsview.the_trusted_fingerprint_could_not_be_saved.aab9c4fe")
         }
     }
     private func connect() async {

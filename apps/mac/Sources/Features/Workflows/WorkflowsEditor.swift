@@ -103,17 +103,17 @@ struct WorkflowsEditor: View {
 
     private func chromeContent(compact: Bool, roomForPalette: Bool) -> some View {
         HStack(spacing: Theme.Space.s) {
-            Button("Library", .back) { onBack() }
+            Button(L10n.text("apple.workflowseditor.library.dc20b3d5"), .back) { onBack() }
                 .buttonStyle(SecondaryButtonStyle(small: true))
             // No button for a palette this window has no room for: a toggle
             // that changes nothing is worse than the missing column.
             if roomForPalette {
-                Button(paletteOpen ? "Hide palette" : "Palette", .layout) {
+                Button(paletteOpen ? L10n.text("apple.workflowseditor.hide_palette.7bf7d98e") : L10n.text("apple.workflowseditor.palette.85794eff"), .layout) {
                     paletteOpen.toggle()
                 }
                 .buttonStyle(SecondaryButtonStyle(small: true))
             }
-            TextField("Name", text: $name)
+            TextField(L10n.text("apple.workflowseditor.name.dcd1d522"), text: $name)
                 .textFieldStyle(.themed)
                 .frame(width: compact ? 150 : 220)
                 .onChange(of: name) { _, next in
@@ -144,28 +144,28 @@ struct WorkflowsEditor: View {
                 }
             }
             if model.isDirty {
-                Text("Unsaved")
+                Text(L10n.text("apple.workflowseditor.unsaved.6250d572"))
                     .font(Theme.caption.weight(.medium))
                     .foregroundStyle(Theme.warning)
             }
             Spacer()
-            Button("Undo", .restore) { model.undo() }
+            Button(L10n.text("apple.workflowseditor.undo.a8283ade"), .restore) { model.undo() }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .disabled(!model.canUndo)
             if model.canRedo {
-                Button("Redo", .next) { model.redo() }
+                Button(L10n.text("apple.workflowseditor.redo.74273989"), .next) { model.redo() }
                     .buttonStyle(SecondaryButtonStyle(small: true))
             }
             if model.isDirty {
-                Button("Discard", .dismiss) { discardEdits() }
+                Button(L10n.text("apple.workflowseditor.discard.eb1a70e3"), .dismiss) { discardEdits() }
                     .buttonStyle(SecondaryButtonStyle(small: true))
             }
-            Button("Save", .save) { Task { await model.saveWorking() } }
+            Button(L10n.text("common.save"), .save) { Task { await model.saveWorking() } }
                 .buttonStyle(AccentButtonStyle(small: true))
                 .disabled(!model.isDirty && !(model.working?.id.isEmpty ?? true))
-            Button("Design", .create) {
+            Button(L10n.text("apple.workflowseditor.design.0072e6b9"), .create) {
                 if model.isDirty {
-                    model.errorMessage = "Save or discard this draft first."
+                    model.errorMessage = L10n.text("apple.workflowseditor.save_or_discard_this_draft_first.274b905e")
                 } else {
                     designing = true
                 }
@@ -173,18 +173,18 @@ struct WorkflowsEditor: View {
             .buttonStyle(SecondaryButtonStyle(small: true))
             if let graph = model.working, !graph.id.isEmpty {
                 if let run = liveRun, run.isWaiting {
-                    Button("Continue", .next) { Task { await model.continueRun(run) } }
+                    Button(L10n.text("apple.workflowseditor.continue.31fbef16"), .next) { Task { await model.continueRun(run) } }
                         .buttonStyle(AccentButtonStyle(small: true))
                 } else if let run = liveRun {
-                    Button("Stop", .stop) { Task { await model.stop(run) } }
+                    Button(L10n.text("common.stop"), .stop) { Task { await model.stop(run) } }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                 } else {
-                    Button("Run", .run) { running = graph }
+                    Button(L10n.text("common.run"), .run) { running = graph }
                         .buttonStyle(AccentButtonStyle(small: true))
                         .disabled(model.isDirty)
                         .help(model.isDirty
-                            ? "Save or discard the unsaved changes before running."
-                            : "Run this workflow")
+                            ? L10n.text("apple.workflowseditor.save_or_discard_the_unsaved_changes_before.97876b0e")
+                            : L10n.text("apple.workflowseditor.run_this_workflow.e1912bd8"))
                 }
             }
         }
@@ -212,29 +212,29 @@ struct WorkflowPalette: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Text("ADD")
+                Text(L10n.text("apple.workflowseditor.add.0ecba137"))
                     .font(Theme.sectionHeader)
                     .foregroundStyle(.tertiary)
-                paletteButton(title: "Input", subtitle: "Starting prompt", kind: .input, mark: "mark_todo")
+                paletteButton(title: L10n.text("apple.workflowseditor.input.36ecb4f8"), subtitle: L10n.text("apple.workflowseditor.starting_prompt.407bec2f"), kind: .input, mark: "mark_todo")
                 ForEach(model.pickerBackends()) { backend in
                     Button {
                         model.addNode(kind: .agent, backend: backend.id)
                     } label: {
                         paletteLabel(
                             title: backend.label,
-                            subtitle: "Agent",
+                            subtitle: L10n.text("apple.workflowseditor.agent.11b39c93"),
                             leading: { HarnessMark(id: backend.id, size: 20) }
                         )
                     }
                     .buttonStyle(.plain)
                 }
-                paletteButton(title: "HTTP", subtitle: "Host-owned request", kind: .http, mark: "mark_sync")
-                paletteButton(title: "Command", subtitle: "Shell in the folder", kind: .command, mark: "mark_terminal")
-                paletteButton(title: "Gate", subtitle: "Wait for you", kind: .gate, mark: "mark_note")
-                paletteButton(title: "If", subtitle: "Then or else", kind: .condition, mark: "mark_plan")
-                paletteButton(title: "Loop", subtitle: "Repeat a body", kind: .loop, mark: "mark_scheduler")
+                paletteButton(title: L10n.text("apple.workflowseditor.http.56d6f321"), subtitle: L10n.text("apple.workflowseditor.host_owned_request.f7355983"), kind: .http, mark: "mark_sync")
+                paletteButton(title: L10n.text("apple.workflowseditor.command.71316697"), subtitle: L10n.text("apple.workflowseditor.shell_in_the_folder.b6875024"), kind: .command, mark: "mark_terminal")
+                paletteButton(title: L10n.text("apple.workflowseditor.gate.fa77a525"), subtitle: L10n.text("apple.workflowseditor.wait_for_you.d955a62d"), kind: .gate, mark: "mark_note")
+                paletteButton(title: L10n.text("apple.workflowseditor.if.1e3abf61"), subtitle: L10n.text("apple.workflowseditor.then_or_else.2318a255"), kind: .condition, mark: "mark_plan")
+                paletteButton(title: L10n.text("apple.workflowseditor.loop.f2f6a018"), subtitle: L10n.text("apple.workflowseditor.repeat_a_body.a05cb63b"), kind: .loop, mark: "mark_scheduler")
                 if !model.jobs.isEmpty {
-                    Text("AUTOMATIONS")
+                    Text(L10n.text("apple.workflowseditor.automations.e5ced470"))
                         .font(Theme.sectionHeader)
                         .foregroundStyle(.tertiary)
                         .padding(.top, Theme.Space.s)
@@ -244,14 +244,14 @@ struct WorkflowPalette: View {
                         } label: {
                             paletteLabel(
                                 title: job.name,
-                                subtitle: "Run automation",
+                                subtitle: L10n.text("apple.workflowseditor.run_automation.4c10763f"),
                                 leading: { FeatureMark(name: "mark_automation", tint: Theme.accent, size: 20) }
                             )
                         }
                         .buttonStyle(.plain)
                     }
                 }
-                Text("A timer cannot commit. Use an agent, an automation, or a command you press Run on.")
+                Text(L10n.text("apple.workflowseditor.a_timer_cannot_commit_use_an_agent_an_auto.09e8f357"))
                     .font(Theme.caption2)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -316,8 +316,8 @@ struct WorkflowDesignSheet: View {
 
     var body: some View {
         ThemedSheet(
-            title: "Design a workflow",
-            subtitle: "A cheap local backend drafts the graph. You review it. It does not run.",
+            title: L10n.text("apple.workflowseditor.design_a_workflow.0988799d"),
+            subtitle: L10n.text("apple.workflowseditor.a_cheap_local_backend_drafts_the_graph_you.8f2ae7a1"),
             icon: .create,
             onClose: { dismiss() }
         ) {
@@ -325,7 +325,7 @@ struct WorkflowDesignSheet: View {
                 if let error = model.errorMessage {
                     Banner(text: error, severity: .warning)
                 }
-                TextField("Describe the run", text: $prompt, axis: .vertical)
+                TextField(L10n.text("apple.workflowseditor.describe_the_run.4c35945c"), text: $prompt, axis: .vertical)
                     .textFieldStyle(.themedMultiline)
                     .lineLimit(3...8)
                     .disabled(model.isDesigning)
@@ -342,11 +342,11 @@ struct WorkflowDesignSheet: View {
                 )
             }
         } actions: {
-            Button("Cancel", .dismiss) { dismiss() }
+            Button(L10n.text("common.cancel"), .dismiss) { dismiss() }
                 .buttonStyle(SecondaryButtonStyle())
                 .keyboardShortcut(.cancelAction)
             Spacer()
-            Button(model.isDesigning ? "Designing" : "Design", .create) {
+            Button(model.isDesigning ? L10n.text("apple.workflowseditor.designing.e7034237") : L10n.text("apple.workflowseditor.design.0072e6b9"), .create) {
                 Task {
                     await model.design(
                         prompt: prompt,

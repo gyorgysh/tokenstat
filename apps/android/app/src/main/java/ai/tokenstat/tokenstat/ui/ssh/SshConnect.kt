@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.ssh
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import android.content.Context
 import android.util.Base64
 import androidx.compose.foundation.clickable
@@ -78,7 +80,7 @@ fun SshConnectDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Connect to $username@$hostname") },
+        title = { Text(L10n.text("android.sshconnect.connect_to_0_1.938a75db", "${username}", "${hostname}")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 Text("$hostname:$port", color = colors.textSecondary)
@@ -86,14 +88,14 @@ fun SshConnectDialog(
                 // are used for this connection and are never saved.
                 Box {
                     OutlinedTextField(
-                        value = if (selectedKeyId.isEmpty()) "Password"
-                        else savedKeys.find { it.sshString("id") == selectedKeyId }?.sshString("label") ?: "Password",
+                        value = if (selectedKeyId.isEmpty()) L10n.text("android.sshconnect.password.e7cf3ef4")
+                        else savedKeys.find { it.sshString("id") == selectedKeyId }?.sshString("label") ?: L10n.text("android.sshconnect.password.e7cf3ef4"),
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text("Use") },
+                        label = { Text(L10n.text("android.sshconnect.use.c36d819e")) },
                         trailingIcon = {
                             IconButton(onClick = { authOpen = true }) {
-                                Icon(ActionIcon.More.vector, "Choose authentication")
+                                Icon(ActionIcon.More.vector, L10n.text("android.sshconnect.choose_authentication.97790843"))
                             }
                         },
                         modifier = Modifier.fillMaxWidth().clickable { authOpen = true },
@@ -101,11 +103,11 @@ fun SshConnectDialog(
                     )
                     DropdownMenu(expanded = authOpen, onDismissRequest = { authOpen = false }) {
                         DropdownMenuItem(
-                            text = { Text("Password") },
+                            text = { Text(L10n.text("android.sshconnect.password.e7cf3ef4")) },
                             onClick = { selectedKeyId = ""; authOpen = false },
                         )
                         savedKeys.forEach { key ->
-                            val label = key.sshString("label") ?: "Key"
+                            val label = key.sshString("label") ?: L10n.text("android.sshconnect.key.99a52df3")
                             DropdownMenuItem(
                                 text = { Text(label) },
                                 onClick = { selectedKeyId = key.sshString("id") ?: ""; authOpen = false },
@@ -117,7 +119,7 @@ fun SshConnectDialog(
                     OutlinedTextField(
                         password,
                         { password = it },
-                        label = { Text("Password") },
+                        label = { Text(L10n.text("android.sshconnect.password.e7cf3ef4")) },
                         visualTransformation = PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
@@ -126,14 +128,14 @@ fun SshConnectDialog(
                     OutlinedTextField(
                         passphrase,
                         { passphrase = it },
-                        label = { Text("Key passphrase (if any)") },
+                        label = { Text(L10n.text("android.sshconnect.key_passphrase_if_any.09728ced")) },
                         visualTransformation = PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                     )
                 }
                 Text(
-                    "Passwords are used for this connection and are never saved.",
+                    L10n.text("android.sshconnect.passwords_are_used_for_this_connection_and.47e746d5"),
                     style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                     color = colors.textSecondary,
                 )
@@ -142,7 +144,7 @@ fun SshConnectDialog(
         },
         confirmButton = {
             TsAccentButton(
-                label = if (busy) "Connecting…" else "Connect",
+                label = if (busy) L10n.text("android.sshconnect.connecting.72021eb7") else L10n.text("common.connect"),
                 enabled = !busy,
                 onClick = {
                     scope.launch {
@@ -162,7 +164,7 @@ fun SshConnectDialog(
                                     },
                                 ) as JsonObject
                                 val fingerprint = probe.sshString("fingerprint")
-                                    ?: throw IllegalStateException("The server did not offer a host key.")
+                                    ?: throw IllegalStateException(L10n.text("android.sshconnect.the_server_did_not_offer_a_host_key.3c1b0e56"))
                                 keysForOpen = listOf(fingerprint)
                                 val saved = buildJsonObject {
                                     host.forEach { (k, v) -> put(k, v) }
@@ -176,7 +178,7 @@ fun SshConnectDialog(
                                 rec?.sshString("secretRef")?.let { withContext(Dispatchers.IO) { SshSecrets.get(context, it) } }
                             }
                             if (keyRef != null && pem.isNullOrBlank()) {
-                                throw IllegalStateException("The saved key has no private material on this device.")
+                                throw IllegalStateException(L10n.text("android.sshconnect.the_saved_key_has_no_private_material_on_t.195cf970"))
                             }
                             val auth = if (!pem.isNullOrBlank()) {
                                 buildJsonObject {
@@ -210,7 +212,7 @@ fun SshConnectDialog(
                                     put("label", host.sshString("label") ?: hostname)
                                 },
                             ) as JsonObject
-                            opened.sshString("id") ?: throw IllegalStateException("The session opened without an id.")
+                            opened.sshString("id") ?: throw IllegalStateException(L10n.text("android.sshconnect.the_session_opened_without_an_id.09911388"))
                         }.onSuccess(onOpened).onFailure { error = it.message }
                         busy = false
                     }
@@ -220,7 +222,7 @@ fun SshConnectDialog(
         // Full size, like Connect beside it. A small Cancel next to a
         // full-size primary reads broken, and it misses the 48dp touch
         // minimum the capsule comment promises for actions.
-        dismissButton = { TsSecondaryButton(label = "Cancel", onClick = onDismiss) },
+        dismissButton = { TsSecondaryButton(label = L10n.text("common.cancel"), onClick = onDismiss) },
     )
 }
 
@@ -236,13 +238,13 @@ fun SshKeyRenameDialog(model: AppViewModel, key: JsonObject, onDismiss: () -> Un
     var busy by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Rename key") },
+        title = { Text(L10n.text("android.sshconnect.rename_key.f1c3ef11")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 OutlinedTextField(
                     label,
                     { label = it },
-                    label = { Text("Label") },
+                    label = { Text(L10n.text("android.sshconnect.label.0e66373f")) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                 )
@@ -254,7 +256,7 @@ fun SshKeyRenameDialog(model: AppViewModel, key: JsonObject, onDismiss: () -> Un
         },
         confirmButton = {
             TsAccentButton(
-                label = if (busy) "Saving…" else "Save",
+                label = if (busy) L10n.text("android.sshconnect.saving.23e39291") else L10n.text("common.save"),
                 small = true,
                 enabled = !busy && label.isNotBlank(),
                 onClick = {
@@ -271,7 +273,7 @@ fun SshKeyRenameDialog(model: AppViewModel, key: JsonObject, onDismiss: () -> Un
                 },
             )
         },
-        dismissButton = { TsSecondaryButton(label = "Cancel", small = true, onClick = onDismiss) },
+        dismissButton = { TsSecondaryButton(label = L10n.text("common.cancel"), small = true, onClick = onDismiss) },
     )
 }
 
@@ -288,15 +290,15 @@ fun SshKeyImportDialog(model: AppViewModel, onDismiss: () -> Unit, onSaved: () -
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add a key") },
+        title = { Text(L10n.text("android.sshconnect.add_a_key.2feab16f")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                OutlinedTextField(label, { label = it }, label = { Text("Label") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                OutlinedTextField(pem, { pem = it }, label = { Text("Paste PEM, or leave blank to generate") }, modifier = Modifier.fillMaxWidth(), minLines = 4)
+                OutlinedTextField(label, { label = it }, label = { Text(L10n.text("android.sshconnect.label.0e66373f")) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                OutlinedTextField(pem, { pem = it }, label = { Text(L10n.text("android.sshconnect.paste_pem_or_leave_blank_to_generate.b4360b7f")) }, modifier = Modifier.fillMaxWidth(), minLines = 4)
                 OutlinedTextField(
                     passphrase,
                     { passphrase = it },
-                    label = { Text("Passphrase") },
+                    label = { Text(L10n.text("android.sshconnect.passphrase.e7611f05")) },
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
@@ -307,7 +309,7 @@ fun SshKeyImportDialog(model: AppViewModel, onDismiss: () -> Unit, onSaved: () -
         confirmButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 TsSecondaryButton(
-                    label = "Generate",
+                    label = L10n.text("android.sshconnect.generate.49e49bb4"),
                     small = true,
                     enabled = !busy && label.isNotBlank(),
                     onClick = {
@@ -323,7 +325,7 @@ fun SshKeyImportDialog(model: AppViewModel, onDismiss: () -> Unit, onSaved: () -
                     },
                 )
                 TsAccentButton(
-                    label = "Import",
+                    label = L10n.text("android.sshconnect.import.2cff9baa"),
                     small = true,
                     enabled = !busy && label.isNotBlank() && pem.isNotBlank(),
                     onClick = {
@@ -346,12 +348,12 @@ fun SshKeyImportDialog(model: AppViewModel, onDismiss: () -> Unit, onSaved: () -
                 )
             }
         },
-        dismissButton = { TsSecondaryButton(label = "Cancel", small = true, onClick = onDismiss) },
+        dismissButton = { TsSecondaryButton(label = L10n.text("common.cancel"), small = true, onClick = onDismiss) },
     )
 }
 
 private suspend fun persistKey(context: Context, model: AppViewModel, label: String, material: JsonObject) {
-    val privateKey = material.sshString("privateKey") ?: error("The key had no private material.")
+    val privateKey = material.sshString("privateKey") ?: error(L10n.text("android.sshconnect.the_key_had_no_private_material.a3963eb0"))
     val id = java.util.UUID.randomUUID().toString()
     val ref = "android:$id"
     withContext(Dispatchers.IO) { SshSecrets.put(context, ref, privateKey) }

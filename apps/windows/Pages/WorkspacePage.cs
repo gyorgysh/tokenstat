@@ -63,7 +63,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         {
             Buttons.ToolbarIcon(
                 ActionIcon.Refresh,
-                "Reload " + _section.Label().ToLowerInvariant(),
+                L10n.Text("windows.workspacepage.reload_0.91253a23", $"{_section.Label().ToLowerInvariant()}"),
                 async (_, _) =>
                 {
                     LogoRefresh.Began();
@@ -100,7 +100,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         }
         if (!string.IsNullOrEmpty(_branch))
         {
-            _inspector.Children.Add(Chrome.InspectorField("Branch", WorkspaceGit.ShortBranch(_branch)));
+            _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.workspacepage.branch.52656e81"), WorkspaceGit.ShortBranch(_branch)));
         }
         if (!string.IsNullOrEmpty(_summary))
         {
@@ -160,16 +160,14 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     if (RemoteWorkspaces.IsRemote(_id))
                     {
                         _root.Children.Add(Chrome.Empty(
-                            _section.Label() + " is local for now",
-                            "This folder lives on another machine, and " + _section.Label().ToLowerInvariant()
-                            + " for a remote folder stays local, like the desktop Mac.",
+                            _section.Label() + L10n.Text("windows.workspacepage.is_local_for_now.d30635a4"),
+                            L10n.Text("windows.workspacepage.this_folder_lives_on_another_machine_and_0.43cf4ce1", $"{_section.Label().ToLowerInvariant()}"),
                             ActionIcon.Reveal));
                         break;
                     }
                     _root.Children.Add(Chrome.Empty(
-                        _section.Label() + " on Windows",
-                        "The Mac app has the full " + _section.Label().ToLowerInvariant()
-                        + " surface. This build lists the folder and the shared boards.",
+                        _section.Label() + L10n.Text("windows.workspacepage.on_windows.c6bb28b6"),
+                        L10n.Text("windows.workspacepage.the_mac_app_has_the_full_0_surface_this_bu.eb18e4f0", $"{_section.Label().ToLowerInvariant()}"),
                         ActionIcon.Reveal));
                     break;
             }
@@ -191,7 +189,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         };
         if (_path.Length > 0)
         {
-            chrome.Children.Add(ActionIconGlyph.Button("Back", ActionIcon.Back, async (_, _) =>
+            chrome.Children.Add(ActionIconGlyph.Button(L10n.Text("common.back"), ActionIcon.Back, async (_, _) =>
             {
                 _path = ParentPath(_path);
                 await LoadAsync();
@@ -199,7 +197,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         }
         chrome.Children.Add(new TextBlock
         {
-            Text = _path.Length == 0 ? "Project root" : _path,
+            Text = _path.Length == 0 ? L10n.Text("windows.workspacepage.project_root.f85c5ef5") : _path,
             VerticalAlignment = VerticalAlignment.Center,
             Opacity = 0.7,
             TextWrapping = TextWrapping.Wrap,
@@ -213,12 +211,12 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         var array = tree as JsonArray ?? tree["entries"] as JsonArray;
         if (array is null || array.Count == 0)
         {
-            _root.Children.Add(EmptyState.View("Empty folder", "Nothing to list here.", EmptyArtKind.Files));
+            _root.Children.Add(EmptyState.View(L10n.Text("windows.workspacepage.empty_folder.ca1fd454"), L10n.Text("windows.workspacepage.nothing_to_list_here.1715efe9"), EmptyArtKind.Files));
             return;
         }
 
         _summary = _path.Length == 0
-            ? $"{array.Count} {(array.Count == 1 ? "entry" : "entries")} at the project root."
+            ? L10n.Text("windows.workspacepage.0_1_at_the_project_root.16601378", $"{array.Count}", $"{(array.Count == 1 ? L10n.Text("windows.workspacepage.entry.923fe539") : L10n.Text("windows.workspacepage.entries.87d05cd0"))}")
             : $"{array.Count} {(array.Count == 1 ? "entry" : "entries")} in {_path}.";
         RenderInspector();
         var list = new StackPanel { Spacing = 4 };
@@ -250,7 +248,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             };
             list.Children.Add(open);
         }
-        _root.Children.Add(Chrome.Card("Files", list));
+        _root.Children.Add(Chrome.Card(L10n.Text("common.files"), list));
     }
 
     private async Task OpenFileAsync(string path, string name)
@@ -287,7 +285,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         {
             body.Children.Add(new TextBlock
             {
-                Text = "This file is too large to edit here. Showing the start, read-only.",
+                Text = L10n.Text("windows.workspacepage.this_file_is_too_large_to_edit_here_showin.f568e57f"),
                 TextWrapping = TextWrapping.Wrap,
                 Opacity = 0.8,
             });
@@ -298,12 +296,12 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         {
             Title = name,
             Content = body,
-            CloseButtonText = huge ? "Close" : "Cancel",
+            CloseButtonText = huge ? L10n.Text("common.close") : L10n.Text("common.cancel"),
             DefaultButton = huge ? ContentDialogButton.Close : ContentDialogButton.Primary,
         };
         if (!huge)
         {
-            dialog.PrimaryButtonText = "Save";
+            dialog.PrimaryButtonText = L10n.Text("common.save");
         }
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary || huge)
         {
@@ -377,36 +375,35 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         }
         session.Reconcile(available);
         _summary = available.Count == 0
-            ? "A clean tree."
-            : $"{available.Count} changed {(available.Count == 1 ? "file" : "files")}, "
-            + $"{session.SelectedCount} selected for the next commit.";
+            ? L10n.Text("windows.workspacepage.a_clean_tree.dde03840")
+            : L10n.Text("windows.workspacepage.0_changed_1_2_selected_for_the_next_commit.32bf5b80", $"{available.Count}", $"{(available.Count == 1 ? L10n.Text("windows.workspacepage.file.3b9c358f") : L10n.Text("windows.workspacepage.files.3d7db37d"))}", $"{session.SelectedCount}");
         RenderInspector();
 
         var selectionRow = new FlowPanel { Spacing = Theme.SpaceS };
         selectionRow.Children.Add(new TextBlock
         {
-            Text = $"{session.SelectedCount} of {available.Count} selected",
+            Text = L10n.Text("windows.workspacepage.0_of_1_selected.d06c59a5", $"{session.SelectedCount}", $"{available.Count}"),
             VerticalAlignment = VerticalAlignment.Center,
             Opacity = 0.7,
         });
-        selectionRow.Children.Add(ActionIconGlyph.Button("Select all", ActionIcon.Apply, async (_, _) =>
+        selectionRow.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.workspacepage.select_all.1fc9a387"), ActionIcon.Apply, async (_, _) =>
         {
             session.SetAll(available);
             await LoadAsync();
         }));
-        selectionRow.Children.Add(ActionIconGlyph.Button("Clear", ActionIcon.Dismiss, async (_, _) =>
+        selectionRow.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.workspacepage.clear.83b12c22"), ActionIcon.Dismiss, async (_, _) =>
         {
             session.ClearSelection();
             await LoadAsync();
         }));
         if (!remote)
         {
-            selectionRow.Children.Add(ActionIconGlyph.Button("Review and commit", ActionIcon.Commit, async (_, _) =>
+            selectionRow.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.workspacepage.review_and_commit.96f097b7"), ActionIcon.Commit, async (_, _) =>
             {
                 if (session.SelectedCount == 0)
                 {
                     _root.Children.Insert(1, Chrome.Banner(
-                        "Select at least one file to review.",
+                        L10n.Text("windows.workspacepage.select_at_least_one_file_to_review.3ccd700d"),
                         Theme.Warning,
                         Symbol.Important));
                     return;
@@ -415,12 +412,12 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                 await LoadAsync();
             }));
         }
-        selectionRow.Children.Add(ActionIconGlyph.Button("Review all", ActionIcon.Compare, async (_, _) =>
+        selectionRow.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.workspacepage.review_all.d05163fa"), ActionIcon.Compare, async (_, _) =>
         {
             if (reviewFiles.Count == 0)
             {
                 _root.Children.Insert(1, Chrome.Banner(
-                    "No changes to review.",
+                    L10n.Text("windows.workspacepage.no_changes_to_review.1f08cad6"),
                     Theme.Warning,
                     Symbol.Important));
                 return;
@@ -432,16 +429,16 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         if (array is null || array.Count == 0)
         {
             var clean = string.IsNullOrEmpty(branch)
-                ? "No uncommitted changes in this folder."
-                : $"On {branch}. No uncommitted changes.";
-            _root.Children.Add(EmptyState.View("Clean tree", clean, EmptyArtKind.Changes));
+                ? L10n.Text("windows.workspacepage.no_uncommitted_changes_in_this_folder.9a39a402")
+                : L10n.Text("windows.workspacepage.on_0_no_uncommitted_changes.59ef86e6", $"{branch}");
+            _root.Children.Add(EmptyState.View(L10n.Text("windows.workspacepage.clean_tree.1cec0a42"), clean, EmptyArtKind.Changes));
             return;
         }
 
         var list = new StackPanel { Spacing = Theme.SpaceS };
         if (!string.IsNullOrEmpty(branch))
         {
-            list.Children.Add(new TextBlock { Text = "On " + branch, Opacity = 0.7 });
+            list.Children.Add(new TextBlock { Text = L10n.Text("windows.workspacepage.on_0.88d14a53", $"{branch}"), Opacity = 0.7 });
         }
         foreach (var entry in array)
         {
@@ -461,7 +458,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                 IsChecked = session.Paths.Contains(filePath),
                 VerticalAlignment = VerticalAlignment.Center,
             };
-            ToolTipService.SetToolTip(check, "Include in the next commit");
+            ToolTipService.SetToolTip(check, L10n.Text("windows.workspacepage.include_in_the_next_commit.5d7f428d"));
             check.Checked += async (_, _) =>
             {
                 session.Select(filePath);
@@ -486,7 +483,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                 Orientation = Orientation.Horizontal,
                 Spacing = Theme.SpaceS,
             };
-            actions.Children.Add(ActionIconGlyph.Button("Stage", ActionIcon.Apply, async (_, _) =>
+            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.workspacepage.stage.de838855"), ActionIcon.Apply, async (_, _) =>
             {
                 var paths = new JsonArray { JsonValue.Create(filePath) };
                 await GitwriteAsync("workspace.stage", new JsonObject
@@ -495,7 +492,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     ["paths"] = paths,
                 });
             }));
-            actions.Children.Add(ActionIconGlyph.Button("Unstage", ActionIcon.Restore, async (_, _) =>
+            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.workspacepage.unstage.033f86f9"), ActionIcon.Restore, async (_, _) =>
             {
                 var paths = new JsonArray { JsonValue.Create(filePath) };
                 await GitwriteAsync("workspace.unstage", new JsonObject
@@ -504,7 +501,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     ["paths"] = paths,
                 });
             }));
-            actions.Children.Add(ActionIconGlyph.Button("Diff", ActionIcon.Compare, async (_, _) =>
+            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.workspacepage.diff.7ecf4628"), ActionIcon.Compare, async (_, _) =>
             {
                 await ShowDiffAsync(filePath);
             }));
@@ -512,16 +509,14 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             line.Children.Add(actions);
             list.Children.Add(line);
         }
-        _root.Children.Add(Chrome.Card("Changes", list));
+        _root.Children.Add(Chrome.Card(L10n.Text("windows.workspacepage.changes.bbd4b6a8"), list));
 
         if (remote)
         {
             _root.Children.Add(new TextBlock
             {
-                Text = "Commits for this folder are made on "
-                    + (RemoteWorkspaces.CachedFolder(_id)?.MachineLabel is string machine
-                        && !string.IsNullOrEmpty(machine) ? machine : "that machine")
-                    + ". Stage, unstage and diff work here.",
+                Text = L10n.Text("windows.workspacepage.commits_for_this_folder_are_made_on_0_stag.e44b99b2", $"{(RemoteWorkspaces.CachedFolder(_id)?.MachineLabel is string machine
+                        && !string.IsNullOrEmpty(machine) ? machine : L10n.Text("windows.workspacepage.that_machine.518ab459"))}"),
                 Opacity = 0.7,
                 FontSize = 12,
                 TextWrapping = TextWrapping.Wrap,
@@ -551,7 +546,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             _root.Children.Add(Chrome.Banner(FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
             return;
         }
-        await WorkspaceDiff.ShowFileDiffAsync(this, "Diff · " + filePath, diff);
+        await WorkspaceDiff.ShowFileDiffAsync(this, L10n.Text("windows.workspacepage.diff_0.4cfe00c5", $"{filePath}"), diff);
     }
 
     private async Task<JsonNode?> LoadOneDiffAsync(string path)
@@ -583,10 +578,10 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         });
         if (!string.IsNullOrEmpty(upstream))
         {
-            ToolTipService.SetToolTip(switchButton, "Tracking " + upstream);
+            ToolTipService.SetToolTip(switchButton, L10n.Text("windows.workspacepage.tracking_0.2e7aa60a", $"{upstream}"));
         }
         row.Children.Add(switchButton);
-        row.Children.Add(ActionIconGlyph.Button("Push", ActionIcon.Upload, async (_, _) =>
+        row.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.workspacepage.push.731ce7ed"), ActionIcon.Upload, async (_, _) =>
         {
             await WorkspacePushDialog.ShowAsync(this, _id, folderName);
             await LoadAsync();
@@ -626,13 +621,13 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         var body = new StackPanel { Spacing = Theme.SpaceM, MaxWidth = 780, HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 32, 0, 16) };
         body.Children.Add(new TextBlock
         {
-            Text = "What do you want to do in " + _folderName + "?",
+            Text = L10n.Text("windows.workspacepage.what_do_you_want_to_do_in_0.d6c232de", $"{_folderName}"),
             TextAlignment = TextAlignment.Center, FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
         });
-        body.Children.Add(new TextBlock { Text = "Open the project where you left it, or start an agent that keeps running on its own.",
+        body.Children.Add(new TextBlock { Text = L10n.Text("windows.workspacepage.open_the_project_where_you_left_it_or_star.4f0ed092"),
             Opacity = 0.65, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 16) });
-        body.Children.Add(new TextBlock { Text = "Open", FontSize = 12, Opacity = 0.7 });
+        body.Children.Add(new TextBlock { Text = L10n.Text("common.open"), FontSize = 12, Opacity = 0.7 });
         var links = new FlowPanel { MinimumItemWidth = 220, Spacing = Theme.SpaceM };
         // Every section of the project, because the sidebar lists only what
         // is running and the chats; this page is where the rest open.
@@ -687,7 +682,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         try
         {
             var catalog = await CallTargetAsync("launcher.catalog");
-            host.Children.Add(new TextBlock { Text = "Run an agent", Opacity = 0.7, FontSize = 12 });
+            host.Children.Add(new TextBlock { Text = L10n.Text("windows.workspacepage.run_an_agent.b7046310"), Opacity = 0.7, FontSize = 12 });
             var tiles = new FlowPanel { MinimumItemWidth = 220, Spacing = Theme.SpaceM };
             foreach (var profile in Format.Items(catalog) ?? new JsonArray())
             {
@@ -710,7 +705,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                         if (operation == "install")
                         {
                             var result = await CallTargetAsync("launcher.install", new JsonObject { ["id"] = id }, TimeSpan.FromMinutes(5));
-                            if (!Format.Flag(result, "ok")) throw new InvalidOperationException(Format.Text(result, "output", "Installation failed."));
+                            if (!Format.Flag(result, "ok")) throw new InvalidOperationException(Format.Text(result, "output", L10n.Text("windows.workspacepage.installation_failed.bfb3106f")));
                             await LoadLaunchersAsync(host);
                             return;
                         }
@@ -721,7 +716,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                             ["rows"] = 30, ["cols"] = 100, ["dark"] = Theme.IsDark,
                         });
                         var sessionId = Format.Text(session, "id");
-                        if (string.IsNullOrEmpty(sessionId)) throw new InvalidOperationException("The host did not return a session.");
+                        if (string.IsNullOrEmpty(sessionId)) throw new InvalidOperationException(L10n.Text("windows.workspacepage.the_host_did_not_return_a_session.8a4eda9a"));
                         AppServices.OpenTerminal?.Invoke(_id, sessionId);
                     }
                     catch (Exception ex)
@@ -739,10 +734,10 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                 };
                 launch.Click += async (_, _) => await RunAsync(launch, installed ? "launch" : "install");
                 launch.IsEnabled = installed || !string.IsNullOrEmpty(Format.Text(profile, "installCommand"));
-                ToolTipService.SetToolTip(launch, installed ? "Launch " + Format.Text(profile, "name", id) : "Install " + Format.Text(profile, "name", id));
+                ToolTipService.SetToolTip(launch, installed ? L10n.Text("windows.workspacepage.launch_0.7c80096e", $"{Format.Text(profile, "name", id)}") : L10n.Text("windows.workspacepage.install_0.234d862d", $"{Format.Text(profile, "name", id)}"));
                 var tile = new Grid();
                 tile.Children.Add(launch);
-                var setup = Buttons.ToolbarIcon(ActionIcon.Settings, "Set up " + Format.Text(profile, "name", id), (_, _) => { }, isAccent: true);
+                var setup = Buttons.ToolbarIcon(ActionIcon.Settings, L10n.Text("windows.workspacepage.set_up_0.4e4ef4a2", $"{Format.Text(profile, "name", id)}"), (_, _) => { }, isAccent: true);
                 setup.HorizontalAlignment = HorizontalAlignment.Right;
                 setup.VerticalAlignment = VerticalAlignment.Top;
                 setup.Margin = new Thickness(8);
@@ -753,15 +748,15 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                 setup.Flyout = options;
                 if (!string.IsNullOrEmpty(Format.Text(profile, "installCommand")))
                 {
-                    var install = ActionIconGlyph.Button(installed ? "Reinstall" : "Install", ActionIcon.Download, (_, _) => { });
+                    var install = ActionIconGlyph.Button(installed ? L10n.Text("windows.workspacepage.reinstall.c630a782") : L10n.Text("windows.workspacepage.install.569ca49f"), ActionIcon.Download, (_, _) => { });
                     install.Click += async (_, _) => { options.Hide(); await RunAsync(install, "install"); };
                     actions.Children.Add(install);
                 }
                 if (actions.Children.Count > 0) tile.Children.Add(setup);
                 var menu = ContextMenus.Menu(tile);
-                ContextMenus.AddButton(menu, launch, installed ? "Launch" : "Install");
+                ContextMenus.AddButton(menu, launch, installed ? L10n.Text("windows.workspacepage.launch.ccf56ef5") : L10n.Text("windows.workspacepage.install.569ca49f"));
                 ContextMenus.AddButtons(menu, actions);
-                ContextMenus.AddAsync(menu, "Remove from launcher", async () =>
+                ContextMenus.AddAsync(menu, L10n.Text("windows.workspacepage.remove_from_launcher.b107a73b"), async () =>
                 {
                     try { await CallTargetAsync("launcher.hide", new JsonObject { ["id"] = id }); await LoadLaunchersAsync(host); }
                     catch (Exception ex) { host.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important)); }
@@ -772,7 +767,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             var hidden = (Format.Items(catalog) ?? new JsonArray()).Where(profile => Format.Flag(profile, "hidden")).ToList();
             if (hidden.Count > 0)
             {
-                var restore = ActionIconGlyph.Button("Restore hidden launchers", ActionIcon.Restore, (_, _) => { });
+                var restore = ActionIconGlyph.Button(L10n.Text("windows.workspacepage.restore_hidden_launchers.9b6fdaaa"), ActionIcon.Restore, (_, _) => { });
                 var menu = new MenuFlyout();
                 foreach (var profile in hidden)
                 {
@@ -854,19 +849,19 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             if (total == 0)
             {
                 _sessionsHost.Children.Add(EmptyState.View(
-                    "No shells in this folder",
+                    L10n.Text("windows.workspacepage.no_shells_in_this_folder.727f2ce6"),
                     RemoteWorkspaces.IsRemote(_id)
-                        ? "Open a new shell. It runs on that machine through the tunnel."
-                        : "Open a new shell. It runs on this PC.",
+                        ? L10n.Text("windows.workspacepage.open_a_new_shell_it_runs_on_that_machine_t.ff8f1763")
+                        : L10n.Text("windows.workspacepage.open_a_new_shell_it_runs_on_this_pc.eee8fa9c"),
                     EmptyArtKind.Sessions));
-                _summary = "No shells in this folder.";
+                _summary = L10n.Text("windows.workspacepage.no_shells_in_this_folder.b7cd6bcc");
             }
             else
             {
-                _sessionsHost.Children.Add(Chrome.Card("Sessions", list));
+                _sessionsHost.Children.Add(Chrome.Card(L10n.Text("windows.workspacepage.sessions.6fa3cbf4"), list));
                 _summary = running == total
-                    ? $"{total} {(total == 1 ? "shell" : "shells")}, all running."
-                    : $"{running} of {total} shells running.";
+                    ? L10n.Text("windows.workspacepage.0_1_all_running.504eeb8b", $"{total}", $"{(total == 1 ? "shell" : L10n.Text("windows.workspacepage.shells.b0606c08"))}")
+                    : L10n.Text("windows.workspacepage.0_of_1_shells_running.13b482cd", $"{running}", $"{total}");
             }
             RenderInspector();
         }
@@ -885,7 +880,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
     {
         var state = alive
             ? "running"
-            : exitCode.HasValue ? $"exited {exitCode}" : "exited";
+            : exitCode.HasValue ? L10n.Text("windows.workspacepage.exited_0.39ec5073", $"{exitCode}") : "exited";
         var body = new StackPanel { Spacing = 2 };
         body.Children.Add(new StackPanel
         {
@@ -958,7 +953,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         var memory = await BrowserProjectMemory.ForAsync(_id);
         var portBox = new TextBox
         {
-            PlaceholderText = "Port",
+            PlaceholderText = L10n.Text("windows.workspacepage.port.72e9a59f"),
             Text = memory?.Targets.FirstOrDefault() is string savedTarget && Uri.TryCreate(savedTarget, UriKind.Absolute, out var last) ? last.Port.ToString() : "",
             MinWidth = 120,
         };
@@ -968,7 +963,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             Spacing = Theme.SpaceS,
         };
         row.Children.Add(portBox);
-        row.Children.Add(ActionIconGlyph.Button("Open", ActionIcon.Browser, async (_, _) =>
+        row.Children.Add(ActionIconGlyph.Button(L10n.Text("common.open"), ActionIcon.Browser, async (_, _) =>
         {
             await OpenPortAsync(portBox.Text);
         }));
@@ -977,14 +972,14 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             var recent = new MenuFlyout();
             foreach (var target in memory.Targets)
                 ContextMenus.Add(recent, target, () => portBox.Text = new Uri(target).Port.ToString());
-            row.Children.Add(ActionIconGlyph.MoreButton("Recent ports", recent));
+            row.Children.Add(ActionIconGlyph.MoreButton(L10n.Text("windows.workspacepage.recent_ports.b757062a"), recent));
         }
         _root.Children.Add(row);
         _root.Children.Add(new TextBlock
         {
             Text = RemoteWorkspaces.IsRemote(_id)
-                ? "Opens a page from that machine in the in-app browser, through the tunnel. Use the port its dev server is already listening on."
-                : "Opens a loopback page on this PC in the in-app browser. Use the port a local dev server is already listening on.",
+                ? L10n.Text("windows.workspacepage.opens_a_page_from_that_machine_in_the_in_a.96e37993")
+                : L10n.Text("windows.workspacepage.opens_a_loopback_page_on_this_pc_in_the_in.2e1d8c7c"),
             Opacity = 0.7,
             TextWrapping = TextWrapping.Wrap,
         });
@@ -996,7 +991,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         if (!ushort.TryParse(raw.Trim(), out var port) || port == 0)
         {
             _root.Children.Insert(1, Chrome.Banner(
-                "Enter a port between 1 and 65535.",
+                L10n.Text("windows.workspacepage.enter_a_port_between_1_and_65535.8d698cda"),
                 Theme.Danger,
                 Symbol.Important));
             return;
@@ -1005,7 +1000,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         if (open is null)
         {
             _root.Children.Insert(1, Chrome.Banner(
-                "The in-app browser is not wired in this window.",
+                L10n.Text("windows.workspacepage.the_in_app_browser_is_not_wired_in_this_wi.7ab7dbc4"),
                 Theme.Danger,
                 Symbol.Important));
             return;
@@ -1041,24 +1036,24 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     continue;
                 }
                 n++;
-                list.Children.Add(new TextBlock { Text = Format.Text(card, "title", "(untitled)") });
+                list.Children.Add(new TextBlock { Text = Format.Text(card, "title", L10n.Text("windows.workspacepage.untitled.3bc7cc17")) });
             }
         }
         _summary = n == 0
-            ? "No tasks in this folder."
-            : $"{n} {(n == 1 ? "task" : "tasks")} in this folder.";
+            ? L10n.Text("windows.workspacepage.no_tasks_in_this_folder.876ca35f")
+            : L10n.Text("windows.workspacepage.0_1_in_this_folder.8b3dad5f", $"{n}", $"{(n == 1 ? L10n.Text("windows.workspacepage.task.0ebb429f") : L10n.Text("windows.workspacepage.tasks.08515408"))}");
         RenderInspector();
         if (n == 0)
         {
             // The global Tasks board is this PC's only. A folder on another
             // machine grows its tasks on its own board instead.
             var hint = peer is null
-                ? "Add one from Tasks."
-                : "Add one on that machine's board for this folder.";
-            _root.Children.Add(EmptyState.View("No tasks in this folder", hint, EmptyArtKind.Tasks));
+                ? L10n.Text("windows.workspacepage.add_one_from_tasks.391694bb")
+                : L10n.Text("windows.workspacepage.add_one_on_that_machine_s_board_for_this_f.b2cea4d5");
+            _root.Children.Add(EmptyState.View(L10n.Text("windows.workspacepage.no_tasks_in_this_folder.ff9fd529"), hint, EmptyArtKind.Tasks));
             return;
         }
-        _root.Children.Add(Chrome.Card("Tasks", list));
+        _root.Children.Add(Chrome.Card(L10n.Text("common.tasks"), list));
     }
 
     private async Task<string> FolderNameAsync()
@@ -1090,7 +1085,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
 
     private static bool OutcomeOk(JsonNode outcome, out string message)
     {
-        message = Format.Text(outcome, "message", "The command failed.");
+        message = Format.Text(outcome, "message", L10n.Text("windows.workspacepage.the_command_failed.449398a9"));
         if (outcome is JsonObject && outcome["ok"] is not null)
         {
             return Format.Flag(outcome, "ok");

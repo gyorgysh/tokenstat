@@ -63,7 +63,7 @@ internal sealed class BrowserBridgePool(
                 PublishListeners();
                 await RetireAsync(endpoint, entry);
                 EnsureCurrent(generation);
-                throw new InvalidOperationException("The host did not return a local browser address.");
+                throw new InvalidOperationException(L10n.Text("windows.browserbridgepool.the_host_did_not_return_a_local_browser_ad.d1206c20"));
             }
             PublishListeners();
             return url;
@@ -116,7 +116,7 @@ internal sealed class BrowserBridgePool(
 
     private void EnsureCurrent(long generation)
     {
-        if (generation != currentGeneration()) throw new InvalidOperationException("The account changed before this preview opened.");
+        if (generation != currentGeneration()) throw new InvalidOperationException(L10n.Text("windows.browserbridgepool.the_account_changed_before_this_preview_op.be8f0c58"));
     }
 
     private static bool ValidListener(string url) => Uri.TryCreate(url, UriKind.Absolute, out var parsed)

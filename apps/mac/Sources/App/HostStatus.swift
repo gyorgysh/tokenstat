@@ -28,19 +28,19 @@ struct HostStatusCard: View {
         Group {
             if isRecovering {
                 status(
-                    title: "Reconnecting to tokenstat",
-                    subtitle: "The local helper is retrying in the background",
+                    title: L10n.text("apple.hoststatus.reconnecting_to_tokenstat.aab873f3"),
+                    subtitle: L10n.text("apple.hoststatus.the_local_helper_is_retrying_in_the_backgr.93465018"),
                     spinner: true
                 )
             } else if issue == .silent {
                 status(
-                    title: "tokenstat is quiet",
-                    subtitle: "The local helper did not answer. Retrying in the background."
+                    title: L10n.text("apple.hoststatus.tokenstat_is_quiet.66cb8b41"),
+                    subtitle: L10n.text("apple.hoststatus.the_local_helper_did_not_answer_retrying_i.2ffe7707")
                 )
             } else if issue == .down {
                 status(
-                    title: "tokenstat is not answering",
-                    subtitle: "tokenstat tried to restart it and will keep retrying."
+                    title: L10n.text("apple.hoststatus.tokenstat_is_not_answering.a510336e"),
+                    subtitle: L10n.text("apple.hoststatus.tokenstat_tried_to_restart_it_and_will_kee.1f4f841d")
                 )
             }
         }

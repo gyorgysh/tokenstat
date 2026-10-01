@@ -51,7 +51,7 @@ struct ClientChatComposer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if model.savedCopy != nil {
-                Button("Send when connected", .scheduled) { model.queueDraftWhenConnected() }
+                Button(L10n.text("apple.clientchatcomposer.send_when_connected.c2aae57a"), .scheduled) { model.queueDraftWhenConnected() }
                     .buttonStyle(SecondaryButtonStyle(small: true))
                     .disabled(model.stagingAttachments > 0 || model.unconfirmedSend != nil || (model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty))
             }
@@ -61,7 +61,7 @@ struct ClientChatComposer: View {
             if model.draftSaveFailed {
                 ChatDraftNotice(retrySave: { model.retryDraftSave() })
             } else if model.unconfirmedSend != nil, model.savedCopy != nil {
-                Text("A previous send needs confirmation. Return to the live conversation to check it.")
+                Text(L10n.text("apple.clientchatcomposer.a_previous_send_needs_confirmation_return.825b7880"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
             } else if let unconfirmed = model.unconfirmedSend {
@@ -81,7 +81,7 @@ struct ClientChatComposer: View {
                 // every time, and this row is already three controls wide on
                 // a phone.
                 if focused {
-                    Button("Hide keyboard", .hideKeyboard, action: hideKeyboard)
+                    Button(L10n.text("apple.clientchatcomposer.hide_keyboard.f6b0718e"), .hideKeyboard, action: hideKeyboard)
                         .modifier(ComposerChromeButton())
                         .transition(controlTransition)
                 }
@@ -90,7 +90,7 @@ struct ClientChatComposer: View {
                 // appears, grew the bar and put a glass circle where a
                 // 44-point glyph belongs.
                 if running {
-                    Button("Stop", .stop, action: onStop)
+                    Button(L10n.text("common.stop"), .stop, action: onStop)
                         .modifier(ComposerChromeButton())
                         .transition(controlTransition)
                 }
@@ -126,7 +126,7 @@ struct ClientChatComposer: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(Theme.accentSoft.opacity(0.94))
                     .overlay {
-                        Text("Drop to attach")
+                        Text(L10n.text("apple.clientchatcomposer.drop_to_attach.34a7a637"))
                             .font(ClientType.label.weight(.semibold))
                             .foregroundStyle(Theme.accent)
                     }
@@ -195,27 +195,27 @@ struct ClientChatComposer: View {
 
     private var attachControl: some View {
         Menu {
-            Button("Choose files", .attach) {
+            Button(L10n.text("apple.clientchatcomposer.choose_files.1157defa"), .attach) {
                 importOwner = model.currentReference
                 importing = true
             }
-            Button("Choose photos", .attach) {
+            Button(L10n.text("apple.clientchatcomposer.choose_photos.abc1dfd6"), .attach) {
                 photoOwner = model.currentReference
                 pickingPhotos = true
             }
             if ChatInbox.pasteboardHasAttachment() {
-                Button("Paste from clipboard", .attach) {
+                Button(L10n.text("apple.clientchatcomposer.paste_from_clipboard.dc2d6f20"), .attach) {
                     ingest(items: ChatInbox.pasteboardItems())
                 }
             }
         } label: {
-            ActionIcon.attach.label("Attach")
+            ActionIcon.attach.label(L10n.text("apple.clientchatcomposer.attach.d406ade2"))
                 .environment(\.compactActions, true)
                 .foregroundStyle(Theme.accent)
                 .frame(width: 44, height: 44)
                 .contentShape(.rect)
         }
-        .accessibilityLabel("Attach")
+        .accessibilityLabel(L10n.text("apple.clientchatcomposer.attach.d406ade2"))
     }
 
     /// Grow the writing area without leaving the conversation.
@@ -229,11 +229,11 @@ struct ClientChatComposer: View {
     private var expandToggle: some View {
         Group {
             if expanded {
-                Button("Shrink the message box", .exitFullScreen) {
+                Button(L10n.text("apple.clientchatcomposer.shrink_the_message_box.2430d33f"), .exitFullScreen) {
                     expanded = false
                 }
             } else {
-                Button("Expand the message box", .enterFullScreen) {
+                Button(L10n.text("apple.clientchatcomposer.expand_the_message_box.c0441a94"), .enterFullScreen) {
                     expanded = true
                     focused = true
                 }
@@ -285,17 +285,17 @@ struct ClientChatComposer: View {
         }
         .modifier(ChatSendStyle())
         .environment(\.compactActions, true)
-        .accessibilityLabel(sendsAsNote ? "Add a note for the next step" : sendTitle)
+        .accessibilityLabel(sendsAsNote ? L10n.text("apple.clientchatcomposer.add_a_note_for_the_next_step.4778177a") : sendTitle)
         .contextMenu {
             if running {
-                Button("Stop and send now", .send, action: sendNowTapped)
+                Button(L10n.text("apple.clientchatcomposer.stop_and_send_now.8ad0a50d"), .send, action: sendNowTapped)
             }
         }
     }
 
     private var sendTitle: String {
-        if sendsAsNote { return "Next step" }
-        return running ? "Send after this turn" : "Send"
+        if sendsAsNote { return L10n.text("apple.clientchatcomposer.next_step.298a9207") }
+        return running ? L10n.text("apple.clientchatcomposer.send_after_this_turn.012fc8c3") : L10n.text("apple.clientchatcomposer.send.f6f4688f")
     }
 
     private var canSend: Bool { !cannotSend }

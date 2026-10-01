@@ -144,3 +144,6 @@ xcuserdata/
 /scripts/tests/windows-shell/obj/
 /scripts/tests/windows-automations/bin/
 /scripts/tests/windows-automations/obj/
+/scripts/tests/windows-localization/bin/
+/scripts/tests/windows-localization/obj/
+__pycache__/

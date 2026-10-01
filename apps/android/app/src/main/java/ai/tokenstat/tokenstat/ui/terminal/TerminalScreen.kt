@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.terminal
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.activity.compose.BackHandler
 import ai.tokenstat.tokenstat.ui.chrome.HideTabBar
 
@@ -172,7 +174,7 @@ fun TerminalScreen(
             }.onSuccess { element ->
                 bridge.readInfo(element as? JsonObject)
                 if (bridge.exitCode != null || !bridge.alive) {
-                    fail("This session has ended.")
+                    fail(L10n.text("android.terminalscreen.this_session_has_ended.5ac92537"))
                     return@launch
                 }
             }
@@ -202,11 +204,11 @@ fun TerminalScreen(
                 }
             },
             navigationIcon = {
-                IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+                IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, L10n.text("common.back")) }
             },
             actions = {
-                TextButton(onClick = { confirmClose = true }) { Text("Close") }
-                TextButton(onClick = onClose) { Text("Done") }
+                TextButton(onClick = { confirmClose = true }) { Text(L10n.text("common.close")) }
+                TextButton(onClick = onClose) { Text(L10n.text("common.done")) }
             },
         )
         // Bridge fields are plain volatiles; keying on the tick it nudges is
@@ -214,14 +216,14 @@ fun TerminalScreen(
         key(tick) {
             if (bridge.outputPaused) {
                 Text(
-                    "Output paused while the terminal catches up.",
+                    L10n.text("android.terminalscreen.output_paused_while_the_terminal_catches_u.c3cbbc1c"),
                     color = LocalTsColors.current.warning,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = Space.s),
                 )
             }
             if (bridge.droppedOutput) {
                 Text(
-                    "Some output was dropped.",
+                    L10n.text("android.terminalscreen.some_output_was_dropped.80a58e7e"),
                     color = LocalTsColors.current.warning,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = Space.s),
                 )
@@ -244,7 +246,7 @@ fun TerminalScreen(
                         color = LocalTsColors.current.danger,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = { retryFreshShell() }) { Text("New shell") }
+                    TextButton(onClick = { retryFreshShell() }) { Text(L10n.text("android.terminalscreen.new_shell.8a926ed7")) }
                 }
             }
         }
@@ -325,12 +327,12 @@ fun TerminalScreen(
                                         if (id != null) {
                                             bind(id)
                                         } else {
-                                            fail("The host would not start a shell.")
+                                            fail(L10n.text("android.terminalscreen.the_host_would_not_start_a_shell.144768c7"))
                                         }
                                     }.onFailure { error ->
                                         fail(
                                             ai.tokenstat.tokenstat.ui.logic.TunnelCopy.display(
-                                                error.message ?: "The request failed.",
+                                                error.message ?: L10n.text("android.terminalscreen.the_request_failed.db4fb447"),
                                                 hostLabel,
                                             ),
                                         )
@@ -377,8 +379,8 @@ fun TerminalScreen(
     if (confirmClose) {
         AlertDialog(
             onDismissRequest = { confirmClose = false },
-            title = { Text("Close this session?") },
-            text = { Text("Stops the process on $hostLabel.") },
+            title = { Text(L10n.text("android.terminalscreen.close_this_session.2b66ce2d")) },
+            text = { Text(L10n.text("android.terminalscreen.stops_the_process_on_0.7aa0b494", "${hostLabel}")) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmClose = false
@@ -392,10 +394,10 @@ fun TerminalScreen(
                         bridge.killed = true
                         onClose()
                     }
-                }) { Text("Close") }
+                }) { Text(L10n.text("common.close")) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmClose = false }) { Text("Keep it") }
+                TextButton(onClick = { confirmClose = false }) { Text(L10n.text("android.terminalscreen.keep_it.fdce5da2")) }
             },
         )
     }
@@ -418,11 +420,11 @@ private object TermChromeClient : android.webkit.WebChromeClient() {
 }
 
 private fun bridgeTitle(bridge: TerminalBridge): String =
-    TerminalKeysLogic.basename(bridge.command).ifBlank { "Terminal" }
+    TerminalKeysLogic.basename(bridge.command).ifBlank { L10n.text("android.terminalscreen.terminal.e0926fda") }
 
 private fun bridgeSubtitle(bridge: TerminalBridge): String {
-    bridge.exitCode?.let { return "exited $it" }
-    if (!bridge.alive) return "stopped"
+    bridge.exitCode?.let { return L10n.text("android.terminalscreen.exited_0.39ec5073", "${it}") }
+    if (!bridge.alive) return L10n.text("android.terminalscreen.stopped.8322e87d")
     return bridge.cwd.ifBlank { "" }
 }
 
@@ -499,7 +501,7 @@ fun SshTerminalScreen(
                         Text(hostLabel)
                         if (bridge.ended) {
                             Text(
-                                "ended",
+                                L10n.text("android.terminalscreen.ended.e87ba7a0"),
                                 color = LocalTsColors.current.textSecondary,
                                 modifier = Modifier.padding(start = Space.s),
                             )
@@ -508,12 +510,12 @@ fun SshTerminalScreen(
                 }
             },
             navigationIcon = {
-                IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+                IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, L10n.text("common.back")) }
             },
             actions = {
-                TextButton(onClick = { confirmEnd = true }) { Text("End session") }
+                TextButton(onClick = { confirmEnd = true }) { Text(L10n.text("android.terminalscreen.end_session.f00b921f")) }
                 // Done leaves it running, which is why it is not Close.
-                TextButton(onClick = onClose) { Text("Done") }
+                TextButton(onClick = onClose) { Text(L10n.text("common.done")) }
             },
         )
         key(tick) {
@@ -625,8 +627,8 @@ fun SshTerminalScreen(
     if (confirmEnd) {
         AlertDialog(
             onDismissRequest = { confirmEnd = false },
-            title = { Text("End this session?") },
-            text = { Text("Whatever is running in it stops. Nothing else on the server changes.") },
+            title = { Text(L10n.text("android.terminalscreen.end_this_session.2a445dc0")) },
+            text = { Text(L10n.text("android.terminalscreen.whatever_is_running_in_it_stops_nothing_el.f25aee6b")) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmEnd = false
@@ -638,10 +640,10 @@ fun SshTerminalScreen(
                         if (ended) onEnded()
                         onClose()
                     }
-                }) { Text("End session") }
+                }) { Text(L10n.text("android.terminalscreen.end_session.f00b921f")) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmEnd = false }) { Text("Cancel") }
+                TextButton(onClick = { confirmEnd = false }) { Text(L10n.text("common.cancel")) }
             },
         )
     }
@@ -668,7 +670,7 @@ private fun SnippetKey(
     var open by remember { mutableStateOf(false) }
     Box {
         Text(
-            "snip",
+            L10n.text("android.terminalscreen.snip.b0e6a23a"),
             style = TextStyle(fontSize = 13.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
             color = colors.textPrimary,
             textAlign = TextAlign.Center,
@@ -686,7 +688,7 @@ private fun SnippetKey(
             snippets.filterIsInstance<JsonObject>().forEach { item ->
                 val title = (item["title"] as? kotlinx.serialization.json.JsonPrimitive)?.content
                     ?: (item["label"] as? kotlinx.serialization.json.JsonPrimitive)?.content
-                    ?: "Snippet"
+                    ?: L10n.text("android.terminalscreen.snippet.48f55cb8")
                 androidx.compose.material3.DropdownMenuItem(
                     text = { Text(title) },
                     onClick = {
@@ -715,7 +717,7 @@ private fun SnippetFillSheet(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                (item["title"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "Run snippet",
+                (item["title"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: L10n.text("android.terminalscreen.run_snippet.9fba9773"),
             )
         },
         text = {
@@ -736,10 +738,10 @@ private fun SnippetFillSheet(
         confirmButton = {
             TextButton(onClick = {
                 onRun(ai.tokenstat.tokenstat.ui.ssh.SnippetRun.fill(command, values.toMap()))
-            }) { Text("Run") }
+            }) { Text(L10n.text("common.run")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(L10n.text("common.cancel")) }
         },
     )
 }
@@ -948,7 +950,7 @@ class TerminalBridge {
                     // steady drumbeat rather than on every failure.
                     failures++
                     if (transportError == null) {
-                        transportError = "Connection lost. Retrying…"
+                        transportError = L10n.text("android.terminalscreen.connection_lost_retrying.7bb52793")
                         onProgress()
                     }
                     if (failures % 8 == 0) {
@@ -1035,7 +1037,7 @@ class TerminalBridge {
 
         @JavascriptInterface
         fun onResize(rows: Int, cols: Int) {
-            inbound.trySend("__resize__:$rows:$cols")
+            inbound.trySend(L10n.text("android.terminalscreen.resize_0_1.ac3609a3", "${rows}", "${cols}"))
         }
 
         @JavascriptInterface
@@ -1070,7 +1072,7 @@ class TerminalBridge {
                     // A failed read is a transport outage, not proof the
                     // session ended. Back off and keep polling.
                     if (transportError == null) {
-                        transportError = "Connection lost. Retrying…"
+                        transportError = L10n.text("android.terminalscreen.connection_lost_retrying.7bb52793")
                         onProgress()
                     }
                     delay(backoffMs)
@@ -1182,7 +1184,7 @@ fun TerminalKeys(
         leading?.invoke()
         IconKeyCap(
             icon = if (keyboardUp) Icons.Default.KeyboardHide else Icons.Default.Keyboard,
-            label = if (keyboardUp) "Hide keyboard" else "Show keyboard",
+            label = if (keyboardUp) L10n.text("android.terminalscreen.hide_keyboard.f6b0718e") else L10n.text("android.terminalscreen.show_keyboard.585f7659"),
             colors = colors,
             onClick = onToggleKeyboard,
         )

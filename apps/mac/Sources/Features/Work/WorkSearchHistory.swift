@@ -82,7 +82,7 @@ final class WorkSearchHistory {
                 guard current, epoch == requestedEpoch, enabled else { payload = Payload(); return }
                 payload = bounded(stored ?? Payload())
                 failure = nil
-            } catch { if current, epoch == requestedEpoch { failure = "Search history could not be opened. Try again after unlocking this device." } }
+            } catch { if current, epoch == requestedEpoch { failure = L10n.text("apple.worksearchhistory.search_history_could_not_be_opened_try_aga.63a6445d") } }
         }
     }
 
@@ -107,7 +107,7 @@ final class WorkSearchHistory {
                 _ = try await Bridge.cacheRemove(scope: wireScope, id: "search-history-v1")
                 payload = Payload()
                 failure = nil
-            } catch { if current, epoch == requestedEpoch { failure = "History could not be cleared. Try again." } }
+            } catch { if current, epoch == requestedEpoch { failure = L10n.text("apple.worksearchhistory.history_could_not_be_cleared_try_again.44fe4825") } }
         }
     }
 
@@ -125,7 +125,7 @@ final class WorkSearchHistory {
             }
             guard current, enabled, epoch == requestedEpoch, !Task.isCancelled else { return }
             guard let key = availableKey else {
-                failure = "Unlock this device to save search history."
+                failure = L10n.text("apple.worksearchhistory.unlock_this_device_to_save_search_history.193ec4af")
                 return
             }
             var next = payload
@@ -148,7 +148,7 @@ final class WorkSearchHistory {
                 guard current, epoch == requestedEpoch, enabled else { payload = Payload(); return }
                 payload = next
                 failure = nil
-            } catch { if current, epoch == requestedEpoch { failure = "History could not be saved. Your search is still available." } }
+            } catch { if current, epoch == requestedEpoch { failure = L10n.text("apple.worksearchhistory.history_could_not_be_saved_your_search_is.9b7f29df") } }
         }
     }
 

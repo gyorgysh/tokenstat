@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.setup
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.browser.customtabs.CustomTabsIntent
@@ -96,9 +98,9 @@ fun SetupWizard(
         containerColor = colors.background,
         topBar = {
             TopAppBar(
-                title = { Text("Set up a machine") },
+                title = { Text(L10n.text("android.setupwizard.set_up_a_machine.43e10e13")) },
                 navigationIcon = {
-                    TsSecondaryButton(label = "Close", small = true, onClick = {
+                    TsSecondaryButton(label = L10n.text("common.close"), small = true, onClick = {
                         if (path.isEmpty()) onClose() else path = path.dropLast(1)
                     })
                 },
@@ -238,56 +240,56 @@ private fun SetupServerGuide(onHaveServer: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(Space.m),
     ) {
         Text(
-            "Renting a server",
+            L10n.text("android.setupwizard.renting_a_server.f1a1e2a6"),
             style = TsType.title2.copy(fontWeight = FontWeight.SemiBold),
             color = colors.textPrimary,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
-            "This device is where you work. The machine is what runs the agent, holds your projects and stays on when you close this. A small rented Linux server is the usual way to have one.",
+            L10n.text("android.setupwizard.this_device_is_where_you_work_the_machine.2bf93b68"),
             style = TsType.body,
             color = colors.textSecondary,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
-        GuideSection("What it has to be") {
+        GuideSection(L10n.text("android.setupwizard.what_it_has_to_be.db0d043b")) {
             GuideRequirement(
-                "Linux with systemd",
-                "Setup uses systemd to keep the helper running, including after a reboot.",
+                L10n.text("android.setupwizard.linux_with_systemd.02486325"),
+                L10n.text("android.setupwizard.setup_uses_systemd_to_keep_the_helper_runn.08263b69"),
             )
             GuideRequirement(
-                "64-bit Intel or AMD",
-                "The standard server image at any provider.",
+                L10n.text("android.setupwizard.64_bit_intel_or_amd.6b85ad70"),
+                L10n.text("android.setupwizard.the_standard_server_image_at_any_provider.0a8d231e"),
             )
             GuideRequirement(
-                "SSH access",
-                "A login setup can use: a password or an SSH key. Root works, and so does an ordinary user that can write to its own home directory.",
+                L10n.text("android.setupwizard.ssh_access.4755492e"),
+                L10n.text("android.setupwizard.a_login_setup_can_use_a_password_or_an_ssh.0805316c"),
             )
         }
-        GuideSection("What size is enough") {
+        GuideSection(L10n.text("android.setupwizard.what_size_is_enough.3ea0c00a")) {
             Text(
-                "The coding agent, your project and any local models determine how much memory, disk space and processing power you need.",
+                L10n.text("android.setupwizard.the_coding_agent_your_project_and_any_loca.ea37ed75"),
                 style = TsType.subheadline,
                 color = colors.textSecondary,
             )
-            GuideBullet("Check the agent's system requirements and leave room for your project's builds and tests.")
-            GuideBullet("Grow when the projects do. Disk and memory follow your checkouts and models, not us.")
+            GuideBullet(L10n.text("android.setupwizard.check_the_agent_s_system_requirements_and.9af69248"))
+            GuideBullet(L10n.text("android.setupwizard.grow_when_the_projects_do_disk_and_memory.29b9c033"))
         }
-        GuideSection("Who takes the money") {
-            Text("Three separate things, and only one of them is ours.", style = TsType.subheadline)
-            GuideBullet("The provider bills you for the server, monthly or by the hour, until you delete it. Deleting the machine is how the charge stops, and that happens in their console, not here.")
-            GuideBullet("The coding agent is billed by whoever makes it, through the account you sign in to on the machine.")
-            GuideBullet("tokenstat charges for its own plan. Nothing here buys a server and nothing here includes agent usage.")
+        GuideSection(L10n.text("android.setupwizard.who_takes_the_money.7df75402")) {
+            Text(L10n.text("android.setupwizard.three_separate_things_and_only_one_of_them.08df69a7"), style = TsType.subheadline)
+            GuideBullet(L10n.text("android.setupwizard.the_provider_bills_you_for_the_server_mont.429cf30a"))
+            GuideBullet(L10n.text("android.setupwizard.the_coding_agent_is_billed_by_whoever_make.efc06607"))
+            GuideBullet(L10n.text("android.setupwizard.tokenstat_charges_for_its_own_plan_nothing.6a1be7f0"))
         }
-        GuideSection("Where to get one") {
+        GuideSection(L10n.text("android.setupwizard.where_to_get_one.dead684a")) {
             Text(
-                "Choose a provider with a server that meets the requirements above. Setup can import DigitalOcean servers on this device, and any other server works with its SSH address. You create and manage the server in the provider's own account.",
+                L10n.text("android.setupwizard.choose_a_provider_with_a_server_that_meets.67e8b16b"),
                 style = TsType.subheadline,
                 color = colors.textSecondary,
             )
             TsSecondaryButton(
-                label = "DigitalOcean",
+                label = L10n.text("android.setupwizard.digitalocean.8db02fc9"),
                 icon = ActionIcon.External.vector,
                 onClick = {
                     runCatching {
@@ -299,18 +301,18 @@ private fun SetupServerGuide(onHaveServer: () -> Unit) {
                 },
             )
             Text(
-                "The DigitalOcean link is a referral link. Same price for you, credit for the project.",
+                L10n.text("android.setupwizard.the_digitalocean_link_is_a_referral_link_s.b3c5c9a2"),
                 style = TsType.caption,
                 color = colors.textSecondary,
             )
         }
         Text(
-            "Come back here when the server exists and you have its address. Nothing on this screen has to be finished in one sitting.",
+            L10n.text("android.setupwizard.come_back_here_when_the_server_exists_and.d77e7d9e"),
             style = TsType.caption,
             color = colors.textSecondary,
         )
         TsAccentButton(
-            label = "I have a server now",
+            label = L10n.text("android.setupwizard.i_have_a_server_now.7af0bb61"),
             icon = ActionIcon.Next.vector,
             onClick = onHaveServer,
             modifier = Modifier.fillMaxWidth(),
@@ -367,29 +369,29 @@ private fun SetupServerDoor(onConnect: () -> Unit, onByHand: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(Space.m),
     ) {
         Text(
-            "A server you have",
+            L10n.text("android.setupwizard.a_server_you_have.25b36aee"),
             style = TsType.title2.copy(fontWeight = FontWeight.SemiBold),
             color = colors.textPrimary,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
-            "Connect over SSH and set it up, or run one command yourself. Either way the machine signs in to this account and comes back paired.",
+            L10n.text("android.setupwizard.connect_over_ssh_and_set_it_up_or_run_one.1455e3e0"),
             style = TsType.body,
             color = colors.textSecondary,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
         SetupDoorCard(
-            title = "Connect over SSH",
-            body = "Choose a server and how to sign in. Setup verifies it, checks it, and installs tokenstat while you watch.",
+            title = L10n.text("android.setupwizard.connect_over_ssh.3de5dfcd"),
+            body = L10n.text("android.setupwizard.choose_a_server_and_how_to_sign_in_setup_v.b0864943"),
             requirement = null,
             icon = { Icon(ActionIcon.Source.vector, null, tint = colors.accent, modifier = Modifier.size(25.dp)) },
             onClick = onConnect,
         )
         SetupDoorCard(
-            title = "Run it yourself",
-            body = "Paste one command into a terminal on the server. For a server that matters, or whenever handing over an SSH key is not on.",
+            title = L10n.text("android.setupwizard.run_it_yourself.b3ab2275"),
+            body = L10n.text("android.setupwizard.paste_one_command_into_a_terminal_on_the_s.e0f350fd"),
             requirement = null,
             icon = { Icon(ActionIcon.Copy.vector, null, tint = colors.accent, modifier = Modifier.size(25.dp)) },
             onClick = onByHand,
@@ -427,7 +429,7 @@ private fun SetupByHand(model: AppViewModel, onRanIt: () -> Unit) {
                 }.getOrNull()
                 val minted = model.core("account.pairingCode").jsonObject
                 val text = minted["code"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                if (text.isEmpty()) throw CoreClientFailure("The account did not return a pairing code.")
+                if (text.isEmpty()) throw CoreClientFailure(L10n.text("android.setupwizard.the_account_did_not_return_a_pairing_code.1776d60f"))
                 val minutes = (minted["expiresIn"]?.jsonPrimitive?.longOrNull ?: 900) / 60
                 val install = model.core("ssh.provision.line", buildJsonObject {
                     if (allow != null) put("allow", allow)
@@ -450,14 +452,14 @@ private fun SetupByHand(model: AppViewModel, onRanIt: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(Space.m),
     ) {
         Text(
-            "Run it yourself",
+            L10n.text("android.setupwizard.run_it_yourself.b3ab2275"),
             style = TsType.title2.copy(fontWeight = FontWeight.SemiBold),
             color = colors.textPrimary,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
-            "Paste this into a terminal on the server. tokenstat waits here for the machine to appear on your account.",
+            L10n.text("android.setupwizard.paste_this_into_a_terminal_on_the_server_t.f90ccb47"),
             style = TsType.body,
             color = colors.textSecondary,
             textAlign = TextAlign.Center,
@@ -467,12 +469,12 @@ private fun SetupByHand(model: AppViewModel, onRanIt: () -> Unit) {
         if (code != null) {
             TsCard {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                    Text("Your pairing code", style = TsType.subheadline.copy(fontWeight = FontWeight.SemiBold), color = colors.textSecondary)
+                    Text(L10n.text("android.setupwizard.your_pairing_code.4385c97f"), style = TsType.subheadline.copy(fontWeight = FontWeight.SemiBold), color = colors.textSecondary)
                     SelectionContainer {
                         Text(code!!, style = TsType.mono(22, FontWeight.SemiBold), color = colors.textPrimary)
                     }
                     Text(
-                        "Good for $expiresMinutes minutes and for one machine. It is already in the command below.",
+                        L10n.text("android.setupwizard.good_for_0_minutes_and_for_one_machine_it.ee887227", "${expiresMinutes}"),
                         style = TsType.caption,
                         color = colors.textSecondary,
                     )
@@ -482,7 +484,7 @@ private fun SetupByHand(model: AppViewModel, onRanIt: () -> Unit) {
         if (line != null) {
             TsCard {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                    Text("On the server", style = TsType.subheadline.copy(fontWeight = FontWeight.SemiBold), color = colors.textSecondary)
+                    Text(L10n.text("android.setupwizard.on_the_server.3f5514e0"), style = TsType.subheadline.copy(fontWeight = FontWeight.SemiBold), color = colors.textSecondary)
                     SelectionContainer {
                         Text(
                             line!!,
@@ -494,15 +496,15 @@ private fun SetupByHand(model: AppViewModel, onRanIt: () -> Unit) {
                 }
             }
         } else if (working) {
-            Text("Preparing the command…", style = TsType.subheadline, color = colors.textSecondary)
+            Text(L10n.text("android.setupwizard.preparing_the_command.dc40c381"), style = TsType.subheadline, color = colors.textSecondary)
         }
         Text(
-            "The machine signs itself in with that code, and lets this device open its work. Nothing about it goes through a browser.",
+            L10n.text("android.setupwizard.the_machine_signs_itself_in_with_that_code.63c89f28"),
             style = TsType.caption,
             color = colors.textSecondary,
         )
         TsAccentButton(
-            label = if (copied) "Copied" else "Copy the command",
+            label = if (copied) L10n.text("android.setupwizard.copied.8d525e5f") else L10n.text("android.setupwizard.copy_the_command.5a677843"),
             icon = if (copied) ActionIcon.Done.vector else ActionIcon.Copy.vector,
             onClick = {
                 val text = line ?: return@TsAccentButton
@@ -514,7 +516,7 @@ private fun SetupByHand(model: AppViewModel, onRanIt: () -> Unit) {
             enabled = line != null && !working,
         )
         TsSecondaryButton(
-            label = "Generate a new code",
+            label = L10n.text("android.setupwizard.generate_a_new_code.01dcaf62"),
             icon = ActionIcon.Refresh.vector,
             onClick = {
                 line = null
@@ -526,7 +528,7 @@ private fun SetupByHand(model: AppViewModel, onRanIt: () -> Unit) {
             enabled = !working,
         )
         TsSecondaryButton(
-            label = "I ran it, check my account",
+            label = L10n.text("android.setupwizard.i_ran_it_check_my_account.db748611"),
             icon = ActionIcon.Next.vector,
             onClick = onRanIt,
             modifier = Modifier.fillMaxWidth(),
@@ -559,7 +561,7 @@ private fun SetupProjectStep(
     var peer by remember { mutableStateOf(machines.singleOrNull()?.setupPeer()) }
     var route by remember { mutableStateOf<ProjectRoute?>(null) }
     BackHandler(enabled = route != null) { route = null }
-    val hostLabel = machines.find { it.setupPeer() == peer }?.setupHostLabel() ?: "the machine"
+    val hostLabel = machines.find { it.setupPeer() == peer }?.setupHostLabel() ?: L10n.text("android.setupwizard.the_machine.0bb5c22e")
     val hostId = machines.find { it.setupPeer() == peer }?.setupMachineId()
     when (route) {
         ProjectRoute.CLONE -> if (peer != null) {
@@ -593,25 +595,25 @@ private fun SetupProjectStep(
         verticalArrangement = Arrangement.spacedBy(Space.m),
     ) {
         Text(
-            "Choose a project",
+            L10n.text("android.setupwizard.choose_a_project.8ba607b1"),
             style = TsType.title2.copy(fontWeight = FontWeight.SemiBold),
             color = colors.textPrimary,
         )
         Text(
-            "The agent works inside one folder at a time. Bring a repository down onto the machine, or point at a folder it already has.",
+            L10n.text("android.setupwizard.the_agent_works_inside_one_folder_at_a_tim.ff4e99e5"),
             style = TsType.body,
             color = colors.textSecondary,
         )
         if (machines.isEmpty()) {
             Banner(
-                "No machines on this account yet. Run the install first, then choose a project.",
+                L10n.text("android.setupwizard.no_machines_on_this_account_yet_run_the_in.7f8619a1"),
                 BannerSeverity.WARNING,
             )
         }
         if (machines.size > 1) {
             TsCard {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                    Text("Machine", style = TsType.caption, color = colors.textSecondary)
+                    Text(L10n.text("android.setupwizard.machine.8f1cc42d"), style = TsType.caption, color = colors.textSecondary)
                     machines.forEach { machine ->
                         Row(
                             Modifier.fillMaxWidth().clickable { peer = machine.setupPeer() }.padding(vertical = 4.dp),
@@ -631,25 +633,25 @@ private fun SetupProjectStep(
             }
         }
         SetupDoorCard(
-            title = "Clone a repository",
-            body = "tokenstat runs git on the machine and registers the folder when it finishes. You watch the whole thing, so a passphrase or an unknown host key is something you can answer.",
+            title = L10n.text("android.setupwizard.clone_a_repository.749e5d4d"),
+            body = L10n.text("android.setupwizard.tokenstat_runs_git_on_the_machine_and_regi.1c501f13"),
             requirement = null,
             icon = { Icon(ActionIcon.Download.vector, null, tint = colors.accent, modifier = Modifier.size(25.dp)) },
             onClick = { route = ProjectRoute.CLONE },
         )
         SetupDoorCard(
-            title = "A folder already on the machine",
-            body = "Browse the machine's disk and register a folder that is there. Nothing is copied and nothing is changed.",
+            title = L10n.text("android.setupwizard.a_folder_already_on_the_machine.d5432a67"),
+            body = L10n.text("android.setupwizard.browse_the_machine_s_disk_and_register_a_f.e316c912"),
             requirement = null,
             icon = { Icon(ActionIcon.Source.vector, null, tint = colors.accent, modifier = Modifier.size(25.dp)) },
             onClick = { route = ProjectRoute.EXISTING },
         )
         Text(
-            "Whichever you choose, the machine opens with a first task written into the message box. Nothing is sent until you send it.",
+            L10n.text("android.setupwizard.whichever_you_choose_the_machine_opens_wit.cc343316"),
             style = TsType.caption,
             color = colors.textSecondary,
         )
-        TsSecondaryButton(label = "Not now", onClick = onNotNow, modifier = Modifier.fillMaxWidth())
+        TsSecondaryButton(label = L10n.text("android.setupwizard.not_now.a0e63d7c"), onClick = onNotNow, modifier = Modifier.fillMaxWidth())
     }
 }
 
@@ -671,14 +673,14 @@ private fun SetupDoors(
         verticalArrangement = Arrangement.spacedBy(Space.m),
     ) {
         Text(
-            "How do you want to work?",
+            L10n.text("android.setupwizard.how_do_you_want_to_work.f00e4112"),
             style = TsType.title2.copy(fontWeight = FontWeight.SemiBold),
             color = colors.textPrimary,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
-            "tokenstat runs agents on a machine that stays on. It can be a computer you own or a server you rent.",
+            L10n.text("android.setupwizard.tokenstat_runs_agents_on_a_machine_that_st.ba177299"),
             style = TsType.body,
             color = colors.textSecondary,
             textAlign = TextAlign.Center,
@@ -687,23 +689,23 @@ private fun SetupDoors(
         // The computer first: no token, no rental, nothing to buy. The doors
         // below it both assume a server.
         SetupDoorCard(
-            title = "On my Mac",
-            body = "Install the desktop app on the computer you work on, sign in to this account, and let this device in.",
+            title = L10n.text("android.setupwizard.on_my_mac.8282732a"),
+            body = L10n.text("android.setupwizard.install_the_desktop_app_on_the_computer_yo.adea6dec"),
             requirement = null,
             icon = { Icon(Icons.Default.Laptop, null, tint = colors.accent, modifier = Modifier.size(25.dp)) },
             onClick = { onDoor(SetupStep.MAC) },
         )
         SetupDoorCard(
-            title = "On a server I have",
-            body = "Connect over SSH and set it up. tokenstat installs itself, signs the machine in and comes back paired.",
-            requirement = if (paywalled) "Reaching it needs patron" else null,
+            title = L10n.text("android.setupwizard.on_a_server_i_have.70b31f4d"),
+            body = L10n.text("android.setupwizard.connect_over_ssh_and_set_it_up_tokenstat_i.8fa4f9e0"),
+            requirement = if (paywalled) L10n.text("android.setupwizard.reaching_it_needs_patron.c628ad97") else null,
             icon = { Icon(Icons.Default.Dns, null, tint = colors.accent, modifier = Modifier.size(25.dp)) },
             onClick = { onDoor(SetupStep.SERVER) },
         )
         SetupDoorCard(
-            title = "On a cloud machine",
-            body = "A VPS or a dedicated server. Import the ones you have, or find out what to rent if you have none yet.",
-            requirement = if (paywalled) "Reaching it needs patron" else null,
+            title = L10n.text("android.setupwizard.on_a_cloud_machine.304af746"),
+            body = L10n.text("android.setupwizard.a_vps_or_a_dedicated_server_import_the_one.0e3b5c2d"),
+            requirement = if (paywalled) L10n.text("android.setupwizard.reaching_it_needs_patron.c628ad97") else null,
             icon = { Icon(Icons.Default.Cloud, null, tint = colors.accent, modifier = Modifier.size(25.dp)) },
             onClick = { onDoor(SetupStep.CLOUD) },
         )
@@ -711,19 +713,19 @@ private fun SetupDoors(
         // wore the same surface as the three doors and read as a fourth way
         // to set up. A quiet bordered button says what it is.
         TsSecondaryButton(
-            label = "Skip for now",
+            label = L10n.text("android.setupwizard.skip_for_now.b58eb52c"),
             onClick = onClose,
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
-            "Go to your account and your numbers. Usage from machines you already have keeps arriving on its own, and a machine can be connected later from Devices.",
+            L10n.text("android.setupwizard.go_to_your_account_and_your_numbers_usage.fb973c15"),
             style = TsType.caption,
             color = colors.textSecondary,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
-            "Nothing here is permanent. Every door can be left, and leaving lands on your numbers, which keep arriving whatever you choose.",
+            L10n.text("android.setupwizard.nothing_here_is_permanent_every_door_can_b.7027fa6d"),
             style = TsType.caption,
             color = colors.textSecondary,
             textAlign = TextAlign.Center,
@@ -786,7 +788,7 @@ private fun SetupMacDoor(model: AppViewModel, state: ai.tokenstat.tokenstat.Clie
                 type = "text/plain"
                 putExtra(Intent.EXTRA_TEXT, SETUP_DOWNLOAD_URL)
             }
-            context.startActivity(Intent.createChooser(send, "Send it to my computer"))
+            context.startActivity(Intent.createChooser(send, L10n.text("android.setupwizard.send_it_to_my_computer.3260803b")))
             sharing = false
         }
     }
@@ -804,14 +806,14 @@ private fun SetupMacDoor(model: AppViewModel, state: ai.tokenstat.tokenstat.Clie
         verticalArrangement = Arrangement.spacedBy(Space.m),
     ) {
         Text(
-            "Your computer",
+            L10n.text("android.setupwizard.your_computer.49361195"),
             style = TsType.title2.copy(fontWeight = FontWeight.SemiBold),
             color = colors.textPrimary,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
-            "Three things, all of them on the computer. This screen watches your account and ticks each one off as it happens.",
+            L10n.text("android.setupwizard.three_things_all_of_them_on_the_computer_t.63c1a537"),
             style = TsType.body,
             color = colors.textSecondary,
             textAlign = TextAlign.Center,
@@ -819,33 +821,33 @@ private fun SetupMacDoor(model: AppViewModel, state: ai.tokenstat.tokenstat.Clie
         )
         SetupNumberedStep(
             number = 1,
-            title = "Install tokenstat on the computer",
-            body = "Send the download link to the computer. Share it or message it to yourself, then open it there.",
+            title = L10n.text("android.setupwizard.install_tokenstat_on_the_computer.8d9833fb"),
+            body = L10n.text("android.setupwizard.send_the_download_link_to_the_computer_sha.8aa03041"),
             done = arrived != null,
-            actionTitle = if (arrived == null) "Send it to my computer" else null,
+            actionTitle = if (arrived == null) L10n.text("android.setupwizard.send_it_to_my_computer.3260803b") else null,
             onAction = { sharing = true },
         )
         val arrivedLabel = arrived?.get("label")?.jsonPrimitive?.contentOrNull
         SetupNumberedStep(
             number = 2,
-            title = "Sign in to this account",
-            body = if (arrivedLabel != null) "$arrivedLabel is on your account."
-            else "Open it there and sign in with the same account this device uses.",
+            title = L10n.text("android.setupwizard.sign_in_to_this_account.d3d7f116"),
+            body = if (arrivedLabel != null) L10n.text("android.setupwizard.0_is_on_your_account.5704eab4", "${arrivedLabel}")
+            else L10n.text("android.setupwizard.open_it_there_and_sign_in_with_the_same_ac.d3ddaa5f"),
             done = arrived != null,
             actionTitle = null,
             onAction = {},
         )
         SetupNumberedStep(
             number = 3,
-            title = "Let this device in",
-            body = "Folders and terminals are only open to devices that computer has allowed. Ask from Projects, and say yes on the computer.",
+            title = L10n.text("android.setupwizard.let_this_device_in.35808989"),
+            body = L10n.text("android.setupwizard.folders_and_terminals_are_only_open_to_dev.e9f4d10a"),
             done = false,
             actionTitle = null,
             onAction = {},
         )
         if (arrived != null) {
             Text(
-                "One step is left and it happens on the computer: when this device asks to open a folder, say yes there.",
+                L10n.text("android.setupwizard.one_step_is_left_and_it_happens_on_the_com.6a5d8111"),
                 style = TsType.caption,
                 color = colors.textSecondary,
             )
@@ -869,7 +871,7 @@ private fun SetupNumberedStep(
             horizontalArrangement = Arrangement.spacedBy(Space.m),
         ) {
             Text(
-                if (done) "Done" else "$number",
+                if (done) L10n.text("common.done") else "$number",
                 style = TsType.headline,
                 color = if (done) colors.accent else colors.textSecondary,
             )
@@ -907,22 +909,22 @@ private fun SetupCloudDoor(
         verticalArrangement = Arrangement.spacedBy(Space.m),
     ) {
         Text(
-            "A cloud machine",
+            L10n.text("android.setupwizard.a_cloud_machine.e66ba82a"),
             style = TsType.title2.copy(fontWeight = FontWeight.SemiBold),
             color = colors.textPrimary,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
-            "Import an existing server from your provider, then connect over SSH. No servers are created and nothing is purchased.",
+            L10n.text("android.setupwizard.import_an_existing_server_from_your_provid.24352ead"),
             style = TsType.body,
             color = colors.textSecondary,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
         SetupDoorCard(
-            title = "I do not have one yet",
-            body = "What a machine has to be, who bills you for it, and where people rent one. Nothing there spends money.",
+            title = L10n.text("android.setupwizard.i_do_not_have_one_yet.1bfb41c7"),
+            body = L10n.text("android.setupwizard.what_a_machine_has_to_be_who_bills_you_for.b01df46d"),
             requirement = null,
             icon = { Icon(ActionIcon.Next.vector, null, tint = colors.accent) },
             onClick = onNeedServer,
@@ -930,16 +932,16 @@ private fun SetupCloudDoor(
         if (error != null) Banner(error!!, BannerSeverity.DANGER)
         TsCard {
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                Text("Read-only API token", style = TsType.caption, color = colors.textSecondary)
+                Text(L10n.text("android.setupwizard.read_only_api_token.8a4f07c1"), style = TsType.caption, color = colors.textSecondary)
                 androidx.compose.material3.OutlinedTextField(
                     value = token,
                     onValueChange = { token = it },
-                    placeholder = { Text("Paste your DigitalOcean token") },
+                    placeholder = { Text(L10n.text("android.setupwizard.paste_your_digitalocean_token.2e2aa61f")) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 TsSecondaryButton(
-                    label = "Where to find the token",
+                    label = L10n.text("android.setupwizard.where_to_find_the_token.625cfc6d"),
                     small = true,
                     onClick = {
                         runCatching {
@@ -950,16 +952,16 @@ private fun SetupCloudDoor(
                         }
                     },
                 )
-                Text("SSH username", style = TsType.caption, color = colors.textSecondary)
+                Text(L10n.text("android.setupwizard.ssh_username.04940ab1"), style = TsType.caption, color = colors.textSecondary)
                 androidx.compose.material3.OutlinedTextField(
                     value = username,
                     onValueChange = { username = it },
-                    placeholder = { Text("SSH username") },
+                    placeholder = { Text(L10n.text("android.setupwizard.ssh_username.04940ab1")) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(
-                    "Only the droplet list is read. The token is used once and is not saved.",
+                    L10n.text("android.setupwizard.only_the_droplet_list_is_read_the_token_is.d730f946"),
                     style = TsType.caption,
                     color = colors.textSecondary,
                 )
@@ -967,15 +969,15 @@ private fun SetupCloudDoor(
         }
         if (imported != null) {
             Text(
-                if (imported == 1) "One server is in your library. Pick it on the next screen."
-                else "$imported servers are in your library. Pick one on the next screen.",
+                if (imported == 1) L10n.text("android.setupwizard.one_server_is_in_your_library_pick_it_on_t.3984faae")
+                else L10n.text("android.setupwizard.0_servers_are_in_your_library_pick_one_on.85b3ca0e", "${imported}"),
                 style = TsType.subheadline,
                 color = colors.textPrimary,
             )
         }
         if (imported == null) {
             TsAccentButton(
-                label = if (working) "Reading the list…" else "Read my servers",
+                label = if (working) L10n.text("android.setupwizard.reading_the_list.0fd8ea35") else L10n.text("android.setupwizard.read_my_servers.0e3c3c94"),
                 onClick = {
                     scope.launch {
                         working = true
@@ -988,7 +990,7 @@ private fun SetupCloudDoor(
                         }.onSuccess { answer ->
                             val count = answer["imported"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
                             if ((count ?: 0) <= 0) {
-                                error = "No servers were found. Check the account token or enter a server address instead."
+                                error = L10n.text("android.setupwizard.no_servers_were_found_check_the_account_to.e590f2d6")
                             } else {
                                 // The token was a credential and its job is
                                 // done. It is never written to the archive.
@@ -1004,7 +1006,7 @@ private fun SetupCloudDoor(
             )
         } else {
             TsAccentButton(
-                label = "Pick a server",
+                label = L10n.text("android.setupwizard.pick_a_server.3ff63c9e"),
                 onClick = onPickServer,
                 modifier = Modifier.fillMaxWidth(),
             )

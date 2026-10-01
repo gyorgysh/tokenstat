@@ -45,9 +45,9 @@ struct SidebarRowActions: View {
                     .accessibilityLabel(deleteTitle)
             } else {
                 glyph("ellipsis")
-                    .overlay(NativeMenuTrigger(items: actions, accessibilityLabel: "Actions for \(name)"))
-                    .help("Actions for \(name). Hold Shift for \(deleteTitle.lowercased()).")
-                    .accessibilityLabel("Actions for \(name)")
+                    .overlay(NativeMenuTrigger(items: actions, accessibilityLabel: L10n.text("apple.sidebarrowactions.actions_for_0.29a5141b", "\(name)")))
+                    .help(L10n.text("apple.sidebarrowactions.actions_for_0_hold_shift_for_1.34c1216b", "\(name)", "\(deleteTitle.lowercased())"))
+                    .accessibilityLabel(L10n.text("apple.sidebarrowactions.actions_for_0.29a5141b", "\(name)"))
             }
         }
         .frame(width: 24, height: 24)
@@ -83,10 +83,10 @@ struct SidebarRenameSheet: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        ThemedSheet(title: title, subtitle: "Choose the name shown in the sidebar.", icon: .edit,
+        ThemedSheet(title: title, subtitle: L10n.text("apple.sidebarrowactions.choose_the_name_shown_in_the_sidebar.e7682b18"), icon: .edit,
                     onClose: { if !saving { dismiss() } }) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                TextField("Name", text: $name).textFieldStyle(.themed)
+                TextField(L10n.text("apple.sidebarrowactions.name.dcd1d522"), text: $name).textFieldStyle(.themed)
                     .focused($focused).onSubmit { submit() }
                     .disabled(saving)
                 if let error {
@@ -95,8 +95,8 @@ struct SidebarRenameSheet: View {
                 }
             }
         } actions: {
-            Button("Cancel", .dismiss) { dismiss() }.disabled(saving)
-            Button("Save", .save) { submit() }
+            Button(L10n.text("common.cancel"), .dismiss) { dismiss() }.disabled(saving)
+            Button(L10n.text("common.save"), .save) { submit() }
                 .buttonStyle(AccentButtonStyle())
                 .disabled(saving || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .keyboardShortcut(.defaultAction)
@@ -138,13 +138,13 @@ enum SidebarPinAction {
         let store = PinnedWorkStore.shared
         let pinned = store.isPinned(reference)
         let full = !pinned && store.pins(in: reference.scope).count >= PinnedWorkStore.capacity
-        var items = [NativeMenuItem(pinned ? "Unpin from Home" : "Pin to Home",
+        var items = [NativeMenuItem(pinned ? L10n.text("apple.sidebarrowactions.unpin_from_home.df00f5de") : L10n.text("apple.sidebarrowactions.pin_to_home.db029e6f"),
                                    icon: pinned ? .pinned : .pin, isEnabled: !full) {
             if pinned { store.unpin(reference) }
             else { store.pin(reference, label: name, folderName: folderName) }
         }]
         if full {
-            items.append(.init("Home holds eight pins. Unpin one to make room.", isEnabled: false) {})
+            items.append(.init(L10n.text("apple.sidebarrowactions.home_holds_eight_pins_unpin_one_to_make_ro.7d0eb1cf"), isEnabled: false) {})
         }
         return items
     }

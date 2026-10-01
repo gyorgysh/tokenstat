@@ -68,28 +68,28 @@ struct ClientAutomationWorkspace: View {
                 }
         }
         .background(Theme.background)
-        .navigationTitle("Automations")
+        .navigationTitle(L10n.text("common.automations"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button("Blank automation", .create) { editor = AutomationEditorRoute(workspaceID: workspaceID, folderName: folderName, job: nil) }
-                    Section("Templates") {
+                    Button(L10n.text("apple.clientautomationworkspace.blank_automation.642aebac"), .create) { editor = AutomationEditorRoute(workspaceID: workspaceID, folderName: folderName, job: nil) }
+                    Section(L10n.text("apple.clientautomationworkspace.templates.56b564b7")) {
                         ForEach(AutomationTemplate.suggested) { template in
                             Button(template.title, systemImage: template.symbol) {
                                 editor = AutomationEditorRoute(workspaceID: workspaceID, folderName: folderName, job: nil, template: template)
                             }
                         }
                     }
-                } label: { ActionIcon.create.label("New automation") }
+                } label: { ActionIcon.create.label(L10n.text("apple.clientautomationworkspace.new_automation.db87a63d")) }
                 .labelStyle(.iconOnly)
                 .keyboardShortcut("n", modifiers: .command)
                 .disabled(editor != nil || showingQueue || showingHistory)
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Picker("Sort automations", selection: $sort) { ForEach(AutomationMobileOrder.allCases) { Text($0.rawValue).tag($0) } }
-                } label: { ActionIcon.filter.label("Sort automations") }
+                    Picker(L10n.text("apple.clientautomationworkspace.sort_automations.449f1e2d"), selection: $sort) { ForEach(AutomationMobileOrder.allCases) { Text(L10n.enumLabel($0)).tag($0) } }
+                } label: { ActionIcon.filter.label(L10n.text("apple.clientautomationworkspace.sort_automations.449f1e2d")) }
             }
         }
         .fullScreenCover(item: $editor) { route in
@@ -125,22 +125,22 @@ struct ClientAutomationWorkspace: View {
             }
         }
         .confirmationDialog(
-            "Delete \(pendingDelete?.name ?? "this job")?",
+            L10n.text("apple.clientautomationworkspace.delete_0.dc6c5ae4", "\(pendingDelete?.name ?? L10n.text("apple.clientautomationworkspace.this_job.c627fafe"))"),
             isPresented: Binding(
                 get: { pendingDelete != nil },
                 set: { if !$0 { pendingDelete = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("Delete", role: .destructive) {
+            Button(L10n.text("common.delete"), role: .destructive) {
                 if let job = pendingDelete {
                     pendingDelete = nil
                     Task { await session.remove(job) }
                 }
             }
-            Button("Keep it", role: .cancel) { pendingDelete = nil }
+            Button(L10n.text("apple.clientautomationworkspace.keep_it.fdce5da2"), role: .cancel) { pendingDelete = nil }
         } message: {
-            Text("The schedule goes with it. Runs it already produced stay.")
+            Text(L10n.text("apple.clientautomationworkspace.the_schedule_goes_with_it_runs_it_already.a4efc8fe"))
         }
         .onReceive(NotificationCenter.default.publisher(for: AutomationEditorSession.didChange)) { _ in
             Task { await session.load() }
@@ -193,7 +193,7 @@ struct ClientAutomationWorkspace: View {
         let running = session.runs.filter { run in
             run.isRunning && session.jobs.contains(where: { $0.id == run.jobId })
         }.count
-        return "\(enabled) enabled · \(running) running"
+        return L10n.text("apple.clientautomationworkspace.0_enabled_1_running.6a231a0e", "\(enabled)", "\(running)")
     }
 
     private var filteredJobs: [Automation] {
@@ -215,9 +215,9 @@ struct ClientAutomationWorkspace: View {
 
     private var compactList: some View {
         List {
-            TextField("Search automations", text: $search)
+            TextField(L10n.text("apple.clientautomationworkspace.search_automations.bdff71b2"), text: $search)
                 .textFieldStyle(.themed)
-                .accessibilityLabel("Search automations")
+                .accessibilityLabel(L10n.text("apple.clientautomationworkspace.search_automations.bdff71b2"))
                 .clientCardRow()
             if session.loaded {
                 schedulerCard(compactCopy: false).clientCardRow()
@@ -242,7 +242,7 @@ struct ClientAutomationWorkspace: View {
             } else if session.jobs.isEmpty {
                 emptyState.clientCardRow()
             } else if filteredJobs.isEmpty {
-                Text("No matching automations")
+                Text(L10n.text("apple.clientautomationworkspace.no_matching_automations.7358d7d9"))
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -253,8 +253,8 @@ struct ClientAutomationWorkspace: View {
                     jobButton(job, showsChevron: true, isSelected: false)
                         .clientCardRow()
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button("Delete", role: .destructive) { pendingDelete = job }
-                            Button("Edit") { openEditor(job) }
+                            Button(L10n.text("common.delete"), role: .destructive) { pendingDelete = job }
+                            Button(L10n.text("common.edit")) { openEditor(job) }
                                 .tint(Theme.accent)
                         }
                 }
@@ -274,8 +274,8 @@ struct ClientAutomationWorkspace: View {
     private func splitList(_ layout: ClientJobLayout) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Theme.Space.s) {
-                TextField("Search automations", text: $search).textFieldStyle(.themed)
-                    .accessibilityLabel("Search automations")
+                TextField(L10n.text("apple.clientautomationworkspace.search_automations.bdff71b2"), text: $search).textFieldStyle(.themed)
+                    .accessibilityLabel(L10n.text("apple.clientautomationworkspace.search_automations.bdff71b2"))
                 if session.loaded {
                     schedulerCard(compactCopy: true)
                 }
@@ -296,7 +296,7 @@ struct ClientAutomationWorkspace: View {
                 } else if session.jobs.isEmpty {
                     emptyState
                 } else if filteredJobs.isEmpty {
-                    Text("No matching automations")
+                    Text(L10n.text("apple.clientautomationworkspace.no_matching_automations.7358d7d9"))
                         .font(ClientType.body)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -334,10 +334,10 @@ struct ClientAutomationWorkspace: View {
 
     private var emptyState: some View {
         ClientSectionEmpty(
-            text: "Nothing scheduled here",
+            text: L10n.text("apple.clientautomationworkspace.nothing_scheduled_here.911c1a9b"),
             art: .automations,
-            message: "Create a job for this folder. It runs on the connected computer.",
-            actionTitle: "New automation",
+            message: L10n.text("apple.clientautomationworkspace.create_a_job_for_this_folder_it_runs_on_th.96a56e05"),
+            actionTitle: L10n.text("apple.clientautomationworkspace.new_automation.db87a63d"),
             actionIcon: .create,
             action: {
                 editor = AutomationEditorRoute(
@@ -370,8 +370,8 @@ struct ClientAutomationWorkspace: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
-            Button("Edit automation") { openEditor(job) }
-            Button("Delete automation", role: .destructive) { pendingDelete = job }
+            Button(L10n.text("apple.clientautomationworkspace.edit_automation.b16f31c1")) { openEditor(job) }
+            Button(L10n.text("apple.clientautomationworkspace.delete_automation.f71084e7"), role: .destructive) { pendingDelete = job }
         }
     }
 
@@ -395,35 +395,35 @@ struct ClientAutomationWorkspace: View {
                     Text(job.name)
                         .font(ClientType.sectionTitle)
                     Spacer(minLength: 0)
-                    Button("Edit", .edit) { openEditor(job) }
+                    Button(L10n.text("common.edit"), .edit) { openEditor(job) }
                         .buttonStyle(SecondaryButtonStyle(small: true))
-                    Button("Delete", .delete) { pendingDelete = job }
+                    Button(L10n.text("common.delete"), .delete) { pendingDelete = job }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                 }
                 Text(job.prompt)
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                ClientFactRow(label: "Backend", value: job.backend)
+                ClientFactRow(label: L10n.text("apple.clientautomationworkspace.backend.2fb4019a"), value: job.backend)
                 if let model = job.model, !model.isEmpty {
-                    ClientFactRow(label: "Model", value: model)
+                    ClientFactRow(label: L10n.text("apple.clientautomationworkspace.model.5e2c614c"), value: model)
                 }
-                ClientFactRow(label: "Schedule", value: job.schedule.summary)
+                ClientFactRow(label: L10n.text("apple.clientautomationworkspace.schedule.f4830a1d"), value: job.schedule.summary)
                 HStack(alignment: .top, spacing: Theme.Space.m) {
-                    ClientFactRow(label: "Budget", value: ClientJobCopy.budget(job.budgetSeconds))
+                    ClientFactRow(label: L10n.text("apple.clientautomationworkspace.budget.1c6225ec"), value: ClientJobCopy.budget(job.budgetSeconds))
                     if let clock = HostScheduleClock.clock(session.schedulerTimezone) {
-                        ClientFactRow(label: "Time zone", value: clock)
+                        ClientFactRow(label: L10n.text("apple.clientautomationworkspace.time_zone.b9fe1464"), value: clock)
                     }
                 }
                 HStack(alignment: .top, spacing: Theme.Space.m) {
                     if let next = job.nextRun, job.enabled {
                         ClientFactRow(
-                            label: "Next",
+                            label: L10n.text("common.next"),
                             value: HostScheduleClock.nextRun(next, timezone: session.schedulerTimezone)
                         )
                     }
                     ClientFactRow(
-                        label: "Last",
+                        label: L10n.text("apple.clientautomationworkspace.last.eb970eb0"),
                         value: ClientJobCopy.lastRunWhen(
                             session.lastRun(for: job)?.startedAt ?? job.lastRun
                         )
@@ -433,20 +433,20 @@ struct ClientAutomationWorkspace: View {
             .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            ClientSectionEmpty(text: "Pick a job", message: "Its schedule and its last runs open here.")
+            ClientSectionEmpty(text: L10n.text("apple.clientautomationworkspace.pick_a_job.d9572964"), message: L10n.text("apple.clientautomationworkspace.its_schedule_and_its_last_runs_open_here.a6f3e92d"))
                 .padding(Theme.Space.m)
         }
     }
 
     private var runContent: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Run details").font(ClientType.sectionTitle)
+            Text(L10n.text("apple.clientautomationworkspace.run_details.7bbc3690")).font(ClientType.sectionTitle)
             ClientAutomationActions(session: session, shortcutsEnabled: editor == nil && !showingHistory)
             if let run = session.selectedRun {
                 StatusPill(status: run.status, text: run.endedLabel)
                 TranscriptView(
                     text: session.transcriptText,
-                    empty: run.isRunning ? "Waiting for output…" : "No readable output."
+                    empty: run.isRunning ? L10n.text("apple.clientautomationworkspace.waiting_for_output.f05fefe2") : L10n.text("apple.clientautomationworkspace.no_readable_output.cd218ba3")
                 )
             }
             if let job = session.selectedJob {
@@ -455,7 +455,7 @@ struct ClientAutomationWorkspace: View {
                     all, id: \.id, startedAtMs: \.startedAtMs, isLive: \.isRunning
                 )
                 if !history.isEmpty {
-                    Text("Recent runs")
+                    Text(L10n.text("apple.clientautomationworkspace.recent_runs.237112b8"))
                         .font(ClientType.caption.weight(.semibold))
                         .foregroundStyle(.tertiary)
                         .padding(.top, Theme.Space.xs)

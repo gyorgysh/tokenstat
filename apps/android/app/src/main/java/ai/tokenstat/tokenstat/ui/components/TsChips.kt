@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.components
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -106,7 +108,7 @@ fun TimeLimitChips(
             )
         }
         ChoiceChip(
-            title = "No limit",
+            title = L10n.text("android.tschips.no_limit.f7fcff0d"),
             isSelected = noLimit,
             onSelect = {
                 onNoLimitChange(true)
@@ -141,7 +143,7 @@ fun ConcurrentChips(
             )
         }
         ChoiceChip(
-            title = "No cap",
+            title = L10n.text("android.tschips.no_cap.59db2115"),
             isSelected = isConcurrentUncapped(countText),
             onSelect = {
                 onCountChange("0")

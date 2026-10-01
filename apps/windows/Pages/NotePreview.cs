@@ -18,7 +18,7 @@ internal static class NotePreview
     {
         var body = Blocks(NoteMarkdown.Parse(text));
         if (body.Children.Count == 0)
-            body.Children.Add(new TextBlock { Text = "Start writing to see your note here.", Opacity = 0.65 });
+            body.Children.Add(new TextBlock { Text = L10n.Text("windows.notepreview.start_writing_to_see_your_note_here.6fc34f5d"), Opacity = 0.65 });
         return body;
     }
 

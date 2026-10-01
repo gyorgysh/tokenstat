@@ -21,7 +21,7 @@ struct ClientContinueSection: View {
     var body: some View {
         if !places.isEmpty {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                ClientSectionTitle(title: "Pick up where you left off", mark: "mark_activity")
+                ClientSectionTitle(title: L10n.text("apple.clientcontinuesection.pick_up_where_you_left_off.47173482"), mark: "mark_activity")
                 VStack(spacing: 0) {
                     ForEach(places) { place in
                         HStack(spacing: 0) {
@@ -77,10 +77,10 @@ struct ClientContinueSection: View {
 
     private func row(_ place: ClientRecentPlaces.Place) -> some View {
         let machine = account.account?.machines.first { $0.publicIdentity == place.id.peer }
-        let state = machine == nil ? "No longer linked"
-            : connectivity.isOffline ? "You are offline"
-            : machine?.online == true ? "Awake"
-            : machine?.online == false ? "Asleep" : "Status unknown"
+        let state = machine == nil ? L10n.text("apple.clientcontinuesection.no_longer_linked.e409e8a7")
+            : connectivity.isOffline ? L10n.text("apple.clientcontinuesection.you_are_offline.4d5c9439")
+            : machine?.online == true ? L10n.text("apple.clientcontinuesection.awake.9123b5f4")
+            : machine?.online == false ? L10n.text("apple.clientcontinuesection.asleep.60135e8f") : L10n.text("apple.clientcontinuesection.status_unknown.e412d872")
         return HStack(spacing: Theme.Space.m) {
             Image(systemName: place.symbol)
                 .font(ClientType.body)
@@ -91,7 +91,7 @@ struct ClientContinueSection: View {
                 Text(place.title)
                     .font(ClientType.label.weight(.semibold))
                     .lineLimit(2)
-                (Text("\(machine?.displayName ?? "Machine") · \(state) · ")
+                (Text("\(machine?.displayName ?? L10n.text("apple.clientcontinuesection.machine.8f1cc42d")) · \(state) · ")
                     + Text(place.openedAt, style: .relative))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
@@ -114,8 +114,8 @@ extension ClientRecentPlaces.Place {
     var title: String {
         switch id.kind {
         case .workspace: return workspaceName
-        case .chat: return "Chat in \(workspaceName)"
-        case .terminal: return id.workspaceID == nil ? "Terminal" : "Terminal in \(workspaceName)"
+        case .chat: return L10n.text("apple.clientcontinuesection.chat_in_0.83a947da", "\(workspaceName)")
+        case .terminal: return id.workspaceID == nil ? L10n.text("apple.clientcontinuesection.terminal.e0926fda") : L10n.text("apple.clientcontinuesection.terminal_in_0.9d87a81b", "\(workspaceName)")
         }
     }
     var symbol: String {

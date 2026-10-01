@@ -31,11 +31,11 @@ struct ClientSetupWizard: View {
     var body: some View {
         NavigationStack(path: $path) {
             doors
-                .navigationTitle("Set up a machine")
+                .navigationTitle(L10n.text("apple.clientsetupwizard.set_up_a_machine.43e10e13"))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Close") { dismiss() }
+                        Button(L10n.text("common.close")) { dismiss() }
                             // Escape leaves, for somebody on a keyboard. The
                             // sheet is dismissible by gesture already, and a
                             // keyboard had no equivalent.
@@ -114,28 +114,25 @@ struct ClientSetupWizard: View {
                 // The computer first: no token, no rental, nothing to buy.
                 // The doors below it both assume a server.
                 door(
-                    title: "On my Mac",
-                    body: "Install the desktop app on the computer you work on, sign in "
-                        + "to this account, and let this device in.",
+                    title: L10n.text("apple.clientsetupwizard.on_my_mac.8282732a"),
+                    body: L10n.text("apple.clientsetupwizard.install_the_desktop_app_on_the_computer_yo.adea6dec"),
                     requirement: nil,
                     symbol: "laptopcomputer"
                 ) {
                     enter([.mac])
                 }
                 door(
-                    title: "On a server I have",
-                    body: "Connect over SSH and set it up. tokenstat installs itself, "
-                        + "signs the machine in and comes back paired.",
-                    requirement: paywalled ? "Reaching it needs patron" : nil,
+                    title: L10n.text("apple.clientsetupwizard.on_a_server_i_have.70b31f4d"),
+                    body: L10n.text("apple.clientsetupwizard.connect_over_ssh_and_set_it_up_tokenstat_i.8fa4f9e0"),
+                    requirement: paywalled ? L10n.text("apple.clientsetupwizard.reaching_it_needs_patron.c628ad97") : nil,
                     symbol: "server.rack"
                 ) {
                     enter([.where])
                 }
                 door(
-                    title: "On a cloud machine",
-                    body: "A VPS or a dedicated server. Import the ones you have, or find "
-                        + "out what to rent if you have none yet.",
-                    requirement: paywalled ? "Reaching it needs patron" : nil,
+                    title: L10n.text("apple.clientsetupwizard.on_a_cloud_machine.304af746"),
+                    body: L10n.text("apple.clientsetupwizard.a_vps_or_a_dedicated_server_import_the_one.0e3b5c2d"),
+                    requirement: paywalled ? L10n.text("apple.clientsetupwizard.reaching_it_needs_patron.c628ad97") : nil,
                     symbol: "cloud.fill"
                 ) {
                     enter([.cloud])
@@ -144,13 +141,11 @@ struct ClientSetupWizard: View {
                 // wore the same surface as the three doors and read as a fourth
                 // way to set up. A quiet bordered button says what it is.
                 VStack(spacing: Theme.Space.s) {
-                    Button("Skip for now", .next) { dismiss() }
+                    Button(L10n.text("apple.clientsetupwizard.skip_for_now.b58eb52c"), .next) { dismiss() }
                         .buttonStyle(.bordered)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .accessibilityIdentifier("setup.skip")
-                    Text("Go to your account and your numbers. Usage from machines you "
-                        + "already have keeps arriving on its own, and a machine can be "
-                        + "connected later from Devices.")
+                    Text(L10n.text("apple.clientsetupwizard.go_to_your_account_and_your_numbers_usage.fb973c15"))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -159,8 +154,7 @@ struct ClientSetupWizard: View {
                 }
                 .padding(.top, Theme.Space.xs)
                 Text(
-                    "Nothing here is permanent. Every door can be left, and leaving lands on "
-                    + "your numbers, which keep arriving whatever you choose."
+                    L10n.text("apple.clientsetupwizard.nothing_here_is_permanent_every_door_can_b.7027fa6d")
                 )
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
@@ -208,13 +202,12 @@ struct ClientSetupWizard: View {
     private func SetupSignInCard(onRetry: @escaping () -> Void, onDismiss: @escaping () -> Void) -> some View {
         ClientEmptyState(
             kind: .needsAccount,
-            title: "Sign in to set up a machine",
-            message: "Setup needs a signed-in account. If you just signed in, "
-                + "give it a moment and check again.",
-            actionTitle: "Check again",
+            title: L10n.text("apple.clientsetupwizard.sign_in_to_set_up_a_machine.d2117f15"),
+            message: L10n.text("apple.clientsetupwizard.setup_needs_a_signed_in_account_if_you_jus.771114c7"),
+            actionTitle: L10n.text("apple.clientsetupwizard.check_again.fb7099ad"),
             actionIcon: .refresh,
             action: onRetry,
-            secondaryActionTitle: "Not now",
+            secondaryActionTitle: L10n.text("apple.clientsetupwizard.not_now.a0e63d7c"),
             secondaryActionIcon: .dismiss,
             secondaryAction: onDismiss
         )
@@ -227,13 +220,12 @@ struct ClientSetupWizard: View {
     private func SetupRetryCard(onRetry: @escaping () -> Void, onDismiss: @escaping () -> Void) -> some View {
         ClientEmptyState(
             kind: .unreachable,
-            title: "Setup could not start",
-            message: "Nothing was started, so there is nothing to fix. "
-                + "Check again and setup retries.",
-            actionTitle: "Check again",
+            title: L10n.text("apple.clientsetupwizard.setup_could_not_start.21614de3"),
+            message: L10n.text("apple.clientsetupwizard.nothing_was_started_so_there_is_nothing_to.32225f88"),
+            actionTitle: L10n.text("apple.clientsetupwizard.check_again.fb7099ad"),
             actionIcon: .refresh,
             action: onRetry,
-            secondaryActionTitle: "Not now",
+            secondaryActionTitle: L10n.text("apple.clientsetupwizard.not_now.a0e63d7c"),
             secondaryActionIcon: .dismiss,
             secondaryAction: onDismiss
         )
@@ -252,7 +244,7 @@ struct ClientSetupWizard: View {
                     .font(Theme.fixed(15, weight: .semibold))
                     .foregroundStyle(Theme.accent)
                     .accessibilityHidden(true)
-                Text("Setup in progress")
+                Text(L10n.text("apple.clientsetupwizard.setup_in_progress.46d0a813"))
                     .font(ClientType.caption.weight(.semibold))
                     .foregroundStyle(Theme.accent)
                     .textCase(.uppercase)
@@ -265,19 +257,19 @@ struct ClientSetupWizard: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: Theme.Space.s) {
-                Button("Continue setup", .next) {
+                Button(L10n.text("apple.clientsetupwizard.continue_setup.c5702c19"), .next) {
                     if let step = model.resume(library: library) { path = [step] }
                 }
                 .setupPrimaryStyle()
                 .accessibilityIdentifier("setup.resume")
-                Button("Start over", .restore) {
+                Button(L10n.text("apple.clientsetupwizard.start_over.5eed7e9f"), .restore) {
                     if model.startNewSetup() { path = [.where] }
                 }
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("setup.startOver")
             }
             .padding(.top, Theme.Space.xs)
-            Text("Starting over forgets this progress on this device. Nothing on the server is removed.")
+            Text(L10n.text("apple.clientsetupwizard.starting_over_forgets_this_progress_on_thi.cf10cf66"))
                 .font(ClientType.caption)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -295,11 +287,10 @@ struct ClientSetupWizard: View {
         VStack(spacing: Theme.Space.s) {
             ClientEmptyArt(kind: .connect)
                 .frame(maxWidth: .infinity)
-            Text("How do you want to work?")
+            Text(L10n.text("apple.clientsetupwizard.how_do_you_want_to_work.f00e4112"))
                 .font(Theme.title.weight(.semibold))
             Text(
-                "tokenstat runs agents on a machine that stays on. It can be a computer "
-                + "you own or a server you rent."
+                L10n.text("apple.clientsetupwizard.tokenstat_runs_agents_on_a_machine_that_st.ba177299")
             )
             .font(ClientType.body)
             .foregroundStyle(.secondary)

@@ -34,7 +34,7 @@ struct AutomationEditorDestination: View {
             if let session, session.target == target, session.workspaceID == workspaceID {
                 AutomationEditorView(session: session, hostName: hostName, onFinished: onFinished)
             } else {
-                ProgressView(existing == nil ? "Opening new automation" : "Opening automation")
+                ProgressView(existing == nil ? L10n.text("apple.automationeditorview.opening_new_automation.f09691b8") : L10n.text("apple.automationeditorview.opening_automation.7be3aa30"))
                     .font(Theme.callout)
             }
         }
@@ -190,13 +190,13 @@ struct AutomationEditorView: View {
     }
 
     private var title: String {
-        if session.saved.created != nil { return "Automation saved" }
-        return session.isCreate ? "New automation" : "Edit automation"
+        if session.saved.created != nil { return L10n.text("apple.automationeditorview.automation_saved.00a9bf84") }
+        return session.isCreate ? L10n.text("apple.automationeditorview.new_automation.db87a63d") : L10n.text("apple.automationeditorview.edit_automation.b16f31c1")
     }
 
     private var draftStatus: String {
-        if session.persistedFields == session.fields { return "Draft kept on this device" }
-        return "Saving draft on this device…"
+        if session.persistedFields == session.fields { return L10n.text("apple.automationeditorview.draft_kept_on_this_device.980c4050") }
+        return L10n.text("apple.automationeditorview.saving_draft_on_this_device.40996e62")
     }
 
     private var showValidation: Bool {
@@ -208,15 +208,15 @@ struct AutomationEditorView: View {
         if session.isCreate || session.dirty { return nil }
         let job = session.current ?? session.saved.baseline
         if job?.enabled == false {
-            return "Paused. It will not fire on its own."
+            return L10n.text("apple.automationeditorview.paused_it_will_not_fire_on_its_own.84765e76")
         }
         guard let next = job?.nextRun else { return nil }
-        return "Next \(HostScheduleClock.nextRun(next, timezone: session.schedulerTimezone))."
+        return L10n.text("apple.automationeditorview.next_0.383f019f", "\(HostScheduleClock.nextRun(next, timezone: session.schedulerTimezone))")
     }
 
     @ViewBuilder private var notices: some View {
         if session.working {
-            ProgressView(session.creating ? "Creating job" : "Saving job")
+            ProgressView(session.creating ? L10n.text("apple.automationeditorview.creating_job.745ad37a") : L10n.text("apple.automationeditorview.saving_job.841fc05f"))
                 .font(Theme.callout)
         }
         if let message = session.noticeMessage {
@@ -225,12 +225,12 @@ struct AutomationEditorView: View {
                 .foregroundStyle(Theme.controlGlyph)
         }
         if session.loaded, !session.supportsReceipts, session.saved.created == nil, !session.isCreate {
-            Text("This computer cannot protect concurrent edits yet. Saving overwrites the job as it is now.")
+            Text(L10n.text("apple.automationeditorview.this_computer_cannot_protect_concurrent_ed.c272aa01"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
         }
         if session.liveRun, session.saved.created == nil {
-            Text("A run is going. This save is for the next one.")
+            Text(L10n.text("apple.automationeditorview.a_run_is_going_this_save_is_for_the_next_o.82358bf1"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
         }
@@ -240,32 +240,32 @@ struct AutomationEditorView: View {
                 .foregroundStyle(Theme.danger)
                 .textSelection(.enabled)
             if !session.creating, session.saved.created == nil, session.saved.pendingEdit == nil {
-                Button("Reload options", .refresh) { Task { await session.load() } }
+                Button(L10n.text("apple.automationeditorview.reload_options.e9ed25ed"), .refresh) { Task { await session.load() } }
                     .buttonStyle(SecondaryButtonStyle(comfortable: true))
                     .disabled(session.working)
             }
         }
         if session.backends.isEmpty, session.loaded, session.saved.created == nil, !session.creating {
-            Text("No supported agent CLI is installed on this computer yet. Install one there, then reload.")
+            Text(L10n.text("apple.automationeditorview.no_supported_agent_cli_is_installed_on_thi.c6691a59"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
         }
         if session.conflict, let current = session.current {
-            comparison(title: "Changed on the computer", draft: AutomationEditorDraft(current))
-            Text("This job changed since you opened it. Compare the saved job before replacing it.")
+            comparison(title: L10n.text("apple.automationeditorview.changed_on_the_computer.aefb92cf"), draft: AutomationEditorDraft(current))
+            Text(L10n.text("apple.automationeditorview.this_job_changed_since_you_opened_it_compa.ae02b985"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
         }
         if let other = session.otherDraft {
-            comparison(title: "Draft from another window", draft: other.value.fields)
-            Text("Choose which draft to continue. A creation already sent must be checked first.")
+            comparison(title: L10n.text("apple.automationeditorview.draft_from_another_window.8b70bae9"), draft: other.value.fields)
+            Text(L10n.text("apple.automationeditorview.choose_which_draft_to_continue_a_creation.6be102c4"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
-            Button("Use saved draft", .restore) { Task { await session.resolveDiskConflict(keepMine: false) } }
+            Button(L10n.text("apple.automationeditorview.use_saved_draft.31f362c2"), .restore) { Task { await session.resolveDiskConflict(keepMine: false) } }
                 .buttonStyle(SecondaryButtonStyle(comfortable: true))
                 .disabled(session.working)
             if other.value.pendingCreate == false, other.value.pendingCreation == nil, other.value.pendingEdit == nil {
-                Button("Keep my draft", .edit) { Task { await session.resolveDiskConflict(keepMine: true) } }
+                Button(L10n.text("apple.automationeditorview.keep_my_draft.cdb80bb9"), .edit) { Task { await session.resolveDiskConflict(keepMine: true) } }
                     .buttonStyle(SecondaryButtonStyle(comfortable: true))
                     .disabled(session.working)
             }
@@ -295,15 +295,15 @@ struct AutomationEditorView: View {
                 .font(Theme.callout)
                 .foregroundStyle(Theme.controlGlyph)
             if let created = session.saved.created, created.enabled, let next = created.nextRun {
-                Text("Next \(HostScheduleClock.nextRun(next, timezone: session.schedulerTimezone)).")
+                Text(L10n.text("apple.automationeditorview.next_0.383f019f", "\(HostScheduleClock.nextRun(next, timezone: session.schedulerTimezone))"))
                     .font(Theme.callout)
                     .foregroundStyle(Theme.controlGlyph)
             }
-            Text("It runs on \(hostName), in \(session.folderName).")
+            Text(L10n.text("apple.automationeditorview.it_runs_on_0_in_1.8d815fb3", "\(hostName)", "\(session.folderName)"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
             if let place = HostScheduleClock.place(session.schedulerTimezone) {
-                Text("Times are \(place) time.")
+                Text(L10n.text("apple.automationeditorview.times_are_0_time.3e5f6eb5", "\(place)"))
                     .font(Theme.caption)
                     .foregroundStyle(Theme.controlGlyph)
             }
@@ -313,7 +313,7 @@ struct AutomationEditorView: View {
 
     @ViewBuilder private var footer: some View {
         if session.saved.created != nil {
-            Button("Done", .done) {
+            Button(L10n.text("common.done"), .done) {
                 Task {
                     let created = await session.finishCreated() ?? session.saved.created
                     await onFinished(created)
@@ -323,31 +323,31 @@ struct AutomationEditorView: View {
             .buttonStyle(AccentButtonStyle(comfortable: true))
             .disabled(session.working)
         } else if session.conflict {
-            Button("Use computer version", .restore) { Task { await session.resolveConflict(keepMine: false) } }
+            Button(L10n.text("apple.automationeditorview.use_computer_version.f0d6599f"), .restore) { Task { await session.resolveConflict(keepMine: false) } }
                 .buttonStyle(SecondaryButtonStyle(comfortable: true))
                 .disabled(session.working)
-            Button("Keep my draft", .edit) { Task { await session.resolveConflict(keepMine: true) } }
+            Button(L10n.text("apple.automationeditorview.keep_my_draft.cdb80bb9"), .edit) { Task { await session.resolveConflict(keepMine: true) } }
                 .buttonStyle(AccentButtonStyle(comfortable: true))
                 .disabled(session.working)
         } else if session.saved.pendingEdit != nil {
-            Button("Check saved job", .refresh) { Task { await session.refresh() } }
+            Button(L10n.text("apple.automationeditorview.check_saved_job.bc689b04"), .refresh) { Task { await session.refresh() } }
                 .buttonStyle(AccentButtonStyle(comfortable: true))
                 .disabled(session.working)
         } else if session.creating {
-            Button("Check creation", .refresh) { Task { await session.checkCreated() } }
+            Button(L10n.text("apple.automationeditorview.check_creation.61fe51e6"), .refresh) { Task { await session.checkCreated() } }
                 .buttonStyle(SecondaryButtonStyle(comfortable: true))
                 .disabled(session.working)
             if session.canRetryCreate {
-                Button("Retry creation", .create) { Task { await session.retryCreate() } }
+                Button(L10n.text("apple.automationeditorview.retry_creation.0bb084c1"), .create) { Task { await session.retryCreate() } }
                     .buttonStyle(AccentButtonStyle(comfortable: true))
                     .disabled(session.working || session.otherDraft != nil)
             }
         } else if session.isCreate {
-            Button("Create automation", .create) { Task { await session.create() } }
+            Button(L10n.text("apple.automationeditorview.create_automation.77947194"), .create) { Task { await session.create() } }
                 .buttonStyle(AccentButtonStyle(comfortable: true))
                 .disabled(!session.canCreate)
         } else {
-            Button("Save automation", .save) { Task { await session.save() } }
+            Button(L10n.text("apple.automationeditorview.save_automation.7a7199c9"), .save) { Task { await session.save() } }
                 .buttonStyle(AccentButtonStyle(comfortable: true))
                 .disabled(!session.canSave)
         }

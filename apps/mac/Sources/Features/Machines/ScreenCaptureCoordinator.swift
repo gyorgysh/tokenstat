@@ -256,7 +256,7 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         guard let display = requestedID.flatMap({ id in content.displays.first { $0.displayID == id } }) ?? content.displays.first else { throw ScreenCaptureError.noDisplay }
         displayID = display.displayID
         let displays = content.displays.enumerated().map { index, item in
-            ["id": item.displayID, "name": item.displayID == CGMainDisplayID() ? "Main display" : "Display \(index + 1)", "width": item.width, "height": item.height] as [String: Any]
+            ["id": item.displayID, "name": item.displayID == CGMainDisplayID() ? L10n.text("apple.screencapturecoordinator.main_display.df3c4252") : L10n.text("apple.screencapturecoordinator.display_0.c82e7be8", "\(index + 1)"), "width": item.width, "height": item.height] as [String: Any]
         }
         if let metadata = try? JSONSerialization.data(withJSONObject: ["type": "displays", "selected": display.displayID, "displays": displays]) {
             output(ScreenWire.metadata(metadata))
@@ -715,9 +715,9 @@ private enum ScreenCaptureError: LocalizedError {
     case permission, noDisplay, encoder(OSStatus)
     var errorDescription: String? {
         switch self {
-        case .permission: "Allow Screen Recording in System Settings > Privacy & Security."
-        case .noDisplay: "No display is available to share."
-        case let .encoder(status): "VideoToolbox could not start (\(status))."
+        case .permission: L10n.text("apple.screencapturecoordinator.allow_screen_recording_in_system_settings.eef22694")
+        case .noDisplay: L10n.text("apple.screencapturecoordinator.no_display_is_available_to_share.c35fefc8")
+        case let .encoder(status): L10n.text("apple.screencapturecoordinator.videotoolbox_could_not_start_0.e9bdf454", "\(status)")
         }
     }
 }

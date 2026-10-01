@@ -22,16 +22,16 @@ struct WorkHandoffSheet: View {
     @State private var fileError: String?
 
     var body: some View {
-        ThemedSheet(title: "Continue on another device",
-            subtitle: chat.selected?.title ?? "This conversation", icon: .device,
+        ThemedSheet(title: L10n.text("apple.workhandoffsheet.continue_on_another_device.b5836f9a"),
+            subtitle: chat.selected?.title ?? L10n.text("apple.workhandoffsheet.this_conversation.0e82ebfc"), icon: .device,
             scrolls: true, onClose: { dismiss() }) {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
-                Text("Pick up this conversation on another device while the computer that holds it is awake and connected.")
+                Text(L10n.text("apple.workhandoffsheet.pick_up_this_conversation_on_another_devic.6f518069"))
                     .font(Theme.callout).foregroundStyle(Theme.controlGlyph)
                 if let model {
                     content(model)
                 } else {
-                    Text("Open the live conversation to share this work.")
+                    Text(L10n.text("apple.workhandoffsheet.open_the_live_conversation_to_share_this_w.21af9551"))
                         .font(Theme.callout)
                 }
                 if let notice {
@@ -74,37 +74,37 @@ struct WorkHandoffSheet: View {
     private var sharingHelp: some View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                ModalInfoRow(icon: .device, title: "Kept on the conversation’s computer",
-                    text: "Your other devices ask that computer for shared work. It needs to be awake, connected, and allowing workspace access.")
-                ModalInfoRow(icon: .edit, title: "Your draft is yours",
-                    text: "Sharing a place does not include your words unless you select Include my unsent draft. Later edits stay on this device until you share again. Sharing never sends a message to an agent.")
-                ModalInfoRow(icon: .history, title: "Choose where to continue",
-                    text: "Use this opens the shared draft. Continue reading moves to the shared reading position. Neither happens automatically when shared work arrives.")
-                ModalInfoRow(icon: .connect, title: "When the computer is unavailable",
-                    text: "You can keep working with drafts and saved conversations already on this device. Shared words you have not opened here cannot be fetched until the computer is reachable again.")
+                ModalInfoRow(icon: .device, title: L10n.text("apple.workhandoffsheet.kept_on_the_conversation_s_computer.296de7f7"),
+                    text: L10n.text("apple.workhandoffsheet.your_other_devices_ask_that_computer_for_s.9c03f0b7"))
+                ModalInfoRow(icon: .edit, title: L10n.text("apple.workhandoffsheet.your_draft_is_yours.289be195"),
+                    text: L10n.text("apple.workhandoffsheet.sharing_a_place_does_not_include_your_word.ce606d91"))
+                ModalInfoRow(icon: .history, title: L10n.text("apple.workhandoffsheet.choose_where_to_continue.3e822dbf"),
+                    text: L10n.text("apple.workhandoffsheet.use_this_opens_the_shared_draft_continue_r.1005a580"))
+                ModalInfoRow(icon: .connect, title: L10n.text("apple.workhandoffsheet.when_the_computer_is_unavailable.a944ec4d"),
+                    text: L10n.text("apple.workhandoffsheet.you_can_keep_working_with_drafts_and_saved.d80c920f"))
             }
             .padding(.top, Theme.Space.m)
         } label: {
-            ActionIcon.help.label("How sharing works")
+            ActionIcon.help.label(L10n.text("apple.workhandoffsheet.how_sharing_works.90f93832"))
                 .font(Theme.callout.weight(.medium))
         }
     }
 
     @ViewBuilder private func content(_ model: WorkHandoffModel) -> some View {
         if model.phase == .invalidated {
-            Text("This conversation changed. Close this sheet and open it again to continue.")
+            Text(L10n.text("apple.workhandoffsheet.this_conversation_changed_close_this_sheet.e11a2582"))
                 .font(Theme.callout)
         } else {
-            if preparingDraft { ProgressView("Preparing draft files…") }
-            if model.isBusy { ProgressView(model.phase == .loading ? "Checking shared work…" : "Sharing…") }
+            if preparingDraft { ProgressView(L10n.text("apple.workhandoffsheet.preparing_draft_files.3e0d0b2b")) }
+            if model.isBusy { ProgressView(model.phase == .loading ? L10n.text("apple.workhandoffsheet.checking_shared_work.49ef87bb") : L10n.text("apple.workhandoffsheet.sharing.2e913af4")) }
             if let error = model.error {
                 Text(error).font(Theme.callout).foregroundStyle(Theme.warning)
-                Button("Try again", .refresh) {
+                Button(L10n.text("apple.workhandoffsheet.try_again.d8b8392e"), .refresh) {
                     Task { if model.canRetryShare { await model.retryShare() } else { await model.load() } }
                 }.buttonStyle(SecondaryButtonStyle())
             }
             if model.phase == .conflict {
-                Text("Another device shared work while you were sharing. Both versions are here.")
+                Text(L10n.text("apple.workhandoffsheet.another_device_shared_work_while_you_were.e60d9e79"))
                     .font(Theme.callout).foregroundStyle(Theme.warning)
             }
             if let shared = model.shared {
@@ -112,25 +112,25 @@ struct WorkHandoffSheet: View {
             }
             if model.phase == .conflict {
                 if let draft = model.pending?.draft, draft != chat.handoffDraft {
-                    draftCard(title: "Your version", draft: draft, attachments: chat.attachments)
+                    draftCard(title: L10n.text("apple.workhandoffsheet.your_version.f06cf159"), draft: draft, attachments: chat.attachments)
                 }
-                Button("Keep mine", .done) { model.keepMine(); notice = "Your draft is unchanged on this device." }
+                Button(L10n.text("apple.workhandoffsheet.keep_mine.0335c833"), .done) { model.keepMine(); notice = L10n.text("apple.workhandoffsheet.your_draft_is_unchanged_on_this_device.44ba61a3") }
                     .buttonStyle(SecondaryButtonStyle())
-                Button("Share my version", .upload) { Task { await model.shareMyVersion() } }
+                Button(L10n.text("apple.workhandoffsheet.share_my_version.2888feac"), .upload) { Task { await model.shareMyVersion() } }
                     .buttonStyle(AccentButtonStyle())
             } else if model.phase == .shared {
-                ModalInfoRow(icon: .done, title: "Ready on your other devices",
-                    text: "Open this conversation there and choose Continue. Your draft stays here too.")
+                ModalInfoRow(icon: .done, title: L10n.text("apple.workhandoffsheet.ready_on_your_other_devices.af50c8dc"),
+                    text: L10n.text("apple.workhandoffsheet.open_this_conversation_there_and_choose_co.c4f25c3e"))
             } else if model.canShare {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    Text("From this device").font(Theme.callout.weight(.semibold))
+                    Text(L10n.text("apple.workhandoffsheet.from_this_device.37910fa8")).font(Theme.callout.weight(.semibold))
                     if !chat.draft.isEmpty || !chat.attachments.isEmpty {
-                        Toggle("Include my unsent draft", isOn: $includeDraft).toggleStyle(.brandCheckbox)
+                        Toggle(L10n.text("apple.workhandoffsheet.include_my_unsent_draft.1764aefe"), isOn: $includeDraft).toggleStyle(.brandCheckbox)
                         if includeDraft {
-                            draftCard(title: "Your draft", draft: chat.handoffDraft, attachments: chat.attachments)
+                            draftCard(title: L10n.text("apple.workhandoffsheet.your_draft.931ad336"), draft: chat.handoffDraft, attachments: chat.attachments)
                         }
                     }
-                    Button("Share this place", .upload) { share(model) }
+                    Button(L10n.text("apple.workhandoffsheet.share_this_place.8d748a2d"), .upload) { share(model) }
                         .buttonStyle(AccentButtonStyle())
                         .disabled(preparingDraft || chat.stagingAttachments > 0 || chat.sending || chat.unconfirmedSend != nil)
                 }
@@ -140,32 +140,32 @@ struct WorkHandoffSheet: View {
 
     private func sharedCard(_ shared: WorkHandoff, model: WorkHandoffModel) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Text("Continue from \(shared.deviceName)").font(Theme.title3.weight(.semibold))
-            Text("Shared \(Date(timeIntervalSince1970: Double(shared.updatedAtMs) / 1000).formatted(date: .abbreviated, time: .shortened))")
+            Text(L10n.text("apple.workhandoffsheet.continue_from_0.5f98842e", "\(shared.deviceName)")).font(Theme.title3.weight(.semibold))
+            Text(L10n.text("apple.workhandoffsheet.shared_0.3bb181a7", "\(Date(timeIntervalSince1970: Double(shared.updatedAtMs) / 1000).formatted(date: .abbreviated, time: .shortened))"))
                 .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
             if let draft = shared.draft {
-                draftCard(title: "Shared draft", draft: draft, attachments: files)
-                if loadingFiles { ProgressView("Checking shared files…") }
+                draftCard(title: L10n.text("apple.workhandoffsheet.shared_draft.9f03d34e"), draft: draft, attachments: files)
+                if loadingFiles { ProgressView(L10n.text("apple.workhandoffsheet.checking_shared_files.0a7a6940")) }
                 if let fileError {
                     Text(fileError).font(Theme.caption).foregroundStyle(Theme.warning)
-                    Button("Check files again", .refresh) { Task { await loadFiles() } }
+                    Button(L10n.text("apple.workhandoffsheet.check_files_again.ae8be3d2"), .refresh) { Task { await loadFiles() } }
                         .buttonStyle(SecondaryButtonStyle())
                 }
                 if !chat.draft.isEmpty || !chat.attachments.isEmpty {
-                    draftCard(title: "On this device", draft: chat.handoffDraft, attachments: chat.attachments)
-                    Text("Use this replaces the draft on this device. Copy keeps both versions where they are.")
+                    draftCard(title: L10n.text("apple.workhandoffsheet.on_this_device.38b9d88c"), draft: chat.handoffDraft, attachments: chat.attachments)
+                    Text(L10n.text("apple.workhandoffsheet.use_this_replaces_the_draft_on_this_device.1f377038"))
                         .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                 }
-                Button(importing ? "Opening draft…" : "Use this", .restore) {
+                Button(importing ? L10n.text("apple.workhandoffsheet.opening_draft.34c32aa9") : L10n.text("apple.workhandoffsheet.use_this.b2919965"), .restore) {
                     importDraft(draft, model: model)
                 }.buttonStyle(AccentButtonStyle())
                     .disabled(loadingFiles || importing || fileError != nil || model.isBusy
                         || model.canRetryShare || chat.sending || chat.unconfirmedSend != nil)
-                Button("Copy shared text", .copy) { copy(draft.text); notice = "Shared text copied." }
+                Button(L10n.text("apple.workhandoffsheet.copy_shared_text.03b373fb"), .copy) { copy(draft.text); notice = L10n.text("apple.workhandoffsheet.shared_text_copied.358c6857") }
                     .buttonStyle(SecondaryButtonStyle())
             }
             if let anchor = shared.anchor {
-                Button("Continue reading", .history) {
+                Button(L10n.text("apple.workhandoffsheet.continue_reading.66e7853c"), .history) {
                     importAnchor(anchor, model: model)
                 }.buttonStyle(SecondaryButtonStyle())
                     .disabled(importing || model.isBusy || model.canRetryShare)
@@ -199,7 +199,7 @@ struct WorkHandoffSheet: View {
             anchor = WorkHandoffAnchor(eventID: last.id, fraction: 0, followsLatest: true)
         } else { anchor = nil }
         #if os(macOS)
-        let name = Host.current().localizedName ?? "Mac"
+        let name = Host.current().localizedName ?? L10n.text("apple.workhandoffsheet.mac.8b3795aa")
         #else
         let name = ClientDeviceName.marketing
         #endif
@@ -245,7 +245,7 @@ struct WorkHandoffSheet: View {
                 try await chat.keepImportedDraftFiles(resolved, reference: model.reference, expected: expected)
                 guard model.phase != .invalidated, connection.isCurrent,
                       chat.importHandoffDraft(draft, files: resolved, replacing: expected, reference: model.reference) else {
-                    notice = "Your draft changed while opening shared work. Review it and choose again."
+                    notice = L10n.text("apple.workhandoffsheet.your_draft_changed_while_opening_shared_wo.ccca9699")
                     return
                 }
                 dismiss()

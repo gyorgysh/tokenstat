@@ -68,7 +68,7 @@ struct ClientChatView: View {
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(\.scenePhase) private var scenePhase
 
-    private var place: String { folderName.isEmpty ? "this folder" : folderName }
+    private var place: String { folderName.isEmpty ? L10n.text("apple.clientchatview.this_folder.9d6325c8") : folderName }
 
     var body: some View {
         ZStack {
@@ -118,49 +118,49 @@ struct ClientChatView: View {
 
     private var list: some View {
         ClientCardList(
-            title: "Chat",
+            title: L10n.text("apple.clientchatview.chat.460b3a7d"),
             errorMessage: model.error.map { ClientTunnelCopy.display($0, host: hostName) },
             isLoaded: loaded,
             isEmpty: model.chats.isEmpty,
-            emptyText: "Start a chat",
+            emptyText: L10n.text("apple.clientchatview.start_a_chat.d80b1888"),
             emptyArt: .chat(seed: model.defaultFaceSeed),
-            emptyMessage: "Ask an agent to explore, plan, or work in \(place).",
-            emptyActionTitle: "New chat",
+            emptyMessage: L10n.text("apple.clientchatview.ask_an_agent_to_explore_plan_or_work_in_0.c1ba0fc2", "\(place)"),
+            emptyActionTitle: L10n.text("apple.clientchatview.new_chat.db18382a"),
             emptyActionIcon: .create,
             emptyAction: { Task { await create() } },
             refreshKey: "workspace-chat-\(workspaceID)",
             reload: { await reload() }
         ) {
             ClientStatPanels(panels: [
-                ("Conversations", "\(model.chats.count)", "mark_chat"),
-                ("Running", "\(model.chats.filter(\.running).count)", "mark_running"),
-                ("Agents", "\(Set(model.chats.map(\.backend)).count)", "mark_agent"),
+                (L10n.text("apple.clientchatview.conversations.1d432f58"), "\(model.chats.count)", "mark_chat"),
+                (L10n.text("common.running"), "\(model.chats.filter(\.running).count)", "mark_running"),
+                (L10n.text("apple.clientchatview.agents.279b44d2"), "\(Set(model.chats.map(\.backend)).count)", "mark_agent"),
             ]).clientCardRow()
             // The list gets a name of its own, because the figures above it
             // are about the folder and the rows below are the conversations.
             // Home and Workspaces already label their sections this way.
-            ClientSectionTitle(title: "Conversations", mark: "mark_chat")
+            ClientSectionTitle(title: L10n.text("apple.clientchatview.conversations.1d432f58"), mark: "mark_chat")
                 .clientCardRow()
             HStack {
                 Menu {
-                    Picker("Agent", selection: $agent) {
-                        Text("All agents").tag("")
+                    Picker(L10n.text("apple.clientchatview.agent.11b39c93"), selection: $agent) {
+                        Text(L10n.text("apple.clientchatview.all_agents.54c32d3e")).tag("")
                         ForEach(Set(model.chats.map(\.backend)).sorted(), id: \.self) { id in
                             Text(model.backend(for: id)?.label ?? id).tag(id)
                         }
                     }
-                    Toggle("Running only", isOn: $runningOnly)
-                    Picker("Sort", selection: $alphabetical) {
-                        Text("Recent first").tag(false)
-                        Text("Title A–Z").tag(true)
+                    Toggle(L10n.text("apple.clientchatview.running_only.48bbf789"), isOn: $runningOnly)
+                    Picker(L10n.text("apple.clientchatview.sort.bec69036"), selection: $alphabetical) {
+                        Text(L10n.text("apple.clientchatview.recent_first.e23e162b")).tag(false)
+                        Text(L10n.text("apple.clientchatview.title_a_z.ab217de6")).tag(true)
                     }
-                } label: { Label("Filter & sort", systemImage: ActionIcon.filter.symbol) }
+                } label: { Label(L10n.text("apple.clientchatview.filter_sort.f6606a98"), systemImage: ActionIcon.filter.symbol) }
                 .frame(minHeight: 44)
                 Spacer()
-                Text("\(filteredChats.count) shown").font(ClientType.caption).foregroundStyle(.secondary)
+                Text(L10n.text("apple.clientchatview.0_shown.c67ec9a7", "\(filteredChats.count)")).font(ClientType.caption).foregroundStyle(.secondary)
             }.clientCardRow()
             if filteredChats.isEmpty {
-                Text("No matching conversations. Adjust your search or filters.").font(ClientType.label).foregroundStyle(.secondary).clientCardRow()
+                Text(L10n.text("apple.clientchatview.no_matching_conversations_adjust_your_sear.37233882")).font(ClientType.label).foregroundStyle(.secondary).clientCardRow()
             }
             ForEach(filteredChats) { chat in
                 HStack {
@@ -173,11 +173,11 @@ struct ClientChatView: View {
                 }
                 .clientCardRow()
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button("Delete", role: .destructive) { pendingDelete = chat }
+                    Button(L10n.text("common.delete"), role: .destructive) { pendingDelete = chat }
                 }
             }
         }
-        .searchable(text: $search, prompt: "Titles, agents, or models")
+        .searchable(text: $search, prompt: L10n.text("apple.clientchatview.titles_agents_or_models.b7ffdc79"))
         .safeAreaInset(edge: .top, spacing: 0) {
             if showReconnect {
                 ClientReconnectBanner(offline: !refreshing && connectivity.status == .offline)
@@ -198,42 +198,42 @@ struct ClientChatView: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("New chat", .create) { Task { await create() } }
+                Button(L10n.text("apple.clientchatview.new_chat.db18382a"), .create) { Task { await create() } }
                     .disabled(model.isCreating)
             }
             if supportsDeleteAll && !model.chats.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu { Button("Delete all chats…", role: .destructive) { deleteAll = true } }
-                    label: { ActionIcon.more.label("Chat list actions") }
+                    Menu { Button(L10n.text("apple.clientchatview.delete_all_chats.9753e785"), role: .destructive) { deleteAll = true } }
+                    label: { ActionIcon.more.label(L10n.text("apple.clientchatview.chat_list_actions.43ea56ad")) }
                 }
             }
         }
         .task(id: peer) { supportsDeleteAll = await RemoteHostFeature.chatRemoveAll.isSupported(peer: peer) }
-        .confirmationDialog("Delete all chats?", isPresented: $deleteAll, titleVisibility: .visible) {
-            Button("Delete all chats", role: .destructive) {
+        .confirmationDialog(L10n.text("apple.clientchatview.delete_all_chats.7d0b4340"), isPresented: $deleteAll, titleVisibility: .visible) {
+            Button(L10n.text("apple.clientchatview.delete_all_chats.3fbb0f9c"), role: .destructive) {
                 Task { await model.removeAll(in: workspaceID, peer: peer); if model.error == nil { retainedThread = nil; opened = nil } }
             }
-            Button("Cancel", role: .cancel) {}
+            Button(L10n.text("common.cancel"), role: .cancel) {}
         } message: {
-            Text("Every chat in this project on \(hostName.isEmpty ? "the computer" : hostName) will be deleted. This cannot be undone.")
+            Text(L10n.text("apple.clientchatview.every_chat_in_this_project_on_0_will_be_de.8c6b8cf6", "\(hostName.isEmpty ? L10n.text("apple.clientchatview.the_computer.da52d93a") : hostName)"))
         }
         .confirmationDialog(
-            "Delete this chat?",
+            L10n.text("apple.clientchatview.delete_this_chat.848dad9b"),
             isPresented: Binding(
                 get: { pendingDelete != nil },
                 set: { if !$0 { pendingDelete = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("Delete chat", role: .destructive) {
+            Button(L10n.text("apple.clientchatview.delete_chat.93291d9c"), role: .destructive) {
                 if let chat = pendingDelete {
                     Task { await model.remove(chat) }
                 }
                 pendingDelete = nil
             }
-            Button("Keep it", role: .cancel) { pendingDelete = nil }
+            Button(L10n.text("apple.clientchatview.keep_it.fdce5da2"), role: .cancel) { pendingDelete = nil }
         } message: {
-            Text("The transcript stays on \(hostName.isEmpty ? "the computer" : hostName) until you delete it. This cannot be undone.")
+            Text(L10n.text("apple.clientchatview.the_transcript_stays_on_0_until_you_delete.2ccfbdf7", "\(hostName.isEmpty ? L10n.text("apple.clientchatview.the_computer.da52d93a") : hostName)"))
         }
         .task {
             guard !loaded else { return }
@@ -295,7 +295,7 @@ struct ClientChatView: View {
 
     private func rowDetail(_ chat: ChatConversation) -> String {
         let agent = model.backend(for: chat.backend)?.label ?? chat.backend
-        let mode = chat.mode == "plan" ? "Plan" : "Execute"
+        let mode = chat.mode == "plan" ? L10n.text("apple.clientchatview.plan.fa8ed0bd") : L10n.text("apple.clientchatview.execute.e3a67d95")
         return "\(agent) · \(mode)"
     }
 
@@ -349,7 +349,7 @@ struct ClientChatView: View {
         }
         guard let chat = model.chats.first(where: { $0.id == id }) else {
             if loaded, model.error == nil {
-                model.error = "This conversation is no longer available in this folder. It may have been deleted on the machine."
+                model.error = L10n.text("apple.clientchatview.this_conversation_is_no_longer_available_i.3867a302")
             }
             return true
         }
@@ -375,7 +375,7 @@ private struct ClientReconnectBanner: View {
                     .tint(Theme.accent)
                     .accessibilityHidden(true)
             }
-            Text(offline ? "Waiting for connection…" : "Reconnecting…")
+            Text(offline ? L10n.text("apple.clientchatview.waiting_for_connection.28ee7605") : L10n.text("apple.clientchatview.reconnecting.27b80374"))
                 .font(ClientType.caption.weight(.medium))
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
@@ -385,7 +385,7 @@ private struct ClientReconnectBanner: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.panel)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(offline ? "Waiting for connection" : "Reconnecting")
+        .accessibilityLabel(offline ? L10n.text("apple.clientchatview.waiting_for_connection.f12044f6") : L10n.text("apple.clientchatview.reconnecting.afb118fc"))
     }
 }
 
@@ -474,7 +474,7 @@ struct ClientChatThread: View {
     private func toolsPane(peer: String, workspaceID: String) -> some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Project")
+                Text(L10n.text("apple.clientchatview.project.98595978"))
                     .font(ClientType.caption.weight(.semibold))
                     .foregroundStyle(Theme.controlGlyph)
                 Spacer(minLength: 0)
@@ -486,7 +486,7 @@ struct ClientChatThread: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.controlGlyph)
-                .accessibilityLabel("Hide workspace tools")
+                .accessibilityLabel(L10n.text("apple.clientchatview.hide_workspace_tools.d56bc00c"))
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.top, Theme.Space.s)
@@ -544,7 +544,7 @@ struct ClientChatThread: View {
         await model.poll()
     }
 
-    var body: some View {
+    private var chatPresentation: some View {
         VStack(spacing: 0) {
             if let chat {
                 if model.savedCopy == nil {
@@ -573,8 +573,8 @@ struct ClientChatThread: View {
             } else {
                 ClientEmptyState(
                     kind: .nothingYet,
-                    title: "This chat is gone",
-                    message: "It was deleted on \(hostName.isEmpty ? "the computer" : hostName).",
+                    title: L10n.text("apple.clientchatview.this_chat_is_gone.8a6de141"),
+                    message: L10n.text("apple.clientchatview.it_was_deleted_on_0.80f0ae0a", "\(hostName.isEmpty ? L10n.text("apple.clientchatview.the_computer.da52d93a") : hostName)"),
                     art: .chat(seed: model.defaultFaceSeed)
                 )
                 .padding(Theme.Space.m)
@@ -618,12 +618,12 @@ struct ClientChatThread: View {
             Task { await foregroundRefresh() }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: dropExperienceVisible)
-        .navigationTitle(isActive ? (chat?.title ?? "Chat") : "Chat")
+        .navigationTitle(isActive ? (chat?.title ?? L10n.text("apple.clientchatview.chat.460b3a7d")) : L10n.text("apple.clientchatview.chat.460b3a7d"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if isActive, let onBack {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(action: onBack) { ActionIcon.back.label("Chats") }
+                    Button(action: onBack) { ActionIcon.back.label(L10n.text("common.chats")) }
                 }
             }
             if isActive && chat != nil && (pinReference != nil || model.savedCopy == nil) {
@@ -631,11 +631,11 @@ struct ClientChatThread: View {
                     HStack(spacing: 0) {
                         PinToggleButton(
                             reference: pinReference,
-                            label: chat?.title ?? "Chat",
+                            label: chat?.title ?? L10n.text("apple.clientchatview.chat.460b3a7d"),
                             folderName: folderName
                         )
                         if toolsIdentity != nil {
-                            Button("Project tools", .source) {
+                            Button(L10n.text("apple.clientchatview.project_tools.c50826a7"), .source) {
                                 if sizeClass == .regular,
                                    UIDevice.current.userInterfaceIdiom == .pad {
                                     showingToolsPane.toggle()
@@ -643,7 +643,7 @@ struct ClientChatThread: View {
                                     pushingTools = true
                                 }
                             }
-                            .accessibilityLabel("Project files, changes and history")
+                            .accessibilityLabel(L10n.text("apple.clientchatview.project_files_changes_and_history.4da56c40"))
                             // The inspector chord, on the real control. Wide
                             // iPad toggles the trailing pane; compact pushes
                             // the same surface and Back returns to the
@@ -656,8 +656,8 @@ struct ClientChatThread: View {
                                 ClientChatMenu(model: model, conversation: chat, peer: tools.peer,
                                                workspaceID: tools.workspaceID, onFork: onFork)
                             }
-                            Button("Continue on another device", .device) { showingHandoff = true }
-                            Button("Setup", .settings) { showingSetup = true }
+                            Button(L10n.text("apple.clientchatview.continue_on_another_device.b5836f9a"), .device) { showingHandoff = true }
+                            Button(L10n.text("apple.clientchatview.setup.7013af4c"), .settings) { showingSetup = true }
                         }
                     }
                 }
@@ -677,28 +677,12 @@ struct ClientChatThread: View {
         .sheet(isPresented: $showingSetup) {
             setupSheet
         }
-        .task(id: chatID) {
-            // A first task offered by setup, put in the composer rather than
-            // sent. Only into an empty one, only once, and only for the folder
-            // setup opened: any other thread mounting first must not consume it.
-            if model.draft.isEmpty, let scope = navigation.folderID,
-               let offered = navigation.takeSuggestedPrompt(for: scope) {
-                model.draft = offered
-            }
-            guard let chat = model.chats.first(where: { $0.id == chatID }) else { return }
-            // Already open, with rows on screen. Re-selecting would empty the
-            // transcript and read it back, which is this screen blanking and
-            // re-scrolling every time it is pushed, including straight after
-            // the launcher picked the conversation for you.
-            if model.savedCopy == nil && (model.selected?.id != chat.id || model.transcriptItems.isEmpty) {
-                await model.select(chat)
-            }
-            guard !Task.isCancelled else { return }
-            if let current = model.chats.first(where: { $0.id == chatID }) {
-                ClientChatReadState.shared.markRead(peer: model.peer, chat: current)
-            }
-        }
-        .task(id: "\(chatID)-\(scenePhase == .active)-\(isActive)") {
+    }
+
+    var body: some View {
+        chatPresentation
+        .task(id: chatID) { await loadChat() }
+        .task(id: pollingIdentity) {
             // Backgrounded chats stop polling. Every mounted conversation
             // otherwise polls every 2s indefinitely, churning the view graph
             // for a screen nobody sees.
@@ -749,14 +733,40 @@ struct ClientChatThread: View {
         // is about to erase is a popup, not information: the strip says
         // reconnecting, the foreground refresh retries, and anything still
         // broken once back online raises its own error then.
-        .alert("Chat unavailable", isPresented: Binding(
+        .alert(L10n.text("apple.clientchatview.chat_unavailable.a45aae80"), isPresented: Binding(
             get: { isActive && model.error != nil && connectivity.status != .offline },
             set: { if !$0 { model.error = nil } }
         )) {
-            Button("OK", role: .cancel) { model.error = nil }
+            Button(L10n.text("apple.clientchatview.ok.565339bc"), role: .cancel) { model.error = nil }
         } message: {
             Text(model.error.map { ClientTunnelCopy.display($0, host: hostName) } ?? "")
         }
+    }
+
+    private func loadChat() async {
+        // A first task offered by setup, put in the composer rather than
+        // sent. Only into an empty one, only once, and only for the folder
+        // setup opened: any other thread mounting first must not consume it.
+        if model.draft.isEmpty, let scope = navigation.folderID,
+           let offered = navigation.takeSuggestedPrompt(for: scope) {
+            model.draft = offered
+        }
+        guard let chat = model.chats.first(where: { $0.id == chatID }) else { return }
+        // Already open, with rows on screen. Re-selecting would empty the
+        // transcript and read it back, which is this screen blanking and
+        // re-scrolling every time it is pushed, including straight after
+        // the launcher picked the conversation for you.
+        if model.savedCopy == nil && (model.selected?.id != chat.id || model.transcriptItems.isEmpty) {
+            await model.select(chat)
+        }
+        guard !Task.isCancelled else { return }
+        if let current = model.chats.first(where: { $0.id == chatID }) {
+            ClientChatReadState.shared.markRead(peer: model.peer, chat: current)
+        }
+    }
+
+    private var pollingIdentity: String {
+        "\(chatID)-\(scenePhase == .active)-\(isActive)"
     }
 
     /// Same rule as the Mac: a blocked turn takes the composer's place. On a
@@ -809,10 +819,10 @@ struct ClientChatThread: View {
                     running: model.busy,
                     sendsAsNote: model.sendsAsNote,
                     placeholder: model.sendsAsNote
-                        ? "Add a note for the next step"
+                        ? L10n.text("apple.clientchatview.add_a_note_for_the_next_step.4778177a")
                         : (model.busy
-                            ? "Send after this turn"
-                            : "Ask about \(folderName.isEmpty ? "this folder" : folderName)"),
+                            ? L10n.text("apple.clientchatview.send_after_this_turn.012fc8c3")
+                            : L10n.text("apple.clientchatview.ask_about_0.35c322e7", "\(folderName.isEmpty ? L10n.text("apple.clientchatview.this_folder.9d6325c8") : folderName)")),
                     onSend: { submit(from: chat) },
                     onSendNow: { submit(from: chat, sendNow: true) },
                     onStop: { Task { await model.stop() } },
@@ -870,12 +880,12 @@ struct ClientChatThread: View {
                         window.ask(force: true)
                     }
                     if hiddenAboveCount > 0 {
-                        Button("Show \(hiddenAboveCount) earlier messages", .history) {
+                        Button(L10n.text("apple.clientchatview.show_0_earlier_messages.2e5e4ab9", "\(hiddenAboveCount)"), .history) {
                             revealEarlier()
                         }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                         .frame(maxWidth: .infinity, alignment: .center)
-                        .accessibilityLabel("Show earlier messages")
+                        .accessibilityLabel(L10n.text("apple.clientchatview.show_earlier_messages.b6badd18"))
                     }
                     ForEach(rows) { item in
                         ClientChatEventRow(
@@ -1126,7 +1136,7 @@ struct ClientChatThread: View {
         } catch {
             // Never silent. A card that does nothing when tapped is the bug
             // this whole path is being rebuilt for.
-            showDropNotice("\(attachment.name) could not be opened. \(error.localizedDescription)")
+            showDropNotice(L10n.text("apple.clientchatview.0_could_not_be_opened_1.3ad9cd09", "\(attachment.name)", "\(error.localizedDescription)"))
         }
     }
 
@@ -1153,18 +1163,18 @@ struct ClientChatThread: View {
                         )
                         ChatInstructionsCard(model: model, chat: chat)
                         ChatCostMeter(totals: model.turnUsage)
-                        Button("Personas", .persona) { showingPersonas = true }
+                        Button(L10n.text("apple.clientchatview.personas.fa2ea3fb"), .persona) { showingPersonas = true }
                             .buttonStyle(SecondaryButtonStyle())
                     }
                 }
                 .padding(Theme.Space.m)
             }
             .background(Theme.background)
-            .navigationTitle("Chat setup")
+            .navigationTitle(L10n.text("apple.clientchatview.chat_setup.9fa79d00"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done", .done) { showingSetup = false }
+                    Button(L10n.text("common.done"), .done) { showingSetup = false }
                 }
             }
         }
@@ -1474,7 +1484,7 @@ struct ClientChatThread: View {
             case let .text(text):
                 model.appendImportedText(text, to: owner)
             case .folder:
-                showDropNotice("Attach files, not folders")
+                showDropNotice(L10n.text("apple.clientchatview.attach_files_not_folders.9039f9a4"))
             }
         }
     }

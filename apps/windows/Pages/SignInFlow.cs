@@ -117,14 +117,14 @@ internal static class SignInFlow
         waiting.Children.Add(progress);
         waiting.Children.Add(new TextBlock
         {
-            Text = "Waiting for approval",
+            Text = L10n.Text("windows.signinflow.waiting_for_approval.10c5739b"),
             VerticalAlignment = VerticalAlignment.Center,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         body.Children.Add(waiting);
         body.Children.Add(new TextBlock
         {
-            Text = "Approve this device on tokenstat.ai. This screen updates by itself.",
+            Text = L10n.Text("windows.signinflow.approve_this_device_on_tokenstat_ai_this_s.bad8690a"),
             Opacity = 0.7,
             TextWrapping = TextWrapping.Wrap,
         });
@@ -138,7 +138,7 @@ internal static class SignInFlow
             HorizontalAlignment = HorizontalAlignment.Left,
             Child = new TextBlock
             {
-                Text = string.IsNullOrEmpty(code) ? "Complete sign-in in the browser." : code,
+                Text = string.IsNullOrEmpty(code) ? L10n.Text("windows.signinflow.complete_sign_in_in_the_browser.73cba30f") : code,
                 FontFamily = Fonts.Mono,
                 FontSize = Fonts.SignInCode,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
@@ -151,9 +151,9 @@ internal static class SignInFlow
         if (!string.IsNullOrEmpty(openUrl))
         {
             buttons.Children.Add(ActionIconGlyph.Button(
-                "Open the page", ActionIcon.External, (_, _) => Open(openUrl)));
+                L10n.Text("windows.signinflow.open_the_page.911fa06e"), ActionIcon.External, (_, _) => Open(openUrl)));
         }
-        buttons.Children.Add(ActionIconGlyph.Button("Cancel", ActionIcon.Dismiss, (_, _) =>
+        buttons.Children.Add(ActionIconGlyph.Button(L10n.Text("common.cancel"), ActionIcon.Dismiss, (_, _) =>
         {
             if (progress.IsActive)
             {
@@ -166,9 +166,9 @@ internal static class SignInFlow
         }));
         body.Children.Add(buttons);
         card = Chrome.Card(
-            "Waiting for approval",
+            L10n.Text("windows.signinflow.waiting_for_approval.10c5739b"),
             body,
-            string.IsNullOrEmpty(verify) ? null : "A page should have opened at " + verify);
+            string.IsNullOrEmpty(verify) ? null : L10n.Text("windows.signinflow.a_page_should_have_opened_at_0.8fba8da9", $"{verify}"));
         card.Name = "SignInFlowCard";
         slot.Children.Add(card);
 
@@ -189,16 +189,16 @@ internal static class SignInFlow
                     var lower = ex.Message.ToLowerInvariant();
                     if (lower.Contains("invalid_grant") || lower.Contains("device_invalid_grant"))
                     {
-                        Note("That sign-in expired. Start again.");
+                        Note(L10n.Text("windows.signinflow.that_sign_in_expired_start_again.28cffde9"));
                         break;
                     }
                     failures++;
                     if (failures >= 3)
                     {
-                        Note("The account service could not be reached after several tries. Try again.");
+                        Note(L10n.Text("windows.signinflow.the_account_service_could_not_be_reached_a.445bdbf0"));
                         break;
                     }
-                    Note("Waiting for the network.");
+                    Note(L10n.Text("windows.signinflow.waiting_for_the_network.76a08f16"));
                     continue;
                 }
                 token.ThrowIfCancellationRequested();
@@ -222,7 +222,7 @@ internal static class SignInFlow
             }
             if (!token.IsCancellationRequested && DateTime.UtcNow >= deadline)
             {
-                Note("The sign-in code expired before it was confirmed.");
+                Note(L10n.Text("windows.signinflow.the_sign_in_code_expired_before_it_was_con.84ac1b4b"));
             }
             try { await AppServices.Host.CallAsync("account.cancelLogin"); }
             catch { /* the wait is over either way */ }
@@ -237,7 +237,7 @@ internal static class SignInFlow
         }
         if (!token.IsCancellationRequested)
         {
-            buttons.Children.Add(ActionIconGlyph.Button("Try again", ActionIcon.Refresh, async (_, _) =>
+            buttons.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.signinflow.try_again.d8b8392e"), ActionIcon.Refresh, async (_, _) =>
             {
                 slot.Children.Remove(card);
                 await RunAsync(owner, slot, onSignedIn);

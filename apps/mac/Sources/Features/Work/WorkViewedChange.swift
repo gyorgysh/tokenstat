@@ -68,7 +68,7 @@ struct WorkViewedChange: Codable, Sendable, Identifiable {
         let reference = WorkReference(scope: owner.scope, hostIdentity: owner.hostIdentity,
             workspaceID: owner.workspaceID, kind: commit == nil ? .savedDiff : .commit,
             itemID: commit?.id ?? revision)
-        let copy = Self(reference: reference, title: commit?.subject ?? diff?.path ?? "Changes",
+        let copy = Self(reference: reference, title: commit?.subject ?? diff?.path ?? L10n.text("apple.workviewedchange.changes.bbd4b6a8"),
                         capturedAt: Date(), revision: revision, commit: commit, diff: diff)
         let scope = WorkCache.scope(for: owner.scope)
         guard let id = WorkCache.recordID(for: reference),

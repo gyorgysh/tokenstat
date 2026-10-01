@@ -20,9 +20,9 @@ struct ChatDraftNotice: View {
             row(
                 symbol: "exclamationmark.triangle.fill",
                 tint: Theme.warning,
-                text: "Not saved on this device. Your words are here until you close the app."
+                text: L10n.text("apple.chatdraftnotice.not_saved_on_this_device_your_words_are_he.e5e95b26")
             ) {
-                Button("Try again", .refresh, action: retrySave)
+                Button(L10n.text("apple.chatdraftnotice.try_again.d8b8392e"), .refresh, action: retrySave)
                     .buttonStyle(NoticeActionButtonStyle())
             }
         } else if let unconfirmed {
@@ -30,11 +30,11 @@ struct ChatDraftNotice: View {
                 symbol: unconfirmed.checking ? "clock.arrow.circlepath" : "questionmark.circle.fill",
                 tint: unconfirmed.checking ? Theme.accent : Theme.warning,
                 text: unconfirmed.checking
-                    ? "Checking whether the machine took this message…"
-                    : "Delivery is not confirmed. Check again before starting another message."
+                    ? L10n.text("apple.chatdraftnotice.checking_whether_the_machine_took_this_mes.16f576a1")
+                    : L10n.text("apple.chatdraftnotice.delivery_is_not_confirmed_check_again_befo.29ad199b")
             ) {
                 if !unconfirmed.checking, let checkAgain {
-                    Button("Check again", .refresh, action: checkAgain)
+                    Button(L10n.text("apple.chatdraftnotice.check_again.fb7099ad"), .refresh, action: checkAgain)
                         .buttonStyle(NoticeActionButtonStyle())
                 }
             }

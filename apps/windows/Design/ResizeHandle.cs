@@ -26,8 +26,8 @@ internal sealed class ResizeHandle : UserControl
         Width = 6;
         Content = _thumb;
         IsTabStop = true;
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(this, "Drag or use Left and Right arrows to resize. Double-click to reset.");
-        ToolTipService.SetToolTip(this, "Drag to resize · Double-click to reset");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(this, L10n.Text("windows.resizehandle.drag_or_use_left_and_right_arrows_to_resiz.7cd7cd98"));
+        ToolTipService.SetToolTip(this, L10n.Text("windows.resizehandle.drag_to_resize_double_click_to_reset.0feeacb9"));
         Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeWestEast);
         PointerEntered += (_, _) => Background = Theme.AccentSoftBrush;

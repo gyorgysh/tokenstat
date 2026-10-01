@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.activity.compose.BackHandler
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.background
@@ -102,9 +104,9 @@ import kotlinx.serialization.json.put
 /// has, in the same order and with the same words, so a person who knows one
 /// phone knows the other.
 internal enum class PullTab(val title: String) {
-    Conversation("Conversation"),
-    Changes("Changes"),
-    Checks("Checks"),
+    Conversation(L10n.text("android.pulldetail.conversation.ccca1817")),
+    Changes(L10n.text("android.pulldetail.changes.bbd4b6a8")),
+    Checks(L10n.text("android.pulldetail.checks.de07d072")),
     ;
 
     val icon: ImageVector
@@ -176,7 +178,7 @@ internal fun PullDetailPage(
             nextCursor = page?.str("nextCursor")
             timelineError = null
         }.onFailure {
-            timelineError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+            timelineError = TunnelCopy.display(it.message ?: L10n.text("android.pulldetail.the_request_failed.db4fb447"), hostLabel)
         }
         loadingTimeline = false
     }
@@ -194,7 +196,7 @@ internal fun PullDetailPage(
             selectedPath = diffs.firstOrNull()?.str("path")
             diffError = null
         }.onFailure {
-            diffError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+            diffError = TunnelCopy.display(it.message ?: L10n.text("android.pulldetail.the_request_failed.db4fb447"), hostLabel)
         }
         loadingDiff = false
     }
@@ -214,7 +216,7 @@ internal fun PullDetailPage(
             if (checkoutBranch.isBlank()) checkoutBranch = view?.str("headRef").orEmpty()
             loadTimeline()
             if (tab == PullTab.Changes) loadDiff(refresh = refresh)
-        }.onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+        }.onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.pulldetail.the_request_failed.db4fb447"), hostLabel) }
         loading = false
     }
     LaunchedEffect(number) { load() }
@@ -240,7 +242,7 @@ internal fun PullDetailPage(
                 actionNotice = label
                 load(refresh = true)
             }.onFailure {
-                actionError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+                actionError = TunnelCopy.display(it.message ?: L10n.text("android.pulldetail.the_request_failed.db4fb447"), hostLabel)
             }
         } finally {
             actionBusy = false
@@ -255,11 +257,11 @@ internal fun PullDetailPage(
         verticalArrangement = Arrangement.spacedBy(Space.l),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            TsSecondaryButton(label = "Pull requests", icon = ActionIcon.Back.vector, small = true, onClick = onBack)
+            TsSecondaryButton(label = L10n.text("android.pulldetail.pull_requests.d9e3f260"), icon = ActionIcon.Back.vector, small = true, onClick = onBack)
             Spacer(Modifier.weight(1f))
             view?.str("url")?.takeIf { it.isNotBlank() }?.let { url ->
                 TsSecondaryButton(
-                    label = "Open on GitHub",
+                    label = L10n.text("android.pulldetail.open_on_github.03f69885"),
                     icon = ActionIcon.External.vector,
                     small = true,
                     onClick = { runCatching { CustomTabsIntent.Builder().build().launchUrl(context, url.toUri()) } },
@@ -267,7 +269,7 @@ internal fun PullDetailPage(
             }
             PullToolbarIconButton(
                 icon = ActionIcon.Refresh.vector,
-                description = "Refresh pull request",
+                description = L10n.text("android.pulldetail.refresh_pull_request.fc146ac9"),
                 busy = loading,
                 onClick = { scope.launch { load(refresh = true) } },
             )
@@ -276,7 +278,7 @@ internal fun PullDetailPage(
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 PullInlineError(error!!)
                 TsAccentButton(
-                    label = "Try again",
+                    label = L10n.text("android.pulldetail.try_again.d8b8392e"),
                     icon = ActionIcon.Refresh.vector,
                     small = true,
                     onClick = { scope.launch { load(refresh = true) } },
@@ -306,7 +308,7 @@ internal fun PullDetailPage(
                         val body = commentDraft.trim()
                         if (body.isNotEmpty()) {
                             commentDraft = ""
-                            scope.launch { act("Comment posted", "pulls.comment") { put("body", body) } }
+                            scope.launch { act(L10n.text("android.pulldetail.comment_posted.f79769cc"), "pulls.comment") { put("body", body) } }
                         }
                     },
                 )
@@ -328,19 +330,19 @@ internal fun PullDetailPage(
                 onReviewDraft = { reviewDraft = it },
                 onBeginReview = { reviewMode = it; reviewDraft = ""; actionError = null },
                 onCancelReview = { reviewMode = null; reviewDraft = "" },
-                onApprove = { scope.launch { act("Review approved", "pulls.review") { put("verdict", "approve"); put("body", "") } } },
+                onApprove = { scope.launch { act(L10n.text("android.pulldetail.review_approved.0978fd61"), "pulls.review") { put("verdict", "approve"); put("body", "") } } },
                 onSendReview = { mode ->
                     val body = reviewDraft.trim()
                     if (body.isNotEmpty()) {
                         reviewMode = null
                         reviewDraft = ""
-                        val message = if (mode == "requestChanges") "Changes requested" else "Review comment posted"
+                        val message = if (mode == "requestChanges") L10n.text("android.pulldetail.changes_requested.10a92a8a") else L10n.text("android.pulldetail.review_comment_posted.b23f0868")
                         scope.launch { act(message, "pulls.review") { put("verdict", mode); put("body", body) } }
                     }
                 },
-                onReady = { scope.launch { act("Ready for review", "pulls.ready") {} } },
+                onReady = { scope.launch { act(L10n.text("android.pulldetail.ready_for_review.75c2a5c8"), "pulls.ready") {} } },
                 onClose = { confirmingClose = true },
-                onReopen = { scope.launch { act("Pull request reopened", "pulls.reopen") {} } },
+                onReopen = { scope.launch { act(L10n.text("android.pulldetail.pull_request_reopened.03ed9cfc"), "pulls.reopen") {} } },
                 mergeMethod = mergeMethod,
                 onMergeMethod = { mergeMethod = it },
                 onMerge = { confirmingMerge = true },
@@ -349,7 +351,7 @@ internal fun PullDetailPage(
                 onCheckout = {
                     val branch = checkoutBranch.trim()
                     if (branch.isNotEmpty()) {
-                        scope.launch { act("Checked out $branch", "pulls.checkout") { put("branch", branch) } }
+                        scope.launch { act(L10n.text("android.pulldetail.checked_out_0.d61914af", "${branch}"), "pulls.checkout") { put("branch", branch) } }
                     }
                 },
             )
@@ -360,29 +362,29 @@ internal fun PullDetailPage(
     if (confirmingClose) {
         AlertDialog(
             onDismissRequest = { confirmingClose = false },
-            title = { Text("Close this pull request?") },
-            text = { Text("Other people will see it as closed. You can reopen it later.") },
+            title = { Text(L10n.text("android.pulldetail.close_this_pull_request.54b5c0b1")) },
+            text = { Text(L10n.text("android.pulldetail.other_people_will_see_it_as_closed_you_can.7b0cb552")) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmingClose = false
-                    scope.launch { act("Pull request closed", "pulls.close") {} }
-                }) { Text("Close pull request") }
+                    scope.launch { act(L10n.text("android.pulldetail.pull_request_closed.2babc563"), "pulls.close") {} }
+                }) { Text(L10n.text("android.pulldetail.close_pull_request.672e174d")) }
             },
-            dismissButton = { TextButton(onClick = { confirmingClose = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { confirmingClose = false }) { Text(L10n.text("common.cancel")) } },
         )
     }
     if (confirmingMerge) {
         AlertDialog(
             onDismissRequest = { confirmingMerge = false },
-            title = { Text("Merge this pull request?") },
-            text = { Text("This changes the shared repository and cannot be undone from tokenstat.") },
+            title = { Text(L10n.text("android.pulldetail.merge_this_pull_request.6ea40a2a")) },
+            text = { Text(L10n.text("android.pulldetail.this_changes_the_shared_repository_and_can.ef54ace2")) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmingMerge = false
-                    scope.launch { act("Pull request merged", "pulls.merge") { put("mergeMethod", mergeMethod) } }
-                }) { Text("Merge with ${PullReview.mergeTitle(mergeMethod).lowercase()}") }
+                    scope.launch { act(L10n.text("android.pulldetail.pull_request_merged.5f0f1f6d"), "pulls.merge") { put("mergeMethod", mergeMethod) } }
+                }) { Text(L10n.text("android.pulldetail.merge_with_0.9456a9db", "${PullReview.mergeTitle(mergeMethod).lowercase()}")) }
             },
-            dismissButton = { TextButton(onClick = { confirmingMerge = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { confirmingMerge = false }) { Text(L10n.text("common.cancel")) } },
         )
     }
 }
@@ -436,7 +438,7 @@ private fun PullHero(view: JsonObject, number: Long) {
                     horizontalArrangement = Arrangement.spacedBy(Space.s),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("opened #$number", style = TsType.footnote, color = colors.textSecondary)
+                    Text(L10n.text("android.pulldetail.opened_0.095c9540", "${number}"), style = TsType.footnote, color = colors.textSecondary)
                     pullEpochMillis(view.str("createdAt"))?.let {
                         Text("·", style = TsType.footnote, color = colors.textTertiary)
                         // The iPhone's abbreviated formatter writes "3d ago",
@@ -457,7 +459,7 @@ private fun PullHero(view: JsonObject, number: Long) {
             horizontalArrangement = Arrangement.spacedBy(Space.s),
         ) {
             Text(
-                if (draft) "Draft" else state.replaceFirstChar(Char::uppercase),
+                if (draft) L10n.text("android.pulldetail.draft.ebf12ef4") else state.replaceFirstChar(Char::uppercase),
                 style = TsType.caption.copy(fontWeight = FontWeight.SemiBold),
                 color = when {
                     state == "closed" -> colors.danger
@@ -476,7 +478,7 @@ private fun PullHero(view: JsonObject, number: Long) {
                 PullBranchChip(view.str("headRef").orEmpty(), Modifier.weight(1f, fill = false))
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowForward,
-                    contentDescription = "into",
+                    contentDescription = L10n.text("android.pulldetail.into.6b847a0e"),
                     tint = colors.textTertiary,
                     modifier = Modifier.size(12.dp),
                 )
@@ -490,7 +492,7 @@ private fun PullHero(view: JsonObject, number: Long) {
             }
             view.long("changedFiles")?.let {
                 Text(
-                    "$it files",
+                    L10n.text("android.pulldetail.0_files.fb42ce4d", "${it}"),
                     style = TsType.caption.copy(fontWeight = FontWeight.SemiBold),
                     color = colors.textSecondary,
                     maxLines = 1,
@@ -635,19 +637,19 @@ private fun PullConversationTab(
         ) {
             val body = view.str("body").orEmpty().trim()
             if (body.isEmpty()) {
-                Text("No description was added.", style = TsType.footnote, color = colors.textTertiary)
+                Text(L10n.text("android.pulldetail.no_description_was_added.68442d50"), style = TsType.footnote, color = colors.textTertiary)
             } else {
                 MarkdownText(pullBodyMarkdown(body), TsType.chatBody, colors.textPrimary)
             }
         }
         timeline.forEach { event -> PullTimelineEntry(event) }
         if (loadingTimeline) {
-            Text("Loading activity…", style = TsType.footnote, color = colors.textSecondary)
+            Text(L10n.text("android.pulldetail.loading_activity.a389c395"), style = TsType.footnote, color = colors.textSecondary)
         }
         timelineError?.let { PullInlineError(it) }
         if (nextCursor != null) {
             TsSecondaryButton(
-                label = "Earlier activity",
+                label = L10n.text("android.pulldetail.earlier_activity.2e9839ac"),
                 icon = ActionIcon.More.vector,
                 small = true,
                 onClick = onMore,
@@ -806,7 +808,7 @@ private fun PullCommentComposer(
                 modifier = Modifier.size(16.dp),
             )
             Text(
-                "Join the conversation",
+                L10n.text("android.pulldetail.join_the_conversation.a0a9b316"),
                 style = TsType.footnote.copy(fontWeight = FontWeight.SemiBold),
                 color = colors.textPrimary,
             )
@@ -815,18 +817,18 @@ private fun PullCommentComposer(
             text,
             onText,
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("Write a comment…") },
+            placeholder = { Text(L10n.text("android.pulldetail.write_a_comment.d21c3e2f")) },
             minLines = 3,
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "Markdown is supported",
+                L10n.text("android.pulldetail.markdown_is_supported.c08eb344"),
                 style = TsType.caption2,
                 color = colors.textTertiary,
                 modifier = Modifier.weight(1f),
             )
             TsAccentButton(
-                label = "Comment",
+                label = L10n.text("android.pulldetail.comment.44f5e3fb"),
                 icon = ActionIcon.Comment.vector,
                 small = true,
                 enabled = text.trim().isNotEmpty() && !busy,
@@ -854,8 +856,8 @@ private fun PullChangesTab(
             error != null -> PullInlineError(error)
             diffs.isEmpty() -> EmptyState(
                 Icons.Default.Description,
-                "No text changes",
-                "This pull request has no line-by-line diff to show.",
+                L10n.text("android.pulldetail.no_text_changes.08722a9e"),
+                L10n.text("android.pulldetail.this_pull_request_has_no_line_by_line_diff.680bf131"),
             )
             else -> {
                 Row(
@@ -1012,7 +1014,7 @@ private fun PullCheckRow(check: JsonObject) {
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                check.str("name") ?: "Check",
+                check.str("name") ?: L10n.text("android.pulldetail.check.9d60841e"),
                 style = TsType.footnote.copy(fontWeight = FontWeight.Medium),
                 color = colors.textPrimary,
                 maxLines = 1,
@@ -1034,7 +1036,7 @@ private fun PullCheckRow(check: JsonObject) {
         check.str("url")?.takeIf { it.isNotBlank() }?.let { url ->
             Icon(
                 ActionIcon.External.vector,
-                contentDescription = "Open check",
+                contentDescription = L10n.text("android.pulldetail.open_check.130779b8"),
                 tint = colors.accent,
                 modifier = Modifier
                     .size(18.dp)
@@ -1066,13 +1068,13 @@ private fun PullInspectorCard(view: JsonObject) {
             .padding(cardPaddingDp),
         verticalArrangement = Arrangement.spacedBy(Space.l),
     ) {
-        PullInspectorSection("REVIEW", Icons.Default.Visibility) {
+        PullInspectorSection(L10n.text("android.pulldetail.review.182e4992"), Icons.Default.Visibility) {
             val text = when {
                 state != "open" -> state.replaceFirstChar(Char::uppercase)
-                decision == "approved" -> "Approved"
-                decision == "changes_requested" -> "Changes requested"
-                view.bol("draft") -> "Draft"
-                else -> "Review pending"
+                decision == "approved" -> L10n.text("android.pulldetail.approved.87b42e40")
+                decision == "changes_requested" -> L10n.text("android.pulldetail.changes_requested.10a92a8a")
+                view.bol("draft") -> L10n.text("android.pulldetail.draft.ebf12ef4")
+                else -> L10n.text("android.pulldetail.review_pending.9834120e")
             }
             val tint = when (decision) {
                 "approved" -> colors.success
@@ -1086,15 +1088,15 @@ private fun PullInspectorCard(view: JsonObject) {
                     review.str("state")?.replace('_', ' ')?.replaceFirstChar(Char::uppercase),
                 )
             }
-            requests.forEach { PullActorRow(it, "Requested") }
+            requests.forEach { PullActorRow(it, L10n.text("android.pulldetail.requested.2d9e2828")) }
         }
         if (assignees.isNotEmpty()) {
-            PullInspectorSection("ASSIGNEES", Icons.Default.People) {
+            PullInspectorSection(L10n.text("android.pulldetail.assignees.6549675b"), Icons.Default.People) {
                 assignees.forEach { PullActorRow(it, null) }
             }
         }
         if (labels.isNotEmpty()) {
-            PullInspectorSection("LABELS", Icons.AutoMirrored.Filled.Label) {
+            PullInspectorSection(L10n.text("android.pulldetail.labels.47399b60"), Icons.AutoMirrored.Filled.Label) {
                 labels.forEach { label ->
                     Text(
                         label,
@@ -1109,11 +1111,11 @@ private fun PullInspectorCard(view: JsonObject) {
             }
         }
         if (state == "open") {
-            PullInspectorSection("MERGE", Icons.Default.Merge) {
+            PullInspectorSection(L10n.text("android.pulldetail.merge.fc2b737d"), Icons.Default.Merge) {
                 val mergeable = view.str("mergeable") == "mergeable"
                 PullInspectorValue(
                     if (mergeable) {
-                        "Ready to merge"
+                        L10n.text("android.pulldetail.ready_to_merge.28f7384e")
                     } else {
                         view.str("mergeState").orEmpty().replace('_', ' ').replaceFirstChar(Char::uppercase)
                     },
@@ -1201,14 +1203,14 @@ private fun PullActionsPanel(
                 tint = colors.textTertiary,
                 modifier = Modifier.size(12.dp),
             )
-            Text("ACTIONS", style = TsType.caption2.copy(fontWeight = FontWeight.SemiBold), color = colors.textTertiary)
+            Text(L10n.text("android.pulldetail.actions.1ba13aa6"), style = TsType.caption2.copy(fontWeight = FontWeight.SemiBold), color = colors.textTertiary)
         }
         if (state == "open") {
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                Text("Review", style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
-                TsSecondaryButton(label = "Approve", icon = ActionIcon.Approve.vector, small = true, enabled = !busy, onClick = onApprove)
-                TsSecondaryButton(label = "Request changes", icon = ActionIcon.Edit.vector, small = true, enabled = !busy, onClick = { onBeginReview("requestChanges") })
-                TsSecondaryButton(label = "Comment review", icon = ActionIcon.Comment.vector, small = true, enabled = !busy, onClick = { onBeginReview("comment") })
+                Text(L10n.text("android.pulldetail.review.aff0766a"), style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
+                TsSecondaryButton(label = L10n.text("android.pulldetail.approve.6007acbe"), icon = ActionIcon.Approve.vector, small = true, enabled = !busy, onClick = onApprove)
+                TsSecondaryButton(label = L10n.text("android.pulldetail.request_changes.cb5d9f98"), icon = ActionIcon.Edit.vector, small = true, enabled = !busy, onClick = { onBeginReview("requestChanges") })
+                TsSecondaryButton(label = L10n.text("android.pulldetail.comment_review.f8950d66"), icon = ActionIcon.Comment.vector, small = true, enabled = !busy, onClick = { onBeginReview("comment") })
                 val mode = reviewMode
                 if (mode != null) {
                     Column(
@@ -1226,10 +1228,10 @@ private fun PullActionsPanel(
                             minLines = 3,
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            TsSecondaryButton(label = "Cancel", icon = ActionIcon.Dismiss.vector, small = true, onClick = onCancelReview)
+                            TsSecondaryButton(label = L10n.text("common.cancel"), icon = ActionIcon.Dismiss.vector, small = true, onClick = onCancelReview)
                             Spacer(Modifier.weight(1f))
                             TsAccentButton(
-                                label = "Send review",
+                                label = L10n.text("android.pulldetail.send_review.e61e3577"),
                                 icon = ActionIcon.Send.vector,
                                 small = true,
                                 enabled = reviewDraft.trim().isNotEmpty() && !busy,
@@ -1240,10 +1242,10 @@ private fun PullActionsPanel(
                 }
             }
             if (view.bol("draft")) {
-                TsAccentButton(label = "Ready for review", icon = ActionIcon.Done.vector, small = true, enabled = !busy, onClick = onReady)
+                TsAccentButton(label = L10n.text("android.pulldetail.ready_for_review.75c2a5c8"), icon = ActionIcon.Done.vector, small = true, enabled = !busy, onClick = onReady)
             }
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                Text("Merge method", style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
+                Text(L10n.text("android.pulldetail.merge_method.889b19c3"), style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
                 Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     PullReview.MERGE_METHODS.forEach { method ->
                         if (method == mergeMethod) {
@@ -1254,29 +1256,29 @@ private fun PullActionsPanel(
                     }
                 }
                 TsAccentButton(
-                    label = "Merge pull request",
+                    label = L10n.text("android.pulldetail.merge_pull_request.4aa62232"),
                     icon = ActionIcon.Merge.vector,
                     small = true,
                     enabled = !view.bol("draft") && !busy,
                     onClick = onMerge,
                 )
             }
-            TsDangerButton(label = "Close pull request", icon = ActionIcon.Dismiss.vector, small = true, enabled = !busy, onClick = onClose)
+            TsDangerButton(label = L10n.text("android.pulldetail.close_pull_request.672e174d"), icon = ActionIcon.Dismiss.vector, small = true, enabled = !busy, onClick = onClose)
         } else if (state == "closed") {
-            TsAccentButton(label = "Reopen pull request", icon = ActionIcon.Reopen.vector, small = true, enabled = !busy, onClick = onReopen)
+            TsAccentButton(label = L10n.text("android.pulldetail.reopen_pull_request.6126288e"), icon = ActionIcon.Reopen.vector, small = true, enabled = !busy, onClick = onReopen)
         }
         Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-            Text("Local checkout", style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
+            Text(L10n.text("android.pulldetail.local_checkout.416562be"), style = TsType.caption.copy(fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
             OutlinedTextField(
                 checkoutBranch,
                 onCheckoutBranch,
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Local branch name") },
+                placeholder = { Text(L10n.text("android.pulldetail.local_branch_name.a33a6eba")) },
                 singleLine = true,
                 textStyle = TsType.mono(12),
             )
             TsSecondaryButton(
-                label = "Check out locally",
+                label = L10n.text("android.pulldetail.check_out_locally.433de9bf"),
                 icon = ActionIcon.Checkout.vector,
                 small = true,
                 enabled = checkoutBranch.trim().isNotEmpty() && !busy,
@@ -1346,7 +1348,7 @@ private fun PullNotice(message: String, tint: Color, icon: ImageVector, onDismis
         )
         Icon(
             ActionIcon.Dismiss.vector,
-            contentDescription = "Dismiss",
+            contentDescription = L10n.text("android.pulldetail.dismiss.48845bff"),
             tint = tint,
             modifier = Modifier
                 .size(16.dp)
@@ -1407,7 +1409,7 @@ private fun PullDetailSkeleton(summary: JsonObject?, number: Long) {
                         style = TsType.footnote,
                         color = colors.textSecondary,
                     )
-                    Text("Loading conversation…", style = TsType.caption, color = colors.textSecondary)
+                    Text(L10n.text("android.pulldetail.loading_conversation.5eb1e4a3"), style = TsType.caption, color = colors.textSecondary)
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
@@ -1478,19 +1480,19 @@ internal fun checkDurationText(startedAt: String?, completedAt: String?): String
 /// word, which is what the Apple timeline does.
 internal fun timelineSentence(kind: String, actor: String, subject: String?): String {
     val verb = when (kind) {
-        "committed" -> "committed"
-        "labeled" -> "added a label"
-        "unlabeled" -> "removed a label"
-        "assigned" -> "assigned"
-        "unassigned" -> "unassigned"
-        "reviewRequested" -> "requested a review"
-        "forcePushed" -> "force-pushed"
-        "renamed" -> "renamed the pull request"
-        "readyForReview" -> "marked this ready for review"
-        "closed" -> "closed the pull request"
-        "reopened" -> "reopened the pull request"
-        "merged" -> "merged the pull request"
-        else -> "updated the pull request"
+        "committed" -> L10n.text("android.pulldetail.committed.cc962289")
+        "labeled" -> L10n.text("android.pulldetail.added_a_label.d94d0d1f")
+        "unlabeled" -> L10n.text("android.pulldetail.removed_a_label.9b424566")
+        "assigned" -> L10n.text("android.pulldetail.assigned.2ebb9294")
+        "unassigned" -> L10n.text("android.pulldetail.unassigned.2f23e841")
+        "reviewRequested" -> L10n.text("android.pulldetail.requested_a_review.366ef14e")
+        "forcePushed" -> L10n.text("android.pulldetail.force_pushed.13045511")
+        "renamed" -> L10n.text("android.pulldetail.renamed_the_pull_request.03cbfb8e")
+        "readyForReview" -> L10n.text("android.pulldetail.marked_this_ready_for_review.9851474a")
+        "closed" -> L10n.text("android.pulldetail.closed_the_pull_request.0ee2b89d")
+        "reopened" -> L10n.text("android.pulldetail.reopened_the_pull_request.7a38a97b")
+        "merged" -> L10n.text("android.pulldetail.merged_the_pull_request.e32d2898")
+        else -> L10n.text("android.pulldetail.updated_the_pull_request.b58c4a83")
     }
     val suffix = subject?.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
     return "$actor $verb$suffix"
@@ -1499,13 +1501,13 @@ internal fun timelineSentence(kind: String, actor: String, subject: String?): St
 /// "3 of 31 checks passed", or the sentence for a head commit that publishes
 /// no check suite at all.
 internal fun checksHeadline(passed: Int, total: Int): String =
-    if (total == 0) "No checks reported" else "$passed of $total checks passed"
+    if (total == 0) L10n.text("android.pulldetail.no_checks_reported.8454518f") else L10n.text("android.pulldetail.0_of_1_checks_passed.17ecc810", "${passed}", "${total}")
 
 internal fun checksMessage(states: List<String>): String = when {
-    states.isEmpty() -> "The head commit does not publish a check suite."
-    states.contains("failing") -> "Something needs attention before this is ready."
-    states.contains("pending") -> "The remaining work is still running."
-    else -> "Everything reported by the head commit is green."
+    states.isEmpty() -> L10n.text("android.pulldetail.the_head_commit_does_not_publish_a_check_s.3a467ede")
+    states.contains("failing") -> L10n.text("android.pulldetail.something_needs_attention_before_this_is_r.1400a527")
+    states.contains("pending") -> L10n.text("android.pulldetail.the_remaining_work_is_still_running.1c81cb2a")
+    else -> L10n.text("android.pulldetail.everything_reported_by_the_head_commit_is.6083342c")
 }
 
 private fun checksIcon(states: List<String>): ImageVector = when {

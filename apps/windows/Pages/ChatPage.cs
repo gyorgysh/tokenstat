@@ -52,7 +52,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     {
         AcceptsReturn = true,
         TextWrapping = TextWrapping.Wrap,
-        PlaceholderText = "Ask about this folder",
+        PlaceholderText = L10n.Text("windows.chatpage.ask_about_this_folder.33b8b41b"),
         MinHeight = 72,
         MaxHeight = 220,
     };
@@ -111,7 +111,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             _pendingReveal = chatId;
         }
-        _draft.PlaceholderText = "Ask about this folder";
+        _draft.PlaceholderText = L10n.Text("windows.chatpage.ask_about_this_folder.33b8b41b");
         _draft.PreviewKeyDown += DraftOnPreviewKeyDown;
         PreviewKeyDown += PageOnPreviewKeyDown;
         _titleBox.LostFocus += async (_, _) =>
@@ -158,7 +158,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     /// The folder this chat belongs to, like the Mac conversation scope.
     /// </summary>
     public UIElement? ToolbarScope =>
-        Chrome.ScopeChip(string.IsNullOrEmpty(_folderName) ? "Chat" : _folderName);
+        Chrome.ScopeChip(string.IsNullOrEmpty(_folderName) ? L10n.Text("windows.chatpage.chat.460b3a7d") : _folderName);
 
     public IList<UIElement> ToolbarActions()
     {
@@ -166,7 +166,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             Buttons.ToolbarIcon(
                 ActionIcon.Refresh,
-                "Reload chats",
+                L10n.Text("windows.chatpage.reload_chats.fb6be0ad"),
                 async (_, _) =>
                 {
                     LogoRefresh.Began();
@@ -181,7 +181,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 }),
             Buttons.ToolbarIcon(
                 ActionIcon.Create,
-                "Start a chat",
+                L10n.Text("windows.chatpage.start_a_chat.d80b1888"),
                 async (_, _) => await CreateAsync()),
         };
     }
@@ -202,14 +202,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             _inspector.Children.Add(new TextBlock
             {
-                Text = "Chats",
+                Text = L10n.Text("common.chats"),
                 FontWeight = FontWeights.SemiBold,
             });
             _inspector.Children.Add(new TextBlock
             {
                 Text = _chats.Count == 0
-                    ? "No conversations in this folder yet."
-                    : $"{_chats.Count} {(_chats.Count == 1 ? "conversation" : "conversations")} in this folder.",
+                    ? L10n.Text("windows.chatpage.no_conversations_in_this_folder_yet.1cf8e78c")
+                    : L10n.Text("windows.chatpage.0_1_in_this_folder.8b3dad5f", $"{_chats.Count}", $"{(_chats.Count == 1 ? L10n.Text("windows.chatpage.conversation.8b34dbc2") : L10n.Text("windows.chatpage.conversations.5c0dc939"))}"),
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -219,43 +219,43 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var backend = Backend(Format.Text(chat, "backend"));
         _inspector.Children.Add(new TextBlock
         {
-            Text = Format.Text(chat, "title", "New chat"),
+            Text = Format.Text(chat, "title", L10n.Text("windows.chatpage.new_chat.db18382a")),
             FontWeight = FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
         });
         _inspector.Children.Add(new TextBlock
         {
-            Text = Format.Flag(chat, "running") ? "Running" : "Idle",
+            Text = Format.Flag(chat, "running") ? L10n.Text("common.running") : L10n.Text("common.idle"),
             Foreground = Format.Flag(chat, "running") ? Theme.AccentBrush : Theme.Brush(static () => Theme.StateIdle),
         });
         _inspector.Children.Add(Chrome.InspectorField(
-            "Agent", Format.Text(backend, "label", Format.Text(chat, "backend", "Agent"))));
+            L10n.Text("windows.chatpage.agent.11b39c93"), Format.Text(backend, "label", Format.Text(chat, "backend", L10n.Text("windows.chatpage.agent.11b39c93")))));
         var model = Format.Text(chat, "model");
         if (!string.IsNullOrEmpty(model))
         {
-            _inspector.Children.Add(Chrome.InspectorField("Model", model));
+            _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.chatpage.model.5e2c614c"), model));
         }
         var effort = Format.Text(chat, "effort");
         if (!string.IsNullOrEmpty(effort))
         {
-            _inspector.Children.Add(Chrome.InspectorField("Effort", effort));
+            _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.chatpage.effort.4387e5d3"), effort));
         }
         _inspector.Children.Add(Chrome.InspectorField(
-            "Mode", Format.Text(chat, "mode") == "plan" ? "Plan" : "Execute"));
+            L10n.Text("windows.chatpage.mode.5e23ec6a"), Format.Text(chat, "mode") == "plan" ? L10n.Text("windows.chatpage.plan.fa8ed0bd") : L10n.Text("windows.chatpage.execute.e3a67d95")));
         var personaId = Format.Text(chat, "personaId");
         if (!string.IsNullOrEmpty(personaId))
         {
             var persona = FindPersona(personaId);
             _inspector.Children.Add(Chrome.InspectorField(
-                "Persona", Format.Text(persona, "name", "Preset")));
+                L10n.Text("windows.chatpage.persona.31bdeef9"), Format.Text(persona, "name", L10n.Text("windows.chatpage.preset.7252e7ce"))));
         }
         if (_approvals.Count > 0)
         {
             _inspector.Children.Add(Chrome.InspectorField(
-                "Approvals", $"{_approvals.Count} waiting",
-                "Answer them in the transcript."));
+                L10n.Text("windows.chatpage.approvals.2bfc3471"), L10n.Text("windows.chatpage.0_waiting.15f51b52", $"{_approvals.Count}"),
+                L10n.Text("windows.chatpage.answer_them_in_the_transcript.fd152eae")));
         }
-        _inspector.Children.Add(Chrome.InspectorField("Spend", InspectorSpend()));
+        _inspector.Children.Add(Chrome.InspectorField(L10n.Text("windows.chatpage.spend.85f3d558"), InspectorSpend()));
     }
 
     private string InspectorSpend()
@@ -281,9 +281,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         }
         if (input == 0 && output == 0)
         {
-            return "Nothing counted yet";
+            return L10n.Text("windows.chatpage.nothing_counted_yet.b1c2a931");
         }
-        var tokens = (_aggregateUsage is null && _hasEarlier ? "Loaded messages: " : "") + $"{input:N0} in, {output:N0} out";
+        var tokens = (_aggregateUsage is null && _hasEarlier ? L10n.Text("windows.chatpage.loaded_messages.ee1d2f1b") : "") + L10n.Text("windows.chatpage.0_in_1_out.9d9c3e33", $"{input:N0}", $"{output:N0}");
         return cost > 0
             ? $"{tokens} · {cost.ToString("C2", CultureInfo.GetCultureInfo("en-US"))}"
             : tokens;
@@ -383,16 +383,16 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 // conversation is not in it, so it was deleted. An explicit
                 // destination must never fall back to a different thread.
                 _root.Children.Add(Chrome.Banner(
-                    "This conversation is no longer available in this folder. Choose another conversation from the list.",
+                    L10n.Text("windows.chatpage.this_conversation_is_no_longer_available_i.357d50bd"),
                     Theme.Danger, Symbol.Important));
             }
             if (_chats.Count == 0)
             {
                 _root.Children.Add(Chrome.Empty(
-                    "Start a chat",
-                    "Ask an agent to explore, plan, or work in this folder.",
+                    L10n.Text("windows.chatpage.start_a_chat.d80b1888"),
+                    L10n.Text("windows.chatpage.ask_an_agent_to_explore_plan_or_work_in_th.ebcac953"),
                     ActionIcon.Comment,
-                    ActionIconGlyph.PrimaryButton("New chat", ActionIcon.Create, async (_, _) => await CreateAsync())));
+                    ActionIconGlyph.PrimaryButton(L10n.Text("windows.chatpage.new_chat.db18382a"), ActionIcon.Create, async (_, _) => await CreateAsync())));
                 return;
             }
             var list = new StackPanel { Spacing = Theme.SpaceS };
@@ -433,19 +433,19 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var titles = new StackPanel { Spacing = 2, Margin = new Thickness(Theme.SpaceM, 0, 0, 0) };
         titles.Children.Add(new TextBlock
         {
-            Text = "Chat",
+            Text = L10n.Text("windows.chatpage.chat.460b3a7d"),
             FontSize = Fonts.PageTitle,
             FontWeight = FontWeights.SemiBold,
         });
         titles.Children.Add(new TextBlock
         {
-            Text = "Talk to an agent in this folder",
+            Text = L10n.Text("windows.chatpage.talk_to_an_agent_in_this_folder.df22c32f"),
             Opacity = 0.66,
             TextWrapping = TextWrapping.Wrap,
         });
         Grid.SetColumn(titles, 1);
         row.Children.Add(titles);
-        var create = ActionIconGlyph.PrimaryButton("New chat", ActionIcon.Create, async (_, _) => await CreateAsync());
+        var create = ActionIconGlyph.PrimaryButton(L10n.Text("windows.chatpage.new_chat.db18382a"), ActionIcon.Create, async (_, _) => await CreateAsync());
         Grid.SetColumn(create, 2);
         row.Children.Add(create);
         return row;
@@ -469,7 +469,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         }
         heading.Children.Add(new TextBlock
         {
-            Text = Format.Text(chat, "title", "New chat"),
+            Text = Format.Text(chat, "title", L10n.Text("windows.chatpage.new_chat.db18382a")),
             FontWeight = FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
             MaxWidth = 640,
@@ -504,8 +504,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         ChatPreviewCache.Attach(button, _workspaceId, id);
         button.Click += async (_, _) => await OpenAsync(id);
         var menu = ContextMenus.Menu(button);
-        ContextMenus.AddAsync(menu, "Open chat", async () => await OpenAsync(id));
-        ContextMenus.AddAsync(menu, "Remove chat…", async () => await ConfirmDeleteAsync(id));
+        ContextMenus.AddAsync(menu, L10n.Text("windows.chatpage.open_chat.0600175a"), async () => await OpenAsync(id));
+        ContextMenus.AddAsync(menu, L10n.Text("windows.chatpage.remove_chat.92fd2fb8"), async () => await ConfirmDeleteAsync(id));
         return button;
     }
 
@@ -513,7 +513,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     {
         var backend = Backend(Format.Text(chat, "backend"));
         var agent = Format.Text(backend, "label", Format.Text(chat, "backend"));
-        var mode = Format.Text(chat, "mode") == "plan" ? "Plan" : "Execute";
+        var mode = Format.Text(chat, "mode") == "plan" ? L10n.Text("windows.chatpage.plan.fa8ed0bd") : L10n.Text("windows.chatpage.execute.e3a67d95");
         return agent + " · " + mode;
     }
 
@@ -599,7 +599,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _composerDock.Child = null;
         _composerDock.Visibility = Visibility.Collapsed;
         _root.Children.Clear();
-        _root.Children.Add(ActionIconGlyph.Button("Chats", ActionIcon.Back, async (_, _) => await ShowListAsync()));
+        _root.Children.Add(ActionIconGlyph.Button(L10n.Text("common.chats"), ActionIcon.Back, async (_, _) => await ShowListAsync()));
         _root.Children.Add(Motion.SkeletonCard());
         _openChat = null;
         _approvals = new JsonArray();
@@ -645,9 +645,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             if (_openId == id && generation == _openGeneration && IsLoaded)
             {
                 _root.Children.Clear();
-                _root.Children.Add(ActionIconGlyph.Button("Chats", ActionIcon.Back, async (_, _) => await ShowListAsync()));
+                _root.Children.Add(ActionIconGlyph.Button(L10n.Text("common.chats"), ActionIcon.Back, async (_, _) => await ShowListAsync()));
                 _root.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
-                _root.Children.Add(ActionIconGlyph.Button("Try again", ActionIcon.Refresh, async (_, _) => await OpenAsync(id)));
+                _root.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.chatpage.try_again.d8b8392e"), ActionIcon.Refresh, async (_, _) => await OpenAsync(id)));
             }
         }
     }
@@ -662,13 +662,13 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         Detach(_costHost);
         _root.Children.Clear();
         var chrome = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        chrome.Children.Add(ActionIconGlyph.Button("Chats", ActionIcon.Back, async (_, _) => await ShowListAsync()));
-        chrome.Children.Add(ActionIconGlyph.Button("Delete", ActionIcon.Delete, async (_, _) => await ConfirmDeleteAsync()));
+        chrome.Children.Add(ActionIconGlyph.Button(L10n.Text("common.chats"), ActionIcon.Back, async (_, _) => await ShowListAsync()));
+        chrome.Children.Add(ActionIconGlyph.Button(L10n.Text("common.delete"), ActionIcon.Delete, async (_, _) => await ConfirmDeleteAsync()));
         _root.Children.Add(chrome);
 
         if (_titleBox.FocusState == FocusState.Unfocused)
         {
-            _titleBox.Text = Format.Text(_openChat, "title", "New chat");
+            _titleBox.Text = Format.Text(_openChat, "title", L10n.Text("windows.chatpage.new_chat.db18382a"));
         }
         _root.Children.Add(_titleBox);
 
@@ -690,18 +690,18 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var bypassOnly = gate == "bypassOnly";
         var running = Format.Flag(chat, "running");
         var body = new StackPanel { Spacing = Theme.SpaceM };
-        body.Children.Add(ActionIconGlyph.Button("Done", ActionIcon.Done, (_, _) =>
+        body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.done"), ActionIcon.Done, (_, _) =>
         {
             _setupExpanded = false;
             PaintConversation();
         }));
-        body.Children.Add(Chrome.SectionLabel("How this chat should work"));
-        body.Children.Add(Muted("Agent, model and mode also live on the composer. Personas stay here."));
+        body.Children.Add(Chrome.SectionLabel(L10n.Text("windows.chatpage.how_this_chat_should_work.b5eec3c8")));
+        body.Children.Add(Muted(L10n.Text("windows.chatpage.agent_model_and_mode_also_live_on_the_comp.23ec79e1")));
 
-        body.Children.Add(Labeled("Agent", AgentPicker(backendId, running)));
+        body.Children.Add(Labeled(L10n.Text("windows.chatpage.agent.11b39c93"), AgentPicker(backendId, running)));
         if (_personas.Count > 0)
         {
-            body.Children.Add(Labeled("Persona", PersonaPicker(Format.Text(chat, "personaId"), running)));
+            body.Children.Add(Labeled(L10n.Text("windows.chatpage.persona.31bdeef9"), PersonaPicker(Format.Text(chat, "personaId"), running)));
         }
         var models = backend?["models"] as JsonArray;
         if (models is { Count: > 0 })
@@ -722,15 +722,15 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 running,
                 async value => await UpdateAsync(new JsonObject { ["model"] = value })));
             picker.Children.Add(ActionIconGlyph.Button(
-                "Refresh",
+                L10n.Text("common.refresh"),
                 ActionIcon.Refresh,
                 async (_, _) => await ReloadBackendsAsync()));
-            body.Children.Add(Labeled("Model", picker));
+            body.Children.Add(Labeled(L10n.Text("windows.chatpage.model.5e2c614c"), picker));
         }
         var efforts = backend?["efforts"] as JsonArray;
         if (efforts is { Count: > 0 })
         {
-            body.Children.Add(Labeled("Effort", OptionPicker(
+            body.Children.Add(Labeled(L10n.Text("windows.chatpage.effort.4387e5d3"), OptionPicker(
                 efforts,
                 Format.Text(chat, "effort"),
                 running,
@@ -741,7 +741,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         body.Children.Add(ModePills(Format.Text(chat, "mode", "plan"), !running));
         var bypass = new CheckBox
         {
-            Content = "Work without asking",
+            Content = L10n.Text("windows.chatpage.work_without_asking.dde89661"),
             IsChecked = Format.Text(chat, "autonomy") == "bypass" || bypassOnly,
             IsEnabled = !running && !bypassOnly,
             Foreground = Theme.AccentBrush,
@@ -760,9 +760,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         }
         body.Children.Add(InstructionsCard(
             Format.Text(chat, "systemPrompt"),
-            Format.Text(backend, "label", "This agent"),
+            Format.Text(backend, "label", L10n.Text("windows.chatpage.this_agent.15af7e1b")),
             running));
-        return Card("Setup", body);
+        return Card(L10n.Text("windows.chatpage.setup.7013af4c"), body);
     }
 
     /// <summary>
@@ -774,10 +774,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     {
         var chatId = _openId;
         var stack = new StackPanel { Spacing = Theme.SpaceS };
-        stack.Children.Add(Chrome.SectionLabel("Instructions"));
+        stack.Children.Add(Chrome.SectionLabel(L10n.Text("windows.chatpage.instructions.934652dc")));
         var brief = new TextBox
         {
-            PlaceholderText = "How should this agent behave?",
+            PlaceholderText = L10n.Text("windows.chatpage.how_should_this_agent_behave.6cee0aaf"),
             Text = systemPrompt,
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
@@ -785,12 +785,12 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             IsEnabled = !running,
         };
         stack.Children.Add(brief);
-        var note = Muted("Sent as an instruction, never as part of your message.");
+        var note = Muted(L10n.Text("windows.chatpage.sent_as_an_instruction_never_as_part_of_yo.48abdbf3"));
         stack.Children.Add(note);
         // The handler is attached after creation so it can name the button
         // it hides. Declaring the handler inline would use save before it
         // exists.
-        var save = ActionIconGlyph.PrimaryButton("Save", ActionIcon.Save, (_, _) => { });
+        var save = ActionIconGlyph.PrimaryButton(L10n.Text("common.save"), ActionIcon.Save, (_, _) => { });
         save.Click += async (_, _) =>
         {
             await UpdateAsync(new JsonObject { ["systemPrompt"] = brief.Text ?? "" });
@@ -812,7 +812,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             Visibility = Visibility.Collapsed,
         };
         var toggle = ActionIconGlyph.Button(
-            "What tokenstat adds", ActionIcon.More, (_, _) =>
+            L10n.Text("windows.chatpage.what_tokenstat_adds.358d9a68"), ActionIcon.More, (_, _) =>
             {
                 added.Visibility = added.Visibility == Visibility.Visible
                     ? Visibility.Collapsed
@@ -844,10 +844,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             return;
         }
         var text = Format.Text(answer, "added");
-        added.Text = string.IsNullOrEmpty(text) ? "Not available on this computer." : text;
+        added.Text = string.IsNullOrEmpty(text) ? L10n.Text("windows.chatpage.not_available_on_this_computer.ffcbd9b9") : text;
         note.Text = Format.Text(answer, "channel") == "systemPrompt"
-            ? $"{agent} takes this as a system prompt, so it is never part of your message."
-            : $"{agent} has no system-prompt flag, so this is sent once, ahead of your message.";
+            ? L10n.Text("windows.chatpage.0_takes_this_as_a_system_prompt_so_it_is_n.dc332cd6", $"{agent}")
+            : L10n.Text("windows.chatpage.0_has_no_system_prompt_flag_so_this_is_sen.01aa66c2", $"{agent}");
     }
 
     private UIElement AgentPicker(string current, bool disabled)
@@ -888,14 +888,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             string.IsNullOrEmpty(current) ? 0 : PersonaSeed.For(current), 40);
         face.VerticalAlignment = VerticalAlignment.Center;
         var box = new ComboBox { MinWidth = 220, IsEnabled = !disabled };
-        box.Items.Add(new ComboBoxItem { Content = "No preset", Tag = "" });
+        box.Items.Add(new ComboBoxItem { Content = L10n.Text("windows.chatpage.no_preset.396e7b77"), Tag = "" });
         box.SelectedIndex = 0;
         foreach (var persona in _personas)
         {
             if (persona is null) continue;
             var id = Format.Text(persona, "id");
             var mark = Format.Text(persona, "mark");
-            var name = Format.Text(persona, "name", "Persona");
+            var name = Format.Text(persona, "name", L10n.Text("windows.chatpage.persona.31bdeef9"));
             box.Items.Add(new ComboBoxItem
             {
                 Content = string.IsNullOrEmpty(mark) ? name : mark + "  " + name,
@@ -948,7 +948,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var box = new ComboBox { MinWidth = 180, IsEnabled = !disabled };
         if (includeDefault)
         {
-            box.Items.Add(new ComboBoxItem { Content = "Default", Tag = "" });
+            box.Items.Add(new ComboBoxItem { Content = L10n.Text("windows.chatpage.default.21b111cb"), Tag = "" });
             if (string.IsNullOrEmpty(current)) box.SelectedIndex = 0;
         }
         foreach (var option in options)
@@ -975,7 +975,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private UIElement ModePills(string mode, bool enabled)
     {
         return Chrome.Segmented(
-            [("plan", "Plan"), ("execute", "Execute")],
+            [("plan", L10n.Text("windows.chatpage.plan.fa8ed0bd")), ("execute", L10n.Text("windows.chatpage.execute.e3a67d95"))],
             mode,
             async value =>
             {
@@ -1025,8 +1025,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             {
                 _transcript.Children.Clear();
                 var waiting = EmptyState.View(
-                    "Waiting for that computer",
-                    "That computer has not answered yet.",
+                    L10n.Text("windows.chatpage.waiting_for_that_computer.da4d8f33"),
+                    L10n.Text("windows.chatpage.that_computer_has_not_answered_yet.da66b3c8"),
                     EmptyArtKind.Waiting);
                 waiting.Tag = waitingKey;
                 _transcript.Children.Add(waiting);
@@ -1140,7 +1140,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         };
         if (view is FrameworkElement element && !string.IsNullOrEmpty(item.Text))
         {
-            var title = item.Kind == ItemKind.Assistant ? "Copy response" : item.Kind == ItemKind.Thinking ? "Copy reasoning" : "Copy";
+            var title = item.Kind == ItemKind.Assistant ? L10n.Text("windows.chatpage.copy_response.f0f755af") : item.Kind == ItemKind.Thinking ? L10n.Text("windows.chatpage.copy_reasoning.5d2976d8") : L10n.Text("common.copy");
             ContextMenus.Copy(ContextMenus.Menu(element), title, () => item.Text);
         }
         return view;
@@ -1253,9 +1253,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             var item = items[index];
             if (!item.Running) continue;
             if (item.Kind == ItemKind.Tool) return SeatStep.Phrase(item.Verb, item.Target);
-            if (item.Kind == ItemKind.Edit) return SeatStep.Phrase("Edit", item.Path);
+            if (item.Kind == ItemKind.Edit) return SeatStep.Phrase(L10n.Text("common.edit"), item.Path);
         }
-        return "Working";
+        return L10n.Text("common.working");
     }
 
     private bool HasPendingApproval()
@@ -1369,7 +1369,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 },
             },
         };
-        ContextMenus.Copy(ContextMenus.Menu(block), "Copy code", () => code);
+        ContextMenus.Copy(ContextMenus.Menu(block), L10n.Text("windows.chatpage.copy_code.49a0053f"), () => code);
         return block;
     }
 
@@ -1381,7 +1381,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var body = new StackPanel { Spacing = Theme.SpaceS };
         body.Children.Add(new TextBlock
         {
-            Text = pending ? "Permission needed" : "Permission answered",
+            Text = pending ? L10n.Text("windows.chatpage.permission_needed.4e25d34a") : L10n.Text("windows.chatpage.permission_answered.82fb2221"),
             FontWeight = FontWeights.SemiBold,
         });
         body.Children.Add(Chip(SeatStep.ApprovalWord(verb, pending)));
@@ -1397,18 +1397,18 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
             var id = Format.Text(approval, "id");
-            actions.Children.Add(ActionIconGlyph.Button("Allow", ActionIcon.Allow, async (_, _) => await ResolveAsync(id, "allow")));
-            actions.Children.Add(ActionIconGlyph.PrimaryButton("Always allow", ActionIcon.Allow, async (_, _) => await ResolveAsync(id, "allowAlways")));
-            actions.Children.Add(ActionIconGlyph.Button("Deny", ActionIcon.Deny, async (_, _) => await ResolveAsync(id, "deny")));
+            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.chatpage.allow.e213c161"), ActionIcon.Allow, async (_, _) => await ResolveAsync(id, "allow")));
+            actions.Children.Add(ActionIconGlyph.PrimaryButton(L10n.Text("windows.chatpage.always_allow.977618bd"), ActionIcon.Allow, async (_, _) => await ResolveAsync(id, "allowAlways")));
+            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.chatpage.deny.05a2d733"), ActionIcon.Deny, async (_, _) => await ResolveAsync(id, "deny")));
             body.Children.Add(actions);
             var note = SeatStep.AllowAlwaysNote(verb, Format.Text(approval, "shellPrefix"));
             if (!string.IsNullOrEmpty(note)) body.Children.Add(Muted(note));
         }
         else
         {
-            body.Children.Add(Muted("This request is no longer waiting."));
+            body.Children.Add(Muted(L10n.Text("windows.chatpage.this_request_is_no_longer_waiting.b64fd4de")));
         }
-        var border = (Border)Card("Permission", body);
+        var border = (Border)Card(L10n.Text("windows.chatpage.permission.229efc8f"), body);
         border.BorderBrush = pending ? Theme.Brush(static () => Theme.Accent) : Theme.BorderBrush;
         return border;
     }
@@ -1450,14 +1450,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             });
         }
         body.Children.Add(text);
-        return Card("Attachment", body);
+        return Card(L10n.Text("windows.chatpage.attachment.040d2b36"), body);
     }
 
     private static UIElement UsageLine(DisplayItem item)
     {
         var text = string.Format(
             CultureInfo.InvariantCulture,
-            "{0:N0} in · {1:N0} out",
+            L10n.Text("windows.chatpage.0_n0_in_1_n0_out.bcfb97ef"),
             item.Input,
             item.Output);
         if (item.Cost > 0)
@@ -1505,8 +1505,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var body = new StackPanel { Spacing = Theme.SpaceS };
         if (!any)
         {
-            body.Children.Add(Muted("Tokens and cost show up after a turn."));
-            return Card(_aggregateUsage is null && _hasEarlier ? "Loaded messages" : "This conversation", body);
+            body.Children.Add(Muted(L10n.Text("windows.chatpage.tokens_and_cost_show_up_after_a_turn.722fc82f")));
+            return Card(_aggregateUsage is null && _hasEarlier ? L10n.Text("windows.chatpage.loaded_messages.0202f0cd") : L10n.Text("windows.chatpage.this_conversation.0e82ebfc"), body);
         }
         var track = new Grid { Height = 6 };
         track.Children.Add(new Border
@@ -1526,8 +1526,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         track.Children.Add(split);
         body.Children.Add(track);
         var legend = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceM };
-        legend.Children.Add(Fonts.Tabular(new TextBlock { Text = $"In {input:N0}", FontSize = 12 }));
-        legend.Children.Add(Fonts.Tabular(new TextBlock { Text = $"Out {output:N0}", FontSize = 12 }));
+        legend.Children.Add(Fonts.Tabular(new TextBlock { Text = L10n.Text("windows.chatpage.in_0.b1de9d0d", $"{input:N0}"), FontSize = 12 }));
+        legend.Children.Add(Fonts.Tabular(new TextBlock { Text = L10n.Text("windows.chatpage.out_0.6b0d54dd", $"{output:N0}"), FontSize = 12 }));
         if (cost > 0)
         {
             legend.Children.Add(Fonts.Tabular(new TextBlock
@@ -1539,8 +1539,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             }));
         }
         body.Children.Add(legend);
-        if (cache > 0) body.Children.Add(Muted($"{cache:N0} cached"));
-        return Card(_aggregateUsage is null && _hasEarlier ? "Loaded messages" : "This conversation", body);
+        if (cache > 0) body.Children.Add(Muted(L10n.Text("windows.chatpage.0_cached.60f9f8b8", $"{cache:N0}")));
+        return Card(_aggregateUsage is null && _hasEarlier ? L10n.Text("windows.chatpage.loaded_messages.0202f0cd") : L10n.Text("windows.chatpage.this_conversation.0e82ebfc"), body);
     }
 
     private UIElement Composer()
@@ -1562,7 +1562,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var attach = Buttons.ToolbarIcon(ActionIcon.Attach, "Attach a file", async (_, _) => await AttachAsync());
+        var attach = Buttons.ToolbarIcon(ActionIcon.Attach, L10n.Text("windows.chatpage.attach_a_file.21298c62"), async (_, _) => await AttachAsync());
         attach.IsEnabled = !Busy();
         var options = CompactSetup();
         Grid.SetColumn((FrameworkElement)options, 1);
@@ -1633,13 +1633,13 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var bypassOnly = gate == "bypassOnly";
         if (bypassOnly)
         {
-            row.Children.Add(Chip("Don't ask"));
+            row.Children.Add(Chip(L10n.Text("windows.chatpage.don_t_ask.15dae980")));
         }
         else
         {
             row.Children.Add(AutonomyPills(Format.Text(chat, "autonomy", "standard"), !locked));
         }
-        row.Children.Add(ActionIconGlyph.Button("Setup", ActionIcon.Settings, (_, _) =>
+        row.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.chatpage.setup.7013af4c"), ActionIcon.Settings, (_, _) =>
         {
             _setupExpanded = true;
             PaintConversation();
@@ -1677,8 +1677,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
         var flyout = new Flyout();
         var panel = new StackPanel { Spacing = Theme.SpaceS, Width = 360 };
-        panel.Children.Add(new TextBlock { Text = "Agent, model and effort", FontSize = 16, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        var search = new TextBox { PlaceholderText = "Filter agents, models and efforts" };
+        panel.Children.Add(new TextBlock { Text = L10n.Text("windows.chatpage.agent_model_and_effort.217ff8ae"), FontSize = 16, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        var search = new TextBox { PlaceholderText = L10n.Text("windows.chatpage.filter_agents_models_and_efforts.315032da") };
         panel.Children.Add(search);
         var choices = new StackPanel { Spacing = 4 };
         panel.Children.Add(new ScrollViewer { MaxHeight = 360, Content = choices, HorizontalScrollMode = ScrollMode.Disabled });
@@ -1713,12 +1713,12 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     choices.Children.Add(pick);
                 }
             }
-            Group("AGENT", _backends.Where(item => item is not null && (Format.Text(item, "id") != "sh" || backendId == "sh"))
+            Group(L10n.Text("windows.chatpage.agent.b62db7d0"), _backends.Where(item => item is not null && (Format.Text(item, "id") != "sh" || backendId == "sh"))
                 .Select(item => (Format.Text(item, "id"), Format.Text(item, "label", Format.Text(item, "id")))), "backend", backendId);
             foreach (var field in new[] { "model", "effort" })
             {
                 if (backend?[field + "s"] is not JsonArray values || values.Count == 0) continue;
-                var options = new List<(string, string)> { ("", "Default") };
+                var options = new List<(string, string)> { ("", L10n.Text("windows.chatpage.default.21b111cb")) };
                 foreach (var value in values)
                 {
                     var text = value?.ToString() ?? "";
@@ -1756,8 +1756,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private UIElement AutonomyPills(string current, bool enabled)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        row.Children.Add(AutonomyPill("Ask first", "standard", current, enabled));
-        row.Children.Add(AutonomyPill("Don't ask", "bypass", current, enabled));
+        row.Children.Add(AutonomyPill(L10n.Text("windows.chatpage.ask_first.4a9e8cf3"), "standard", current, enabled));
+        row.Children.Add(AutonomyPill(L10n.Text("windows.chatpage.don_t_ask.15dae980"), "bypass", current, enabled));
         return row;
     }
 
@@ -1812,8 +1812,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(0),
             };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, "Remove attachment " + file.Name);
-            ToolTipService.SetToolTip(button, "Remove attachment " + file.Name);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, L10n.Text("windows.chatpage.remove_attachment_0.bea47ab0", $"{file.Name}"));
+            ToolTipService.SetToolTip(button, L10n.Text("windows.chatpage.remove_attachment_0.bea47ab0", $"{file.Name}"));
             button.Click += (_, _) =>
             {
                 _attachments.Remove(remove);
@@ -1835,13 +1835,13 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (Busy())
         {
             var steering = SteerKnownAvailable();
-            var queue = ActionIconGlyph.PrimaryButton(steering ? "Next step" : "Queue", ActionIcon.Send, async (_, _) => await SendAsync());
+            var queue = ActionIconGlyph.PrimaryButton(steering ? L10n.Text("windows.chatpage.next_step.298a9207") : L10n.Text("windows.chatpage.queue.3b2fe03e"), ActionIcon.Send, async (_, _) => await SendAsync());
             var tip = steering
-                ? "The agent reads this on its next step."
-                : "Waits until this turn finishes. Stop and send now is on the queued message.";
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(queue, steering ? "Add a note for the next step" : "Queue");
+                ? L10n.Text("windows.chatpage.the_agent_reads_this_on_its_next_step.aab7b1c7")
+                : L10n.Text("windows.chatpage.waits_until_this_turn_finishes_stop_and_se.2df81427");
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(queue, steering ? L10n.Text("windows.chatpage.add_a_note_for_the_next_step.4778177a") : L10n.Text("windows.chatpage.queue.3b2fe03e"));
             ToolTipService.SetToolTip(queue, tip);
-            ContextMenus.AddAsync(ContextMenus.Menu(queue), "Stop and send now", async () =>
+            ContextMenus.AddAsync(ContextMenus.Menu(queue), L10n.Text("windows.chatpage.stop_and_send_now.8ad0a50d"), async () =>
             {
                 if (_openId is not string chat) return;
                 var noteRevision = _steerOverlay.Revision(chat);
@@ -1857,13 +1857,13 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 catch (Exception ex) { Banner(ex.Message); }
             });
             _composerActions.Children.Add(queue);
-            _composerActions.Children.Add(ActionIconGlyph.Button("Stop", ActionIcon.Stop, async (_, _) => await StopAsync()));
+            _composerActions.Children.Add(ActionIconGlyph.Button(L10n.Text("common.stop"), ActionIcon.Stop, async (_, _) => await StopAsync()));
         }
         else
         {
-            var send = ActionIconGlyph.PrimaryButton("Send", ActionIcon.Send, async (_, _) => await SendAsync());
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(send, "Send");
-            ToolTipService.SetToolTip(send, "Send");
+            var send = ActionIconGlyph.PrimaryButton(L10n.Text("windows.chatpage.send.f6f4688f"), ActionIcon.Send, async (_, _) => await SendAsync());
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(send, L10n.Text("windows.chatpage.send.f6f4688f"));
+            ToolTipService.SetToolTip(send, L10n.Text("windows.chatpage.send.f6f4688f"));
             _composerActions.Children.Add(send);
         }
     }
@@ -1887,7 +1887,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         }
         if (data.Length > AttachmentCap)
         {
-            Banner("An attachment is limited to 12 MB.");
+            Banner(L10n.Text("windows.chatpage.an_attachment_is_limited_to_12_mb.a0b63b0d"));
             return;
         }
         try
@@ -1904,7 +1904,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             var id = Format.Text(attached, "id");
             if (string.IsNullOrEmpty(id))
             {
-                Banner("Attachment was rejected.");
+                Banner(L10n.Text("windows.chatpage.attachment_was_rejected.c3b4db65"));
                 return;
             }
             _attachments.Add(new StagedFile(id, file.Name));
@@ -1936,14 +1936,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             var key = await OutboxKeyAsync(chat);
             if (_openId != chat || !IsLoaded) return;
             if (await TryParkSteerAsync(chat, text, sendNext, attachmentIds)) return;
-            if (_openChat?["sendRevision"] is null) throw new InvalidOperationException("Update the host to use reliable message delivery.");
+            if (_openChat?["sendRevision"] is null) throw new InvalidOperationException(L10n.Text("windows.chatpage.update_the_host_to_use_reliable_message_de.fcb58190"));
             var item = new QueuedChatMessage(Guid.NewGuid().ToString("N"), text, attachmentIds, Format.Long(_openChat, "sendRevision"));
             ChatOutbox.Shared.Update(key, rows =>
             {
                 if (sendNext)
                 {
                     if (rows.Any(row => row.AttemptedAt.HasValue))
-                        throw new InvalidOperationException("Check delivery of the pending message before sending another message first.");
+                        throw new InvalidOperationException(L10n.Text("windows.chatpage.check_delivery_of_the_pending_message_befo.a75b6c73"));
                     rows.Insert(0, item);
                 }
                 else rows.Add(item);
@@ -2002,10 +2002,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (id is null) return;
         var dialog = new ContentDialog
         {
-            Title = "Delete this chat?",
-            Content = "The transcript stays on this computer until you delete it. This cannot be undone.",
-            PrimaryButtonText = "Delete chat",
-            CloseButtonText = "Keep it",
+            Title = L10n.Text("windows.chatpage.delete_this_chat.848dad9b"),
+            Content = L10n.Text("windows.chatpage.the_transcript_stays_on_this_computer_unti.46662c93"),
+            PrimaryButtonText = L10n.Text("windows.chatpage.delete_chat.93291d9c"),
+            CloseButtonText = L10n.Text("windows.chatpage.keep_it.fdce5da2"),
             DefaultButton = ContentDialogButton.Close,
         };
         if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary) return;
@@ -2338,7 +2338,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     {
                         Id = "edit-" + Format.Text(ev, "callId", items.Count.ToString()),
                         Kind = ItemKind.Edit,
-                        Path = Format.Text(ev, "path", "File"),
+                        Path = Format.Text(ev, "path", L10n.Text("windows.chatpage.file.50009ce1")),
                         Added = Format.Long(ev, "added"),
                         Removed = Format.Long(ev, "removed"),
                         Patch = Format.Text(ev, "patch"),
@@ -2359,12 +2359,12 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 case "attachment":
                     FlushText();
                     FlushThinking();
-                    var attachmentName = Format.Text(ev, "name", "Attachment");
+                    var attachmentName = Format.Text(ev, "name", L10n.Text("windows.chatpage.attachment.040d2b36"));
                     items.Add(new DisplayItem
                     {
                         Id = "attachment-" + Format.Text(ev, "id", items.Count.ToString()),
                         Kind = ItemKind.Attachment,
-                        Name = string.IsNullOrEmpty(attachmentName) ? "Attachment" : attachmentName,
+                        Name = string.IsNullOrEmpty(attachmentName) ? L10n.Text("windows.chatpage.attachment.040d2b36") : attachmentName,
                         MediaType = Format.Text(ev, "mediaType"),
                         Size = Format.Long(ev, "size"),
                     });
@@ -2377,7 +2377,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     {
                         Id = "failed-" + items.Count,
                         Kind = ItemKind.Failed,
-                        Text = Format.Text(ev, "text", "The turn failed"),
+                        Text = Format.Text(ev, "text", L10n.Text("windows.chatpage.the_turn_failed.45783181")),
                     });
                     break;
                 case "done":
@@ -2433,21 +2433,21 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private static string GateChip(string tier) => tier switch
     {
-        "full" => "Approvals",
-        "rules" => "Rules",
-        "bypassOnly" => "Bypass only",
-        _ => "Checking",
+        "full" => L10n.Text("windows.chatpage.approvals.2bfc3471"),
+        "rules" => L10n.Text("windows.chatpage.rules.4228aeb0"),
+        "bypassOnly" => L10n.Text("windows.chatpage.bypass_only.6110acbf"),
+        _ => L10n.Text("windows.chatpage.checking.0dfe1d63"),
     };
 
     private static string GateCopy(string tier, bool bypass)
     {
-        if (bypass) return "This agent can use its backend's bypass mode in this folder.";
+        if (bypass) return L10n.Text("windows.chatpage.this_agent_can_use_its_backend_s_bypass_mo.620f4900");
         return tier switch
         {
-            "full" => "tokenstat asks before every tool action.",
-            "rules" => "Saved permission rules run. Anything else is denied.",
-            "bypassOnly" => "This backend has no tokenstat approval gate. Use Bypass only if you intend that.",
-            _ => "Checking this backend's permission support.",
+            "full" => L10n.Text("windows.chatpage.tokenstat_asks_before_every_tool_action.a67dbd55"),
+            "rules" => L10n.Text("windows.chatpage.saved_permission_rules_run_anything_else_i.ef7fb8c5"),
+            "bypassOnly" => L10n.Text("windows.chatpage.this_backend_has_no_tokenstat_approval_gat.a3ae2978"),
+            _ => L10n.Text("windows.chatpage.checking_this_backend_s_permission_support.13f013cf"),
         };
     }
 

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.setup
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ClientState
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
@@ -94,7 +96,7 @@ fun SetupStepScaffold(
             verticalArrangement = Arrangement.spacedBy(Space.s),
         ) {
             Text(
-                "Step $number of $SETUP_CONNECT_TOTAL",
+                L10n.text("android.setupconnectscreens.step_0_of_1.92f19534", "${number}", "${SETUP_CONNECT_TOTAL}"),
                 style = TsType.caption.copy(fontWeight = FontWeight.SemiBold),
                 color = colors.accent,
             )
@@ -144,7 +146,7 @@ fun SetupFailureBanner(
                         Text(it, style = TsType.mono(11), color = colors.textTertiary)
                     }
                 }
-                TsSecondaryButton(label = "Dismiss", small = true, onClick = onDismiss)
+                TsSecondaryButton(label = L10n.text("android.setupconnectscreens.dismiss.48845bff"), small = true, onClick = onDismiss)
             }
             val step = failure.action.step()
             if (step != null && onRecover != null) {
@@ -155,13 +157,13 @@ fun SetupFailureBanner(
                 )
             } else if (failure.action == SetupAction.SIGN_IN_ACCOUNT) {
                 Text(
-                    "Sign in from the account screen, then continue here.",
+                    L10n.text("android.setupconnectscreens.sign_in_from_the_account_screen_then_conti.45d5f944"),
                     style = TsType.caption,
                     color = colors.textSecondary,
                 )
             } else if (failure.action == SetupAction.UPDATE_MACHINE) {
                 Text(
-                    "Update tokenstat on that machine, then continue here.",
+                    L10n.text("android.setupconnectscreens.update_tokenstat_on_that_machine_then_cont.f6294158"),
                     style = TsType.caption,
                     color = colors.textSecondary,
                 )
@@ -242,15 +244,15 @@ fun SetupWhereStep(
         }
     }
     SetupStepScaffold(
-        title = "Which server",
-        subtitle = "Choose a saved server or enter its address. Connect securely over SSH with your own credentials.",
+        title = L10n.text("android.setupconnectscreens.which_server.f723b68c"),
+        subtitle = L10n.text("android.setupconnectscreens.choose_a_saved_server_or_enter_its_address.a9fb6642"),
         number = 1,
         failure = connect.failure,
         onDismissError = { connect.failure = null },
         onRecover = onRecover,
         footer = {
             TsAccentButton(
-                label = "Continue",
+                label = L10n.text("android.setupconnectscreens.continue.31fbef16"),
                 icon = ActionIcon.Next.vector,
                 onClick = {
                     if (connect.pickedHostId == null && connect.label.isBlank()) {
@@ -262,14 +264,14 @@ fun SetupWhereStep(
                 enabled = connect.whereReady(),
             )
             TsSecondaryButton(
-                label = "Set up with a terminal",
+                label = L10n.text("android.setupconnectscreens.set_up_with_a_terminal.c6e8442d"),
                 onClick = onByHand,
                 modifier = Modifier.fillMaxWidth(),
             )
         },
     ) {
         if (hosts.isNotEmpty()) {
-            SetupSection("Saved servers") {
+            SetupSection(L10n.text("android.setupconnectscreens.saved_servers.4bf08480")) {
                 hosts.forEach { host ->
                     val selected = connect.pickedHostId == host.sshString("id") && connect.pickedHostId != null
                     Row(
@@ -278,9 +280,9 @@ fun SetupWhereStep(
                         horizontalArrangement = Arrangement.spacedBy(Space.s),
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text(host.sshString("label") ?: "Server", style = TsType.body, color = colors.textPrimary)
+                            Text(host.sshString("label") ?: L10n.text("android.setupconnectscreens.server.aef7de28"), style = TsType.body, color = colors.textPrimary)
                             Text(
-                                "${host.sshString("username") ?: "root"}@${host.sshString("hostname") ?: ""}",
+                                "${host.sshString("username") ?: L10n.text("android.setupconnectscreens.root.4813494d")}@${host.sshString("hostname") ?: ""}",
                                 style = TsType.caption,
                                 color = colors.textSecondary,
                             )
@@ -291,16 +293,16 @@ fun SetupWhereStep(
             }
         }
         SetupSection(
-            if (hosts.isEmpty()) "The server"
-            else if (connect.pickedHostId == null) "Or type one" else "Type another",
+            if (hosts.isEmpty()) L10n.text("android.setupconnectscreens.the_server.442b5366")
+            else if (connect.pickedHostId == null) L10n.text("android.setupconnectscreens.or_type_one.3c8afc53") else L10n.text("android.setupconnectscreens.type_another.0993d6bc"),
         ) {
-            SetupLabeledField("Address", connect.hostname, "203.0.113.10") {
+            SetupLabeledField(L10n.text("android.setupconnectscreens.address.56ef8f20"), connect.hostname, "203.0.113.10") {
                 connect.editServer(ServerField.HOSTNAME, it)
             }
-            SetupLabeledField("User", connect.username, "root") {
+            SetupLabeledField(L10n.text("android.setupconnectscreens.user.b512d97e"), connect.username, "root") {
                 connect.editServer(ServerField.USERNAME, it)
             }
-            SetupLabeledField("Name", connect.label, "cloud one") {
+            SetupLabeledField(L10n.text("android.setupconnectscreens.name.dcd1d522"), connect.label, L10n.text("android.setupconnectscreens.cloud_one.ab0123af")) {
                 connect.editServer(ServerField.LABEL, it)
             }
         }
@@ -324,15 +326,15 @@ fun SetupCredentialStep(
     val keys = connect.libraryKeys.orEmpty()
     val ready = connect.credential.ready(connect.password)
     SetupStepScaffold(
-        title = "How to sign in",
-        subtitle = "A key from your vault, or a password used once for this connection and never written down.",
+        title = L10n.text("android.setupconnectscreens.how_to_sign_in.6730dada"),
+        subtitle = L10n.text("android.setupconnectscreens.a_key_from_your_vault_or_a_password_used_o.75f6b9b8"),
         number = 2,
         failure = connect.failure,
         onDismissError = { connect.failure = null },
         onRecover = onRecover,
         footer = {
             TsAccentButton(
-                label = "Continue",
+                label = L10n.text("android.setupconnectscreens.continue.31fbef16"),
                 icon = ActionIcon.Next.vector,
                 onClick = { onPush(SetupStep.FINGERPRINT) },
                 modifier = Modifier.fillMaxWidth(),
@@ -342,12 +344,12 @@ fun SetupCredentialStep(
     ) {
         if (keys.isEmpty()) {
             Text(
-                "There are no keys in your vault yet. Add one on the SSH screen, or use a password this time.",
+                L10n.text("android.setupconnectscreens.there_are_no_keys_in_your_vault_yet_add_on.c14f0501"),
                 style = TsType.subheadline,
                 color = colors.textSecondary,
             )
         } else {
-            SetupSection("Keys in your vault") {
+            SetupSection(L10n.text("android.setupconnectscreens.keys_in_your_vault.32d8b1ef")) {
                 keys.forEach { key ->
                     val selected = connect.credential == SetupCredential.Key(key.sshString("id") ?: "")
                     Row(
@@ -359,7 +361,7 @@ fun SetupCredentialStep(
                         horizontalArrangement = Arrangement.spacedBy(Space.s),
                     ) {
                         Text(
-                            key.sshString("label") ?: "Key",
+                            key.sshString("label") ?: L10n.text("android.setupconnectscreens.key.99a52df3"),
                             style = TsType.body,
                             color = colors.textPrimary,
                             modifier = Modifier.weight(1f),
@@ -369,7 +371,7 @@ fun SetupCredentialStep(
                 }
             }
         }
-        SetupSection(if (keys.isEmpty()) "A password, this time only" else "Or a password, this time only") {
+        SetupSection(if (keys.isEmpty()) L10n.text("android.setupconnectscreens.a_password_this_time_only.0283f848") else L10n.text("android.setupconnectscreens.or_a_password_this_time_only.44e1c7da")) {
             OutlinedTextField(
                 value = connect.password,
                 onValueChange = {
@@ -379,13 +381,13 @@ fun SetupCredentialStep(
                         connect.credential = SetupCredential.None
                     }
                 },
-                placeholder = { Text("Password") },
+                placeholder = { Text(L10n.text("android.setupconnectscreens.password.e7cf3ef4")) },
                 visualTransformation = PasswordVisualTransformation(),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(
-                "Used for this connection and dropped when the wizard closes. It is never saved to the vault or to this device.",
+                L10n.text("android.setupconnectscreens.used_for_this_connection_and_dropped_when.43398559"),
                 style = TsType.caption,
                 color = colors.textSecondary,
             )
@@ -411,8 +413,8 @@ fun SetupFingerprintStep(
         if (connect.fingerprint == null && !connect.working) probe()
     }
     SetupStepScaffold(
-        title = "Is this your server?",
-        subtitle = "Compare this fingerprint with your server before continuing. It identifies the machine that will receive your credentials.",
+        title = L10n.text("android.setupconnectscreens.is_this_your_server.1d76f188"),
+        subtitle = L10n.text("android.setupconnectscreens.compare_this_fingerprint_with_your_server.f06f2526"),
         number = 3,
         failure = connect.failure,
         onDismissError = { connect.failure = null },
@@ -421,13 +423,13 @@ fun SetupFingerprintStep(
             if (connect.fingerprint == null) {
                 if (connect.working) {
                     TsAccentButton(
-                        label = "Stop",
+                        label = L10n.text("common.stop"),
                         onClick = { connect.cancel() },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 } else {
                     TsAccentButton(
-                        label = "Ask the server",
+                        label = L10n.text("android.setupconnectscreens.ask_the_server.5d186479"),
                         icon = ActionIcon.Connect.vector,
                         onClick = { probe() },
                         modifier = Modifier.fillMaxWidth(),
@@ -435,7 +437,7 @@ fun SetupFingerprintStep(
                 }
             } else {
                 TsAccentButton(
-                    label = "This is my server",
+                    label = L10n.text("android.setupconnectscreens.this_is_my_server.22acffe8"),
                     icon = ActionIcon.Approve.vector,
                     onClick = {
                         scope.launch {
@@ -447,7 +449,7 @@ fun SetupFingerprintStep(
                     enabled = !connect.working,
                 )
                 TsSecondaryButton(
-                    label = "Ask again",
+                    label = L10n.text("android.setupconnectscreens.ask_again.0d9ad5ef"),
                     icon = ActionIcon.Refresh.vector,
                     onClick = {
                         connect.fingerprint = null
@@ -458,14 +460,14 @@ fun SetupFingerprintStep(
             }
         },
     ) {
-        SetupSection("Fingerprint") {
+        SetupSection(L10n.text("android.setupconnectscreens.fingerprint.ba7af0b7")) {
             val pin = connect.fingerprint
             if (pin != null) {
                 SelectionContainer {
                     Text(pin, style = TsType.mono(13), color = colors.textPrimary)
                 }
                 Text(
-                    "Compare it with what the server itself reports. On the machine, `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` prints it.",
+                    L10n.text("android.setupconnectscreens.compare_it_with_what_the_server_itself_rep.0f5fff76"),
                     style = TsType.caption,
                     color = colors.textSecondary,
                 )
@@ -475,15 +477,15 @@ fun SetupFingerprintStep(
                     horizontalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Text("Asking the server…", style = TsType.subheadline, color = colors.textPrimary)
+                    Text(L10n.text("android.setupconnectscreens.asking_the_server.fb689559"), style = TsType.subheadline, color = colors.textPrimary)
                 }
                 Text(
-                    "An address that is wrong takes about a minute to give up, because nothing answers to say so.",
+                    L10n.text("android.setupconnectscreens.an_address_that_is_wrong_takes_about_a_min.c355da67"),
                     style = TsType.caption,
                     color = colors.textSecondary,
                 )
             } else {
-                Text("Nothing asked yet.", style = TsType.subheadline, color = colors.textSecondary)
+                Text(L10n.text("android.setupconnectscreens.nothing_asked_yet.3f88b8bf"), style = TsType.subheadline, color = colors.textSecondary)
             }
         }
     }
@@ -513,8 +515,8 @@ fun SetupCheckStep(
     val check = connect.check
     val ready = (check?.get("ready") as? JsonPrimitive)?.booleanOrNull == true
     SetupStepScaffold(
-        title = "What is on it",
-        subtitle = "Read before anything is written. Nothing on the server changes on this screen.",
+        title = L10n.text("android.setupconnectscreens.what_is_on_it.047811ac"),
+        subtitle = L10n.text("android.setupconnectscreens.read_before_anything_is_written_nothing_on.f53dc6d5"),
         number = 4,
         failure = connect.failure,
         onDismissError = { connect.failure = null },
@@ -522,13 +524,13 @@ fun SetupCheckStep(
         footer = {
             if (connect.working) {
                 TsAccentButton(
-                    label = "Stop",
+                    label = L10n.text("common.stop"),
                     onClick = { connect.cancel() },
                     modifier = Modifier.fillMaxWidth(),
                 )
             } else if (ready) {
                 TsAccentButton(
-                    label = "Install",
+                    label = L10n.text("android.setupconnectscreens.install.569ca49f"),
                     icon = ActionIcon.Download.vector,
                     onClick = { onPush(SetupStep.INSTALL) },
                     modifier = Modifier.fillMaxWidth(),
@@ -536,44 +538,42 @@ fun SetupCheckStep(
                 )
             } else {
                 TsAccentButton(
-                    label = "Check again",
+                    label = L10n.text("android.setupconnectscreens.check_again.fb7099ad"),
                     icon = ActionIcon.Refresh.vector,
                     onClick = { inspect() },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
             TsSecondaryButton(
-                label = "Show me the command instead",
+                label = L10n.text("android.setupconnectscreens.show_me_the_command_instead.1da2f134"),
                 onClick = onByHand,
                 modifier = Modifier.fillMaxWidth(),
             )
         },
     ) {
         if (check != null) {
-            SetupSection("The machine") {
-                SetupFact("Operating system", check.sshString("distro") ?: check.sshString("os") ?: "unknown")
-                SetupFact("Architecture", check.sshString("arch") ?: "unknown")
-                SetupFact("Signs in as", check.sshString("user") ?: "unknown")
+            SetupSection(L10n.text("android.setupconnectscreens.the_machine.0cccf589")) {
+                SetupFact(L10n.text("android.setupconnectscreens.operating_system.0fcabfe6"), check.sshString("distro") ?: check.sshString("os") ?: "unknown")
+                SetupFact(L10n.text("android.setupconnectscreens.architecture.cd74053c"), check.sshString("arch") ?: "unknown")
+                SetupFact(L10n.text("android.setupconnectscreens.signs_in_as.f6adc71c"), check.sshString("user") ?: "unknown")
                 SetupFact(
-                    "Service manager",
-                    if ((check["systemd"] as? JsonPrimitive)?.booleanOrNull == true) "systemd" else "not systemd",
+                    L10n.text("android.setupconnectscreens.service_manager.ddd070d4"),
+                    if ((check["systemd"] as? JsonPrimitive)?.booleanOrNull == true) "systemd" else L10n.text("android.setupconnectscreens.not_systemd.050cd421"),
                 )
                 val freeMb = check["diskFreeMb"]?.jsonPrimitive?.longOrNull
-                SetupFact("Free space", freeMb?.let { "${it / 1024} GB" } ?: "unknown")
+                SetupFact(L10n.text("android.setupconnectscreens.free_space.64cd989e"), freeMb?.let { "${it / 1024} GB" } ?: "unknown")
                 if ((check["installed"] as? JsonPrimitive)?.booleanOrNull == true) {
-                    SetupFact("Already installed", "tokenstat is on this machine")
+                    SetupFact(L10n.text("android.setupconnectscreens.already_installed.9616d808"), L10n.text("android.setupconnectscreens.tokenstat_is_on_this_machine.3fc55e14"))
                 }
             }
             if ((check["root"] as? JsonPrimitive)?.booleanOrNull == true) {
                 // A fact next to the operating system version, not a warning
                 // triangle. It is the trade being made, and it is the right
                 // one for a machine that exists to do this work.
-                SetupSection("Who agents run as") {
-                    Text("Agents on this machine will run as root.", style = TsType.body, color = colors.textPrimary)
+                SetupSection(L10n.text("android.setupconnectscreens.who_agents_run_as.fc7c9918")) {
+                    Text(L10n.text("android.setupconnectscreens.agents_on_this_machine_will_run_as_root.d624b53a"), style = TsType.body, color = colors.textPrimary)
                     Text(
-                        "That is the same authority as the SSH session you just opened, " +
-                            "so agents can access system files as well as your projects. " +
-                            "Each agent's own approval settings still apply.",
+                        L10n.text("android.setupconnectscreens.that_is_the_same_authority_as_the_ssh_sess.27a3539a"),
                         style = TsType.caption,
                         color = colors.textSecondary,
                     )
@@ -582,14 +582,14 @@ fun SetupCheckStep(
             val blockers = (check["blockers"] as? JsonArray).orEmpty()
                 .mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
             if (blockers.isNotEmpty()) {
-                SetupSection("In the way") {
+                SetupSection(L10n.text("android.setupconnectscreens.in_the_way.ec946c03")) {
                     blockers.forEach { Text(it, style = TsType.subheadline, color = colors.textPrimary) }
                 }
             }
-            SetupSection("What to call it") {
-                SetupLabeledField("Name", connect.machineName, "cloud one") { connect.machineName = it }
+            SetupSection(L10n.text("android.setupconnectscreens.what_to_call_it.55325bff")) {
+                SetupLabeledField(L10n.text("android.setupconnectscreens.name.dcd1d522"), connect.machineName, L10n.text("android.setupconnectscreens.cloud_one.ab0123af")) { connect.machineName = it }
                 Text(
-                    "This is the name on your account, and what you tap to reach it.",
+                    L10n.text("android.setupconnectscreens.this_is_the_name_on_your_account_and_what.4a9ec588"),
                     style = TsType.caption,
                     color = colors.textSecondary,
                 )
@@ -600,12 +600,12 @@ fun SetupCheckStep(
                 horizontalArrangement = Arrangement.spacedBy(Space.s),
             ) {
                 CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                Text("Looking at the machine…", style = TsType.subheadline, color = colors.textPrimary)
+                Text(L10n.text("android.setupconnectscreens.looking_at_the_machine.2b29e9e2"), style = TsType.subheadline, color = colors.textPrimary)
             }
         }
         if (!ready && check != null && !connect.working) {
             Banner(
-                "The machine is not ready yet. Read what is in the way above, fix it on the server, then check again.",
+                L10n.text("android.setupconnectscreens.the_machine_is_not_ready_yet_read_what_is.80c89a1b"),
                 BannerSeverity.WARNING,
             )
         }
@@ -639,7 +639,7 @@ fun SetupInstallStep(
                 horizontalArrangement = Arrangement.spacedBy(Space.s),
             ) {
                 Text(
-                    "Installing on ${connect.machineName}",
+                    L10n.text("android.setupconnectscreens.installing_on_0.db18c0f3", "${connect.machineName}"),
                     style = TsType.subheadline,
                     color = colors.textSecondary,
                     modifier = Modifier.weight(1f),
@@ -650,7 +650,7 @@ fun SetupInstallStep(
                 SshTerminalScreen(
                     model = model,
                     sessionId = sessionId,
-                    hostLabel = "Install on ${connect.machineName}",
+                    hostLabel = L10n.text("android.setupconnectscreens.install_on_0.07c7ed2f", "${connect.machineName}"),
                     onClose = { watching = false },
                 )
             }
@@ -659,13 +659,13 @@ fun SetupInstallStep(
                 verticalArrangement = Arrangement.spacedBy(Space.s),
             ) {
                 TsAccentButton(
-                    label = "It finished, check the machine",
+                    label = L10n.text("android.setupconnectscreens.it_finished_check_the_machine.0c1b9b30"),
                     icon = ActionIcon.Next.vector,
                     onClick = { onPush(SetupStep.FINISH) },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 TsSecondaryButton(
-                    label = "It failed, show me the command",
+                    label = L10n.text("android.setupconnectscreens.it_failed_show_me_the_command.df0a4f0d"),
                     onClick = onByHand,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -674,8 +674,8 @@ fun SetupInstallStep(
         return
     }
     SetupStepScaffold(
-        title = "Install",
-        subtitle = "tokenstat mints a one-time pairing code, writes it to a private file on the server, and runs the installer. You watch the whole thing.",
+        title = L10n.text("android.setupconnectscreens.install.569ca49f"),
+        subtitle = L10n.text("android.setupconnectscreens.tokenstat_mints_a_one_time_pairing_code_wr.f10f332e"),
         number = 5,
         failure = connect.failure,
         onDismissError = { connect.failure = null },
@@ -683,19 +683,19 @@ fun SetupInstallStep(
         footer = {
             if (sessionId != null) {
                 TsAccentButton(
-                    label = "Watch the install",
+                    label = L10n.text("android.setupconnectscreens.watch_the_install.5aaf2482"),
                     onClick = { watching = true },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 TsAccentButton(
-                    label = "It finished, check the machine",
+                    label = L10n.text("android.setupconnectscreens.it_finished_check_the_machine.0c1b9b30"),
                     icon = ActionIcon.Next.vector,
                     onClick = { onPush(SetupStep.FINISH) },
                     modifier = Modifier.fillMaxWidth(),
                 )
             } else {
                 TsAccentButton(
-                    label = if (connect.working) "Starting…" else "Start the install",
+                    label = if (connect.working) L10n.text("android.setupconnectscreens.starting.bbe5fc3b") else L10n.text("android.setupconnectscreens.start_the_install.40fb0ff5"),
                     icon = ActionIcon.Download.vector,
                     onClick = {
                         scope.launch {
@@ -715,44 +715,44 @@ fun SetupInstallStep(
                 )
             }
             TsSecondaryButton(
-                label = "I would rather run it myself",
+                label = L10n.text("android.setupconnectscreens.i_would_rather_run_it_myself.73496e0e"),
                 onClick = onByHand,
                 modifier = Modifier.fillMaxWidth(),
             )
         },
     ) {
-        SetupSection("What will happen") {
-            SetupBullet("The CLI and the always-on host are installed.")
+        SetupSection(L10n.text("android.setupconnectscreens.what_will_happen.d5b89826")) {
+            SetupBullet(L10n.text("android.setupconnectscreens.the_cli_and_the_always_on_host_are_install.5c5da81f"))
             SetupBullet(
-                "The machine signs in to your account with a code that expires in fifteen minutes and works once.",
+                L10n.text("android.setupconnectscreens.the_machine_signs_in_to_your_account_with.72be3ba6"),
             )
             SetupBullet(
-                "This device is allowed to open the work here, granted over this SSH session rather than through our servers.",
+                L10n.text("android.setupconnectscreens.this_device_is_allowed_to_open_the_work_he.47d6f496"),
             )
-            SetupBullet("It stays on and keeps counting, which costs whatever the server costs.")
+            SetupBullet(L10n.text("android.setupconnectscreens.it_stays_on_and_keeps_counting_which_costs.713e3511"))
         }
-        SetupSection("Agents") {
+        SetupSection(L10n.text("android.setupconnectscreens.agents.279b44d2")) {
             SetupAgentChoice(
                 id = "claude_code",
-                name = "Claude Code",
-                detail = "Anthropic's coding agent for your projects.",
+                name = L10n.text("android.setupconnectscreens.claude_code.246ef8c1"),
+                detail = L10n.text("android.setupconnectscreens.anthropic_s_coding_agent_for_your_projects.27c15f70"),
                 selected = connect.agents.contains("claude_code"),
                 onToggle = { connect.toggleAgent("claude_code", it) },
             )
             SetupAgentChoice(
                 id = "codex",
-                name = "Codex",
-                detail = "OpenAI's coding agent for your projects.",
+                name = L10n.text("android.setupconnectscreens.codex.616efbe9"),
+                detail = L10n.text("android.setupconnectscreens.openai_s_coding_agent_for_your_projects.8a830857"),
                 selected = connect.agents.contains("codex"),
                 onToggle = { connect.toggleAgent("codex", it) },
             )
             Text(
-                "Choose either, both, or neither. You can install more later.",
+                L10n.text("android.setupconnectscreens.choose_either_both_or_neither_you_can_inst.36b5f4ed"),
                 style = TsType.caption,
                 color = colors.textSecondary,
             )
             Text(
-                "Next, setup helps you sign in to your agent and choose a project. You can also do either later from the machine's page.",
+                L10n.text("android.setupconnectscreens.next_setup_helps_you_sign_in_to_your_agent.34acb358"),
                 style = TsType.caption,
                 color = colors.textSecondary,
             )
@@ -827,11 +827,11 @@ fun SetupFinishStep(
         if (finished == null && !connect.working && connect.canCheckMachine) check()
     }
     SetupStepScaffold(
-        title = if (finished == null) "Waiting for the machine" else "It is up",
+        title = if (finished == null) L10n.text("android.setupconnectscreens.waiting_for_the_machine.9a2264c1") else L10n.text("android.setupconnectscreens.it_is_up.3f950bb2"),
         subtitle = if (finished == null) {
-            "The server signs in, joins the tunnel and answers. This takes a few seconds."
+            L10n.text("android.setupconnectscreens.the_server_signs_in_joins_the_tunnel_and_a.2831dd5b")
         } else {
-            "${connect.machineName} is on your account and this device can reach it."
+            L10n.text("android.setupconnectscreens.0_is_on_your_account_and_this_device_can_r.944d14db", "${connect.machineName}")
         },
         number = 6,
         failure = connect.failure,
@@ -840,7 +840,7 @@ fun SetupFinishStep(
         footer = {
             if (finished == null) {
                 TsAccentButton(
-                    label = if (connect.working) "Checking…" else "Check again",
+                    label = if (connect.working) L10n.text("android.setupconnectscreens.checking.ec963ffc") else L10n.text("android.setupconnectscreens.check_again.fb7099ad"),
                     icon = ActionIcon.Refresh.vector,
                     onClick = { check() },
                     modifier = Modifier.fillMaxWidth(),
@@ -848,7 +848,7 @@ fun SetupFinishStep(
                 )
             } else {
                 TsAccentButton(
-                    label = "Continue",
+                    label = L10n.text("android.setupconnectscreens.continue.31fbef16"),
                     icon = ActionIcon.Next.vector,
                     onClick = { onPush(SetupStep.AGENT) },
                     modifier = Modifier.fillMaxWidth(),
@@ -857,16 +857,16 @@ fun SetupFinishStep(
         },
     ) {
         if (connect.manualInstall && finished == null) {
-            SetupSection("Confirm the installed machine") {
+            SetupSection(L10n.text("android.setupconnectscreens.confirm_the_installed_machine.835e82aa")) {
                 Text(
-                    "Paste the full machine key printed at the end of the installer, or run tokenstat host identity on the server. This selects the exact machine, even when two servers have the same name.",
+                    L10n.text("android.setupconnectscreens.paste_the_full_machine_key_printed_at_the.11894974"),
                     style = TsType.subheadline,
                     color = colors.textSecondary,
                 )
                 OutlinedTextField(
                     value = connect.manualMachineKey,
                     onValueChange = { connect.manualMachineKey = it },
-                    placeholder = { Text("64-character machine key") },
+                    placeholder = { Text(L10n.text("android.setupconnectscreens.64_character_machine_key.90b955a9")) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !connect.working && connect.expectedPeer == null,
@@ -879,24 +879,24 @@ fun SetupFinishStep(
                 horizontalArrangement = Arrangement.spacedBy(Space.s),
             ) {
                 CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                Text("Waiting for the machine…", style = TsType.subheadline, color = colors.textPrimary)
+                Text(L10n.text("android.setupconnectscreens.waiting_for_the_machine.70f5bea0"), style = TsType.subheadline, color = colors.textPrimary)
             }
         }
         finished?.let { status ->
             val info = remember(status) { SetupProvisionInfo.of(status) }
-            SetupSection("This machine") {
-                SetupFact("Signed in", info.signedInHandle ?: "yes")
-                SetupFact("Always on", if (info.alwaysOn) "on" else "off")
-                SetupFact("Reachable", if (info.tunnelOnline) "yes" else "connecting")
-                SetupFact("Runs as", info.runsAs)
-                SetupFact("Allowed devices", "${info.allowedDevices}")
+            SetupSection(L10n.text("android.setupconnectscreens.this_machine.1b8548de")) {
+                SetupFact(L10n.text("android.setupconnectscreens.signed_in.ca566c89"), info.signedInHandle ?: "yes")
+                SetupFact(L10n.text("android.setupconnectscreens.always_on.044ba8a9"), if (info.alwaysOn) "on" else "off")
+                SetupFact(L10n.text("android.setupconnectscreens.reachable.f94b5f3d"), if (info.tunnelOnline) "yes" else "connecting")
+                SetupFact(L10n.text("android.setupconnectscreens.runs_as.dc98511e"), info.runsAs)
+                SetupFact(L10n.text("android.setupconnectscreens.allowed_devices.748d1f2f"), "${info.allowedDevices}")
             }
-            SetupSection("What is next") {
+            SetupSection(L10n.text("android.setupconnectscreens.what_is_next.8cfb34ce")) {
                 Text(
                     if (info.anyAgentInstalled) {
-                        "The agent is on the machine. It still needs its own sign-in, which is the next step."
+                        L10n.text("android.setupconnectscreens.the_agent_is_on_the_machine_it_still_needs.10e35681")
                     } else {
-                        "No agent is on the machine yet. The next step installs one and signs it in."
+                        L10n.text("android.setupconnectscreens.no_agent_is_on_the_machine_yet_the_next_st.ab8684b7")
                     },
                     style = TsType.subheadline,
                     color = colors.textPrimary,

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.setup
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ui.ssh.SshHostPlatform
 import ai.tokenstat.tokenstat.ui.ssh.SshSecrets
@@ -191,7 +193,7 @@ class SetupConnectState {
             ).jsonObject
             coroutineContext.ensureActive()
             fingerprint = answer.sshString("fingerprint")
-                ?: throw IllegalStateException("The server did not offer a host key.")
+                ?: throw IllegalStateException(L10n.text("android.setupserversteps.the_server_did_not_offer_a_host_key.3c1b0e56"))
         }
     }
 
@@ -258,7 +260,7 @@ class SetupConnectState {
             coroutineContext.ensureActive()
             val minted = model.core("account.pairingCode").jsonObject
             val code = minted.sshString("code")?.takeIf { it.isNotEmpty() }
-                ?: throw IllegalStateException("The account did not return a pairing code.")
+                ?: throw IllegalStateException(L10n.text("android.setupserversteps.the_account_did_not_return_a_pairing_code.1776d60f"))
             coroutineContext.ensureActive()
             model.core(
                 "ssh.provision.stageCode",
@@ -277,7 +279,7 @@ class SetupConnectState {
                     },
                 ).jsonObject
                 val oneLine = line.sshString("oneLine")?.takeIf { it.isNotBlank() }
-                    ?: throw IllegalStateException("The host did not compose an install line.")
+                    ?: throw IllegalStateException(L10n.text("android.setupserversteps.the_host_did_not_compose_an_install_line.26c6ebcc"))
                 coroutineContext.ensureActive()
                 val opened = model.core(
                     "ssh.session.open",
@@ -287,7 +289,7 @@ class SetupConnectState {
                     ),
                 ).jsonObject
                 val id = opened.sshString("id")
-                    ?: throw IllegalStateException("The session opened without an id.")
+                    ?: throw IllegalStateException(L10n.text("android.setupserversteps.the_session_opened_without_an_id.09911388"))
                 coroutineContext.ensureActive()
                 // A moment for the shell to draw its prompt. Typing into a
                 // shell that has not started echoing yet loses the first
@@ -325,7 +327,7 @@ class SetupConnectState {
                     expectedPeer = SetupIdentity.normalize(manualMachineKey)
                         ?: throw ai.tokenstat.tokenstat.core.CoreFailure(
                             "identity_required",
-                            "Paste the full machine key printed by the installer.",
+                            L10n.text("android.setupserversteps.paste_the_full_machine_key_printed_by_the.c44766a5"),
                         )
                 } else {
                     val host = resolvedHost(hosts)
@@ -336,7 +338,7 @@ class SetupConnectState {
                     ).jsonObject
                     coroutineContext.ensureActive()
                     expectedPeer = answer.sshString("key")
-                        ?: throw IllegalStateException("The server did not answer with an identity.")
+                        ?: throw IllegalStateException(L10n.text("android.setupserversteps.the_server_did_not_answer_with_an_identity.45212d47"))
                 }
             }
             val peer = expectedPeer ?: return@runGuarded
@@ -363,7 +365,7 @@ class SetupConnectState {
                     if (!SetupIdentity.matches(status.sshString("machineKey") ?: "", peer)) {
                         throw ai.tokenstat.tokenstat.core.CoreFailure(
                             "identity_mismatch",
-                            "The machine answered with a different identity. Reconnect and verify the server.",
+                            L10n.text("android.setupserversteps.the_machine_answered_with_a_different_iden.b83fb7ed"),
                         )
                     }
                     finished = status
@@ -374,7 +376,7 @@ class SetupConnectState {
             }
             throw ai.tokenstat.tokenstat.core.CoreFailure(
                 "setup_pending",
-                "This machine has not appeared on your account yet. Check that the install finished, then try again.",
+                L10n.text("android.setupserversteps.this_machine_has_not_appeared_on_your_acco.727d062b"),
             )
         }
     }
@@ -415,16 +417,16 @@ fun setupAuthPayload(
     pem: String?,
 ): JsonObject {
     return when (credential) {
-        is SetupCredential.None -> throw SetupAuthMissing("Choose how to sign in to this server.")
+        is SetupCredential.None -> throw SetupAuthMissing(L10n.text("android.setupserversteps.choose_how_to_sign_in_to_this_server.ef643f08"))
         is SetupCredential.Password -> {
-            if (password.isEmpty()) throw SetupAuthMissing("Enter the password for this server.")
+            if (password.isEmpty()) throw SetupAuthMissing(L10n.text("android.setupserversteps.enter_the_password_for_this_server.baf1babf"))
             buildJsonObject {
                 put("kind", "password")
                 put("password", password)
             }
         }
         is SetupCredential.Key -> {
-            if (key == null) throw SetupAuthMissing("That key is no longer in your vault.")
+            if (key == null) throw SetupAuthMissing(L10n.text("android.setupserversteps.that_key_is_no_longer_in_your_vault.c88cbd34"))
             val ref = key.sshString("secretRef").orEmpty()
             if (ref.startsWith("agent:")) {
                 buildJsonObject {
@@ -433,7 +435,7 @@ fun setupAuthPayload(
                 }
             } else {
                 if (pem.isNullOrEmpty()) {
-                    throw SetupAuthMissing("That key has no private material on this device.")
+                    throw SetupAuthMissing(L10n.text("android.setupserversteps.that_key_has_no_private_material_on_this_d.d0045bd3"))
                 }
                 buildJsonObject {
                     put("kind", "privateKey")

@@ -25,8 +25,8 @@ internal static class SshHostPlatform
     public static string SessionLabel(JsonNode? session)
     {
         if (Cache.TryGetValue(Format.Text(session, "hostId"), out var entry) && !string.IsNullOrWhiteSpace(entry.Name)) return entry.Name;
-        var label = Format.Text(session, "label", "SSH session");
-        return label.Contains('@') || System.Net.IPAddress.TryParse(label, out _) ? "SSH session" : label;
+        var label = Format.Text(session, "label", L10n.Text("windows.sshhostplatform.ssh_session.25493005"));
+        return label.Contains('@') || System.Net.IPAddress.TryParse(label, out _) ? L10n.Text("windows.sshhostplatform.ssh_session.25493005") : label;
     }
     public static FrameworkElement SessionRow(JsonNode? session) => Row(
         Cache.TryGetValue(Format.Text(session, "hostId"), out var entry) ? entry.Label : null,
@@ -47,7 +47,7 @@ internal static class SshHostPlatform
     private static string? Distro(string? platform)
     {
         var name = (platform ?? "").ToLowerInvariant();
-        foreach (var (term, asset) in new[] { ("ubuntu", "ubuntu"), ("debian", "debian"), ("fedora", "fedora"), ("alpine", "alpinelinux"), ("arch", "archlinux"), ("nixos", "nixos"), ("mint", "linuxmint"), ("gentoo", "gentoo"), ("rocky", "rockylinux"), ("alma", "almalinux"), ("centos", "centos"), ("red hat", "redhat"), ("rhel", "redhat"), ("opensuse", "opensuse"), ("suse", "suse"), ("linux", "linux") })
+        foreach (var (term, asset) in new[] { ("ubuntu", "ubuntu"), ("debian", "debian"), ("fedora", "fedora"), ("alpine", "alpinelinux"), ("arch", "archlinux"), ("nixos", "nixos"), ("mint", "linuxmint"), ("gentoo", "gentoo"), ("rocky", "rockylinux"), ("alma", "almalinux"), ("centos", "centos"), (L10n.Text("windows.sshhostplatform.red_hat.8dfe5e6c"), "redhat"), ("rhel", "redhat"), ("opensuse", "opensuse"), ("suse", "suse"), ("linux", "linux") })
             if (name.Contains(term, StringComparison.Ordinal)) return asset;
         return null;
     }
@@ -68,7 +68,7 @@ internal static class SshHostPlatform
             if (string.IsNullOrWhiteSpace(label)) label = Format.Text(result, "os");
             label = string.Join(" ", label.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
             if (label.Length == 0) return false;
-            Cache[id] = new Entry(endpoint, label[..Math.Min(label.Length, 80)], Format.Text(host, "label", "SSH session"), now);
+            Cache[id] = new Entry(endpoint, label[..Math.Min(label.Length, 80)], Format.Text(host, "label", L10n.Text("windows.sshhostplatform.ssh_session.25493005")), now);
             foreach (var old in Cache.OrderByDescending(pair => pair.Value.CheckedAt).Skip(128).Select(pair => pair.Key).ToArray()) Cache.Remove(old);
             try { Directory.CreateDirectory(Path.GetDirectoryName(CachePath)!); File.WriteAllText(CachePath + ".tmp", JsonSerializer.Serialize(Cache)); File.Move(CachePath + ".tmp", CachePath, true); } catch { /* Memory cache remains useful if the disk is unavailable. */ }
             return true;

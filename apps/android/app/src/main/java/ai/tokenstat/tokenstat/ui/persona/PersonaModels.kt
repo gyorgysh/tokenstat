@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.persona
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -48,10 +50,10 @@ fun faceSeedFor(persona: ChatPersona): ULong =
 
 /// Starting points for a blank brief, from `PersonaEditor`.
 val personaStartingPoints: List<Pair<String, String>> = listOf(
-    "Reviewer" to "Reviews changes carefully, says what is wrong before what is fine, and never rewrites more than was asked.",
-    "Explainer" to "Explains what code does in plain language, with a short example, and checks understanding before moving on.",
-    "Refactorer" to "Finds duplication and unclear naming, proposes the smallest change that fixes it, and never mixes a refactor with a behaviour change.",
-    "Rubber duck" to "Asks questions rather than answering them, and helps me find the problem myself.",
+    "Reviewer" to L10n.text("android.personamodels.reviews_changes_carefully_says_what_is_wro.cc7172db"),
+    "Explainer" to L10n.text("android.personamodels.explains_what_code_does_in_plain_language.0aac8304"),
+    "Refactorer" to L10n.text("android.personamodels.finds_duplication_and_unclear_naming_propo.964ba2cf"),
+    "Rubber duck" to L10n.text("android.personamodels.asks_questions_rather_than_answering_them.bf150882"),
 )
 
 private fun JsonObject.stringOrNull(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull

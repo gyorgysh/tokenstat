@@ -47,7 +47,7 @@ final class WorkSessionContext {
                 // The name is shown ("Saved for …"), so it stays human: the
                 // identity underneath may be a server id, which names
                 // nothing a person would recognise.
-                return SavedWorkOwner(scope: scope, name: account.title ?? "your account", hosts: hosts)
+                return SavedWorkOwner(scope: scope, name: account.title ?? L10n.text("apple.worksessioncontext.your_account.17a7e5cf"), hosts: hosts)
             }
             savedAccess.verified(owner)
         } else {

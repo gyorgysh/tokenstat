@@ -34,7 +34,7 @@ struct InsightsView: View {
                     if model.focusedDay != nil && scope == .thisMachine {
                         ToolbarIconButton(
                             systemImage: "chevron.left",
-                            help: "Back to Home"
+                            help: L10n.text("apple.insightsview.back_to_home.eec78426")
                         ) {
                             onBackToHome?()
                         }
@@ -50,15 +50,15 @@ struct InsightsView: View {
                     if scope == .thisMachine {
                     SegmentedCapsulePicker(
                         options: InsightsModel.Period.allCases.map {
-                            (value: $0, label: $0.rawValue, symbol: "")
+                            (value: $0, label: L10n.enumLabel($0), symbol: "")
                         },
                         selection: $model.period
                     )
                     .frame(maxWidth: 240)
-                    .help("Report period")
+                    .help(L10n.text("apple.insightsview.report_period.2447b4ac"))
                     ToolbarIconButton(
                         systemImage: "arrow.triangle.2.circlepath",
-                        help: "Read new sessions from supported local tools into the archive",
+                        help: L10n.text("apple.insightsview.read_new_sessions_from_supported_local_too.baa5d296"),
                         isBusy: model.isScanning,
                         isEnabled: !model.isScanning && model.scanCooldownUntil == nil
                     ) {
@@ -69,7 +69,7 @@ struct InsightsView: View {
                     }
                     ToolbarIconButton(
                         systemImage: "arrow.down.circle",
-                        help: "Fetch usage from remote vendors such as Cursor",
+                        help: L10n.text("apple.insightsview.fetch_usage_from_remote_vendors_such_as_cu.406af0cd"),
                         isBusy: model.isFetching,
                         isEnabled: !model.isFetching && model.fetchCooldownUntil == nil
                     ) {
@@ -110,7 +110,7 @@ struct InsightsView: View {
                         Label(day, systemImage: "calendar")
                             .font(Theme.callout)
                         Spacer()
-                        Button("Clear", .dismiss) { model.clearFocusedDay() }
+                        Button(L10n.text("apple.insightsview.clear.83b12c22"), .dismiss) { model.clearFocusedDay() }
                             .buttonStyle(.plain)
                             .font(Theme.callout.weight(.medium))
                             .foregroundStyle(Theme.accent)
@@ -169,7 +169,7 @@ struct InsightsView: View {
         // Sharp wireframe of the overview. Real content replaces it with
         // `.smoothIn` when the first report lands; no blur veil.
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Card(title: "Usage over time", subtitle: "Daily tokens · cache included", mark: "mark_insights") {
+            Card(title: L10n.text("apple.insightsview.usage_over_time.56d901b0"), subtitle: L10n.text("apple.insightsview.daily_tokens_cache_included.57801e52"), mark: "mark_insights") {
                 Skeleton.Bar(width: nil, height: 260)
             }
             WidthReader { width in
@@ -184,51 +184,51 @@ struct InsightsView: View {
             if let totals = model.totals {
                 WidthReader { width in
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: width >= 760 ? 4 : (width >= 380 ? 2 : 1)), spacing: 12) {
-                    InsightMetric(title: "Total tokens", value: formatTokens(totals.counters.total),
-                                  detail: "Including reported cache usage", symbol: "chart.bar.fill")
-                    InsightMetric(title: "API list price", value: model.periodValue.formatted,
-                                  detail: "Not an extra bill", symbol: "dollarsign.circle")
-                        .help("Dollar amounts are the published API price for those tokens. Work your subscription already covered is not an extra bill.")
-                    InsightMetric(title: "Sessions", value: totals.sessions.formatted(),
-                                  detail: "\(totals.events.formatted()) recorded events", symbol: "bubble.left.and.bubble.right")
-                    InsightMetric(title: "Active days", value: totals.days.formatted(),
-                                  detail: "\(formatTokens(totals.days > 0 ? totals.counters.total / totals.days : 0)) tokens / active day", symbol: "calendar")
+                    InsightMetric(title: L10n.text("apple.insightsview.total_tokens.e7601ca1"), value: formatTokens(totals.counters.total),
+                                  detail: L10n.text("apple.insightsview.including_reported_cache_usage.44e4a309"), symbol: "chart.bar.fill")
+                    InsightMetric(title: L10n.text("apple.insightsview.api_list_price.060458ef"), value: model.periodValue.formatted,
+                                  detail: L10n.text("apple.insightsview.not_an_extra_bill.ed03e1c3"), symbol: "dollarsign.circle")
+                        .help(L10n.text("apple.insightsview.dollar_amounts_are_the_published_api_price.0275eb31"))
+                    InsightMetric(title: L10n.text("apple.insightsview.sessions.6fa3cbf4"), value: totals.sessions.formatted(),
+                                  detail: L10n.text("apple.insightsview.0_recorded_events.1b95ec0e", "\(totals.events.formatted())"), symbol: "bubble.left.and.bubble.right")
+                    InsightMetric(title: L10n.text("apple.insightsview.active_days.6cbebfa2"), value: totals.days.formatted(),
+                                  detail: L10n.text("apple.insightsview.0_tokens_active_day.a9bff644", "\(formatTokens(totals.days > 0 ? totals.counters.total / totals.days : 0))"), symbol: "calendar")
                 }
                 }
             }
-            Card(title: "Usage over time", subtitle: "Daily tokens · cache included", mark: "mark_insights") {
+            Card(title: L10n.text("apple.insightsview.usage_over_time.56d901b0"), subtitle: L10n.text("apple.insightsview.daily_tokens_cache_included.57801e52"), mark: "mark_insights") {
                 DailyChart(rows: model.daily)
                 HStack {
                     if let peak = model.daily.max(by: { $0.counters.total < $1.counters.total }) {
-                        Label("Peak: \(formatTokens(peak.counters.total)) · \(peak.key)", systemImage: "arrow.up.right")
+                        Label(L10n.text("apple.insightsview.peak_0_1.cb480974", "\(formatTokens(peak.counters.total))", "\(peak.key)"), systemImage: "arrow.up.right")
                     }
                     Spacer()
-                    Text("\(model.daily.count) recorded days")
+                    Text(L10n.text("apple.insightsview.0_recorded_days.81103b2c", "\(model.daily.count)"))
                 }
                 .font(Theme.caption).foregroundStyle(.secondary)
             }
             WidthReader { width in
                 if width >= 680 {
                     HStack(alignment: .top, spacing: Theme.Space.m) {
-                        rankingCard(title: "Top models", rows: model.byModel, tab: .models)
-                        rankingCard(title: "By coding tool", rows: model.bySource, tab: .harnesses)
+                        rankingCard(title: L10n.text("apple.insightsview.top_models.79489561"), rows: model.byModel, tab: .models)
+                        rankingCard(title: L10n.text("apple.insightsview.by_coding_tool.d88bafe1"), rows: model.bySource, tab: .harnesses)
                     }.fixedSize(horizontal: false, vertical: true)
                 } else {
                     VStack(spacing: Theme.Space.m) {
-                        rankingCard(title: "Top models", rows: model.byModel, tab: .models)
-                        rankingCard(title: "By coding tool", rows: model.bySource, tab: .harnesses)
+                        rankingCard(title: L10n.text("apple.insightsview.top_models.79489561"), rows: model.byModel, tab: .models)
+                        rankingCard(title: L10n.text("apple.insightsview.by_coding_tool.d88bafe1"), rows: model.bySource, tab: .harnesses)
                     }
                 }
             }
             if !model.byProject.isEmpty {
-                rankingCard(title: "Project activity", rows: model.byProject, tab: .projects)
+                rankingCard(title: L10n.text("apple.insightsview.project_activity.3601328f"), rows: model.byProject, tab: .projects)
             }
         }
     }
 
     private func rankingCard(title: String, rows: [Bucket], tab: InsightsModel.Tab) -> some View {
-        Card(title: title, subtitle: "Ranked by tokens · share of this breakdown", mark: tab == .harnesses ? "mark_automation" : "mark_insights",
-             accessory: AnyView(Button("View all (\(rows.count))", .more) { model.tab = tab }
+        Card(title: title, subtitle: L10n.text("apple.insightsview.ranked_by_tokens_share_of_this_breakdown.929721dd"), mark: tab == .harnesses ? "mark_automation" : "mark_insights",
+             accessory: AnyView(Button(L10n.text("apple.insightsview.view_all_0.41a41832", "\(rows.count)"), .more) { model.tab = tab }
                 .buttonStyle(.plain).font(Theme.caption).foregroundStyle(Theme.accent)), fillsHeight: true) {
             InsightRanking(rows: rows, isHarness: tab == .harnesses, showsValue: tab == .models) { row in
                 model.tab = tab
@@ -298,8 +298,8 @@ private struct BreakdownTable: View {
         if rows.isEmpty {
             EmptyHint(
                 symbol: "tray",
-                title: "Nothing recorded",
-                text: "No usage landed in this period. Scan, or widen the time range."
+                title: L10n.text("apple.insightsview.nothing_recorded.44985e2c"),
+                text: L10n.text("apple.insightsview.no_usage_landed_in_this_period_scan_or_wid.59209497")
             )
         } else {
             VStack(spacing: 0) {
@@ -336,24 +336,24 @@ private struct BreakdownTable: View {
     /// rather than hidden behind a scroll that never ends.
     private var revealMore: some View {
         HStack(spacing: Theme.Space.m) {
-            Button("Show \(min(Self.pageStep, hidden)) more", .more) {
+            Button(L10n.text("apple.insightsview.show_0_more.b91c3640", "\(min(Self.pageStep, hidden))"), .more) {
                 visible += Self.pageStep
             }
             .buttonStyle(.plain)
             .font(Theme.callout.weight(.medium))
             .foregroundStyle(Theme.accent)
 
-            Text("\(hidden) more hidden")
+            Text(L10n.text("apple.insightsview.0_more_hidden.4beb56b2", "\(hidden)"))
                 .font(Theme.caption)
                 .foregroundStyle(.tertiary)
 
             Spacer()
 
-            Button("Show all", .more) { visible = rows.count }
+            Button(L10n.text("apple.insightsview.show_all.2150d8df"), .more) { visible = rows.count }
                 .buttonStyle(.plain)
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
-                .help("Draws every remaining row. A long list takes a moment to lay out.")
+                .help(L10n.text("apple.insightsview.draws_every_remaining_row_a_long_list_take.db76817f"))
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.vertical, Theme.Space.s)
@@ -361,11 +361,11 @@ private struct BreakdownTable: View {
 
     private var header: some View {
         HStack(spacing: Theme.Space.m) {
-            Text("NAME").frame(maxWidth: .infinity, alignment: .leading)
-            Text("SESSIONS").frame(width: 66, alignment: .trailing)
-            Text("TOKENS").frame(width: 66, alignment: .trailing)
+            Text(L10n.text("apple.insightsview.name.eaa58932")).frame(maxWidth: .infinity, alignment: .leading)
+            Text(L10n.text("apple.insightsview.sessions.3068f7e5")).frame(width: 66, alignment: .trailing)
+            Text(L10n.text("apple.insightsview.tokens.a0dd5436")).frame(width: 66, alignment: .trailing)
             if showsValue {
-                Text("VALUE").frame(width: 88, alignment: .trailing)
+                Text(L10n.text("apple.insightsview.value.8ec121c9")).frame(width: 88, alignment: .trailing)
             }
         }
         .font(Theme.sectionHeader)
@@ -398,7 +398,7 @@ private struct BreakdownRow: View {
             if isHarness {
                 HarnessMark(id: row.key, size: 16)
             }
-            Text(isHarness ? harnessName(row.key) : (row.key.isEmpty ? "unknown" : row.key))
+            Text(isHarness ? harnessName(row.key) : (row.key.isEmpty ? L10n.text("apple.insightsview.unknown.b23a6a84") : row.key))
                 .font(monospaced ? Theme.mono(12) : Theme.font(13))
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -419,7 +419,7 @@ private struct BreakdownRow: View {
                     .font(Theme.numeric(12))
                     .lineLimit(1)
                     .frame(width: 88, alignment: .trailing)
-                    .help("API list price, not an extra bill")
+                    .help(L10n.text("apple.insightsview.api_list_price_not_an_extra_bill.7ecc2b1d"))
             }
         }
         .padding(.horizontal, Theme.Space.m)
@@ -471,7 +471,7 @@ private struct InsightRanking: View {
 
     var body: some View {
         if rows.isEmpty {
-            EmptyHint(text: "Nothing recorded yet.")
+            EmptyHint(text: L10n.text("apple.insightsview.nothing_recorded_yet.17f000e0"))
         } else {
             VStack(spacing: 14) {
                 ForEach(rows.prefix(6)) { row in
@@ -479,7 +479,7 @@ private struct InsightRanking: View {
                         VStack(spacing: 7) {
                             HStack(spacing: 8) {
                                 if isHarness { HarnessMark(id: row.key, size: 16) }
-                                Text(isHarness ? harnessName(row.key) : (row.key.isEmpty ? "unknown" : row.key))
+                                Text(isHarness ? harnessName(row.key) : (row.key.isEmpty ? L10n.text("apple.insightsview.unknown.b23a6a84") : row.key))
                                     .font(isHarness ? Theme.font(13) : Theme.mono(12))
                                     .lineLimit(1).truncationMode(.middle)
                                 Spacer(minLength: 4)
@@ -493,14 +493,14 @@ private struct InsightRanking: View {
                                     .frame(width: geo.size.width * (peak > 0 ? Double(row.counters.total) / peak : 0))
                             }.frame(height: 5).accessibilityHidden(true)
                             HStack {
-                                Text("\(row.sessions.formatted()) sessions")
+                                Text(L10n.text("apple.insightsview.0_sessions.42cfea31", "\(row.sessions.formatted())"))
                                 Spacer()
-                                if showsValue { Text("\(row.value.formatted) at API list price") }
+                                if showsValue { Text(L10n.text("apple.insightsview.0_at_api_list_price.1faebace", "\(row.value.formatted)")) }
                             }.font(Theme.caption2).foregroundStyle(.secondary)
                         }
                         .contentShape(Rectangle())
                     }.buttonStyle(.plain)
-                    .help("Inspect \(row.key)")
+                    .help(L10n.text("apple.insightsview.inspect_0.0ae7a9ec", "\(row.key)"))
                 }
             }
         }
@@ -536,24 +536,24 @@ private struct DailyChart: View {
         if rows.isEmpty {
             EmptyHint(
                 symbol: "calendar.badge.exclamationmark",
-                title: "No usage in this period",
-                text: "The days you picked have no events. Try a wider range."
+                title: L10n.text("apple.insightsview.no_usage_in_this_period.ed8918b1"),
+                text: L10n.text("apple.insightsview.the_days_you_picked_have_no_events_try_a_w.078db9c9")
             )
         } else {
             VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(showsValue ? "Daily API list price · not an extra bill" : "Daily token volume")
+                Text(showsValue ? L10n.text("apple.insightsview.daily_api_list_price_not_an_extra_bill.c12b9c19") : L10n.text("apple.insightsview.daily_token_volume.e3ab0b2f"))
                     .font(Theme.caption).foregroundStyle(.secondary)
                 Spacer()
-                Picker("Chart metric", selection: $showsValue) {
-                    Text("Tokens").tag(false)
-                    Text("API list price").tag(true)
+                Picker(L10n.text("apple.insightsview.chart_metric.0a62bdb0"), selection: $showsValue) {
+                    Text(L10n.text("apple.insightsview.tokens.a039dfb9")).tag(false)
+                    Text(L10n.text("apple.insightsview.api_list_price.060458ef")).tag(true)
                 }.pickerStyle(.segmented).labelsHidden().frame(width: 210)
             }
             Chart(rows) { row in
                 BarMark(
-                    x: .value("Day", row.key),
-                    y: .value("Usage", showsValue ? Double(row.valueMicros) / 1_000_000 : Double(row.counters.total)),
+                    x: .value(L10n.text("apple.insightsview.day.8f2364e1"), row.key),
+                    y: .value(L10n.text("apple.insightsview.usage.8d59829c"), showsValue ? Double(row.valueMicros) / 1_000_000 : Double(row.counters.total)),
                     // Capped, not proportional. A categorical axis gives every
                     // bar an equal share of the plot, so filtering to one day
                     // drew a single bar the width of the card: a block, with no
@@ -563,7 +563,7 @@ private struct DailyChart: View {
                 .foregroundStyle(Theme.accent.gradient)
                 .cornerRadius(2)
                 if selectedDay == row.key {
-                    RuleMark(x: .value("Selected day", row.key))
+                    RuleMark(x: .value(L10n.text("apple.insightsview.selected_day.eab13a3c"), row.key))
                         .foregroundStyle(Theme.secondary)
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [3]))
                 }
@@ -638,11 +638,11 @@ private struct DailyChart: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(shortDay(row.key))
                 .font(Theme.caption.weight(.semibold))
-            Text("\(formatTokens(row.counters.total)) tokens")
+            Text(L10n.text("apple.insightsview.0_tokens.624f11b9", "\(formatTokens(row.counters.total))"))
                 .font(Theme.caption2)
                 .foregroundStyle(.secondary)
             Text(row.value.formatted)
-                .help("API list price, not an extra bill")
+                .help(L10n.text("apple.insightsview.api_list_price_not_an_extra_bill.7ecc2b1d"))
                 .font(Theme.numeric(10, weight: .medium))
                 .foregroundStyle(Theme.accent)
         }
@@ -660,7 +660,7 @@ struct EmptyHint: View {
     /// The symbol in the soft accent seat. The app's empty states are drawn in
     /// the brand language, never as a bare system placeholder.
     var symbol: String = "chart.bar.xaxis"
-    var title: String = "Nothing here yet"
+    var title: String = L10n.text("apple.insightsview.nothing_here_yet.49abaf80")
     var text: String
 
     var body: some View {
@@ -697,12 +697,12 @@ private struct AccountInsightsContent: View {
                     options: ClientInsightsModel.Cut.allCases.map { (value: $0, label: $0.label, symbol: "") },
                     selection: $model.cut
                 ).frame(maxWidth: 360)
-                SearchField(text: $search, prompt: "Filter")
-                ToolbarIconButton(systemImage: "arrow.clockwise", help: "Refresh account usage", isBusy: model.isLoading) {
+                SearchField(text: $search, prompt: L10n.text("apple.insightsview.filter.638e249f"))
+                ToolbarIconButton(systemImage: "arrow.clockwise", help: L10n.text("apple.insightsview.refresh_account_usage.70ac7105"), isBusy: model.isLoading) {
                     Task { await model.refresh() }
                 }
             }
-            Text("Synced usage across all devices · Last 53 weeks · API list price, not an extra bill")
+            Text(L10n.text("apple.insightsview.synced_usage_across_all_devices_last_53_we.20b8c5e2"))
                 .font(Theme.caption).foregroundStyle(.secondary)
             if let error = model.errorMessage { ErrorBanner(message: error) }
             if let age = model.ageDescription { Text(age).font(Theme.caption).foregroundStyle(.secondary) }
@@ -723,12 +723,12 @@ private struct AccountInsightsContent: View {
                                 Spacer()
                                 VStack(alignment: .trailing) {
                                     Text(row.value.formatted).foregroundStyle(Theme.accent)
-                                    Text("\(row.counters.total.formatted()) tokens").font(Theme.caption).foregroundStyle(.secondary)
+                                    Text(L10n.text("apple.insightsview.0_tokens.624f11b9", "\(row.counters.total.formatted())")).font(Theme.caption).foregroundStyle(.secondary)
                                 }
                             }.padding(Theme.Space.m).background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                         }
-                        if rows.isEmpty { Text("No synced usage in this period.").foregroundStyle(.secondary) }
-                        else if filtered.isEmpty { Text("No matching usage.").foregroundStyle(.secondary) }
+                        if rows.isEmpty { Text(L10n.text("apple.insightsview.no_synced_usage_in_this_period.3484c8af")).foregroundStyle(.secondary) }
+                        else if filtered.isEmpty { Text(L10n.text("apple.insightsview.no_matching_usage.8b2c6893")).foregroundStyle(.secondary) }
                     }
                 }
             }
@@ -741,18 +741,18 @@ private struct AccountInsightsContent: View {
         let plotted = daily ? rows.sorted { $0.key < $1.key }
             : Array(rows.sorted { $0.counters.total > $1.counters.total }.prefix(8))
         return VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text(daily ? "Daily activity" : "Most used \(model.cut.plural)")
+            Text(daily ? L10n.text("apple.insightsview.daily_activity.561d7c9e") : L10n.text("apple.insightsview.most_used_0.ad293687", "\(model.cut.plural)"))
                 .font(Theme.headline)
-            Text("Tokens · including reported cache usage")
+            Text(L10n.text("apple.insightsview.tokens_including_reported_cache_usage.a3e0a451"))
                 .font(Theme.caption).foregroundStyle(.secondary)
             if daily {
                 Chart(plotted) { row in
                     if let position = InsightDayAxis.position(row.key) {
-                        RectangleMark(xStart: .value("Day", position - 0.4), xEnd: .value("Day", position + 0.4),
-                                yStart: .value("Tokens", UInt64(0)), yEnd: .value("Tokens", row.counters.total))
+                        RectangleMark(xStart: .value(L10n.text("apple.insightsview.day.8f2364e1"), position - 0.4), xEnd: .value(L10n.text("apple.insightsview.day.8f2364e1"), position + 0.4),
+                                yStart: .value(L10n.text("apple.insightsview.tokens.a039dfb9"), UInt64(0)), yEnd: .value(L10n.text("apple.insightsview.tokens.a039dfb9"), row.counters.total))
                             .foregroundStyle(Theme.accent.gradient)
                             .accessibilityLabel(model.cut.title(for: row.key))
-                            .accessibilityValue("\(formatTokens(row.counters.total)) tokens")
+                            .accessibilityValue(L10n.text("apple.insightsview.0_tokens.624f11b9", "\(formatTokens(row.counters.total))"))
                     }
                 }
                 .chartXScale(domain: InsightDayAxis.domain(plotted.map(\.key)))
@@ -775,12 +775,12 @@ private struct AccountInsightsContent: View {
                 }.font(Theme.caption).foregroundStyle(.secondary)
             } else {
                 Chart(plotted) { row in
-                    BarMark(x: .value("Tokens", row.counters.total),
+                    BarMark(x: .value(L10n.text("apple.insightsview.tokens.a039dfb9"), row.counters.total),
                         y: .value(model.cut.label, model.cut.title(for: row.key)))
                         .foregroundStyle(Theme.accent.gradient)
                         .cornerRadius(3)
                         .accessibilityLabel(model.cut.title(for: row.key))
-                        .accessibilityValue("\(formatTokens(row.counters.total)) tokens")
+                        .accessibilityValue(L10n.text("apple.insightsview.0_tokens.624f11b9", "\(formatTokens(row.counters.total))"))
                 }
                 .chartXAxis {
                     AxisMarks { value in
@@ -811,8 +811,8 @@ struct ScopedInsightsInspector: View {
             InspectorView(model: model, onClose: onClose)
         } else {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                HStack { Text("All devices").font(Theme.headline); Spacer(); Button("Close", .dismiss, action: onClose) }
-                Text("Aggregated model, coding tool and daily usage synced to your account. Choose This device for local projects, sessions and archive details.")
+                HStack { Text(L10n.text("apple.insightsview.all_devices.0594fe82")).font(Theme.headline); Spacer(); Button(L10n.text("common.close"), .dismiss, action: onClose) }
+                Text(L10n.text("apple.insightsview.aggregated_model_coding_tool_and_daily_usa.c5f79ddb"))
                     .foregroundStyle(.secondary)
                 Spacer()
             }.padding(Theme.Space.m)

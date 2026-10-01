@@ -17,7 +17,7 @@ import Observation
 final class AppUpdateModel {
     /// What a manual check says when there is nothing newer. Shared with the
     /// sidebar so the card can own the "up to date" state instead of a caption.
-    static let upToDateMessage = "You are on the latest version."
+    static let upToDateMessage = L10n.text("apple.appupdatemodel.you_are_on_the_latest_version.eeced728")
 
     /// Real update milestones, shown by the sidebar activity card.
     enum Stage: Equatable {
@@ -98,11 +98,11 @@ final class AppUpdateModel {
         await checkAndInstall()
 
         if isReady {
-            checkNotice = "Update installed. Relaunch to finish."
+            checkNotice = L10n.text("apple.appupdatemodel.update_installed_relaunch_to_finish.d191ced5")
         } else if let failure {
             checkNotice = failure
         } else if isAvailable, release?.latest != before {
-            checkNotice = "Version \(latest) found."
+            checkNotice = L10n.text("apple.appupdatemodel.version_0_found.a4c4e509", "\(latest)")
         } else {
             checkNotice = Self.upToDateMessage
         }
@@ -127,7 +127,7 @@ final class AppUpdateModel {
             if let timestamp = found.retryAt {
                 let date = Date(timeIntervalSince1970: timestamp)
                 retryAfter = date
-                stage = .failed("GitHub is limiting update checks. You can try again after \(date.formatted(date: .omitted, time: .shortened)).")
+                stage = .failed(L10n.text("apple.appupdatemodel.github_is_limiting_update_checks_you_can_t.01b98ce8", "\(date.formatted(date: .omitted, time: .shortened))"))
                 return
             }
             release = found
@@ -159,7 +159,7 @@ final class AppUpdateModel {
         }
         #else
         // Nothing to install into on iOS. The card offers the release page.
-        stage = .failed("Updates on this platform come from the App Store.")
+        stage = .failed(L10n.text("apple.appupdatemodel.updates_on_this_platform_come_from_the_app.95715312"))
         #endif
     }
 

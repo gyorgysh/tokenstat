@@ -8,7 +8,7 @@ struct WorkFolderCacheButton: View {
     @State private var destination: WorkFolderCacheSettings.Destination?
 
     var body: some View {
-        Button("Saved work", .archive) {
+        Button(L10n.text("apple.workfoldercachesettings.saved_work.9204cce7"), .archive) {
             if let reference = WorkViewedChange.owner(folderID: folderID, peer: peer) {
                 destination = .init(reference: reference, name: name)
             }
@@ -33,28 +33,28 @@ struct WorkFolderCacheSettings: View {
     private var current: Bool { WorkCacheAccess.canRead(destination.reference) }
 
     var body: some View {
-        ThemedSheet(title: "Saved work", subtitle: current ? destination.name : "", icon: .archive,
+        ThemedSheet(title: L10n.text("apple.workfoldercachesettings.saved_work.9204cce7"), subtitle: current ? destination.name : "", icon: .archive,
                     scrolls: true, onClose: { dismiss() }) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                Toggle("Save recent work on this device", isOn: $enabled)
+                Toggle(L10n.text("apple.workfoldercachesettings.save_recent_work_on_this_device.e5e4effd"), isOn: $enabled)
                     .toggleStyle(.brandCheckbox)
                     .onChange(of: enabled) { _, value in
                         guard current else { return }
                         WorkCacheSettings.shared.setFolderEnabled(value, for: destination.reference)
                     }
-                Text("Opened conversations and viewed changes are encrypted on this device. Turning this off stops new copies; existing copies stay until you clear them.")
+                Text(L10n.text("apple.workfoldercachesettings.opened_conversations_and_viewed_changes_ar.70045bee"))
                     .font(Theme.callout).foregroundStyle(Theme.controlGlyph)
                 if !WorkCacheSettings.shared.enabled {
-                    Text("Saving is turned off for all folders in Settings. This folder’s choice will apply when saving is turned on again.")
+                    Text(L10n.text("apple.workfoldercachesettings.saving_is_turned_off_for_all_folders_in_se.47813aa8"))
                         .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                 }
                 ThemeRule()
-                Text("\(records.count) saved items · \(ByteCountFormatter.string(fromByteCount: Int64(clamping: records.reduce(UInt64(0)) { $0.saturatingAdd($1.bytes) }), countStyle: .file))")
+                Text(L10n.text("apple.workfoldercachesettings.0_saved_items_1.6298b5c1", "\(records.count)", "\(ByteCountFormatter.string(fromByteCount: Int64(clamping: records.reduce(UInt64(0)) { $0.saturatingAdd($1.bytes) }), countStyle: .file))"))
                     .font(Theme.callout)
-                Button("Clear this folder’s saved work", .delete) { Task { await clear() } }
+                Button(L10n.text("apple.workfoldercachesettings.clear_this_folder_s_saved_work.562d133f"), .delete) { Task { await clear() } }
                     .buttonStyle(SecondaryButtonStyle())
                     .disabled(busy || records.isEmpty)
-                Text("Clearing removes copies from this device, including copies kept offline. Source work and unsent drafts stay.")
+                Text(L10n.text("apple.workfoldercachesettings.clearing_removes_copies_from_this_device_i.1f1e89ff"))
                     .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                 if busy { ProgressView().controlSize(.small) }
                 if let message { Text(message).font(Theme.caption).foregroundStyle(Theme.controlGlyph) }
@@ -84,7 +84,7 @@ struct WorkFolderCacheSettings: View {
                     && ref.workspaceID == destination.reference.workspaceID
             }
             return true
-        } catch { if current { message = "Saved work could not be read. Close and try again." }; return false }
+        } catch { if current { message = L10n.text("apple.workfoldercachesettings.saved_work_could_not_be_read_close_and_try.3b322b0b") }; return false }
     }
 
     private func clear() async {
@@ -102,7 +102,7 @@ struct WorkFolderCacheSettings: View {
             }
             guard current else { return }
             guard await load() else { return }
-            message = records.isEmpty ? "Saved work cleared." : "New work was saved while clearing. Turn saving off to keep this folder clear."
-        } catch { if current { message = "Some copies could not be removed. Try again." } }
+            message = records.isEmpty ? L10n.text("apple.workfoldercachesettings.saved_work_cleared.489ad926") : L10n.text("apple.workfoldercachesettings.new_work_was_saved_while_clearing_turn_sav.adcc538b")
+        } catch { if current { message = L10n.text("apple.workfoldercachesettings.some_copies_could_not_be_removed_try_again.07f2b8a4") } }
     }
 }

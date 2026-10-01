@@ -17,14 +17,14 @@ struct WorkSearchSheet: View {
 
     var body: some View {
         ScrollViewReader { scroll in
-        ThemedSheet(title: places == nil ? "Search work" : "Search",
+        ThemedSheet(title: places == nil ? L10n.text("apple.worksearchsheet.search_work.cc46cedc") : L10n.text("common.search"),
                     subtitle: dynamicTypeSize.isAccessibilitySize ? "" : subtitle,
                     icon: dynamicTypeSize.isAccessibilitySize ? nil : .searchAll,
                     scrolls: dynamicTypeSize.isAccessibilitySize, onClose: { dismiss() }) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 HStack(spacing: Theme.Space.s) {
                     Image(systemName: ActionIcon.search.symbol).foregroundStyle(Theme.controlGlyph)
-                    TextField(places == nil ? "Search work" : "Search the app and your work", text: $model.query)
+                    TextField(places == nil ? L10n.text("apple.worksearchsheet.search_work.cc46cedc") : L10n.text("apple.worksearchsheet.search_the_app_and_your_work.deb3629b"), text: $model.query)
                         .textFieldStyle(.plain)
                         .font(Theme.body)
                         .focused($fieldFocused)
@@ -45,7 +45,7 @@ struct WorkSearchSheet: View {
                 .background(Theme.sidebar, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.accent.opacity(fieldFocused ? 0.6 : 0.15)))
                 filters
-                if openingChange { ProgressView("Opening saved change…").font(Theme.caption) }
+                if openingChange { ProgressView(L10n.text("apple.worksearchsheet.opening_saved_change.a31530ab")).font(Theme.caption) }
                 if let openFailure {
                     Text(openFailure).font(Theme.callout).foregroundStyle(Theme.controlGlyph)
                 }
@@ -58,7 +58,7 @@ struct WorkSearchSheet: View {
                 if let error = model.queryFailure ?? model.failure {
                     Text(error).font(Theme.callout).foregroundStyle(Theme.controlGlyph)
                     if (try? WorkSearchQuery(model.query)) != nil {
-                        Button("Try again", .refresh) {
+                        Button(L10n.text("apple.worksearchsheet.try_again.d8b8392e"), .refresh) {
                             Task {
                                 if model.queryFailure != nil { await model.search() }
                                 else { await model.refresh() }
@@ -68,15 +68,15 @@ struct WorkSearchSheet: View {
                     }
                 }
                 if let coverage = model.coverage, coverage.unreadable > 0 {
-                    Text("\(coverage.unreadable) saved items could not be read. Results cover the copies available now.")
+                    Text(L10n.text("apple.worksearchsheet.0_saved_items_could_not_be_read_results_co.3a212847", "\(coverage.unreadable)"))
                         .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                 }
                 if model.savedWorkChanged {
-                    Button("Refresh saved work", .refresh) { Task { await model.refresh() } }
+                    Button(L10n.text("apple.worksearchsheet.refresh_saved_work.dbb0ddec"), .refresh) { Task { await model.refresh() } }
                         .buttonStyle(SecondaryButtonStyle())
                 }
                 if model.hasUpdatedResults {
-                    Button("Show updated results", .refresh) { Task { await model.acceptUpdatedResults() } }
+                    Button(L10n.text("apple.worksearchsheet.show_updated_results.b4a3e278"), .refresh) { Task { await model.acceptUpdatedResults() } }
                         .buttonStyle(SecondaryButtonStyle())
                         .disabled(model.searching)
                 }
@@ -106,8 +106,8 @@ struct WorkSearchSheet: View {
 
     private var subtitle: String {
         places == nil
-            ? "Find a conversation, folder, or change"
-            : "Find a screen, a setting, or your work"
+            ? L10n.text("apple.worksearchsheet.find_a_conversation_folder_or_change.c6ecae64")
+            : L10n.text("apple.worksearchsheet.find_a_screen_a_setting_or_your_work.e15aaac3")
     }
 
     /// Screens and settings matching what has been typed. Only for a query:
@@ -123,13 +123,13 @@ struct WorkSearchSheet: View {
     private var placeList: some View {
         let hits = placeHits
         if !hits.isEmpty {
-            Text("In the app").font(Theme.callout).foregroundStyle(Theme.controlGlyph)
+            Text(L10n.text("apple.worksearchsheet.in_the_app.dac837e8")).font(Theme.callout).foregroundStyle(Theme.controlGlyph)
             ForEach(hits) { place in
                 Button { openPlace(place) } label: { WorkSearchPlaceRow(place: place) }
                     .buttonStyle(.plain)
             }
             if !model.results.isEmpty {
-                Text("Your work").font(Theme.callout).foregroundStyle(Theme.controlGlyph)
+                Text(L10n.text("apple.worksearchsheet.your_work.ef14cf0d")).font(Theme.callout).foregroundStyle(Theme.controlGlyph)
                     .padding(.top, Theme.Space.s)
             }
         }
@@ -161,7 +161,7 @@ struct WorkSearchSheet: View {
                             .accessibilityAddTraits(model.selected == hit.reference ? .isSelected : [])
                         }
                         if model.canLoadMore {
-                            Button("Show more results", .more) { Task { await model.search(more: true) } }
+                            Button(L10n.text("apple.worksearchsheet.show_more_results.b27dc424"), .more) { Task { await model.search(more: true) } }
                                 .buttonStyle(SecondaryButtonStyle())
                                 .disabled(model.searching)
                         }
@@ -177,9 +177,9 @@ struct WorkSearchSheet: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             if hasRecentWork {
                 HStack {
-                    Text("Recent searches").font(Theme.callout)
+                    Text(L10n.text("apple.worksearchsheet.recent_searches.228c84b5")).font(Theme.callout)
                     Spacer()
-                    Button("Clear", .delete) { Task { await model.history.clear() } }
+                    Button(L10n.text("apple.worksearchsheet.clear.83b12c22"), .delete) { Task { await model.history.clear() } }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                         .disabled(model.history.busy)
                 }
@@ -188,7 +188,7 @@ struct WorkSearchSheet: View {
                         .buttonStyle(SecondaryButtonStyle())
                 }
                 if !model.recentDestinations.isEmpty {
-                    Text("Recently opened").font(Theme.callout)
+                    Text(L10n.text("apple.worksearchsheet.recently_opened.07d9b609")).font(Theme.callout)
                     ForEach(model.recentDestinations) { destination in
                         Button(destination.title, .history) { openResult(destination.reference) }
                             .buttonStyle(SecondaryButtonStyle())
@@ -197,26 +197,26 @@ struct WorkSearchSheet: View {
             } else {
                 EmptyState(
                     symbol: ActionIcon.search.symbol,
-                    title: places == nil ? "Search your work" : "Search the app and your work",
+                    title: places == nil ? L10n.text("apple.worksearchsheet.search_your_work.25aa8c29") : L10n.text("apple.worksearchsheet.search_the_app_and_your_work.deb3629b"),
                     message: openingMessage
                 )
             }
             if model.history.enabled {
-                Button("Turn off search history", .history) { Task { await model.history.setEnabled(false) } }
+                Button(L10n.text("apple.worksearchsheet.turn_off_search_history.10132c4b"), .history) { Task { await model.history.setEnabled(false) } }
                     .buttonStyle(SecondaryButtonStyle(small: true))
                     .disabled(model.history.busy)
             } else {
-                Text("Search history is off. Turn it on to keep recent searches and destinations, encrypted on this device.")
+                Text(L10n.text("apple.worksearchsheet.search_history_is_off_turn_it_on_to_keep_r.6847b71e"))
                     .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("Turn on search history", .history) { Task { await model.history.setEnabled(true) } }
+                Button(L10n.text("apple.worksearchsheet.turn_on_search_history.d3147981"), .history) { Task { await model.history.setEnabled(true) } }
                     .buttonStyle(SecondaryButtonStyle(small: true))
                     .disabled(model.history.busy)
             }
             if let failure = model.history.failure {
                 Text(failure).font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                 if !model.history.enabled {
-                    Button("Clear saved history", .delete) { Task { await model.history.clear() } }
+                    Button(L10n.text("apple.worksearchsheet.clear_saved_history.186756c8"), .delete) { Task { await model.history.clear() } }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                         .disabled(model.history.busy)
                 }
@@ -230,20 +230,20 @@ struct WorkSearchSheet: View {
                 Menu {
                     ForEach(model.liveMachines.keys.sorted(), id: \.self) { identity in
                         if model.liveHosts.contains(identity) {
-                            Button(model.liveMachines[identity] ?? "Computer", .done) {
+                            Button(model.liveMachines[identity] ?? L10n.text("apple.worksearchsheet.computer.76ed42d2"), .done) {
                                 model.selectLiveHosts(model.liveHosts.subtracting([identity]))
                             }
                         } else {
-                            Button(model.liveMachines[identity] ?? "Computer", .device) {
+                            Button(model.liveMachines[identity] ?? L10n.text("apple.worksearchsheet.computer.76ed42d2"), .device) {
                                 model.selectLiveHosts(model.liveHosts.union([identity]))
                             }
                         }
                     }
                     if !model.liveHosts.isEmpty {
-                        Button("Stop searching connected machines", .stop) { model.selectLiveHosts([]) }
+                        Button(L10n.text("apple.worksearchsheet.stop_searching_connected_machines.6f7d631e"), .stop) { model.selectLiveHosts([]) }
                     }
                 } label: {
-                    ActionIcon.search.label(model.liveHosts.isEmpty ? "Search connected machines" : "Computers (\(model.liveHosts.count))")
+                    ActionIcon.search.label(model.liveHosts.isEmpty ? L10n.text("apple.worksearchsheet.search_connected_machines.67d82a82") : L10n.text("apple.worksearchsheet.computers_0.098e9f1f", "\(model.liveHosts.count)"))
                         .font(Theme.callout)
                 }
             }
@@ -252,11 +252,11 @@ struct WorkSearchSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if model.canLoadMoreLive {
-                Button("More live results", .search) { model.loadMoreLive() }
+                Button(L10n.text("apple.worksearchsheet.more_live_results.b30b9ba6"), .search) { model.loadMoreLive() }
                     .buttonStyle(SecondaryButtonStyle())
             }
             if !model.liveFailures.intersection(model.activeLiveHosts).isEmpty {
-                Button("Retry live search", .refresh) { model.selectLiveHosts(model.liveHosts) }
+                Button(L10n.text("apple.worksearchsheet.retry_live_search.fef46d4a"), .refresh) { model.selectLiveHosts(model.liveHosts) }
                     .buttonStyle(SecondaryButtonStyle())
             }
         }
@@ -267,7 +267,7 @@ struct WorkSearchSheet: View {
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Space.s))
             : AnyLayout(HStackLayout())
         return layout {
-            Text("Saved work on this device").font(Theme.caption).foregroundStyle(Theme.controlGlyph)
+            Text(L10n.text("apple.worksearchsheet.saved_work_on_this_device.6942a15d")).font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                 .fixedSize(horizontal: false, vertical: true)
             if !dynamicTypeSize.isAccessibilitySize { Spacer() }
             machineFilter
@@ -279,7 +279,7 @@ struct WorkSearchSheet: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: Theme.Space.s) {
                 ForEach(WorkSearchModel.Filter.allCases) { filter in
-                    Button(filter.rawValue, .filter) { model.filter = filter }
+                    Button(L10n.enumLabel(filter), .filter) { model.filter = filter }
                         .buttonStyle(SecondaryButtonStyle())
                         .foregroundStyle(model.filter == filter ? Theme.accent : Theme.controlGlyph)
                         .accessibilityAddTraits(model.filter == filter ? .isSelected : [])
@@ -291,12 +291,12 @@ struct WorkSearchSheet: View {
 
     private var machineFilter: some View {
                 Menu {
-                    Button("All machines", .device) { model.host = nil }
+                    Button(L10n.text("apple.worksearchsheet.all_machines.47841756"), .device) { model.host = nil }
                     ForEach(model.machines.keys.sorted(), id: \.self) { identity in
-                        Button(model.machines[identity] ?? "Machine", .device) { model.host = identity }
+                        Button(model.machines[identity] ?? L10n.text("apple.worksearchsheet.machine.8f1cc42d"), .device) { model.host = identity }
                     }
                 } label: {
-                    ActionIcon.device.label(model.host.flatMap { model.machines[$0] } ?? "All machines")
+                    ActionIcon.device.label(model.host.flatMap { model.machines[$0] } ?? L10n.text("apple.worksearchsheet.all_machines.47841756"))
                         .font(Theme.callout)
                 }
     }
@@ -354,7 +354,7 @@ struct WorkSearchSheet: View {
         let dated = hit.updatedAt.timeIntervalSince1970 > 0
             ? " " + RelativeClock.phrase(for: hit.updatedAt, style: .full)
             : ""
-        return hit.source.rawValue + dated + (hit.partial ? " · Partial conversation" : "")
+        return L10n.enumLabel(hit.source) + dated + (hit.partial ? L10n.text("apple.worksearchsheet.partial_conversation.26d41f9c") : "")
     }
 
     private func highlighted(_ excerpt: WorkSearchText.Excerpt) -> Text {
@@ -377,10 +377,10 @@ struct WorkSearchSheet: View {
     private var openingMessage: String {
         let live = model.liveMachines.isEmpty
             ? ""
-            : " Pick a connected machine above to search it as it is now."
+            : L10n.text("apple.worksearchsheet.pick_a_connected_machine_above_to_search_i.e252311d")
         return places == nil
-            ? "Type to find a conversation, a folder, or a change you have opened or saved.\(live)"
-            : "Type to find a screen, a setting, or work you have opened or saved.\(live)"
+            ? L10n.text("apple.worksearchsheet.type_to_find_a_conversation_a_folder_or_a.579dec50", "\(live)")
+            : L10n.text("apple.worksearchsheet.type_to_find_a_screen_a_setting_or_work_yo.14600f0e", "\(live)")
     }
 
     /// A query with no work behind it. Full width when it is the only answer,
@@ -390,11 +390,11 @@ struct WorkSearchSheet: View {
         if placeHits.isEmpty {
             EmptyState(
                 symbol: ActionIcon.search.symbol,
-                title: "No matches in your work",
+                title: L10n.text("apple.worksearchsheet.no_matches_in_your_work.a6f76389"),
                 message: noMatchesMessage
             )
         } else {
-            Text("Nothing in your work matches this.")
+            Text(L10n.text("apple.worksearchsheet.nothing_in_your_work_matches_this.30cda127"))
                 .font(Theme.caption).foregroundStyle(Theme.controlGlyph)
                 .padding(.vertical, Theme.Space.s)
         }
@@ -402,12 +402,12 @@ struct WorkSearchSheet: View {
 
     private var noMatchesMessage: String {
         if !model.liveMachines.isEmpty, model.activeLiveHosts.isEmpty {
-            return "Nothing saved on this device matches. Pick a connected machine above to search what is on it."
+            return L10n.text("apple.worksearchsheet.nothing_saved_on_this_device_matches_pick.c5307040")
         }
         if !model.includesSavedText {
-            return "Saved conversation text is off, so this covers folder names only. Turn it on in Saved work, or search a connected machine."
+            return L10n.text("apple.worksearchsheet.saved_conversation_text_is_off_so_this_cov.bca810dc")
         }
-        return "Nothing here matches. Try fewer words, or another machine."
+        return L10n.text("apple.worksearchsheet.nothing_here_matches_try_fewer_words_or_an.7daab500")
     }
 
     private func openPlace(_ place: WorkSearchPlace) {
@@ -431,10 +431,10 @@ struct WorkSearchSheet: View {
                     model.rememberOpen(reference)
                     openedChange = change
                 } else {
-                    openFailure = "This saved change is no longer available. Refresh saved work, or open its folder to view current changes."
+                    openFailure = L10n.text("apple.worksearchsheet.this_saved_change_is_no_longer_available_r.75cc6c73")
                 }
             }
         } else if open(reference) { model.rememberOpen(reference); dismiss() }
-        else { openFailure = "This work is not available to open. Check its folder and machine in Projects, then try again." }
+        else { openFailure = L10n.text("apple.worksearchsheet.this_work_is_not_available_to_open_check_i.21b25b9d") }
     }
 }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -71,9 +73,9 @@ sealed interface ChatAgentChoice {
     data class Effort(val id: String) : ChatAgentChoice
 }
 
-private const val SECTION_AGENT = "Agent"
-private const val SECTION_MODEL = "Model"
-private const val SECTION_EFFORT = "Effort"
+private val SECTION_AGENT = L10n.text("android.chatagentpanel.agent.11b39c93")
+private val SECTION_MODEL = L10n.text("android.chatagentpanel.model.5e2c614c")
+private val SECTION_EFFORT = L10n.text("android.chatagentpanel.effort.4387e5d3")
 
 private fun backendOf(backends: List<JsonObject>, id: String?): JsonObject? =
     backends.firstOrNull { it.str("id") == id }
@@ -98,8 +100,8 @@ internal fun chatAgentChoices(
                 value = ChatAgentChoice.Agent(id),
                 label = label,
                 detail = when (backend?.str("readiness")) {
-                    "needsSignIn" -> "Sign-in may be needed"
-                    "expired" -> "Stored login has expired"
+                    "needsSignIn" -> L10n.text("android.chatagentpanel.sign_in_may_be_needed.c3dde98c")
+                    "expired" -> L10n.text("android.chatagentpanel.stored_login_has_expired.bf189dae")
                     else -> null
                 },
                 section = SECTION_AGENT,
@@ -112,8 +114,8 @@ internal fun chatAgentChoices(
         rows.add(
             PickerChoice(
                 value = ChatAgentChoice.Model(""),
-                label = "Default",
-                detail = "$label picks the model",
+                label = L10n.text("android.chatagentpanel.default.21b111cb"),
+                detail = L10n.text("android.chatagentpanel.0_picks_the_model.59367853", "${label}"),
                 section = SECTION_MODEL,
             ),
         )
@@ -123,14 +125,14 @@ internal fun chatAgentChoices(
                 PickerChoice(
                     value = ChatAgentChoice.Model(id),
                     label = id,
-                    detail = if (id in listed) null else "Saved choice · availability unverified",
+                    detail = if (id in listed) null else L10n.text("android.chatagentpanel.saved_choice_availability_unverified.96a7ce32"),
                     section = SECTION_MODEL,
                 ),
             )
         }
         val efforts = chatEffortOptions(current, chat?.str("effort"))
         if (efforts.isNotEmpty()) {
-            rows.add(PickerChoice(ChatAgentChoice.Effort(""), "Default", section = SECTION_EFFORT))
+            rows.add(PickerChoice(ChatAgentChoice.Effort(""), L10n.text("android.chatagentpanel.default.21b111cb"), section = SECTION_EFFORT))
             efforts.forEach { rows.add(PickerChoice(ChatAgentChoice.Effort(it), it, section = SECTION_EFFORT)) }
         }
     }
@@ -152,8 +154,8 @@ internal fun chatAgentSectionValue(
 ): String? = when (section) {
     SECTION_AGENT -> backendOf(backends, chat?.str("backend"))?.str("label")?.ifBlank { null }
         ?: chat?.str("backend")
-    SECTION_MODEL -> chat?.str("model")?.ifBlank { null } ?: "Default"
-    SECTION_EFFORT -> chat?.str("effort")?.ifBlank { null } ?: "Default"
+    SECTION_MODEL -> chat?.str("model")?.ifBlank { null } ?: L10n.text("android.chatagentpanel.default.21b111cb")
+    SECTION_EFFORT -> chat?.str("effort")?.ifBlank { null } ?: L10n.text("android.chatagentpanel.default.21b111cb")
     else -> null
 }
 
@@ -186,12 +188,12 @@ internal fun chatAgentSummary(backends: List<JsonObject>, chat: JsonObject?): St
     val backend = backendOf(backends, id)
     val agent = backend?.str("label")?.ifBlank { null }
         ?: id.ifBlank { null }?.let { ai.tokenstat.tokenstat.ui.logic.harnessName(it) }
-        ?: "Agent"
+        ?: L10n.text("android.chatagentpanel.agent.11b39c93")
     val parts = mutableListOf(agent)
     chat?.str("model")?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
     val effort = chat?.str("effort")?.takeIf { it.isNotBlank() }
     if (stringList(backend, "efforts").isNotEmpty() && effort != null) {
-        parts.add("$effort effort")
+        parts.add(L10n.text("android.chatagentpanel.0_effort.b0d63362", "${effort}"))
     }
     return parts.joinToString(" · ")
 }
@@ -237,7 +239,7 @@ fun ChatAgentSheet(
             onBackends(asObjects(it))
             refreshError = null
         }.onFailure {
-            refreshError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel.ifBlank { "that computer" })
+            refreshError = TunnelCopy.display(it.message ?: L10n.text("android.chatagentpanel.the_request_failed.db4fb447"), hostLabel.ifBlank { L10n.text("android.chatagentpanel.that_computer.2b209061") })
         }
     }
     LaunchedEffect(peer, chatId) { if (backends.isEmpty()) load(refresh = false) }
@@ -266,7 +268,7 @@ fun ChatAgentSheet(
                 refreshError = null
                 onChanged()
             }.onFailure {
-                refreshError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel.ifBlank { "that computer" })
+                refreshError = TunnelCopy.display(it.message ?: L10n.text("android.chatagentpanel.the_request_failed.db4fb447"), hostLabel.ifBlank { L10n.text("android.chatagentpanel.that_computer.2b209061") })
             }
             updating = false
         }
@@ -283,17 +285,17 @@ fun ChatAgentSheet(
             }.onSuccess { result ->
                 val obj = result as? JsonObject
                 if (obj?.bol("ok") != true) {
-                    setupError = "Installation failed. " + (obj?.str("output").orEmpty().takeLast(600))
+                    setupError = L10n.text("android.chatagentpanel.installation_failed_0.f293f900", "${(obj?.str("output").orEmpty().takeLast(600))}")
                 }
                 load(refresh = true)
             }.onFailure {
-                setupError = TunnelCopy.display(it.message ?: "The request failed.", hostLabel.ifBlank { "that computer" })
+                setupError = TunnelCopy.display(it.message ?: L10n.text("android.chatagentpanel.the_request_failed.db4fb447"), hostLabel.ifBlank { L10n.text("android.chatagentpanel.that_computer.2b209061") })
             }
             installing = null
         }
     }
 
-    TsPickerSheet(title = "Agent, model and effort", onDismiss = onDismiss) {
+    TsPickerSheet(title = L10n.text("android.chatagentpanel.agent_model_and_effort.217ff8ae"), onDismiss = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(bottom = Space.l)) {
             if (showingSetup) {
                 Column(
@@ -305,7 +307,7 @@ fun ChatAgentSheet(
                     verticalArrangement = Arrangement.spacedBy(Space.m),
                 ) {
                     Text(
-                        "Set up on ${hostLabel.ifBlank { "this computer" }}",
+                        L10n.text("android.chatagentpanel.set_up_on_0.3a4e92e0", "${hostLabel.ifBlank { L10n.text("android.chatagentpanel.this_computer.058bf37c") }}"),
                         style = TsType.callout.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
                         color = colors.textPrimary,
                     )
@@ -319,12 +321,12 @@ fun ChatAgentSheet(
                                 )
                                 Text(
                                     when {
-                                        backendNotInstalled(backend) -> "Not installed"
+                                        backendNotInstalled(backend) -> L10n.text("android.chatagentpanel.not_installed.d177cdc0")
                                         backend.str("readiness") == "needsSignIn" ||
                                             backend.str("readiness") == "expired" ->
-                                            "Open this agent in the host's Terminal to sign in, then retry."
-                                        backend.bol("installed") -> "Installed"
-                                        else -> "Availability unknown"
+                                            L10n.text("android.chatagentpanel.open_this_agent_in_the_host_s_terminal_to.758284f3")
+                                        backend.bol("installed") -> L10n.text("android.chatagentpanel.installed.f8b32f4e")
+                                        else -> L10n.text("android.chatagentpanel.availability_unknown.2e0078a8")
                                     },
                                     style = TsType.caption,
                                     color = colors.controlGlyph,
@@ -332,7 +334,7 @@ fun ChatAgentSheet(
                             }
                             if (backendNotInstalled(backend) && backend.bol("canInstall")) {
                                 TsSecondaryButton(
-                                    label = if (installing == backend.str("id")) "Installing…" else "Install",
+                                    label = if (installing == backend.str("id")) L10n.text("android.chatagentpanel.installing.530bcc35") else L10n.text("android.chatagentpanel.install.569ca49f"),
                                     icon = ActionIcon.Download.vector,
                                     small = true,
                                     enabled = installing == null && !locked,
@@ -346,9 +348,9 @@ fun ChatAgentSheet(
                 TsPickerOptionList(
                     choices = choices,
                     isSelected = { chatAgentIsSelected(it, chat) },
-                    prompt = "Filter agents, models and efforts",
-                    emptyMessage = "No agents installed. Set up an agent to start chatting.",
-                    caption = "Agents on ${hostLabel.ifBlank { "this computer" }}",
+                    prompt = L10n.text("android.chatagentpanel.filter_agents_models_and_efforts.315032da"),
+                    emptyMessage = L10n.text("android.chatagentpanel.no_agents_installed_set_up_an_agent_to_sta.2f73b57f"),
+                    caption = L10n.text("android.chatagentpanel.agents_on_0.ebf316db", "${hostLabel.ifBlank { L10n.text("android.chatagentpanel.this_computer.058bf37c") }}"),
                     onRefresh = if (HostContracts.supportsModelRefresh(protocol)) {
                         { load(refresh = true) }
                     } else {
@@ -366,7 +368,7 @@ fun ChatAgentSheet(
                             val starred = id in pinned
                             Icon(
                                 ActionIcon.Pinned.vector,
-                                if (starred) "Unpin $id" else "Pin $id",
+                                if (starred) L10n.text("android.chatagentpanel.unpin_0.450ccf9f", "${id}") else L10n.text("android.chatagentpanel.pin_0.67fd141b", "${id}"),
                                 tint = if (starred) colors.accent else colors.textTertiary,
                                 modifier = Modifier
                                     .size(44.dp)
@@ -383,13 +385,13 @@ fun ChatAgentSheet(
             }
             when (current?.str("modelListStatus")) {
                 "refreshFailed" -> Text(
-                    "Couldn't refresh models. Use the agent default or a previously listed model.",
+                    L10n.text("android.chatagentpanel.couldn_t_refresh_models_use_the_agent_defa.5288d275"),
                     style = TsType.caption,
                     color = colors.warning,
                     modifier = Modifier.padding(horizontal = Space.m),
                 )
                 "loading" -> Text(
-                    "Checking models… Agent default is available.",
+                    L10n.text("android.chatagentpanel.checking_models_agent_default_is_available.6cb73a5c"),
                     style = TsType.caption,
                     color = colors.controlGlyph,
                     modifier = Modifier.padding(horizontal = Space.m),
@@ -404,7 +406,7 @@ fun ChatAgentSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TsSecondaryButton(
-                    label = if (showingSetup) "Back to agent choices" else "Set up another agent…",
+                    label = if (showingSetup) L10n.text("android.chatagentpanel.back_to_agent_choices.a5dc0271") else L10n.text("android.chatagentpanel.set_up_another_agent.ba92ba58"),
                     icon = if (showingSetup) ActionIcon.Back.vector else ActionIcon.Create.vector,
                     small = true,
                     enabled = !locked,
@@ -412,7 +414,7 @@ fun ChatAgentSheet(
                 )
                 Spacer(Modifier.weight(1f))
                 TsSecondaryButton(
-                    label = "Retry",
+                    label = L10n.text("common.retry"),
                     icon = ActionIcon.Refresh.vector,
                     small = true,
                     enabled = installing == null && !locked,

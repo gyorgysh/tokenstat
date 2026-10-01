@@ -1416,27 +1416,27 @@ enum PersonaMood: Hashable, CaseIterable {
 
     var label: String {
         switch self {
-        case .idle: return "Idle"
-        case .bouncing: return "Bouncing"
-        case .thinking: return "Thinking"
-        case .working: return "Working"
-        case .speaking: return "Replying"
-        case .juggling: return "Juggling"
-        case .dancing: return "Dancing"
-        case .waiting: return "Waiting"
-        case .ok: return "Done"
-        case .failed: return "Failed"
-        case .sleeping: return "Asleep"
-        case .reading: return "Reading"
-        case .gaming: return "Playing"
-        case .pacing: return "Thinking"
-        case .typing: return "Typing"
-        case .sipping: return "Tea break"
-        case .sketching: return "Sketching"
-        case .stargazing: return "Stargazing"
-        case .gardening: return "Gardening"
-        case .bubbling: return "Blowing bubbles"
-        case .snacking: return "Snack break"
+        case .idle: return L10n.text("common.idle")
+        case .bouncing: return L10n.text("apple.personamood.bouncing.640dcae5")
+        case .thinking: return L10n.text("apple.personamood.thinking.a20d12c5")
+        case .working: return L10n.text("common.working")
+        case .speaking: return L10n.text("apple.personamood.replying.b2663dd7")
+        case .juggling: return L10n.text("apple.personamood.juggling.126aab73")
+        case .dancing: return L10n.text("apple.personamood.dancing.9879cda2")
+        case .waiting: return L10n.text("common.waiting")
+        case .ok: return L10n.text("common.done")
+        case .failed: return L10n.text("common.failed")
+        case .sleeping: return L10n.text("apple.personamood.asleep.60135e8f")
+        case .reading: return L10n.text("apple.personamood.reading.463816d0")
+        case .gaming: return L10n.text("apple.personamood.playing.deaf6f9d")
+        case .pacing: return L10n.text("apple.personamood.thinking.a20d12c5")
+        case .typing: return L10n.text("apple.personamood.typing.25dfb9b4")
+        case .sipping: return L10n.text("apple.personamood.tea_break.08af9306")
+        case .sketching: return L10n.text("apple.personamood.sketching.edf49874")
+        case .stargazing: return L10n.text("apple.personamood.stargazing.94665327")
+        case .gardening: return L10n.text("apple.personamood.gardening.0fe4b0b9")
+        case .bubbling: return L10n.text("apple.personamood.blowing_bubbles.8f2744ed")
+        case .snacking: return L10n.text("apple.personamood.snack_break.5d92c6d3")
         }
     }
 

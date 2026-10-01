@@ -14,7 +14,7 @@ struct WorkflowStepListView: View {
     /// Phone list and iPad inspector share these names. Input is Start.
     static func kindTitle(_ kind: WorkflowNodeKind) -> String {
         switch kind {
-        case .input: return "Start"
+        case .input: return L10n.text("common.start")
         default: return kind.label
         }
     }
@@ -37,7 +37,7 @@ struct WorkflowStepListView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if !adding {
-                Button("Add step", .create) { adding = true }
+                Button(L10n.text("apple.workflowsteplistview.add_step.839bd5e0"), .create) { adding = true }
                     .buttonStyle(AccentButtonStyle(comfortable: true))
                     .disabled(!canAdd)
             }
@@ -65,22 +65,22 @@ struct WorkflowStepListView: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Steps")
+                Text(L10n.text("apple.workflowsteplistview.steps.1de3df70"))
                     .font(Theme.caption)
                     .foregroundStyle(Theme.controlGlyph)
-                Text("\(session.fields.nodes.count) steps · \(session.fields.edges.count) connections")
+                Text(L10n.text("apple.workflowsteplistview.0_steps_1_connections.9fa532d7", "\(session.fields.nodes.count)", "\(session.fields.edges.count)"))
                     .font(Theme.caption)
                     .foregroundStyle(Theme.controlGlyph)
             }
             Spacer(minLength: Theme.Space.s)
-            Button("Undo", .restore) { session.undoGraph() }
+            Button(L10n.text("apple.workflowsteplistview.undo.a8283ade"), .restore) { session.undoGraph() }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .disabled(!session.canUndoGraph || session.creating)
-            Button("Redo", .next) { session.redoGraph() }
+            Button(L10n.text("apple.workflowsteplistview.redo.74273989"), .next) { session.redoGraph() }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .disabled(!session.canRedoGraph || session.creating)
             if selectsInPlace, !path.isEmpty {
-                Button("Settings", .settings) {
+                Button(L10n.text("common.settings"), .settings) {
                     session.endGroupedStepEdit()
                     session.selectStep(nil)
                     session.selectConnection(nil)
@@ -147,7 +147,7 @@ struct WorkflowStepListView: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier(node.id)
         .contextMenu {
-            Button("Delete step", .delete, role: .destructive) {
+            Button(L10n.text("apple.workflowsteplistview.delete_step.0e31c081"), .delete, role: .destructive) {
                 session.selectStep(node.id)
                 session.removeSelectedStep()
             }
@@ -161,7 +161,7 @@ struct WorkflowStepListView: View {
         incoming: [WorkflowEdge]
     ) -> some View {
         if outgoing.isEmpty {
-            Text("No next step yet")
+            Text(L10n.text("apple.workflowsteplistview.no_next_step_yet.e542b775"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
         } else {
@@ -172,7 +172,7 @@ struct WorkflowStepListView: View {
             }
         }
         if incoming.count > 1 {
-            Text("Joins \(incoming.count) steps")
+            Text(L10n.text("apple.workflowsteplistview.joins_0_steps.a16e2768", "\(incoming.count)"))
                 .font(Theme.caption)
                 .foregroundStyle(Theme.controlGlyph)
         }
@@ -199,11 +199,11 @@ struct WorkflowStepListView: View {
         let columns = typeSize.isAccessibilitySize ? 1 : 2
         return VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack {
-                Text("Add a step")
+                Text(L10n.text("apple.workflowsteplistview.add_a_step.e45a4474"))
                     .font(Theme.caption)
                     .foregroundStyle(Theme.controlGlyph)
                 Spacer(minLength: 0)
-                Button("Cancel", .dismiss) { adding = false }
+                Button(L10n.text("common.cancel"), .dismiss) { adding = false }
                     .buttonStyle(SecondaryButtonStyle(small: true))
             }
             LazyVGrid(
@@ -284,7 +284,7 @@ struct WorkflowStepListView: View {
         if let issue = WorkflowGraphRules.nodeIssue(node) { return issue }
         if node.kind == .loop,
            !session.fields.edges.contains(where: { $0.from == node.id && $0.when == .ok }) {
-            return "Loop \(node.displayTitle) needs a body connection."
+            return L10n.text("apple.workflowsteplistview.loop_0_needs_a_body_connection.0195107c", "\(node.displayTitle)")
         }
         return nil
     }
@@ -302,7 +302,7 @@ struct WorkflowStepListView: View {
             parts.append("\(role) \(target)")
         }
         if incoming.count > 1 {
-            parts.append("joins \(incoming.count) steps")
+            parts.append(L10n.text("apple.workflowsteplistview.joins_0_steps.fe010394", "\(incoming.count)"))
         }
         if let issue { parts.append(issue) }
         return parts.joined(separator: ". ")
@@ -310,14 +310,14 @@ struct WorkflowStepListView: View {
 
     private var kindChoices: [KindChoice] {
         [
-            KindChoice(kind: .input, title: "Start", subtitle: "Starting prompt"),
-            KindChoice(kind: .agent, title: "Agent", subtitle: "Model and prompt"),
-            KindChoice(kind: .automation, title: "Automation", subtitle: "Run a saved job"),
-            KindChoice(kind: .http, title: "HTTP", subtitle: "Host-owned request"),
-            KindChoice(kind: .command, title: "Command", subtitle: "Shell in the folder"),
-            KindChoice(kind: .gate, title: "Gate", subtitle: "Wait for you"),
-            KindChoice(kind: .condition, title: "If", subtitle: "Then or else"),
-            KindChoice(kind: .loop, title: "Loop", subtitle: "Repeat a body"),
+            KindChoice(kind: .input, title: L10n.text("common.start"), subtitle: L10n.text("apple.workflowsteplistview.starting_prompt.407bec2f")),
+            KindChoice(kind: .agent, title: L10n.text("apple.workflowsteplistview.agent.11b39c93"), subtitle: L10n.text("apple.workflowsteplistview.model_and_prompt.4250fe37")),
+            KindChoice(kind: .automation, title: L10n.text("apple.workflowsteplistview.automation.d909750b"), subtitle: L10n.text("apple.workflowsteplistview.run_a_saved_job.ce446b1f")),
+            KindChoice(kind: .http, title: L10n.text("apple.workflowsteplistview.http.56d6f321"), subtitle: L10n.text("apple.workflowsteplistview.host_owned_request.f7355983")),
+            KindChoice(kind: .command, title: L10n.text("apple.workflowsteplistview.command.71316697"), subtitle: L10n.text("apple.workflowsteplistview.shell_in_the_folder.b6875024")),
+            KindChoice(kind: .gate, title: L10n.text("apple.workflowsteplistview.gate.fa77a525"), subtitle: L10n.text("apple.workflowsteplistview.wait_for_you.d955a62d")),
+            KindChoice(kind: .condition, title: L10n.text("apple.workflowsteplistview.if.1e3abf61"), subtitle: L10n.text("apple.workflowsteplistview.then_or_else.2318a255")),
+            KindChoice(kind: .loop, title: L10n.text("apple.workflowsteplistview.loop.f2f6a018"), subtitle: L10n.text("apple.workflowsteplistview.repeat_a_body.a05cb63b")),
         ]
     }
 

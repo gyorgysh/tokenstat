@@ -305,7 +305,7 @@ final class WorkflowsModel {
             draft = nil
         }
         openEditor(fresh)
-        showNotice("Reverted to the last save.")
+        showNotice(L10n.text("apple.workflowsmodel.reverted_to_the_last_save.ed0d9061"))
     }
 
     var selectedNode: WorkflowNode? { document.selectedNode }
@@ -441,13 +441,13 @@ final class WorkflowsModel {
 
     func startBlank(scope: WorkflowScope = .global, workspaceID: String? = nil) {
         guard canStartNewDraft else {
-            errorMessage = "Save or discard the unsaved graph first."
+            errorMessage = L10n.text("apple.workflowsmodel.save_or_discard_the_unsaved_graph_first.1d0405b2")
             return
         }
         draft = WorkflowGraph.blank(scope: scope, workspaceID: workspaceID)
         designTranscript = ""
         selectDraft()
-        showNotice("Blank draft. Review it, then save. It will not run until you press Run.")
+        showNotice(L10n.text("apple.workflowsmodel.blank_draft_review_it_then_save_it_will_no.f79ecab4"))
     }
 
     func discardDraft() {
@@ -476,11 +476,11 @@ final class WorkflowsModel {
     func design(prompt: String, workspaceID: String?, backend: String?, model: String? = nil, effort: String? = nil) async {
         let intent = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !intent.isEmpty else {
-            errorMessage = "Describe the run first."
+            errorMessage = L10n.text("apple.workflowsmodel.describe_the_run_first.c72c5c15")
             return
         }
         guard canStartNewDraft else {
-            errorMessage = "Save or discard the unsaved graph first."
+            errorMessage = L10n.text("apple.workflowsmodel.save_or_discard_the_unsaved_graph_first.1d0405b2")
             return
         }
         isDesigning = true
@@ -499,7 +499,7 @@ final class WorkflowsModel {
             designTranscript = result.transcript
             errorMessage = nil
             selectDraft()
-            showNotice("Draft ready. Review it, then save. It will not run until you press Run.")
+            showNotice(L10n.text("apple.workflowsmodel.draft_ready_review_it_then_save_it_will_no.8950c360"))
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -513,7 +513,7 @@ final class WorkflowsModel {
         guard var graph = working ?? draft else { return }
         let name = graph.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
-            errorMessage = "A workflow needs a name."
+            errorMessage = L10n.text("apple.workflowsmodel.a_workflow_needs_a_name.fb280d33")
             return
         }
         graph.name = name
@@ -544,7 +544,7 @@ final class WorkflowsModel {
                 document.open(saved, dirty: false)
             }
             errorMessage = nil
-            showNotice("Saved \(saved.name).")
+            showNotice(L10n.text("apple.workflowsmodel.saved_0.d851298f", "\(saved.name)"))
             await load()
             selectedGraphID = saved.id
             selectedFocus = .graph
@@ -557,7 +557,7 @@ final class WorkflowsModel {
         do {
             _ = try await Bridge.updateWorkflow(graph)
             errorMessage = nil
-            showNotice("Saved \(graph.name).")
+            showNotice(L10n.text("apple.workflowsmodel.saved_0.d851298f", "\(graph.name)"))
             await load()
         } catch {
             errorMessage = error.localizedDescription
@@ -572,7 +572,7 @@ final class WorkflowsModel {
                 workspaceID: workspaceID
             )
             errorMessage = nil
-            showNotice("Started \(graph.name).")
+            showNotice(L10n.text("apple.workflowsmodel.started_0.8f95ec71", "\(graph.name)"))
             await load()
             if let current = runs.first(where: { $0.id == started.id }) {
                 selectRun(current)
@@ -588,7 +588,7 @@ final class WorkflowsModel {
         do {
             try await Bridge.workflowKill(runID: run.id)
             errorMessage = nil
-            showNotice("Stopped \(run.name).")
+            showNotice(L10n.text("apple.workflowsmodel.stopped_0.6cebd065", "\(run.name)"))
             await load()
         } catch {
             errorMessage = error.localizedDescription
@@ -599,7 +599,7 @@ final class WorkflowsModel {
         do {
             let updated = try await Bridge.workflowContinue(runID: run.id)
             errorMessage = nil
-            showNotice("Continued \(run.name).")
+            showNotice(L10n.text("apple.workflowsmodel.continued_0.472d1447", "\(run.name)"))
             await load()
             if let current = runs.first(where: { $0.id == updated.id }) {
                 selectRun(current)

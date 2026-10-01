@@ -11,7 +11,7 @@ import SwiftUI
 /// failed: the old forms each built their own row and ended up with three
 /// button sizes and delete styled as a link.
 struct SSHEditorFooter: View {
-    var saveTitle = "Save"
+    var saveTitle = L10n.text("common.save")
     var saveIcon: ActionIcon = .save
     var canSave: Bool
     var working: Bool
@@ -27,17 +27,17 @@ struct SSHEditorFooter: View {
     private var busyTitle: String {
         if let workingTitle { return workingTitle }
         switch saveIcon {
-        case .connect: return "Connecting…"
-        case .download: return "Importing…"
-        case .security, .approve: return "Checking…"
-        default: return "Saving…"
+        case .connect: return L10n.text("apple.sshlibraryeditors.connecting.72021eb7")
+        case .download: return L10n.text("apple.sshlibraryeditors.importing.c01c4324")
+        case .security, .approve: return L10n.text("apple.sshlibraryeditors.checking.ec963ffc")
+        default: return L10n.text("apple.sshlibraryeditors.saving.23e39291")
         }
     }
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
             if let onDelete {
-                Button("Delete", .delete, action: onDelete)
+                Button(L10n.text("common.delete"), .delete, action: onDelete)
                     .buttonStyle(DestructiveButtonStyle())
                     .disabled(working)
             }
@@ -47,7 +47,7 @@ struct SSHEditorFooter: View {
             // there until the socket gave up unavailable for exactly as long
             // as somebody wanted it: the screen looked frozen and the button
             // that would have got them out was the greyed-out one.
-            Button("Cancel", .dismiss, action: onCancel)
+            Button(L10n.text("common.cancel"), .dismiss, action: onCancel)
                 .buttonStyle(SecondaryButtonStyle())
                 .frame(minWidth: Theme.Control.pairedWidth)
             // A spinner and a verb, rather than the same button greyed out.
@@ -227,24 +227,24 @@ struct SSHHostEditor: View {
                 if let error {
                     InlineBanner(text: error, kind: .danger) { self.error = nil }
                 }
-                SSHEditorSection(title: "Connection") {
-                    SSHEditorField(label: "Name") {
-                        TextField("Name", text: $host.label).textFieldStyle(.themed)
+                SSHEditorSection(title: L10n.text("apple.sshlibraryeditors.connection.639a40e8")) {
+                    SSHEditorField(label: L10n.text("apple.sshlibraryeditors.name.dcd1d522")) {
+                        TextField(L10n.text("apple.sshlibraryeditors.name.dcd1d522"), text: $host.label).textFieldStyle(.themed)
                     }
-                    SSHEditorField(label: "Address") {
-                        TextField("Address", text: $host.hostname).textFieldStyle(.themed)
+                    SSHEditorField(label: L10n.text("apple.sshlibraryeditors.address.56ef8f20")) {
+                        TextField(L10n.text("apple.sshlibraryeditors.address.56ef8f20"), text: $host.hostname).textFieldStyle(.themed)
                     }
-                    SSHEditorField(label: "Username") {
-                        TextField("Username", text: $host.username).textFieldStyle(.themed)
+                    SSHEditorField(label: L10n.text("apple.sshlibraryeditors.username.e3b89e9d")) {
+                        TextField(L10n.text("apple.sshlibraryeditors.username.e3b89e9d"), text: $host.username).textFieldStyle(.themed)
                     }
-                    SSHEditorField(label: "Port") {
-                        TextField("Port", value: $host.port, format: .number)
+                    SSHEditorField(label: L10n.text("apple.sshlibraryeditors.port.72e9a59f")) {
+                        TextField(L10n.text("apple.sshlibraryeditors.port.72e9a59f"), value: $host.port, format: .number)
                             .textFieldStyle(.themed)
                             .frame(maxWidth: 100)
                     }
-                    SSHEditorField(label: "Starting directory") {
+                    SSHEditorField(label: L10n.text("apple.sshlibraryeditors.starting_directory.43eff379")) {
                         TextField(
-                            "Starting directory",
+                            L10n.text("apple.sshlibraryeditors.starting_directory.43eff379"),
                             text: Binding(
                                 get: { host.initialDirectory ?? "~" },
                                 set: { host.initialDirectory = $0 }
@@ -255,48 +255,48 @@ struct SSHHostEditor: View {
                     }
                 }
 
-                SSHEditorSection(title: "Authentication") {
-                    SSHEditorField(label: "Use") {
-                        Picker("Use", selection: Binding(
+                SSHEditorSection(title: L10n.text("apple.sshlibraryeditors.authentication.66880d2d")) {
+                    SSHEditorField(label: L10n.text("apple.sshlibraryeditors.use.c36d819e")) {
+                        Picker(L10n.text("apple.sshlibraryeditors.use.c36d819e"), selection: Binding(
                             get: { host.credentialID ?? "" },
                             set: { host.credentialID = $0.isEmpty ? nil : $0 }
                         )) {
-                            Text("Ask when connecting").tag("")
+                            Text(L10n.text("apple.sshlibraryeditors.ask_when_connecting.f16c5b52")).tag("")
                             ForEach(model.keys) { Text($0.label).tag($0.id) }
                         }
                     }
-                    SSHEditorField(label: "Connect through") {
-                        Picker("Connect through", selection: Binding(
+                    SSHEditorField(label: L10n.text("apple.sshlibraryeditors.connect_through.33b4cdfc")) {
+                        Picker(L10n.text("apple.sshlibraryeditors.connect_through.33b4cdfc"), selection: Binding(
                             get: { host.jumpHostID ?? "" },
                             set: { host.jumpHostID = $0.isEmpty ? nil : $0 }
                         )) {
-                            Text("Nothing, connect directly").tag("")
+                            Text(L10n.text("apple.sshlibraryeditors.nothing_connect_directly.af6bb305")).tag("")
                             ForEach(model.hosts.filter { $0.id != host.id }) { Text($0.label).tag($0.id) }
                         }
                     }
-                    Toggle("Forward the SSH agent", isOn: $host.agentForwarding)
+                    Toggle(L10n.text("apple.sshlibraryeditors.forward_the_ssh_agent.9a9a736c"), isOn: $host.agentForwarding)
                         .toggleStyle(.brandCheckbox)
 
-                    SSHEditorNote(text: "Passwords are asked for when you connect and are never saved. A key is stored in this device's vault and, if you have one, in the encrypted vault.")
+                    SSHEditorNote(text: L10n.text("apple.sshlibraryeditors.passwords_are_asked_for_when_you_connect_a.786d5eb5"))
                 }
 
-                SSHEditorSection(title: "In the list") {
-                    SSHEditorField(label: "Folder") {
-                        Picker("Folder", selection: Binding(
+                SSHEditorSection(title: L10n.text("apple.sshlibraryeditors.in_the_list.54b44e0b")) {
+                    SSHEditorField(label: L10n.text("apple.sshlibraryeditors.folder.74ccd433")) {
+                        Picker(L10n.text("apple.sshlibraryeditors.folder.74ccd433"), selection: Binding(
                             get: { host.folderID ?? "" },
                             set: { host.folderID = $0.isEmpty ? nil : $0 }
                         )) {
-                            Text("Top level").tag("")
+                            Text(L10n.text("apple.sshlibraryeditors.top_level.f61dd254")).tag("")
                             ForEach(model.folders) { Text($0.name).tag($0.id) }
                         }
                     }
                     SSHColorPicker(selection: $host.color)
-                    Toggle("Favourite", isOn: $host.favorite)
+                    Toggle(L10n.text("apple.sshlibraryeditors.favourite.e39b2499"), isOn: $host.favorite)
                         .toggleStyle(.brandCheckbox)
 
                 }
 
-                SSHEditorSection(title: "Advanced") {
+                SSHEditorSection(title: L10n.text("apple.sshlibraryeditors.advanced.9f088dbe")) {
                     Stepper(
                         keepaliveLabel,
                         value: $host.keepaliveSeconds,
@@ -307,24 +307,24 @@ struct SSHHostEditor: View {
                 }
 
                 if !host.hostKeys.isEmpty {
-                    SSHEditorSection(title: "Trusted server key") {
+                    SSHEditorSection(title: L10n.text("apple.sshlibraryeditors.trusted_server_key.0cf9a352")) {
                         ForEach(host.hostKeys, id: \.self) { key in
                             Text(key)
                                 .font(Theme.mono(11))
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        Button("Forget this key", .revoke) {
+                        Button(L10n.text("apple.sshlibraryeditors.forget_this_key.aa28ad3b"), .revoke) {
                             host.hostKeys = []
                         }
                         .buttonStyle(SecondaryButtonStyle(small: true))
-                        SSHEditorNote(text: "Forgetting makes the next connection ask you to confirm the server's fingerprint again.")
+                        SSHEditorNote(text: L10n.text("apple.sshlibraryeditors.forgetting_makes_the_next_connection_ask_y.7dece06c"))
                     }
                 }
             }
 
             SSHEditorFooter(
-                saveTitle: isNew ? "Add server" : "Save",
+                saveTitle: isNew ? L10n.text("apple.sshlibraryeditors.add_server.1099b2a9") : L10n.text("common.save"),
                 canSave: !host.label.isEmpty && !host.hostname.isEmpty && !host.username.isEmpty,
                 working: working,
                 onSave: { Task { await save() } },
@@ -332,7 +332,7 @@ struct SSHHostEditor: View {
                 onDelete: isNew ? nil : { confirmingDelete = true }
             )
         }
-        .navigationTitle(isNew ? "Add server" : host.label)
+        .navigationTitle(isNew ? L10n.text("apple.sshlibraryeditors.add_server.1099b2a9") : host.label)
         .task {
             guard !loaded else { return }
             loaded = true
@@ -342,24 +342,24 @@ struct SSHHostEditor: View {
                 host.folderID = folderID
             }
         }
-        .confirmationDialog("Delete this server?", isPresented: $confirmingDelete, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) {
+        .confirmationDialog(L10n.text("apple.sshlibraryeditors.delete_this_server.c1a65300"), isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button(L10n.text("common.delete"), role: .destructive) {
                 // Leave first, then delete. The delete reloads the list,
                 // and a detail view still bound to the record that just left
                 // it is a row being read while it is removed.
                 finish()
                 Task { await model.delete(host: host) }
             }
-            Button("Cancel", role: .cancel) {}
+            Button(L10n.text("common.cancel"), role: .cancel) {}
         } message: {
-            Text("The saved address and settings are removed from this device and from the encrypted vault. Nothing on the server changes.")
+            Text(L10n.text("apple.sshlibraryeditors.the_saved_address_and_settings_are_removed.c54d8484"))
         }
     }
 
     private var keepaliveLabel: String {
         host.keepaliveSeconds == 0
-            ? "Keepalive: off"
-            : "Keepalive: every \(host.keepaliveSeconds)s"
+            ? L10n.text("apple.sshlibraryeditors.keepalive_off.57e99fb2")
+            : L10n.text("apple.sshlibraryeditors.keepalive_every_0_s.b2a5973d", "\(host.keepaliveSeconds)")
     }
 
     @ViewBuilder
@@ -370,16 +370,16 @@ struct SSHHostEditor: View {
                 Text("=").foregroundStyle(.secondary)
                 Text(pair.value).font(Theme.mono(11)).lineLimit(1)
                 Spacer()
-                Button("Remove", .delete) {
+                Button(L10n.text("common.remove"), .delete) {
                     host.env.removeAll { $0.name == pair.name }
                 }
                 .buttonStyle(SecondaryButtonStyle(small: true))
             }
         }
         HStack(spacing: Theme.Space.s) {
-            TextField("Variable", text: $newEnvName)
-            TextField("Value", text: $newEnvValue)
-            Button("Add", .create) {
+            TextField(L10n.text("apple.sshlibraryeditors.variable.e57e9987"), text: $newEnvName)
+            TextField(L10n.text("apple.sshlibraryeditors.value.8e37953d"), text: $newEnvValue)
+            Button(L10n.text("common.add"), .create) {
                 let name = newEnvName.trimmingCharacters(in: .whitespaces)
                 guard !name.isEmpty else { return }
                 host.env.removeAll { $0.name == name }
@@ -411,7 +411,7 @@ struct SSHColorPicker: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
-            Text("Colour")
+            Text(L10n.text("apple.sshlibraryeditors.colour.3a9dfa58"))
             Spacer()
             ForEach(SSHColor.names, id: \.self) { name in
                 Button {
@@ -440,7 +440,7 @@ struct SSHKeyEditor: View {
     let keyID: String?
     let onDone: () -> Void
 
-    @State private var label = "My SSH key"
+    @State private var label = L10n.text("apple.sshlibraryeditors.my_ssh_key.127c1dd4")
     @State private var pem = ""
     @State private var passphrase = ""
     @State private var record: SSHKeyRecord?
@@ -466,48 +466,48 @@ struct SSHKeyEditor: View {
                 if let error {
                     InlineBanner(text: error, kind: .danger) { self.error = nil }
                 }
-                SSHEditorSection(title: "Key") {
-                    SSHEditorField(label: "Name") {
-                        TextField("Name", text: $label).textFieldStyle(.themed)
+                SSHEditorSection(title: L10n.text("apple.sshlibraryeditors.key.99a52df3")) {
+                    SSHEditorField(label: L10n.text("apple.sshlibraryeditors.name.dcd1d522")) {
+                        TextField(L10n.text("apple.sshlibraryeditors.name.dcd1d522"), text: $label).textFieldStyle(.themed)
                     }
                     if let record {
-                        SSHEditorField(label: "Algorithm") {
+                        SSHEditorField(label: L10n.text("apple.sshlibraryeditors.algorithm.d704d8af")) {
                             Text(record.algorithm)
                         }
-                        SSHEditorField(label: "Fingerprint") {
-                            Text(record.fingerprint.isEmpty ? "Not computed" : record.fingerprint)
+                        SSHEditorField(label: L10n.text("apple.sshlibraryeditors.fingerprint.ba7af0b7")) {
+                            Text(record.fingerprint.isEmpty ? L10n.text("apple.sshlibraryeditors.not_computed.9292f2b0") : record.fingerprint)
                                 .font(Theme.mono(11))
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         if record.passphraseProtected {
-                            Label("Protected by a passphrase", systemImage: "lock")
+                            Label(L10n.text("apple.sshlibraryeditors.protected_by_a_passphrase.e1da5704"), systemImage: "lock")
                                 .font(Theme.caption).foregroundStyle(.secondary)
                         }
                         if SSHSecretStore.requiresBiometrics(record.secretRef) {
-                            Label("Touch ID · This device only", systemImage: "touchid")
+                            Label(L10n.text("apple.sshlibraryeditors.touch_id_this_device_only.bdd18977"), systemImage: "touchid")
                                 .font(Theme.caption).foregroundStyle(Theme.accent)
-                            SSHEditorNote(text: "Not synced to vault. Touch ID protects access to this software key. Keep another way to access your servers in case this device or its enrolled fingerprints change.")
+                            SSHEditorNote(text: L10n.text("apple.sshlibraryeditors.not_synced_to_vault_touch_id_protects_acce.f3bcabb6"))
                         }
                     }
                 }
 
                 if let record {
-                    SSHEditorSection(title: "Public key") {
+                    SSHEditorSection(title: L10n.text("apple.sshlibraryeditors.public_key.4ee252fb")) {
                         Text(record.publicKey)
                             .font(Theme.mono(11))
                             .textSelection(.enabled)
                             .lineLimit(4)
                             .fixedSize(horizontal: false, vertical: true)
-                        Button(copied ? "Copied" : "Copy public key", .copy) {
+                        Button(copied ? L10n.text("apple.sshlibraryeditors.copied.8d525e5f") : L10n.text("apple.sshlibraryeditors.copy_public_key.5f2f4548"), .copy) {
                             copy(record.publicKey)
                         }
                         .buttonStyle(SecondaryButtonStyle(small: true))
-                        SSHEditorNote(text: "Add this line to ~/.ssh/authorized_keys on a server to let this key in. tokenstat never edits that file for you.")
+                        SSHEditorNote(text: L10n.text("apple.sshlibraryeditors.add_this_line_to_ssh_authorized_keys_on_a.711df410"))
                     }
                 } else {
-                    SSHEditorSection(title: "Add") {
-                        SSHEditorField(label: "New key type") {
+                    SSHEditorSection(title: L10n.text("common.add")) {
+                        SSHEditorField(label: L10n.text("apple.sshlibraryeditors.new_key_type.2ea9dfe1")) {
                             AppMenuPicker(options: SSHKeyAlgorithm.allCases.filter {
                                 $0 != .ecdsaP256TouchID || SSHVaultBiometrics.name == "Touch ID"
                             }.map { (value: $0, label: $0.label) }, selection: $algorithm)
@@ -515,18 +515,18 @@ struct SSHKeyEditor: View {
                         SSHEditorNote(text: algorithm.explanation)
                         #if os(macOS)
                         if SSHVaultBiometrics.name != "Touch ID" {
-                            SSHEditorNote(text: "Touch ID key protection is available when Touch ID is set up and available on this Mac.")
+                            SSHEditorNote(text: L10n.text("apple.sshlibraryeditors.touch_id_key_protection_is_available_when.32815577"))
                         }
                         #endif
-                        Button("Generate key", .create) { Task { await generate() } }
+                        Button(L10n.text("apple.sshlibraryeditors.generate_key.3dbb721a"), .create) { Task { await generate() } }
                             .buttonStyle(AccentButtonStyle())
-                        SSHEditorNote(text: "Or import an existing private key below. The private half goes into this device's vault, never into the connection list.")
+                        SSHEditorNote(text: L10n.text("apple.sshlibraryeditors.or_import_an_existing_private_key_below_th.d754e12b"))
                         ThemedEditor(text: $pem, font: Theme.mono(11), minHeight: 160)
-                        SSHEditorField(label: "Private-key passphrase (if it has one)") {
-                            SecureField("Passphrase", text: $passphrase).themedFieldBox()
+                        SSHEditorField(label: L10n.text("apple.sshlibraryeditors.private_key_passphrase_if_it_has_one.948cec1e")) {
+                            SecureField(L10n.text("apple.sshlibraryeditors.passphrase.e7611f05"), text: $passphrase).themedFieldBox()
                         }
                         HStack(spacing: Theme.Space.s) {
-                            Button("Import pasted key", .upload) { Task { await importPasted() } }
+                            Button(L10n.text("apple.sshlibraryeditors.import_pasted_key.92d28e76"), .upload) { Task { await importPasted() } }
                                 .buttonStyle(AccentButtonStyle())
                                 .disabled(pem.isEmpty)
                         }
@@ -542,7 +542,7 @@ struct SSHKeyEditor: View {
                 onDelete: record == nil ? nil : { confirmingDelete = true }
             )
         }
-        .navigationTitle(isNew ? "Add key" : label)
+        .navigationTitle(isNew ? L10n.text("apple.sshlibraryeditors.add_key.12626d65") : label)
         .task {
             guard !loaded else { return }
             loaded = true
@@ -551,15 +551,15 @@ struct SSHKeyEditor: View {
                 label = existing.label
             }
         }
-        .confirmationDialog("Delete this key?", isPresented: $confirmingDelete, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) {
+        .confirmationDialog(L10n.text("apple.sshlibraryeditors.delete_this_key.a5c8994b"), isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button(L10n.text("common.delete"), role: .destructive) {
                 let doomed = record
                 finish()
                 Task { if let doomed { await model.delete(key: doomed) } }
             }
-            Button("Cancel", role: .cancel) {}
+            Button(L10n.text("common.cancel"), role: .cancel) {}
         } message: {
-            Text("The private key is removed from this device's vault. Servers that trust it keep trusting it, so remove the public key there as well.")
+            Text(L10n.text("apple.sshlibraryeditors.the_private_key_is_removed_from_this_devic.52587af1"))
         }
     }
 
@@ -684,9 +684,9 @@ struct SSHSnippetEditor: View {
             // wrong until a different destination remounted the column. A
             // scroll view answers the same demand by scrolling.
             SSHEditorBody(working: working) {
-                TextField("Name", text: $snippet.title)
+                TextField(L10n.text("apple.sshlibraryeditors.name.dcd1d522"), text: $snippet.title)
                     .textFieldStyle(.themed)
-                Text("Command")
+                Text(L10n.text("apple.sshlibraryeditors.command.71316697"))
                     .font(Theme.caption).foregroundStyle(.secondary)
                 // The border used to be drawn over a bare TextEditor, which
                 // themed the outline of the platform's grey slab and left the
@@ -697,11 +697,11 @@ struct SSHSnippetEditor: View {
                 // text editor's content grows with what is typed into it.
                 ThemedEditor(text: $snippet.command, minHeight: 140)
                 if placeholders.isEmpty {
-                    Text("Wrap a value in {{braces}} to be asked for it every time this runs, so one snippet covers every server.")
+                    Text(L10n.text("apple.sshlibraryeditors.wrap_a_value_in_braces_to_be_asked_for_it.76780e5c"))
                         .font(Theme.caption).foregroundStyle(.secondary)
                 } else {
                     HStack(spacing: Theme.Space.xs) {
-                        Text("Asks for:").font(Theme.caption).foregroundStyle(.secondary)
+                        Text(L10n.text("apple.sshlibraryeditors.asks_for.e07b5c1a")).font(Theme.caption).foregroundStyle(.secondary)
                         ForEach(placeholders, id: \.self) { name in
                             Text(name)
                                 .font(Theme.mono(10))
@@ -710,15 +710,15 @@ struct SSHSnippetEditor: View {
                         }
                     }
                 }
-                Toggle("Run automatically after connecting", isOn: $snippet.runOnConnect)
+                Toggle(L10n.text("apple.sshlibraryeditors.run_automatically_after_connecting.b531eae1"), isOn: $snippet.runOnConnect)
                     .toggleStyle(.brandCheckbox)
                     .disabled(snippet.hostIDs.isEmpty || !placeholders.isEmpty)
                 if snippet.hostIDs.isEmpty {
-                    Text("Pick the servers this snippet belongs to before it can run by itself. A snippet kept for every server would fire into every connection.")
+                    Text(L10n.text("apple.sshlibraryeditors.pick_the_servers_this_snippet_belongs_to_b.ecbd238b"))
                         .font(Theme.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if !placeholders.isEmpty {
-                    Text("A snippet that asks for values cannot run by itself: the question would arrive on its own the moment you connected.")
+                    Text(L10n.text("apple.sshlibraryeditors.a_snippet_that_asks_for_values_cannot_run.46222c41"))
                         .font(Theme.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -726,7 +726,7 @@ struct SSHSnippetEditor: View {
             }
 
             SSHEditorFooter(
-                saveTitle: isNew ? "Add snippet" : "Save",
+                saveTitle: isNew ? L10n.text("apple.sshlibraryeditors.add_snippet.a1f802b9") : L10n.text("common.save"),
                 canSave: !snippet.title.isEmpty && !snippet.command.isEmpty,
                 working: working,
                 onSave: { Task { await save() } },
@@ -734,7 +734,7 @@ struct SSHSnippetEditor: View {
                 onDelete: isNew ? nil : { confirmingDelete = true }
             )
         }
-        .navigationTitle(isNew ? "Add snippet" : snippet.title)
+        .navigationTitle(isNew ? L10n.text("apple.sshlibraryeditors.add_snippet.a1f802b9") : snippet.title)
         .task {
             guard !loaded else { return }
             loaded = true
@@ -742,12 +742,12 @@ struct SSHSnippetEditor: View {
                 snippet = existing
             }
         }
-        .confirmationDialog("Delete this snippet?", isPresented: $confirmingDelete, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) {
+        .confirmationDialog(L10n.text("apple.sshlibraryeditors.delete_this_snippet.58a04ce8"), isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button(L10n.text("common.delete"), role: .destructive) {
                 finish()
                 Task { await model.delete(snippet: snippet) }
             }
-            Button("Cancel", role: .cancel) {}
+            Button(L10n.text("common.cancel"), role: .cancel) {}
         }
     }
 
@@ -792,26 +792,26 @@ struct SSHFolderEditor: View {
                 if let error {
                     InlineBanner(text: error, kind: .danger) { self.error = nil }
                 }
-                SSHEditorSection(title: "Folder") {
-                    SSHEditorField(label: "Name") {
-                        TextField("Name", text: $folder.name).textFieldStyle(.themed)
+                SSHEditorSection(title: L10n.text("apple.sshlibraryeditors.folder.74ccd433")) {
+                    SSHEditorField(label: L10n.text("apple.sshlibraryeditors.name.dcd1d522")) {
+                        TextField(L10n.text("apple.sshlibraryeditors.name.dcd1d522"), text: $folder.name).textFieldStyle(.themed)
                     }
-                    SSHEditorField(label: "Inside") {
-                        Picker("Inside", selection: Binding(
+                    SSHEditorField(label: L10n.text("apple.sshlibraryeditors.inside.123a3ebc")) {
+                        Picker(L10n.text("apple.sshlibraryeditors.inside.123a3ebc"), selection: Binding(
                             get: { folder.parentID ?? "" },
                             set: { folder.parentID = $0.isEmpty ? nil : $0 }
                         )) {
-                            Text("Top level").tag("")
+                            Text(L10n.text("apple.sshlibraryeditors.top_level.f61dd254")).tag("")
                             ForEach(model.folders.filter { $0.id != folder.id }) { Text($0.name).tag($0.id) }
                         }
                     }
                     SSHColorPicker(selection: $folder.color)
                 }
-                SSHEditorNote(text: "Deleting a folder keeps what is in it. Servers and sub-folders move up one level.")
+                SSHEditorNote(text: L10n.text("apple.sshlibraryeditors.deleting_a_folder_keeps_what_is_in_it_serv.285fdc6d"))
             }
 
             SSHEditorFooter(
-                saveTitle: isNew ? "Add folder" : "Save",
+                saveTitle: isNew ? L10n.text("apple.sshlibraryeditors.add_folder.5bbfc5a6") : L10n.text("common.save"),
                 canSave: !folder.name.isEmpty,
                 working: working,
                 onSave: { Task { await save() } },
@@ -819,7 +819,7 @@ struct SSHFolderEditor: View {
                 onDelete: isNew ? nil : { confirmingDelete = true }
             )
         }
-        .navigationTitle(isNew ? "Add folder" : folder.name)
+        .navigationTitle(isNew ? L10n.text("apple.sshlibraryeditors.add_folder.5bbfc5a6") : folder.name)
         .task {
             guard !loaded else { return }
             loaded = true
@@ -829,14 +829,14 @@ struct SSHFolderEditor: View {
                 folder.parentID = parentID
             }
         }
-        .confirmationDialog("Delete this folder?", isPresented: $confirmingDelete, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) {
+        .confirmationDialog(L10n.text("apple.sshlibraryeditors.delete_this_folder.76764808"), isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button(L10n.text("common.delete"), role: .destructive) {
                 finish()
                 Task { await model.delete(folder: folder) }
             }
-            Button("Cancel", role: .cancel) {}
+            Button(L10n.text("common.cancel"), role: .cancel) {}
         } message: {
-            Text("Servers and sub-folders inside it move up one level. Nothing is deleted with it.")
+            Text(L10n.text("apple.sshlibraryeditors.servers_and_sub_folders_inside_it_move_up.c429a85f"))
         }
     }
 
@@ -864,8 +864,8 @@ struct SSHKnownHostsView: View {
             if model.knownHosts.isEmpty {
                 EmptyState(
                     symbol: "checkmark.shield",
-                    title: "No trusted servers yet",
-                    message: "The first time you connect to a server you confirm its fingerprint. Confirmed servers are listed here."
+                    title: L10n.text("apple.sshlibraryeditors.no_trusted_servers_yet.c7540d35"),
+                    message: L10n.text("apple.sshlibraryeditors.the_first_time_you_connect_to_a_server_you.379e18b6")
                 )
             } else {
                 List {
@@ -877,7 +877,7 @@ struct SSHKnownHostsView: View {
                             ForEach(known.fingerprints, id: \.self) { print in
                                 Text(print).font(Theme.mono(10)).textSelection(.enabled)
                             }
-                            Button("Forget", .revoke) {
+                            Button(L10n.text("apple.sshlibraryeditors.forget.a6bd489d"), .revoke) {
                                 Task { await model.forgetKnownHost(known) }
                             }
                             .buttonStyle(SecondaryButtonStyle(small: true))
@@ -887,7 +887,7 @@ struct SSHKnownHostsView: View {
                 }
             }
         }
-        .navigationTitle("Trusted servers")
+        .navigationTitle(L10n.text("apple.sshlibraryeditors.trusted_servers.b101ed86"))
     }
 }
 
@@ -919,20 +919,20 @@ struct SSHConfigImportView: View {
         VStack(spacing: 0) {
             Group {
                 if loading {
-                    ProgressView("Reading ssh config…")
+                    ProgressView(L10n.text("apple.sshlibraryeditors.reading_ssh_config.c68950fc"))
                 } else if candidates.isEmpty {
                     EmptyState(
                         symbol: "doc.text.magnifyingglass",
-                        title: "Nothing to import",
-                        message: "There is no ~/.ssh/config on this machine, or it has no named servers in it."
+                        title: L10n.text("apple.sshlibraryeditors.nothing_to_import.c4497f32"),
+                        message: L10n.text("apple.sshlibraryeditors.there_is_no_ssh_config_on_this_machine_or.d3ad32d2")
                     )
                 } else {
                     List {
                         if let imported {
                             InlineBanner(
                                 text: imported.imported == 1
-                                    ? "Imported 1 server."
-                                    : "Imported \(imported.imported) servers.",
+                                    ? L10n.text("apple.sshlibraryeditors.imported_1_server.55a1249f")
+                                    : L10n.text("apple.sshlibraryeditors.imported_0_servers.7b286af3", "\(imported.imported)"),
                                 kind: .info
                             )
                         }
@@ -948,7 +948,7 @@ struct SSHConfigImportView: View {
                                 }
                                 Spacer()
                                 if candidate.alreadySaved {
-                                    Text("Already saved")
+                                    Text(L10n.text("apple.sshlibraryeditors.already_saved.748a428f"))
                                         .font(Theme.caption).foregroundStyle(.secondary)
                                 }
                             }
@@ -960,7 +960,7 @@ struct SSHConfigImportView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             SSHEditorFooter(
-                saveTitle: newCount == 1 ? "Import 1 server" : "Import \(newCount) servers",
+                saveTitle: newCount == 1 ? L10n.text("apple.sshlibraryeditors.import_1_server.6af4f169") : L10n.text("apple.sshlibraryeditors.import_0_servers.2c452fd7", "\(newCount)"),
                 canSave: newCount > 0,
                 working: working,
                 onSave: { Task { await run() } },
@@ -968,7 +968,7 @@ struct SSHConfigImportView: View {
                 onDelete: nil
             )
         }
-        .navigationTitle("Import from ssh config")
+        .navigationTitle(L10n.text("apple.sshlibraryeditors.import_from_ssh_config.1b6e8c38"))
         .task {
             candidates = (try? await Bridge.sshConfigCandidates()) ?? []
             loading = false

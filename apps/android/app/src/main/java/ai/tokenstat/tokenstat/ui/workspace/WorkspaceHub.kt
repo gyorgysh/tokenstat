@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.activity.compose.BackHandler
 import ai.tokenstat.tokenstat.ui.chrome.HideTopBar
 import ai.tokenstat.tokenstat.ui.chrome.LocalTabBarPresence
@@ -89,10 +91,10 @@ fun StickyErrorCard(
         if (onRetry != null || onDismiss != null) {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 onRetry?.let {
-                    TsSecondaryButton(label = "Try again", small = true, onClick = it)
+                    TsSecondaryButton(label = L10n.text("android.workspacehub.try_again.d8b8392e"), small = true, onClick = it)
                 }
                 onDismiss?.let {
-                    TextButton(onClick = it) { Text("Dismiss") }
+                    TextButton(onClick = it) { Text(L10n.text("android.workspacehub.dismiss.48845bff")) }
                 }
             }
         }
@@ -145,7 +147,7 @@ fun HubSectionRow(
         }
         Icon(
             Icons.Default.ChevronRight,
-            contentDescription = "Open ${section.label}",
+            contentDescription = L10n.text("android.workspacehub.open_0.e71b4013", "${section.label}"),
             tint = colors.textTertiary,
             modifier = Modifier.size(14.dp),
         )
@@ -218,7 +220,7 @@ fun WorkspaceHubMenu(
         }.onFailure {
             // Every badge comes from this one call, so a failure leaves all
             // of them stale rather than one blank. Say so.
-            error = TunnelCopy.display(it.message ?: "The request failed.", hostName)
+            error = TunnelCopy.display(it.message ?: L10n.text("android.workspacehub.the_request_failed.db4fb447"), hostName)
         }
     }
     LaunchedEffect(peer, workspace) { reload() }
@@ -273,7 +275,7 @@ fun WorkspaceHubMenu(
             // branch row rather than as a heavy button of its own.
             if (isRepo) {
                 TsSecondaryButton(
-                    label = "Worktrees",
+                    label = L10n.text("android.workspacehub.worktrees.aec2f93d"),
                     icon = ActionIcon.Source.vector,
                     small = true,
                     onClick = { onOpenSection("Worktrees") },
@@ -342,21 +344,21 @@ fun WorkspaceHub(
             if (presence.sectionHeaderHidden) return@Row
             if (section != null) {
                 IconButton(enabled = !worktreeBusy, onClick = { openSection = null }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to $folderName")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, L10n.text("android.workspacehub.back_to_0.c8f69409", "${folderName}"))
                 }
             } else if (onBack != null) {
-                IconButton(enabled = !worktreeBusy, onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+                IconButton(enabled = !worktreeBusy, onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, L10n.text("common.back")) }
             }
             Column(Modifier.weight(1f)) {
                 Text(
-                    if (section != null) HubSection.entries.find { it.key == section }?.label ?: section else folderName.ifBlank { "Project" },
+                    if (section != null) HubSection.entries.find { it.key == section }?.label ?: section else folderName.ifBlank { L10n.text("android.workspacehub.project.98595978") },
                     style = MaterialTheme.typography.headlineSmall,
                     color = colors.textPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    if (section != null) folderName else "Sections",
+                    if (section != null) folderName else L10n.text("android.workspacehub.sections.9bae918a"),
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.textSecondary,
                     maxLines = 1,
@@ -369,7 +371,7 @@ fun WorkspaceHub(
             WorkspaceHubMenu(
                 model = model,
                 peer = peer,
-                hostName = host.str("label") ?: "Computer",
+                hostName = host.str("label") ?: L10n.text("android.workspacehub.computer.76ed42d2"),
                 folder = folder,
                 modifier = Modifier.weight(1f),
                 onOpenSection = { openSection = it },
@@ -381,7 +383,7 @@ fun WorkspaceHub(
                 model = model,
                 peer = peer,
                 workspace = workspace,
-                hostLabel = host.str("label") ?: "Computer",
+                hostLabel = host.str("label") ?: L10n.text("android.workspacehub.computer.76ed42d2"),
                 section = section,
                 protocol = HostContracts.protocolOf(host),
                 folderName = folderName,

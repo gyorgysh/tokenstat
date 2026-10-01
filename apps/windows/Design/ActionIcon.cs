@@ -38,7 +38,7 @@ internal static class ActionIconGlyph
     /// code below exists in both fonts, so Windows 10 falls back to the older
     /// drawing rather than to a missing-character box.
     /// </summary>
-    private static readonly FontFamily IconFont = new("Segoe Fluent Icons, Segoe MDL2 Assets");
+    private static readonly FontFamily IconFont = new(L10n.Text("windows.actionicon.segoe_fluent_icons_segoe_mdl2_assets.dd457200"));
 
     /// <summary>
     /// A FontIcon for one Segoe code unit. All codes are in the BMP, so one

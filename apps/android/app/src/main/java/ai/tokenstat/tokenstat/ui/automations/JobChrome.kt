@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.automations
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -89,7 +91,7 @@ fun PastRunRow(
             drawCircle(RunOutcome.tint(status, colors))
         }
         Text(
-            title.ifBlank { "Run" },
+            title.ifBlank { L10n.text("common.run") },
             style = TsType.subheadline.copy(fontWeight = FontWeight.Medium),
             color = colors.textPrimary,
             maxLines = 1,
@@ -140,7 +142,7 @@ fun JobScreenHeader(
     val colors = LocalTsColors.current
     Row(verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onBack) {
-            Icon(ActionIcon.Back.vector, "Back", tint = colors.controlGlyph)
+            Icon(ActionIcon.Back.vector, L10n.text("common.back"), tint = colors.controlGlyph)
         }
         Column(Modifier.weight(1f)) {
             Text(title, style = TsType.headline, color = colors.textPrimary, maxLines = 1)
@@ -174,7 +176,7 @@ fun JobConfirmDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel", color = colors.textSecondary) }
+            TextButton(onClick = onDismiss) { Text(L10n.text("common.cancel"), color = colors.textSecondary) }
         },
     )
 }

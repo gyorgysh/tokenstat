@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.logic
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.properties.ReadWriteProperty
@@ -32,12 +34,12 @@ class ChatComposerSessions<A>(
 
     fun update(owner: String?, next: Snapshot<A>): Boolean {
         val reason = when {
-            owner.isNullOrBlank() -> "Open a conversation before writing."
+            owner.isNullOrBlank() -> L10n.text("android.chatcomposersessions.open_a_conversation_before_writing.fb3b835a")
             !next.empty && owner !in sessions && sessions.size >= capacity ->
-                "Too many conversations have unsent drafts. Send or clear a draft before starting another."
+                L10n.text("android.chatcomposersessions.too_many_conversations_have_unsent_drafts.cd12b8ec")
             next.text.length > 128 * 1024 || cost(next) > byteLimit ||
                 sessions.filterKeys { it != owner }.values.sumOf(::cost) > byteLimit - cost(next) ->
-                "Unsent drafts are full. Send or remove staged files before adding more."
+                L10n.text("android.chatcomposersessions.unsent_drafts_are_full_send_or_remove_stag.3e749631")
             else -> null
         }
         if (reason != null) {

@@ -45,11 +45,11 @@ struct ClientDevicesView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 HStack(spacing: Theme.Space.m) {
-                    Button("Add device", .create) { showSetup = true }
+                    Button(L10n.text("common.add_device"), .create) { showSetup = true }
                     NavigationLink {
                         SSHLibraryView(vaultTier: account.account?.vaultTierForSsh)
                     } label: {
-                        Label("SSH hosts", systemImage: "terminal")
+                        Label(L10n.text("apple.clientdevicesview.ssh_hosts.6e8d5967"), systemImage: "terminal")
                     }
                 }
                 .buttonStyle(.bordered)
@@ -60,10 +60,9 @@ struct ClientDevicesView: View {
                     } else {
                         ClientEmptyState(
                             kind: .nothingYet,
-                            title: "No computer connected yet",
-                            message: "Connect a computer you own, or give tokenstat a server "
-                                + "and it will set the machine up for you.",
-                            actionTitle: "Set up a machine",
+                            title: L10n.text("apple.clientdevicesview.no_computer_connected_yet.f36b705d"),
+                            message: L10n.text("apple.clientdevicesview.connect_a_computer_you_own_or_give_tokenst.d19be274"),
+                            actionTitle: L10n.text("apple.clientdevicesview.set_up_a_machine.43e10e13"),
                             actionIcon: .connect,
                             action: { showSetup = true },
                             art: .connect
@@ -73,7 +72,7 @@ struct ClientDevicesView: View {
                 if !machines.isEmpty {
                     header
                     if shownMachines.isEmpty {
-                        Text("No devices match your search.")
+                        Text(L10n.text("apple.clientdevicesview.no_devices_match_your_search.85a81e48"))
                             .font(ClientType.caption).foregroundStyle(.secondary)
                     }
                     ClientAdaptiveCards {
@@ -113,7 +112,7 @@ struct ClientDevicesView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        .searchable(text: $search, prompt: "Search devices")
+        .searchable(text: $search, prompt: L10n.text("apple.clientdevicesview.search_devices.3aebaefc"))
         .fullScreenCover(isPresented: $showSetup) {
             ClientSetupWizard()
         }
@@ -270,7 +269,7 @@ struct ClientDevicesView: View {
         // means and crowded the list.
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .center, spacing: Theme.Space.s) {
-                ClientSectionTitle(title: "Devices", mark: "mark_device")
+                ClientSectionTitle(title: L10n.text("common.devices"), mark: "mark_device")
                 Spacer(minLength: Theme.Space.s)
                 capacityBadge
             }
@@ -302,7 +301,7 @@ struct ClientDevicesView: View {
                     capacityTint(used: machines.count, limit: limit).opacity(0.12),
                     in: Capsule()
                 )
-                .accessibilityLabel("\(machines.count) of \(limit) devices")
+                .accessibilityLabel(L10n.text("apple.clientdevicesview.0_of_1_devices.bd266bff", "\(machines.count)", "\(limit)"))
         } else {
             Text(deviceCount)
                 .font(ClientType.caption.weight(.medium))
@@ -336,9 +335,9 @@ struct ClientDevicesView: View {
     }
 
     private var headerAccessibilityLabel: String {
-        var parts: [String] = ["Devices"]
+        var parts: [String] = [L10n.text("common.devices")]
         if let limit = account.account?.machineLimit {
-            parts.append("\(machines.count) of \(limit) devices")
+            parts.append(L10n.text("apple.clientdevicesview.0_of_1_devices.bd266bff", "\(machines.count)", "\(limit)"))
         } else {
             parts.append(deviceCount)
         }
@@ -347,12 +346,12 @@ struct ClientDevicesView: View {
     }
 
     private var deviceCount: String {
-        machines.count == 1 ? "1 device" : "\(machines.count) devices"
+        machines.count == 1 ? "1 device" : L10n.text("apple.clientdevicesview.0_devices.f3bf57aa", "\(machines.count)")
     }
 
     private var planRemoteLine: String? {
         if account.account?.canRemote == false {
-            return "Remote control is on Patron. Usage from every linked device is already here."
+            return L10n.text("apple.clientdevicesview.remote_control_is_on_patron_usage_from_eve.5dc0dfc8")
         }
         return nil
     }
@@ -404,12 +403,12 @@ private struct DeviceRow: View {
                         // not been shown to have spent nothing, and reporting zero
                         // for something we did not measure is the one thing the
                         // data rules forbid outright.
-                        Text("n/a")
+                        Text(L10n.text("apple.clientdevicesview.n_a.a683c5c5"))
                             .font(ClientType.rowFigure)
                             .foregroundStyle(.tertiary)
                     }
                 } else if isThisDevice {
-                    Text("You")
+                    Text(L10n.text("apple.clientdevicesview.you.08b04193"))
                         .font(ClientType.caption.weight(.semibold))
                         .foregroundStyle(Theme.accent)
                         .padding(.horizontal, 8)
@@ -433,7 +432,7 @@ private struct DeviceRow: View {
             usage: showsSpend ? usage : nil,
             isThisDevice: isThisDevice
         ))
-        .accessibilityHint("Opens this device's detail")
+        .accessibilityHint(L10n.text("apple.clientdevicesview.opens_this_device_s_detail.58c2810e"))
     }
 }
 
@@ -487,9 +486,9 @@ struct ClientDeviceDetailView: View {
                         reach: DeviceCopy.reach(machine, isThisDevice: isThisDevice)
                     )
                     if let workspaces, workspaces.connectedKey == key {
-                        Button("Disconnect", .disconnect) { workspaces.disconnect() }
+                        Button(L10n.text("common.disconnect"), .disconnect) { workspaces.disconnect() }
                             .buttonStyle(SecondaryButtonStyle())
-                            .accessibilityHint("Disconnects this device from the computer")
+                            .accessibilityHint(L10n.text("apple.clientdevicesview.disconnects_this_device_from_the_computer.19cd3aac"))
                     }
                 } else {
                     liveStats
@@ -529,13 +528,13 @@ struct ClientDeviceDetailView: View {
 
     private var spend: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(usage?.value.formatted ?? "n/a")
+            Text(usage?.value.formatted ?? L10n.text("apple.clientdevicesview.n_a.a683c5c5"))
                 .font(ClientType.figure)
                 .foregroundStyle(Theme.accent)
                 .minimumScaleFactor(0.6)
                 .lineLimit(1)
-            Text(usage.map { "at API list price, \(DeviceHistory.windowPhrase(days: $0.days))" }
-                ?? "This device's share has not been fetched.")
+            Text(usage.map { L10n.text("apple.clientdevicesview.at_api_list_price_0.32cb2c25", "\(DeviceHistory.windowPhrase(days: $0.days))") }
+                ?? L10n.text("apple.clientdevicesview.this_device_s_share_has_not_been_fetched.6aa4e138"))
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
             if let usage {
@@ -560,8 +559,8 @@ struct ClientDeviceDetailView: View {
 
     private func detail(_ usage: MachineUsage) -> String {
         var parts = [
-            usage.activeDays == 1 ? "1 active day" : "\(usage.activeDays) active days",
-            "\(usage.events.formatted()) events",
+            usage.activeDays == 1 ? L10n.text("apple.clientdevicesview.1_active_day.1b05d320") : L10n.text("apple.clientdevicesview.0_active_days.16d30c85", "\(usage.activeDays)"),
+            L10n.text("apple.clientdevicesview.0_events.a7742aab", "\(usage.events.formatted())"),
         ]
         if accountTotal > 0 {
             let share = Double(usage.valueMicros) / Double(accountTotal) * 100
@@ -576,30 +575,30 @@ struct ClientDeviceDetailView: View {
     /// naming itself, which is the same rule the Mac's own name field has.
     private var nameField: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Name")
+            Text(L10n.text("apple.clientdevicesview.name.dcd1d522"))
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
-            TextField("Name this device", text: $draft)
+            TextField(L10n.text("apple.clientdevicesview.name_this_device.ab6b2bc7"), text: $draft)
                 .textFieldStyle(.themed)
                 .autocorrectionDisabled()
                 .focused($editingName)
                 .submitLabel(.done)
                 .onSubmit { Task { await saveName() } }
             HStack(spacing: Theme.Space.s) {
-                Button(savingName ? "Saving…" : "Save", .save) {
+                Button(savingName ? L10n.text("apple.clientdevicesview.saving.23e39291") : L10n.text("common.save"), .save) {
                     Task { await saveName() }
                 }
                 .clientProminentStyle()
                 .tint(Theme.accent)
                 .disabled(savingName)
-                Button("Cancel", .dismiss, role: .cancel) {
+                Button(L10n.text("common.cancel"), .dismiss, role: .cancel) {
                     renaming = false
                     renameError = nil
                 }
                 .font(ClientType.caption.weight(.semibold))
                 .tint(Theme.accent)
             }
-            Text("Empty puts back the name the device gives itself.")
+            Text(L10n.text("apple.clientdevicesview.empty_puts_back_the_name_the_device_gives.9bb5bd6d"))
                 .font(ClientType.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -608,7 +607,7 @@ struct ClientDeviceDetailView: View {
 
     private func saveName() async {
         guard let id = machine.machineID, !id.isEmpty else {
-            renameError = "This device has no id on the account yet."
+            renameError = L10n.text("apple.clientdevicesview.this_device_has_no_id_on_the_account_yet.5edab834")
             return
         }
         savingName = true
@@ -627,7 +626,7 @@ struct ClientDeviceDetailView: View {
 
     private var reach: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            ClientSectionTitle(title: "Reach", mark: "mark_host")
+            ClientSectionTitle(title: L10n.text("apple.clientdevicesview.reach.2068b81b"), mark: "mark_host")
             HStack(spacing: Theme.Space.s) {
                 AwakeDot(online: isThisDevice ? true : machine.online)
                 Text(DeviceCopy.reach(machine, isThisDevice: isThisDevice))
@@ -652,13 +651,13 @@ struct ClientDeviceDetailView: View {
            !key.isEmpty,
            machine.isHost {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                ClientSectionTitle(title: "Folders", mark: "mark_folder")
+                ClientSectionTitle(title: L10n.text("apple.clientdevicesview.folders.c4d6bb20"), mark: "mark_folder")
                 NavigationLink {
                     ClientFolderPicker(peer: key, hostName: DeviceCopy.name(current)) { _ in }
                 } label: {
                     DeviceActionRow(
-                        title: "Choose a folder",
-                        subtitle: "Register a folder already on this computer.",
+                        title: L10n.text("apple.clientdevicesview.choose_a_folder.5c71b8cd"),
+                        subtitle: L10n.text("apple.clientdevicesview.register_a_folder_already_on_this_computer.31c7d112"),
                         icon: .reveal
                     )
                 }
@@ -667,8 +666,8 @@ struct ClientDeviceDetailView: View {
                     ClientCloneRepository(peer: key, hostName: DeviceCopy.name(current)) { _ in }
                 } label: {
                     DeviceActionRow(
-                        title: "Clone a repository",
-                        subtitle: "Run git on this computer and register the folder.",
+                        title: L10n.text("apple.clientdevicesview.clone_a_repository.749e5d4d"),
+                        subtitle: L10n.text("apple.clientdevicesview.run_git_on_this_computer_and_register_the.d6fc5a8e"),
                         icon: .download
                     )
                 }
@@ -708,13 +707,13 @@ struct ClientDeviceDetailView: View {
 
     private var identity: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            ClientSectionTitle(title: "What this is", mark: "mark_device")
+            ClientSectionTitle(title: L10n.text("apple.clientdevicesview.what_this_is.45d2766e"), mark: "mark_device")
             if renaming {
                 nameField
             } else {
                 HStack(alignment: .firstTextBaseline) {
                     DetailLine(
-                        label: "Name",
+                        label: L10n.text("apple.clientdevicesview.name.dcd1d522"),
                         value: current.label?.isEmpty == false
                             ? current.label ?? ""
                             : "not named on this account"
@@ -723,7 +722,7 @@ struct ClientDeviceDetailView: View {
                     // Any device on the account, not only this phone. A Linux
                     // server with nothing but the CLI on it has no other way
                     // to be named.
-                    Button("Rename", .edit) {
+                    Button(L10n.text("common.rename"), .edit) {
                         draft = current.label ?? ""
                         renaming = true
                         editingName = true
@@ -743,15 +742,15 @@ struct ClientDeviceDetailView: View {
                     .foregroundStyle(Theme.danger)
             }
             if let platform = machine.platform, !platform.isEmpty {
-                DetailLine(label: "What it runs", value: platform)
+                DetailLine(label: L10n.text("apple.clientdevicesview.what_it_runs.ba619d80"), value: platform)
             }
             if let id = machine.machineID {
-                DetailLine(label: "Device id", value: id)
+                DetailLine(label: L10n.text("apple.clientdevicesview.device_id.4ad41656"), value: id)
             }
             if machine.reportsArchiveSync {
-                DetailLine(label: "Last sync", value: DeviceCopy.lastSync(machine))
+                DetailLine(label: L10n.text("apple.clientdevicesview.last_sync.71967fca"), value: DeviceCopy.lastSync(machine))
             } else if let seen = formatRelativeDate(machine.lastSeenAt) {
-                DetailLine(label: "Last used", value: seen)
+                DetailLine(label: L10n.text("apple.clientdevicesview.last_used.830ec7f8"), value: seen)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -892,7 +891,7 @@ private enum DeviceCopy {
            !family.isEmpty {
             return "\(family) \(machine.isHost ? "computer" : "device")"
         }
-        return "Unnamed device"
+        return L10n.text("apple.clientdevicesview.unnamed_device.6aba593f")
     }
 
     /// The second line: awake / reach first, then enough to tell two unnamed
@@ -916,21 +915,21 @@ private enum DeviceCopy {
     /// key say so in one line instead of a second panel of the same machines.
     static func statusLine(_ machine: Machine, isThisDevice: Bool) -> String {
         if isThisDevice || machine.online == true {
-            return "Awake now"
+            return L10n.text("apple.clientdevicesview.awake_now.64f95f4c")
         }
         if machine.isHost {
             if machine.publicIdentity?.isEmpty == false {
                 if let seen = formatRelativeDate(machine.lastSeenAt) {
-                    return "Asleep · last seen \(seen)"
+                    return L10n.text("apple.clientdevicesview.asleep_last_seen_0.6ef899b9", "\(seen)")
                 }
-                return "Asleep"
+                return L10n.text("apple.clientdevicesview.asleep.60135e8f")
             }
-            return "Not set up for remote"
+            return L10n.text("apple.clientdevicesview.not_set_up_for_remote.3db4bb28")
         }
         if let seen = formatRelativeDate(machine.lastSeenAt) {
-            return "Last seen \(seen)"
+            return L10n.text("apple.clientdevicesview.last_seen_0.77ac00d1", "\(seen)")
         }
-        return "Has not reported in yet"
+        return L10n.text("apple.clientdevicesview.has_not_reported_in_yet.88f189cb")
     }
 
     /// `m_c982…872c`. Long enough to be unique in a list of five, short enough
@@ -950,25 +949,25 @@ private enum DeviceCopy {
     }
 
     static func reach(_ machine: Machine, isThisDevice: Bool) -> String {
-        if isThisDevice { return "This is the device you are holding." }
+        if isThisDevice { return L10n.text("apple.clientdevicesview.this_is_the_device_you_are_holding.19fe2976") }
         if machine.online == true {
-            return "Awake and reachable through the tunnel from this device, and from any other device signed in to this account."
+            return L10n.text("apple.clientdevicesview.awake_and_reachable_through_the_tunnel_fro.81ab5be0")
         }
         if machine.publicIdentity?.isEmpty == false {
-            return "Asleep. It has a connection key, so it can be reached from this device once it is awake. Always-on host on that computer keeps it reachable after you quit the app there."
+            return L10n.text("apple.clientdevicesview.asleep_it_has_a_connection_key_so_it_can_b.8982cace")
         }
         // Not a fault, and not something to fix from a phone. Saying which
         // switch it is beats "unavailable".
-        return "Not set up for remote reach. Turn on \"Reach devices from anywhere\" on that computer."
+        return L10n.text("apple.clientdevicesview.not_set_up_for_remote_reach_turn_on_reach.9d22e688")
     }
 
     static func rowLabel(_ machine: Machine, usage: MachineUsage?, isThisDevice: Bool) -> String {
         var parts = [name(machine)]
-        if isThisDevice { parts.append("this device") }
+        if isThisDevice { parts.append(L10n.text("apple.clientdevicesview.this_device.cf3cc23e")) }
         parts.append(statusLine(machine, isThisDevice: isThisDevice))
         if let usage {
             parts.append(
-                "\(usage.value.formatted) at API list price, \(DeviceHistory.windowPhrase(days: usage.days))"
+                L10n.text("apple.clientdevicesview.0_at_api_list_price_1.3531a559", "\(usage.value.formatted)", "\(DeviceHistory.windowPhrase(days: usage.days))")
             )
         }
         return parts.joined(separator: ", ")
@@ -993,10 +992,10 @@ enum DeviceHistory {
 
     /// Human window for labels: "the last 30 days", "the last year", "all time".
     static func windowPhrase(days: Int) -> String {
-        if days >= 1000 { return "all time" }
-        if days >= 360 { return "the last year" }
-        if days == 1 { return "the last day" }
-        return "the last \(days) days"
+        if days >= 1000 { return L10n.text("apple.clientdevicesview.all_time.c79ddf2b") }
+        if days >= 360 { return L10n.text("apple.clientdevicesview.the_last_year.ce4cc449") }
+        if days == 1 { return L10n.text("apple.clientdevicesview.the_last_day.8319fd61") }
+        return L10n.text("apple.clientdevicesview.the_last_0_days.1bfce3a7", "\(days)")
     }
 }
 
@@ -1025,8 +1024,8 @@ final class ClientDevicesModel {
     var total: Int64 { rows.reduce(0) { $0 + $1.valueMicros } }
 
     var windowDescription: String {
-        guard let days = rows.first?.days else { return "Across this account" }
-        return "Share of \(DeviceHistory.windowPhrase(days: days)), at API list price"
+        guard let days = rows.first?.days else { return L10n.text("apple.clientdevicesview.across_this_account.2a6688f7") }
+        return L10n.text("apple.clientdevicesview.share_of_0_at_api_list_price.3aad6111", "\(DeviceHistory.windowPhrase(days: days))")
     }
 
     func load(machines: [Machine], days: Int = 30, force: Bool = false) async {
@@ -1052,7 +1051,7 @@ final class ClientDevicesModel {
             // The device list itself came from the account and is already on
             // screen. This failure costs the figures beside the names, which is
             // a line of explanation rather than an empty screen.
-            errorMessage = "Could not work out what each device spent: \(error.localizedDescription)"
+            errorMessage = L10n.text("apple.clientdevicesview.could_not_work_out_what_each_device_spent.908fa25b", "\(error.localizedDescription)")
         }
     }
 }

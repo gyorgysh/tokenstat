@@ -243,13 +243,13 @@ internal static class SidebarLive
             ToolTipService.SetToolTip(row, cwd);
         }
         var menu = ContextMenus.Menu(row);
-        ContextMenus.AddAsync(menu, "Stop and close…", async () =>
+        ContextMenus.AddAsync(menu, L10n.Text("windows.sidebarlive.stop_and_close.9712e7bb"), async () =>
         {
             var owner = menu.Target ?? row;
-            var confirm = new ContentDialog { Title = "Stop this session?", Content = "The running process will stop.", PrimaryButtonText = "Stop and close", CloseButtonText = "Keep running", DefaultButton = ContentDialogButton.Close };
+            var confirm = new ContentDialog { Title = L10n.Text("windows.sidebarlive.stop_this_session.5efe50c8"), Content = L10n.Text("windows.sidebarlive.the_running_process_will_stop.a851d6df"), PrimaryButtonText = L10n.Text("windows.sidebarlive.stop_and_close.52b40c33"), CloseButtonText = L10n.Text("windows.sidebarlive.keep_running.154949db"), DefaultButton = ContentDialogButton.Close };
             if (await Chrome.ShowDialog(owner, confirm) != ContentDialogResult.Primary) return;
             try { await AppServices.Host.CallAsync("pty.close", new JsonObject { ["id"] = id }); }
-            catch (Exception ex) { await Chrome.ShowDialog(owner, new ContentDialog { Title = "Could not close session", Content = ex.Message, CloseButtonText = "Close" }); }
+            catch (Exception ex) { await Chrome.ShowDialog(owner, new ContentDialog { Title = L10n.Text("windows.sidebarlive.could_not_close_session.f56b373d"), Content = ex.Message, CloseButtonText = L10n.Text("common.close") }); }
         });
         return row;
     }
@@ -258,20 +258,21 @@ internal static class SidebarLive
     /// One recent conversation row: title, backend and age. Tapping opens the
     /// conversation in its folder chat, like the Mac sidebar row.
     /// </summary>
-    public static NavigationViewItem ChatItem(string folderId, JsonNode chat, string folderName = "Project")
+    public static NavigationViewItem ChatItem(string folderId, JsonNode chat, string? folderName = null)
     {
+        folderName ??= L10n.Text("windows.sidebarlive.project.98595978");
         var id = Format.Text(chat, "id");
         var title = Format.Text(chat, "title");
         if (string.IsNullOrEmpty(title))
         {
-            title = "Untitled conversation";
+            title = L10n.Text("windows.sidebarlive.untitled_conversation.31d248c4");
         }
         var backend = HarnessName(Format.Text(chat, "backend"));
         var running = Format.Flag(chat, "running");
         var detail = backend;
         if (running)
         {
-            detail += " · Working";
+            detail += L10n.Text("windows.sidebarlive.working.9442ebf6");
         }
         var ms = LastMessageMs(chat);
         if (ms is not null)
@@ -326,22 +327,22 @@ internal static class SidebarLive
         WorkPinMenu.Add(menu, folderId, id, title, folderName);
         Task<JsonNode> Call(string method, JsonObject parameters) => RemoteWorkspaces.TrySplit(folderId, out var peer, out _)
             ? RemoteWorkspaces.CallOnPeerAsync(peer, method, parameters) : AppServices.Host.CallAsync(method, parameters);
-        ContextMenus.AddAsync(menu, "Rename chat…", async () =>
+        ContextMenus.AddAsync(menu, L10n.Text("windows.sidebarlive.rename_chat.b85a1ab4"), async () =>
         {
-            var input = new TextBox { Text = title, PlaceholderText = "Chat name" };
-            var dialog = new ContentDialog { Title = "Rename chat", Content = input, PrimaryButtonText = "Save", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary };
+            var input = new TextBox { Text = title, PlaceholderText = L10n.Text("windows.sidebarlive.chat_name.09c3e4ca") };
+            var dialog = new ContentDialog { Title = L10n.Text("windows.sidebarlive.rename_chat.26076241"), Content = input, PrimaryButtonText = L10n.Text("common.save"), CloseButtonText = L10n.Text("common.cancel"), DefaultButton = ContentDialogButton.Primary };
             input.TextChanged += (_, _) => dialog.IsPrimaryButtonEnabled = input.Text.Trim().Length > 0;
             if (await Chrome.ShowDialog(menu.Target ?? row, dialog) != ContentDialogResult.Primary || input.Text.Trim().Length == 0) return;
             await Call("chat.update", new JsonObject { ["id"] = id, ["title"] = input.Text.Trim() });
             var memory = await BrowserProjectMemory.ForAsync(folderId);
             if (memory is not null) PinnedWorkStore.Shared.Rename(memory.Owner, id, input.Text.Trim());
         });
-        var fork = ContextMenus.AddAsync(menu, "Fork chat", async () =>
+        var fork = ContextMenus.AddAsync(menu, L10n.Text("windows.sidebarlive.fork_chat.dfbcbb35"), async () =>
         {
             var protocol = RemoteWorkspaces.TrySplit(folderId, out var peer, out _)
                 ? await RemoteFeatureGate.PeerProtocolAsync(peer) : await WorkbenchOps.ProtocolAsync();
             if (!RemoteFeatureGate.SupportsProtocol(protocol, RemoteFeatureGate.ChatForkMinProtocol))
-                throw new InvalidOperationException("Update the project's computer to fork chats.");
+                throw new InvalidOperationException(L10n.Text("windows.sidebarlive.update_the_project_s_computer_to_fork_chat.4d57279f"));
             var copied = await Call("chat.fork", new JsonObject { ["id"] = id });
             if (Format.Text(copied, "id") is { Length: > 0 } copiedId) AppServices.OpenConversation?.Invoke(folderId, copiedId);
         }, () => !running);
@@ -351,10 +352,10 @@ internal static class SidebarLive
                 ? await RemoteFeatureGate.PeerProtocolAsync(peer) : await WorkbenchOps.ProtocolAsync();
             fork.IsEnabled = !running && RemoteFeatureGate.SupportsProtocol(protocol, RemoteFeatureGate.ChatForkMinProtocol);
         };
-        ContextMenus.AddAsync(menu, "Remove chat…", async () =>
+        ContextMenus.AddAsync(menu, L10n.Text("windows.sidebarlive.remove_chat.92fd2fb8"), async () =>
         {
             var owner = menu.Target ?? row;
-            var confirm = new ContentDialog { Title = "Remove this chat?", Content = "This permanently deletes the transcript.", PrimaryButtonText = "Remove chat", CloseButtonText = "Keep it", DefaultButton = ContentDialogButton.Close };
+            var confirm = new ContentDialog { Title = L10n.Text("windows.sidebarlive.remove_this_chat.5fe93d92"), Content = L10n.Text("windows.sidebarlive.this_permanently_deletes_the_transcript.470ca3e0"), PrimaryButtonText = L10n.Text("windows.sidebarlive.remove_chat.4e6c56bb"), CloseButtonText = L10n.Text("windows.sidebarlive.keep_it.fdce5da2"), DefaultButton = ContentDialogButton.Close };
             if (await Chrome.ShowDialog(owner, confirm) != ContentDialogResult.Primary) return;
             try
             {
@@ -364,7 +365,7 @@ internal static class SidebarLive
                 var memory = await BrowserProjectMemory.ForAsync(folderId);
                 if (memory is not null) PinnedWorkStore.Shared.Remove(memory.Owner, id);
             }
-            catch (Exception ex) { await Chrome.ShowDialog(owner, new ContentDialog { Title = "Could not remove chat", Content = ex.Message, CloseButtonText = "Close" }); }
+            catch (Exception ex) { await Chrome.ShowDialog(owner, new ContentDialog { Title = L10n.Text("windows.sidebarlive.could_not_remove_chat.8dfbba94"), Content = ex.Message, CloseButtonText = L10n.Text("common.close") }); }
         });
         return row;
     }
@@ -399,7 +400,7 @@ internal static class SidebarLive
         var name = Format.Text(account, "displayName", handle);
         if (string.IsNullOrEmpty(name))
         {
-            name = "Signed in";
+            name = L10n.Text("windows.sidebarlive.signed_in.ca566c89");
         }
         var tier = Format.Text(account, "tier");
         var avatar = Format.Text(account, "avatar");
@@ -453,9 +454,9 @@ internal static class SidebarLive
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
         };
         open.Click += (_, _) => onOpen();
-        AutomationProperties.SetName(open, "Account: " + name);
+        AutomationProperties.SetName(open, L10n.Text("windows.sidebarlive.account_0.d8cd9318", $"{name}"));
         ToolTipService.SetToolTip(
-            open, string.IsNullOrEmpty(handle) ? "Account" : "@" + handle);
+            open, string.IsNullOrEmpty(handle) ? L10n.Text("common.account") : "@" + handle);
         return open;
     }
 
@@ -488,13 +489,13 @@ internal static class SidebarLive
     {
         if (!string.IsNullOrEmpty(Format.Text(item, "attention")))
         {
-            return ("Needs attention", Theme.Warning);
+            return (L10n.Text("windows.sidebarlive.needs_attention.c1ebc781"), Theme.Warning);
         }
         return Format.Text(item, "activity") switch
         {
-            "working" => ("Working", Theme.StateWorking),
-            "idle" => ("Idle", Theme.StateIdle),
-            _ => ("Starting", Theme.StateIdle),
+            "working" => (L10n.Text("common.working"), Theme.StateWorking),
+            "idle" => (L10n.Text("common.idle"), Theme.StateIdle),
+            _ => (L10n.Text("windows.sidebarlive.starting.aeed4d26"), Theme.StateIdle),
         };
     }
 
@@ -600,19 +601,19 @@ internal static class SidebarLive
         var age = DateTimeOffset.Now - moment;
         if (age < TimeSpan.Zero || age < TimeSpan.FromMinutes(1))
         {
-            return "now";
+            return L10n.Text("windows.sidebarlive.now");
         }
         if (age < TimeSpan.FromHours(1))
         {
-            return (int)age.TotalMinutes + "m ago";
+            return L10n.Text("windows.sidebarlive.minutes_ago", (int)age.TotalMinutes);
         }
         if (age < TimeSpan.FromDays(1))
         {
-            return (int)age.TotalHours + "h ago";
+            return L10n.Text("windows.sidebarlive.hours_ago", (int)age.TotalHours);
         }
         if (age < TimeSpan.FromDays(30))
         {
-            return (int)age.TotalDays + "d ago";
+            return L10n.Text("windows.sidebarlive.days_ago", (int)age.TotalDays);
         }
         return moment.LocalDateTime.ToString("d", CultureInfo.CurrentCulture);
     }
@@ -626,26 +627,26 @@ internal static class SidebarLive
         }
         return CanonicalHarnessId(id) switch
         {
-            "claude_code" => "Claude Code",
-            "claude_code_rollup" or "claude_code_estimate" => "Claude Code (recovered)",
+            "claude_code" => L10n.Text("windows.sidebarlive.claude_code.246ef8c1"),
+            "claude_code_rollup" or "claude_code_estimate" => L10n.Text("windows.sidebarlive.claude_code_recovered.93f5e6b2"),
             "codex" => "Codex",
-            "grok" => "Grok Build",
+            "grok" => L10n.Text("windows.sidebarlive.grok_build.fd3bf01a"),
             "opencode" => "OpenCode",
             "cline" => "Cline",
             "openclaw" => "OpenClaw",
             "muse" => "Muse",
-            "devin" => "Devin CLI",
+            "devin" => L10n.Text("windows.sidebarlive.devin_cli.29247d05"),
             "pi" => "Pi",
-            "dsh" => "DeepSeek Harness",
+            "dsh" => L10n.Text("windows.sidebarlive.deepseek_harness.e562a9c5"),
             "zed" => "Zed",
-            "copilot" => "Copilot CLI",
+            "copilot" => L10n.Text("windows.sidebarlive.copilot_cli.c73e38d4"),
             "antigravity" => "Antigravity",
             "cursor" => "Cursor",
             "gemini" => "Gemini",
-            "hermes" => "Hermes Agent",
-            "kilo" => "Kilo Code",
-            "kimi" => "Kimi Code",
-            "qwen" => "Qwen Code",
+            "hermes" => L10n.Text("windows.sidebarlive.hermes_agent.873e989a"),
+            "kilo" => L10n.Text("windows.sidebarlive.kilo_code.83abecfd"),
+            "kimi" => L10n.Text("windows.sidebarlive.kimi_code.0c486180"),
+            "qwen" => L10n.Text("windows.sidebarlive.qwen_code.47487dbd"),
             "" => "unknown",
             var other => other,
         };

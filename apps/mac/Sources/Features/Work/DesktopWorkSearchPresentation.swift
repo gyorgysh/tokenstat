@@ -17,13 +17,13 @@ struct DesktopWorkSearchPresentation: View {
             if let model {
                 WorkSearchSheet(model: model, open: open)
             } else {
-                ThemedSheet(title: "Search work", subtitle: "Saved work on this Mac", icon: .search,
+                ThemedSheet(title: L10n.text("apple.desktopworksearchpresentation.search_work.cc46cedc"), subtitle: L10n.text("apple.desktopworksearchpresentation.saved_work_on_this_mac.bfcde535"), icon: .search,
                             onClose: { dismiss() }) {
                     VStack(alignment: .leading, spacing: Theme.Space.m) {
-                        if preparing { ProgressView("Preparing saved work") }
+                        if preparing { ProgressView(L10n.text("apple.desktopworksearchpresentation.preparing_saved_work.b5c92a5d")) }
                         if let failure {
                             Text(failure).font(Theme.callout).foregroundStyle(Theme.controlGlyph)
-                            Button("Try again", .refresh) { Task { await prepare() } }
+                            Button(L10n.text("apple.desktopworksearchpresentation.try_again.d8b8392e"), .refresh) { Task { await prepare() } }
                                 .buttonStyle(SecondaryButtonStyle())
                         }
                     }
@@ -52,7 +52,7 @@ struct DesktopWorkSearchPresentation: View {
         await WorkSessionContext.shared.resolveLocalHostIdentity()
         guard visible, !Task.isCancelled, WorkSessionContext.shared.scope == scope else { return }
         guard let local = WorkSessionContext.shared.localHostIdentity else {
-            failure = "This Mac’s identity could not be loaded. Try again."
+            failure = L10n.text("apple.desktopworksearchpresentation.this_mac_s_identity_could_not_be_loaded_tr.e4b3205a")
             return
         }
         let access = WorkAccessStore.shared.generation
@@ -60,7 +60,7 @@ struct DesktopWorkSearchPresentation: View {
         var machines = account.account?.machines.reduce(into: [String: String]()) { result, machine in
             if let identity = machine.publicIdentity { result[identity] = machine.displayName }
         } ?? [:]
-        machines[local] = "This Mac"
+        machines[local] = L10n.text("apple.desktopworksearchpresentation.this_mac.79a4aefc")
         var allowed = Set(machines.keys.filter { WorkAccessStore.shared.allowed(scope: scope, host: $0) == true })
         allowed.insert(local)
         var known = PinnedWorkStore.shared.pins(in: scope).map {
@@ -89,10 +89,10 @@ struct DesktopWorkSearchPresentation: View {
                     && Set(account.account?.machines.compactMap(\.publicIdentity) ?? []) == linked
             })
         model.coverageNotice = allowed.count < machines.count
-            ? "Search covers this Mac and machines with verified project access. Open a folder on another machine to verify its access."
-            : (includesText ? nil : "Saving conversation text is off. Search still includes work stored on this Mac.")
+            ? L10n.text("apple.desktopworksearchpresentation.search_covers_this_mac_and_machines_with_v.573db3b2")
+            : (includesText ? nil : L10n.text("apple.desktopworksearchpresentation.saving_conversation_text_is_off_search_sti.7a3397de"))
         if savedUnavailable {
-            model.coverageNotice = "Saved copies could not be loaded. You can still search work stored on this Mac."
+            model.coverageNotice = L10n.text("apple.desktopworksearchpresentation.saved_copies_could_not_be_loaded_you_can_s.9efc5e59")
         }
         self.model = model
     }

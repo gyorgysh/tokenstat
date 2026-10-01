@@ -191,17 +191,17 @@ final class DeviceAccessRequests {
                 // launch and a second would be a second thing to keep in step.
                 UNNotificationAction(
                     identifier: allowViewAction,
-                    title: "Allow",
+                    title: L10n.text("apple.deviceaccessrequests.allow.e213c161"),
                     options: [.authenticationRequired]
                 ),
                 UNNotificationAction(
                     identifier: allowControlAction,
-                    title: "Allow with control",
+                    title: L10n.text("apple.deviceaccessrequests.allow_with_control.6a1fb974"),
                     options: [.authenticationRequired]
                 ),
                 UNNotificationAction(
                     identifier: denyAction,
-                    title: "Deny",
+                    title: L10n.text("apple.deviceaccessrequests.deny.05a2d733"),
                     options: [.destructive, .authenticationRequired]
                 ),
             ],

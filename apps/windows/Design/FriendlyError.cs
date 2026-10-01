@@ -56,66 +56,60 @@ internal static class FriendlyError
         if (lower.Contains("session_time_limit"))
         {
             return new FriendlyErrorInfo(
-                "Session ended",
-                "Screen sessions end after a while. Connect again to carry on.",
+                L10n.Text("windows.friendlyerror.session_ended.4a50e4c0"),
+                L10n.Text("windows.friendlyerror.screen_sessions_end_after_a_while_connect.1255ca00"),
                 raw,
-                ActionTitle: "Connect again",
+                ActionTitle: L10n.Text("windows.friendlyerror.connect_again.7da41f19"),
                 Symbol: Symbol.Clock);
         }
         if (lower.Contains("session_idle"))
         {
             return new FriendlyErrorInfo(
-                "Session ended while it was idle",
-                "This device went quiet, so the stream stopped. Connect again to pick it up.",
+                L10n.Text("windows.friendlyerror.session_ended_while_it_was_idle.24ad53cc"),
+                L10n.Text("windows.friendlyerror.this_device_went_quiet_so_the_stream_stopp.6bd273ae"),
                 raw,
-                ActionTitle: "Connect again",
+                ActionTitle: L10n.Text("windows.friendlyerror.connect_again.7da41f19"),
                 Symbol: Symbol.Clock);
         }
         if (lower.Contains("screen_already_open"))
         {
             return new FriendlyErrorInfo(
-                "A screen is already open",
-                "One screen at a time on an account. Close the other one and try again.",
+                L10n.Text("windows.friendlyerror.a_screen_is_already_open.fbd0ef4f"),
+                L10n.Text("windows.friendlyerror.one_screen_at_a_time_on_an_account_close_t.d76ae776"),
                 raw,
                 Symbol: Symbol.View);
         }
         if (lower.Contains("quota_exceeded"))
         {
             return new FriendlyErrorInfo(
-                "Relay allowance used up",
-                "Check relay usage in Account to see when older traffic leaves the window. "
-                + "Direct connections do not use this allowance.",
+                L10n.Text("windows.friendlyerror.relay_allowance_used_up.d052225f"),
+                L10n.Text("windows.friendlyerror.check_relay_usage_in_account_to_see_when_o.14353728"),
                 raw,
                 Symbol: Symbol.Download);
         }
         if (lower.Contains("-34018") || lower.Contains("errsecmissingentitlement"))
         {
             return new FriendlyErrorInfo(
-                "This build cannot use the keychain",
-                "This copy of the app is missing the signing configuration needed for "
-                + "protected Keychain storage. Use a build signed with its Keychain "
-                + "entitlement and matching provisioning profile.",
+                L10n.Text("windows.friendlyerror.this_build_cannot_use_the_keychain.d1a5c315"),
+                L10n.Text("windows.friendlyerror.this_copy_of_the_app_is_missing_the_signin.98aa5af7"),
                 raw,
                 Symbol: Symbol.Permissions);
         }
         if (lower.Contains("-25300"))
         {
             return new FriendlyErrorInfo(
-                "The private key is not on this device",
-                "The record is here but the secret it points at is not, which is what "
-                + "a restore from a backup leaves behind. Import or generate the key again.",
+                L10n.Text("windows.friendlyerror.the_private_key_is_not_on_this_device.3db8a142"),
+                L10n.Text("windows.friendlyerror.the_record_is_here_but_the_secret_it_point.d27bd117"),
                 raw,
                 Symbol: Symbol.Permissions);
         }
         if (lower.Contains("register this device before using the vault"))
         {
             return new FriendlyErrorInfo(
-                "This login is not tied to this computer",
-                "The vault lives on your account, and this sign-in predates "
-                + "linking the two. Press Try again first. If that does not clear it, "
-                + "sign in again from Account. Everything saved here still works.",
+                L10n.Text("windows.friendlyerror.this_login_is_not_tied_to_this_computer.b304b378"),
+                L10n.Text("windows.friendlyerror.the_vault_lives_on_your_account_and_this_s.e52d4845"),
                 raw,
-                ActionTitle: "Try again",
+                ActionTitle: L10n.Text("windows.friendlyerror.try_again.d8b8392e"),
                 Symbol: Symbol.People);
         }
         if (lower.Contains("machine_required") || lower.Contains("machine_not_registered")
@@ -123,61 +117,55 @@ internal static class FriendlyError
             || lower.Contains("not bound to an account device"))
         {
             return new FriendlyErrorInfo(
-                "This computer is not on your account",
-                "Sync needs this computer linked to your account before it can hold a "
-                + "copy of your servers. Everything still works here in the meantime.",
+                L10n.Text("windows.friendlyerror.this_computer_is_not_on_your_account.6ce371f7"),
+                L10n.Text("windows.friendlyerror.sync_needs_this_computer_linked_to_your_ac.5ece6b14"),
                 raw,
-                ActionTitle: "Try again",
+                ActionTitle: L10n.Text("windows.friendlyerror.try_again.d8b8392e"),
                 Symbol: Symbol.People);
         }
         if (lower.Contains("vault already exists"))
         {
             return new FriendlyErrorInfo(
-                "There is already a vault",
-                "An account has one vault. Unlock the one you have, or reset it if you "
-                + "cannot get back into it.",
+                L10n.Text("windows.friendlyerror.there_is_already_a_vault.b9e57f99"),
+                L10n.Text("windows.friendlyerror.an_account_has_one_vault_unlock_the_one_yo.b269036b"),
                 raw,
                 Symbol: Symbol.Permissions);
         }
         if (lower.Contains("not enrolled") || lower.Contains("did not enroll"))
         {
             return new FriendlyErrorInfo(
-                "This device cannot read the vault",
-                "It has not been let in yet. Unlock the vault here to give this device "
-                + "its copy of the key.",
+                L10n.Text("windows.friendlyerror.this_device_cannot_read_the_vault.f4b4e811"),
+                L10n.Text("windows.friendlyerror.it_has_not_been_let_in_yet_unlock_the_vaul.0e352acf"),
                 raw,
-                ActionTitle: "Try again",
+                ActionTitle: L10n.Text("windows.friendlyerror.try_again.d8b8392e"),
                 Symbol: Symbol.Permissions);
         }
         if (lower.Contains("unknown method") || lower.Contains("unknown_method"))
         {
             return new FriendlyErrorInfo(
-                "Helper is out of date",
-                "The background helper on this machine is older than the app and does "
-                + "not know this yet. Restart the app to replace it, then try again.",
+                L10n.Text("windows.friendlyerror.helper_is_out_of_date.ff2cd175"),
+                L10n.Text("windows.friendlyerror.the_background_helper_on_this_machine_is_o.2156c337"),
                 raw,
-                ActionTitle: "Try again",
+                ActionTitle: L10n.Text("windows.friendlyerror.try_again.d8b8392e"),
                 Symbol: Symbol.Refresh);
         }
         if (lower.Contains("not approved") || lower.Contains("waiting for someone to allow"))
         {
             return new FriendlyErrorInfo(
-                "Waiting for approval",
-                "The other device has to say yes to this one. Open Devices there and "
-                + "approve it, then try again.",
+                L10n.Text("windows.friendlyerror.waiting_for_approval.10c5739b"),
+                L10n.Text("windows.friendlyerror.the_other_device_has_to_say_yes_to_this_on.d2653756"),
                 raw,
-                ActionTitle: "Try again",
+                ActionTitle: L10n.Text("windows.friendlyerror.try_again.d8b8392e"),
                 Symbol: Symbol.People);
         }
         if (lower.Contains("paid-plan") || lower.Contains("not_on_this_plan")
             || lower.Contains("no longer includes remote"))
         {
             return new FriendlyErrorInfo(
-                "Not on this plan",
-                "Reaching your devices from anywhere is part of a paid plan. Everything "
-                + "else keeps working exactly as it does now.",
+                L10n.Text("windows.friendlyerror.not_on_this_plan.92dff92e"),
+                L10n.Text("windows.friendlyerror.reaching_your_devices_from_anywhere_is_par.bfe9ca82"),
                 raw,
-                ActionTitle: "See plans",
+                ActionTitle: L10n.Text("windows.friendlyerror.see_plans.d9898933"),
                 OpensPlans: true,
                 Symbol: Symbol.Favorite);
         }
@@ -194,32 +182,29 @@ internal static class FriendlyError
                 || lower.Contains("device limit")))
         {
             return new FriendlyErrorInfo(
-                "Sign in again",
-                "This device's login is no longer valid. Signing in again puts it back, "
-                + "and nothing local is lost.",
+                L10n.Text("windows.friendlyerror.sign_in_again.51fbe1dc"),
+                L10n.Text("windows.friendlyerror.this_device_s_login_is_no_longer_valid_sig.e2c0cd69"),
                 raw,
-                ActionTitle: "Sign in",
+                ActionTitle: L10n.Text("common.sign_in"),
                 Symbol: Symbol.Contact);
         }
         if (lower.Contains("credential") || lower.Contains("tunnel token")
             || lower.Contains("key does not match"))
         {
             return new FriendlyErrorInfo(
-                "Reconnecting",
-                "The connection credential was refused, so this device is getting a new "
-                + "one. It usually comes back on its own within a minute.",
+                L10n.Text("windows.friendlyerror.reconnecting.afb118fc"),
+                L10n.Text("windows.friendlyerror.the_connection_credential_was_refused_so_t.8e2696c5"),
                 raw,
-                ActionTitle: "Retry now",
+                ActionTitle: L10n.Text("windows.friendlyerror.retry_now.5148c3e2"),
                 Symbol: Symbol.Refresh);
         }
         if (wantsSignIn)
         {
             return new FriendlyErrorInfo(
-                "Sign in again",
-                "This device's login is no longer valid. Signing in again puts it back, "
-                + "and nothing local is lost.",
+                L10n.Text("windows.friendlyerror.sign_in_again.51fbe1dc"),
+                L10n.Text("windows.friendlyerror.this_device_s_login_is_no_longer_valid_sig.e2c0cd69"),
                 raw,
-                ActionTitle: "Sign in",
+                ActionTitle: L10n.Text("common.sign_in"),
                 Symbol: Symbol.Contact);
         }
         // No Apple row for this one. A refused account or device is not a
@@ -227,17 +212,16 @@ internal static class FriendlyError
         if (lower.Contains("unauthorized") || lower.Contains("forbidden"))
         {
             return new FriendlyErrorInfo(
-                "This account or device does not have access to that.",
-                "This account or device does not have access to that.",
+                L10n.Text("windows.friendlyerror.this_account_or_device_does_not_have_acces.4f3e4cdf"),
+                L10n.Text("windows.friendlyerror.this_account_or_device_does_not_have_acces.4f3e4cdf"),
                 raw,
                 Symbol: Symbol.Permissions);
         }
         if (lower.Contains("already on the tunnel") || lower.Contains("key_already_live"))
         {
             return new FriendlyErrorInfo(
-                "Connected somewhere else",
-                "Another copy of tokenstat is on the tunnel with this device's key. "
-                + "Quit it, or wait a moment for it to drop.",
+                L10n.Text("windows.friendlyerror.connected_somewhere_else.2da62c31"),
+                L10n.Text("windows.friendlyerror.another_copy_of_tokenstat_is_on_the_tunnel.0e092a52"),
                 raw,
                 Symbol: Symbol.People);
         }
@@ -246,30 +230,28 @@ internal static class FriendlyError
             || lower.Contains("could not resolve"))
         {
             return new FriendlyErrorInfo(
-                "No connection",
-                "This device cannot reach the network right now. It retries by itself as "
-                + "soon as it can.",
+                L10n.Text("windows.friendlyerror.no_connection.c9e1a200"),
+                L10n.Text("windows.friendlyerror.this_device_cannot_reach_the_network_right.663f753c"),
                 raw,
-                ActionTitle: "Try again",
+                ActionTitle: L10n.Text("windows.friendlyerror.try_again.d8b8392e"),
                 Symbol: Symbol.Globe);
         }
         if (lower.Contains("timed out") || lower.Contains("timeout"))
         {
             return new FriendlyErrorInfo(
-                "It did not answer",
-                "The other side took too long. It is usually asleep rather than broken.",
+                L10n.Text("windows.friendlyerror.it_did_not_answer.4f030967"),
+                L10n.Text("windows.friendlyerror.the_other_side_took_too_long_it_is_usually.94ae09da"),
                 raw,
-                ActionTitle: "Try again",
+                ActionTitle: L10n.Text("windows.friendlyerror.try_again.d8b8392e"),
                 Symbol: Symbol.Clock);
         }
         if (lower.Contains("this mac is asleep") || lower.Contains("host_asleep"))
         {
             return new FriendlyErrorInfo(
-                "That Mac is asleep",
-                "That Mac has its lid closed, or tokenstat is not open there. Open the "
-                + "app, open the lid, or turn on Always-on host in Account to keep it reachable.",
+                L10n.Text("windows.friendlyerror.that_mac_is_asleep.fce2923b"),
+                L10n.Text("windows.friendlyerror.that_mac_has_its_lid_closed_or_tokenstat_i.3ed1ce89"),
                 raw,
-                ActionTitle: "Try again",
+                ActionTitle: L10n.Text("windows.friendlyerror.try_again.d8b8392e"),
                 Symbol: Symbol.Clock);
         }
         if (lower.Contains("connection refused") || lower.Contains("os error 61")
@@ -277,31 +259,28 @@ internal static class FriendlyError
             || lower.Contains("host daemon") || lower.Contains("hostd"))
         {
             return new FriendlyErrorInfo(
-                "The helper is not running",
-                "tokenstat's background helper handles your archive and your devices. "
-                + "Open the app to start it, or turn on Always-on host to keep it running "
-                + "after you quit or close the lid.",
+                L10n.Text("windows.friendlyerror.the_helper_is_not_running.f7afe244"),
+                L10n.Text("windows.friendlyerror.tokenstat_s_background_helper_handles_your.82c596f6"),
                 raw,
-                ActionTitle: "Start it",
+                ActionTitle: L10n.Text("windows.friendlyerror.start_it.4238a078"),
                 Symbol: Symbol.Setting);
         }
         if (lower.Contains("broken pipe") || lower.Contains("connection reset")
             || lower.Contains("disconnected"))
         {
             return new FriendlyErrorInfo(
-                "Connection dropped",
-                "The link to the other device closed. It reconnects on its own.",
+                L10n.Text("windows.friendlyerror.connection_dropped.9049f3d8"),
+                L10n.Text("windows.friendlyerror.the_link_to_the_other_device_closed_it_rec.fdda8bd3"),
                 raw,
-                ActionTitle: "Try again",
+                ActionTitle: L10n.Text("windows.friendlyerror.try_again.d8b8392e"),
                 Symbol: Symbol.Link);
         }
         if (lower.Contains("too many requests") || lower.Contains("rate limit")
             || lower.Contains("429"))
         {
             return new FriendlyErrorInfo(
-                "Asked too often",
-                "The account is answering fewer requests for a moment. What is on screen "
-                + "is still good, and the next refresh will go through.",
+                L10n.Text("windows.friendlyerror.asked_too_often.52a8ddb1"),
+                L10n.Text("windows.friendlyerror.the_account_is_answering_fewer_requests_fo.ecb66749"),
                 raw,
                 Symbol: Symbol.Clock);
         }
@@ -309,10 +288,10 @@ internal static class FriendlyError
             || (lower.Contains("1033") && lower.Contains("tunnel")))
         {
             return new FriendlyErrorInfo(
-                "The server is unreachable",
-                "The connection could not reach the server. Try again shortly.",
+                L10n.Text("windows.friendlyerror.the_server_is_unreachable.6862e581"),
+                L10n.Text("windows.friendlyerror.the_connection_could_not_reach_the_server.b54b3470"),
                 raw,
-                ActionTitle: "Try again",
+                ActionTitle: L10n.Text("windows.friendlyerror.try_again.d8b8392e"),
                 Symbol: Symbol.Refresh);
         }
         // Bare codes only count inside a failure sentence, never on their own:
@@ -327,20 +306,19 @@ internal static class FriendlyError
                     || lower.Contains("530"))))
         {
             return new FriendlyErrorInfo(
-                "The server could not answer",
-                "The request could not be completed. Try again shortly.",
+                L10n.Text("windows.friendlyerror.the_server_could_not_answer.ffe49c76"),
+                L10n.Text("windows.friendlyerror.the_request_could_not_be_completed_try_aga.54350986"),
                 raw,
-                ActionTitle: "Try again",
+                ActionTitle: L10n.Text("windows.friendlyerror.try_again.d8b8392e"),
                 Symbol: Symbol.Refresh);
         }
         if (lower.Contains("device limit") || lower.Contains("machine_limit"))
         {
             return new FriendlyErrorInfo(
-                "Device limit reached",
-                "This account is using all the devices its plan allows. Remove one you no "
-                + "longer have, or move up a plan.",
+                L10n.Text("windows.friendlyerror.device_limit_reached.9993b12e"),
+                L10n.Text("windows.friendlyerror.this_account_is_using_all_the_devices_its.b51162b6"),
                 raw,
-                ActionTitle: "Manage devices",
+                ActionTitle: L10n.Text("windows.friendlyerror.manage_devices.3511575c"),
                 Symbol: Symbol.CellPhone);
         }
         if (lower.Contains("no_such_peer") || lower.Contains("no direct address")
@@ -349,22 +327,20 @@ internal static class FriendlyError
                 || lower.Contains("direct candidates") || lower.Contains("relay"))))
         {
             return new FriendlyErrorInfo(
-                "That computer is not reachable",
-                "It has to be awake with tokenstat running, and set up for remote "
-                + "reach. If this worked before, wake it and try again. If it never worked, on that computer open Devices and turn on \"Reach devices from "
-                + "anywhere\". Until that is on, it never tells the relay where it is.",
+                L10n.Text("windows.friendlyerror.that_computer_is_not_reachable.162e2c34"),
+                L10n.Text("windows.friendlyerror.it_has_to_be_awake_with_tokenstat_running.73405e61"),
                 raw,
-                ActionTitle: "Try again",
+                ActionTitle: L10n.Text("windows.friendlyerror.try_again.d8b8392e"),
                 Symbol: Symbol.Globe);
         }
 
         // Nothing matched. Say that something failed and show the words the
         // machine used, rather than inventing a cause.
         return new FriendlyErrorInfo(
-            "That did not work",
-            string.IsNullOrEmpty(raw) ? "Something went wrong and nothing said what." : raw,
+            L10n.Text("windows.friendlyerror.that_did_not_work.93a20328"),
+            string.IsNullOrEmpty(raw) ? L10n.Text("windows.friendlyerror.something_went_wrong_and_nothing_said_what.8776f982") : raw,
             raw,
-            ActionTitle: "Try again",
+            ActionTitle: L10n.Text("windows.friendlyerror.try_again.d8b8392e"),
             Symbol: Symbol.Important);
     }
 }

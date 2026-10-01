@@ -147,7 +147,7 @@ struct ChatComposer: View {
     private var well: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             if model.savedCopy != nil {
-                Button("Send when connected", .scheduled) { model.queueDraftWhenConnected() }
+                Button(L10n.text("apple.chatcomposer.send_when_connected.c2aae57a"), .scheduled) { model.queueDraftWhenConnected() }
                     .buttonStyle(SecondaryButtonStyle(small: true))
                     .disabled(model.stagingAttachments > 0 || model.unconfirmedSend != nil || (model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty))
             }
@@ -209,7 +209,7 @@ struct ChatComposer: View {
             onDropTargeted(targeted)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Message")
+        .accessibilityLabel(L10n.text("apple.chatcomposer.message.2f77668a"))
     }
 
     private var strip: some View {
@@ -230,17 +230,17 @@ struct ChatComposer: View {
 
     private var attachControl: some View {
         Menu {
-            Button("Choose files", .attach) {
+            Button(L10n.text("apple.chatcomposer.choose_files.1157defa"), .attach) {
                 importOwner = model.currentReference
                 importing = true
             }
             if ChatInbox.pasteboardHasAttachment() {
-                Button("Paste from clipboard", .attach) {
+                Button(L10n.text("apple.chatcomposer.paste_from_clipboard.dc2d6f20"), .attach) {
                     ingest(items: ChatInbox.pasteboardItems())
                 }
             }
         } label: {
-            ActionIcon.attach.label("Attach")
+            ActionIcon.attach.label(L10n.text("apple.chatcomposer.attach.d406ade2"))
                 .environment(\.compactActions, true)
                 .foregroundStyle(Theme.accent)
                 .frame(width: 28, height: 28)
@@ -250,8 +250,8 @@ struct ChatComposer: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         #endif
-        .help("Attach files or images")
-        .accessibilityLabel("Attach")
+        .help(L10n.text("apple.chatcomposer.attach_files_or_images.b548dd44"))
+        .accessibilityLabel(L10n.text("apple.chatcomposer.attach.d406ade2"))
     }
 
     /// How long this turn has been running, in a slot wide enough for its
@@ -264,7 +264,7 @@ struct ChatComposer: View {
     /// time a turn starts, ends, or the clock passes another digit.
     private var turnStatus: some View {
         ZStack(alignment: .trailing) {
-            Text("Working · 00h 00m")
+            Text(L10n.text("apple.chatcomposer.working_00h_00m.df5f29d2"))
                 .hidden()
                 .accessibilityHidden(true)
             if running {
@@ -274,8 +274,8 @@ struct ChatComposer: View {
                     // The stamp lands on the same write that reports running,
                     // so this is a single frame at most: the word without the
                     // clock beats no word at all.
-                    Text("Working")
-                        .accessibilityLabel("Working")
+                    Text(L10n.text("common.working"))
+                        .accessibilityLabel(L10n.text("common.working"))
                 }
             }
         }
@@ -302,7 +302,7 @@ struct ChatComposer: View {
         ZStack(alignment: .trailing) {
             HStack(spacing: Theme.Space.s) {
                 if running {
-                    Button("Stop", .stop) {}
+                    Button(L10n.text("common.stop"), .stop) {}
                         .buttonStyle(DestructiveButtonStyle(small: true))
                 }
                 if !cannotSend {
@@ -316,7 +316,7 @@ struct ChatComposer: View {
             .allowsHitTesting(false)
             HStack(spacing: Theme.Space.s) {
                 if running {
-                    Button("Stop", .stop) { onStop() }
+                    Button(L10n.text("common.stop"), .stop) { onStop() }
                         .buttonStyle(DestructiveButtonStyle(small: true))
                         .environment(\.compactActions, true)
                         .keyboardShortcut(.cancelAction)
@@ -325,10 +325,10 @@ struct ChatComposer: View {
                     Button(sendTitle, .send, action: onSend)
                         .buttonStyle(AccentButtonStyle(small: true))
                         .environment(\.compactActions, true)
-                        .help(sendsAsNote ? "The agent reads this on its next step." : running ? "Waits until this turn finishes. Stop and send now is on the queued message." : "Send")
+                        .help(sendsAsNote ? L10n.text("apple.chatcomposer.the_agent_reads_this_on_its_next_step.aab7b1c7") : running ? L10n.text("apple.chatcomposer.waits_until_this_turn_finishes_stop_and_se.2df81427") : L10n.text("apple.chatcomposer.send.f6f4688f"))
                         .contextMenu {
                             if running {
-                                Button("Stop and send now", .send, action: onSendNow)
+                                Button(L10n.text("apple.chatcomposer.stop_and_send_now.8ad0a50d"), .send, action: onSendNow)
                             }
                         }
                 }
@@ -375,7 +375,7 @@ struct ChatComposer: View {
                 HStack(spacing: Theme.Space.s) {
                     Image(systemName: ActionIcon.attach.symbol)
                         .font(Theme.font(15, weight: .semibold))
-                    Text("Drop to attach")
+                    Text(L10n.text("apple.chatcomposer.drop_to_attach.34a7a637"))
                         .font(Theme.callout.weight(.semibold))
                 }
                 .foregroundStyle(Theme.accent)
@@ -392,8 +392,8 @@ struct ChatComposer: View {
     }
 
     private var sendTitle: String {
-        if sendsAsNote { return "Next step" }
-        return running ? "Send after this turn" : "Send"
+        if sendsAsNote { return L10n.text("apple.chatcomposer.next_step.298a9207") }
+        return running ? L10n.text("apple.chatcomposer.send_after_this_turn.012fc8c3") : L10n.text("apple.chatcomposer.send.f6f4688f")
     }
 
     private var cannotSend: Bool {
@@ -435,7 +435,7 @@ struct ChatAttachmentTile: View {
         ZStack(alignment: .topTrailing) {
             tile
             Button(action: onRemove) {
-                ActionIcon.dismiss.label("Remove")
+                ActionIcon.dismiss.label(L10n.text("common.remove"))
                     .font(Theme.fixed(8, weight: .bold))
                     .foregroundStyle(Theme.accent)
                     .frame(width: 18, height: 18)
@@ -448,12 +448,12 @@ struct ChatAttachmentTile: View {
             }
             .buttonStyle(.plain)
             .environment(\.compactActions, true)
-            .accessibilityLabel("Remove \(attachment.name)")
+            .accessibilityLabel(L10n.text("apple.chatcomposer.remove_0.dfbfd0da", "\(attachment.name)"))
             #if os(macOS)
             .offset(x: 5, y: -5)
             #endif
         }
-        .help(unavailable ? "The original is not saved on this device. Reconnect or remove it and attach the original again." : attachment.name)
+        .help(unavailable ? L10n.text("apple.chatcomposer.the_original_is_not_saved_on_this_device_r.b6f9a2f6") : attachment.name)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(attachment.name)
     }
@@ -475,7 +475,7 @@ struct ChatAttachmentTile: View {
                 Image(systemName: fileSymbol)
                     .font(Theme.font(16, weight: .medium))
                     .foregroundStyle(Theme.accent)
-                Text(unavailable ? "Not saved here" : attachment.name)
+                Text(unavailable ? L10n.text("apple.chatcomposer.not_saved_here.791263ad") : attachment.name)
                     .font(Theme.mono(9))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)

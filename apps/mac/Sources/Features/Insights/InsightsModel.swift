@@ -41,11 +41,11 @@ final class InsightsModel {
 
         var label: String {
             switch self {
-            case .overview: return "Overview"
-            case .models: return "Models"
-            case .projects: return "Projects"
-            case .harnesses: return "Coding tools"
-            case .sessions: return "Sessions"
+            case .overview: return L10n.text("apple.insightsmodel.overview.d4b1ea57")
+            case .models: return L10n.text("apple.insightsmodel.models.d17d2d78")
+            case .projects: return L10n.text("common.projects")
+            case .harnesses: return L10n.text("apple.insightsmodel.coding_tools.6032f740")
+            case .sessions: return L10n.text("apple.insightsmodel.sessions.6fa3cbf4")
             }
         }
 
@@ -215,7 +215,7 @@ final class InsightsModel {
         defer { isScanning = false }
         do {
             let report = try await Bridge.scan()
-            showAction("Scan complete: added \(report.eventsNew) new events from \(report.filesRead) files.")
+            showAction(L10n.text("apple.insightsmodel.scan_complete_added_0_new_events_from_1_fi.0eff738d", "\(report.eventsNew)", "\(report.filesRead)"))
             startCooldown(seconds: 10, clearing: \.scanCooldownUntil)
             await refresh()
             // Home's heatmap is a separate model; tell it the archive moved.
@@ -233,7 +233,7 @@ final class InsightsModel {
         do {
             let reports = try await Bridge.fetchRemotes()
             let details = reports.compactMap(\.message).joined(separator: " · ")
-            showAction(details.isEmpty ? "Remote fetch complete." : details)
+            showAction(details.isEmpty ? L10n.text("apple.insightsmodel.remote_fetch_complete.2bfec637") : details)
             startCooldown(seconds: 30 * 60, clearing: \.fetchCooldownUntil)
             await refresh()
             NotificationCenter.default.post(name: .archiveDidChange, object: nil)

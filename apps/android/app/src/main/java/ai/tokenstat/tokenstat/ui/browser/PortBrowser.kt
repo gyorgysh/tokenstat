@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.browser
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.activity.compose.BackHandler
 import ai.tokenstat.tokenstat.ui.chrome.HideTabBar
 
@@ -93,7 +95,7 @@ fun PortBrowserScreen(
         if (opening || !ownsContext()) return
         val value = url.trim()
         if (!BrowserPolicy.allows(value)) {
-            loadError = "That address cannot open here."
+            loadError = L10n.text("android.portbrowser.that_address_cannot_open_here.5de454ec")
             return
         }
         loadError = null
@@ -120,11 +122,11 @@ fun PortBrowserScreen(
     }
 
     fun blockedResponse(): WebResourceResponse = WebResourceResponse(
-        "text/plain", "utf-8", 403, "Forbidden", emptyMap(),
-        ByteArrayInputStream("Open this preview's port before loading this address.".toByteArray()),
+        "text/plain", "utf-8", 403, L10n.text("android.portbrowser.forbidden.78342a09"), emptyMap(),
+        ByteArrayInputStream(L10n.text("android.portbrowser.open_this_preview_s_port_before_loading_th.4a4d565e").toByteArray()),
     )
 
-    fun blockNavigation() { loadError = "Open this preview's port before loading this address." }
+    fun blockNavigation() { loadError = L10n.text("android.portbrowser.open_this_preview_s_port_before_loading_th.4a4d565e") }
     // A pushed screen owns the system back. Without it the gesture falls
     // through to the activity and closes the app instead of stepping back.
     // History first: followed links and address-bar loads are pages, and
@@ -143,14 +145,14 @@ fun PortBrowserScreen(
         TopAppBar(
             title = { Text(shownHost) },
             navigationIcon = {
-                IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+                IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, L10n.text("common.back")) }
             },
             actions = {
                 TextButton(enabled = !opening, onClick = {
                     val actual = view?.url ?: address
                     navigate(original(actual)?.url ?: actual)
-                }) { Text("Reload") }
-                TextButton(onClick = onClose) { Text("Done") }
+                }) { Text(L10n.text("android.portbrowser.reload.bdc090ec")) }
+                TextButton(onClick = onClose) { Text(L10n.text("common.done")) }
             },
         )
         Row(
@@ -160,7 +162,7 @@ fun PortBrowserScreen(
             OutlinedTextField(
                 value = address,
                 onValueChange = { address = it },
-                label = { Text("URL") },
+                label = { Text(L10n.text("android.portbrowser.url.e7a241de")) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(
                     capitalization = KeyboardCapitalization.None,
@@ -168,7 +170,7 @@ fun PortBrowserScreen(
                 ),
                 modifier = Modifier.weight(1f),
             )
-            TextButton(enabled = !opening, onClick = { navigate(address) }) { Text("Go") }
+            TextButton(enabled = !opening, onClick = { navigate(address) }) { Text(L10n.text("android.portbrowser.go.6cc8519b")) }
         }
         loadError?.let { error ->
             Text(
@@ -238,7 +240,7 @@ fun PortBrowserScreen(
                             error: WebResourceError?,
                         ) {
                             if (Build.VERSION.SDK_INT >= 23 && request?.isForMainFrame == true) {
-                                loadError = error?.description?.toString() ?: "The page failed to load."
+                                loadError = error?.description?.toString() ?: L10n.text("android.portbrowser.the_page_failed_to_load.b7ee8af7")
                             }
                         }
 
@@ -249,12 +251,12 @@ fun PortBrowserScreen(
                             description: String?,
                             failingUrl: String?,
                         ) {
-                            loadError = description ?: "The page failed to load."
+                            loadError = description ?: L10n.text("android.portbrowser.the_page_failed_to_load.b7ee8af7")
                         }
 
                         override fun onReceivedSslError(v: WebView?, handler: SslErrorHandler?, error: SslError?) {
                             handler?.cancel()
-                            loadError = "The secure connection failed."
+                            loadError = L10n.text("android.portbrowser.the_secure_connection_failed.7b74150f")
                         }
                     }
                     webChromeClient = object : WebChromeClient() {
@@ -265,7 +267,7 @@ fun PortBrowserScreen(
                     view = this
                     val forwarded = request.target.through(request.listenerUrl)
                     if (listeners.isCurrent && forwarded != null && BrowserPolicy.allows(forwarded)) loadUrl(forwarded)
-                    else loadError = "That address cannot open here."
+                    else loadError = L10n.text("android.portbrowser.that_address_cannot_open_here.5de454ec")
                 }
             },
             onRelease = {

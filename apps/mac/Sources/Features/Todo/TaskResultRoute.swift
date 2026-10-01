@@ -12,8 +12,8 @@ enum TaskResultWorkspaceSurface: String, CaseIterable, Identifiable, Hashable, S
     /// Same words the folder itself uses for these sections.
     var title: String {
         switch self {
-        case .changes: return "Changes"
-        case .history: return "History"
+        case .changes: return L10n.text("apple.taskresultroute.changes.bbd4b6a8")
+        case .history: return L10n.text("common.history")
         }
     }
 
@@ -42,13 +42,13 @@ enum TaskResultReviewAvailability: Equatable, Sendable {
         case .ready:
             return nil
         case .uncategorized:
-            return "This task has no folder. Assign one to review files and history."
+            return L10n.text("apple.taskresultroute.this_task_has_no_folder_assign_one_to_revi.ec78820b")
         case .folderMissing:
             let host = hostName.trimmingCharacters(in: .whitespacesAndNewlines)
             if host.isEmpty {
-                return "This folder is no longer available on the connected computer."
+                return L10n.text("apple.taskresultroute.this_folder_is_no_longer_available_on_the.be3071ed")
             }
-            return "This folder is no longer available on \(host)."
+            return L10n.text("apple.taskresultroute.this_folder_is_no_longer_available_on_0.70d7366a", "\(host)")
         }
     }
 }
@@ -108,8 +108,8 @@ struct TaskResultRoute: Equatable, Sendable {
     var folderLabel: String {
         let name = folderName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !name.isEmpty { return name }
-        if workspaceID.isEmpty { return "Uncategorized" }
-        return "Folder"
+        if workspaceID.isEmpty { return L10n.text("apple.taskresultroute.uncategorized.8d40d123") }
+        return L10n.text("apple.taskresultroute.folder.74ccd433")
     }
 
     func preservesRun(_ selectedRunID: String?) -> Bool {
@@ -120,12 +120,12 @@ struct TaskResultRoute: Equatable, Sendable {
         switch (surface, reviewAvailability) {
         case (.changes, .ready):
             if let changeCount {
-                if changeCount == 0 { return "Working tree matches the last commit" }
-                return changeCount == 1 ? "1 file to review" : "\(changeCount) files to review"
+                if changeCount == 0 { return L10n.text("apple.taskresultroute.working_tree_matches_the_last_commit.419b69e6") }
+                return changeCount == 1 ? L10n.text("apple.taskresultroute.1_file_to_review.0d600164") : L10n.text("apple.taskresultroute.0_files_to_review.b2f93852", "\(changeCount)")
             }
-            return "Uncommitted files in this folder"
+            return L10n.text("apple.taskresultroute.uncommitted_files_in_this_folder.9b817339")
         case (.history, .ready):
-            return "Previous commits in this folder"
+            return L10n.text("apple.taskresultroute.previous_commits_in_this_folder.cf1fcffb")
         default:
             return reviewAvailability.message(hostName: hostName) ?? surface.title
         }

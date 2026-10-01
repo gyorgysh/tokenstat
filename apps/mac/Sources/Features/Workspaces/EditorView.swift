@@ -64,11 +64,11 @@ struct EditorView: View {
             // For focus in the SwiftUI chrome. With the caret in the text,
             // the text view's key equivalents answer instead.
             Group {
-                Button("Find next") {
+                Button(L10n.text("apple.editorview.find_next.b1fb4052")) {
                     if find.showing { find.goNext() } else { find.showing = true }
                 }
                 .keyboardShortcut("g", modifiers: .command)
-                Button("Find previous") {
+                Button(L10n.text("apple.editorview.find_previous.8bb7bf68")) {
                     if find.showing { find.goPrevious() } else { find.showing = true }
                 }
                 .keyboardShortcut("g", modifiers: [.command, .shift])
@@ -109,7 +109,7 @@ struct EditorView: View {
                 .help(path)
 
             if document.isDirty {
-                Label("Unsaved", systemImage: "circle.fill")
+                Label(L10n.text("apple.editorview.unsaved.6250d572"), systemImage: "circle.fill")
                     .labelStyle(.titleAndIcon)
                     .font(Theme.caption)
                     .imageScale(.small)
@@ -130,18 +130,18 @@ struct EditorView: View {
             Spacer()
 
             if !document.changedLines.isEmpty {
-                Text("\(document.changedLines.count) changed")
+                Text(L10n.text("apple.editorview.0_changed.d85c3eae", "\(document.changedLines.count)"))
                     .font(Theme.numeric(11))
                     .foregroundStyle(.tertiary)
             }
 
-            Button("Find in file", systemImage: "magnifyingglass") { find.showing.toggle() }
+            Button(L10n.text("apple.editorview.find_in_file.214c422e"), systemImage: "magnifyingglass") { find.showing.toggle() }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.controlGlyph)
-                .help("Find in file")
+                .help(L10n.text("apple.editorview.find_in_file.214c422e"))
                 .keyboardShortcut("f", modifiers: .command)
-            Button("Save", .save) {
+            Button(L10n.text("common.save"), .save) {
                 Task { await model.saveText(path, in: folder.id) }
             }
             .disabled(!document.isDirty)
@@ -166,7 +166,7 @@ struct EditorView: View {
                 .truncationMode(.head)
 
             if document.isDirty {
-                Label("Unsaved", systemImage: "circle.fill")
+                Label(L10n.text("apple.editorview.unsaved.6250d572"), systemImage: "circle.fill")
                     .font(ClientType.caption)
                     .foregroundStyle(Theme.warning)
             }
@@ -180,10 +180,10 @@ struct EditorView: View {
             }
 
             Spacer()
-            Button("Find in file", .search) { find.showing.toggle() }
+            Button(L10n.text("apple.editorview.find_in_file.214c422e"), .search) { find.showing.toggle() }
                 .labelStyle(.iconOnly)
                 .keyboardShortcut("f", modifiers: .command)
-            Button("Save", .save) {
+            Button(L10n.text("common.save"), .save) {
                 Task { await model.saveText(path, in: folder.id) }
             }
             .keyboardShortcut("s", modifiers: .command)
@@ -203,7 +203,7 @@ struct EditorView: View {
             findShowing: find.showing
         )
         return [
-            .workbench(.findNext, id: "find-next", title: "Find Next",
+            .workbench(.findNext, id: "find-next", title: L10n.text("apple.editorview.find_next.664d6cdf"),
                        enabled: WorkbenchShortcutPolicy.canFindNext(state)) {
                 if find.showing {
                     find.goNext()
@@ -211,7 +211,7 @@ struct EditorView: View {
                     find.showing = true
                 }
             },
-            .workbench(.findPrevious, id: "find-previous", title: "Find Previous",
+            .workbench(.findPrevious, id: "find-previous", title: L10n.text("apple.editorview.find_previous.bf0e5179"),
                        enabled: WorkbenchShortcutPolicy.canFindPrevious(state)) {
                 if find.showing {
                     find.goPrevious()

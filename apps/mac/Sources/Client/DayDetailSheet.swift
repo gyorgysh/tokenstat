@@ -38,7 +38,7 @@ struct DayDetailSheet: View {
                     } else {
                         // A quiet day is an answer. It must not read as a
                         // failure to look.
-                        Text("Nothing recorded on this day.")
+                        Text(L10n.text("apple.daydetailsheet.nothing_recorded_on_this_day.5ad77ba8"))
                             .font(ClientType.label)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -51,7 +51,7 @@ struct DayDetailSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Button(L10n.text("common.done")) { dismiss() }
                 }
             }
         }
@@ -71,11 +71,11 @@ struct DayDetailSheet: View {
             Text(formatSpend(day.value))
                 .font(ClientType.figure)
                 .foregroundStyle(Theme.accent)
-            Text("at API list price")
+            Text(L10n.text("apple.daydetailsheet.at_api_list_price.128de85c"))
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
             if let detail {
-                Text("\(detail.events) events, \(detail.tokens.formatted()) tokens")
+                Text(L10n.text("apple.daydetailsheet.0_events_1_tokens.e35a47c3", "\(detail.events)", "\(detail.tokens.formatted())"))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                     .padding(.top, 2)
@@ -107,7 +107,7 @@ struct DayDetailSheet: View {
         .cardSurface()
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(row.model) on \(harnessName(harnessToolKey(row.src))), \(formatTokens(row.tokens)) tokens"
+            L10n.text("apple.daydetailsheet.0_on_1_2_tokens.2b7237a6", "\(row.model)", "\(harnessName(harnessToolKey(row.src)))", "\(formatTokens(row.tokens))")
         )
     }
 }

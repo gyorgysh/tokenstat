@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.chrome.TabBarChrome
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
@@ -106,9 +108,9 @@ fun CloneRepositoryScreen(
         containerColor = colors.background,
         topBar = {
             TopAppBar(
-                title = { Text("Clone a repository") },
+                title = { Text(L10n.text("android.clonerepository.clone_a_repository.749e5d4d")) },
                 navigationIcon = {
-                    TsSecondaryButton(label = "Back", small = true, onClick = onClose)
+                    TsSecondaryButton(label = L10n.text("common.back"), small = true, onClick = onClose)
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.background),
             )
@@ -116,7 +118,7 @@ fun CloneRepositoryScreen(
         bottomBar = {
             if (sessionId == null) {
                 TsAccentButton(
-                    label = if (working) "Starting…" else "Clone",
+                    label = if (working) L10n.text("android.clonerepository.starting.bbe5fc3b") else L10n.text("android.clonerepository.clone.5779f32f"),
                     icon = ActionIcon.Download.vector,
                     onClick = {
                         scope.launch {
@@ -147,16 +149,16 @@ fun CloneRepositoryScreen(
                 Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(Space.m).padding(bottom = TabBarChrome.contentBottomInset),
                 verticalArrangement = Arrangement.spacedBy(Space.m),
             ) {
-                Text("Clone onto $hostLabel", style = TsType.title2.copy(fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
+                Text(L10n.text("android.clonerepository.clone_onto_0.56da4378", "${hostLabel}"), style = TsType.title2.copy(fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
                 Text(
-                    "tokenstat runs git on that machine and registers the folder when it finishes. You watch the whole thing.",
+                    L10n.text("android.clonerepository.tokenstat_runs_git_on_that_machine_and_reg.c316bf55"),
                     style = TsType.body,
                     color = colors.textSecondary,
                 )
                 if (error != null) Banner(error!!, BannerSeverity.DANGER)
                 TsCard {
                     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                        Text("Repository", style = TsType.caption, color = colors.textSecondary)
+                        Text(L10n.text("android.clonerepository.repository.13d6ff07"), style = TsType.caption, color = colors.textSecondary)
                         OutlinedTextField(
                             value = url,
                             onValueChange = { url = it },
@@ -164,13 +166,13 @@ fun CloneRepositoryScreen(
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        Text("Where it lands", style = TsType.caption, color = colors.textSecondary)
+                        Text(L10n.text("android.clonerepository.where_it_lands.452fbb26"), style = TsType.caption, color = colors.textSecondary)
                         Row(
                             Modifier.fillMaxWidth().clickable { picking = true }.padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                parent ?: "Choose a folder",
+                                parent ?: L10n.text("android.clonerepository.choose_a_folder.5c71b8cd"),
                                 style = TsType.mono(13),
                                 color = if (parent == null) colors.textSecondary else colors.textPrimary,
                                 modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
@@ -179,18 +181,18 @@ fun CloneRepositoryScreen(
                             )
                             Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary)
                         }
-                        Text("Folder name", style = TsType.caption, color = colors.textSecondary)
+                        Text(L10n.text("android.clonerepository.folder_name.14d34edf"), style = TsType.caption, color = colors.textSecondary)
                         OutlinedTextField(
                             value = name,
                             onValueChange = { name = it },
-                            placeholder = { Text("taken from the address") },
+                            placeholder = { Text(L10n.text("android.clonerepository.taken_from_the_address.1d24ffb4")) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
                 }
                 Text(
-                    "A private repository asks for its credentials in the terminal, and you can answer there.",
+                    L10n.text("android.clonerepository.a_private_repository_asks_for_its_credenti.7173fc9d"),
                     style = TsType.caption,
                     color = colors.textSecondary,
                 )
@@ -218,8 +220,8 @@ fun CloneRepositoryScreen(
             model = model,
             peer = peer,
             hostName = hostLabel,
-            title = "Where it lands",
-            confirm = "Land it here",
+            title = L10n.text("android.clonerepository.where_it_lands.452fbb26"),
+            confirm = L10n.text("android.clonerepository.land_it_here.40ae2d76"),
             onClose = { picking = false },
             onChosen = { parent = it; picking = false },
         )
@@ -270,14 +272,14 @@ private fun CloneRunning(
             delay(2_000)
         }
         if (status?.state == "running" || status == null) {
-            onError("Status checks stopped after 30 minutes. The clone may still be running. Check the terminal or check its status again.")
+            onError(L10n.text("android.clonerepository.status_checks_stopped_after_30_minutes_the.aff07dba"))
         }
     }
     val headline = when {
-        error != null -> "Clone status unavailable"
-        status?.state == "done" -> "Cloned. The folder is registered on $hostLabel."
-        status?.state == "failed" -> status?.error ?: "The clone did not finish."
-        else -> "Cloning onto $hostLabel…"
+        error != null -> L10n.text("android.clonerepository.clone_status_unavailable.a25ebbc8")
+        status?.state == "done" -> L10n.text("android.clonerepository.cloned_the_folder_is_registered_on_0.9404dac1", "${hostLabel}")
+        status?.state == "failed" -> status?.error ?: L10n.text("android.clonerepository.the_clone_did_not_finish.fa812d0f")
+        else -> L10n.text("android.clonerepository.cloning_onto_0.fd24885d", "${hostLabel}")
     }
     Column(modifier.fillMaxSize()) {
         Text(headline, style = TsType.subheadline, color = colors.textSecondary, modifier = Modifier.padding(horizontal = Space.m, vertical = Space.s))
@@ -287,7 +289,7 @@ private fun CloneRunning(
                 verticalArrangement = Arrangement.spacedBy(Space.s),
             ) {
                 Text(error, style = TsType.caption, color = colors.textSecondary)
-                TsSecondaryButton(label = "Check status again", small = true, onClick = onRecheck)
+                TsSecondaryButton(label = L10n.text("android.clonerepository.check_status_again.84baa61b"), small = true, onClick = onRecheck)
             }
             Spacer(Modifier.height(Space.s))
         }
@@ -303,14 +305,14 @@ private fun CloneRunning(
         }
         if (status?.state == "done" && status?.workspaceId != null) {
             TsAccentButton(
-                label = "Open the folder",
+                label = L10n.text("android.clonerepository.open_the_folder.e241ab00"),
                 icon = ActionIcon.Next.vector,
                 onClick = { onOpen(status.workspaceId) },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = Space.m, vertical = Space.s),
             )
         } else if (status?.state == "failed") {
             TsAccentButton(
-                label = "Back",
+                label = L10n.text("common.back"),
                 icon = ActionIcon.Back.vector,
                 onClick = onBack,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = Space.m, vertical = Space.s),
@@ -371,11 +373,11 @@ fun FolderPickerScreen(
             TopAppBar(
                 title = { Text(title) },
                 navigationIcon = {
-                    TsSecondaryButton(label = "Back", small = true, onClick = onClose)
+                    TsSecondaryButton(label = L10n.text("common.back"), small = true, onClick = onClose)
                 },
                 actions = {
                     TsSecondaryButton(
-                        label = "New folder",
+                        label = L10n.text("android.clonerepository.new_folder.cf28f49e"),
                         small = true,
                         onClick = { naming = true },
                         enabled = path != null && !creating,
@@ -404,7 +406,7 @@ fun FolderPickerScreen(
                         horizontalArrangement = Arrangement.spacedBy(Space.s),
                     ) {
                         if (parentPath != null) {
-                            TsSecondaryButton(label = "Up", small = true, onClick = { load(parentPath) })
+                            TsSecondaryButton(label = L10n.text("android.clonerepository.up.55490a4b"), small = true, onClick = { load(parentPath) })
                         }
                         Text(
                             path!!,
@@ -443,14 +445,14 @@ fun FolderPickerScreen(
         val here = path
         AlertDialog(
             onDismissRequest = { naming = false; newFolder = "" },
-            title = { Text("New folder") },
+            title = { Text(L10n.text("android.clonerepository.new_folder.cf28f49e")) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                    Text("It is made on $hostName, inside the folder you are looking at.")
+                    Text(L10n.text("android.clonerepository.it_is_made_on_0_inside_the_folder_you_are.7077098c", "${hostName}"))
                     OutlinedTextField(
                         value = newFolder,
                         onValueChange = { newFolder = it },
-                        placeholder = { Text("Name") },
+                        placeholder = { Text(L10n.text("android.clonerepository.name.dcd1d522")) },
                         singleLine = true,
                     )
                 }
@@ -461,7 +463,7 @@ fun FolderPickerScreen(
                     newFolder = ""
                     if (clean.isEmpty() || here == null) return@TextButton
                     if (clean.contains("/") || clean.contains("\\") || clean == ".." || clean == ".") {
-                        error = "A folder name is one name, without a path in it."
+                        error = L10n.text("android.clonerepository.a_folder_name_is_one_name_without_a_path_i.d41badd4")
                         return@TextButton
                     }
                     naming = false
@@ -476,10 +478,10 @@ fun FolderPickerScreen(
                             .onFailure { error = SetupFailure.readable(it) }
                         creating = false
                     }
-                }) { Text("Create") }
+                }) { Text(L10n.text("android.clonerepository.create.4759498a")) }
             },
             dismissButton = {
-                TextButton(onClick = { naming = false; newFolder = "" }) { Text("Cancel") }
+                TextButton(onClick = { naming = false; newFolder = "" }) { Text(L10n.text("common.cancel")) }
             },
         )
     }
@@ -503,8 +505,8 @@ fun RegisterFolderScreen(
         model = model,
         peer = peer,
         hostName = hostName,
-        title = "A folder on $hostName",
-        confirm = if (registering) "Registering…" else "Register this folder",
+        title = L10n.text("android.clonerepository.a_folder_on_0.68442fb8", "${hostName}"),
+        confirm = if (registering) L10n.text("android.clonerepository.registering.6bf4d89b") else L10n.text("android.clonerepository.register_this_folder.e273b524"),
         notice = error,
         onClose = onClose,
         onChosen = { picked ->

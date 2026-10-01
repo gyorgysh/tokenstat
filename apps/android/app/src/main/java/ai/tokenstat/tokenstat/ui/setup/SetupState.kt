@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.setup
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.core.CoreFailure
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
@@ -44,11 +46,11 @@ enum class SetupMilestone {
      *  the honest answer after an interruption is that nobody knows how far
      *  it got. */
     fun summary(): String = when (this) {
-        TRUSTED -> "Its fingerprint is verified. Setup carries on from your sign-in details."
-        CHECKED -> "It is checked and ready to install."
-        INSTALL_REQUESTED -> "The installer was started. Setup asks the server what actually happened before it does anything again."
-        VERIFYING -> "The server is installed. Setup is waiting for it to reach your account."
-        HOST_READY -> "The server answered. One last check finishes this."
+        TRUSTED -> L10n.text("android.setupstate.its_fingerprint_is_verified_setup_carries.85d90f26")
+        CHECKED -> L10n.text("android.setupstate.it_is_checked_and_ready_to_install.8f2e0902")
+        INSTALL_REQUESTED -> L10n.text("android.setupstate.the_installer_was_started_setup_asks_the_s.2ca3a719")
+        VERIFYING -> L10n.text("android.setupstate.the_server_is_installed_setup_is_waiting_f.fe7267cd")
+        HOST_READY -> L10n.text("android.setupstate.the_server_answered_one_last_check_finishe.a9101f9b")
     }
 }
 
@@ -57,14 +59,14 @@ enum class SetupAction {
     NEW_CODE, SIGN_IN_AGENT, SIGN_IN_ACCOUNT, UPDATE_MACHINE, RETRY;
 
     fun title(): String = when (this) {
-        CHECK_ADDRESS -> "Check the address"
-        REVIEW_FINGERPRINT -> "Review the fingerprint"
-        CHECK_CREDENTIAL -> "Check the credential"
-        CHECK_SERVER -> "Check the server"
-        NEW_CODE -> "Get a new code"
-        SIGN_IN_AGENT, SIGN_IN_ACCOUNT -> "Sign in"
-        UPDATE_MACHINE -> "How to update"
-        RETRY -> "Try again"
+        CHECK_ADDRESS -> L10n.text("android.setupstate.check_the_address.b092b174")
+        REVIEW_FINGERPRINT -> L10n.text("android.setupstate.review_the_fingerprint.377df466")
+        CHECK_CREDENTIAL -> L10n.text("android.setupstate.check_the_credential.5f42f1c7")
+        CHECK_SERVER -> L10n.text("android.setupstate.check_the_server.eb259223")
+        NEW_CODE -> L10n.text("android.setupstate.get_a_new_code.42cc251c")
+        SIGN_IN_AGENT, SIGN_IN_ACCOUNT -> L10n.text("common.sign_in")
+        UPDATE_MACHINE -> L10n.text("android.setupstate.how_to_update.d97d76cb")
+        RETRY -> L10n.text("android.setupstate.try_again.d8b8392e")
     }
 
     fun step(): SetupStep? = when (this) {
@@ -96,7 +98,7 @@ data class SetupFailure(
         fun from(error: Throwable): SetupFailure {
             if (error !is CoreFailure) {
                 return SetupFailure(
-                    explanation = error.message ?: "Setup could not continue.",
+                    explanation = error.message ?: L10n.text("android.setupstate.setup_could_not_continue.8be1b020"),
                     action = SetupAction.RETRY,
                 )
             }
@@ -104,60 +106,60 @@ data class SetupFailure(
             val message = error.message
             return when (code) {
                 "ssh_unreachable" -> SetupFailure(
-                    "We couldn't reach this server. Check its address, and that it is running and accepting connections.",
+                    L10n.text("android.setupstate.we_couldn_t_reach_this_server_check_its_ad.13dd9877"),
                     action = SetupAction.CHECK_ADDRESS,
                     details = message,
                 )
                 "ssh_host_key_changed" -> SetupFailure(
-                    "This server's identity has changed since it was trusted. That can be a reinstall, or it can be the wrong machine answering. Verify the fingerprint before connecting again.",
-                    changed = "Nothing was sent to it.",
+                    L10n.text("android.setupstate.this_server_s_identity_has_changed_since_i.e7f60705"),
+                    changed = L10n.text("android.setupstate.nothing_was_sent_to_it.80689dc8"),
                     action = SetupAction.REVIEW_FINGERPRINT,
                     details = message,
                 )
                 "ssh_host_key_unverified" -> SetupFailure(
-                    "This server's fingerprint has not been confirmed yet.",
+                    L10n.text("android.setupstate.this_server_s_fingerprint_has_not_been_con.98cbb3d1"),
                     action = SetupAction.REVIEW_FINGERPRINT,
                     details = message,
                 )
                 "ssh_auth_refused" -> SetupFailure(
-                    "The server refused the key or password. Check the credential and the user name you are connecting as.",
+                    L10n.text("android.setupstate.the_server_refused_the_key_or_password_che.7f44f231"),
                     action = SetupAction.CHECK_CREDENTIAL,
                     details = message,
                 )
                 "setup_pending" -> SetupFailure(
-                    "This machine has not appeared on your account yet.",
-                    changed = "The installer may still be running on the server.",
+                    L10n.text("android.setupstate.this_machine_has_not_appeared_on_your_acco.54a9c2b8"),
+                    changed = L10n.text("android.setupstate.the_installer_may_still_be_running_on_the.9ccd1cf6"),
                     action = SetupAction.CHECK_SERVER,
                     details = message,
                 )
                 "identity_mismatch" -> SetupFailure(
-                    "The machine answered with a different identity than the one this setup installed. Reconnect and verify the server.",
+                    L10n.text("android.setupstate.the_machine_answered_with_a_different_iden.b027025e"),
                     action = SetupAction.REVIEW_FINGERPRINT,
                     details = message,
                 )
                 "access_required" -> SetupFailure(
-                    "This machine is on your account, but this device is not allowed on it yet.",
-                    changed = "The server is installed and signed in.",
+                    L10n.text("android.setupstate.this_machine_is_on_your_account_but_this_d.876ba315"),
+                    changed = L10n.text("android.setupstate.the_server_is_installed_and_signed_in.092d7364"),
                     action = SetupAction.CHECK_SERVER,
                     details = message,
                 )
                 "pairing_expired", "code_expired" -> SetupFailure(
-                    "This pairing code has expired.",
+                    L10n.text("android.setupstate.this_pairing_code_has_expired.dc34ec3b"),
                     action = SetupAction.NEW_CODE,
                     details = message,
                 )
                 "identity_required" -> SetupFailure(
-                    "Paste the full machine key the installer printed, so setup finishes on the machine you installed rather than one with the same name.",
+                    L10n.text("android.setupstate.paste_the_full_machine_key_the_installer_p.95ca62ac"),
                     action = SetupAction.RETRY,
                     details = message,
                 )
                 "account_changed", "signed_out", "auth" -> SetupFailure(
-                    "This device is signed out of the account that started this setup. Sign in again, then continue.",
+                    L10n.text("android.setupstate.this_device_is_signed_out_of_the_account_t.cd22fc68"),
                     action = SetupAction.SIGN_IN_ACCOUNT,
                     details = message,
                 )
                 "unknown_method" -> SetupFailure(
-                    "This machine is running an older tokenstat, which does not know how to finish setup. Update it there to continue.",
+                    L10n.text("android.setupstate.this_machine_is_running_an_older_tokenstat.e8972de3"),
                     action = SetupAction.UPDATE_MACHINE,
                     details = message,
                 )
@@ -165,12 +167,12 @@ data class SetupFailure(
                     val lower = message.lowercase()
                     when {
                         lower.contains("unknown method") -> SetupFailure(
-                            "This app is running against an older helper, which does not know how to do that yet. Reinstall tokenstat and try again.",
+                            L10n.text("android.setupstate.this_app_is_running_against_an_older_helpe.66cf1f69"),
                             action = SetupAction.UPDATE_MACHINE,
                             details = message,
                         )
                         lower.contains("not logged in") -> SetupFailure(
-                            "This device is signed out. Sign in again, then set the machine up.",
+                            L10n.text("android.setupstate.this_device_is_signed_out_sign_in_again_th.868697cc"),
                             action = SetupAction.SIGN_IN_ACCOUNT,
                             details = message,
                         )
@@ -182,15 +184,14 @@ data class SetupFailure(
 
         /** A readable sentence for an error that never became a SetupFailure. */
         fun readable(error: Throwable): String =
-            (error as? CoreFailure)?.message ?: error.message ?: "Something went wrong."
+            (error as? CoreFailure)?.message ?: error.message ?: L10n.text("android.setupstate.something_went_wrong.0c953ab3")
     }
 }
 
 /** A first task that reads the project and changes nothing. Deliberately
  *  not "fix" or "add": the first thing somebody sends should not be a
  *  change they have to review before they have seen the place. */
-const val SETUP_FIRST_TASK =
-    "Give me a short tour of this project: what it does, how it is laid out, and where you would start."
+val SETUP_FIRST_TASK = L10n.text("android.setupstate.give_me_a_short_tour_of_this_project_what.bd63b9e4")
 
 /** How the wizard will sign in to the server it is setting up. Ported from
  *  `SetupCredential`: a key already in the vault, or a password typed once,
@@ -216,11 +217,11 @@ enum class AgentReadiness {
     NOT_INSTALLED, NEEDS_SIGN_IN, SIGNED_IN, EXPIRED, UNKNOWN;
 
     fun summary(): String = when (this) {
-        NOT_INSTALLED -> "Not installed"
-        NEEDS_SIGN_IN -> "Not signed in"
-        SIGNED_IN -> "Signed in"
-        EXPIRED -> "Sign-in expired"
-        UNKNOWN -> "Sign-in not checked"
+        NOT_INSTALLED -> L10n.text("android.setupstate.not_installed.d177cdc0")
+        NEEDS_SIGN_IN -> L10n.text("android.setupstate.not_signed_in.491fc91c")
+        SIGNED_IN -> L10n.text("android.setupstate.signed_in.ca566c89")
+        EXPIRED -> L10n.text("android.setupstate.sign_in_expired.07fd892e")
+        UNKNOWN -> L10n.text("android.setupstate.sign_in_not_checked.58904f56")
     }
 
     companion object {

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.screen
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.core.CoreClient
 import android.util.Base64
@@ -49,7 +51,7 @@ class ScreenViewerModel(
 
     var state by mutableStateOf(State.Idle)
         private set
-    var message by mutableStateOf("Connecting…")
+    var message by mutableStateOf(L10n.text("android.screenviewermodel.connecting.72021eb7"))
         private set
     var aspectRatio by mutableFloatStateOf(16f / 9f)
         private set
@@ -143,7 +145,7 @@ class ScreenViewerModel(
         requestNotice = null
         attempts = 0
         state = State.Connecting
-        message = "Connecting…"
+        message = L10n.text("android.screenviewermodel.connecting.72021eb7")
         startInputPump()
         startHeartbeat()
         sessionJob = scope.launch { runSession(current) }
@@ -228,14 +230,14 @@ class ScreenViewerModel(
         attempts += 1
         if (attempts > 3) {
             state = State.Failed
-            message = "Connection could not recover. $reason"
+            message = L10n.text("android.screenviewermodel.connection_could_not_recover_0.7c8ca1d2", "${reason}")
             return false
         }
         state = State.Connecting
         // Say why. Keeping the reason back until the third failure made the
         // whole visible story of a session that could not stay up
         // "Reconnecting…", which names nothing anybody can act on.
-        message = "Reconnecting, attempt $attempts of 3. $reason"
+        message = L10n.text("android.screenviewermodel.reconnecting_attempt_0_of_3_1.8f4f26ac", "${attempts}", "${reason}")
         delay(attempts * 1_000L)
         return current == generation && !stopped
     }
@@ -243,7 +245,7 @@ class ScreenViewerModel(
     /// Null when the session opened. Otherwise the reason it did not.
     private suspend fun openSession(): String? {
         if (!tier.equals("legend", ignoreCase = true)) {
-            return "Screen access requires the Legend plan."
+            return L10n.text("android.screenviewermodel.screen_access_requires_the_legend_plan.66173f1c")
         }
         return try {
             // Pair and serve before dialling, the way a workspace connect
@@ -262,7 +264,7 @@ class ScreenViewerModel(
                 },
             ) as JsonObject
             viewerId = opened["id"]?.jsonPrimitive?.contentOrNull
-                ?: return "The viewer opened without an id."
+                ?: return L10n.text("android.screenviewermodel.the_viewer_opened_without_an_id.9cdf904c")
             hostSessionId = opened["sessionId"]?.jsonPrimitive?.contentOrNull
             transport = opened["transport"]?.jsonPrimitive?.contentOrNull
             connectedSince = System.currentTimeMillis()
@@ -272,10 +274,10 @@ class ScreenViewerModel(
             // would lift the overlay off a black rectangle that still accepts
             // mouse and keyboard, because input is a side channel.
             state = State.Connecting
-            message = "Waiting for the first picture…"
+            message = L10n.text("android.screenviewermodel.waiting_for_the_first_picture.be8d50cf")
             null
         } catch (e: Exception) {
-            e.message ?: "The screen session failed."
+            e.message ?: L10n.text("android.screenviewermodel.the_screen_session_failed.92e22825")
         }
     }
 
@@ -285,7 +287,7 @@ class ScreenViewerModel(
         // never `publicIdentity`: that lookup missed on every device and the
         // viewer failed before dialling. The Apple viewer reads the same key.
         val peerId = identity["key"]?.jsonPrimitive?.contentOrNull
-            ?: throw IllegalStateException("This device has no identity yet.")
+            ?: throw IllegalStateException(L10n.text("android.screenviewermodel.this_device_has_no_identity_yet.40d835eb"))
         val cap = app.workspaceSection(
             peer,
             "screen.capability.issue",
@@ -296,7 +298,7 @@ class ScreenViewerModel(
             },
         ) as JsonObject
         return cap["token"]?.jsonPrimitive?.contentOrNull
-            ?: throw IllegalStateException("The host did not issue a capability.")
+            ?: throw IllegalStateException(L10n.text("android.screenviewermodel.the_host_did_not_issue_a_capability.b8faa6a5"))
     }
 
     private suspend fun closeSession() {
@@ -317,7 +319,7 @@ class ScreenViewerModel(
 
     /// Null when this device ended the session. Otherwise why it ended.
     private suspend fun readLoop(current: Int): String? {
-        val id = viewerId ?: return "The viewer never opened."
+        val id = viewerId ?: return L10n.text("android.screenviewermodel.the_viewer_never_opened.e0afb76d")
         while (current == generation && !stopped) {
             val chunk = try {
                 app.core(
@@ -327,7 +329,7 @@ class ScreenViewerModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                return e.message ?: "The screen session broke."
+                return e.message ?: L10n.text("android.screenviewermodel.the_screen_session_broke.487e4664")
             }
             chunk["metadata"]?.jsonPrimitive?.contentOrNull?.let { applyMetadata(it) }
             chunk["frame"]?.jsonPrimitive?.contentOrNull?.let { applyFrame(it) }
@@ -347,12 +349,11 @@ class ScreenViewerModel(
                 closeSession()
                 connectedSince = 0
                 state = State.Failed
-                message = "Connected, but no picture has arrived yet. " +
-                    "That computer may not have Screen Recording, or tokenstat may not be open on that computer."
+                message = L10n.text("android.screenviewermodel.connected_but_no_picture_has_arrived_yet_t.7af64031")
                 return null
             }
             if (chunk["active"]?.jsonPrimitive?.contentOrNull == "false") {
-                return chunk["error"]?.jsonPrimitive?.contentOrNull ?: "The screen session ended."
+                return chunk["error"]?.jsonPrimitive?.contentOrNull ?: L10n.text("android.screenviewermodel.the_screen_session_ended.c37a27b0")
             }
             val error = chunk["error"]?.jsonPrimitive?.contentOrNull
             if (!error.isNullOrBlank()) return error
@@ -623,7 +624,7 @@ class ScreenViewerModel(
             val keepLabel = label
             stop()
             start(keepPeer, keepLabel, keepTier, wanted)
-            message = if (wanted) "Asking for control…" else "Switching to view only…"
+            message = if (wanted) L10n.text("android.screenviewermodel.asking_for_control.50c714d1") else L10n.text("android.screenviewermodel.switching_to_view_only.d67a2762")
         }
     }
 
@@ -675,7 +676,7 @@ class ScreenViewerModel(
         try {
             val asked = runCatching { ask(isControlling) }
             val answer = asked.getOrElse {
-                requestNotice = it.message ?: "That computer could not be asked."
+                requestNotice = it.message ?: L10n.text("android.screenviewermodel.that_computer_could_not_be_asked.d4222412")
                 return
             }
             // Already allowed to watch, and still not running: what is missing
@@ -688,10 +689,10 @@ class ScreenViewerModel(
                 answer
             }
             if (allowed) {
-                requestNotice = "This device already has access. Press Try again."
+                requestNotice = L10n.text("android.screenviewermodel.this_device_already_has_access_press_try_a.fd1aee06")
                 return
             }
-            requestNotice = "Asked. Approve this device on that computer."
+            requestNotice = L10n.text("android.screenviewermodel.asked_approve_this_device_on_that_computer.f8ffae43")
             // Best effort, and never the reason the request failed. Somebody
             // with no other device registered has still asked the computer.
             runCatching {
@@ -700,7 +701,7 @@ class ScreenViewerModel(
                 val enabled = sent["enabled"]?.jsonPrimitive?.contentOrNull == "true"
                 val signedIn = sent["signedIn"]?.jsonPrimitive?.contentOrNull == "true"
                 if (signedIn && enabled && devices > 0) {
-                    requestNotice = "Asked. A notification went to your other devices."
+                    requestNotice = L10n.text("android.screenviewermodel.asked_a_notification_went_to_your_other_de.3be993ac")
                 }
             }
         } finally {
@@ -785,7 +786,7 @@ class ScreenViewerModel(
                 while (skipped < offset) {
                     val want = minOf(discard.size.toLong(), offset - skipped).toInt()
                     val read = stream.read(discard, 0, want)
-                    if (read <= 0) throw IOException("The file changed during upload.")
+                    if (read <= 0) throw IOException(L10n.text("android.screenviewermodel.the_file_changed_during_upload.ed47b50e"))
                     skipped += read
                 }
                 val buffer = ByteArray(chunkBytes)
@@ -815,7 +816,7 @@ class ScreenViewerModel(
             throw e
         } catch (e: Exception) {
             transferProgress = null
-            requestNotice = e.message ?: "The file could not be sent."
+            requestNotice = e.message ?: L10n.text("android.screenviewermodel.the_file_could_not_be_sent.47565f42")
         }
     }
 

@@ -5,6 +5,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 projects=(
+  windows-localization/WindowsLocalizationTests.csproj
   windows-chat/WindowsChatTests.csproj
   windows-notes/WindowsNoteTests.csproj
   windows-board/WindowsBoardTests.csproj

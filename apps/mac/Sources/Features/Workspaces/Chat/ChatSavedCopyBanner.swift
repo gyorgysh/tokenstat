@@ -18,13 +18,13 @@ struct ChatSavedCopyBanner: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
-            ActionIcon.archive.label("Saved copy")
+            ActionIcon.archive.label(L10n.text("apple.chatsavedcopybanner.saved_copy.9a53ca9a"))
                 .labelStyle(.iconOnly)
                 .font(Theme.font(13))
                 .foregroundStyle(Theme.accent)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Saved on this device")
+                Text(L10n.text("apple.chatsavedcopybanner.saved_on_this_device.ade5400f"))
                     .font(Theme.font(12, weight: .semibold))
                     .foregroundStyle(.primary)
                 Text(subtitle)
@@ -36,14 +36,14 @@ struct ChatSavedCopyBanner: View {
             if checking {
                 HStack(spacing: Theme.Space.xs) {
                     ProgressView().controlSize(.small)
-                    Text("Checking for updates…")
+                    Text(L10n.text("apple.chatsavedcopybanner.checking_for_updates.497a1998"))
                         .font(Theme.font(11, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("Checking for updates")
+                .accessibilityLabel(L10n.text("apple.chatsavedcopybanner.checking_for_updates.53b276ad"))
             } else if canCheck {
-                Button("Check for updates", .refresh, action: onCheck)
+                Button(L10n.text("apple.chatsavedcopybanner.check_for_updates.f26f3275"), .refresh, action: onCheck)
                     .buttonStyle(NoticeActionButtonStyle())
             }
         }
@@ -56,11 +56,11 @@ struct ChatSavedCopyBanner: View {
 
     private var subtitle: String {
         let when = RelativeClock.phrase(for: info.savedAt, style: .full)
-        let accountNote = canCheck ? "" : " Verify your account for live updates."
+        let accountNote = canCheck ? "" : L10n.text("apple.chatsavedcopybanner.verify_your_account_for_live_updates.ba22a709")
         if info.hasEarlier {
-            return "Updated \(when). Earlier messages were not saved." + accountNote
+            return L10n.text("apple.chatsavedcopybanner.updated_0_earlier_messages_were_not_saved.fd965da3", "\(when)", "\(accountNote)")
         }
-        return "Updated \(when)." + accountNote
+        return L10n.text("apple.chatsavedcopybanner.updated_0_1.ac599c45", "\(when)", "\(accountNote)")
     }
 }
 

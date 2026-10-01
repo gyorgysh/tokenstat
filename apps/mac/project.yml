@@ -298,6 +298,9 @@ targets:
           cp "$SRCROOT/Resources/PriceBookSeed.json" "$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/PriceBookSeed.json"
     sources:
       - path: Sources
+      - path: ../localization
+        type: folder
+        buildPhase: resources
       # Vendor marks for the harnesses. See TRADEMARK.md: these belong to
       # their owners and are not covered by this project's licence.
       - path: Resources

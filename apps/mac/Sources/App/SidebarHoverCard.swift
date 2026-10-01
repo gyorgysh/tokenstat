@@ -71,8 +71,8 @@ struct SidebarChatDetailCard: View {
 
     var body: some View {
         SidebarDetailCard(
-            title: conversation.title.isEmpty ? "Untitled conversation" : conversation.title,
-            subtitle: "Chat · \(harnessName(conversation.backend))",
+            title: conversation.title.isEmpty ? L10n.text("apple.sidebarhovercard.untitled_conversation.31d248c4") : conversation.title,
+            subtitle: L10n.text("apple.sidebarhovercard.chat_0.34012b11", "\(harnessName(conversation.backend))"),
             symbol: "bubble.left.and.bubble.right",
             path: folder.path,
             fields: fields
@@ -90,35 +90,35 @@ struct SidebarChatDetailCard: View {
 
     private var fields: [SidebarDetailField] {
         var fields = [
-            SidebarDetailField(title: "Project", value: folder.name, symbol: "folder"),
-            SidebarDetailField(title: "Computer", value: folder.sidebarComputer, symbol: "laptopcomputer"),
-            SidebarDetailField(title: "Status", value: conversation.running ? "Working" : "Ready", symbol: "circle.dotted"),
+            SidebarDetailField(title: L10n.text("apple.sidebarhovercard.project.98595978"), value: folder.name, symbol: "folder"),
+            SidebarDetailField(title: L10n.text("apple.sidebarhovercard.computer.76ed42d2"), value: folder.sidebarComputer, symbol: "laptopcomputer"),
+            SidebarDetailField(title: L10n.text("apple.sidebarhovercard.status.920e413c"), value: conversation.running ? "Working" : "Ready", symbol: "circle.dotted"),
         ]
         if let model = conversation.model, !model.isEmpty {
-            fields.append(.init(title: "Model", value: model, symbol: "sparkles"))
+            fields.append(.init(title: L10n.text("apple.sidebarhovercard.model.5e2c614c"), value: model, symbol: "sparkles"))
         }
         if let usage, !usage.isEmpty {
             let total = Decimal(usage.input) + Decimal(usage.output) + usage.cache
-            fields.append(.init(title: "Tokens", value: total.formatted(), symbol: "number"))
-            fields.append(.init(title: "Fresh input", value: usage.input.formatted(), symbol: "arrow.down"))
-            fields.append(.init(title: "Tokens out", value: usage.output.formatted(), symbol: "arrow.up"))
+            fields.append(.init(title: L10n.text("apple.sidebarhovercard.tokens.a039dfb9"), value: total.formatted(), symbol: "number"))
+            fields.append(.init(title: L10n.text("apple.sidebarhovercard.fresh_input.a5156480"), value: usage.input.formatted(), symbol: "arrow.down"))
+            fields.append(.init(title: L10n.text("apple.sidebarhovercard.tokens_out.da9a58f8"), value: usage.output.formatted(), symbol: "arrow.up"))
             if usage.cache > 0 {
-                fields.append(.init(title: "Cached tokens", value: usage.cache.formatted(), symbol: "arrow.clockwise"))
+                fields.append(.init(title: L10n.text("apple.sidebarhovercard.cached_tokens.3efd7d16"), value: usage.cache.formatted(), symbol: "arrow.clockwise"))
             }
         } else {
-            fields.append(.init(title: "Tokens", value: !finishedLoading ? "Checking…" : loadFailed ? "Couldn’t load usage" : "Not reported yet", symbol: "number"))
+            fields.append(.init(title: L10n.text("apple.sidebarhovercard.tokens.a039dfb9"), value: !finishedLoading ? "Checking…" : loadFailed ? "Couldn’t load usage" : "Not reported yet", symbol: "number"))
         }
-        fields.append(.init(title: "Last message", value: sidebarDate(conversation.lastMessageAtMs), symbol: "clock"))
+        fields.append(.init(title: L10n.text("apple.sidebarhovercard.last_message.ee5c88bf"), value: sidebarDate(conversation.lastMessageAtMs), symbol: "clock"))
         return fields
     }
 }
 
 extension WorkspaceFolder {
-    var sidebarComputer: String { isRemote ? machineLabel ?? "Other computer" : "This computer" }
+    var sidebarComputer: String { isRemote ? machineLabel ?? L10n.text("apple.sidebarhovercard.other_computer.dc797a69") : L10n.text("apple.sidebarhovercard.this_computer.26f9f95a") }
 }
 
 func sidebarDate(_ milliseconds: Int64?) -> String {
-    guard let milliseconds else { return "No messages yet" }
+    guard let milliseconds else { return L10n.text("apple.sidebarhovercard.no_messages_yet.f42e0f66") }
     return Date(timeIntervalSince1970: Double(milliseconds) / 1000)
         .formatted(date: .abbreviated, time: .shortened)
 }

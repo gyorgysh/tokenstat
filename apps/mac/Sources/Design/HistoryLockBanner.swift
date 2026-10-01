@@ -53,20 +53,20 @@ struct HistoryLockBanner: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             (
-                Text("Older history is locked. ")
+                Text(L10n.text("apple.historylockbanner.older_history_is_locked.8ef6b29a"))
                     .font(Theme.font(12, weight: .semibold))
-                + Text("Free shows the last \(days) days in full. Older days keep the year shape only.")
+                + Text(L10n.text("apple.historylockbanner.free_shows_the_last_0_days_in_full_older_d.2a97306a", "\(days)"))
                     .font(Theme.font(12))
                     .foregroundStyle(.secondary)
             )
             .fixedSize(horizontal: false, vertical: true)
             #if os(macOS)
-            Link("Upgrade to see the year", destination: Plans.pricing)
+            Link(L10n.text("apple.historylockbanner.upgrade_to_see_the_year.7918f544"), destination: Plans.pricing)
                 .font(Theme.font(12, weight: .semibold))
                 .foregroundStyle(Theme.accent)
                 .underline(false)
             #else
-            Button("See plans", .plans) {
+            Button(L10n.text("apple.historylockbanner.see_plans.d9898933"), .plans) {
                 NotificationCenter.default.post(name: .tokenstatOpenPaywall, object: nil)
             }
             .font(Theme.font(12, weight: .semibold))

@@ -108,7 +108,7 @@ struct DayDetailPopover: View {
 
     private func card(_ detail: DayDetail) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("SELECTED DAY")
+            Text(L10n.text("apple.daydetailpopover.selected_day.43c93a22"))
                 .font(Theme.font(9, weight: .semibold))
                 .tracking(0.8)
                 .foregroundStyle(.tertiary)
@@ -121,13 +121,13 @@ struct DayDetailPopover: View {
                 Text(detail.value.formatted)
                     .font(Theme.numeric(14, weight: .medium))
                 if !detail.estimated {
-                    Text("at API list price")
+                    Text(L10n.text("apple.daydetailpopover.at_api_list_price.128de85c"))
                         .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                 }
             }
 
-            Text("\(formatTokens(detail.tokens)) tokens · \(Self.int(detail.events)) requests")
+            Text(L10n.text("apple.daydetailpopover.0_tokens_1_requests.02bc82f3", "\(formatTokens(detail.tokens))", "\(Self.int(detail.events))"))
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
 
@@ -135,7 +135,7 @@ struct DayDetailPopover: View {
                 ThemeRule()
                 rows(detail)
                 if detail.rows.count > Self.maxRows {
-                    Text("+\(detail.rows.count - Self.maxRows) more")
+                    Text(L10n.text("apple.daydetailpopover.0_more.3f1d2fb4", "\(detail.rows.count - Self.maxRows)"))
                         .font(Theme.caption.weight(.medium))
                         .foregroundStyle(.tertiary)
                 }
@@ -202,10 +202,10 @@ struct DayDetailPopover: View {
         guard grand > 0 else { return AnyView(EmptyView()) }
 
         let segments: [(label: String, value: UInt64, color: Color)] = [
-            ("cache read", total.cacheRead, Theme.heat[1]),
-            ("cache write", total.cacheWrite, Theme.heat[2]),
+            (L10n.text("apple.daydetailpopover.cache_read.e16dda7a"), total.cacheRead, Theme.heat[1]),
+            (L10n.text("apple.daydetailpopover.cache_write.e2bcc9d6"), total.cacheWrite, Theme.heat[2]),
             ("output", total.output, Theme.heat[4]),
-            ("fresh in", total.fresh, Theme.accent),
+            (L10n.text("apple.daydetailpopover.fresh_in.28475ebb"), total.fresh, Theme.accent),
         ].filter { $0.value > 0 }
         let barMax = max(2, cardWidth - 24)
         let widths = segments.map { max(2, barMax * CGFloat($0.value) / CGFloat(grand)) }
@@ -235,7 +235,7 @@ struct DayDetailPopover: View {
         HStack(spacing: 8) {
             ProgressView()
                 .controlSize(.small)
-            Text("Loading day…")
+            Text(L10n.text("apple.daydetailpopover.loading_day.758e26f6"))
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
         }

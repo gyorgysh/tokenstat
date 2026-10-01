@@ -16,12 +16,12 @@ enum TurnElapsed {
     /// 59.9 seconds has not run a minute yet.
     static func phrase(since start: Date, now: Date = Date()) -> String {
         let seconds = max(0, Int(now.timeIntervalSince(start)))
-        if seconds < 60 { return "\(seconds)s" }
+        if seconds < 60 { return L10n.text("apple.chatturntiming.0_s.c4c041f8", "\(seconds)") }
         let minutes = seconds / 60
-        if minutes < 60 { return "\(minutes)m" }
+        if minutes < 60 { return L10n.text("apple.chatturntiming.0_m.7f5ea983", "\(minutes)") }
         let hours = minutes / 60
         let rest = minutes % 60
-        return rest == 0 ? "\(hours)h" : "\(hours)h \(rest)m"
+        return rest == 0 ? L10n.text("apple.chatturntiming.0_h.360a8af5", "\(hours)") : L10n.text("apple.chatturntiming.0_h_1_m.d426ce3b", "\(hours)", "\(rest)")
     }
 
     /// "10 seconds", "3 minutes", "1 hour 5 minutes". What the compact phrase
@@ -71,12 +71,12 @@ func reconcileRunningSince(
 /// `RelativeClock`.
 struct TurnElapsedText: View {
     let since: Date
-    var prefix = "Working"
+    var prefix = L10n.text("common.working")
 
     var body: some View {
         TimelineView(.periodic(from: since, by: 1)) { context in
             Text("\(prefix) · \(TurnElapsed.phrase(since: since, now: context.date))")
-                .accessibilityLabel("\(prefix) for \(TurnElapsed.durationWords(since: since, now: context.date))")
+                .accessibilityLabel(L10n.text("apple.chatturntiming.0_for_1.b1e4faa4", "\(prefix)", "\(TurnElapsed.durationWords(since: since, now: context.date))"))
         }
     }
 }

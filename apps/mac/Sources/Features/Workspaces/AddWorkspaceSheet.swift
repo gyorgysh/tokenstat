@@ -38,13 +38,13 @@ struct AddWorkspaceSheet: View {
 
     private var localSheet: some View {
         ThemedSheet(
-            title: "Add a project",
-            subtitle: "Keep chats, terminals, notes and tasks together in one project.",
+            title: L10n.text("apple.addworkspacesheet.add_a_project.69c7be56"),
+            subtitle: L10n.text("apple.addworkspacesheet.keep_chats_terminals_notes_and_tasks_toget.55a5f978"),
             icon: .create,
             onClose: { dismiss() }
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.xl) {
-                Text("Choose an existing folder on this Mac, or open a project on another computer.")
+                Text(L10n.text("apple.addworkspacesheet.choose_an_existing_folder_on_this_mac_or_o.4db7412d"))
                     .font(Theme.body)
                     .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -52,21 +52,21 @@ struct AddWorkspaceSheet: View {
                 VStack(alignment: .leading, spacing: Theme.Space.l) {
                     ModalInfoRow(
                         icon: .source,
-                        title: "One home for your work",
-                        text: "New chats and terminal sessions use this folder. If it is a Git repository, changes and history appear automatically."
+                        title: L10n.text("apple.addworkspacesheet.one_home_for_your_work.0a838a44"),
+                        text: L10n.text("apple.addworkspacesheet.new_chats_and_terminal_sessions_use_this_f.0398eac8")
                     )
                     ModalInfoRow(
                         icon: .security,
-                        title: "Nothing is uploaded",
-                        text: "Adding a project does not send the folder anywhere. Only usage counters are eligible for sync."
+                        title: L10n.text("apple.addworkspacesheet.nothing_is_uploaded.3b1a51ef"),
+                        text: L10n.text("apple.addworkspacesheet.adding_a_project_does_not_send_the_folder.7c3c576c")
                     )
                 }
             }
         } actions: {
-            Button("Not now", .dismiss) { dismiss() }
+            Button(L10n.text("apple.addworkspacesheet.not_now.a0e63d7c"), .dismiss) { dismiss() }
                 .buttonStyle(SecondaryButtonStyle())
                 .keyboardShortcut(.cancelAction)
-            Button("On another machine…", .device) { remote = true }
+            Button(L10n.text("apple.addworkspacesheet.on_another_machine.6f3387cc"), .device) { remote = true }
                 .buttonStyle(SecondaryButtonStyle())
             Spacer()
             Button {
@@ -78,7 +78,7 @@ struct AddWorkspaceSheet: View {
                 }
             } label: {
                 ZStack {
-                    ActionIcon.reveal.label("Choose folder…")
+                    ActionIcon.reveal.label(L10n.text("apple.addworkspacesheet.choose_folder.6e8eb2b0"))
                         .opacity(picking ? 0 : 1)
                     if picking {
                         ProgressView()
@@ -113,54 +113,54 @@ struct ProjectWorktreeSheet: View {
     @State private var pickingParent = false
 
     var body: some View {
-        ThemedSheet(title: "Worktrees", subtitle: "Separate working folders for \(folder.name)",
+        ThemedSheet(title: L10n.text("apple.addworkspacesheet.worktrees.aec2f93d"), subtitle: L10n.text("apple.addworkspacesheet.separate_working_folders_for_0.92b95d37", "\(folder.name)"),
                     icon: .source, onClose: { if !working { dismiss() } }) {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    Text("Work on another branch without interrupting the chats or terminals in this project.")
+                    Text(L10n.text("apple.addworkspacesheet.work_on_another_branch_without_interruptin.b8b9fb64"))
                         .font(Theme.callout).foregroundStyle(.secondary)
-                    Picker("Worktree view", selection: $showingFolders) {
-                        Text("New worktree").tag(false)
-                        Text("Working folders (\(existing.count))").tag(true)
+                    Picker(L10n.text("apple.addworkspacesheet.worktree_view.47529948"), selection: $showingFolders) {
+                        Text(L10n.text("apple.addworkspacesheet.new_worktree.4f210afe")).tag(false)
+                        Text(L10n.text("apple.addworkspacesheet.working_folders_0.b9b73029", "\(existing.count)")).tag(true)
                     }.pickerStyle(.segmented).labelsHidden()
                     if showingFolders {
                         ForEach(existing) { tree in
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(tree.branch ?? "Detached commit").font(Theme.callout)
+                                Text(tree.branch ?? L10n.text("apple.addworkspacesheet.detached_commit.05f9a89e")).font(Theme.callout)
                                 Text(tree.path).font(Theme.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                                if tree.locked { Text("Locked").font(Theme.caption).foregroundStyle(Theme.warning) }
-                                if tree.prunable { Text("Folder no longer available").font(Theme.caption).foregroundStyle(.secondary) }
+                                if tree.locked { Text(L10n.text("apple.addworkspacesheet.locked.a424e33d")).font(Theme.caption).foregroundStyle(Theme.warning) }
+                                if tree.prunable { Text(L10n.text("apple.addworkspacesheet.folder_no_longer_available.c06a8a39")).font(Theme.caption).foregroundStyle(.secondary) }
                                 if !tree.bare && !tree.prunable {
-                                    Button("Open project", .reveal) { openExisting(tree) }
+                                    Button(L10n.text("apple.addworkspacesheet.open_project.5e5eba7f"), .reveal) { openExisting(tree) }
                                         .buttonStyle(SecondaryButtonStyle(small: true))
                                 }
                             }.padding(.vertical, Theme.Space.xs)
                         }
                     } else {
-                    Text("New worktree").font(Theme.headline)
+                    Text(L10n.text("apple.addworkspacesheet.new_worktree.4f210afe")).font(Theme.headline)
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                        Text("Name").font(Theme.caption).foregroundStyle(.secondary)
-                        TextField("For example improved-search", text: $name).textFieldStyle(.themed)
+                        Text(L10n.text("apple.addworkspacesheet.name.dcd1d522")).font(Theme.caption).foregroundStyle(.secondary)
+                        TextField(L10n.text("apple.addworkspacesheet.for_example_improved_search.ae407d65"), text: $name).textFieldStyle(.themed)
                     }
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                        Text("Branch prefix").font(Theme.caption).foregroundStyle(.secondary)
-                        TextField("Optional", text: $namespace).textFieldStyle(.themed)
+                        Text(L10n.text("apple.addworkspacesheet.branch_prefix.502ac088")).font(Theme.caption).foregroundStyle(.secondary)
+                        TextField(L10n.text("apple.addworkspacesheet.optional.59be7133"), text: $namespace).textFieldStyle(.themed)
                     }
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                        Text("Start from branch or commit").font(Theme.caption).foregroundStyle(.secondary)
-                        TextField("HEAD", text: $base).textFieldStyle(.themed)
+                        Text(L10n.text("apple.addworkspacesheet.start_from_branch_or_commit.1ab72550")).font(Theme.caption).foregroundStyle(.secondary)
+                        TextField(L10n.text("apple.addworkspacesheet.head.b5180223"), text: $base).textFieldStyle(.themed)
                     }
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                        Text("Parent folder").font(Theme.caption).foregroundStyle(.secondary)
-                        TextField("Absolute path", text: $parent).textFieldStyle(.themed)
+                        Text(L10n.text("apple.addworkspacesheet.parent_folder.158f5a01")).font(Theme.caption).foregroundStyle(.secondary)
+                        TextField(L10n.text("apple.addworkspacesheet.absolute_path.977f8f03"), text: $parent).textFieldStyle(.themed)
                     }
                     if folder.isRemote {
-                        Button("Choose parent folder…", .reveal) { pickingParent = true }
+                        Button(L10n.text("apple.addworkspacesheet.choose_parent_folder.80d064c3"), .reveal) { pickingParent = true }
                             .buttonStyle(SecondaryButtonStyle(small: true))
                     }
                     #if os(macOS)
                     if !folder.isRemote {
-                        Button("Choose parent folder…", .reveal) {
+                        Button(L10n.text("apple.addworkspacesheet.choose_parent_folder.80d064c3"), .reveal) {
                             let picker = NSOpenPanel()
                             picker.canChooseDirectories = true
                             picker.canChooseFiles = false
@@ -172,19 +172,19 @@ struct ProjectWorktreeSheet: View {
                     }
                     #endif
                     if !name.isEmpty {
-                        Text("Branch: \(namespace.isEmpty ? name : namespace + "/" + name)")
+                        Text(L10n.text("apple.addworkspacesheet.branch_0.1262f157", "\(namespace.isEmpty ? name : namespace + "/" + name)"))
                             .font(Theme.caption).foregroundStyle(.secondary)
-                        Text("Folder: \(parent)\(parent.hasSuffix("/") || parent.hasSuffix("\\") ? "" : parent.contains("\\") ? "\\" : "/")\(name)").font(Theme.caption).foregroundStyle(.secondary)
+                        Text(L10n.text("apple.addworkspacesheet.folder_0_1_2.28953d93", "\(parent)", "\(parent.hasSuffix("/") || parent.hasSuffix("\\") ? "" : parent.contains("\\") ? "\\" : "/")", "\(name)")).font(Theme.caption).foregroundStyle(.secondary)
                     }
                     }
                     if let error { Text(error).font(Theme.callout).foregroundStyle(Theme.warning).textSelection(.enabled) }
                 }.disabled(working)
             }
         } actions: {
-            Button("Cancel", .dismiss) { dismiss() }.buttonStyle(SecondaryButtonStyle()).disabled(working)
+            Button(L10n.text("common.cancel"), .dismiss) { dismiss() }.buttonStyle(SecondaryButtonStyle()).disabled(working)
             Spacer()
             if !showingFolders {
-            Button(working ? "Creating…" : "Create worktree", .create) {
+            Button(working ? L10n.text("apple.addworkspacesheet.creating.c79ed949") : L10n.text("apple.addworkspacesheet.create_worktree.fdedbce2"), .create) {
                 working = true
                 error = nil
                 let scope = WorkSessionContext.shared.scope
@@ -263,20 +263,20 @@ private struct ProjectParentPicker: View {
     @State private var retry = 0
 
     var body: some View {
-        ThemedSheet(title: "Choose parent folder", subtitle: hostName, icon: .reveal, onClose: { dismiss() }) {
+        ThemedSheet(title: L10n.text("apple.addworkspacesheet.choose_parent_folder.c1b4bfea"), subtitle: hostName, icon: .reveal, onClose: { dismiss() }) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let listing {
                     HStack {
                         if let parent = listing.parent {
-                            Button("Up", .back) { path = parent }.buttonStyle(SecondaryButtonStyle(small: true))
+                            Button(L10n.text("apple.addworkspacesheet.up.55490a4b"), .back) { path = parent }.buttonStyle(SecondaryButtonStyle(small: true))
                         }
                         Text(listing.path).font(Theme.caption).lineLimit(2).truncationMode(.middle)
                     }
                 }
-                if loading { ProgressView("Reading folders…") }
+                if loading { ProgressView(L10n.text("apple.addworkspacesheet.reading_folders.66f40f96")) }
                 if let error {
                     Text(error).foregroundStyle(Theme.warning)
-                    Button("Home folder", .reveal) { path = nil; retry += 1 }.buttonStyle(SecondaryButtonStyle(small: true))
+                    Button(L10n.text("apple.addworkspacesheet.home_folder.6772da55"), .reveal) { path = nil; retry += 1 }.buttonStyle(SecondaryButtonStyle(small: true))
                 }
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -296,9 +296,9 @@ private struct ProjectParentPicker: View {
                 }
             }
         } actions: {
-            Button("Cancel", .dismiss) { dismiss() }.buttonStyle(SecondaryButtonStyle())
+            Button(L10n.text("common.cancel"), .dismiss) { dismiss() }.buttonStyle(SecondaryButtonStyle())
             Spacer()
-            Button("Use this folder", .approve) { if let listing { onSelect(listing.path) } }
+            Button(L10n.text("apple.addworkspacesheet.use_this_folder.30cbaeca"), .approve) { if let listing { onSelect(listing.path) } }
                 .buttonStyle(AccentButtonStyle()).disabled(loading || error != nil || listing == nil)
         }
         .modalFrame(width: 540, height: 560)

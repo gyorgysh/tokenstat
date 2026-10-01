@@ -10,9 +10,9 @@ enum OriginalFileCoordination {
         case unavailable, anotherInstance, busy
         var errorDescription: String? {
             switch self {
-            case .unavailable: "Original-file access could not be checked. The file has been kept."
-            case .busy: "This original file is being used. Try again when the current operation finishes."
-            case .anotherInstance: "Close the other running instance of tokenstat before removing original files."
+            case .unavailable: L10n.text("apple.originalfilecoordination.original_file_access_could_not_be_checked.79086443")
+            case .busy: L10n.text("apple.originalfilecoordination.this_original_file_is_being_used_try_again.169bdb1e")
+            case .anotherInstance: L10n.text("apple.originalfilecoordination.close_the_other_running_instance_of_tokens.71f89709")
             }
         }
     }

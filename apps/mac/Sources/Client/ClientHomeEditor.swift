@@ -46,7 +46,7 @@ struct ClientHomeEditor: View {
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 } footer: {
-                    Text("A starting arrangement. It moves the cards and nothing else.")
+                    Text(L10n.text("apple.clienthomeeditor.a_starting_arrangement_it_moves_the_cards.9484a124"))
                 }
 
                 Section {
@@ -55,13 +55,13 @@ struct ClientHomeEditor: View {
                     }
                     .onMove(perform: move)
                 } header: {
-                    Text("Visible · drag to reorder")
+                    Text(L10n.text("apple.clienthomeeditor.visible_drag_to_reorder.865ac64c"))
                 } footer: {
                     Text(footerText)
                 }
 
                 if !hidden.isEmpty {
-                    Section("Hidden") {
+                    Section(L10n.text("apple.clienthomeeditor.hidden.7e6fefff")) {
                         ForEach(order.filter { hidden.contains($0) }) { section in
                             row(section)
                         }
@@ -69,21 +69,21 @@ struct ClientHomeEditor: View {
                 }
 
                 Section {
-                    Button("Reset Home", .refresh) {
+                    Button(L10n.text("apple.clienthomeeditor.reset_home.99f3f8ce"), .refresh) {
                         beforeReset = (order, hidden, preset)
                         order = HomePreset.balanced.order
                         hidden = HomePreset.balanced.hidden
                         preset = .balanced
-                        announcement = "Balanced arrangement restored."
+                        announcement = L10n.text("apple.clienthomeeditor.balanced_arrangement_restored.f3e8a3f6")
                     }
                     .listRowBackground(Color.clear)
                     if let previous = beforeReset {
-                        Button("Undo reset", .restore) {
+                        Button(L10n.text("apple.clienthomeeditor.undo_reset.c4961cf5"), .restore) {
                             order = previous.order
                             hidden = previous.hidden
                             preset = previous.preset
                             beforeReset = nil
-                            announcement = "Previous arrangement restored."
+                            announcement = L10n.text("apple.clienthomeeditor.previous_arrangement_restored.cc0d9cd0")
                         }
                         .listRowBackground(Color.clear)
                     }
@@ -100,14 +100,14 @@ struct ClientHomeEditor: View {
             // themselves; the list is only the scroll behind them.
             .scrollContentBackground(.hidden)
             .background(Theme.background)
-            .navigationTitle("Customize Home")
+            .navigationTitle(L10n.text("apple.clienthomeeditor.customize_home.642cec6e"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", .dismiss) { dismiss() }
+                    Button(L10n.text("common.cancel"), .dismiss) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done", .done) {
+                    Button(L10n.text("common.done"), .done) {
                         layout.apply(order: order, hidden: hidden, preset: preset)
                         dismiss()
                     }
@@ -118,12 +118,11 @@ struct ClientHomeEditor: View {
 
     private var footerText: String {
         if visible.isEmpty {
-            return "Home will be clear. Search and the tabs are still there, and you can "
-                + "switch a card back on here at any time."
+            return L10n.text("apple.clienthomeeditor.home_will_be_clear_search_and_the_tabs_are.e1a1987c")
         }
         let off = order.filter { hidden.contains($0) }
-        guard !off.isEmpty else { return "Every card is on." }
-        return "Off: \(off.map(\.label).joined(separator: ", "))."
+        guard !off.isEmpty else { return L10n.text("apple.clienthomeeditor.every_card_is_on.2b53a175") }
+        return L10n.text("apple.clienthomeeditor.off_0.8d022e73", "\(off.map(\.label).joined(separator: ", "))")
     }
 
     private var presetRow: some View {
@@ -157,7 +156,7 @@ struct ClientHomeEditor: View {
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(option.label) arrangement")
+                .accessibilityLabel(L10n.text("apple.clienthomeeditor.0_arrangement.f463b57e", "\(option.label)"))
                 .accessibilityAddTraits(preset == option ? [.isSelected] : [])
             }
         }
@@ -174,7 +173,7 @@ struct ClientHomeEditor: View {
             if on { hidden.insert(section) } else { hidden.remove(section) }
             preset = nil
             beforeReset = nil
-            announcement = "\(section.label) \(on ? "hidden" : "shown")."
+            announcement = "\(section.label) \(on ? L10n.text("apple.clienthomeeditor.hidden.e564b408") : L10n.text("apple.clienthomeeditor.shown.baaf5362"))."
         } label: {
             HStack(spacing: Theme.Space.m) {
                 Image(systemName: section.symbol)
@@ -209,17 +208,17 @@ struct ClientHomeEditor: View {
         }
         .listRowBackground(Color.clear)
         .accessibilityLabel(section.label)
-        .accessibilityValue(on ? "Visible, position \(place) of \(visible.count)" : "Hidden")
+        .accessibilityValue(on ? L10n.text("apple.clienthomeeditor.visible_position_0_of_1.0c15d01d", "\(place)", "\(visible.count)") : L10n.text("apple.clienthomeeditor.hidden.7e6fefff"))
         .accessibilityFocused($focusedSection, equals: section)
         // Dragging is not the only way to move a card. VoiceOver and a
         // keyboard both reach these.
         .accessibilityActions {
             if on {
                 if visible.first != section {
-                    Button("Move up") { shift(section, by: -1) }
+                    Button(L10n.text("apple.clienthomeeditor.move_up.c66feb5e")) { shift(section, by: -1) }
                 }
                 if visible.last != section {
-                    Button("Move down") { shift(section, by: 1) }
+                    Button(L10n.text("apple.clienthomeeditor.move_down.40bb50da")) { shift(section, by: 1) }
                 }
             }
         }
@@ -243,7 +242,7 @@ struct ClientHomeEditor: View {
     }
 
     private func announceMove(_ section: HomeSection) {
-        announcement = "\(section.label) moved to position \((visible.firstIndex(of: section) ?? 0) + 1)."
+        announcement = L10n.text("apple.clienthomeeditor.0_moved_to_position_1.4fa1daea", "\(section.label)", "\((visible.firstIndex(of: section) ?? 0) + 1)")
         AccessibilityNotification.Announcement(announcement).post()
     }
 }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.marks
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -59,7 +61,7 @@ fun CountdownRing(
     Canvas(
         modifier
             .size(size)
-            .semantics { contentDescription = "Next run" },
+            .semantics { contentDescription = L10n.text("android.rungauges.next_run.b3c0ab96") },
     ) {
         val stroke = Stroke(width = lineWidth.toPx(), cap = StrokeCap.Round)
         val diameter = size.toPx() - lineWidth.toPx()
@@ -116,8 +118,8 @@ fun slotGaugeDrawn(total: Int, maxTiles: Int = SLOT_GAUGE_MAX_TILES): Int =
 
 /// The words the gauge stands for, matching the Apple accessibility label.
 fun slotGaugeLabel(filled: Int, total: Int, uncapped: Boolean): String {
-    if (uncapped) return "No limit on jobs at once"
-    return "$filled of $total slots busy"
+    if (uncapped) return L10n.text("android.rungauges.no_limit_on_jobs_at_once.76b43c57")
+    return L10n.text("android.rungauges.0_of_1_slots_busy.2b6c328d", "${filled}", "${total}")
 }
 
 /// Concurrency as places at a table, filled by what is running now.
@@ -142,7 +144,7 @@ fun SlotGauge(
     ) {
         if (uncapped) {
             Text(
-                "No cap",
+                L10n.text("android.rungauges.no_cap.59db2115"),
                 style = TextStyle(fontSize = 12.sp),
                 color = colors.textSecondary,
             )

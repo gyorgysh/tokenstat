@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.workspace
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -80,7 +82,7 @@ class CommitUiState(val peer: String, val workspace: String) {
                 selection = FileSelection.reconcile(selection, fresh.mapNotNull { it.str("path") }.toSet())
             }
             error = null
-        }.onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+        }.onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacecommitstate.the_request_failed.db4fb447"), hostLabel) }
         loaded = true
     }
 
@@ -89,7 +91,7 @@ class CommitUiState(val peer: String, val workspace: String) {
         working = true
         try {
             if (!supportsSelectedCommit) {
-                error = "Update the connected computer to commit selected files."
+                error = L10n.text("android.workspacecommitstate.update_the_connected_computer_to_commit_se.54c335ba")
                 return
             }
             val wanted = selection
@@ -103,7 +105,7 @@ class CommitUiState(val peer: String, val workspace: String) {
                 review = it as? JsonObject
                 outcome = null
                 error = null
-            }.onFailure { error = TunnelCopy.display(it.message ?: "The request failed.", hostLabel) }
+            }.onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacecommitstate.the_request_failed.db4fb447"), hostLabel) }
         } finally {
             working = false
         }
@@ -130,8 +132,7 @@ class CommitUiState(val peer: String, val workspace: String) {
                 save(context)
             }.onFailure {
                 // No rollback, retry or new id follows a lost response.
-                error = "The commit outcome has not been confirmed. Check its outcome before starting another. " +
-                    TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+                error = L10n.text("android.workspacecommitstate.the_commit_outcome_has_not_been_confirmed.5b129e15", "${TunnelCopy.display(it.message ?: L10n.text("android.workspacecommitstate.the_request_failed.db4fb447"), hostLabel)}")
             }
         } finally {
             working = false
@@ -165,10 +166,10 @@ class CommitUiState(val peer: String, val workspace: String) {
                 save(context)
             } else {
                 canRetry = true
-                error = "The computer has no recorded outcome yet. You can retry this same submission."
+                error = L10n.text("android.workspacecommitstate.the_computer_has_no_recorded_outcome_yet_y.0b11d451")
             }
         } catch (e: Exception) {
-            error = TunnelCopy.display(e.message ?: "The request failed.", hostLabel)
+            error = TunnelCopy.display(e.message ?: L10n.text("android.workspacecommitstate.the_request_failed.db4fb447"), hostLabel)
         } finally {
             working = false
         }
@@ -193,8 +194,7 @@ class CommitUiState(val peer: String, val workspace: String) {
                 adopt(it, null)
                 save(context)
             }.onFailure {
-                error = "Check this commit's outcome before starting another. " +
-                    TunnelCopy.display(it.message ?: "The request failed.", hostLabel)
+                error = L10n.text("android.workspacecommitstate.check_this_commit_s_outcome_before_startin.f3872ebf", "${TunnelCopy.display(it.message ?: L10n.text("android.workspacecommitstate.the_request_failed.db4fb447"), hostLabel)}")
             }
         } finally {
             working = false

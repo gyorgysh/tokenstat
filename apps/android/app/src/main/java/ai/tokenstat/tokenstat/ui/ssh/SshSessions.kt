@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.ssh
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.components.TsCard
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
@@ -58,7 +60,7 @@ data class SshSessionEntry(
                 id = id,
                 hostId = (item["hostId"] as? JsonPrimitive)?.contentOrNull,
                 label = (item["label"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
-                    ?: "Session",
+                    ?: L10n.text("android.sshsessions.session.6959b415"),
                 alive = (item["alive"] as? JsonPrimitive)?.booleanOrNull != false,
             )
         }
@@ -221,7 +223,7 @@ fun SshOpenSessionsSection(
     val colors = LocalTsColors.current
     Column(Modifier.fillMaxWidth()) {
         Text(
-            "Open sessions",
+            L10n.text("android.sshsessions.open_sessions.8bf47766"),
             style = MaterialTheme.typography.labelLarge,
             color = colors.textSecondary,
         )
@@ -244,13 +246,13 @@ fun SshOpenSessionsSection(
                             color = colors.textPrimary,
                         )
                         Text(
-                            if (session.alive && !session.locallyEnded) "Running" else "Ended",
+                            if (session.alive && !session.locallyEnded) L10n.text("common.running") else L10n.text("android.sshsessions.ended.7cdc804e"),
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.textSecondary,
                         )
                     }
                     androidx.compose.material3.TextButton(onClick = { onEnd(session) }) {
-                        Text("End", color = colors.danger)
+                        Text(L10n.text("android.sshsessions.end.f4db1e48"), color = colors.danger)
                     }
                 }
             }

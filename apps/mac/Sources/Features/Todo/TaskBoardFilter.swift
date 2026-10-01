@@ -17,10 +17,10 @@ enum TaskBoardAttention: String, CaseIterable, Sendable {
     case all, running, needsAttention, highPriority
     var label: String {
         switch self {
-        case .all: "All tasks"
-        case .running: "Running"
-        case .needsAttention: "Needs attention"
-        case .highPriority: "High priority"
+        case .all: L10n.text("apple.taskboardfilter.all_tasks.cb664823")
+        case .running: L10n.text("common.running")
+        case .needsAttention: L10n.text("apple.taskboardfilter.needs_attention.c1ebc781")
+        case .highPriority: L10n.text("apple.taskboardfilter.high_priority.b699a8c8")
         }
     }
     func contains(_ card: TodoCard) -> Bool {

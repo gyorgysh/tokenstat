@@ -596,19 +596,19 @@ enum ScreenQualityChoice: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .auto: return "Automatic"
-        case .sharp: return "Sharp"
-        case .smooth: return "Smooth"
-        case .dataSaver: return "Data saver"
+        case .auto: return L10n.text("apple.models.automatic.d461a493")
+        case .sharp: return L10n.text("apple.models.sharp.1a3c4b30")
+        case .smooth: return L10n.text("apple.models.smooth.da519387")
+        case .dataSaver: return L10n.text("apple.models.data_saver.5b444f24")
         }
     }
 
     var detail: String {
         switch self {
-        case .auto: return "Best the connection allows"
-        case .sharp: return "Every detail, on a fast link"
-        case .smooth: return "Steady over the relay"
-        case .dataSaver: return "Least data, softest picture"
+        case .auto: return L10n.text("apple.models.best_the_connection_allows.6532539b")
+        case .sharp: return L10n.text("apple.models.every_detail_on_a_fast_link.ef30d0aa")
+        case .smooth: return L10n.text("apple.models.steady_over_the_relay.6391fb1b")
+        case .dataSaver: return L10n.text("apple.models.least_data_softest_picture.383ee72b")
         }
     }
 }
@@ -794,14 +794,14 @@ struct DeviceAccessPending: Codable, Sendable, Hashable, Identifiable {
     /// what the rest of the app shows when the account knows no better.
     var displayName: String {
         if let label, !label.isEmpty { return label }
-        return "Device \(peerID.prefix(8))"
+        return L10n.text("apple.models.device_0.625b47c6", "\(peerID.prefix(8))")
     }
 
     /// The one-line question, for a toast and for a notification title.
     var headline: String {
         switch kind {
-        case .screen: return "\(displayName) wants to see this screen"
-        case .workspace: return "\(displayName) wants to open your work"
+        case .screen: return L10n.text("apple.models.0_wants_to_see_this_screen.a07f03f2", "\(displayName)")
+        case .workspace: return L10n.text("apple.models.0_wants_to_open_your_work.24c50659", "\(displayName)")
         }
     }
 
@@ -809,10 +809,10 @@ struct DeviceAccessPending: Codable, Sendable, Hashable, Identifiable {
         switch kind {
         case .screen:
             return control
-                ? "It asked for the picture, and for mouse and keyboard."
-                : "It asked for the picture only."
+                ? L10n.text("apple.models.it_asked_for_the_picture_and_for_mouse_and.d24fdc88")
+                : L10n.text("apple.models.it_asked_for_the_picture_only.b6be05b5")
         case .workspace:
-            return "Folders, files, terminals and the agents running in them."
+            return L10n.text("apple.models.folders_files_terminals_and_the_agents_run.5abdd984")
         }
     }
 }
@@ -845,12 +845,12 @@ enum GroupBy: String, Sendable, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .day: return "Day"
-        case .week: return "Week"
-        case .model: return "Model"
-        case .project: return "Project"
-        case .source: return "Coding tool"
-        case .session: return "Session"
+        case .day: return L10n.text("apple.models.day.8f2364e1")
+        case .week: return L10n.text("apple.models.week.e78041ab")
+        case .model: return L10n.text("apple.models.model.5e2c614c")
+        case .project: return L10n.text("apple.models.project.98595978")
+        case .source: return L10n.text("apple.models.coding_tool.9f48285d")
+        case .session: return L10n.text("apple.models.session.6959b415")
         }
     }
 }
@@ -1090,7 +1090,7 @@ struct ActivityCalendar: Codable, Sendable, Hashable {
     var freshness: String? {
         guard let fetchedAt else { return nil }
         let ago = fetchedAt.formatted(.relative(presentation: .named))
-        return isStaleGrid ? "stale, last updated \(ago)" : "updated \(ago)"
+        return isStaleGrid ? L10n.text("apple.models.stale_last_updated_0.72c66d79", "\(ago)") : L10n.text("apple.models.updated_0.01a31c30", "\(ago)")
     }
 }
 
@@ -1680,7 +1680,7 @@ struct Machine: Codable, Sendable, Hashable, Identifiable {
         case let (_, id?):
             return id
         default:
-            return "unnamed device"
+            return L10n.text("apple.models.unnamed_device.72ac73e4")
         }
     }
 
@@ -1762,11 +1762,11 @@ enum AgentReadiness: String, Codable, Sendable, Hashable {
 
     var summary: String {
         switch self {
-        case .notInstalled: "Not installed"
-        case .needsSignIn: "Not signed in"
-        case .signedIn: "Signed in"
-        case .expired: "Sign-in expired"
-        case .unknown: "Sign-in not checked"
+        case .notInstalled: L10n.text("apple.models.not_installed.d177cdc0")
+        case .needsSignIn: L10n.text("apple.models.not_signed_in.491fc91c")
+        case .signedIn: L10n.text("apple.models.signed_in.ca566c89")
+        case .expired: L10n.text("apple.models.sign_in_expired.07fd892e")
+        case .unknown: L10n.text("apple.models.sign_in_not_checked.58904f56")
         }
     }
 }
@@ -2001,26 +2001,26 @@ func harnessName(_ id: String) -> String {
     if id == "opencode2" { return "OpenCode 2" }
     let canonical = harnessCanonicalID(id)
     switch canonical {
-    case "claude_code": return "Claude Code"
-    case "claude_code_rollup", "claude_code_estimate": return "Claude Code (recovered)"
+    case "claude_code": return L10n.text("apple.models.claude_code.246ef8c1")
+    case "claude_code_rollup", "claude_code_estimate": return L10n.text("apple.models.claude_code_recovered.93f5e6b2")
     case "codex": return "Codex"
-    case "grok": return "Grok Build"
+    case "grok": return L10n.text("apple.models.grok_build.fd3bf01a")
     case "opencode": return "OpenCode"
     case "cline": return "Cline"
     case "openclaw": return "OpenClaw"
     case "muse": return "Muse"
-    case "devin": return "Devin CLI"
+    case "devin": return L10n.text("apple.models.devin_cli.29247d05")
     case "pi": return "Pi"
-    case "dsh": return "DeepSeek Harness"
+    case "dsh": return L10n.text("apple.models.deepseek_harness.e562a9c5")
     case "zed": return "Zed"
-    case "copilot": return "Copilot CLI"
+    case "copilot": return L10n.text("apple.models.copilot_cli.c73e38d4")
     case "antigravity": return "Antigravity"
     case "cursor": return "Cursor"
     case "gemini": return "Gemini"
-    case "hermes": return "Hermes Agent"
-    case "kilo": return "Kilo Code"
-    case "kimi": return "Kimi Code"
-    case "qwen": return "Qwen Code"
+    case "hermes": return L10n.text("apple.models.hermes_agent.873e989a")
+    case "kilo": return L10n.text("apple.models.kilo_code.83abecfd")
+    case "kimi": return L10n.text("apple.models.kimi_code.0c486180")
+    case "qwen": return L10n.text("apple.models.qwen_code.47487dbd")
     case "": return "unknown"
     default: return canonical.isEmpty ? "unknown" : canonical
     }
@@ -2089,12 +2089,12 @@ enum ChangeKind: String, Codable, Sendable {
     /// The word for it, where there is room for a word rather than a glyph.
     var label: String {
         switch self {
-        case .added: return "Added"
-        case .modified: return "Modified"
-        case .deleted: return "Deleted"
-        case .renamed: return "Renamed"
-        case .untracked: return "Untracked"
-        case .conflicted: return "Conflicted"
+        case .added: return L10n.text("apple.models.added.6b02e0d3")
+        case .modified: return L10n.text("apple.models.modified.e8ce5dca")
+        case .deleted: return L10n.text("apple.models.deleted.b48ff39c")
+        case .renamed: return L10n.text("apple.models.renamed.05487af3")
+        case .untracked: return L10n.text("apple.models.untracked.c7ba5477")
+        case .conflicted: return L10n.text("apple.models.conflicted.916a464e")
         }
     }
 }
@@ -2193,10 +2193,10 @@ enum PullScope: String, Codable, Sendable, Hashable, CaseIterable, Identifiable 
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .all: return "All"
-        case .mine: return "Mine"
-        case .assigned: return "Assigned"
-        case .reviewRequested: return "Review requested"
+        case .all: return L10n.text("apple.models.all.a52ace42")
+        case .mine: return L10n.text("apple.models.mine.f57afb7d")
+        case .assigned: return L10n.text("apple.models.assigned.8191888d")
+        case .reviewRequested: return L10n.text("apple.models.review_requested.744f7028")
         }
     }
 }
@@ -2497,8 +2497,8 @@ enum GitOutcomeAction: Sendable, Hashable {
     /// What to say when it worked.
     var done: String {
         switch self {
-        case .commit: return "Committed."
-        case .push: return "Pushed."
+        case .commit: return L10n.text("apple.models.committed.3160c5e5")
+        case .push: return L10n.text("apple.models.pushed.73b8b141")
         }
     }
 
@@ -2506,8 +2506,8 @@ enum GitOutcomeAction: Sendable, Hashable {
     /// part that explains it, so this only has to name what was attempted.
     var failed: String {
         switch self {
-        case .commit: return "Could not commit."
-        case .push: return "Could not push."
+        case .commit: return L10n.text("apple.models.could_not_commit.48fd13cb")
+        case .push: return L10n.text("apple.models.could_not_push.ba04327e")
         }
     }
 }
@@ -2587,13 +2587,13 @@ struct UsageWindow: Codable, Sendable, Hashable, Identifiable {
         }
         switch scope.lowercased() {
         case "secondary":
-            return "\(label) (all models)"
+            return L10n.text("apple.models.0_all_models.31683c25", "\(label)")
         case "primary":
-            return "\(label) (primary)"
+            return L10n.text("apple.models.0_primary.57ab87b8", "\(label)")
         case "current model":
             // A small model's own allowance (Spark, and whatever comes
             // next): secondary, never bare beside the account's week.
-            return "\(label) (secondary)"
+            return L10n.text("apple.models.0_secondary.6cd2b67a", "\(label)")
         default:
             // The account's own allowance reads as written: "weekly
             // (general)". Anything else vendor-named stays qualified rather
@@ -2753,8 +2753,8 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
     /// Nil when there is nothing worth saying, so a plain folder does not
     /// pretend to be a repository.
     var subtitle: String? {
-        guard exists else { return "Folder missing" }
-        guard let git, git.isRepo else { return "Not a git repo" }
+        guard exists else { return L10n.text("apple.models.folder_missing.f06c68a6") }
+        guard let git, git.isRepo else { return L10n.text("apple.models.not_a_git_repo.86308fef") }
         var parts: [String] = []
         if let branch = git.branch, !branch.isEmpty {
             parts.append(branch)
@@ -3542,27 +3542,27 @@ struct AutomationSchedule: Codable, Sendable, Hashable {
     var summary: String {
         let time = String(format: "%d:%02d", hour, minute)
         switch kind {
-        case .once: return "once, when you run it"
+        case .once: return L10n.text("apple.models.once_when_you_run_it.cbb9301d")
         case .interval:
             let minutes = Int(everySeconds) / 60
             if minutes >= 60, minutes % 60 == 0 {
                 let hours = minutes / 60
-                return "every \(hours) hour\(hours == 1 ? "" : "s")"
+                return (hours == 1 ? L10n.text("apple.models.every_0_hour_1.ed193624.one", "\(hours)") : L10n.text("apple.models.every_0_hour_1.ed193624.other", "\(hours)"))
             }
-            return "every \(minutes) minute\(minutes == 1 ? "" : "s")"
-        case .daily: return "daily at \(time)"
-        case .weekdays: return "weekdays at \(time)"
+            return (minutes == 1 ? L10n.text("apple.models.every_0_minute_1.fd623530.one", "\(minutes)") : L10n.text("apple.models.every_0_minute_1.fd623530.other", "\(minutes)"))
+        case .daily: return L10n.text("apple.models.daily_at_0.c0d8484c", "\(time)")
+        case .weekdays: return L10n.text("apple.models.weekdays_at_0.6459d30a", "\(time)")
         case .weekly:
             if weekdays & 0b0111_1111 != 0 {
-                return "\(Self.dayList(weekdays)) at \(time)"
+                return L10n.text("apple.models.0_at_1.f0a220c8", "\(Self.dayList(weekdays))", "\(time)")
             }
-            let names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+            let names = [L10n.text("apple.models.monday.6a00dfc1"), L10n.text("apple.models.tuesday.7d8af1de"), L10n.text("apple.models.wednesday.c0a6cc82"), L10n.text("apple.models.thursday.fc266206"), L10n.text("apple.models.friday.e21f3f37"), L10n.text("apple.models.saturday.dbe35c73"), L10n.text("apple.models.sunday.873fef76")]
             let day = weekday >= 0 && weekday < 7 ? names[weekday] : "?"
-            return "\(day) at \(time)"
+            return L10n.text("apple.models.0_at_1.f0a220c8", "\(day)", "\(time)")
         case .custom:
             let days = Self.dayList(weekdays)
-            if days.isEmpty { return "custom at \(time)" }
-            return "\(days) at \(time)"
+            if days.isEmpty { return L10n.text("apple.models.custom_at_0.55fdfc5a", "\(time)") }
+            return L10n.text("apple.models.0_at_1.f0a220c8", "\(days)", "\(time)")
         }
     }
 
@@ -3570,7 +3570,7 @@ struct AutomationSchedule: Codable, Sendable, Hashable {
     var repeats: Bool { kind != .once }
 
     private static func dayList(_ mask: Int) -> String {
-        let short = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        let short = [L10n.text("apple.models.mon.f40d7f51"), L10n.text("apple.models.tue.d1eb39b0"), L10n.text("apple.models.wed.58339f45"), L10n.text("apple.models.thu.7da11212"), L10n.text("apple.models.fri.66dab40c"), L10n.text("apple.models.sat.fdeb71b5"), L10n.text("apple.models.sun.db18f17f")]
         return (0..<7).compactMap { bit -> String? in
             (mask & (1 << bit)) != 0 ? short[bit] : nil
         }.joined(separator: ", ")
@@ -3587,12 +3587,12 @@ enum ScheduleKind: String, Codable, Sendable, Hashable, CaseIterable {
 
     var label: String {
         switch self {
-        case .once: return "Once"
-        case .interval: return "Interval"
-        case .daily: return "Daily"
-        case .weekdays: return "Weekdays"
-        case .weekly: return "Weekly"
-        case .custom: return "Custom"
+        case .once: return L10n.text("apple.models.once.d88f6d83")
+        case .interval: return L10n.text("apple.models.interval.6f45b000")
+        case .daily: return L10n.text("apple.models.daily.b36c2611")
+        case .weekdays: return L10n.text("apple.models.weekdays.6f4b602b")
+        case .weekly: return L10n.text("apple.models.weekly.29751324")
+        case .custom: return L10n.text("apple.models.custom.494ca78f")
         }
     }
 }
@@ -3629,14 +3629,14 @@ struct RunRecord: Codable, Sendable, Identifiable {
     var isRunning: Bool { ["starting", "queued", "running", "stopping"].contains(status) }
     var endedLabel: String {
         switch status {
-        case "starting": return "Starting"
-        case "queued": return "Queued"
-        case "running": return "Running"
-        case "stopping": return "Stopping"
-        case "ok": return "Done"
-        case "stopped": return "Stopped"
-        case "error": return "Failed"
-        case "interrupted": return "Interrupted by restart"
+        case "starting": return L10n.text("apple.models.starting.aeed4d26")
+        case "queued": return L10n.text("common.queued")
+        case "running": return L10n.text("common.running")
+        case "stopping": return L10n.text("apple.models.stopping.a71ee1d4")
+        case "ok": return L10n.text("common.done")
+        case "stopped": return L10n.text("apple.models.stopped.1a4f630a")
+        case "error": return L10n.text("common.failed")
+        case "interrupted": return L10n.text("apple.models.interrupted_by_restart.012812fe")
         default: return status
         }
     }
@@ -3776,12 +3776,12 @@ struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
     var nextRun: Date? { nextRunAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
 
     /// Empty graph with a start node. The person still has to save it.
-    static func blank(name: String = "Untitled", scope: WorkflowScope = .global, workspaceID: String? = nil) -> WorkflowGraph {
+    static func blank(name: String = L10n.text("apple.models.untitled.f59ab8d1"), scope: WorkflowScope = .global, workspaceID: String? = nil) -> WorkflowGraph {
         WorkflowGraph(
             name: name,
             scope: scope,
             workspaceID: workspaceID,
-            nodes: [WorkflowNode(id: "in", kind: .input, x: 80, y: 120, title: "Start")]
+            nodes: [WorkflowNode(id: "in", kind: .input, x: 80, y: 120, title: L10n.text("common.start"))]
         )
     }
 
@@ -3844,8 +3844,8 @@ enum WorkflowScope: String, Codable, Sendable, Hashable, CaseIterable {
 
     var label: String {
         switch self {
-        case .global: return "Global"
-        case .workspace: return "This project"
+        case .global: return L10n.text("apple.models.global.a258b30f")
+        case .workspace: return L10n.text("apple.models.this_project.d0f62545")
         }
     }
 }
@@ -3863,15 +3863,15 @@ enum WorkflowNodeKind: String, Codable, Sendable, Hashable, CaseIterable {
 
     var label: String {
         switch self {
-        case .input: return "Input"
-        case .agent: return "Agent"
-        case .automation: return "Automation"
-        case .http: return "HTTP"
-        case .command: return "Command"
-        case .gate: return "Gate"
-        case .condition: return "If"
-        case .loop: return "Loop"
-        case .mcp: return "MCP"
+        case .input: return L10n.text("apple.models.input.36ecb4f8")
+        case .agent: return L10n.text("apple.models.agent.11b39c93")
+        case .automation: return L10n.text("apple.models.automation.d909750b")
+        case .http: return L10n.text("apple.models.http.56d6f321")
+        case .command: return L10n.text("apple.models.command.71316697")
+        case .gate: return L10n.text("apple.models.gate.fa77a525")
+        case .condition: return L10n.text("apple.models.if.1e3abf61")
+        case .loop: return L10n.text("apple.models.loop.f2f6a018")
+        case .mcp: return L10n.text("apple.models.mcp.53f13ae9")
         }
     }
 
@@ -3897,9 +3897,9 @@ enum WorkflowEdgeWhen: String, Codable, Sendable, Hashable {
 
     var label: String {
         switch self {
-        case .ok: return "on success"
-        case .error: return "on error"
-        case .always: return "always"
+        case .ok: return L10n.text("apple.models.on_success.97a99d2e")
+        case .error: return L10n.text("apple.models.on_error.deef8196")
+        case .always: return L10n.text("apple.models.always.9cdc6c47")
         }
     }
 }
@@ -4053,26 +4053,26 @@ struct WorkflowNode: Codable, Sendable, Hashable, Identifiable {
     var subtitle: String {
         switch kind {
         case .input:
-            return "Starting prompt"
+            return L10n.text("apple.models.starting_prompt.407bec2f")
         case .agent:
             return [backend, model].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         case .automation:
-            return automationID ?? "Run automation"
+            return automationID ?? L10n.text("apple.models.run_automation.4c10763f")
         case .http:
             let verb = (method?.isEmpty == false ? method! : "GET")
             return [verb, url].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
         case .command:
-            return command ?? prompt ?? "Command"
+            return command ?? prompt ?? L10n.text("apple.models.command.71316697")
         case .gate:
-            return "Waits for you"
+            return L10n.text("apple.models.waits_for_you.0851c4a2")
         case .condition:
-            return pattern?.isEmpty == false ? (pattern ?? "If") : "Then or else"
+            return pattern?.isEmpty == false ? (pattern ?? L10n.text("apple.models.if.1e3abf61")) : L10n.text("apple.models.then_or_else.2318a255")
         case .loop:
-            if let until, !until.isEmpty { return "until \(until)" }
+            if let until, !until.isEmpty { return L10n.text("apple.models.until_0.b5b51017", "\(until)") }
             let n = times ?? 3
             return "\(n)×"
         case .mcp:
-            return "Reserved"
+            return L10n.text("apple.models.reserved.3385ffe6")
         }
     }
 }
@@ -4188,13 +4188,13 @@ struct WorkflowRunRecord: Codable, Sendable, Hashable, Identifiable {
 
     static func label(for status: String) -> String {
         switch status {
-        case "queued": return "Queued"
-        case "running": return "Working"
-        case "waiting": return "Needs attention"
-        case "ok": return "Done"
-        case "stopped": return "Stopped"
-        case "error": return "Failed"
-        case "interrupted": return "Interrupted by restart"
+        case "queued": return L10n.text("common.queued")
+        case "running": return L10n.text("common.working")
+        case "waiting": return L10n.text("apple.models.needs_attention.c1ebc781")
+        case "ok": return L10n.text("common.done")
+        case "stopped": return L10n.text("apple.models.stopped.1a4f630a")
+        case "error": return L10n.text("common.failed")
+        case "interrupted": return L10n.text("apple.models.interrupted_by_restart.012812fe")
         default: return status
         }
     }
@@ -4301,10 +4301,10 @@ struct TodoCard: Codable, Sendable, Identifiable, Hashable {
 
     var columnLabel: String {
         switch column {
-        case "doing": return "Doing"
-        case "done": return "Done"
-        case "archive": return "Archive"
-        default: return "To Do"
+        case "doing": return L10n.text("apple.models.doing.cd742c53")
+        case "done": return L10n.text("common.done")
+        case "archive": return L10n.text("common.archive")
+        default: return L10n.text("apple.models.to_do.150d92c4")
         }
     }
 
@@ -4392,13 +4392,13 @@ struct TodoDelegate: Codable, Sendable, Hashable {
     var isRunning: Bool { ["starting", "queued", "running", "stopping"].contains(status) }
     var label: String {
         switch status {
-        case "starting": return "Starting"
-        case "queued": return "Queued"
-        case "running": return "Running"
-        case "stopping": return "Stopping"
-        case "ok": return "Done"
-        case "stopped": return "Stopped"
-        case "error": return "Failed"
+        case "starting": return L10n.text("apple.models.starting.aeed4d26")
+        case "queued": return L10n.text("common.queued")
+        case "running": return L10n.text("common.running")
+        case "stopping": return L10n.text("apple.models.stopping.a71ee1d4")
+        case "ok": return L10n.text("common.done")
+        case "stopped": return L10n.text("apple.models.stopped.1a4f630a")
+        case "error": return L10n.text("common.failed")
         default: return status
         }
     }
@@ -4645,7 +4645,7 @@ struct RemoteTrafficPeer: Codable, Sendable, Hashable, Identifiable {
     var idle: Int
     var id: String { peer }
 
-    var routeLabel: String { Self.knownLabel(route) ?? "Unknown" }
+    var routeLabel: String { Self.knownLabel(route) ?? L10n.text("common.unknown") }
 
     /// Nil when this process has not yet observed a path, so a machine
     /// screen can stay quiet rather than invent Encrypted relay.
@@ -4653,8 +4653,8 @@ struct RemoteTrafficPeer: Codable, Sendable, Hashable, Identifiable {
 
     static func knownLabel(_ route: String?) -> String? {
         switch route {
-        case "direct": return "Direct connection"
-        case "relay": return "Encrypted relay"
+        case "direct": return L10n.text("apple.models.direct_connection.28d0ad54")
+        case "relay": return L10n.text("apple.models.encrypted_relay.153d7b1c")
         default: return nil
         }
     }

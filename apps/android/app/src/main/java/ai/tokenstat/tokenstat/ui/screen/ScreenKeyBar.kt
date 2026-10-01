@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.screen
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
@@ -75,7 +77,7 @@ fun ScreenKeyBar(
             // is pressed and shoves the row sideways under the thumb that
             // pressed it.
             ScreenKeyCap(
-                label = if (pointer.dragLatched) "Release" else "Hold",
+                label = if (pointer.dragLatched) L10n.text("android.screenkeybar.release.e020e3c6") else L10n.text("android.screenkeybar.hold.8e685d54"),
                 icon = ActionIcon.Move.vector,
                 active = pointer.dragLatched,
                 width = 104.dp,

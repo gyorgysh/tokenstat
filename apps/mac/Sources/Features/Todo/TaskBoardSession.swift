@@ -102,10 +102,10 @@ final class TaskBoardSession {
         do {
             _ = try await service.moveTask(card, column: column, order: order)
             if order != nil { filter.newestFirst = false }
-            showNotice(column == "archive" ? "Task archived" : "Task moved")
+            showNotice(column == "archive" ? L10n.text("apple.taskboardsession.task_archived.0e7819fb") : L10n.text("apple.taskboardsession.task_moved.c7ea8625"))
             await load()
             NotificationCenter.default.post(name: TaskEditorSession.didChange, object: target)
-        } catch { errorMessage = "The move was not confirmed. Reload the board before trying again. \(error.localizedDescription)" }
+        } catch { errorMessage = L10n.text("apple.taskboardsession.the_move_was_not_confirmed_reload_the_boar.ca497030", "\(error.localizedDescription)") }
     }
 
     func delete(_ card: TodoCard) async {
@@ -121,10 +121,10 @@ final class TaskBoardSession {
             loading = false
             cards.removeAll { $0.id == card.id }
             deletingTask = nil
-            showNotice("Task deleted")
+            showNotice(L10n.text("apple.taskboardsession.task_deleted.d986a85e"))
             errorMessage = nil
             NotificationCenter.default.post(name: TaskEditorSession.didChange, object: target)
-        } catch { errorMessage = "The deletion was not confirmed. Reload the board to check the task. \(error.localizedDescription)" }
+        } catch { errorMessage = L10n.text("apple.taskboardsession.the_deletion_was_not_confirmed_reload_the.bef65da3", "\(error.localizedDescription)") }
     }
 
     private func showNotice(_ text: String) {

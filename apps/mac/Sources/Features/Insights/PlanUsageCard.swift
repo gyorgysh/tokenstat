@@ -19,13 +19,13 @@ struct PlanUsageCard: View {
 
     var body: some View {
         Card(
-            title: "Plan usage",
-            subtitle: "Subscription-covered usage recorded in the archive",
+            title: L10n.text("apple.planusagecard.plan_usage.eb55e923"),
+            subtitle: L10n.text("apple.planusagecard.subscription_covered_usage_recorded_in_the.e96aa3c3"),
             mark: "mark_plan",
             fillsHeight: fillsHeight
         ) {
             if rows.isEmpty {
-                Text("No plan-covered usage recorded in this period.")
+                Text(L10n.text("apple.planusagecard.no_plan_covered_usage_recorded_in_this_per.020d7a22"))
                     .font(Theme.callout)
                     .foregroundStyle(.secondary)
             } else {
@@ -38,7 +38,7 @@ struct PlanUsageCard: View {
                             Spacer(minLength: Theme.Space.s)
                             Text(formatTokens(row.counters.total))
                                 .font(Theme.numeric(13, weight: .medium))
-                            Text("tokens")
+                            Text(L10n.text("apple.planusagecard.tokens.c51e455b"))
                                 .font(Theme.font(11))
                                 .foregroundStyle(.tertiary)
                         }

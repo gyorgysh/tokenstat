@@ -55,14 +55,14 @@ struct ChatCostMeter: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("This conversation")
+            Text(L10n.text("apple.chatcostmeter.this_conversation.0e82ebfc"))
                 .font(Theme.caption)
                 .foregroundStyle(.tertiary)
             if case let .available(totals) = totals {
                 TokenSplitBar(input: totals.input, output: totals.output)
                 HStack(spacing: Theme.Space.m) {
-                    legend(color: Theme.accent, title: "In", value: totals.input)
-                    legend(color: Theme.secondary, title: "Out", value: totals.output)
+                    legend(color: Theme.accent, title: L10n.text("apple.chatcostmeter.in.8bc1d53c"), value: totals.input)
+                    legend(color: Theme.secondary, title: L10n.text("apple.chatcostmeter.out.9a3c5460"), value: totals.output)
                     Spacer(minLength: 0)
                     if totals.cost > 0 {
                         Text(totals.cost, format: .currency(code: "USD").precision(.fractionLength(2...4)))
@@ -72,15 +72,15 @@ struct ChatCostMeter: View {
                     }
                 }
                 if totals.cache > 0 {
-                    Text("\(totals.cache.formatted()) cached")
+                    Text(L10n.text("apple.chatcostmeter.0_cached.60f9f8b8", "\(totals.cache.formatted())"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
             } else {
                 Text(totals == .unavailable
-                     ? "Usage totals could not be verified."
-                     : "Tokens and cost show up after a turn.")
+                     ? L10n.text("apple.chatcostmeter.usage_totals_could_not_be_verified.54ec6857")
+                     : L10n.text("apple.chatcostmeter.tokens_and_cost_show_up_after_a_turn.722fc82f"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -114,16 +114,16 @@ struct ChatCostMeter: View {
     private var label: String {
         guard case let .available(totals) = totals else {
             return totals == .unavailable
-                ? "This conversation, usage totals could not be verified"
-                : "This conversation, no tokens yet"
+                ? L10n.text("apple.chatcostmeter.this_conversation_usage_totals_could_not_b.24041222")
+                : L10n.text("apple.chatcostmeter.this_conversation_no_tokens_yet.94fa4d40")
         }
         var parts = [
-            "This conversation",
+            L10n.text("apple.chatcostmeter.this_conversation.0e82ebfc"),
             "\(totals.input.formatted()) in",
-            "\(totals.output.formatted()) out",
+            L10n.text("apple.chatcostmeter.0_out.e8e18b78", "\(totals.output.formatted())"),
         ]
         if totals.cache > 0 {
-            parts.append("\(totals.cache.formatted()) cached")
+            parts.append(L10n.text("apple.chatcostmeter.0_cached.60f9f8b8", "\(totals.cache.formatted())"))
         }
         if totals.cost > 0 {
             parts.append(totals.cost.formatted(.currency(code: "USD").precision(.fractionLength(2...4))))

@@ -23,15 +23,15 @@ internal static class WorkspaceGit
 {
     public static string KindLabel(string raw) => raw switch
     {
-        "added" => "Added",
-        "modified" => "Modified",
-        "deleted" => "Deleted",
-        "renamed" => "Renamed",
-        "untracked" => "Untracked",
-        "conflicted" => "Conflicted",
+        "added" => L10n.Text("windows.workspacecommit.added.6b02e0d3"),
+        "modified" => L10n.Text("windows.workspacecommit.modified.e8ce5dca"),
+        "deleted" => L10n.Text("windows.workspacecommit.deleted.b48ff39c"),
+        "renamed" => L10n.Text("windows.workspacecommit.renamed.05487af3"),
+        "untracked" => L10n.Text("windows.workspacecommit.untracked.c7ba5477"),
+        "conflicted" => L10n.Text("windows.workspacecommit.conflicted.916a464e"),
         _ when !string.IsNullOrEmpty(raw)
             => char.ToUpperInvariant(raw[0]) + raw[1..],
-        _ => "Changed",
+        _ => L10n.Text("windows.workspacecommit.changed.2a6141e4"),
     };
 
     public static Color KindTint(string raw) => raw switch
@@ -278,8 +278,7 @@ internal sealed class WorkspaceCommitSession
             // No rollback, retry or new id follows a lost response. The
             // submission is persisted (in this session), so reconcile it
             // with a receipt check before anything else runs.
-            Error = "The commit outcome has not been confirmed. "
-                + "Check its outcome before starting another. " + ex.Message;
+            Error = L10n.Text("windows.workspacecommit.the_commit_outcome_has_not_been_confirmed.5b129e15", $"{ex.Message}");
         }
         finally
         {
@@ -308,8 +307,7 @@ internal sealed class WorkspaceCommitSession
             if (receipt is null)
             {
                 CanRetry = true;
-                Error = "The computer has no recorded outcome yet. "
-                    + "You can retry this same submission.";
+                Error = L10n.Text("windows.workspacecommit.the_computer_has_no_recorded_outcome_yet_y.0b11d451");
             }
             else if (recover && IsUnresolved(Format.Text(receipt, "state")))
             {
@@ -363,7 +361,7 @@ internal sealed class WorkspaceCommitSession
         }
         catch (Exception ex)
         {
-            Error = "Check this commit's outcome before starting another. " + ex.Message;
+            Error = L10n.Text("windows.workspacecommit.check_this_commit_s_outcome_before_startin.f3872ebf", $"{ex.Message}");
         }
         finally
         {
@@ -405,7 +403,7 @@ internal sealed class WorkspaceCommitSession
 
     private static string ReviewedError(string message) =>
         message.Contains("unknown method", StringComparison.OrdinalIgnoreCase)
-            ? "Update the connected computer to commit selected files. " + message
+            ? L10n.Text("windows.workspacecommit.update_the_connected_computer_to_commit_se.778ec8ca", $"{message}")
             : message;
 }
 
@@ -429,33 +427,33 @@ internal static class WorkspaceCommitComposer
             string primary;
             if (succeeded)
             {
-                primary = "Done";
+                primary = L10n.Text("common.done");
             }
             else if (submitted)
             {
-                primary = session.CanRetry ? "Retry same submission" : "Check outcome";
+                primary = session.CanRetry ? L10n.Text("windows.workspacecommit.retry_same_submission.3dbca561") : L10n.Text("windows.workspacecommit.check_outcome.9200a2fd");
             }
             else if (review is null)
             {
-                primary = "Review selected files";
+                primary = L10n.Text("windows.workspacecommit.review_selected_files.fb340554");
             }
             else
             {
                 var count = session.ReviewPaths().Count;
-                primary = $"Commit {count} {(count == 1 ? "file" : "files")}";
+                primary = L10n.Text("windows.workspacecommit.commit_0_1.ed71a626", $"{count}", $"{(count == 1 ? L10n.Text("windows.workspacecommit.file.3b9c358f") : L10n.Text("windows.workspacecommit.files.3d7db37d"))}");
             }
             var body = BuildBody(owner, workspaceId, folderName, branch, session);
             var dialog = new ContentDialog
             {
-                Title = "Review and commit",
+                Title = L10n.Text("windows.workspacecommit.review_and_commit.96f097b7"),
                 Content = body,
                 PrimaryButtonText = primary,
-                CloseButtonText = succeeded ? null : "Close",
+                CloseButtonText = succeeded ? null : L10n.Text("common.close"),
                 DefaultButton = ContentDialogButton.Primary,
             };
             if (submitted && session.CanRetry)
             {
-                dialog.SecondaryButtonText = "Check outcome";
+                dialog.SecondaryButtonText = L10n.Text("windows.workspacecommit.check_outcome.9200a2fd");
             }
             var result = await Chrome.ShowDialog(owner, dialog);
             if (result == ContentDialogResult.None)
@@ -554,14 +552,14 @@ internal static class WorkspaceCommitComposer
         if (session.MessageTooLong)
         {
             stack.Children.Add(Chrome.Banner(
-                "Shorten the commit message to 128 KiB or less before committing.",
+                L10n.Text("windows.workspacecommit.shorten_the_commit_message_to_128_kib_or_l.ffe20f8c"),
                 Theme.Danger, Symbol.Important));
         }
         var frozen = session.SubmittedOperationId is not null;
         var titleBox = new TextBox
         {
-            Header = "Commit title",
-            PlaceholderText = "Describe the change",
+            Header = L10n.Text("windows.workspacecommit.commit_title.30459372"),
+            PlaceholderText = L10n.Text("windows.workspacecommit.describe_the_change.beaee364"),
             Text = session.Title,
             IsEnabled = !session.Working && !frozen,
         };
@@ -569,7 +567,7 @@ internal static class WorkspaceCommitComposer
         stack.Children.Add(titleBox);
         var detailsBox = new TextBox
         {
-            Header = "Description (optional)",
+            Header = L10n.Text("windows.workspacecommit.description_optional.f6cbe2f0"),
             Text = session.Details,
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
@@ -583,7 +581,7 @@ internal static class WorkspaceCommitComposer
             var included = session.ReviewIncluded();
             stack.Children.Add(new TextBlock
             {
-                Text = $"{included.Count} selected {(included.Count == 1 ? "file" : "files")}",
+                Text = L10n.Text("windows.workspacecommit.0_selected_1.3a4c3bb6", $"{included.Count}", $"{(included.Count == 1 ? L10n.Text("windows.workspacecommit.file.3b9c358f") : L10n.Text("windows.workspacecommit.files.3d7db37d"))}"),
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             });
             var files = new StackPanel { Spacing = 4 };
@@ -607,7 +605,7 @@ internal static class WorkspaceCommitComposer
                 files.Children.Add(row);
             }
             stack.Children.Add(files);
-            stack.Children.Add(ActionIconGlyph.Button("Review all", ActionIcon.Compare, async (_, _) =>
+            stack.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.workspacecommit.review_all.d05163fa"), ActionIcon.Compare, async (_, _) =>
             {
                 var all = included
                     .Select(path => (path, "", (long?)null, (long?)null))
@@ -624,9 +622,7 @@ internal static class WorkspaceCommitComposer
         {
             stack.Children.Add(new TextBlock
             {
-                Text = $"{session.SelectedCount} selected "
-                    + $"{(session.SelectedCount == 1 ? "file" : "files")}. "
-                    + "Review freezes this selection: files changed afterwards are not included.",
+                Text = L10n.Text("windows.workspacecommit.0_selected_1_review_freezes_this_selection.0d8154c5", $"{session.SelectedCount}", $"{(session.SelectedCount == 1 ? L10n.Text("windows.workspacecommit.file.3b9c358f") : L10n.Text("windows.workspacecommit.files.3d7db37d"))}"),
                 FontSize = 12,
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
@@ -636,8 +632,7 @@ internal static class WorkspaceCommitComposer
         {
             stack.Children.Add(new TextBlock
             {
-                Text = "This submission is waiting on the computer. "
-                    + "Check its outcome before starting another.",
+                Text = L10n.Text("windows.workspacecommit.this_submission_is_waiting_on_the_computer.261dc66e"),
                 FontSize = 12,
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
@@ -661,7 +656,7 @@ internal static class WorkspaceCommitComposer
                 Title = path,
                 Content = Chrome.Banner(
                     FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important),
-                CloseButtonText = "Close",
+                CloseButtonText = L10n.Text("common.close"),
             };
             await Chrome.ShowDialog(owner, failed);
             return;

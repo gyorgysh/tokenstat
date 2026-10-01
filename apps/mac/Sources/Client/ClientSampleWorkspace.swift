@@ -31,25 +31,24 @@ struct ClientSampleWorkspace: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     header
-                    section("The conversation") {
+                    section(L10n.text("apple.clientsampleworkspace.the_conversation.16b401bd")) {
                         ForEach(ClientSampleStore.conversation) { turn in
                             turnRow(turn)
                         }
                     }
-                    section("What changed in \(ClientSampleStore.file)") {
+                    section(L10n.text("apple.clientsampleworkspace.what_changed_in_0.27f74287", "\(ClientSampleStore.file)")) {
                         VStack(alignment: .leading, spacing: 1) {
                             ForEach(ClientSampleStore.diff) { line in
                                 diffRow(line)
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        Text("One line. Nothing was committed and nothing was published: "
-                            + "that stays something you do on purpose.")
+                        Text(L10n.text("apple.clientsampleworkspace.one_line_nothing_was_committed_and_nothing.09cd6075"))
                             .font(ClientType.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    section("What it counted") {
+                    section(L10n.text("apple.clientsampleworkspace.what_it_counted.bd0fa788")) {
                         ForEach(ClientSampleStore.readings) { reading in
                             HStack(alignment: .firstTextBaseline) {
                                 Text(reading.label)
@@ -70,11 +69,11 @@ struct ClientSampleWorkspace: View {
                 .setupColumn()
             }
             .background(Theme.background)
-            .navigationTitle("Sample")
+            .navigationTitle(L10n.text("apple.clientsampleworkspace.sample.95a2f1ed"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                    Button(L10n.text("common.done")) { dismiss() }
                         .keyboardShortcut(.cancelAction)
                         .accessibilityIdentifier("sample.close")
                 }
@@ -86,12 +85,12 @@ struct ClientSampleWorkspace: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            Text("An example, not your data")
+            Text(L10n.text("apple.clientsampleworkspace.an_example_not_your_data.c35ce3db"))
                 .font(ClientType.caption.weight(.semibold))
                 .foregroundStyle(Theme.accent)
                 .textCase(.uppercase)
                 .kerning(0.6)
-            Text("A small task, start to finish")
+            Text(L10n.text("apple.clientsampleworkspace.a_small_task_start_to_finish.58a0447b"))
                 .font(Theme.title.weight(.semibold))
             Text(ClientSampleStore.disclaimer)
                 .font(ClientType.body)
@@ -132,7 +131,7 @@ struct ClientSampleWorkspace: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(turn.speaker == .person ? "You" : "The agent"): \(turn.text)")
+        .accessibilityLabel("\(turn.speaker == .person ? L10n.text("apple.clientsampleworkspace.you.08b04193") : L10n.text("apple.clientsampleworkspace.the_agent.750a4ad2")): \(turn.text)")
     }
 
     /// A diff line, marked by its sign as well as its colour.
@@ -169,9 +168,9 @@ struct ClientSampleWorkspace: View {
 
     private func spoken(_ kind: ClientSampleStore.Change.Kind) -> String {
         switch kind {
-        case .context: "unchanged"
-        case .removed: "removed"
-        case .added: "added"
+        case .context: L10n.text("apple.clientsampleworkspace.unchanged.aaa8d3c8")
+        case .removed: L10n.text("apple.clientsampleworkspace.removed.e1f79758")
+        case .added: L10n.text("apple.clientsampleworkspace.added.279b8a60")
         }
     }
 

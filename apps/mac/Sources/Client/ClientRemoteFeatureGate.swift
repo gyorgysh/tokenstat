@@ -37,30 +37,30 @@ enum RemoteHostFeature: Hashable {
 
     var title: String {
         switch self {
-        case .chat: "Chat"
-        case .pulls: "Pull requests"
-        case .modelRefresh: "Model list refresh"
-        case .folderPicker: "Choosing a folder"
-        case .cloneRepository: "Cloning a repository"
-        case .provisioning: "Setup"
-        case .inviteCode: "Adding this device"
-        case .agentSignIn: "Signing in to an agent"
-        case .confirmedSend: "Confirming a sent message"
-        case .handoff: "Handoff"
-        case .workSearch: "Search work"
-        case .hostUpdate: "Updating this computer"
-        case .selectedCommit: "Committing selected files"
-        case .worktrees: "Project worktrees"
-        case .reviewedPush: "Pushing a branch"
-        case .taskEditing: "Editing tasks"
-        case .taskDeletion: "Deleting tasks"
-        case .taskCreation: "Creating tasks"
-        case .taskExecution: "Running tasks"
-        case .automationReceipts: "Saving automations"
-        case .workflowEditing: "Saving workflows"
-        case .chatFork: "Forking chats"
-        case .chatRemoveAll: "Deleting all chats"
-        case .steer: "Notes on the next step"
+        case .chat: L10n.text("apple.clientremotefeaturegate.chat.460b3a7d")
+        case .pulls: L10n.text("apple.clientremotefeaturegate.pull_requests.d9e3f260")
+        case .modelRefresh: L10n.text("apple.clientremotefeaturegate.model_list_refresh.7113bd00")
+        case .folderPicker: L10n.text("apple.clientremotefeaturegate.choosing_a_folder.5e3303d0")
+        case .cloneRepository: L10n.text("apple.clientremotefeaturegate.cloning_a_repository.6ad75b22")
+        case .provisioning: L10n.text("apple.clientremotefeaturegate.setup.7013af4c")
+        case .inviteCode: L10n.text("apple.clientremotefeaturegate.adding_this_device.4bb25dcd")
+        case .agentSignIn: L10n.text("apple.clientremotefeaturegate.signing_in_to_an_agent.7a8b7e31")
+        case .confirmedSend: L10n.text("apple.clientremotefeaturegate.confirming_a_sent_message.86a0a4b6")
+        case .handoff: L10n.text("apple.clientremotefeaturegate.handoff.f89e2d72")
+        case .workSearch: L10n.text("apple.clientremotefeaturegate.search_work.cc46cedc")
+        case .hostUpdate: L10n.text("apple.clientremotefeaturegate.updating_this_computer.5b732088")
+        case .selectedCommit: L10n.text("apple.clientremotefeaturegate.committing_selected_files.c40972a7")
+        case .worktrees: L10n.text("apple.clientremotefeaturegate.project_worktrees.0c15733b")
+        case .reviewedPush: L10n.text("apple.clientremotefeaturegate.pushing_a_branch.e4403991")
+        case .taskEditing: L10n.text("apple.clientremotefeaturegate.editing_tasks.1663f4eb")
+        case .taskDeletion: L10n.text("apple.clientremotefeaturegate.deleting_tasks.faf65d2e")
+        case .taskCreation: L10n.text("apple.clientremotefeaturegate.creating_tasks.ca462a92")
+        case .taskExecution: L10n.text("apple.clientremotefeaturegate.running_tasks.99ad64f5")
+        case .automationReceipts: L10n.text("apple.clientremotefeaturegate.saving_automations.1673f244")
+        case .workflowEditing: L10n.text("apple.clientremotefeaturegate.saving_workflows.9ca663b4")
+        case .chatFork: L10n.text("apple.clientremotefeaturegate.forking_chats.1181b97c")
+        case .chatRemoveAll: L10n.text("apple.clientremotefeaturegate.deleting_all_chats.978c2f5e")
+        case .steer: L10n.text("apple.clientremotefeaturegate.notes_on_the_next_step.a272bf5a")
         }
     }
 
@@ -295,7 +295,7 @@ private struct RemoteHostFeatureCheckingView: View {
     var body: some View {
         VStack(spacing: Theme.Space.m) {
             ProgressView()
-            Text("Checking \(feature.title) on this computer")
+            Text(L10n.text("apple.clientremotefeaturegate.checking_0_on_this_computer.19e3aa4b", "\(feature.title)"))
                 .font(Theme.callout)
                 .foregroundStyle(.secondary)
         }
@@ -314,7 +314,7 @@ struct RemoteHostFeatureUpdateView: View {
     let retry: () -> Void
 
     private var computer: String {
-        guard let hostName, !hostName.isEmpty else { return "this computer" }
+        guard let hostName, !hostName.isEmpty else { return L10n.text("apple.clientremotefeaturegate.this_computer.058bf37c") }
         return hostName
     }
 
@@ -342,18 +342,18 @@ struct RemoteHostFeatureUpdateView: View {
                     .overlay(Circle().stroke(Theme.border))
                     .offset(x: 58, y: 46)
             }
-            Text("Update \(computer) to use \(feature.title)")
+            Text(L10n.text("apple.clientremotefeaturegate.update_0_to_use_1.3ca9b9e4", "\(computer)", "\(feature.title)"))
                 .font(Theme.title3.weight(.semibold))
                 .multilineTextAlignment(.center)
-            Text("This device is ready, but \(computer) runs an older version of tokenstat. Update the desktop app, then check again.")
+            Text(L10n.text("apple.clientremotefeaturegate.this_device_is_ready_but_0_runs_an_older_v.6c7d61dc", "\(computer)"))
                 .font(Theme.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 380)
-            Button("Check again", .refresh) { retry() }
+            Button(L10n.text("apple.clientremotefeaturegate.check_again.fb7099ad"), .refresh) { retry() }
                 .buttonStyle(AccentButtonStyle())
-                .accessibilityHint("Checks whether the desktop update is ready")
-            Text("Desktop protocol \(hostProtocol) needs \(feature.minimumProtocol) or later")
+                .accessibilityHint(L10n.text("apple.clientremotefeaturegate.checks_whether_the_desktop_update_is_ready.1ca1f834"))
+            Text(L10n.text("apple.clientremotefeaturegate.desktop_protocol_0_needs_1_or_later.addd22e9", "\(hostProtocol)", "\(feature.minimumProtocol)"))
                 .font(Theme.caption)
                 .foregroundStyle(.tertiary)
             Spacer(minLength: 0)

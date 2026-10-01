@@ -27,7 +27,7 @@ public partial class App : Application
     {
         UnhandledException += (_, e) =>
         {
-            Program.LogStartup($"XAML unhandled exception: {e.Message}");
+            Program.LogStartup(L10n.Text("windows.app_xaml.xaml_unhandled_exception_0.33c34383", $"{e.Message}"));
             Debug.WriteLine(e.Exception);
             try
             {
@@ -46,27 +46,27 @@ public partial class App : Application
             e.Handled = true;
         };
         InitializeComponent();
-        Program.LogStartup("Application resources initialized");
+        Program.LogStartup(L10n.Text("windows.app_xaml.application_resources_initialized.483da808"));
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         RunNotifications.Shared.EnsureRegistered();
         HostOwnerLock.Acquire();
-        Program.LogStartup("Creating main window");
+        Program.LogStartup(L10n.Text("windows.app_xaml.creating_main_window.a841d7fe"));
         _window = new MainWindow();
-        Program.LogStartup("Main window created");
+        Program.LogStartup(L10n.Text("windows.app_xaml.main_window_created.977d73de"));
         if (_window.Content is FrameworkElement root)
-            root.Loaded += (_, _) => Program.LogStartup("Main window content loaded");
+            root.Loaded += (_, _) => Program.LogStartup(L10n.Text("windows.app_xaml.main_window_content_loaded.20d9af28"));
         CurrentWindow = _window;
         _window.Closed += (_, _) =>
         {
-            Program.LogStartup("Main window closed");
+            Program.LogStartup(L10n.Text("windows.app_xaml.main_window_closed.75546c33"));
             CurrentWindow = null;
             HostOwnerLock.Release();
         };
         _window.Activate();
-        Program.LogStartup("Main window activated");
+        Program.LogStartup(L10n.Text("windows.app_xaml.main_window_activated.8696990f"));
         _ = Task.Run(async () =>
         {
             HostProcess.EnsureRunning();

@@ -22,7 +22,7 @@ struct MachinesInspector: View {
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
-                InspectorTitle(title: "Device", symbol: "laptopcomputer")
+                InspectorTitle(title: L10n.text("apple.machinesinspector.device.6ba0bdec"), symbol: "laptopcomputer")
                 Spacer(minLength: 0)
             }
             Group {
@@ -36,8 +36,8 @@ struct MachinesInspector: View {
                 case .none:
                     InspectorEmptyState(
                         mark: "mark_device",
-                        title: "Pick a device",
-                        subtitle: "Reachability and pairing actions open here."
+                        title: L10n.text("apple.machinesinspector.pick_a_device.de6694f3"),
+                        subtitle: L10n.text("apple.machinesinspector.reachability_and_pairing_actions_open_here.6de3491c")
                     )
                 }
             }
@@ -47,70 +47,70 @@ struct MachinesInspector: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.background)
         .confirmationDialog(
-            "Forget this device?",
+            L10n.text("apple.machinesinspector.forget_this_device.6bddebb5"),
             isPresented: Binding(
                 get: { confirmForget != nil },
                 set: { if !$0 { confirmForget = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("Forget", role: .destructive) {
+            Button(L10n.text("apple.machinesinspector.forget.a6bd489d"), role: .destructive) {
                 if let peer = confirmForget { Task { await model.forget(peer) } }
                 confirmForget = nil
             }
-            Button("Cancel", role: .cancel) { confirmForget = nil }
+            Button(L10n.text("common.cancel"), role: .cancel) { confirmForget = nil }
         }
         .confirmationDialog(
-            "Revoke this device?",
+            L10n.text("apple.machinesinspector.revoke_this_device.e7e35e2c"),
             isPresented: Binding(
                 get: { confirmRevoke != nil },
                 set: { if !$0 { confirmRevoke = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("Revoke", role: .destructive) {
+            Button(L10n.text("apple.machinesinspector.revoke.87e6d00b"), role: .destructive) {
                 if let peer = confirmRevoke { Task { await model.revoke(peer) } }
                 confirmRevoke = nil
             }
-            Button("Cancel", role: .cancel) { confirmRevoke = nil }
+            Button(L10n.text("common.cancel"), role: .cancel) { confirmRevoke = nil }
         }
         .confirmationDialog(
-            "Remove from account?",
+            L10n.text("apple.machinesinspector.remove_from_account.a3010e43"),
             isPresented: Binding(
                 get: { pendingUnlink != nil },
                 set: { if !$0 { pendingUnlink = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("Remove", role: .destructive) {
+            Button(L10n.text("common.remove"), role: .destructive) {
                 if let machine = pendingUnlink { Task { await model.unlink(machine) } }
                 pendingUnlink = nil
             }
-            Button("Cancel", role: .cancel) { pendingUnlink = nil }
+            Button(L10n.text("common.cancel"), role: .cancel) { pendingUnlink = nil }
         }
     }
 
     private var thisMachine: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                Text(model.identity?.label ?? "This device")
+                Text(model.identity?.label ?? L10n.text("apple.machinesinspector.this_device.d052579c"))
                     .font(Theme.font(15, weight: .semibold))
                 if let words = model.words {
-                    labeled("Known as", words)
+                    labeled(L10n.text("apple.machinesinspector.known_as.9076e6ab"), words)
                 }
                 if model.pairingCode != nil {
                     Button {
                         model.copyInvite()
                     } label: {
-                        ActionIcon.copy.label("Copy invite")
+                        ActionIcon.copy.label(L10n.text("apple.machinesinspector.copy_invite.953ed058"))
                     }
                     .buttonStyle(AccentButtonStyle())
-                    .help("Paste this in the other machine's Add device box")
+                    .help(L10n.text("apple.machinesinspector.paste_this_in_the_other_machine_s_add_devi.be6bf406"))
                 }
                 if let status = model.status {
                     labeled(
-                        "Reachability",
-                        status.tunnelOnline == true ? "Tunnel up" : "Not reachable from elsewhere"
+                        L10n.text("apple.machinesinspector.reachability.66f0f432"),
+                        status.tunnelOnline == true ? L10n.text("apple.machinesinspector.tunnel_up.77a2eaee") : L10n.text("apple.machinesinspector.not_reachable_from_elsewhere.1f54e85a")
                     )
                 }
                 HostStatsBar(local: true)
@@ -124,14 +124,14 @@ struct MachinesInspector: View {
     private func peerBody(_ peer: Peer) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                Text(peer.label.isEmpty ? (model.accountName(for: peer) ?? "Unnamed device") : peer.label)
+                Text(peer.label.isEmpty ? (model.accountName(for: peer) ?? L10n.text("apple.machinesinspector.unnamed_device.6aba593f")) : peer.label)
                     .font(Theme.font(15, weight: .semibold))
                 if let words = peer.words {
-                    labeled("Known as", words)
+                    labeled(L10n.text("apple.machinesinspector.known_as.9076e6ab"), words)
                 }
-                labeled("Trust", Self.trustLabel(peer.trust))
+                labeled(L10n.text("apple.machinesinspector.trust.ade9248e"), Self.trustLabel(peer.trust))
                 if model.connectedPeerKeys.contains(peer.key) {
-                    Text("Projects from this device are in the sidebar.")
+                    Text(L10n.text("apple.machinesinspector.projects_from_this_device_are_in_the_sideb.a1c36b35"))
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                     HostStatsBar(peer: peer.key, online: true)
@@ -141,20 +141,20 @@ struct MachinesInspector: View {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     if peer.trust == .approved {
                         if model.connectedPeerKeys.contains(peer.key) {
-                            Button("Disconnect", .disconnect) { model.disconnect(peer) }
+                            Button(L10n.text("common.disconnect"), .disconnect) { model.disconnect(peer) }
                                 .buttonStyle(SecondaryButtonStyle())
                         } else {
-                            Button("Connect", .connect) { Task { await model.connect(peer) } }
+                            Button(L10n.text("common.connect"), .connect) { Task { await model.connect(peer) } }
                                 .buttonStyle(AccentButtonStyle())
                         }
                         autoConnectToggle(peer: peer)
-                        Button("Revoke", .revoke) { confirmRevoke = peer }
+                        Button(L10n.text("apple.machinesinspector.revoke.87e6d00b"), .revoke) { confirmRevoke = peer }
                             .buttonStyle(SecondaryButtonStyle())
                     } else {
-                        Button("Approve", .approve) { Task { await model.approve(peer) } }
+                        Button(L10n.text("apple.machinesinspector.approve.6007acbe"), .approve) { Task { await model.approve(peer) } }
                             .buttonStyle(AccentButtonStyle())
                     }
-                    Button("Forget", .delete, role: .destructive) { confirmForget = peer }
+                    Button(L10n.text("apple.machinesinspector.forget.a6bd489d"), .delete, role: .destructive) { confirmForget = peer }
                         .buttonStyle(SecondaryButtonStyle())
                 }
             }
@@ -171,16 +171,16 @@ struct MachinesInspector: View {
                 Text(model.resolvedName(for: machine) ?? machine.displayName)
                     .font(Theme.font(15, weight: .semibold))
                 if let id = machine.machineID {
-                    labeled("Code", id)
+                    labeled(L10n.text("apple.machinesinspector.code.340f4630"), id)
                 }
                 if isSelf {
-                    Text("This device.")
+                    Text(L10n.text("apple.machinesinspector.this_device.3b5031a9"))
                         .font(Theme.callout)
                         .foregroundStyle(.secondary)
                     HostStatsBar(local: true)
                     HostUpdateCard(local: true)
                 } else if !machine.isHost {
-                    Text("This phone or tablet connects to your computers. Open tokenstat on it to choose a computer and project.")
+                    Text(L10n.text("apple.machinesinspector.this_phone_or_tablet_connects_to_your_comp.c99a1b87"))
                         .font(Theme.callout).foregroundStyle(.secondary)
                 } else if let peer = model.peer(for: machine) {
                     if machine.online == true, let key = machine.publicIdentity, !key.isEmpty {
@@ -192,11 +192,11 @@ struct MachinesInspector: View {
                     if machine.online == true, let key = machine.publicIdentity, !key.isEmpty {
                         HostStatsBar(peer: key, online: true)
                     }
-                    Button("Connect", .connect) { Task { await model.connect(machine) } }
+                    Button(L10n.text("common.connect"), .connect) { Task { await model.connect(machine) } }
                         .buttonStyle(AccentButtonStyle())
                 }
                 if !isSelf {
-                    Button("Remove from account", .delete, role: .destructive) {
+                    Button(L10n.text("apple.machinesinspector.remove_from_account.6bfa319e"), .delete, role: .destructive) {
                         pendingUnlink = machine
                     }
                     .buttonStyle(SecondaryButtonStyle())
@@ -210,10 +210,10 @@ struct MachinesInspector: View {
     @ViewBuilder
     private func peerActions(_ peer: Peer, machine: Machine) -> some View {
         if model.isConnected(machine) {
-            Button("Disconnect", .disconnect) { model.disconnect(peer) }
+            Button(L10n.text("common.disconnect"), .disconnect) { model.disconnect(peer) }
                 .buttonStyle(SecondaryButtonStyle())
         } else {
-            Button("Connect", .connect) { Task { await model.connect(peer) } }
+            Button(L10n.text("common.connect"), .connect) { Task { await model.connect(peer) } }
                 .buttonStyle(AccentButtonStyle())
         }
         autoConnectToggle(peer: peer, machine: machine)
@@ -223,12 +223,12 @@ struct MachinesInspector: View {
     /// and leaves a live connection alone; only Disconnect drops it.
     private func autoConnectToggle(peer: Peer, machine: Machine? = nil) -> some View {
         HStack(spacing: 6) {
-            Text("Auto-connect")
+            Text(L10n.text("apple.machinesinspector.auto_connect.45b6d201"))
                 .font(Theme.caption.weight(.medium))
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
             Toggle(
-                "Auto-connect",
+                L10n.text("apple.machinesinspector.auto_connect.45b6d201"),
                 isOn: Binding(
                     get: { WorkspacesModel.isAutoConnectEnabled(for: peer.key) },
                     set: { model.setAutoConnect($0, peer: peer, machine: machine) }
@@ -238,14 +238,14 @@ struct MachinesInspector: View {
             .toggleStyle(.switch)
             .controlSize(.small)
         }
-        .accessibilityLabel("Auto-connect \(peer.label.isEmpty ? "this device" : peer.label)")
+        .accessibilityLabel(L10n.text("apple.machinesinspector.auto_connect_0.3bbf847e", "\(peer.label.isEmpty ? L10n.text("apple.machinesinspector.this_device.cf3cc23e") : peer.label)"))
     }
 
     private static func trustLabel(_ trust: Peer.Trust) -> String {
         switch trust {
-        case .pending: return "Waiting for approval"
-        case .approved: return "Approved"
-        case .revoked: return "Revoked"
+        case .pending: return L10n.text("apple.machinesinspector.waiting_for_approval.10c5739b")
+        case .approved: return L10n.text("apple.machinesinspector.approved.87b42e40")
+        case .revoked: return L10n.text("apple.machinesinspector.revoked.f6f738d0")
         }
     }
 

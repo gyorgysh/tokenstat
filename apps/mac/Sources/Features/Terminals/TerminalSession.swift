@@ -33,12 +33,12 @@ enum SessionState: Equatable {
 
     var label: String {
         switch self {
-        case .none: return "None"
-        case .starting: return "Starting"
-        case .working: return "Working"
-        case .idle: return "Idle"
-        case .needsAttention: return "Needs attention"
-        case .stopped: return "Stopped"
+        case .none: return L10n.text("apple.terminalsession.none.dc937b59")
+        case .starting: return L10n.text("apple.terminalsession.starting.aeed4d26")
+        case .working: return L10n.text("common.working")
+        case .idle: return L10n.text("common.idle")
+        case .needsAttention: return L10n.text("apple.terminalsession.needs_attention.c1ebc781")
+        case .stopped: return L10n.text("apple.terminalsession.stopped.1a4f630a")
         }
     }
 }

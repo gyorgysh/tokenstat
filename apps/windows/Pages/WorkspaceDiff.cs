@@ -79,7 +79,7 @@ internal static class WorkspaceDiff
             {
                 var show = new Button
                 {
-                    Content = new TextBlock { Text = $"Show all {total} lines" },
+                    Content = new TextBlock { Text = L10n.Text("windows.workspacediff.show_all_0_lines.8c1a7690", $"{total}") },
                     HorizontalAlignment = HorizontalAlignment.Left,
                 };
                 show.Click += (_, _) =>
@@ -92,8 +92,7 @@ internal static class WorkspaceDiff
             else
             {
                 stack.Children.Add(Note(
-                    $"Showing the first {MaxLines} of {total} lines. "
-                    + "The rest is on the computer."));
+                    L10n.Text("windows.workspacediff.showing_the_first_0_of_1_lines_the_rest_is.ff25aced", $"{MaxLines}", $"{total}")));
             }
         }
         if (WorkspaceTabsPage.Find(owner) is { } workbench)
@@ -110,7 +109,7 @@ internal static class WorkspaceDiff
         {
             Title = title,
             Content = new ScrollViewer { MaxHeight = 560, Content = stack },
-            CloseButtonText = "Close",
+            CloseButtonText = L10n.Text("common.close"),
         };
         await Chrome.ShowDialog(owner, dialog);
     }
@@ -169,15 +168,15 @@ internal static class WorkspaceDiff
         var stack = new StackPanel { Spacing = Theme.SpaceM, MinWidth = 560 };
         stack.Children.Add(new TextBlock
         {
-            Text = "Reading every change…",
+            Text = L10n.Text("windows.workspacediff.reading_every_change.9fd3cc74"),
             Opacity = 0.7,
         });
-        var tabTitle = string.IsNullOrEmpty(title) ? "Review all" : title;
+        var tabTitle = string.IsNullOrEmpty(title) ? L10n.Text("windows.workspacediff.review_all.d05163fa") : title;
         var dialog = new ContentDialog
         {
             Title = tabTitle,
             Content = new ScrollViewer { MaxHeight = 560, Content = stack },
-            CloseButtonText = "Close",
+            CloseButtonText = L10n.Text("common.close"),
         };
         var closed = false;
         dialog.Closed += (_, _) => closed = true;
@@ -206,7 +205,7 @@ internal static class WorkspaceDiff
             var slot = new ContentControl
             {
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                Content = Note($"Reading {file.Path}…"),
+                Content = Note(L10n.Text("windows.workspacediff.reading_0.f5d364f3", $"{file.Path}")),
             };
             stack.Children.Add(slot);
             async Task Load()
@@ -217,7 +216,7 @@ internal static class WorkspaceDiff
                     if (closed) return;
                     var diff = await loadDiff(file.Path).WaitAsync(TimeSpan.FromSeconds(30));
                     if (closed) return;
-                    if (diff is null) throw new InvalidOperationException("No diff was returned.");
+                    if (diff is null) throw new InvalidOperationException(L10n.Text("windows.workspacediff.no_diff_was_returned.b30e0096"));
                     slot.Content = FileCard(owner, file, diff);
                 }
                 catch (Exception error)
@@ -225,8 +224,8 @@ internal static class WorkspaceDiff
                     if (closed) return;
                     var failed = new StackPanel { Spacing = Theme.SpaceS };
                     failed.Children.Add(Note($"{file.Path}: " + (error is TimeoutException
-                        ? "The computer did not respond in time." : error.Message)));
-                    var retry = new Button { Content = "Retry" };
+                        ? L10n.Text("windows.workspacediff.the_computer_did_not_respond_in_time.8eebc73b") : error.Message)));
+                    var retry = new Button { Content = L10n.Text("common.retry") };
                     retry.Click += async (_, _) =>
                     {
                         retry.IsEnabled = false;
@@ -239,13 +238,12 @@ internal static class WorkspaceDiff
             }
             loads.Add(Load());
         }
-        if (shown.Count == 0 && header is null) stack.Children.Add(Note("No changes to review."));
+        if (shown.Count == 0 && header is null) stack.Children.Add(Note(L10n.Text("windows.workspacediff.no_changes_to_review.1f08cad6")));
         if (leftover > 0)
         {
             stack.Children.Add(new TextBlock
             {
-                Text = $"{leftover} more {(leftover == 1 ? "file" : "files")} changed. "
-                    + $"Open {(leftover == 1 ? "it" : "them")} from Changes for the diff.",
+                Text = L10n.Text("windows.workspacediff.0_more_1_changed_open_2_from_changes_for_t.f976e9a1", $"{leftover}", $"{(leftover == 1 ? L10n.Text("windows.workspacediff.file.3b9c358f") : L10n.Text("windows.workspacediff.files.3d7db37d"))}", $"{(leftover == 1 ? L10n.Text("windows.workspacediff.it.2ad8a704") : L10n.Text("windows.workspacediff.them.c9a8dc33"))}"),
                 FontSize = 12,
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
@@ -318,14 +316,14 @@ internal static class WorkspaceDiff
         {
             card.Children.Add(new TextBlock
             {
-                Text = $"Showing {total - cut} of {total} lines here.",
+                Text = L10n.Text("windows.workspacediff.showing_0_of_1_lines_here.f2764462", $"{total - cut}", $"{total}"),
                 FontSize = 12,
                 Opacity = 0.7,
             });
         }
         var full = new Button
         {
-            Content = new TextBlock { Text = "Full diff" },
+            Content = new TextBlock { Text = L10n.Text("windows.workspacediff.full_diff.79eeb065") },
             HorizontalAlignment = HorizontalAlignment.Left,
         };
         full.Click += (_, _) =>
@@ -347,14 +345,14 @@ internal static class WorkspaceDiff
         if (file.Binary)
         {
             cut = 0;
-            return Note("This is a binary file. There is nothing to show line by line.");
+            return Note(L10n.Text("windows.workspacediff.this_is_a_binary_file_there_is_nothing_to.6573d54c"));
         }
         if (file.Hunks.Count == 0)
         {
             cut = 0;
             return Note(file.Untracked
-                ? "This file is not tracked yet and is empty."
-                : "No changes against HEAD.");
+                ? L10n.Text("windows.workspacediff.this_file_is_not_tracked_yet_and_is_empty.7354c94b")
+                : L10n.Text("windows.workspacediff.no_changes_against_head.84a982f2"));
         }
         var rows = new StackPanel { Spacing = 0 };
         var remaining = maxLines;
@@ -467,7 +465,7 @@ internal static class WorkspaceDiff
         var stack = new StackPanel { Spacing = Theme.SpaceS };
         stack.Children.Add(new TextBlock
         {
-            Text = Format.Text(detail, "subject", "(no message)"),
+            Text = Format.Text(detail, "subject", L10n.Text("windows.workspacediff.no_message.c480160e")),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             FontSize = 15,
             TextWrapping = TextWrapping.Wrap,
@@ -502,8 +500,7 @@ internal static class WorkspaceDiff
         {
             stack.Children.Add(new TextBlock
             {
-                Text = "A merge, so there is nothing of its own to show. "
-                    + "Its changes belong to the commits it brought in.",
+                Text = L10n.Text("windows.workspacediff.a_merge_so_there_is_nothing_of_its_own_to.6435e3f6"),
                 FontSize = 13,
                 Opacity = 0.7,
                 TextWrapping = TextWrapping.Wrap,
@@ -530,7 +527,7 @@ internal static class WorkspaceDiff
         var fileCount = files?.Count ?? 0;
         counts.Children.Add(new TextBlock
         {
-            Text = $"· {fileCount} {(fileCount == 1 ? "file" : "files")}",
+            Text = $"· {fileCount} {(fileCount == 1 ? L10n.Text("windows.workspacediff.file.3b9c358f") : L10n.Text("windows.workspacediff.files.3d7db37d"))}",
             FontSize = 12,
             Opacity = 0.7,
         });

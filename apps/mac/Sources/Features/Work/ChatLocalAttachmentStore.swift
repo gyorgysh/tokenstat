@@ -22,10 +22,10 @@ actor ChatLocalAttachmentStore {
         case invalid, missing, inUse, removalUnconfirmed
         var errorDescription: String? {
             switch self {
-            case .invalid: "This attachment could not be saved on this device. Files can be up to 12 MB."
-            case .inUse: "This file is now used by a draft or pending message. It has been kept."
-            case .missing: "An original draft file is unavailable. Remove it and attach the original again before sending."
-            case .removalUnconfirmed: "The file was removed, but the change could not be saved reliably. Reopen this sheet to check."
+            case .invalid: L10n.text("apple.chatlocalattachmentstore.this_attachment_could_not_be_saved_on_this.57a513e2")
+            case .inUse: L10n.text("apple.chatlocalattachmentstore.this_file_is_now_used_by_a_draft_or_pendin.1d6766bc")
+            case .missing: L10n.text("apple.chatlocalattachmentstore.an_original_draft_file_is_unavailable_remo.59270bd7")
+            case .removalUnconfirmed: L10n.text("apple.chatlocalattachmentstore.the_file_was_removed_but_the_change_could.addb3de7")
             }
         }
     }

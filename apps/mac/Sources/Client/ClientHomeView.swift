@@ -160,13 +160,13 @@ struct ClientHomeView: View {
     private func emptyReason(_ section: HomeSection) -> String? {
         switch section {
         case .continueWork where ClientRecentPlaces.shared.places(in: account.account?.recentPlacesScope).isEmpty:
-            return "Appears after you open a folder or conversation."
+            return L10n.text("apple.clienthomeview.appears_after_you_open_a_folder_or_convers.032af20f")
         case .pinnedWork where PinnedWorkStore.shared.pins(in: account.account?.pinnedWorkScope).isEmpty:
-            return "Pin a folder or conversation to keep it here."
+            return L10n.text("apple.clienthomeview.pin_a_folder_or_conversation_to_keep_it_he.e84b9c14")
         case .machines where (account.account?.machines ?? []).isEmpty:
-            return "Appears when your account has linked devices."
+            return L10n.text("apple.clienthomeview.appears_when_your_account_has_linked_devic.8a84c464")
         case .limits where model.hasLoadedPlanLimits && !model.planLimits.contains(where: \.hasWindows) && model.planErrorMessage == nil:
-            return "Readings appear after a linked computer shares how much of each tool's subscription is left."
+            return L10n.text("apple.clienthomeview.readings_appear_after_a_linked_computer_sh.042da1f4")
         default: return nil
         }
     }
@@ -192,11 +192,11 @@ struct ClientHomeView: View {
             // which reads like the product is broken.
             ClientEmptyState(
                 kind: .unreachable,
-                title: connectivity.isOffline ? "You are offline" : "Could not load your activity",
+                title: connectivity.isOffline ? L10n.text("apple.clienthomeview.you_are_offline.4d5c9439") : L10n.text("apple.clienthomeview.could_not_load_your_activity.83f3bb60"),
                 message: connectivity.isOffline
-                    ? "This updates by itself when the connection is back."
+                    ? L10n.text("apple.clienthomeview.this_updates_by_itself_when_the_connection.afd97997")
                     : FriendlyError.from(message).message,
-                actionTitle: connectivity.isOffline ? nil : "Try again",
+                actionTitle: connectivity.isOffline ? nil : L10n.text("apple.clienthomeview.try_again.d8b8392e"),
                 actionIcon: .refresh,
                 action: connectivity.isOffline ? nil : { Task { await model.refresh() } }
             )
@@ -205,9 +205,9 @@ struct ClientHomeView: View {
             // or fallback calendars must not send an account to setup.
             ClientEmptyState(
                 kind: .unreachable,
-                title: "Activity is unavailable",
-                message: model.scopeNotice ?? "Waiting for your activity to load.",
-                actionTitle: "Try again",
+                title: L10n.text("apple.clienthomeview.activity_is_unavailable.05583cc4"),
+                message: model.scopeNotice ?? L10n.text("apple.clienthomeview.waiting_for_your_activity_to_load.49d8b7e3"),
+                actionTitle: L10n.text("apple.clienthomeview.try_again.d8b8392e"),
                 actionIcon: .refresh,
                 action: { Task { await model.refresh() } }
             )
@@ -218,9 +218,9 @@ struct ClientHomeView: View {
     /// nothing to press: the way back is right here.
     private var clearHome: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            Text("Your Home is clear")
+            Text(L10n.text("apple.clienthomeview.your_home_is_clear.9ae93db2"))
                 .font(ClientType.label.weight(.medium))
-            Text("Every card is switched off. The tabs and your folders are where they were.")
+            Text(L10n.text("apple.clienthomeview.every_card_is_switched_off_the_tabs_and_yo.1ab18ab6"))
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -233,7 +233,7 @@ struct ClientHomeView: View {
     /// At the bottom, under everything it arranges. A control for changing
     /// the furniture does not belong above the furniture.
     private var customizeButton: some View {
-        Button("Customize Home", .layout) { customizing = true }
+        Button(L10n.text("apple.clienthomeview.customize_home.642cec6e"), .layout) { customizing = true }
             .buttonStyle(.plain)
             .font(ClientType.caption.weight(.medium))
             .foregroundStyle(Theme.accent)
@@ -278,18 +278,18 @@ struct ClientHomeView: View {
 
     private func totals(_ calendar: ActivityCalendar) -> some View {
         HStack(spacing: Theme.Space.s) {
-            TotalTile(label: "Today", micros: todayValue(calendar), mark: "mark_day")
-            TotalTile(label: "This week", micros: weekValue(calendar), mark: "mark_week")
+            TotalTile(label: L10n.text("common.today"), micros: todayValue(calendar), mark: "mark_day")
+            TotalTile(label: L10n.text("apple.clienthomeview.this_week.8c4eef5a"), micros: weekValue(calendar), mark: "mark_week")
         }
     }
 
     private func heatmapCard(_ calendar: ActivityCalendar) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .center) {
-                ClientSectionTitle(title: "Activity", mark: "mark_activity")
+                ClientSectionTitle(title: L10n.text("apple.clienthomeview.activity.38da1505"), mark: "mark_activity")
                 Spacer()
                 VStack(alignment: .trailing, spacing: 1) {
-                    Text("\(calendar.activeDays) active days")
+                    Text(L10n.text("apple.clienthomeview.0_active_days.16d30c85", "\(calendar.activeDays)"))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                     if let freshness = calendar.freshness {
@@ -372,7 +372,7 @@ private struct TotalTile: View {
         .padding(Theme.Space.m)
         .cardSurface()
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(label), \(formatSpend(micros)) at API list price")
+        .accessibilityLabel(L10n.text("apple.clienthomeview.0_1_at_api_list_price.c7adc814", "\(label)", "\(formatSpend(micros))"))
     }
 }
 
@@ -389,7 +389,7 @@ private struct NoticeCard: View {
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
             if showSignIn {
-                Button("Sign in", .signIn) { account.signIn() }
+                Button(L10n.text("common.sign_in"), .signIn) { account.signIn() }
                     .clientGlassStyle()
                     .tint(Theme.accent)
             }

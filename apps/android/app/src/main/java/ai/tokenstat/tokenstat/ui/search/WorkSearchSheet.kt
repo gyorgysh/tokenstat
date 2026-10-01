@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.search
 
+import ai.tokenstat.tokenstat.ui.localization.L10n
+
 import androidx.compose.foundation.layout.fillMaxHeight
 
 import androidx.compose.foundation.clickable
@@ -92,7 +94,7 @@ fun WorkSearchSheet(
     }.toMap()
     val platforms = machines.mapNotNull { machine ->
         machine.string("publicIdentity")?.let { peer ->
-            peer to (machine.string("platform") ?: "Linked device")
+            peer to (machine.string("platform") ?: L10n.text("android.worksearchsheet.linked_device.a7ba6a12"))
         }
     }.toMap()
     val places = remember(machines) { SearchPlaces.all(machineIds.mapValues { displayNames[it.key] ?: it.key }, platforms) }
@@ -138,7 +140,7 @@ fun WorkSearchSheet(
                             for (folder in list.mapNotNull { it as? JsonObject }) {
                                 val folderId = folder.string("id") ?: continue
                                 if (known.any { it.folderId == folderId && it.peer == peer }) continue
-                                live += SearchFolder(peer, id, name, folderId, folder.string("name") ?: "Project", folder.string("path"))
+                                live += SearchFolder(peer, id, name, folderId, folder.string("name") ?: L10n.text("android.worksearchsheet.project.98595978"), folder.string("path"))
                             }
                         }.onFailure { missed += 1 }
                 }
@@ -169,23 +171,23 @@ fun WorkSearchSheet(
             Modifier.fillMaxWidth().fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(bottom = Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            Text("Search", style = TsType.title3.copy(fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
+            Text(L10n.text("common.search"), style = TsType.title3.copy(fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
             Text(
-                "Find a screen, a setting, or your work",
+                L10n.text("android.worksearchsheet.find_a_screen_a_setting_or_your_work.e15aaac3"),
                 style = TsType.subheadline,
                 color = colors.textSecondary,
             )
-            TsSearchField(prompt = "Search the app", query = query, onQueryChange = { query = it })
+            TsSearchField(prompt = L10n.text("android.worksearchsheet.search_the_app.ad908e74"), query = query, onQueryChange = { query = it })
             if (preparing) {
-                Text("Preparing folders…", style = TsType.subheadline, color = colors.textSecondary)
+                Text(L10n.text("android.worksearchsheet.preparing_folders.94aa8ea8"), style = TsType.subheadline, color = colors.textSecondary)
             }
             if (failure) {
-                Banner("Folders could not be read. Unlock this device and try again.", BannerSeverity.WARNING)
-                TsSecondaryButton(label = "Try again", small = true, onClick = { learn() })
+                Banner(L10n.text("android.worksearchsheet.folders_could_not_be_read_unlock_this_devi.e40774b9"), BannerSeverity.WARNING)
+                TsSecondaryButton(label = L10n.text("android.worksearchsheet.try_again.d8b8392e"), small = true, onClick = { learn() })
             }
             val matches = SearchPlaces.rank(query, places)
             if (matches.isNotEmpty()) {
-                SectionLabel("Screens and settings")
+                SectionLabel(L10n.text("android.worksearchsheet.screens_and_settings.f0586adb"))
                 matches.forEach { place ->
                     SearchPlaceRow(place) {
                         SearchPlaces.destinationOf(place) { peer -> machineIds[peer] }?.let(onOpen)
@@ -198,7 +200,7 @@ fun WorkSearchSheet(
                     (it.path?.contains(query, ignoreCase = true) == true)
             }.take(8)
             if (folderMatches.isNotEmpty()) {
-                SectionLabel("Projects")
+                SectionLabel(L10n.text("common.projects"))
                 folderMatches.forEach { folder ->
                     SearchFolderRow(folder) {
                         onOpen(SearchOpen.Folder(folder.hostId, folder.folderId))
@@ -207,16 +209,16 @@ fun WorkSearchSheet(
                 }
             }
             if (query.isNotBlank() && matches.isEmpty() && folderMatches.isEmpty() && !preparing) {
-                Text("Nothing found for \"$query\".", style = TsType.subheadline, color = colors.textSecondary)
+                Text(L10n.text("android.worksearchsheet.nothing_found_for_0.5e80d678", "${query}"), style = TsType.subheadline, color = colors.textSecondary)
             }
             Text(
-                "Saved conversation text is off. Search covers folder information kept on this device.",
+                L10n.text("android.worksearchsheet.saved_conversation_text_is_off_search_cove.38f2ad0a"),
                 style = TsType.caption,
                 color = colors.textSecondary,
             )
             if (unreachable > 0) {
                 Text(
-                    "Some machines could not be reached. Open a folder on one to verify its access.",
+                    L10n.text("android.worksearchsheet.some_machines_could_not_be_reached_open_a.ce7df8b3"),
                     style = TsType.caption,
                     color = colors.textSecondary,
                 )
