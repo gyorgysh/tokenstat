@@ -31,7 +31,6 @@ public sealed partial class MainWindow : Window
     private const double RailWidth = 56;
     private readonly ResizeHandle _paneResize = new();
     private readonly Border _railFooter = new() { Margin = new Thickness(4, 8, 4, 8) };
-    private bool _nativeBackdrop;
     private readonly Dictionary<string, Button> _pinnedNavigation = new();
     private readonly Frame _frame = new();
     /// <summary>
@@ -61,8 +60,6 @@ public sealed partial class MainWindow : Window
     private readonly SolidColorBrush _chromeBackground = new(Theme.Background);
     private readonly SolidColorBrush _chromeSidebar = new(Theme.Sidebar);
     private readonly SolidColorBrush _chromeBorder = new(Theme.Border);
-    private Windows.UI.ViewManagement.UISettings? _chromeSettings;
-    private Windows.UI.ViewManagement.AccessibilitySettings? _accessibilitySettings;
     private readonly NavigationViewItemHeader _globalHeader = new()
     {
         Content = "GLOBAL",
@@ -143,14 +140,11 @@ public sealed partial class MainWindow : Window
         };
         Closed += (_, _) => resizeSettled.Stop();
 
-        // Only the project pane exposes the system frost. Content and the
-        // navigation rail keep an opaque background.
-        try { SystemBackdrop = new DesktopAcrylicBackdrop(); _nativeBackdrop = true; }
-        catch { _nativeBackdrop = false; }
+        // Every shell surface uses the same opaque theme on Windows.
         RootGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(RailWidth) });
         RootGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         Grid.SetColumnSpan(AppTitleBar, 2);
-        RootGrid.Background = _nativeBackdrop ? new SolidColorBrush(Colors.Transparent) : _chromeBackground;
+        RootGrid.Background = _chromeBackground;
         TitlePaneSide.Background = _chromeSidebar;
         TitleContentSide.Background = _chromeBackground;
         _contentHost.Background = _chromeBackground;
@@ -170,10 +164,10 @@ public sealed partial class MainWindow : Window
         _nav.Loaded += (_, _) => StretchNavigationContent();
         _nav.ActualThemeChanged += (_, _) => StretchNavigationContent();
         _nav.IsSettingsVisible = false;
-        _nav.OpenPaneLength = 280;
+        _nav.OpenPaneLength = ShellWidths.Shared.Sidebar;
         _nav.CompactPaneLength = 0;
         _nav.IsPaneToggleButtonVisible = false;
-        _nav.PaneDisplayMode = NavigationViewPaneDisplayMode.Left;
+        _nav.PaneDisplayMode = NavigationViewPaneDisplayMode.Auto;
         _nav.IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed;
         _nav.Background = new SolidColorBrush(Colors.Transparent);
         _nav.Resources["NavigationViewDefaultPaneBackground"] = _chromeSidebar;
@@ -247,11 +241,13 @@ public sealed partial class MainWindow : Window
             _nav.OpenPaneLength = Math.Clamp(_nav.OpenPaneLength + drag.HorizontalChange, 240, 420);
             SyncPaneChrome();
         };
-        _paneResize.DoubleTapped += (_, _) => { _nav.OpenPaneLength = 280; SyncPaneChrome(); };
+        _paneResize.DragCompleted += (_, _) => { ShellWidths.Shared.RememberSidebar(_nav.OpenPaneLength); SyncInspectorFit(); };
+        _paneResize.DoubleTapped += (_, _) => { _nav.OpenPaneLength = ShellWidths.Default; ShellWidths.Shared.RememberSidebar(_nav.OpenPaneLength); SyncPaneChrome(); };
         _paneResize.KeyDown += (_, key) =>
         {
             if (key.Key is not (Windows.System.VirtualKey.Left or Windows.System.VirtualKey.Right)) return;
-            _nav.OpenPaneLength = Math.Clamp(_nav.OpenPaneLength + (key.Key == Windows.System.VirtualKey.Right ? 16 : -16), 240, 420);
+            _nav.OpenPaneLength = ShellWidths.BoundSidebar(_nav.OpenPaneLength + (key.Key == Windows.System.VirtualKey.Right ? 16 : -16));
+            ShellWidths.Shared.RememberSidebar(_nav.OpenPaneLength);
             SyncPaneChrome();
             key.Handled = true;
         };
@@ -260,22 +256,10 @@ public sealed partial class MainWindow : Window
         RootGrid.Children.Add(_paneResize);
         ApplyChromeColors();
         RootGrid.ActualThemeChanged += (_, _) => ApplyChromeColors();
-        try
-        {
-            _chromeSettings = new Windows.UI.ViewManagement.UISettings();
-            _accessibilitySettings = new Windows.UI.ViewManagement.AccessibilitySettings();
-            _chromeSettings.AdvancedEffectsEnabledChanged += OnAdvancedEffectsChanged;
-            _accessibilitySettings.HighContrastChanged += OnHighContrastChanged;
-            Closed += (_, _) =>
-            {
-                _chromeSettings.AdvancedEffectsEnabledChanged -= OnAdvancedEffectsChanged;
-                _accessibilitySettings.HighContrastChanged -= OnHighContrastChanged;
-            };
-        }
-        catch { /* Older systems keep the opaque fallback. */ }
         _contentHost.SizeChanged += (_, _) => SyncInspectorFit();
+        _inspectorHost.WidthChanged += SyncInspectorFit;
         // Keep the titlebar split on the pane edge when the pane collapses to
-        // its compact width. The display mode itself is fixed at Left.
+        // its compact width. Native adaptive mode floats it on narrow windows.
         _nav.RegisterPropertyChangedCallback(
             NavigationView.IsPaneOpenProperty,
             (_, _) => PaneStateChanged());
@@ -611,6 +595,7 @@ public sealed partial class MainWindow : Window
         var parent = new NavigationViewItem
         {
             Content = FolderLabel(name, git),
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Tag = "ws:" + id + ":Launcher",
             Icon = new SymbolIcon { Symbol = remote ? Symbol.Globe : Symbol.Folder },
             IsExpanded = _nav.IsPaneOpen,
@@ -620,6 +605,25 @@ public sealed partial class MainWindow : Window
             ToolTipService.SetToolTip(parent, path);
         }
         var menu = ContextMenus.Menu(parent);
+        async Task NewChat()
+        {
+            NavigateTo("ws:" + id + ":Chat");
+            if (WorkspaceTabs(id).ActivePage is ChatPage chat) await chat.BeginNewChatAsync();
+        }
+        ContextMenus.AddAsync(menu, "New chat", NewChat);
+        WorkPinMenu.Add(menu, id, "", name, name);
+        ContextMenus.AddAsync(menu, "Rename folder…", async () =>
+        {
+            var input = new TextBox { Text = name };
+            var dialog = new ContentDialog { Title = "Rename folder", Content = input, PrimaryButtonText = "Save", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary };
+            input.TextChanged += (_, _) => dialog.IsPrimaryButtonEnabled = input.Text.Trim().Length > 0;
+            if (await Chrome.ShowDialog(parent, dialog) != ContentDialogResult.Primary || input.Text.Trim().Length == 0) return;
+            await RemoteWorkspaces.CallWorkspaceAsync(id, "workspace.rename", new JsonObject { ["id"] = id, ["name"] = input.Text.Trim() });
+            var memory = await BrowserProjectMemory.ForAsync(id);
+            if (memory is not null) PinnedWorkStore.Shared.Rename(memory.Owner, "", input.Text.Trim());
+            if (remote) await RemoteWorkspaces.SweepAsync();
+            await TryLoadFoldersAsync(refresh: true);
+        });
         ContextMenus.Add(menu, "Open folder", () => NavigateTo("ws:" + id + ":Launcher"));
         ContextMenus.Copy(menu, "Copy path", () => path);
         if (Format.Flag(git, "isRepo"))
@@ -647,10 +651,22 @@ public sealed partial class MainWindow : Window
             try
             {
                 await RemoteWorkspaces.CallWorkspaceAsync(id, "workspace.remove", new JsonObject { ["id"] = id });
+                var memory = await BrowserProjectMemory.ForAsync(id);
+                if (memory is not null) PinnedWorkStore.Shared.Remove(memory.Owner, "");
                 await TryLoadFoldersAsync(refresh: true);
             }
             catch (Exception ex) { await Chrome.ShowDialog(parent, new ContentDialog { Title = "Could not remove folder", Content = ex.Message, CloseButtonText = "Close" }); }
         });
+        var heading = new Grid { ColumnSpacing = 2 };
+        heading.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        if (parent.Content is UIElement label) { parent.Content = null; heading.Children.Add(label); }
+        var compose = Buttons.ToolbarIcon(ActionIcon.Create, "New chat in " + name, async (_, _) => await NewChat());
+        Grid.SetColumn(compose, 1); heading.Children.Add(compose);
+        var more = ActionIconGlyph.MoreButton("Project actions", menu);
+        Grid.SetColumn(more, 2); heading.Children.Add(more);
+        parent.Content = heading;
         return parent;
     }
 
@@ -741,17 +757,20 @@ public sealed partial class MainWindow : Window
             _toolbarSource.ToolbarChanged -= OnToolbarChanged;
         }
         if (_deviceDetailsSource is not null) _deviceDetailsSource.DetailsRequested -= OnDeviceDetailsRequested;
-        _deviceDetailsSource = page as MachinesPage;
+        _deviceDetailsSource = page as IInspectorRequest;
         if (_deviceDetailsSource is not null) _deviceDetailsSource.DetailsRequested += OnDeviceDetailsRequested;
         _toolbarSource = page as IToolbarItems;
         if (_toolbarSource is not null)
         {
             _toolbarSource.ToolbarChanged += OnToolbarChanged;
         }
-        _deviceDetailsPopover?.Hide();
+        _inspectorPopover?.Hide();
         _frame.Content = page;
         _inspectorHost.RouteAllowsInspector = page is not AccountPage;
-        if (!_deviceDetailsInPopover)
+        _inspectorHost.MinimumContentWidth = (page as IInspectorContent)?.MinimumContentWidth ?? ShellWidths.ContentMinimum;
+        _inspectorHost.MinimumInspectorWidth = (page as IInspectorContent)?.MinimumInspectorWidth ?? ShellWidths.Minimum;
+        SyncInspectorFit();
+        if (!_inspectorInPopover)
             _inspectorHost.SetInspector((page as IInspectorContent)?.Inspector, page is WorkspaceTabsPage or HomePage);
         if (page is IScopeAware aware)
         {
@@ -762,39 +781,48 @@ public sealed partial class MainWindow : Window
     }
 
     private IToolbarItems? _toolbarSource;
-    private MachinesPage? _deviceDetailsSource;
-    private bool _deviceDetailsInPopover;
-    private Flyout? _deviceDetailsPopover;
+    private IInspectorRequest? _deviceDetailsSource;
+    private bool _inspectorInPopover;
+    private Flyout? _inspectorPopover;
 
     private void OnDeviceDetailsRequested()
     {
-        if (_deviceDetailsInPopover || _frame.Content is not MachinesPage page || page.Inspector is not UIElement detail) return;
+        _inspectorHost.MinimumContentWidth = (_frame.Content as IInspectorContent)?.MinimumContentWidth ?? ShellWidths.ContentMinimum;
+        _inspectorHost.MinimumInspectorWidth = (_frame.Content as IInspectorContent)?.MinimumInspectorWidth ?? ShellWidths.Minimum;
+        SyncInspectorFit();
         _inspectorHost.IsOpen = true;
-        if (_inspectorHost.FitsWidth)
-        {
-            _inspectorHost.Refresh();
-            RebuildToolbar();
-            return;
-        }
-        // Keep details reachable on narrow windows. A nonmodal native popover
-        // also leaves confirmation dialogs available to the device actions.
-        _deviceDetailsInPopover = true;
+        if (_inspectorHost.FitsWidth) { _inspectorHost.Refresh(); RebuildToolbar(); }
+        else ShowInspectorPopover();
+    }
+
+    private void ShowInspectorPopover()
+    {
+        if (_inspectorInPopover || _frame.Content is not Page page
+            || page is not IInspectorContent { Inspector: UIElement detail }) return;
+        _inspectorInPopover = true;
         _inspectorHost.SetInspector(null);
         var scroll = new ScrollViewer
         {
-            Content = detail, Width = Math.Min(360, Math.Max(240, _contentHost.ActualWidth - 64)),
+            Content = detail, Width = Math.Min(420, Math.Max(240, _contentHost.ActualWidth - 64)),
             MaxHeight = Math.Max(160, _contentHost.ActualHeight - 160),
         };
+        if (page is WorkspaceTabsPage)
+        {
+            scroll.Height = Math.Max(240, _contentHost.ActualHeight - 128);
+            scroll.VerticalScrollMode = ScrollMode.Disabled;
+            scroll.VerticalScrollBarVisibility = ScrollBarVisibility.Disabled;
+            scroll.VerticalContentAlignment = VerticalAlignment.Stretch;
+        }
         var body = new StackPanel { Spacing = Theme.SpaceM };
         var popover = new Flyout { Content = body };
-        _deviceDetailsPopover = popover;
+        _inspectorPopover = popover;
         body.Children.Add(Buttons.Secondary("Close details", ActionIcon.Back, (_, _) => popover.Hide(), small: true));
         body.Children.Add(scroll);
         void Restore()
         {
             scroll.Content = null;
-            _deviceDetailsInPopover = false;
-            _deviceDetailsPopover = null;
+            _inspectorInPopover = false;
+            _inspectorPopover = null;
             _inspectorHost.SetInspector((_frame.Content as IInspectorContent)?.Inspector, _frame.Content is WorkspaceTabsPage or HomePage);
             RebuildToolbar();
         }
@@ -807,7 +835,10 @@ public sealed partial class MainWindow : Window
     {
         DispatcherQueue.TryEnqueue(() =>
         {
-            if (!_deviceDetailsInPopover)
+            _inspectorHost.MinimumContentWidth = (_frame.Content as IInspectorContent)?.MinimumContentWidth ?? ShellWidths.ContentMinimum;
+            _inspectorHost.MinimumInspectorWidth = (_frame.Content as IInspectorContent)?.MinimumInspectorWidth ?? ShellWidths.Minimum;
+            SyncInspectorFit();
+            if (!_inspectorInPopover)
                 _inspectorHost.SetInspector((_frame.Content as IInspectorContent)?.Inspector, _frame.Content is WorkspaceTabsPage or HomePage);
             RebuildToolbar();
         });
@@ -843,7 +874,7 @@ public sealed partial class MainWindow : Window
         }
         trailing.Add(Buttons.ToolbarIcon(ActionIcon.Search, "Search work", (_, _) => OpenSearch()));
         if (content is IInspectorContent inspector && inspector.Inspector is not null
-            && _inspectorHost.RouteAllowsInspector && _inspectorHost.FitsWidth)
+            && _inspectorHost.RouteAllowsInspector)
         {
             // Last, nearest the edge it opens, like the Mac: the toggle is the
             // control beside the column it controls.
@@ -907,6 +938,7 @@ public sealed partial class MainWindow : Window
 
     private void ToggleInspector()
     {
+        if (!_inspectorHost.FitsWidth) { ShowInspectorPopover(); return; }
         _inspectorHost.IsOpen = !_inspectorHost.IsOpen;
         _inspectorHost.Refresh();
         RebuildToolbar();
@@ -918,7 +950,11 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void SyncInspectorFit()
     {
-        bool fits = _contentHost.ActualWidth <= 0 || _contentHost.ActualWidth >= InspectorHost.FitEdge;
+        var companionWidth = _inspectorHost.MinimumInspectorWidth > ShellWidths.Minimum
+            ? Math.Max(_inspectorHost.MinimumInspectorWidth, ShellWidths.Shared.Inspector) + 6 : 0;
+        _nav.ExpandedModeThresholdWidth = ShellWidths.Shared.Sidebar + _inspectorHost.MinimumContentWidth + companionWidth;
+        _nav.CompactModeThresholdWidth = _nav.ExpandedModeThresholdWidth - 1;
+        bool fits = _contentHost.ActualWidth <= 0 || _contentHost.ActualWidth >= _inspectorHost.RequiredWidth;
         if (fits == _inspectorHost.FitsWidth)
         {
             return;
@@ -1112,7 +1148,7 @@ public sealed partial class MainWindow : Window
             return section switch
             {
                 WorkspaceSection.Browser => new BrowserPage("", "127.0.0.1", 0, false,
-                    RemoteWorkspaces.TrySplit(id, out var browserPeer, out _) ? browserPeer : null),
+                    RemoteWorkspaces.TrySplit(id, out var browserPeer, out _) ? browserPeer : null, workspaceId: id),
                 WorkspaceSection.Files => new EditorPage(id),
                 WorkspaceSection.History => WorkspaceHistoryPage(id),
                 WorkspaceSection.Chat => new ChatPage(id),
@@ -1125,7 +1161,7 @@ public sealed partial class MainWindow : Window
         }
         return section switch
         {
-            WorkspaceSection.Browser => new BrowserPage("", "127.0.0.1", 0, false),
+            WorkspaceSection.Browser => new BrowserPage("", "127.0.0.1", 0, false, workspaceId: id),
             WorkspaceSection.Files => new EditorPage(id),
             WorkspaceSection.Notes => new NotesPage(id),
             WorkspaceSection.Workflows => new WorkflowsPage(id),
@@ -1636,27 +1672,20 @@ public sealed partial class MainWindow : Window
             if (chatsByFolder.TryGetValue(folderId, out var chats) && chats.Count > 0)
             {
                 var expanded = _liveChatExpanded.Contains(folderId);
-                if (!expanded
-                    && selectedTag is not null
-                    && LiveRoute.TrySplit(selectedTag, SidebarLive.ChatPrefix, out var selectedFolder, out var selectedId)
+                int? selectedIndex = null;
+                if (selectedTag is not null && LiveRoute.TrySplit(selectedTag, SidebarLive.ChatPrefix, out var selectedFolder, out var selectedId)
                     && selectedFolder == folderId)
                 {
-                    // The lit row must stay drawn: a selection past the first
-                    // five opens the list, like the Mac auto-expansion.
-                    var selectedIndex = chats.FindIndex(c => Format.Text(c, "id") == selectedId);
-                    if (selectedIndex >= SidebarLive.CollapsedChats)
-                    {
-                        expanded = true;
-                        _liveChatExpanded.Add(folderId);
-                    }
+                    var index = chats.FindIndex(chat => Format.Text(chat, "id") == selectedId);
+                    if (index >= 0) selectedIndex = index;
+                    if (index >= SidebarLive.CollapsedChats) expanded = true;
                 }
-                var shown = expanded
-                    ? Math.Min(chats.Count, SidebarLive.InlineChats)
-                    : Math.Min(chats.Count, SidebarLive.CollapsedChats);
-                for (var i = 0; i < shown; i++)
-                {
-                    desiredChats.Add(SidebarLive.ChatItem(folderId, chats[i]));
-                }
+                var window = ChatHistoryWindow.Visible(chats.Count, selectedIndex, expanded);
+                var shown = window.Count;
+                var folderName = RemoteWorkspaces.CachedFolder(folderId)?.Name
+                    ?? Format.Text(_localFolders.FirstOrDefault(folder => Format.Text(folder, "id") == folderId), "name", "Project");
+                for (var i = window.Start; i < window.Start + window.Count; i++)
+                    desiredChats.Add(SidebarLive.ChatItem(folderId, chats[i], folderName));
                 if (chats.Count > SidebarLive.CollapsedChats)
                 {
                     var label = expanded
@@ -1818,12 +1847,6 @@ public sealed partial class MainWindow : Window
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref uint value, int size);
 
-    private void OnAdvancedEffectsChanged(Windows.UI.ViewManagement.UISettings sender, object args) =>
-        DispatcherQueue.TryEnqueue(ApplyChromeColors);
-
-    private void OnHighContrastChanged(Windows.UI.ViewManagement.AccessibilitySettings sender, object args) =>
-        DispatcherQueue.TryEnqueue(ApplyChromeColors);
-
     /// <summary>
     /// Repaint every flat surface from the theme tokens. Runs once at launch
     /// and again whenever the system theme changes, so the window frame never
@@ -1835,13 +1858,7 @@ public sealed partial class MainWindow : Window
         Theme.WindowTheme = RootGrid.ActualTheme;
         Theme.InstallControlResources();
         _chromeBackground.Color = Theme.Background;
-        var sidebar = Theme.Sidebar;
-        bool effects = _nativeBackdrop;
-        try { effects &= (_chromeSettings ?? new Windows.UI.ViewManagement.UISettings()).AdvancedEffectsEnabled
-                && !(_accessibilitySettings ?? new Windows.UI.ViewManagement.AccessibilitySettings()).HighContrast; }
-        catch { effects = false; }
-        if (effects) sidebar.A = 190;
-        _chromeSidebar.Color = sidebar;
+        _chromeSidebar.Color = Theme.Sidebar;
         _chromeBorder.Color = Theme.Border;
         _inspectorHost.ApplyTheme();
         // The toolbar bakes its brushes at build time, like the pages do at
@@ -1862,6 +1879,7 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void SyncPaneChrome()
     {
+        SyncInspectorFit();
         SyncTitleBarSplit();
         _paneResize.Visibility = _nav.IsPaneOpen ? Visibility.Visible : Visibility.Collapsed;
         _paneResize.Margin = new Thickness(Math.Max(0, _nav.OpenPaneLength - 3), 0, 0, 0);

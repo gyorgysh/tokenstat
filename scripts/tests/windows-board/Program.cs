@@ -11,3 +11,12 @@ Check(TaskBoardOrder.InsertionIndex(cards, "a", "backlog") == 2, "Column whitesp
 Check(TaskBoardOrder.InsertionIndex(cards, "missing", "backlog") is null, "External text is not a task.");
 Check(TaskBoardOrder.InsertionIndex(cards, "a", "backlog", "missing") is null, "A stale anchor must not move the task.");
 Console.WriteLine("Board insertion tests passed.");
+
+var creationDraft = new TaskCreationDraft();
+creationDraft.Edited();
+var submittedDraft = creationDraft.Revision;
+if (!creationDraft.Accepts(submittedDraft)) throw new Exception("An unchanged task draft was not accepted");
+creationDraft.Edited();
+creationDraft.Edited(); // Replacing a draft with identical text still creates a newer edit.
+if (creationDraft.Accepts(submittedDraft)) throw new Exception("A delayed creation receipt cleared a newer task draft");
+Console.WriteLine("Task creation: delayed receipts preserve newer stage drafts");

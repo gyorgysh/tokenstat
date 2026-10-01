@@ -72,6 +72,13 @@ internal static class DeviceScopeNames
 internal interface IInspectorContent
 {
     UIElement? Inspector { get; }
+    double MinimumContentWidth => ShellWidths.ContentMinimum;
+    double MinimumInspectorWidth => ShellWidths.Minimum;
+}
+
+internal interface IInspectorRequest
+{
+    event Action? DetailsRequested;
 }
 
 /// <summary>
@@ -106,6 +113,11 @@ internal sealed class InspectorHost : Grid
     private readonly Border _rule;
     private readonly ResizeHandle _resizeHandle;
     private double _inspectorWidth = InspectorWidth;
+    private readonly ShellWidths _widths;
+    public double MinimumContentWidth { get; set; } = ShellWidths.ContentMinimum;
+    public double MinimumInspectorWidth { get; set; } = ShellWidths.Minimum;
+    public double RequiredWidth => MinimumContentWidth + 6 + Math.Max(MinimumInspectorWidth, _inspectorWidth);
+    public event Action? WidthChanged;
     private readonly Border _pane;
     private readonly ScrollViewer _scroller;
 
@@ -121,8 +133,10 @@ internal sealed class InspectorHost : Grid
     /// <summary>Whether the column is on screen right now.</summary>
     public bool IsInspectorVisible { get; private set; }
 
-    public InspectorHost()
+    public InspectorHost(ShellWidths? widths = null)
     {
+        _widths = widths ?? ShellWidths.Shared;
+        _inspectorWidth = _widths.Inspector;
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0) });
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0) });
@@ -137,15 +151,17 @@ internal sealed class InspectorHost : Grid
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_resizeHandle, "Resize details panel");
         _resizeHandle.DragDelta += (_, drag) =>
         {
-            _inspectorWidth = Math.Clamp(_inspectorWidth - drag.HorizontalChange, 240, Math.Min(480, Math.Max(240, ActualWidth - 420)));
+            _inspectorWidth = Math.Clamp(_inspectorWidth - drag.HorizontalChange, 240, Math.Min(480, Math.Max(240, ActualWidth - MinimumContentWidth - 6)));
             Refresh();
         };
-        _resizeHandle.DoubleTapped += (_, _) => { _inspectorWidth = InspectorWidth; Refresh(); };
+        _resizeHandle.DragCompleted += (_, _) => RememberWidth();
+        _resizeHandle.DoubleTapped += (_, _) => { _inspectorWidth = InspectorWidth; RememberWidth(); };
         _resizeHandle.KeyDown += (_, key) =>
         {
             if (key.Key is not (Windows.System.VirtualKey.Left or Windows.System.VirtualKey.Right)) return;
             _inspectorWidth = Math.Clamp(_inspectorWidth + (key.Key == Windows.System.VirtualKey.Left ? 16 : -16), 240, 480);
             Refresh();
+            RememberWidth();
             key.Handled = true;
         };
         Grid.SetColumn(_resizeHandle, 1);
@@ -159,6 +175,13 @@ internal sealed class InspectorHost : Grid
         SizeChanged += (_, _) => Refresh();
         Grid.SetColumn(_pane, 2);
         Children.Add(_pane);
+        Refresh();
+    }
+
+    private void RememberWidth()
+    {
+        _widths.RememberInspector(_inspectorWidth);
+        WidthChanged?.Invoke();
         Refresh();
     }
 
@@ -205,7 +228,7 @@ internal sealed class InspectorHost : Grid
         bool show = IsOpen && RouteAllowsInspector && FitsWidth && _scroller.Content is not null;
         IsInspectorVisible = show;
         ColumnDefinitions[1].Width = new GridLength(show ? 6 : 0);
-        var fittedWidth = ActualWidth > 0 ? Math.Min(_inspectorWidth, Math.Max(240, ActualWidth - 426)) : _inspectorWidth;
+        var fittedWidth = ActualWidth > 0 ? Math.Min(Math.Max(MinimumInspectorWidth, _inspectorWidth), Math.Max(MinimumInspectorWidth, ActualWidth - MinimumContentWidth - 6)) : Math.Max(MinimumInspectorWidth, _inspectorWidth);
         ColumnDefinitions[2].Width = new GridLength(show ? fittedWidth : 0);
         _resizeHandle.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         _rule.Visibility = show ? Visibility.Visible : Visibility.Collapsed;

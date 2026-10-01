@@ -21,7 +21,7 @@ namespace Tokenstat.Pages;
 /// scope picker, Refresh sits beside it, and a pinned day opens in
 /// the inspector column.
 /// </summary>
-internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarItems
+internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, IToolbarItems
 {
     private readonly StackPanel _sections = new() { Spacing = Theme.SpaceS };
     private readonly Dictionary<string, UIElement> _sectionViews = new();
@@ -113,11 +113,15 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
         RefreshInspector();
         Loaded += async (_, _) =>
         {
+            PinnedWorkStore.Shared.Changed += PinsChanged;
+            AppServices.AccountChanged += PinsAccountChanged;
+            await RefreshPinsAsync();
             if (!_hasContent && !_loading)
             {
                 await LoadAsync();
             }
         };
+        Unloaded += (_, _) => { PinnedWorkStore.Shared.Changed -= PinsChanged; AppServices.AccountChanged -= PinsAccountChanged; };
     }
 
     public event Action? ToolbarChanged { add { } remove { } }
@@ -445,6 +449,8 @@ internal sealed class HomePage : Page, IScopeAware, IInspectorContent, IToolbarI
             _root.Children.Add(SignInPrompt(signedIn));
         }
         _root.Children.Add(ProfileCard(account, calendar));
+        _root.Children.Add(_pinsHost);
+        await RefreshPinsAsync();
         _sections.Children.Clear();
         _sectionViews.Clear();
         if (_recent.Count > 0) _sectionViews["Continue"] = ContinueCard(_recent);

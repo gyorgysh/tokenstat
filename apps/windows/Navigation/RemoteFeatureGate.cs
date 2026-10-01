@@ -13,6 +13,7 @@ internal static class RemoteFeatureGate
 {
     public const int WorktreesMinProtocol = 24;
     public const int ChatMinProtocol = 4;
+    public const int ChatForkMinProtocol = 26;
     public const int PullsMinProtocol = 3;
     public const int FolderPickerMinProtocol = 7;
     public const int CloneRepositoryMinProtocol = 7;

@@ -12,6 +12,7 @@ internal sealed class WorkspaceTabStrip
     // A managed subclass is projected as Control and fails style validation.
     public TabView View { get; } = new();
     private readonly Dictionary<string, TabViewItem> _surfaces = new();
+    private ContentPresenter? _contentPresenter;
     public Action<TabViewItem>? CloseRequested { get; set; }
     public WorkspaceTabStrip()
     {
@@ -22,7 +23,13 @@ internal sealed class WorkspaceTabStrip
         View.HorizontalContentAlignment = HorizontalAlignment.Stretch;
         View.VerticalContentAlignment = VerticalAlignment.Stretch;
         View.Loaded += (_, _) => StretchContentPresenter();
-        View.ActualThemeChanged += (_, _) => StretchContentPresenter();
+        View.ActualThemeChanged += (_, _) => { _contentPresenter = null; StretchContentPresenter(); };
+        // Loaded can precede realization of the native content presenter.
+        // Finish the lookup on its first layout instead of leaving it at Top.
+        View.LayoutUpdated += (_, _) =>
+        {
+            if (_contentPresenter is null || !_contentPresenter.IsLoaded) StretchContentPresenter();
+        };
         View.IsAddTabButtonVisible = false;
         View.TabWidthMode = TabViewWidthMode.SizeToContent;
         View.Resources["TabViewBackground"] = Theme.TabStripBrush;
@@ -44,6 +51,7 @@ internal sealed class WorkspaceTabStrip
             {
                 presenter.HorizontalContentAlignment = HorizontalAlignment.Stretch;
                 presenter.VerticalContentAlignment = VerticalAlignment.Stretch;
+                _contentPresenter = presenter;
                 return;
             }
             for (var i = 0; i < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(node); i++)

@@ -958,6 +958,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             box.Items.Add(new ComboBoxItem { Content = value, Tag = value });
             if (value == current) box.SelectedIndex = box.Items.Count - 1;
         }
+        if (current.Length > 0 && box.SelectedIndex < 0)
+        {
+            box.Items.Add(new ComboBoxItem { Content = current, Tag = current });
+            box.SelectedIndex = box.Items.Count - 1;
+        }
         if (box.SelectedIndex < 0 && box.Items.Count > 0) box.SelectedIndex = 0;
         box.SelectionChanged += async (_, _) =>
         {

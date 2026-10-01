@@ -7,7 +7,7 @@ using Tokenstat.Navigation;
 namespace Tokenstat.Pages;
 
 /// <summary>One persistent desktop workbench per local or remote workspace.</summary>
-internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
+internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems, IInspectorRequest
 {
     private readonly WorkspaceTabStrip _tabStrip = new();
     private TabView _tabs => _tabStrip.View;
@@ -29,10 +29,10 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
         _create = section => { var page = create(section); page.Tag = this; return page; };
         _editor = new EditorPage(workspaceId, _tabs);
         _browser = new BrowserPage("", "127.0.0.1", 0, false,
-            RemoteWorkspaces.TrySplit(workspaceId, out var peer, out _) ? peer : null, _tabs);
+            RemoteWorkspaces.TrySplit(workspaceId, out var peer, out _) ? peer : null, _tabs, workspaceId);
         _inspector.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _inspector.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        var inspectorTabs = new Grid { Margin = new Thickness(8) };
+        var inspectorTabs = _inspectorTabs;
         foreach (var label in new[] { "Files", "Changes", "History", "Details" })
         {
             inspectorTabs.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -48,6 +48,7 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
             _inspectorButtons.Add(label, button);
             inspectorTabs.Children.Add(button);
         }
+        InitializeCompanion();
         _details.HorizontalContentAlignment = HorizontalAlignment.Stretch;
         _details.VerticalContentAlignment = VerticalAlignment.Stretch;
         _inspector.Children.Add(inspectorTabs);
@@ -77,6 +78,7 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
     {
         if (section == WorkspaceSection.Browser)
         {
+            if (_browser.ShowLastTab()) return;
             _browser.AddTab("", "127.0.0.1", 0, false,
                 RemoteWorkspaces.TrySplit(WorkspaceId, out var peer, out _) ? peer : null);
             return;
@@ -99,8 +101,15 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
         OpenSurface(key, "Terminal", () => new TerminalPage(WorkspaceId, sessionId));
     }
 
-    public void OpenBrowser(string url, string host, int port, bool unlisten, string? peer) =>
-        _browser.AddTab(url, host, port, unlisten, peer);
+    public void OpenBrowser(string url, string host, int port, bool unlisten, string? peer)
+    {
+        if (ActivePage is ChatPage)
+        {
+            CompanionBrowser.AddTab(url, host, port, unlisten, peer);
+            ShowCompanion("Browser");
+        }
+        else _browser.AddTab(url, host, port, unlisten, peer);
+    }
 
     public void OpenReview(string title, UIElement content)
     {
@@ -142,8 +151,10 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
     private object? ActiveSource => _tabs.SelectedItem is TabViewItem item
         ? _editor.Owns(item) ? _editor : _browser.Owns(item) ? _browser : ActivePage : null;
     public UIElement? Inspector => _inspector;
+    public double MinimumContentWidth => (ActiveSource as IInspectorContent)?.MinimumContentWidth ?? ShellWidths.ContentMinimum;
     public UIElement? ToolbarScope => (ActiveSource as IToolbarItems)?.ToolbarScope;
-    public IList<UIElement> ToolbarActions() => (ActiveSource as IToolbarItems)?.ToolbarActions() ?? new List<UIElement>();
+    public double MinimumInspectorWidth => _companion is null ? ShellWidths.Minimum : 320;
+    public IList<UIElement> ToolbarActions() => CompanionActions((ActiveSource as IToolbarItems)?.ToolbarActions() ?? new List<UIElement>());
     public event Action? ToolbarChanged;
     private void Changed()
     {
@@ -180,7 +191,10 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
         _toolbar = ActiveSource as IToolbarItems;
         if (_toolbar is not null) _toolbar.ToolbarChanged += Changed;
         if (_details.Content is ScrollViewer previous) previous.Content = null;
-        if (_inspectorTab is "Changes" or "History")
+        _inspectorTabs.Visibility = _companion is null ? Visibility.Visible : Visibility.Collapsed;
+        _companionHeader.Visibility = _companion is null ? Visibility.Collapsed : Visibility.Visible;
+        if (_companion is not null) _details.Content = _companion == "Browser" ? CompanionBrowser : CompanionTerminal;
+        else if (_inspectorTab is "Changes" or "History")
         {
             if (!_inspectorPages.TryGetValue(_inspectorTab, out var page))
             {
@@ -194,8 +208,8 @@ internal sealed class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems
             _details.Content = _inspectorTab == "Details" || (filesPage && _inspectorTab == "Files")
                 ? new ScrollViewer { Content = (ActiveSource as IInspectorContent)?.Inspector } : null;
         }
-        _details.Visibility = _inspectorTab == "Files" && !filesPage ? Visibility.Collapsed : Visibility.Visible;
-        _editor.FileTree.Visibility = filesPage || _inspectorTab == "Files" ? Visibility.Visible : Visibility.Collapsed;
+        _details.Visibility = _companion is null && _inspectorTab == "Files" && !filesPage ? Visibility.Collapsed : Visibility.Visible;
+        _editor.FileTree.Visibility = filesPage || _companion is null && _inspectorTab == "Files" ? Visibility.Visible : Visibility.Collapsed;
         foreach (var (label, button) in _inspectorButtons)
         {
             button.Background = label == _inspectorTab ? Theme.Brush(static () => Theme.RowSelected) : Theme.PanelBrush;

@@ -7,6 +7,7 @@
 
 using System.Diagnostics;
 using System.Text.Json.Nodes;
+using Microsoft.Web.WebView2.Core;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -26,6 +27,7 @@ namespace Tokenstat.Pages;
 internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string? _peer;
+    private readonly string? _workspaceId;
     private readonly bool _sharedTabs;
     private readonly TabView _tabs = new()
     {
@@ -38,9 +40,10 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         Padding = new Thickness(Theme.SpaceM),
     };
 
-    public BrowserPage(string url, string host, int port, bool unlisten, string? peer = null, TabView? workspaceTabs = null)
+    public BrowserPage(string url, string host, int port, bool unlisten, string? peer = null, TabView? workspaceTabs = null, string? workspaceId = null)
     {
         _peer = peer;
+        _workspaceId = workspaceId;
         _sharedTabs = workspaceTabs is not null;
         if (workspaceTabs is not null) _tabs = workspaceTabs;
         if (!_sharedTabs) _tabs.AddTabButtonClick += (_, _) => AddTab("", "127.0.0.1", 0, false, peer);
@@ -140,6 +143,14 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         }
     }
 
+    internal bool ShowLastTab()
+    {
+        var last = _tabs.TabItems.OfType<TabViewItem>().LastOrDefault(item => item.Tag is BrowserTab);
+        if (last is null) return false;
+        _tabs.SelectedItem = last;
+        return true;
+    }
+
     internal bool Owns(TabViewItem item) => item.Tag is BrowserTab;
 
     private BrowserTab? CurrentTab() =>
@@ -147,7 +158,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
 
     internal void AddTab(string url, string host, int port, bool unlisten, string? peer = null)
     {
-        var tab = new BrowserTab(this, url, host, port, unlisten, peer, CloseRequested);
+        var tab = new BrowserTab(this, url, host, port, unlisten, peer, CloseRequested, _workspaceId);
         var item = new TabViewItem
         {
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
@@ -225,14 +236,25 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         private readonly Button _reload;
         private readonly Grid _empty;
         private readonly Page _owner;
+        private readonly string? _workspaceId;
+        private readonly Action<BrowserTab> _closeTab;
+        private readonly MenuFlyout _recentMenu = new();
+        private int _recentGeneration;
 
         private string _loadedUrl;
         private string _host;
         private int _port;
         private readonly string _peer;
         private readonly bool _unlisten;
-        private readonly Dictionary<(string Host, int Port), string> _bridges = new();
+        private readonly string _initialUrl;
+        private readonly BrowserRouteState _routes = new();
+        private readonly OperationEpoch _navigationEpoch = new();
+        private readonly OperationEpoch.Operation _initialOperation;
         private readonly SemaphoreSlim _navigationGate = new(1, 1);
+        private long _documentGeneration;
+        private long _startedNavigationEpoch;
+        private ulong _navigationId;
+        private bool _resourceFilterInstalled;
         private bool _closed;
         private bool _started;
 
@@ -245,13 +267,10 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         private string DisplayUrl(string actual)
         {
             if (!Uri.TryCreate(actual, UriKind.Absolute, out var uri)) return actual;
-            foreach (var bridge in _bridges)
-            {
-                var local = new Uri(bridge.Value);
-                if (uri.Host == local.Host && uri.Port == local.Port)
-                    return new UriBuilder(uri) { Host = bridge.Key.Host, Port = bridge.Key.Port }.Uri.AbsoluteUri;
-            }
-            return actual;
+            if (_unlisten && Uri.TryCreate(_initialUrl, UriKind.Absolute, out var initial)
+                && uri.Host == initial.Host && uri.Port == initial.Port)
+                return new UriBuilder(uri) { Host = _host, Port = _port }.Uri.AbsoluteUri;
+            return _routes.Display(actual);
         }
 
         public void Reload()
@@ -259,11 +278,12 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             if (_closed) return;
             if (_web.CoreWebView2 is null)
             {
-                _ = NavigateAsync(_loadedUrl);
+                _ = CommitAsync(DisplayUrl(_loadedUrl));
                 return;
             }
             try
             {
+                _navigationEpoch.Advance();
                 _web.Reload();
             }
             catch (Exception ex)
@@ -293,14 +313,20 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             }
         }
 
-        public BrowserTab(Page owner, string url, string host, int port, bool unlisten, string? peer, Action<BrowserTab> close)
+        public BrowserTab(Page owner, string url, string host, int port, bool unlisten, string? peer, Action<BrowserTab> close, string? workspaceId)
         {
             _owner = owner;
+            _workspaceId = workspaceId;
+            _closeTab = close;
             _loadedUrl = url ?? "";
             _host = host ?? "127.0.0.1";
             _port = port;
             _peer = peer ?? "";
             _unlisten = unlisten;
+            _initialUrl = _loadedUrl;
+            _initialOperation = BrowserProjectMemory.AccountEpoch.Capture(() => _closed || _navigationEpoch.Revision != 0);
+            _documentGeneration = _initialOperation.Revision;
+            AppServices.AccountChanged += OnAccountChanged;
             _address.Text = _loadedUrl;
 
             _back = ActionIconGlyph.Button("Back", ActionIcon.Back, (_, _) =>
@@ -309,6 +335,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 {
                     if (_web.CanGoBack)
                     {
+                        _navigationEpoch.Advance();
                         _web.GoBack();
                     }
                 }
@@ -323,6 +350,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 {
                     if (_web.CanGoForward)
                     {
+                        _navigationEpoch.Advance();
                         _web.GoForward();
                     }
                 }
@@ -334,20 +362,9 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             _reload = ActionIconGlyph.Button("Reload", ActionIcon.Refresh, (_, _) => Reload());
 
             var go = ActionIconGlyph.Button("Go", ActionIcon.Next, async (_, _) => await CommitAsync(_address.Text));
-            var external = ActionIconGlyph.Button("Open in default browser", ActionIcon.External, (_, _) =>
-            {
-                try
-                {
-                    if (Uri.TryCreate(_loadedUrl, UriKind.Absolute, out var uri))
-                    {
-                        Process.Start(new ProcessStartInfo { FileName = uri.AbsoluteUri, UseShellExecute = true });
-                    }
-                }
-                catch
-                {
-                }
-            });
-            var shut = ActionIconGlyph.Button("Close", ActionIcon.Done, (_, _) => close(this));
+            var recent = ActionIconGlyph.Button("Browser actions and recent previews", ActionIcon.More, (_, _) => { });
+            recent.Flyout = _recentMenu;
+            _recentMenu.Opening += async (_, _) => await RefreshRecentAsync(prefill: false);
             _address.KeyDown += async (_, e) =>
             {
                 if (e.Key == VirtualKey.Enter)
@@ -363,7 +380,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 Padding = new Thickness(Theme.SpaceS),
                 VerticalAlignment = VerticalAlignment.Center,
             };
-            foreach (var control in new FrameworkElement[] { _back, _forward, _reload, _spinner, _address, go, external, shut })
+            foreach (var control in new FrameworkElement[] { _back, _forward, _reload, _spinner, _address, go, recent })
             {
                 chrome.ColumnDefinitions.Add(new ColumnDefinition { Width = control == _address ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
                 Grid.SetColumn(control, chrome.ColumnDefinitions.Count - 1);
@@ -383,8 +400,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             chrome.Children.Add(_spinner);
             chrome.Children.Add(_address);
             chrome.Children.Add(go);
-            chrome.Children.Add(external);
-            chrome.Children.Add(shut);
+            chrome.Children.Add(recent);
 
             _empty = new Grid
             {
@@ -408,9 +424,17 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             _view.Children.Add(_web);
             _view.Children.Add(_empty);
 
-            _web.NavigationStarting += (_, args) => SetLoading(true);
+            _web.NavigationStarting += (_, args) =>
+            {
+                if (args.IsUserInitiated && !args.IsRedirected) _navigationEpoch.Advance();
+                _startedNavigationEpoch = _navigationEpoch.Revision;
+                _navigationId = args.NavigationId;
+                SetLoading(true);
+            };
             _web.NavigationCompleted += (_, args) =>
             {
+                if (_closed || _documentGeneration != BrowserProjectMemory.AccountEpoch.Revision
+                    || _startedNavigationEpoch != _navigationEpoch.Revision || args.NavigationId != _navigationId) return;
                 SetLoading(false);
                 RefreshHistory();
                 if (!args.IsSuccess)
@@ -467,11 +491,37 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 return;
             }
             _started = true;
+            await RefreshRecentAsync(prefill: true);
+            if (!_initialOperation.IsCurrent) return;
             if (string.IsNullOrWhiteSpace(_loadedUrl))
             {
                 return;
             }
-            await NavigateAsync(_loadedUrl);
+            if (!_unlisten && _peer.Length > 0 && Uri.TryCreate(_loadedUrl, UriKind.Absolute, out var target) && IsLoopback(target))
+                await CommitAsync(_loadedUrl);
+            else await NavigateAsync(_loadedUrl, _initialOperation);
+        }
+
+        private async Task RefreshRecentAsync(bool prefill)
+        {
+            if (_closed) return;
+            var generation = ++_recentGeneration;
+            _recentMenu.Items.Clear();
+            ContextMenus.Add(_recentMenu, "Open in default browser", () =>
+            {
+                try { if (Uri.TryCreate(_loadedUrl, UriKind.Absolute, out var uri)) Process.Start(new ProcessStartInfo { FileName = uri.AbsoluteUri, UseShellExecute = true }); }
+                catch (Exception ex) { Banner(ex.Message); }
+            }).IsEnabled = _loadedUrl.Length > 0;
+            ContextMenus.Add(_recentMenu, "Close tab", () => _closeTab(this));
+            _recentMenu.Items.Add(new MenuFlyoutSeparator());
+            var memory = _workspaceId is null ? null : await BrowserProjectMemory.ForAsync(_workspaceId);
+            if (_closed || generation != _recentGeneration) return;
+            var targets = memory?.Targets ?? [];
+            if (prefill && _loadedUrl.Length == 0 && _address.Text.Length == 0 && targets.Count > 0)
+                _address.Text = targets[0];
+            foreach (var target in targets)
+                ContextMenus.Add(_recentMenu, target, () => { _address.Text = target; _address.Focus(FocusState.Programmatic); });
+            if (targets.Count == 0) _recentMenu.Items.Add(new MenuFlyoutItem { Text = "No recent previews", IsEnabled = false });
         }
 
         /// <summary>
@@ -482,14 +532,31 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         /// </summary>
         private async Task CommitAsync(string raw)
         {
+            // Capture before the semaphore: a queued click belongs to its original account.
+            _navigationEpoch.Advance();
+            var navigation = _navigationEpoch.Revision;
+            var operation = BrowserProjectMemory.AccountEpoch.Capture(() => _closed || navigation != _navigationEpoch.Revision);
             await _navigationGate.WaitAsync();
-            try { if (!_closed) await CommitCoreAsync(raw); }
+            try
+            {
+                if (!operation.IsCurrent) return;
+                var memory = _workspaceId is null ? null : await BrowserProjectMemory.ForAsync(_workspaceId);
+                if (!operation.IsCurrent) return;
+                await CommitCoreAsync(raw, operation, memory);
+            }
             finally { _navigationGate.Release(); }
         }
 
-        private async Task CommitCoreAsync(string raw)
+        private async Task CommitCoreAsync(string raw, OperationEpoch.Operation operation, BrowserProjectMemory? memory)
         {
-            var candidate = (raw ?? "").Trim();
+            var input = (raw ?? "").Trim();
+            var canonical = BrowserHistory.CanonicalTarget(input);
+            if (canonical is null && input.Length > 0 && input.All(char.IsDigit))
+            {
+                Banner("Enter a port between 1 and 65535.");
+                return;
+            }
+            var candidate = canonical ?? input;
             if (candidate.Length == 0)
             {
                 return;
@@ -533,29 +600,46 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             {
                 try
                 {
-                    var target = (Host: url.Host, Port: url.Port);
-                    if (!_bridges.TryGetValue(target, out var local))
-                    {
-                        local = await BrowserBridges.AcquireAsync(_peer, target.Host, target.Port);
-                        if (_closed)
-                        {
-                            await BrowserBridges.ReleaseAsync(_peer, target.Host, target.Port);
-                            return;
-                        }
-                        _bridges[target] = local;
-                    }
-                    var destination = new UriBuilder(new Uri(new Uri(local), url.PathAndQuery + url.Fragment)) { Scheme = url.Scheme };
-                    await NavigateAsync(destination.Uri.AbsoluteUri);
+                    var lease = await SwitchBridgeAsync(url.Host, url.Port, operation);
+                    if (lease is null || !operation.IsCurrent) return;
+                    memory?.Remember(url.AbsoluteUri);
+                    await NavigateAsync(BrowserRouteState.Through(lease, url), operation);
                 }
-                catch (Exception ex) { Banner(ex.Message); }
+                catch (Exception ex) { if (operation.IsCurrent) Banner(ex.Message); }
                 return;
             }
-            await NavigateAsync(url.AbsoluteUri);
+            await RetireBridgeAsync();
+            if (!operation.IsCurrent) return;
+            memory?.Remember(url.AbsoluteUri);
+            await NavigateAsync(url.AbsoluteUri, operation);
         }
 
-        private async Task NavigateAsync(string url)
+        private async Task<BrowserRouteState.Lease?> SwitchBridgeAsync(string host, int port, OperationEpoch.Operation operation)
         {
-            if (_closed || string.IsNullOrWhiteSpace(url)) return;
+            if (!operation.IsCurrent) return null;
+            if (_routes.Active is { } existing && existing.Generation == operation.Revision
+                && existing.Host.Equals(host, StringComparison.OrdinalIgnoreCase) && existing.Port == port) return existing;
+            // Retire before listen, so even sixteen open tabs can each change their target.
+            await RetireBridgeAsync();
+            var local = await operation.AcquireAsync(
+                () => BrowserBridges.AcquireAsync(_peer, host, port, operation.Revision),
+                () => BrowserBridges.ReleaseAsync(_peer, host, port, operation.Revision));
+            if (local is null) return null;
+            var lease = new BrowserRouteState.Lease(host, port, operation.Revision, local);
+            _routes.Activate(lease);
+            return lease;
+        }
+
+        private async Task RetireBridgeAsync()
+        {
+            if (_routes.Retire() is { } lease)
+                await BrowserBridges.ReleaseAsync(_peer, lease.Host, lease.Port, lease.Generation);
+        }
+
+        private async Task NavigateAsync(string url, OperationEpoch.Operation operation)
+        {
+            if (!operation.IsCurrent || string.IsNullOrWhiteSpace(url)) return;
+            _documentGeneration = operation.Revision;
             _loadedUrl = url;
             _address.Text = DisplayUrl(url);
             _status.Children.Clear();
@@ -565,12 +649,13 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             try
             {
                 await _web.EnsureCoreWebView2Async();
-                if (_closed || _loadedUrl != url) return;
+                if (!operation.IsCurrent || _loadedUrl != url) return;
+                InstallResourceFilter();
                 _web.Source = new Uri(url);
             }
             catch (Exception ex)
             {
-                if (_closed || _loadedUrl != url) return;
+                if (!operation.IsCurrent || _loadedUrl != url) return;
                 SetLoading(false);
                 if (_web.CoreWebView2 is null)
                 {
@@ -581,6 +666,92 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                     Banner(FriendlyError.Display(ex.Message));
                 }
             }
+        }
+
+        private void InstallResourceFilter()
+        {
+            if (_resourceFilterInstalled || _peer.Length == 0 || _web.CoreWebView2 is not { } core) return;
+            // Include frames and workers. Shared worker requests are raised on every
+            // WebView in an environment, so they use the pool's live listener set.
+            core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All, CoreWebView2WebResourceRequestSourceKinds.All);
+            core.FrameNavigationStarting += (_, args) =>
+            {
+                if (_closed || _documentGeneration != BrowserProjectMemory.AccountEpoch.Revision
+                    || Uri.TryCreate(args.Uri, UriKind.Absolute, out var uri) && !_routes.AllowsFrame(uri, _documentGeneration))
+                    args.Cancel = true;
+            };
+            core.WebResourceRequested += async (_, args) =>
+            {
+                if (!Uri.TryCreate(args.Request.Uri, UriKind.Absolute, out var uri)) return;
+                var navigation = _navigationEpoch.Revision;
+                var operation = BrowserProjectMemory.AccountEpoch.Capture(() => _closed || navigation != _navigationEpoch.Revision);
+                var destination = args.Request.Headers.Contains("Sec-Fetch-Dest") ? args.Request.Headers.GetHeader("Sec-Fetch-Dest") : null;
+                var topLevel = BrowserRouteState.IsTopLevelDocument(args.ResourceContext == CoreWebView2WebResourceContext.Document, destination);
+                var worker = (args.RequestedSourceKind & (CoreWebView2WebResourceRequestSourceKinds.SharedWorker | CoreWebView2WebResourceRequestSourceKinds.ServiceWorker)) != 0;
+                var action = !operation.IsCurrent ? BrowserRouteState.RequestAction.Block
+                    : worker ? BrowserRouteState.WorkerRequest(uri, BrowserBridges.IsCurrentListener(uri))
+                    : _documentGeneration == operation.Revision ? _routes.Request(uri, args.Request.Method, topLevel, operation.Revision)
+                    : BrowserRouteState.RequestAction.Block;
+                if (action == BrowserRouteState.RequestAction.Pass) return;
+                // Refuse before rewriting too, so a failed WebView API call cannot
+                // send the original localhost request to this computer.
+                args.Response = core.Environment.CreateWebResourceResponse(null, 403, "Remote preview address unavailable", "Content-Length: 0\r\n");
+                if (action == BrowserRouteState.RequestAction.Rewrite && _routes.Active is { } active)
+                {
+                    // Preserve the request method and body, including forms and subresources.
+                    try { args.Request.Uri = BrowserRouteState.Through(active, uri); args.Response = null; }
+                    catch (Exception ex) { if (operation.IsCurrent) Banner(FriendlyError.Display(ex.Message)); }
+                    return;
+                }
+                // Default to refusal before awaiting anything. An unmapped remote localhost
+                // request must never fall through to a service on this Windows computer.
+                if (action != BrowserRouteState.RequestAction.Reopen) return;
+                var deferral = args.GetDeferral();
+                await _navigationGate.WaitAsync();
+                try
+                {
+                    if (!operation.IsCurrent || _documentGeneration != operation.Revision) return;
+                    var historical = _routes.Historical(uri, operation.Revision);
+                    if (historical is null) return;
+                    var lease = await SwitchBridgeAsync(historical.Host, historical.Port, operation);
+                    if (lease is null || !operation.IsCurrent) return;
+                    // A document redirect gives the page its new proxy origin, so its
+                    // relative requests follow the live listener after Back/Forward.
+                    args.Response = core.Environment.CreateWebResourceResponse(null, 302, "Preview listener refreshed",
+                        "Location: " + BrowserRouteState.Through(lease, uri) + "\r\nContent-Length: 0\r\n");
+                }
+                catch (Exception ex) { if (operation.IsCurrent) Banner(FriendlyError.Display(ex.Message)); }
+                finally { _navigationGate.Release(); deferral.Complete(); }
+            };
+            // A failed or unsupported runtime setup must keep Retry fail closed.
+            _resourceFilterInstalled = true;
+        }
+
+        private void OnAccountChanged()
+        {
+            var changedGeneration = BrowserProjectMemory.AccountEpoch.Revision;
+            _view.DispatcherQueue.TryEnqueue(async () =>
+            {
+                if (_closed) return;
+                if (_documentGeneration < changedGeneration)
+                {
+                    // Stop before waiting for an in-flight Open to release the navigation gate.
+                    try { _web.CoreWebView2?.Stop(); _web.CoreWebView2?.Navigate("about:blank"); } catch { }
+                    _loadedUrl = "";
+                    _address.Text = "";
+                    _empty.Visibility = Visibility.Visible;
+                    SetLoading(false);
+                    HeaderChanged?.Invoke(this);
+                }
+                await _navigationGate.WaitAsync();
+                try
+                {
+                    if (_routes.Active is { } active && active.Generation < changedGeneration) await RetireBridgeAsync();
+                    _routes.ForgetBefore(changedGeneration);
+                }
+                catch { /* Account invalidation also retires listeners in the shared pool. */ }
+                finally { _navigationGate.Release(); }
+            });
         }
 
         private void BrowserUnavailable(Exception error)
@@ -604,7 +775,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             actions.Children.Add(ActionIconGlyph.Button("Get WebView2", ActionIcon.Download,
                 (_, _) => OpenExternal("https://developer.microsoft.com/microsoft-edge/webview2/#download-section")));
             actions.Children.Add(ActionIconGlyph.Button("Retry", ActionIcon.Refresh,
-                async (_, _) => await NavigateAsync(_loadedUrl)));
+                async (_, _) => await CommitAsync(DisplayUrl(_loadedUrl))));
             actions.Children.Add(ActionIconGlyph.Button("Open in browser", ActionIcon.External,
                 (_, _) => OpenExternal(_loadedUrl)));
             _status.Children.Add(actions);
@@ -615,22 +786,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         /// </summary>
         private static bool IsLoopback(Uri url)
         {
-            if (url.IsLoopback) return true;
-            var host = (url.Host ?? "").ToLowerInvariant();
-            if (string.IsNullOrEmpty(host))
-            {
-                return false;
-            }
-            if (host == "localhost" || host == "::1" || host == "0.0.0.0")
-            {
-                return true;
-            }
-            var parts = host.Split('.');
-            if (parts.Length == 4 && parts[0] == "127" && parts.All(p => p.Length > 0 && p.All(char.IsDigit)))
-            {
-                return true;
-            }
-            return false;
+            return BrowserRouteState.IsLoopback(url);
         }
 
         public async Task CloseAsync()
@@ -640,6 +796,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 return;
             }
             _closed = true;
+            AppServices.AccountChanged -= OnAccountChanged;
             try
             {
                 _web.CoreWebView2?.Stop();
@@ -648,13 +805,11 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             catch
             {
             }
-            foreach (var target in _bridges.Keys.ToArray())
-            {
-                try { await BrowserBridges.ReleaseAsync(_peer ?? "", target.Host, target.Port); }
-                catch { /* Closing a tab must not throw. */ }
-            }
-            _bridges.Clear();
-            if (_unlisten)
+            await _navigationGate.WaitAsync();
+            try { await RetireBridgeAsync(); _routes.Reset(); }
+            catch { /* Closing a tab must not throw. */ }
+            finally { _navigationGate.Release(); }
+            if (_unlisten && _initialOperation.Revision == BrowserProjectMemory.AccountEpoch.Revision)
             {
                 try
                 {

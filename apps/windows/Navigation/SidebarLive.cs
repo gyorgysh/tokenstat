@@ -258,7 +258,7 @@ internal static class SidebarLive
     /// One recent conversation row: title, backend and age. Tapping opens the
     /// conversation in its folder chat, like the Mac sidebar row.
     /// </summary>
-    public static NavigationViewItem ChatItem(string folderId, JsonNode chat)
+    public static NavigationViewItem ChatItem(string folderId, JsonNode chat, string folderName = "Project")
     {
         var id = Format.Text(chat, "id");
         var title = Format.Text(chat, "title");
@@ -323,6 +323,34 @@ internal static class SidebarLive
         AutomationProperties.SetName(row, title + ". " + detail);
         ToolTipService.SetToolTip(row, title + " · " + backend);
         var menu = ContextMenus.Menu(row);
+        WorkPinMenu.Add(menu, folderId, id, title, folderName);
+        Task<JsonNode> Call(string method, JsonObject parameters) => RemoteWorkspaces.TrySplit(folderId, out var peer, out _)
+            ? RemoteWorkspaces.CallOnPeerAsync(peer, method, parameters) : AppServices.Host.CallAsync(method, parameters);
+        ContextMenus.AddAsync(menu, "Rename chat…", async () =>
+        {
+            var input = new TextBox { Text = title, PlaceholderText = "Chat name" };
+            var dialog = new ContentDialog { Title = "Rename chat", Content = input, PrimaryButtonText = "Save", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary };
+            input.TextChanged += (_, _) => dialog.IsPrimaryButtonEnabled = input.Text.Trim().Length > 0;
+            if (await Chrome.ShowDialog(menu.Target ?? row, dialog) != ContentDialogResult.Primary || input.Text.Trim().Length == 0) return;
+            await Call("chat.update", new JsonObject { ["id"] = id, ["title"] = input.Text.Trim() });
+            var memory = await BrowserProjectMemory.ForAsync(folderId);
+            if (memory is not null) PinnedWorkStore.Shared.Rename(memory.Owner, id, input.Text.Trim());
+        });
+        var fork = ContextMenus.AddAsync(menu, "Fork chat", async () =>
+        {
+            var protocol = RemoteWorkspaces.TrySplit(folderId, out var peer, out _)
+                ? await RemoteFeatureGate.PeerProtocolAsync(peer) : await WorkbenchOps.ProtocolAsync();
+            if (!RemoteFeatureGate.SupportsProtocol(protocol, RemoteFeatureGate.ChatForkMinProtocol))
+                throw new InvalidOperationException("Update the project's computer to fork chats.");
+            var copied = await Call("chat.fork", new JsonObject { ["id"] = id });
+            if (Format.Text(copied, "id") is { Length: > 0 } copiedId) AppServices.OpenConversation?.Invoke(folderId, copiedId);
+        }, () => !running);
+        menu.Opening += async (_, _) =>
+        {
+            var protocol = RemoteWorkspaces.TrySplit(folderId, out var peer, out _)
+                ? await RemoteFeatureGate.PeerProtocolAsync(peer) : await WorkbenchOps.ProtocolAsync();
+            fork.IsEnabled = !running && RemoteFeatureGate.SupportsProtocol(protocol, RemoteFeatureGate.ChatForkMinProtocol);
+        };
         ContextMenus.AddAsync(menu, "Remove chat…", async () =>
         {
             var owner = menu.Target ?? row;
@@ -333,6 +361,8 @@ internal static class SidebarLive
                 var parameters = new JsonObject { ["id"] = id };
                 if (RemoteWorkspaces.TrySplit(folderId, out var peer, out _)) await RemoteWorkspaces.CallOnPeerAsync(peer, "chat.remove", parameters);
                 else await AppServices.Host.CallAsync("chat.remove", parameters);
+                var memory = await BrowserProjectMemory.ForAsync(folderId);
+                if (memory is not null) PinnedWorkStore.Shared.Remove(memory.Owner, id);
             }
             catch (Exception ex) { await Chrome.ShowDialog(owner, new ContentDialog { Title = "Could not remove chat", Content = ex.Message, CloseButtonText = "Close" }); }
         });

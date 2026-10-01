@@ -83,6 +83,13 @@ Portable installer regression checks run without changing an installed app:
 dotnet run --project scripts/tests/windows-install/WindowsInstallTests.csproj
 ```
 
+Client state regressions run on any OS with the .NET 8 SDK. CI runs these
+alongside the native Windows checks:
+
+```bash
+bash scripts/run-windows-state-tests.sh
+```
+
 Native acceptance still requires Windows: publish, launch from an extracted
 zip, relaunch the installed copy, test update/rollback and uninstall, and
 check light/dark themes, keyboard navigation, window resizing, and 100%/150%/200%

@@ -49,6 +49,18 @@ public sealed partial class SmokeApp : Application
         InitializeComponent();
         UnhandledException += (_, e) => { Program.Result = 1; Program.Log(e.Exception.ToString()); e.Handled = true; Exit(); };
     }
+    private static async Task WaitForLayoutAsync(FrameworkElement root, Func<bool> ready, Func<string> diagnostics)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+        do
+        {
+            root.UpdateLayout();
+            if (ready()) { Program.Log(diagnostics()); return; }
+            await Task.Delay(30);
+        } while (DateTime.UtcNow < deadline);
+        throw new Exception(diagnostics());
+    }
+
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         Program.Log("Creating editor and player controls");
@@ -99,10 +111,11 @@ public sealed partial class SmokeApp : Application
                 workspaceTabs.Open("file:README.md", "README.md", () => throw new Exception("Existing document recreated"));
                 tabView.ApplyTemplate();
                 tabView.UpdateLayout();
-                await Task.Delay(250);
                 if (tabView.TabItems.Count != 2 || !ReferenceEquals(tabView.SelectedItem, document)
-                    || draft.Text != "Unsaved document" || draft.ActualWidth <= 0 || draft.ActualHeight < 90)
-                    throw new Exception("Workspace tabs lost selection, document content, or layout while switching");
+                    || draft.Text != "Unsaved document")
+                    throw new Exception($"Workspace tabs lost document state: tabs={tabView.TabItems.Count}, selected={ReferenceEquals(tabView.SelectedItem, document)}, text={draft.Text}");
+                await WaitForLayoutAsync(body, () => draft.ActualWidth > 0 && draft.ActualHeight >= 90,
+                    () => $"Workspace tab layout: view={tabView.ActualWidth:F1}×{tabView.ActualHeight:F1}, document={draft.ActualWidth:F1}×{draft.ActualHeight:F1}, loaded={draft.IsLoaded}, alignment={tabView.VerticalContentAlignment}");
                 workspaceTabs.Forget(document);
                 if (tabView.TabItems.Count != 1 || !ReferenceEquals(tabView.SelectedItem, launch))
                     throw new Exception("Closing a document did not return to the remaining workspace surface");

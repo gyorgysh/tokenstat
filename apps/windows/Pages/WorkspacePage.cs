@@ -154,7 +154,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     await LoadSessionsAsync();
                     break;
                 case WorkspaceSection.Browser:
-                    LoadBrowser();
+                    await LoadBrowserAsync();
                     break;
                 default:
                     if (RemoteWorkspaces.IsRemote(_id))
@@ -953,11 +953,13 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         _sessionsPoll = null;
     }
 
-    private void LoadBrowser()
+    private async Task LoadBrowserAsync()
     {
+        var memory = await BrowserProjectMemory.ForAsync(_id);
         var portBox = new TextBox
         {
             PlaceholderText = "Port",
+            Text = memory?.Targets.FirstOrDefault() is string savedTarget && Uri.TryCreate(savedTarget, UriKind.Absolute, out var last) ? last.Port.ToString() : "",
             MinWidth = 120,
         };
         var row = new StackPanel
@@ -970,6 +972,13 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         {
             await OpenPortAsync(portBox.Text);
         }));
+        if (memory?.Targets.Count > 0)
+        {
+            var recent = new MenuFlyout();
+            foreach (var target in memory.Targets)
+                ContextMenus.Add(recent, target, () => portBox.Text = new Uri(target).Port.ToString());
+            row.Children.Add(ActionIconGlyph.MoreButton("Recent ports", recent));
+        }
         _root.Children.Add(row);
         _root.Children.Add(new TextBlock
         {
@@ -983,6 +992,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
 
     private async Task OpenPortAsync(string raw)
     {
+        var operation = BrowserProjectMemory.AccountEpoch.Capture();
         if (!ushort.TryParse(raw.Trim(), out var port) || port == 0)
         {
             _root.Children.Insert(1, Chrome.Banner(
@@ -1002,52 +1012,13 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         }
 
         var host = "127.0.0.1";
-        var unlistens = false;
-        string? browserPeer = null;
-        var url = $"http://{host}:{port}/";
-        try
-        {
-            var parameters = new JsonObject
-            {
-                ["host"] = host,
-                ["port"] = port,
-            };
-            if (RemoteWorkspaces.TrySplit(_id, out var peerKey, out _))
-            {
-                // The dev server listens on the peer's own loopback. The
-                // bridge below binds one here and carries the bytes over.
-                browserPeer = peerKey;
-                parameters["peer"] = browserPeer;
-            }
-            var listened = await AppServices.Host.CallAsync("proxy.listen", parameters);
-            var returned = Format.Text(listened, "url");
-            if (!string.IsNullOrEmpty(returned))
-            {
-                url = returned;
-            }
-            unlistens = true;
-        }
-        catch (Exception ex)
-        {
-            if (RemoteWorkspaces.IsRemote(_id))
-            {
-                // The port is on the other machine: there is no local page
-                // to fall back to.
-                _root.Children.Insert(1, Chrome.Banner(
-                    FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important));
-                return;
-            }
-            var missingPeer = ex.Message.Contains("peer", StringComparison.OrdinalIgnoreCase)
-                || ex.Message.Contains("missing field", StringComparison.OrdinalIgnoreCase);
-            if (!missingPeer)
-            {
-                _root.Children.Insert(1, Chrome.Banner(
-                    ex.Message + " Opening the port directly on this PC.",
-                    Theme.Warning,
-                    Symbol.Important));
-            }
-        }
-        open(url, host, port, unlistens, browserPeer);
+        var browserPeer = RemoteWorkspaces.TrySplit(_id, out var peer, out _) ? peer : null;
+        var original = $"http://{host}:{port}/";
+        var memory = await BrowserProjectMemory.ForAsync(_id);
+        if (!operation.IsCurrent || memory is not null && !memory.IsCurrent) return;
+        if (browserPeer is null) memory?.Remember(original);
+        // BrowserTab acquires a reference-counted bridge from this original target.
+        open(original, host, port, false, browserPeer);
     }
 
     private async Task LoadTodoAsync()

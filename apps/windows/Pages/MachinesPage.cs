@@ -24,7 +24,7 @@ namespace Tokenstat.Pages;
 /// came here to do: decide about a machine that is knocking, then read this
 /// PC's own two words to compare with the other end, then add something new.
 /// </summary>
-internal sealed class MachinesPage : Page, IInspectorContent, IToolbarItems
+internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest, IToolbarItems
 {
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _inspectorRoot = new()

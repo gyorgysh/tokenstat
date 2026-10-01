@@ -16,6 +16,11 @@ internal sealed class ResizeHandle : UserControl
         add => _thumb.DragDelta += value;
         remove => _thumb.DragDelta -= value;
     }
+    public event DragCompletedEventHandler DragCompleted
+    {
+        add => _thumb.DragCompleted += value;
+        remove => _thumb.DragCompleted -= value;
+    }
     public ResizeHandle()
     {
         Width = 6;

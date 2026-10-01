@@ -20,12 +20,12 @@ namespace Tokenstat.Pages;
 /// host-level queue settings, live-first run history, and revision-checked
 /// saves with receipts on protocol 21 and later.
 /// </summary>
-internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
+internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string? _scopeWorkspaceId;
-    private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
+    private readonly Grid _root = new() { RowSpacing = Theme.SpaceM };
     private readonly StackPanel _bannerHost = new() { Spacing = Theme.SpaceS };
-    private readonly StackPanel _listHost = new() { Spacing = Theme.SpaceL };
+    private readonly Grid _listHost = new();
     private readonly StackPanel _detailHost = new()
     {
         Spacing = Theme.SpaceL,
@@ -46,9 +46,10 @@ internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
     private bool _working;
     private string? _selectedId;
     private bool _creating;
-    private JobDraft? _draft;
+    private readonly AutomationEditorState<JobDraft> _editorState = new();
+    private JobDraft? _draft { get => _editorState.Draft; set => _editorState.Draft = value; }
     private bool _detailDirty;
-    private ulong? _detailRevision;
+    private ulong? _detailRevision { get => _editorState.Revision; set => _editorState.Revision = value; }
     private string? _conflictId;
     private bool _confirmDelete;
     private string? _pendingCreateOp;
@@ -110,19 +111,26 @@ internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
         // Full width, like the Mac search box: a capped field stops halfway
         // across its column and leaves dead background beside itself.
         _searchBox.HorizontalAlignment = HorizontalAlignment.Stretch;
+        _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         _root.Children.Add(_bannerHost);
+        Grid.SetRow(_searchBox, 1);
         _root.Children.Add(_searchBox);
+        Grid.SetRow(_listHost, 2);
         _root.Children.Add(_listHost);
         // A wireframe until the first load lands. RenderList clears the host,
         // so real content replaces it, like Home's skeleton.
         _listHost.Children.Add(Motion.SkeletonCard());
-        Content = new ScrollViewer
-        {
-            Padding = new Thickness(Theme.SpaceM),
-            Content = _root,
-        };
+        Content = new Border { Padding = new Thickness(Theme.SpaceM), Child = _root };
         RenderDetail();
-        Loaded += async (_, _) => await LoadAsync();
+        Loaded += async (_, _) =>
+        {
+            var mounted = _tableMount.Capture();
+            await LoadAsync();
+            if (mounted.IsCurrent && IsLoaded) StartTablePolling();
+        };
+        Unloaded += (_, _) => { _tableMount.Advance(); StopTablePolling(); };
     }
 
     public event Action? ToolbarChanged;
@@ -148,24 +156,11 @@ internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
     /// stays live without the shell asking again.
     /// </summary>
     public UIElement? Inspector => _detailHost;
+    public double MinimumContentWidth => 640;
 
     public IList<UIElement> ToolbarActions()
     {
-        return new List<UIElement>
-        {
-            Buttons.ToolbarIcon(
-                ActionIcon.Refresh,
-                "Reload automations",
-                async (_, _) =>
-                {
-                    LogoRefresh.Began();
-                    await LoadAsync();
-                }),
-            Buttons.ToolbarIcon(
-                ActionIcon.Create,
-                "Schedule a job",
-                (_, _) => StartCreating()),
-        };
+        return TableToolbarActions();
     }
 
     private void RaiseToolbarChanged() => ToolbarChanged?.Invoke();
@@ -236,6 +231,8 @@ internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
 
     private async Task LoadAsync()
     {
+        SnapshotDraft();
+        _tableGeneration++;
         _working = true;
         try
         {
@@ -266,6 +263,8 @@ internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
                         obj["workspaceId"] = _scopeWorkspaceId;
                     }
                 }
+                foreach (var run in _runs.OfType<JsonObject>())
+                    if (Format.Text(run, "workspaceId") == inner) run["workspaceId"] = _scopeWorkspaceId;
                 // Folder choices must belong to the same host as the cards.
                 // Keep this page's selected folder in the shell namespace;
                 // other choices already carry the owning peer's native ids.
@@ -375,76 +374,12 @@ internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
             return true;
         }
         return Format.Text(job, "name").Contains(term, StringComparison.OrdinalIgnoreCase)
-            || Format.Text(job, "prompt").Contains(term, StringComparison.OrdinalIgnoreCase);
+            || Format.Text(job, "prompt").Contains(term, StringComparison.OrdinalIgnoreCase)
+            || Format.Text(job, "backend").Contains(term, StringComparison.OrdinalIgnoreCase)
+            || FolderLabel(Format.Text(job, "workspaceId")).Contains(term, StringComparison.OrdinalIgnoreCase);
     }
 
-    private void RenderList()
-    {
-        _listHost.Children.Clear();
-        _listHost.Children.Add(QueueCard());
-        var visible = new List<JsonNode?>();
-        foreach (var job in _jobs)
-        {
-            if (!Format.InWorkspace(job, _scopeWorkspaceId, includeUnscoped: true))
-            {
-                continue;
-            }
-            if (string.IsNullOrEmpty(Format.Text(job, "id")))
-            {
-                continue;
-            }
-            if (MatchesQuery(job))
-            {
-                visible.Add(job);
-            }
-        }
-        if (visible.Count == 0)
-        {
-            if (!string.IsNullOrEmpty(_query.Trim()))
-            {
-                _listHost.Children.Add(Chrome.Empty(
-                    "No matching automations",
-                    $"No job matches \"{_query.Trim()}\".",
-                    ActionIcon.Search,
-                    ActionIconGlyph.Button("Clear search", ActionIcon.Dismiss, (_, _) =>
-                    {
-                        _searchBox.Text = "";
-                    })));
-            }
-            else
-            {
-                _listHost.Children.Add(EmptyState.View(
-                    "No automations yet",
-                    "Scheduled jobs run on this computer when Always-on host is on.",
-                    EmptyArtKind.Automations,
-                    ActionIconGlyph.Button("New automation", ActionIcon.Create, (_, _) => StartCreating())));
-            }
-            return;
-        }
-        RenderSection("Active", visible.Where(job => Format.Flag(job, "enabled")).ToList());
-        RenderSection("Paused", visible.Where(job => !Format.Flag(job, "enabled")).ToList());
-    }
-
-    private void RenderSection(string title, List<JsonNode?> jobs)
-    {
-        if (jobs.Count == 0)
-        {
-            return;
-        }
-        var section = new StackPanel { Spacing = Theme.SpaceS };
-        section.Children.Add(Chrome.SectionLabel(title, jobs.Count));
-        var list = new StackPanel { Spacing = Theme.SpaceS };
-        foreach (var job in jobs)
-        {
-            if (job is null)
-            {
-                continue;
-            }
-            list.Children.Add(JobRow(job, Format.Text(job, "id")));
-        }
-        section.Children.Add(list);
-        _listHost.Children.Add(section);
-    }
+    private void RenderList() => RenderTableList();
 
     private UIElement QueueCard()
     {
@@ -516,120 +451,6 @@ internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
         row.Children.Add(save);
         body.Children.Add(row);
         return Chrome.Card("Scheduler", body, "Queue settings for this computer.");
-    }
-
-    private UIElement JobRow(JsonNode job, string id)
-    {
-        var name = Format.Text(job, "name", "Automation");
-        var enabled = Format.Flag(job, "enabled");
-        var cadence = Format.Cadence(job);
-        var body = new Grid { ColumnSpacing = Theme.SpaceM, RowSpacing = Theme.SpaceS };
-        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) });
-        body.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var title = new StackPanel { Spacing = Theme.SpaceXs, VerticalAlignment = VerticalAlignment.Center };
-        title.Children.Add(new TextBlock { Text = name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 });
-        if (_scopeWorkspaceId is null)
-            title.Children.Add(new TextBlock { Text = FolderLabel(Format.Text(job, "workspaceId")),
-                Opacity = 0.6, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 });
-        body.Children.Add(title);
-        var scheduleCell = new StackPanel { Spacing = Theme.SpaceXs, VerticalAlignment = VerticalAlignment.Center };
-        scheduleCell.Children.Add(new TextBlock { Text = cadence, TextWrapping = TextWrapping.Wrap, Opacity = 0.75 });
-        string nextText = "Paused";
-        if (enabled && job["nextRunAtMs"] is JsonValue next && next.TryGetValue<long>(out var nextMs) && nextMs > 0)
-            nextText = "Next: " + DateTimeOffset.FromUnixTimeMilliseconds(nextMs).ToLocalTime().ToString("g");
-        else if (enabled) nextText = "Scheduled";
-        scheduleCell.Children.Add(new TextBlock { Text = nextText, FontSize = 12, Opacity = 0.6,
-            TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 });
-        Grid.SetColumn(scheduleCell, 1);
-        body.Children.Add(scheduleCell);
-        var runningHere = JobRuns(id).Any(r => WorkbenchOps.IsRunning(r));
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        actions.Children.Add(ActionIconGlyph.Button(
-            enabled ? "Pause" : "Resume",
-            enabled ? ActionIcon.Dismiss : ActionIcon.Approve,
-            async (_, _) => await SetEnabledAsync(id, !enabled)));
-        var runButton = ActionIconGlyph.Button("Run", ActionIcon.Run, async (_, _) =>
-        {
-            await RunAsync(id);
-        });
-        runButton.IsEnabled = _pendingRunOp is null && !_working;
-        actions.Children.Add(runButton);
-        if (runningHere)
-        {
-            foreach (var run in JobRuns(id))
-            {
-                if (!WorkbenchOps.IsRunning(run))
-                {
-                    continue;
-                }
-                var runId = Format.Text(run, "id");
-                if (string.IsNullOrEmpty(runId))
-                {
-                    continue;
-                }
-                var liveId = runId;
-                actions.Children.Add(ActionIconGlyph.Button(
-                    "Stop", ActionIcon.Stop, async (_, _) => await KillAsync(liveId)));
-                break;
-            }
-        }
-        Grid.SetColumn(actions, 2);
-        body.Children.Add(actions);
-        body.SizeChanged += (_, e) =>
-        {
-            bool wide = e.NewSize.Width >= 760;
-            body.ColumnDefinitions[1].Width = wide ? new GridLength(200) : new GridLength(0);
-            Grid.SetRow(scheduleCell, wide ? 0 : 1);
-            Grid.SetColumn(scheduleCell, wide ? 1 : 0);
-            Grid.SetRow(actions, wide ? 0 : 2);
-            Grid.SetColumn(actions, wide ? 2 : 0);
-        };
-        var frame = new Border
-        {
-            Background = _selectedId == id ? Theme.AccentSoftBrush : new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
-            BorderThickness = new Thickness(0),
-            Padding = new Thickness(Theme.SpaceS),
-            CornerRadius = new CornerRadius(Theme.CardRadius),
-            Child = body,
-        };
-        var button = new Button
-        {
-            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
-            BorderThickness = new Thickness(0),
-            Padding = new Thickness(0),
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Content = frame,
-        };
-        void SelectRow()
-        {
-            _creating = false;
-            _selectedId = id;
-            _draft = null;
-            _detailDirty = false;
-            _detailRevision = WorkbenchOps.Revision(job);
-            _conflictId = null;
-            _confirmDelete = false;
-            _runError = null;
-            _historyShown = WorkbenchOps.RunPreviewCount;
-            RenderDetail();
-        }
-        button.Click += (_, _) => SelectRow();
-        var menu = ContextMenus.Menu(button);
-        ContextMenus.Add(menu, "Edit", SelectRow);
-        ContextMenus.AddButtons(menu, actions);
-        ContextMenus.Add(menu, "Delete…", () =>
-        {
-            SelectRow();
-            _confirmDelete = true;
-            RenderDetail();
-        });
-        return button;
     }
 
     private List<JsonNode?> JobRuns(string jobId)
@@ -765,6 +586,14 @@ internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
 
     private void RenderDetail()
     {
+        if (_showingRuns)
+        {
+            _detailHost.Children.Clear();
+            var selected = _runs.FirstOrDefault(run => Format.Text(run, "id") == _selectedRunId);
+            if (selected is not null) _detailHost.Children.Add(RunRow(selected));
+            else _detailHost.Children.Add(new TextBlock { Text = "Select a run to read its result and transcript.", TextWrapping = TextWrapping.Wrap });
+            return;
+        }
         if (!_detailDirty)
         {
             if (_creating)
@@ -773,8 +602,7 @@ internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
             }
             else if (SelectedJob() is JsonNode fresh)
             {
-                _detailRevision = WorkbenchOps.Revision(fresh);
-                _draft ??= DraftFromJob(fresh);
+                _editorState.Refresh(DraftFromJob(fresh), WorkbenchOps.Revision(fresh), _detailDirty);
             }
         }
         _detailHost.Children.Clear();
@@ -1290,10 +1118,6 @@ internal sealed class AutomationsPage : Page, IInspectorContent, IToolbarItems
                     _conflictId = id;
                     Banner("This job changed since you opened it. Compare the saved job before replacing it.");
                     await LoadAsync();
-                    if (SelectedJob() is JsonNode conflicted)
-                    {
-                        _detailRevision = WorkbenchOps.Revision(conflicted);
-                    }
                     RenderDetail();
                     return;
                 }

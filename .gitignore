@@ -138,3 +138,9 @@ xcuserdata/
 /scripts/tests/windows-devices/obj/
 /scripts/tests/windows-notes/bin/
 /scripts/tests/windows-notes/obj/
+
+# Portable client regression build outputs.
+/scripts/tests/windows-shell/bin/
+/scripts/tests/windows-shell/obj/
+/scripts/tests/windows-automations/bin/
+/scripts/tests/windows-automations/obj/

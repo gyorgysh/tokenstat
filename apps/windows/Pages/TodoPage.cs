@@ -55,6 +55,13 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     private bool _working;
     private string? _selectedId;
     private string? _pendingCreateOp;
+    private TextBox? _pendingCreateInput;
+    private readonly TaskCreationDraft _backlogCreation = new();
+    private readonly TaskCreationDraft _doingCreation = new();
+    private TaskCreationDraft? _pendingCreateDraft;
+    private long _pendingCreateRevision;
+    private readonly TextBox _doingTitle = new() { PlaceholderText = "New task", HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly Button _doingAdd;
     private string? _pendingRunOp;
     private string? _runError;
     private string? _conflictId;
@@ -99,6 +106,11 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     {
         _scopeWorkspaceId = workspaceId;
         _quickAdd = ActionIconGlyph.Button("Add", ActionIcon.Create, async (_, _) => await CreateAsync());
+        _doingAdd = ActionIconGlyph.Button("Add", ActionIcon.Create, async (_, _) => await CreateAsync(_doingTitle, "doing"));
+        _quickTitle.TextChanged += (_, _) => _backlogCreation.Edited();
+        _doingTitle.TextChanged += (_, _) => _doingCreation.Edited();
+        _quickTitle.KeyDown += async (_, key) => { if (key.Key == Windows.System.VirtualKey.Enter) { key.Handled = true; await CreateAsync(); } };
+        _doingTitle.KeyDown += async (_, key) => { if (key.Key == Windows.System.VirtualKey.Enter) { key.Handled = true; await CreateAsync(_doingTitle, "doing"); } };
 
         _attentionFilter.ItemsSource = new[] { "All tasks", "Running", "Needs attention", "High priority" };
         _attentionFilter.SelectedIndex = 0;
@@ -111,14 +123,6 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             RenderBoard();
         };
 
-        var quick = new Grid { ColumnSpacing = Theme.SpaceS };
-        quick.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        quick.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        Grid.SetColumn(_quickAdd, 1);
-        quick.Children.Add(_quickTitle);
-        quick.Children.Add(_quickAdd);
-
-        _root.Children.Add(quick);
         _root.Children.Add(FilterBar());
         _root.Children.Add(_bannerHost);
         _root.Children.Add(_boardHost);
@@ -145,6 +149,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     /// stays live without the shell asking again.
     /// </summary>
     public UIElement? Inspector => _detailHost;
+    public double MinimumContentWidth => 760;
 
     public event Action? ToolbarChanged;
 
@@ -189,7 +194,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         actions.Add(Buttons.ToolbarIcon(
             ActionIcon.Create,
             "Add a card to To Do",
-            (_, _) => _quickTitle.Focus(FocusState.Programmatic)));
+            (_, _) => FocusNewTask()));
         var sort = SegmentedCapsule.View(
             new List<(string Value, string Label, ActionIcon? Glyph)>
             {
@@ -601,14 +606,14 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     private void RenderBoard()
     {
         _boardHost.Children.Clear();
-        if (_cards.Count == 0)
+        if (_showArchive && _cards.Count == 0)
         {
             _boardHost.Children.Add(EmptyState.View(
                 _showArchive ? "No archived tasks" : "No tasks yet",
                 "Create a task or adjust the filters to see more work.",
                 EmptyArtKind.Tasks,
                 ActionIconGlyph.Button("New task", ActionIcon.Create, (_, _) =>
-                    _quickTitle.Focus(FocusState.Programmatic))));
+                    FocusNewTask())));
             return;
         }
         if (_showArchive)
@@ -674,6 +679,20 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             Text = $"{title} ({cards.Count})",
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
+        if (column is "backlog" or "doing")
+        {
+            var input = column == "backlog" ? _quickTitle : _doingTitle;
+            var add = column == "backlog" ? _quickAdd : _doingAdd;
+            if (input.Parent is Panel oldInput) oldInput.Children.Remove(input);
+            if (add.Parent is Panel oldAdd) oldAdd.Children.Remove(add);
+            var entry = new Grid { ColumnSpacing = Theme.SpaceXs };
+            entry.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            entry.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            Grid.SetColumn(add, 1);
+            entry.Children.Add(input); entry.Children.Add(add);
+            body.Children.Add(entry);
+            ToolTipService.SetToolTip(input, "New task in " + title);
+        }
         body.Children.Add(list);
         var frame = new Border
         {
@@ -802,22 +821,38 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         return _folders.FirstOrDefault(f => f.Id == workspaceId).Name ?? "Folder";
     }
 
-    private async Task CreateAsync()
+    private void FocusNewTask()
     {
-        var title = _quickTitle.Text.Trim();
-        if (title.Length == 0 || _working)
+        if (_showArchive) { _showArchive = false; RenderBoard(); RaiseToolbarChangedIfNeeded(); }
+        _quickTitle.Focus(FocusState.Programmatic);
+    }
+
+    private void ClearAcceptedCreate()
+    {
+        if (_pendingCreateInput is TextBox input && _pendingCreateDraft?.Accepts(_pendingCreateRevision) == true) input.Text = "";
+        _pendingCreateInput = null;
+        _pendingCreateDraft = null;
+    }
+
+    private async Task CreateAsync(TextBox? input = null, string column = "backlog")
+    {
+        input ??= _quickTitle;
+        var title = input.Text.Trim();
+        var draft = ReferenceEquals(input, _doingTitle) ? _doingCreation : _backlogCreation;
+        var submittedRevision = draft.Revision;
+        if (title.Length == 0 || _working || _pendingCreateOp is not null)
         {
             return;
         }
         _working = true;
-        _quickAdd.IsEnabled = false;
+        _quickAdd.IsEnabled = _doingAdd.IsEnabled = false;
         try
         {
             var folder = SelectedFolderId();
             var parameters = new JsonObject
             {
                 ["title"] = title,
-                ["column"] = "backlog",
+                ["column"] = column,
                 ["workspaceId"] = folder == "\0all" ? "" : folder,
                 ["budgetSeconds"] = _defaultBudgetSeconds,
             };
@@ -825,13 +860,16 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             {
                 // One operation id for the whole action. A lost answer is
                 // checked with creationReceipt, never repeated as a new task.
+                _pendingCreateInput = input;
+                _pendingCreateDraft = draft;
+                _pendingCreateRevision = submittedRevision;
                 _pendingCreateOp = WorkbenchOps.NewOperationId("task-create");
                 parameters["operationId"] = _pendingCreateOp;
                 try
                 {
                     await CallTodoAsync("todo.createOnce", parameters);
                     _pendingCreateOp = null;
-                    _quickTitle.Text = "";
+                    ClearAcceptedCreate();
                     Notice("Task added.");
                 }
                 catch (Exception ex)
@@ -844,7 +882,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             else
             {
                 await CallTodoAsync("todo.create", parameters);
-                _quickTitle.Text = "";
+                if (draft.Accepts(submittedRevision)) input.Text = "";
                 Notice("Task added.");
             }
         }
@@ -856,7 +894,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         finally
         {
             _working = false;
-            _quickAdd.IsEnabled = true;
+            _quickAdd.IsEnabled = _doingAdd.IsEnabled = true;
         }
         await LoadAsync(quiet: true);
         RenderBoard();
@@ -864,18 +902,19 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
 
     private async Task CheckCreationAsync()
     {
-        if (_pendingCreateOp is null)
+        if (_pendingCreateOp is not string operationId)
         {
             return;
         }
         try
         {
             var receipt = await CallTodoAsync(
-                "todo.creationReceipt", new JsonObject { ["operationId"] = _pendingCreateOp });
+                "todo.creationReceipt", new JsonObject { ["operationId"] = operationId });
+            if (_pendingCreateOp != operationId) return;
             if (receipt is JsonObject receiptObject && receiptObject.Count > 0)
             {
                 _pendingCreateOp = null;
-                _quickTitle.Text = "";
+                ClearAcceptedCreate();
                 Notice("Task added.");
                 await LoadAsync(quiet: true);
                 RenderBoard();
