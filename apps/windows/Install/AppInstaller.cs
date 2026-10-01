@@ -172,7 +172,7 @@ internal static class AppInstaller
         using var helperProcess = Process.Start(new ProcessStartInfo
         {
             FileName = "powershell.exe",
-            Arguments = L10n.Text("windows.appinstaller.noprofile_executionpolicy_bypass_file_0.7b39de3b", $"{helper}"),
+            Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{helper}\"",
             UseShellExecute = false,
             CreateNoWindow = true,
         }) ?? throw new Failure(L10n.Text("windows.appinstaller.could_not_start_the_update_helper_please_t.e9b2275b"));

@@ -32,7 +32,7 @@ extension AutomationTemplate {
             symbol: "heart.text.square",
             name: L10n.text("apple.automationtemplates.system_health_check.04b44a8a"),
             prompt: L10n.text("apple.automationtemplates.check_disk_memory_and_cpu_and_confirm_the.1eeb5edf"),
-            backendID: "sh",
+            backendID: "claude",
             schedule: AutomationSchedule(kind: .interval, everySeconds: 3600, hour: 0, minute: 0, weekday: 0),
             budgetSeconds: 120
         ),
@@ -42,7 +42,7 @@ extension AutomationTemplate {
             symbol: "shippingbox",
             name: L10n.text("apple.automationtemplates.dependency_check.cb31b5a0"),
             prompt: L10n.text("apple.automationtemplates.check_for_outdated_or_vulnerable_dependenc.12dfb6f0"),
-            backendID: "sh",
+            backendID: "claude",
             schedule: AutomationSchedule(kind: .weekly, hour: 9, minute: 0, weekday: 0),
             budgetSeconds: 900
         ),

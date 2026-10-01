@@ -49,8 +49,8 @@ internal sealed partial class AutomationsPage
         }));
         var templates = new MenuFlyout();
         AddTemplate(templates, L10n.Text("windows.automationspage_table.daily_brief.ba6a6869"), L10n.Text("windows.automationspage_table.summarise_yesterday_s_usage_and_flag_anyth.46ae43e4"), "claude", "daily", 600, 8);
-        AddTemplate(templates, L10n.Text("windows.automationspage_table.system_health_check.04b44a8a"), L10n.Text("windows.automationspage_table.check_disk_memory_and_cpu_and_confirm_the.1eeb5edf"), "sh", "interval", 120);
-        AddTemplate(templates, L10n.Text("windows.automationspage_table.dependency_check.cb31b5a0"), L10n.Text("windows.automationspage_table.dependency_prompt"), "sh", "weekly", 900);
+        AddTemplate(templates, L10n.Text("windows.automationspage_table.system_health_check.04b44a8a"), L10n.Text("windows.automationspage_table.check_disk_memory_and_cpu_and_confirm_the.1eeb5edf"), "claude", "interval", 120);
+        AddTemplate(templates, L10n.Text("windows.automationspage_table.dependency_check.cb31b5a0"), L10n.Text("windows.automationspage_table.dependency_prompt"), "claude", "weekly", 900);
         AddTemplate(templates, L10n.Text("windows.automationspage_table.weekday_standup.26dadcac"), L10n.Text("windows.automationspage_table.summarise_open_work_and_anything_that_bloc.52f7cb29"), "claude", "weekdays", 600);
         AddTemplate(templates, L10n.Text("windows.automationspage_table.release.e020e3c6"), ReleaseTemplate, "claude", "once", 1800);
         var templateButton = Buttons.ToolbarIcon(ActionIcon.Source, L10n.Text("windows.automationspage_table.templates.56b564b7"), (_, _) => { });

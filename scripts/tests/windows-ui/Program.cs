@@ -147,6 +147,51 @@ public sealed partial class SmokeApp : Application
                 terminal.Height = 200;
                 body.UpdateLayout();
                 Program.Log("PASS: production terminal renders VT colors, split UTF-8, direct input and fits a shrinking viewport");
+                // TextBlock identity cannot detect an emulator recreation.
+                // Keep the real WebView2, JavaScript heap, VT buffer and
+                // selection through both offscreen tabs and viewer moves.
+                await Task.Delay(150);
+                await web.ExecuteScriptAsync("window.tokenstatRetentionProbe = { marker: 'retained' }; terminal.select(0, 0, 3)");
+                var core = web.CoreWebView2;
+                body.Children.Remove(terminal);
+                var terminalTree = new Grid { Children = { terminal } };
+                var sharedTree = new SharedTerminalTree(terminalTree);
+                var mainViewer = new Page { Width = 640, Height = 200 };
+                var chatViewer = new Page { Width = 640, Height = 200 };
+                body.Children.Add(mainViewer); body.Children.Add(chatViewer);
+                sharedTree.Attach(mainViewer);
+                body.UpdateLayout();
+                await Task.Delay(150);
+                mainViewer.Visibility = Visibility.Collapsed;
+                body.UpdateLayout();
+                await Task.Delay(150);
+                mainViewer.Visibility = Visibility.Visible;
+                sharedTree.Attach(chatViewer);
+                sharedTree.Detach(mainViewer);
+                body.UpdateLayout();
+                await Task.Delay(150);
+                if (mainViewer.Content is not null || !ReferenceEquals(chatViewer.Content, terminalTree))
+                    throw new Exception("Moving a terminal beside chat duplicated its native parent");
+                // Bytes received while the tree is temporarily detached must
+                // reach the retained emulator instead of being dropped.
+                sharedTree.Detach(chatViewer);
+                terminal.Write(System.Text.Encoding.UTF8.GetBytes("\r\ndetached"));
+                sharedTree.Attach(mainViewer);
+                sharedTree.Detach(chatViewer);
+                body.UpdateLayout();
+                await Task.Delay(200);
+                if (chatViewer.Content is not null || !ReferenceEquals(mainViewer.Content, terminalTree)
+                    || !ReferenceEquals(terminal.Children[0], web) || !ReferenceEquals(web.CoreWebView2, core))
+                    throw new Exception("Terminal collapse/reparent recreated its WebView2 controller or detached the new viewer");
+                var retained = System.Text.Json.JsonSerializer.Deserialize<string>(await web.ExecuteScriptAsync(
+                    "JSON.stringify([window.tokenstatRetentionProbe?.marker, terminal.buffer.active.getLine(0).translateToString(true), terminal.buffer.active.getLine(2).translateToString(true), terminal.getSelection()])"));
+                if (retained != "[\"retained\",\"red\",\"detached\",\"red\"]")
+                    throw new Exception("Terminal collapse/reparent lost its JavaScript state, VT buffer, detached output or selection: " + retained);
+                sharedTree.Detach(mainViewer);
+                terminalTree.Children.Remove(terminal);
+                body.Children.Remove(mainViewer); body.Children.Remove(chatViewer);
+                body.Children.Add(terminal);
+                Program.Log("PASS: one emulator retains WebView2, JavaScript state, VT buffer and selection across collapse and chat/project moves");
                 body.Children.Remove(terminal);
                 terminal.Width = double.NaN;
                 terminal.Height = double.NaN;

@@ -129,7 +129,7 @@ final class ProjectBrowserSession: Identifiable {
         return true
     }
 
-    func open(_ raw: String) async {
+    func open(_ raw: String, waitsForService: Bool = false) async {
         guard !isClosed, isCurrent() else { return }
         let original = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let target = BrowserTarget(original)
@@ -183,6 +183,12 @@ final class ProjectBrowserSession: Identifiable {
                 transport = bridged
             }
             guard navigationGeneration == operation, isCurrent(), !Task.isCancelled else { return }
+            if waitsForService, peer != nil, let url = URL(string: transport) {
+                _ = await BrowserServiceReadiness.wait(url, isCurrent: {
+                    !self.isClosed && self.navigationGeneration == operation && self.isCurrent()
+                })
+                guard navigationGeneration == operation, isCurrent(), !Task.isCancelled else { return }
+            }
             targetURL = target?.url ?? parsed.absoluteString
             transportURL = transport
             loadRevision += 1
@@ -228,5 +234,29 @@ final class ProjectBrowserSession: Identifiable {
         Task { @MainActor in
             for lease in held { ProjectBrowserBridges.shared.release(lease) }
         }
+    }
+}
+
+/// Agent web UIs can bind well after their terminal starts. A bridge's 502
+/// means the service is still starting, so wait before loading its first page.
+@MainActor enum BrowserServiceReadiness {
+    static func wait(_ url: URL, isCurrent: () -> Bool, timeout: TimeInterval = 45,
+                     probe: (URL) async -> Bool = responseIsReady) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            guard isCurrent(), !Task.isCancelled else { return false }
+            if await probe(url) { return isCurrent() && !Task.isCancelled }
+            try? await Task.sleep(for: .milliseconds(400))
+        }
+        return false
+    }
+
+    private static func responseIsReady(_ url: URL) async -> Bool {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 1
+        request.httpMethod = "GET"
+        guard let (_, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse else { return false }
+        return http.statusCode != 502
     }
 }

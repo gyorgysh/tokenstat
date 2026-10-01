@@ -23,6 +23,16 @@ class LocalizationRulesTests(unittest.TestCase):
             '_filter = L10n.Text("windows.conversations")',
             'events.ToString(L10n.Text("windows.number"))',
             'SimpleDateFormat(L10n.text("android.date"), Locale.getDefault())',
+            'Arguments = L10n.Text("windows.powershell", script)',
+            'Path.Combine(AppContext.BaseDirectory, L10n.Text("windows.assets"), "tokenstat.ico")',
+            'Path.Combine(\n Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),\n L10n.Text("windows.programs"), "tokenstat")',
+            'new FontFamily(L10n.Text("windows.icon_font"))',
+            'private static readonly FontFamily IconFont = new(L10n.Text("windows.font"))',
+            'public static FontFamily Mono { get; } = new(L10n.Text("windows.font_uri"))',
+            'new Uri(L10n.Text("windows.asset_uri"))',
+            'new[] { L10n.Text("windows.exe"), ".cmd" }.Any(extension => command.EndsWith(extension, StringComparison.OrdinalIgnoreCase))',
+            'args.Request.Headers.GetHeader(L10n.Text("windows.header"))',
+            'core.Environment.CreateWebResourceResponse(null, 403, L10n.Text("windows.reason"), "Content-Length: 0")',
         )
         for source in sources:
             with self.subTest(source=source):
@@ -40,6 +50,13 @@ class LocalizationRulesTests(unittest.TestCase):
                 selected = "bypass",
             )
             val features = listOf(L10n.text("android.feature") to listOf("1 GiB"))
+            var asset = Path.Combine(AppContext.BaseDirectory, "Assets");
+            Text = L10n.Text("windows.status", Path.GetFileName(asset));
+            var matches = new[] { L10n.Text("windows.choice") }.Any(choice => choice.Length > 0);
+            if (!File.Exists(Path.Combine(root, "Tokenstat.exe")))
+                throw new Failure(L10n.Text("windows.missing_download"));
+            Path.Combine(root, "paren)in-name", @"quote""in-name");
+            Text = L10n.Text("windows.after_path");
         '''
         self.assertEqual(list(technical_uses(source)), [])
 

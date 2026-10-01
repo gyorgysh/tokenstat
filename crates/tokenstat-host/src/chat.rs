@@ -1578,6 +1578,8 @@ impl Store {
         fork.resume_token = None;
         fork.resume_tokens.clear();
         fork.standing_sent.clear();
+        fork.allowed_tools.clear();
+        fork.allowed_shell_prefixes.clear();
         fork.running = false;
         let destination = safe_join(&self.root, &fork.id)?;
         fs::create_dir(&destination).map_err(|error| error.to_string())?;
@@ -6479,6 +6481,8 @@ mod tests {
                     .insert("claude".into(), "vendor-session".into());
                 chat.standing_sent
                     .insert("claude".into(), "standing-fingerprint".into());
+                chat.allowed_tools.push("Read".into());
+                chat.allowed_shell_prefixes.push("git status".into());
                 chat.send_revision = 7;
                 Ok(())
             })
@@ -6571,6 +6575,13 @@ mod tests {
         assert!(copied.resume_token.is_none());
         assert!(copied.resume_tokens.is_empty());
         assert!(copied.standing_sent.is_empty());
+        assert!(copied.allowed_tools.is_empty());
+        assert!(copied.allowed_shell_prefixes.is_empty());
+        assert_eq!(store.get("original").unwrap().allowed_tools, ["Read"]);
+        assert_eq!(
+            store.get("original").unwrap().allowed_shell_prefixes,
+            ["git status"]
+        );
         let copied_path = store.root.join(&copied.id);
         assert_eq!(
             fs::read(copied_path.join("files/attachment-a/diagram.txt")).unwrap(),

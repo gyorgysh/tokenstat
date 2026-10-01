@@ -351,7 +351,8 @@ private struct WebBrowser: NSViewRepresentable {
 
     /// Matches the current macOS Safari so the site negotiates with a browser
     /// it recognises rather than a WebKit shell.
-    static let safariUserAgent = L10n.text("apple.browserview.mozilla_5_0_macintosh_intel_mac_os_x_10_15.89f5ca26")
+    static let safariUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        + "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         let allowsExternalNavigation: Bool

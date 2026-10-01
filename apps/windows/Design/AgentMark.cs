@@ -38,7 +38,7 @@ internal static class AgentMark
             if (key == "shell") return;
             try
             {
-                var xml = XDocument.Parse(await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, L10n.Text("windows.agentmark.assets.bd12731d"), L10n.Text("windows.agentmark.brands.ec26be2c"), key + ".svg")));
+                var xml = XDocument.Parse(await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "Assets", "Brands", key + ".svg")));
                 var color = Theme.Accent;
                 var tint = $"#{color.R:X2}{color.G:X2}{color.B:X2}";
                 xml.Root!.SetAttributeValue("fill", tint);

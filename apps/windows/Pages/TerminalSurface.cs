@@ -71,7 +71,7 @@ internal sealed class TerminalSurface : Grid
                 return;
             }
             var core = web.CoreWebView2;
-            core.SetVirtualHostNameToFolderMapping("terminal.tokenstat.invalid", Path.Combine(AppContext.BaseDirectory, L10n.Text("windows.terminalsurface.assets.bd12731d")), CoreWebView2HostResourceAccessKind.DenyCors);
+            core.SetVirtualHostNameToFolderMapping("terminal.tokenstat.invalid", Path.Combine(AppContext.BaseDirectory, "Assets"), CoreWebView2HostResourceAccessKind.DenyCors);
             core.Settings.AreDevToolsEnabled = false;
             core.Settings.AreBrowserAcceleratorKeysEnabled = false;
             core.Settings.AreDefaultContextMenusEnabled = false;

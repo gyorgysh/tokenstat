@@ -406,6 +406,7 @@ struct TerminalPane: View {
                   let browser = workspaces.browserTabs(in: folder.id).first(where: { $0.id == id }) {
             ProjectBrowserView(
                 workspaceID: folder.id, initialURL: browser.url,
+                waitsForService: browser.waitsForService,
                 onURLChange: { workspaces.setBrowserURL($0, in: folder.id, tabID: browser.id) }
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)

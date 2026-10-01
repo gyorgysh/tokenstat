@@ -6,7 +6,7 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 import Observation
-import SwiftUI
+import Foundation
 
 /// The SSH sessions this app is showing.
 ///
@@ -67,7 +67,9 @@ final class SSHSessionsModel {
     /// snippet cannot land somewhere other than the tab in front.
     func activeSession(for hostID: String) -> SSHLiveTerminal? {
         let mine = sessions(for: hostID)
-        return mine.first { $0.id == selectedID } ?? mine.last
+        return mine.first { $0.id == selectedID }
+            ?? mine.first { $0.id == selectedByHost[hostID] }
+            ?? mine.last
     }
 
     // MARK: - Reconciling with the host
@@ -171,6 +173,14 @@ final class SSHSessionsModel {
     }
 
     func select(_ session: SSHLiveTerminal) {
+        #if os(macOS)
+        if let hostID = session.hostID {
+            var selection = paneSelection(for: hostID)
+            selection.select(session.id, available: sessions(for: hostID).map(\.id),
+                             split: layout(for: hostID).isSplit)
+            apply(selection, for: hostID)
+        }
+        #endif
         selectedID = session.id
         if let hostID = session.hostID { selectedByHost[hostID] = session.id }
     }
@@ -187,9 +197,11 @@ final class SSHSessionsModel {
     }
 
     func close(_ session: SSHLiveTerminal) async {
+        #if os(macOS)
+        let oldSelection = session.hostID.map { paneSelection(for: $0) }
+        #endif
         closingIDs.insert(session.id)
         sessions.removeAll { $0.id == session.id }
-        if selectedID == session.id { selectedID = sessions.last?.id }
         let selectedHosts = selectedByHost.compactMap { host, id in
             id == session.id ? host : nil
         }
@@ -197,21 +209,17 @@ final class SSHSessionsModel {
             selectedByHost.removeValue(forKey: host)
         }
         #if os(macOS)
-        // Splits name sessions by id, so a half pointing at a closed one has
-        // to let go or the pane draws an empty rectangle beside a live shell.
-        let leadingHosts = splitLeadingID.compactMap { host, id in
-            id == session.id ? host : nil
-        }
-        for host in leadingHosts {
-            splitLeadingID.removeValue(forKey: host)
-        }
-        let trailingHosts = splitTrailingID.compactMap { host, id in
-            id == session.id ? host : nil
-        }
-        for host in trailingHosts {
-            splitTrailingID.removeValue(forKey: host)
+        if let hostID = session.hostID, var selection = oldSelection {
+            if selection.reconcile(available: sessions(for: hostID).map(\.id)) {
+                splitLayout[hostID] = .single
+                SSHPreference.setSplitLayout(.single, for: hostID)
+            }
+            apply(selection, for: hostID)
         }
         #endif
+        if selectedID == session.id {
+            selectedID = session.hostID.flatMap { activeSession(for: $0)?.id } ?? sessions.last?.id
+        }
         session.stop()
     }
 
@@ -233,6 +241,17 @@ final class SSHSessionsModel {
     private(set) var splitLeadingID: [String: String] = [:]
     private(set) var splitTrailingID: [String: String] = [:]
 
+    private func paneSelection(for hostID: String) -> TerminalPaneSelection {
+        TerminalPaneSelection(selectedID: activeSession(for: hostID)?.id,
+                              leadingID: splitLeadingID[hostID], trailingID: splitTrailingID[hostID])
+    }
+
+    private func apply(_ selection: TerminalPaneSelection, for hostID: String) {
+        selectedByHost[hostID] = selection.selectedID
+        splitLeadingID[hostID] = selection.leadingID
+        splitTrailingID[hostID] = selection.trailingID
+    }
+
     func layout(for hostID: String) -> TerminalSplitLayout {
         if let cached = splitLayout[hostID] { return cached }
         let stored = SSHPreference.splitLayout(for: hostID)
@@ -243,19 +262,9 @@ final class SSHSessionsModel {
     func setLayout(_ layout: TerminalSplitLayout, for hostID: String) {
         splitLayout[hostID] = layout
         SSHPreference.setSplitLayout(layout, for: hostID)
-        guard layout.isSplit else {
-            splitTrailingID.removeValue(forKey: hostID)
-            return
-        }
-        // Turning a split on with nothing in the other half shows a live
-        // terminal beside an empty rectangle, so the second-newest session
-        // fills it. Nothing to fill it with is not a split.
-        if splitTrailingID[hostID] == nil {
-            let mine = sessions(for: hostID)
-            let other = mine.last { $0.id != selectedID }
-            splitTrailingID[hostID] = other?.id
-        }
-        splitLeadingID[hostID] = splitLeadingID[hostID] ?? selectedID
+        var selection = paneSelection(for: hostID)
+        selection.setSplit(layout.isSplit, available: sessions(for: hostID).map(\.id))
+        apply(selection, for: hostID)
     }
 
     func fraction(for hostID: String) -> Double {
@@ -267,11 +276,9 @@ final class SSHSessionsModel {
 
     func swapPanes(in hostID: String) {
         guard layout(for: hostID).isSplit else { return }
-        var selection = TerminalPaneSelection(selectedID: activeSession(for: hostID)?.id,
-                                              leadingID: splitLeadingID[hostID], trailingID: splitTrailingID[hostID])
+        var selection = paneSelection(for: hostID)
         selection.swapPanes(available: sessions(for: hostID).map(\.id))
-        splitLeadingID[hostID] = selection.leadingID
-        splitTrailingID[hostID] = selection.trailingID
+        apply(selection, for: hostID)
     }
 
     func setFraction(_ value: Double, for hostID: String) {
@@ -281,19 +288,26 @@ final class SSHSessionsModel {
     }
 
     func leadingSession(in hostID: String) -> SSHLiveTerminal? {
-        session(splitLeadingID[hostID]) ?? selected
+        let mine = sessions(for: hostID)
+        let id = paneSelection(for: hostID).panes(in: mine.map(\.id), split: layout(for: hostID).isSplit).leading
+        return mine.first { $0.id == id }
     }
 
     func trailingSession(in hostID: String) -> SSHLiveTerminal? {
-        session(splitTrailingID[hostID])
+        let mine = sessions(for: hostID)
+        let id = paneSelection(for: hostID).panes(in: mine.map(\.id), split: layout(for: hostID).isSplit).trailing
+        return mine.first { $0.id == id }
     }
 
     /// Put a session in the half that is not showing it, so a tab can be
     /// dragged into the other side without a drag.
     func sendToOtherHalf(_ session: SSHLiveTerminal, in hostID: String) {
-        guard layout(for: hostID).isSplit else { return }
-        if splitLeadingID[hostID] == session.id { return }
-        splitTrailingID[hostID] = session.id
+        guard session.hostID == hostID else { return }
+        if !layout(for: hostID).isSplit { setLayout(.side, for: hostID) }
+        var selection = paneSelection(for: hostID)
+        selection.sendToOtherHalf(session.id, available: sessions(for: hostID).map(\.id))
+        apply(selection, for: hostID)
+        selectedID = selection.selectedID
     }
 
     #endif

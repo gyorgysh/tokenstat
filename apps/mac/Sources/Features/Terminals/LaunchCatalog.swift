@@ -540,9 +540,9 @@ final class LaunchCatalog {
     private nonisolated static func conventionalDirectories() -> [String] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return [
-            L10n.text("apple.launchcatalog.0_local_bin.cc5adf3d", "\(home)"),
-            L10n.text("apple.launchcatalog.0_npm_global_bin.5bfa69dd", "\(home)"),
-            L10n.text("apple.launchcatalog.0_volta_bin.5e41e199", "\(home)"),
+            "\(home)/.local/bin",
+            "\(home)/.npm-global/bin",
+            "\(home)/.volta/bin",
             "/opt/homebrew/bin",
             "/usr/local/bin",
             "/usr/bin",

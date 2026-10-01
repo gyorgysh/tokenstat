@@ -167,7 +167,7 @@ internal static class SidebarLive
     /// One live session row: title, meter line, and state. Tag routes to the
     /// session's terminal through the sidebar selection handler.
     /// </summary>
-    public static NavigationViewItem SessionItem(string folderId, JsonNode item)
+    public static NavigationViewItem SessionItem(string folderId, JsonNode item, JsonNode? folder = null)
     {
         var id = Format.Text(item, "id");
         var command = Format.Text(item, "command", "shell");
@@ -237,12 +237,8 @@ internal static class SidebarLive
         if (row.Content is FrameworkElement view)
             view.Tag = (title, stats, state, command, Format.Number(item, "contextUsed"), Format.Number(item, "contextWindow"));
         AutomationProperties.SetName(row, title + ". " + stats + ". " + state);
-        var cwd = Format.Text(item, "cwd");
-        if (!string.IsNullOrEmpty(cwd))
-        {
-            ToolTipService.SetToolTip(row, cwd);
-        }
         var menu = ContextMenus.Menu(row);
+        ContextMenus.Add(menu, L10n.Text("windows.terminalpane.open_in_split"), () => AppServices.OpenTerminalSplit?.Invoke(folderId, id));
         ContextMenus.AddAsync(menu, L10n.Text("windows.sidebarlive.stop_and_close.9712e7bb"), async () =>
         {
             var owner = menu.Target ?? row;
@@ -251,6 +247,7 @@ internal static class SidebarLive
             try { await AppServices.Host.CallAsync("pty.close", new JsonObject { ["id"] = id }); }
             catch (Exception ex) { await Chrome.ShowDialog(owner, new ContentDialog { Title = L10n.Text("windows.sidebarlive.could_not_close_session.f56b373d"), Content = ex.Message, CloseButtonText = L10n.Text("common.close") }); }
         });
+        SidebarHoverCard.AttachTerminal(row, folderId, item, folder);
         return row;
     }
 
@@ -258,7 +255,7 @@ internal static class SidebarLive
     /// One recent conversation row: title, backend and age. Tapping opens the
     /// conversation in its folder chat, like the Mac sidebar row.
     /// </summary>
-    public static NavigationViewItem ChatItem(string folderId, JsonNode chat, string? folderName = null)
+    public static NavigationViewItem ChatItem(string folderId, JsonNode chat, string? folderName = null, JsonNode? folder = null)
     {
         folderName ??= L10n.Text("windows.sidebarlive.project.98595978");
         var id = Format.Text(chat, "id");
@@ -322,7 +319,6 @@ internal static class SidebarLive
         if (row.Content is FrameworkElement view) view.Tag = (title, detail, backend);
         ChatPreviewCache.Attach(row, folderId, id);
         AutomationProperties.SetName(row, title + ". " + detail);
-        ToolTipService.SetToolTip(row, title + " · " + backend);
         var menu = ContextMenus.Menu(row);
         WorkPinMenu.Add(menu, folderId, id, title, folderName);
         Task<JsonNode> Call(string method, JsonObject parameters) => RemoteWorkspaces.TrySplit(folderId, out var peer, out _)
@@ -367,6 +363,7 @@ internal static class SidebarLive
             }
             catch (Exception ex) { await Chrome.ShowDialog(owner, new ContentDialog { Title = L10n.Text("windows.sidebarlive.could_not_remove_chat.8dfbba94"), Content = ex.Message, CloseButtonText = L10n.Text("common.close") }); }
         });
+        SidebarHoverCard.AttachChat(row, folderId, chat, folderName, folder);
         return row;
     }
 

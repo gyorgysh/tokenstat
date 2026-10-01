@@ -28,6 +28,8 @@ struct Automation {
         assert(AutomationMobileOrder.name.sorted(rows).map(\.id) == ["a", "b", "z"])
         let templates = AutomationTemplate.suggested
         assert(templates.count == 5 && Set(templates.map(\.id)).count == 5)
+        assert(templates.allSatisfy { $0.backendID != "sh" },
+               "Suggested natural-language instructions must run through an agent, not a shell")
         assert(templates.first { $0.title == "Daily brief" }?.schedule.hour == 8)
         assert(templates.first { $0.title == "Weekday standup" }?.schedule.weekdays == 31)
         assert(templates.first { $0.title == "System health check" }?.schedule.everySeconds == 3600)

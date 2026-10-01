@@ -27,6 +27,7 @@ internal static class AppServices
     /// Set from MainWindow so a folder's Sessions list can navigate.
     /// </summary>
     public static Action<string, string?>? OpenTerminal { get; set; }
+    public static Action<string, string>? OpenTerminalSplit { get; set; }
 
     /// <summary>Open a linked device and select its connection details.</summary>
     public static Action<string>? OpenMachine { get; set; }

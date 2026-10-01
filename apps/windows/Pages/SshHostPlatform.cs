@@ -24,9 +24,9 @@ internal static class SshHostPlatform
     public static string? Label(JsonNode? host) => host is not null && Cache.TryGetValue(Format.Text(host, "id"), out var entry) && entry.Endpoint == Endpoint(host) ? entry.Label : null;
     public static string SessionLabel(JsonNode? session)
     {
-        if (Cache.TryGetValue(Format.Text(session, "hostId"), out var entry) && !string.IsNullOrWhiteSpace(entry.Name)) return entry.Name;
-        var label = Format.Text(session, "label", L10n.Text("windows.sshhostplatform.ssh_session.25493005"));
-        return label.Contains('@') || System.Net.IPAddress.TryParse(label, out _) ? L10n.Text("windows.sshhostplatform.ssh_session.25493005") : label;
+        var label = Cache.TryGetValue(Format.Text(session, "hostId"), out var entry) && !string.IsNullOrWhiteSpace(entry.Name)
+            ? entry.Name : Format.Text(session, "label");
+        return SshDisplayName.Private(label, L10n.Text("windows.sshhostplatform.ssh_session.25493005"));
     }
     public static FrameworkElement SessionRow(JsonNode? session) => Row(
         Cache.TryGetValue(Format.Text(session, "hostId"), out var entry) ? entry.Label : null,
@@ -47,7 +47,7 @@ internal static class SshHostPlatform
     private static string? Distro(string? platform)
     {
         var name = (platform ?? "").ToLowerInvariant();
-        foreach (var (term, asset) in new[] { ("ubuntu", "ubuntu"), ("debian", "debian"), ("fedora", "fedora"), ("alpine", "alpinelinux"), ("arch", "archlinux"), ("nixos", "nixos"), ("mint", "linuxmint"), ("gentoo", "gentoo"), ("rocky", "rockylinux"), ("alma", "almalinux"), ("centos", "centos"), (L10n.Text("windows.sshhostplatform.red_hat.8dfe5e6c"), "redhat"), ("rhel", "redhat"), ("opensuse", "opensuse"), ("suse", "suse"), ("linux", "linux") })
+        foreach (var (term, asset) in new[] { ("ubuntu", "ubuntu"), ("debian", "debian"), ("fedora", "fedora"), ("alpine", "alpinelinux"), ("arch", "archlinux"), ("nixos", "nixos"), ("mint", "linuxmint"), ("gentoo", "gentoo"), ("rocky", "rockylinux"), ("alma", "almalinux"), ("centos", "centos"), ("red hat", "redhat"), ("rhel", "redhat"), ("opensuse", "opensuse"), ("suse", "suse"), ("linux", "linux") })
             if (name.Contains(term, StringComparison.Ordinal)) return asset;
         return null;
     }

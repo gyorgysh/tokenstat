@@ -12,10 +12,10 @@ internal sealed partial class WorkspaceTabsPage
     private readonly Grid _companionHeader = new() { Margin = new Thickness(8), ColumnSpacing = 8 };
     private string? _companion;
     private BrowserPage? _companionBrowser;
-    private TerminalPage? _companionTerminal;
+    private WorkspaceTerminalPane? _companionTerminal;
     private BrowserPage CompanionBrowser => _companionBrowser ??= new BrowserPage("", "127.0.0.1", 0, false,
         RemoteWorkspaces.TrySplit(WorkspaceId, out var peer, out _) ? peer : null, workspaceId: WorkspaceId);
-    private TerminalPage CompanionTerminal => _companionTerminal ??= new TerminalPage(WorkspaceId, null);
+    private WorkspaceTerminalPane CompanionTerminal => _companionTerminal ??= new WorkspaceTerminalPane(_terminalController);
     public event Action? DetailsRequested;
     private void InitializeCompanion()
     {
@@ -43,6 +43,8 @@ internal sealed partial class WorkspaceTabsPage
         var terminal = Buttons.ToolbarIcon(ActionIcon.Source, L10n.Text("windows.workspacetabspage_companion.terminal_beside_chat.40991a3f"), (_, _) => ShowCompanion("Terminal"), _companion == "Terminal");
         terminal.Content = new FontIcon { Glyph = "\uE756", FontSize = 16 };
         actions.Add(terminal);
+        if (_companion == "Terminal")
+            foreach (var action in _terminalController.ToolbarActions()) actions.Add(action);
         return actions;
     }
 }

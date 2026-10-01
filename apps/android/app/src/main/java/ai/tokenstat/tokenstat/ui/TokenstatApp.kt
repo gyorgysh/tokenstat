@@ -3108,7 +3108,11 @@ private fun WorkspacesScreen(
         val match = folders.mapNotNull { it as? JsonObject }.find { it.string("id") == folderId }
             ?: return@LaunchedEffect
         selectedFolderId = match.string("id")
-        initialSection = if (pendingKind == "CHAT") "Chat" else if (pendingKind == "TERMINAL") L10n.text("android.tokenstatapp.sessions.6fa3cbf4") else null
+        initialSection = when (pendingKind) {
+            "CHAT" -> ai.tokenstat.tokenstat.ui.logic.HubSection.CHAT.key
+            "TERMINAL" -> ai.tokenstat.tokenstat.ui.logic.HubSection.SESSIONS.key
+            else -> null
+        }
         pendingChatId = if (pendingKind == "CHAT") pendingItem else null
         pendingOpenConversation = false
         if (pendingKind == "TERMINAL" && !pendingItem.isNullOrBlank()) {

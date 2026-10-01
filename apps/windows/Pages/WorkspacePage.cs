@@ -147,10 +147,12 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     break;
                 case WorkspaceSection.Launcher:
                     LoadQuickActions();
+                    _root.Children.Add(await ServerLauncher.CreateAsync(host => WorkspaceTabsPage.Find(this)?.OpenServerAsync(host) ?? Task.CompletedTask));
                     await LoadSessionsAsync();
                     break;
                 case WorkspaceSection.Sessions:
                     LoadQuickActions();
+                    _root.Children.Add(await ServerLauncher.CreateAsync(host => WorkspaceTabsPage.Find(this)?.OpenServerAsync(host) ?? Task.CompletedTask));
                     await LoadSessionsAsync();
                     break;
                 case WorkspaceSection.Browser:

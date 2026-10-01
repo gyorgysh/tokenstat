@@ -84,6 +84,7 @@ public sealed partial class MainWindow : Window
     private JsonArray _liveChats = new();
     private Dictionary<string, JsonNode> _liveSummaries = new(StringComparer.Ordinal);
     private JsonNode? _liveAccount;
+    private JsonArray _liveSshSessions = new();
     private string _liveFooterKey = "";
 
     private readonly HashSet<string> _compactExpanded = new(StringComparer.Ordinal);
@@ -276,6 +277,17 @@ public sealed partial class MainWindow : Window
                 _lastNavTag = (_nav.SelectedItem as NavigationViewItem)?.Tag as string;
             });
         };
+        AppServices.OpenTerminalSplit = (workspaceId, sessionId) => DispatcherQueue.TryEnqueue(() =>
+        {
+            var workbench = WorkspaceTabs(workspaceId);
+            workbench.OpenTerminalInSplit(sessionId);
+            SetContent(workbench);
+        });
+        WorkspaceSshTabs.Changed += () => DispatcherQueue.TryEnqueue(() =>
+        {
+            RebuildSidebarLive();
+            _ = RefreshSidebarLiveAsync();
+        });
         AppServices.OpenBrowser = (url, host, port, unlisten, peer) =>
         {
             DispatcherQueue.TryEnqueue(() =>
@@ -1511,10 +1523,12 @@ public sealed partial class MainWindow : Window
             var previousChats = _liveChats;
             var previousSummaries = _liveSummaries;
             var previousAccount = _liveAccount;
+            var previousSshSessions = _liveSshSessions;
             var (sessions, chats) = await SidebarLive.FetchFastAsync();
             try
             {
                 var sshSessions = Format.Items(await AppServices.Host.CallAsync("ssh.session.list"));
+                if (sshSessions is not null) _liveSshSessions = sshSessions;
                 var sshGroup = FindNavItem("ssh:" + SSHSection.Hosts);
                 if (sshGroup is not null && sshSessions is not null)
                 {
@@ -1562,6 +1576,7 @@ public sealed partial class MainWindow : Window
                 _liveChats = chats;
             }
             var rowsChanged = !JsonNode.DeepEquals(previousSessions, _liveSessions)
+                || !JsonNode.DeepEquals(previousSshSessions, _liveSshSessions)
                 || !JsonNode.DeepEquals(previousChats, _liveChats)
                 || (previousSummaries.Count != _liveSummaries.Count || previousSummaries.Any(pair => !_liveSummaries.TryGetValue(pair.Key, out var value) || !JsonNode.DeepEquals(pair.Value, value)));
             var accountChanged = !JsonNode.DeepEquals(previousAccount, _liveAccount);
@@ -1659,13 +1674,25 @@ public sealed partial class MainWindow : Window
                 continue;
             }
             var folderId = rest[..cut];
+            var folder = _localFolders.FirstOrDefault(folder => Format.Text(folder, "id") == folderId);
             var desiredSessions = new List<NavigationViewItem>();
             if (sessionsByFolder.TryGetValue(folderId, out var sessions) && sessions.Count > 0)
             {
                 foreach (var session in sessions)
                 {
-                    desiredSessions.Add(SidebarLive.SessionItem(folderId, session));
+                    desiredSessions.Add(SidebarLive.SessionItem(folderId, session, folder));
                 }
+            }
+            foreach (var session in _liveSshSessions.Where(session => Format.Flag(session, "alive")
+                && WorkspaceSshTabs.In(folderId).Contains(Format.Text(session, "id"))))
+            {
+                var id = "ssh:" + Format.Text(session, "id");
+                var row = new NavigationViewItem { Tag = LiveRoute.Join(SidebarLive.SessionPrefix, folderId, id), Content = SshHostPlatform.SessionRow(session) };
+                SidebarHoverCard.AttachSsh(row, folderId, session, folder);
+                var menu = ContextMenus.Menu(row);
+                ContextMenus.Add(menu, L10n.Text("common.open"), () => AppServices.OpenTerminal?.Invoke(folderId, id));
+                ContextMenus.Add(menu, L10n.Text("windows.terminalpane.open_in_split"), () => AppServices.OpenTerminalSplit?.Invoke(folderId, id));
+                desiredSessions.Add(row);
             }
             NavigationRows.Reconcile(parent.MenuItems, desiredSessions, SidebarLive.SessionPrefix, 0);
             var desiredChats = new List<NavigationViewItem>();
@@ -1685,7 +1712,7 @@ public sealed partial class MainWindow : Window
                 var folderName = RemoteWorkspaces.CachedFolder(folderId)?.Name
                     ?? Format.Text(_localFolders.FirstOrDefault(folder => Format.Text(folder, "id") == folderId), "name", L10n.Text("windows.mainwindow_xaml.project.98595978"));
                 for (var i = window.Start; i < window.Start + window.Count; i++)
-                    desiredChats.Add(SidebarLive.ChatItem(folderId, chats[i], folderName));
+                    desiredChats.Add(SidebarLive.ChatItem(folderId, chats[i], folderName, folder));
                 if (chats.Count > SidebarLive.CollapsedChats)
                 {
                     var label = expanded
@@ -1765,13 +1792,15 @@ public sealed partial class MainWindow : Window
     private UIElement AccountMenu(JsonNode account)
     {
         var name = Format.Text(account, "displayName", L10n.Text("common.account"));
+        var avatar = ProfileHoverRing.Wrap(Marks.Avatar(url: Format.Text(account, "avatar"), name: name,
+            handle: Format.Text(account, "handle"), size: 28), 28);
         var footer = new Button
         {
-            Content = Marks.Avatar(url: Format.Text(account, "avatar"), name: name,
-                handle: Format.Text(account, "handle"), size: 28),
-            Width = 44, Height = 44, Padding = new Thickness(8),
+            Content = avatar,
+            Width = 44, Height = 44, Padding = new Thickness(4),
             Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0),
         };
+        ProfileHoverRing.Attach(avatar, footer);
         var label = AppServices.Update.IsReady || AppServices.Update.IsAvailable ? L10n.Text("windows.mainwindow_xaml.account_update_available.29a1fbd6") : L10n.Text("windows.mainwindow_xaml.account_0.d8cd9318", $"{name}");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(footer, label);
         ToolTipService.SetToolTip(footer, label);
@@ -1803,7 +1832,7 @@ public sealed partial class MainWindow : Window
             var id = Win32Interop.GetWindowIdFromWindow(hwnd);
             var appWindow = AppWindow.GetFromWindowId(id);
             appWindow.Resize(new SizeInt32(1280, 840));
-            appWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, L10n.Text("windows.mainwindow_xaml.assets.bd12731d"), "tokenstat.ico"));
+            appWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "tokenstat.ico"));
         }
         catch
         {

@@ -39,6 +39,23 @@ import Foundation
         let defaults = UserDefaults(suiteName: name)!
         defer { defaults.removePersistentDomain(forName: name) }
         let history = BrowserHistory(defaults: defaults)
+        let readinessURL = URL(string: "http://127.0.0.1:45000/")!
+        var probes = 0
+        let ready = await BrowserServiceReadiness.wait(readinessURL, isCurrent: { true }, timeout: 2) { _ in
+            probes += 1
+            return probes == 3
+        }
+        precondition(ready && probes == 3, "A slow agent web UI loaded before its service was ready")
+        var readinessCurrent = true
+        let staleReady = await BrowserServiceReadiness.wait(readinessURL, isCurrent: { readinessCurrent }) { _ in
+            readinessCurrent = false
+            return true
+        }
+        precondition(!staleReady, "A service readiness answer reopened a retired browser")
+        let timedOut = await BrowserServiceReadiness.wait(readinessURL, isCurrent: { true }, timeout: 0) { _ in
+            preconditionFailure("An expired readiness check still sent a request")
+        }
+        precondition(!timedOut)
         let owner = WorkReference(scope: .local(installationID: "installation-a"), hostIdentity: "host-a", workspaceID: "project-a", kind: .workspace, itemID: nil)
         history.record(BrowserTarget("3000")!, for: owner)
         let a = ProjectBrowserSession(owner: owner, peer: "host-a", history: history, isCurrent: { true })

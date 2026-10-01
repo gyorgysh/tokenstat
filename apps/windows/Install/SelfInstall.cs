@@ -33,7 +33,7 @@ internal static class SelfInstall
     public static string InstallDirectory =>
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            L10n.Text("windows.selfinstall.programs.b6747064"),
+            "Programs",
             "tokenstat");
 
     public static string InstalledExe => Path.Combine(InstallDirectory, "Tokenstat.exe");
@@ -302,7 +302,7 @@ internal static class SelfInstall
                 using var registration = Process.Start(new ProcessStartInfo
                 {
                     FileName = "powershell.exe",
-                    Arguments = L10n.Text("windows.selfinstall.noprofile_executionpolicy_bypass_file_0_bi.46ca77c6", $"{script}", $"{hostdExe}"),
+                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Bin \"{hostdExe}\"",
                     UseShellExecute = false,
                     CreateNoWindow = true,
                 });
@@ -396,7 +396,7 @@ internal static class SelfInstall
             Process.Start(new ProcessStartInfo
             {
                 FileName = "powershell.exe",
-                Arguments = L10n.Text("windows.selfinstall.noprofile_windowstyle_hidden_executionpoli.2b2e6915", $"{helper}"),
+                Arguments = $"-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"{helper}\"",
                 UseShellExecute = false,
                 CreateNoWindow = true,
             });
@@ -601,7 +601,7 @@ internal static class SelfInstall
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = "powershell.exe",
-                    Arguments = L10n.Text("windows.selfinstall.noprofile_executionpolicy_bypass_file_0_un.733698be", $"{script}"),
+                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Uninstall",
                     UseShellExecute = false,
                     CreateNoWindow = true,
                 })?.WaitForExit(10000);

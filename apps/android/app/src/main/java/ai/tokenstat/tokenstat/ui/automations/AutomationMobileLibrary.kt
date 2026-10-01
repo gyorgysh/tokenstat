@@ -15,8 +15,8 @@ data class AutomationTemplate(
 object AutomationTemplates {
     val suggested = listOf(
         AutomationTemplate("brief", L10n.text("android.automationmobilelibrary.daily_brief.ba6a6869"), L10n.text("android.automationmobilelibrary.summarise_yesterday_s_usage_and_flag_anyth.46ae43e4"), "claude", AutomationSchedule(ScheduleKind.DAILY, hour = 8), 600),
-        AutomationTemplate("health", L10n.text("android.automationmobilelibrary.system_health_check.04b44a8a"), L10n.text("android.automationmobilelibrary.check_disk_memory_and_cpu_and_confirm_the.1eeb5edf"), "sh", AutomationSchedule(ScheduleKind.INTERVAL, everySeconds = 3600), 120),
-        AutomationTemplate("dependencies", L10n.text("android.automationmobilelibrary.dependency_check.cb31b5a0"), L10n.text("android.automationmobilelibrary.check_for_outdated_or_vulnerable_dependenc.12dfb6f0"), "sh", AutomationSchedule(ScheduleKind.WEEKLY, hour = 9, weekday = 0), 900),
+        AutomationTemplate("health", L10n.text("android.automationmobilelibrary.system_health_check.04b44a8a"), L10n.text("android.automationmobilelibrary.check_disk_memory_and_cpu_and_confirm_the.1eeb5edf"), "claude", AutomationSchedule(ScheduleKind.INTERVAL, everySeconds = 3600), 120),
+        AutomationTemplate("dependencies", L10n.text("android.automationmobilelibrary.dependency_check.cb31b5a0"), L10n.text("android.automationmobilelibrary.check_for_outdated_or_vulnerable_dependenc.12dfb6f0"), "claude", AutomationSchedule(ScheduleKind.WEEKLY, hour = 9, weekday = 0), 900),
         AutomationTemplate("standup", L10n.text("android.automationmobilelibrary.weekday_standup.26dadcac"), L10n.text("android.automationmobilelibrary.summarise_open_work_and_anything_that_bloc.52f7cb29"), "claude", AutomationSchedule(ScheduleKind.WEEKDAYS, hour = 9, weekdays = WEEKDAYS_MASK), 600),
         AutomationTemplate("release", L10n.text("android.automationmobilelibrary.release.e020e3c6"), L10n.text("android.automationmobilelibrary.ship_a_release_of_this_repository_1_read_h.b379d887").trimIndent(), "claude", AutomationSchedule(ScheduleKind.ONCE), 1800),
     )

@@ -50,6 +50,16 @@ ALLOWED = [
     ("Features/Machines/MachinesView.swift", "Divider()"),
 ]
 
+# The terminal menus are mixed with app-owned panel content in these files.
+# Permit only the known native menu separators, identified by both adjacent
+# menu statements; a Divider added elsewhere in the file must still fail.
+MENU_SEPARATORS = [
+    ("Features/Terminals/ChatTerminalPane.swift", "if !ssh.hosts.isEmpty {", "Menu(L10n.text(\"apple.rootview.servers.68d7beb6\")) {"),
+    ("Features/Terminals/ChatTerminalPane.swift", "if layout.isSplit {", "TerminalSwapButton(layout: layout) { terminals.swapPanes(in: folder.id) }"),
+    ("Features/Terminals/TerminalPane.swift", "if splitLayout.isSplit {", "TerminalSwapButton(layout: splitLayout) { terminals.swapPanes(in: folder.id) }"),
+    ("Features/Machines/SSHTerminalPane.swift", "if layout.isSplit {", "TerminalSwapButton(layout: layout) { sessions.swapPanes(in: host.id) }"),
+]
+
 # `.tint(` at the start of a line is the view modifier. `RunOutcome.tint(…)`
 # and `Avatar.tint(for:)` are functions that happen to share the name, and are
 # preceded by an identifier rather than by the start of a line.
@@ -63,8 +73,13 @@ BANNED = [
 ]
 
 
-def allowed(path, line):
-    return any(path.endswith(f) and snip in line for f, snip in ALLOWED)
+def allowed(path, line, previous, following):
+    if any(path.endswith(f) and snip in line for f, snip in ALLOWED):
+        return True
+    return line.strip() == "Divider()" and any(
+        path.endswith(f) and previous.strip() == before and following.strip() == after
+        for f, before, after in MENU_SEPARATORS
+    )
 
 
 def main():
@@ -74,12 +89,15 @@ def main():
             if not name.endswith(".swift"):
                 continue
             path = os.path.join(base, name)
-            for number, line in enumerate(open(path), start=1):
+            lines = open(path).readlines()
+            for number, line in enumerate(lines, start=1):
                 text = line.rstrip("\n")
                 stripped = text.strip()
                 if stripped.startswith("//"):
                     continue
-                if allowed(path, text):
+                previous = lines[number - 2] if number > 1 else ""
+                following = lines[number] if number < len(lines) else ""
+                if allowed(path, text, previous, following):
                     continue
                 for needle, what in BANNED:
                     if needle in text:

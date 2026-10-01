@@ -36,7 +36,7 @@ internal static class Fonts
     /// JetBrains Mono, loaded from the app folder like <see cref="Interface"/>.
     /// </summary>
     public static FontFamily Mono { get; } =
-        new(L10n.Text("windows.fonts.ms_appx_assets_fonts_jetbrainsmono_variabl.b327e362"));
+        new("ms-appx:///Assets/Fonts/JetBrainsMono-Variable.ttf#JetBrains Mono");
 
     // The Mac ladder, exact values from Theme.swift on macOS: body 13 down
     // to caption 10, titles up to 26, chat prose a step above body.

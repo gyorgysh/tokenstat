@@ -21,15 +21,15 @@ internal sealed class ResizeHandle : UserControl
         add => _thumb.DragCompleted += value;
         remove => _thumb.DragCompleted -= value;
     }
-    public ResizeHandle()
+    public ResizeHandle(bool vertical = false)
     {
-        Width = 6;
+        if (vertical) Height = 6; else Width = 6;
         Content = _thumb;
         IsTabStop = true;
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(this, L10n.Text("windows.resizehandle.drag_or_use_left_and_right_arrows_to_resiz.7cd7cd98"));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(this, vertical ? L10n.Text("windows.resizehandle.drag_or_use_up_and_down") : L10n.Text("windows.resizehandle.drag_or_use_left_and_right_arrows_to_resiz.7cd7cd98"));
         ToolTipService.SetToolTip(this, L10n.Text("windows.resizehandle.drag_to_resize_double_click_to_reset.0feeacb9"));
         Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeWestEast);
+        ProtectedCursor = InputSystemCursor.Create(vertical ? InputSystemCursorShape.SizeNorthSouth : InputSystemCursorShape.SizeWestEast);
         PointerEntered += (_, _) => Background = Theme.AccentSoftBrush;
         PointerExited += (_, _) => Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         _thumb.DragStarted += (_, _) => ColumnResize.InProgress = true;

@@ -1,5 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- SPDX-License-Identifier: LicenseRef-tokenstat-source-available -->
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../apps/windows/Pages/TerminalPaneSelection.cs" Link="TerminalPaneSelection.cs" />
+    <Compile Include="../../../apps/windows/Pages/WorkspaceSshTabs.cs" Link="WorkspaceSshTabs.cs" />
+    <Compile Include="../../../apps/windows/Pages/SshDisplayName.cs" Link="SshDisplayName.cs" />
+    <Compile Include="../../../apps/windows/Pages/TerminalSession.cs" Link="TerminalSession.cs" />
+    <Compile Include="../../../apps/windows/Pages/TerminalViewer.cs" Link="TerminalViewer.cs" />
+    <Compile Include="../../../apps/windows/Pages/Format.cs" Link="Format.cs" />
+  </ItemGroup>
   <ItemGroup><Compile Include="../../../apps/windows/Design/ShellWidths.cs" Link="ShellWidths.cs" /><Compile Include="../../../apps/windows/Pages/BrowserHistory.cs" Link="BrowserHistory.cs" /><Compile Include="../../../apps/windows/Pages/PinnedWorkStore.cs" Link="PinnedWorkStore.cs" /><Compile Include="../../../apps/windows/Navigation/ChatHistoryWindow.cs" Link="ChatHistoryWindow.cs" /><Compile Include="../../../apps/windows/Pages/OperationEpoch.cs" Link="OperationEpoch.cs" /><Compile Include="../../../apps/windows/Pages/BrowserBridgePool.cs" Link="BrowserBridgePool.cs" /><Compile Include="../../../apps/windows/Pages/BrowserRouteState.cs" Link="BrowserRouteState.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../../apps/windows/Design/SidebarHoverState.cs" Link="SidebarHoverState.cs" /></ItemGroup>
 </Project>

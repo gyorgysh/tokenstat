@@ -6,13 +6,14 @@ import SwiftUI
 struct ProjectBrowserView: View {
     let workspaceID: String
     var initialURL = ""
+    var waitsForService = false
     var allowsExternalNavigation = false
     var onURLChange: (String) -> Void = { _ in }
 
     var body: some View {
         let owner = WorkViewedChange.owner(folderID: workspaceID)
         let route = WorkDestinationResolver.route(folderID: workspaceID)
-        ProjectBrowserContent(owner: owner, peer: route.peer, initialURL: initialURL,
+        ProjectBrowserContent(owner: owner, peer: route.peer, initialURL: initialURL, waitsForService: waitsForService,
             allowsExternalNavigation: allowsExternalNavigation, onURLChange: onURLChange)
             .id(BrowserHistory.key(for: owner) ?? workspaceID)
     }
@@ -21,15 +22,17 @@ struct ProjectBrowserView: View {
 @MainActor
 private struct ProjectBrowserContent: View {
     let initialURL: String
+    let waitsForService: Bool
     let allowsExternalNavigation: Bool
     let onURLChange: (String) -> Void
     let owner: WorkReference?
     let peer: String?
     @State private var session: ProjectBrowserSession
 
-    init(owner: WorkReference?, peer: String?, initialURL: String,
+    init(owner: WorkReference?, peer: String?, initialURL: String, waitsForService: Bool,
          allowsExternalNavigation: Bool, onURLChange: @escaping (String) -> Void) {
         self.initialURL = initialURL
+        self.waitsForService = waitsForService
         self.allowsExternalNavigation = allowsExternalNavigation
         self.onURLChange = onURLChange
         self.owner = owner
@@ -62,7 +65,7 @@ private struct ProjectBrowserContent: View {
                 })
             }
             if !initialURL.isEmpty, initialURL != session.targetURL || session.transportURL.isEmpty {
-                await session.open(initialURL)
+                await session.open(initialURL, waitsForService: waitsForService)
             }
         }
         .onChange(of: session.targetURL) { _, target in

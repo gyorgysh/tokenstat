@@ -75,7 +75,7 @@ internal sealed class TerminalSession
 
     private bool _starting;
 
-    private readonly string _slot;
+    private string _slot;
 
     private TerminalSession(string workspaceId, string? sessionId)
     {
@@ -240,6 +240,9 @@ internal sealed class TerminalSession
     public async Task RespawnAsync(int rows, int cols)
     {
         await DetachAsync();
+        var oldId = Id;
+        if (!string.IsNullOrEmpty(oldId)) ById.TryRemove(oldId, out _);
+        ByWorkspace.TryRemove(_slot, out _);
         Id = "";
         Offset = 0;
         Alive = true;
@@ -252,6 +255,11 @@ internal sealed class TerminalSession
         LastError = "";
         _failures = 0;
         await SpawnAsync(rows, cols);
+        if (!string.IsNullOrEmpty(Id))
+        {
+            _slot = Slot(WorkspaceId, Id);
+            ByWorkspace[_slot] = this;
+        }
         if (!string.IsNullOrEmpty(Id) && _poll is null)
         {
             _poll = new CancellationTokenSource();

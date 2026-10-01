@@ -156,7 +156,12 @@ Each workspace holds one tab strip for its launcher, terminals, individual
 files, browser pages and workspace sections. The file tree stays in the right
 inspector, and open documents retain unsaved edits when switching tabs or
 folders during the app session. Closing a document checks unsaved changes;
-closing a terminal tab detaches the viewer without killing its process. Remote
+closing the Terminals workspace tab detaches its viewers and keeps the sessions
+running. Within it, CLI and saved-server SSH tabs can share side-by-side or
+stacked panes, including pane swaps. Chat's terminal companion uses the same
+terminal tree. Closing a session from its tab asks before stopping it and clears
+its saved project association. Launchers and connection headers show saved server
+names without exposing addresses. Remote
 files use the same editor as local files. Windows launches npm batch shims
 through an interpreter and discovers the standalone Codex install directory
 without requiring a daemon restart. Remote loopback addresses in the

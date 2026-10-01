@@ -36,6 +36,7 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
     };
     private readonly TerminalSession _session;
     private string _folderName = "";
+    private string? _reportedSessionId;
     private readonly StackPanel _status = new() { Spacing = Theme.SpaceS };
     private readonly TextBlock _title = new()
     {
@@ -61,11 +62,18 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
     private readonly TextBlock _startTitle = new();
     private bool _loaded;
     private bool _released;
+    private bool _starting;
     private int _generation;
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private Window? _window;
     private readonly TypedEventHandler<object, WindowEventArgs> _windowClosed;
     internal string TabTitle => StartingLabel();
+    internal string SessionId => _session.Id;
+    internal bool IsSessionClosed => _session.Closed;
+    internal bool SharesSessionWith(TerminalPage other) => ReferenceEquals(_session, other._session);
+    internal bool ShouldFocus { get; set; } = true;
+    internal bool RetainOnUnload { get; set; }
+    internal void FocusTerminal() { if (ShouldFocus && IsLoaded && Visibility == Visibility.Visible && _loaded) _terminal.FocusTerminal(); }
 
     public TerminalPage(string workspaceId, string? sessionId)
     {
@@ -140,22 +148,32 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         RenderInspector();
 
         _terminal.Input = bytes => _session.WriteAsync(bytes);
-        _terminal.Resized = (rows, cols) => _loaded ? _session.ResizeAsync(rows, cols) : Task.CompletedTask;
+        _terminal.Resized = (rows, cols) => _loaded && IsLoaded && Visibility == Visibility.Visible
+            ? _session.ResizeAsync(rows, cols) : Task.CompletedTask;
         _terminal.Failed += Banner;
         _windowClosed = (_, _) => Release();
         Loaded += async (_, _) =>
         {
             if (_released) return;
-            _terminal.PrepareForReuse();
-            var generation = ++_generation;
-            _folderName = await FolderNameAsync();
-            if (generation != _generation || !IsLoaded || _released) return;
-            RaiseToolbarChanged();
-            await StartAsync(generation);
+            if (RetainOnUnload && _loaded) { RefreshOnUi(); FocusTerminal(); return; }
+            // A tree move can load again while the first host attach awaits.
+            // Keep that attach and its one pair of output subscriptions.
+            if (RetainOnUnload && _starting) return;
+            _starting = true;
+            try
+            {
+                _terminal.PrepareForReuse();
+                var generation = ++_generation;
+                _folderName = await FolderNameAsync();
+                if (generation != _generation || _released || !RetainOnUnload && !IsLoaded) return;
+                RaiseToolbarChanged();
+                await StartAsync(generation);
+            }
+            finally { _starting = false; }
         };
         Unloaded += (_, _) =>
         {
-            if (_released) return;
+            if (_released || RetainOnUnload) return;
             Stop();
             _terminal.Close();
         };
@@ -166,11 +184,11 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         }
     }
 
-    internal void Release()
+    internal void Release(bool detachSession = true)
     {
         if (_released) return;
         _released = true;
-        Stop();
+        Stop(detachSession);
         _terminal.Close();
         if (_window is not null)
         {
@@ -275,28 +293,28 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         try
         {
             await _terminal.Ready;
-            if (generation != _generation || !IsLoaded) return;
+            if (generation != _generation || _released || !RetainOnUnload && !IsLoaded) return;
             _terminal.Reset();
             _session.Output += Append;
             _session.Changed += Refresh;
             await _session.AttachAsync(CurrentRows(), CurrentCols());
-            if (generation != _generation || !IsLoaded) return;
+            if (generation != _generation || _released || !RetainOnUnload && !IsLoaded) return;
             _loaded = true;
             await _session.ResizeAsync(CurrentRows(), CurrentCols());
             RefreshOnUi();
-            _terminal.FocusTerminal();
+            FocusTerminal();
         }
         catch (Exception ex) { if (generation == _generation && IsLoaded) Banner(ex.Message); }
         finally { _lifecycle.Release(); }
     }
 
-    private void Stop()
+    private void Stop(bool detachSession = true)
     {
         ++_generation;
         _loaded = false;
         _session.Output -= Append;
         _session.Changed -= Refresh;
-        _ = DetachAsync();
+        if (detachSession) _ = DetachAsync();
     }
 
     private async Task DetachAsync()
@@ -310,7 +328,7 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
     {
         DispatcherQueue.TryEnqueue(() =>
         {
-            if (!IsLoaded) return;
+            if (_released || !RetainOnUnload && !IsLoaded) return;
             _terminal.Write(bytes);
             _startOverlay.Visibility = Visibility.Collapsed;
         });
@@ -329,7 +347,9 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
             ? Visibility.Visible
             : Visibility.Collapsed;
         var title = StartingLabel();
-        if (_title.Text != title) { _title.Text = title; RaiseToolbarChanged(); }
+        var identityChanged = _reportedSessionId != _session.Id;
+        _reportedSessionId = _session.Id;
+        if (_title.Text != title || identityChanged) { _title.Text = title; RaiseToolbarChanged(); }
         _size.Text = $"{_session.Cols}×{_session.Rows}";
         _terminal.SetGeometry(_session.Rows, _session.Cols);
         _kill.IsEnabled = _session.Alive && !_session.Closed;
@@ -376,7 +396,7 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         {
             command = command[(cut + 1)..];
         }
-        if (new[] { L10n.Text("windows.terminalpage.exe.e42f3ea0"), L10n.Text("windows.terminalpage.cmd.4ec29444"), L10n.Text("windows.terminalpage.bat.e23b5839") }.Any(extension => command.EndsWith(extension, StringComparison.OrdinalIgnoreCase)))
+        if (new[] { ".exe", ".cmd", ".bat" }.Any(extension => command.EndsWith(extension, StringComparison.OrdinalIgnoreCase)))
         {
             command = command[..^4];
         }

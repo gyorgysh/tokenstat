@@ -7,6 +7,8 @@ namespace Tokenstat.Navigation;
 
 internal static class NavigationRows
 {
+    /// <summary>Refresh row-owned behavior when its navigation container is retained.</summary>
+    public static event Action<NavigationViewItem, NavigationViewItem>? Reconciled;
     /// <summary>Update live content while retaining navigation containers and scroll anchors.</summary>
     public static void Reconcile(IList<object> items, IReadOnlyList<NavigationViewItem> desired, string prefix, int start = -1)
     {
@@ -32,6 +34,7 @@ internal static class NavigationRows
                 AutomationProperties.SetName(existing, AutomationProperties.GetName(fresh));
                 existing.ContextFlyout = fresh.ContextFlyout;
                 fresh.ContextFlyout = null;
+                Reconciled?.Invoke(fresh, existing);
                 var index = items.IndexOf(existing);
                 if (index == at) { at++; continue; }
                 items.RemoveAt(index);

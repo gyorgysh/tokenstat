@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 using System.Reflection;
+using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Tokenstat.Install;
 using Tokenstat.Navigation;
@@ -34,6 +36,33 @@ foreach (var status in new[] { "HashMismatch", "NotTrusted", "UnknownError", "No
 Reject("{\"status\":\"Valid\",\"subject\":\" \"}");
 Reject("{}");
 Reject("bad json");
+
+// A language catalog must never choose a different installation directory.
+// Simulate the translated value that originally changed the shipped path.
+var translatedFolder = Path.Combine(AppContext.BaseDirectory, "localization", "fr-FR");
+var translatedTable = Path.Combine(translatedFolder, "windows.json");
+var previousTable = File.Exists(translatedTable) ? File.ReadAllBytes(translatedTable) : null;
+var previousCulture = CultureInfo.CurrentUICulture;
+Directory.CreateDirectory(translatedFolder);
+try
+{
+    File.WriteAllText(translatedTable, JsonSerializer.Serialize(new Dictionary<string, string>
+    {
+        ["windows.selfinstall.programs.b6747064"] = "Programmes",
+    }));
+    CultureInfo.CurrentUICulture = new CultureInfo("fr-FR");
+    Check(Tokenstat.L10n.Text("windows.selfinstall.programs.b6747064") == "Programmes", "Translated catalog fixture is active.");
+    Check(SelfInstall.InstallDirectory == Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "tokenstat"),
+        "Translated copy cannot change the install path.");
+}
+finally
+{
+    CultureInfo.CurrentUICulture = previousCulture;
+    if (previousTable is not null) File.WriteAllBytes(translatedTable, previousTable);
+    else File.Delete(translatedTable);
+    if (!Directory.EnumerateFileSystemEntries(translatedFolder).Any()) Directory.Delete(translatedFolder);
+}
 
 var scratch = Path.Combine(Path.GetTempPath(), "tokenstat-install-tests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(scratch);

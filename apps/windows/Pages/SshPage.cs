@@ -33,14 +33,26 @@ internal sealed class SshPage : Page, IToolbarItems
     private string? _sessionHostId;
     private long _offset;
     private CancellationTokenSource? _poll;
+    private Task? _pollTask;
     private SSHSection _section;
     private bool _loading;
     private bool _reloadRequested;
     private readonly Border _stripHost = new();
     private readonly Border _bodyHost = new();
+    private readonly bool _terminalOnly;
+    private bool _viewerReleased;
+    private JsonNode? _connectHost;
+    internal bool ShouldFocus { get; set; } = true;
+    internal bool RetainOnUnload { get; set; }
+    internal event Action<string>? ConnectionOpened;
+    internal event Action? ConnectionCancelled;
+    internal void FocusTerminal() { if (ShouldFocus && IsLoaded && Visibility == Visibility.Visible && _sessionId is not null) _terminal.FocusTerminal(); }
+    internal void ReleaseViewer() { _viewerReleased = true; _poll?.Cancel(); _terminal.Close(); }
 
-    public SshPage(SSHSection section = SSHSection.Hosts, string? sessionId = null)
+    public SshPage(SSHSection section = SSHSection.Hosts, string? sessionId = null, JsonNode? connectHost = null, bool terminalOnly = false)
     {
+        _terminalOnly = terminalOnly;
+        _connectHost = connectHost?.DeepClone();
         _section = section;
         _pendingSessionId = sessionId;
         _listView = new ScrollViewer
@@ -62,7 +74,8 @@ internal sealed class SshPage : Page, IToolbarItems
         };
         sessionChrome.Children.Add(ActionIconGlyph.Button(L10n.Text("common.close"), ActionIcon.Disconnect, async (_, _) =>
         {
-            await CloseSessionAsync();
+            if (!await CloseSessionAsync()) return;
+            if (_terminalOnly) { ConnectionCancelled?.Invoke(); return; }
             ShowList();
             await LoadAsync();
         }));
@@ -83,12 +96,13 @@ internal sealed class SshPage : Page, IToolbarItems
         };
         _terminal.Resized = async (rows, cols) =>
         {
-            if (_sessionId is string id)
+            if (IsLoaded && Visibility == Visibility.Visible && _sessionId is string id)
                 await AppServices.Host.CallAsync("ssh.session.resize", new JsonObject { ["id"] = id, ["rows"] = rows, ["cols"] = cols });
         };
         _terminal.Failed += SessionBanner;
 
         RefreshStrip();
+        if (terminalOnly) { _stripHost.Visibility = Visibility.Collapsed; ShowSession(); }
         var root = new Grid();
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -99,12 +113,19 @@ internal sealed class SshPage : Page, IToolbarItems
         Content = root;
         Loaded += async (_, _) =>
         {
+            if (_viewerReleased) return;
             _terminal.PrepareForReuse();
-            await LoadAsync();
+            if (!_terminalOnly) await LoadAsync();
             if (IsLoaded && _pendingSessionId is not null) await AdoptSessionAsync(_pendingSessionId);
+            if (IsLoaded && _connectHost is JsonNode host)
+            {
+                _connectHost = null;
+                await ConnectAsync(host);
+            }
         };
         Unloaded += (_, _) =>
         {
+            if (RetainOnUnload) return;
             _poll?.Cancel();
             _terminal.Close();
         };
@@ -145,6 +166,7 @@ internal sealed class SshPage : Page, IToolbarItems
     /// </summary>
     public IList<UIElement> ToolbarActions()
     {
+        if (_terminalOnly) return new List<UIElement>();
         return new List<UIElement>
         {
             Buttons.ToolbarIcon(
@@ -300,20 +322,8 @@ internal sealed class SshPage : Page, IToolbarItems
             var list = new StackPanel { Spacing = Theme.SpaceS };
             foreach (var host in array)
             {
-                var label = Format.Text(host, "label", Format.Text(host, "hostname"));
-                var username = Format.Text(host, "username");
-                var hostname = Format.Text(host, "hostname");
-                var port = Format.Long(host, "port");
-                if (port <= 0)
-                {
-                    port = 22;
-                }
+                var label = ServerLauncher.Name(host!);
                 var keyHint = HostKeyId(host);
-                var subtitle = $"{username}@{hostname}:{port}";
-                if (!string.IsNullOrEmpty(keyHint))
-                {
-                    subtitle += L10n.Text("windows.sshpage.key.a0986327");
-                }
                 var open = new Button
                 {
                     HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -331,7 +341,7 @@ internal sealed class SshPage : Page, IToolbarItems
                 var hostContent = (FrameworkElement)open.Content;
                 open.Content = null;
                 open.Content = SshHostPlatform.Row(SshHostPlatform.Label(host), hostContent);
-                ToolTipService.SetToolTip(open, subtitle);
+                ToolTipService.SetToolTip(open, label);
                 var record = host;
                 open.Click += async (_, _) => await ConnectAsync(record);
                 var row = new Grid();
@@ -356,7 +366,6 @@ internal sealed class SshPage : Page, IToolbarItems
                 ContextMenus.AddButtons(menu, tools);
                 ContextMenus.AddAsync(menu, Format.Flag(record, "favorite") ? L10n.Text("windows.sshpage.remove_from_favourites.a5bdeced") : L10n.Text("windows.sshpage.add_to_favourites.9e619bff"), async () =>
                     await SaveLibraryFlagAsync("ssh.host.save", record, "favorite", !Format.Flag(record, "favorite")));
-                ContextMenus.Copy(menu, L10n.Text("windows.sshpage.copy_connection_address.3f3f67d7"), () => subtitle);
                 list.Children.Add(row);
             }
             _listRoot.Children.Add(Chrome.Card(L10n.Text("windows.sshpage.hosts.bba9af13"), list));
@@ -637,6 +646,7 @@ internal sealed class SshPage : Page, IToolbarItems
 
     private async Task ConnectAsync(JsonNode? host)
     {
+        if (_viewerReleased) return;
         if (host is not JsonObject record)
         {
             return;
@@ -670,7 +680,7 @@ internal sealed class SshPage : Page, IToolbarItems
         }
         catch (Exception ex)
         {
-            _listRoot.Children.Insert(1, Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+            LibraryBanner(ex.Message);
         }
         var method = new ComboBox { Header = L10n.Text("windows.sshpage.sign_in_with.11aaa142"), HorizontalAlignment = HorizontalAlignment.Stretch };
         method.Items.Add("Saved key");
@@ -683,7 +693,7 @@ internal sealed class SshPage : Page, IToolbarItems
         var passphrase = new PasswordBox { Header = L10n.Text("windows.sshpage.key_passphrase.2510031c"), PlaceholderText = L10n.Text("windows.sshpage.only_for_an_encrypted_private_key.9f122b8a") };
         var validation = new TextBlock { Foreground = Theme.Brush(static () => Theme.Danger), TextWrapping = TextWrapping.Wrap };
         var form = new StackPanel { Spacing = Theme.SpaceM, MinWidth = 360 };
-        form.Children.Add(new TextBlock { Text = $"{username}@{hostname}:{port}", Opacity = 0.8 });
+        form.Children.Add(new TextBlock { Text = ServerLauncher.Name(record), Opacity = 0.8 });
         form.Children.Add(method);
         form.Children.Add(keys);
         form.Children.Add(password);
@@ -703,7 +713,7 @@ internal sealed class SshPage : Page, IToolbarItems
         string SelectedPem() => method.SelectedIndex == 2 ? pemBox.Text.Trim()
             : method.SelectedIndex == 0 && keys.SelectedItem is ComboBoxItem item && item.Tag is JsonNode key
                 ? SshSecrets.Get(Format.Text(key, "secretRef")) ?? "" : "";
-        var dialog = new ContentDialog { Title = L10n.Text("windows.sshpage.connect_to_0.fee15415", $"{hostname}"), Content = form,
+        var dialog = new ContentDialog { Title = L10n.Text("windows.sshpage.connect_to_0.fee15415", ServerLauncher.Name(record)), Content = form,
             PrimaryButtonText = L10n.Text("common.connect"), CloseButtonText = L10n.Text("common.cancel"), DefaultButton = ContentDialogButton.Primary };
         dialog.PrimaryButtonClick += (_, e) =>
         {
@@ -713,7 +723,8 @@ internal sealed class SshPage : Page, IToolbarItems
                 e.Cancel = true;
             }
         };
-        if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary) return;
+        if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary) { ConnectionCancelled?.Invoke(); return; }
+        if (_viewerReleased) return;
         var pem = SelectedPem();
         var useKey = method.SelectedIndex != 1;
 
@@ -724,9 +735,11 @@ internal sealed class SshPage : Page, IToolbarItems
         }
         catch (Exception ex)
         {
-            _listRoot.Children.Insert(1, Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+            LibraryBanner(ex.Message);
             return;
         }
+
+        if (_viewerReleased) return;
 
         JsonObject auth;
         if (useKey)
@@ -773,7 +786,7 @@ internal sealed class SshPage : Page, IToolbarItems
         }
         catch (Exception ex)
         {
-            _listRoot.Children.Insert(1, Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+            LibraryBanner(ex.Message);
             return;
         }
 
@@ -781,28 +794,28 @@ internal sealed class SshPage : Page, IToolbarItems
         _sessionHostId = Format.Text(record, "id");
         if (string.IsNullOrEmpty(_sessionId))
         {
-            _listRoot.Children.Insert(1, Chrome.Banner(
-                L10n.Text("windows.sshpage.the_host_did_not_return_a_session_id.834cef2f"),
-                Theme.Danger,
-                Symbol.Important));
+            LibraryBanner(L10n.Text("windows.sshpage.the_host_did_not_return_a_session_id.834cef2f"));
             return;
         }
+        if (_viewerReleased) { await CloseSessionAsync(); return; }
         _offset = 0;
         _terminal.Reset();
         _status.Children.Clear();
         ShowSession();
         _poll?.Cancel();
         _poll = new CancellationTokenSource();
-        _ = PollAsync(_poll.Token);
+        _pollTask = PollAsync(_poll.Token);
         var platformHost = (JsonObject)record.DeepClone();
         platformHost["hostKeys"] = hostKeys.DeepClone();
         _ = RememberPlatformAsync(platformHost, connection);
+        _pendingSessionId = _sessionId;
+        ConnectionOpened?.Invoke(_sessionId);
 
     }
 
     private async Task RememberPlatformAsync(JsonObject host, JsonObject connection)
     {
-        if (await SshHostPlatform.RememberAsync(host, connection) && IsLoaded) await LoadAsync();
+        if (await SshHostPlatform.RememberAsync(host, connection) && IsLoaded && !_terminalOnly) await LoadAsync();
     }
 
     /// <summary>
@@ -1057,17 +1070,44 @@ internal sealed class SshPage : Page, IToolbarItems
 
     private async Task AdoptSessionAsync(string id)
     {
+        if (_viewerReleased) return;
+        if (RetainOnUnload && _sessionId == id)
+        {
+            ShowSession();
+            // Retained emulators already contain VT state. A read retry must
+            // continue at their offset rather than replaying it over itself.
+            if (_poll is null || _poll.IsCancellationRequested || _pollTask?.IsCompleted == true)
+            {
+                _poll?.Cancel();
+                _poll = new CancellationTokenSource();
+                _pollTask = PollAsync(_poll.Token);
+            }
+            FocusTerminal();
+            return;
+        }
+        var changingSession = _sessionId != id;
+        _poll?.Cancel();
         _sessionId = id;
-        _sessionHostId = null;
+        _pendingSessionId = id;
+        if (changingSession) _sessionHostId = null;
         _offset = 0;
         _terminal.Reset();
         _status.Children.Clear();
         _suggestRoot.Children.Clear();
         ShowSession();
-        _poll?.Cancel();
         _poll = new CancellationTokenSource();
-        _ = PollAsync(_poll.Token);
-        await Task.CompletedTask;
+        _pollTask = PollAsync(_poll.Token);
+        if (_sessionHostId is null)
+        {
+            var token = _poll.Token;
+            try
+            {
+                var sessions = Format.Items(await AppServices.Host.CallAsync("ssh.session.list"));
+                if (!token.IsCancellationRequested && _sessionId == id)
+                    _sessionHostId = Format.Text(sessions?.FirstOrDefault(session => Format.Text(session, "id") == id), "hostId");
+            }
+            catch { /* The terminal still works if saved-snippet metadata is unavailable. */ }
+        }
     }
 
     /// <summary>
@@ -1771,7 +1811,8 @@ internal sealed class SshPage : Page, IToolbarItems
 
     private void LibraryBanner(string text)
     {
-        _listRoot.Children.Insert(1, Chrome.Banner(text, Theme.Danger, Symbol.Important));
+        if (_terminalOnly) { SessionBanner(text); return; }
+        _listRoot.Children.Insert(Math.Min(1, _listRoot.Children.Count), Chrome.Banner(text, Theme.Danger, Symbol.Important));
     }
 
     private async Task PollAsync(CancellationToken token)
@@ -1786,7 +1827,7 @@ internal sealed class SshPage : Page, IToolbarItems
             await _terminal.Ready;
             if (token.IsCancellationRequested) return;
             await _terminal.Resized!(_terminal.Rows, _terminal.Cols);
-            RunOnUi(() => { if (!token.IsCancellationRequested) _terminal.FocusTerminal(); });
+            RunOnUi(() => { if (!token.IsCancellationRequested) FocusTerminal(); });
         }
         catch (Exception ex)
         {
@@ -1845,23 +1886,26 @@ internal sealed class SshPage : Page, IToolbarItems
         }
     }
 
-    private async Task CloseSessionAsync()
+    private async Task<bool> CloseSessionAsync()
     {
-        _poll?.Cancel();
         var id = _sessionId;
-        _sessionId = null;
         if (string.IsNullOrEmpty(id))
         {
-            return;
+            return true;
         }
         try
         {
             await AppServices.Host.CallAsync("ssh.session.close", new JsonObject { ["id"] = id });
         }
-        catch
+        catch (Exception ex)
         {
-            // Leaving the page must not throw.
+            SessionBanner(FriendlyError.Display(ex.Message));
+            return false;
         }
+        _poll?.Cancel();
+        WorkspaceSshTabs.Remove(id);
+        _sessionId = _pendingSessionId = _sessionHostId = null;
+        return true;
     }
 
     private void SessionBanner(string text)

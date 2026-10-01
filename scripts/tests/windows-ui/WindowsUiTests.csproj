@@ -24,6 +24,7 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4654" />
     <Compile Include="../../../apps/windows/Pages/WorkspaceTabStrip.cs" Link="WorkspaceTabStrip.cs" />
+    <Compile Include="../../../apps/windows/Pages/SharedTerminalTree.cs" Link="SharedTerminalTree.cs" />
     <Compile Include="../../../apps/windows/Pages/NotePreview.cs" Link="NotePreview.cs" />
     <Compile Include="../../../apps/windows/Pages/NoteMarkdown.cs" Link="NoteMarkdown.cs" />
     <Compile Include="../../../apps/windows/Pages/EditorTree.cs" Link="EditorTree.cs" />

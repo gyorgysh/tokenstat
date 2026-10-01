@@ -183,15 +183,20 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             _keyBox.Text = "";
             await SendTextAsync(text);
         }));
-        foreach (var special in new[] { L10n.Text("windows.screenpage.esc.52f878ed"), L10n.Text("windows.screenpage.tab.90ddf196"), L10n.Text("windows.screenpage.enter.dc8659db"), L10n.Text("common.back") })
+        foreach (var (label, text) in new[]
+        {
+            (L10n.Text("windows.screenpage.esc.52f878ed"), "\u001b"),
+            (L10n.Text("windows.screenpage.tab.90ddf196"), "\t"),
+            (L10n.Text("windows.screenpage.enter.dc8659db"), "\r"),
+            (L10n.Text("common.back"), "\b"),
+        })
         {
             var keyButton = new Button
             {
-                Content = special,
+                Content = label,
                 MinWidth = 56,
             };
-            var label = special;
-            keyButton.Click += async (_, _) => await SendSpecialAsync(label);
+            keyButton.Click += async (_, _) => await SendTextAsync(text);
             keyBar.Children.Add(keyButton);
         }
         _keyBox.KeyDown += async (_, e) =>
@@ -923,19 +928,6 @@ internal sealed class ScreenPage : Page, IInspectorContent, IToolbarItems
             ["text"] = text,
             ["flags"] = 0,
         });
-    }
-
-    private async Task SendSpecialAsync(string label)
-    {
-        var text = label switch
-        {
-            "Esc" => "\u001b",
-            "Tab" => "\t",
-            "Enter" => "\r",
-            "Back" => "\b",
-            _ => "",
-        };
-        await SendTextAsync(text);
     }
 
     private async Task SendDisplayAsync(uint id)

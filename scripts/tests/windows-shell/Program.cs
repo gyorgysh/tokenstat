@@ -8,6 +8,8 @@ var directory = Path.Combine(Path.GetTempPath(), "tokenstat-shell-test-" + Guid.
 Directory.CreateDirectory(directory);
 try
 {
+    TerminalPaneSelectionTests.Run(directory);
+    await TerminalSessionTests.RunAsync();
     var path = Path.Combine(directory, "widths.json");
     var widths = new ShellWidths(path);
     Check(widths.Sidebar == 280 && widths.Inspector == 280, "Missing preferences changed the default layout");
@@ -125,6 +127,24 @@ try
     Check(await acquisition is null && releaseCount == 1 && !open.IsCurrent,
         "A stale account Open retained a listener or could record/navigate its target");
     await BrowserBridgePoolTests.RunAsync();
+    var trigger = new HoverRect(0, 100, 200, 30);
+    var rightCard = new HoverRect(214, 0, 340, 400);
+    var leftCard = new HoverRect(-354, 0, 340, 400);
+    Check(SidebarHoverState.Contains(208, 115, trigger, rightCard)
+        && SidebarHoverState.Contains(300, 250, trigger, rightCard)
+        && SidebarHoverState.Contains(-8, 115, trigger, leftCard)
+        && SidebarHoverState.Contains(-200, 250, trigger, leftCard), "Hover card dismissed while crossing its row gap or reading a flipped card");
+    Check(!SidebarHoverState.Contains(208, 250, trigger, rightCard)
+        && !SidebarHoverState.Contains(-8, 250, trigger, leftCard)
+        && !SidebarHoverState.Contains(600, 250, trigger, rightCard), "Empty space beside a tall hover card kept it open");
+    var hover = new SidebarHoverState();
+    Check(!hover.ShouldClose(false, 1000) && !hover.ShouldClose(false, 1100) && hover.ShouldClose(false, 1240),
+        "Repeated stationary samples postponed hover dismissal");
+    hover = new();
+    Check(!hover.ShouldClose(false, 2000) && !hover.ShouldClose(true, 2150)
+        && !hover.ShouldClose(false, 2300) && !hover.ShouldClose(false, 2450) && hover.ShouldClose(false, 2600),
+        "Returning to a hover card did not reset its departure grace");
+    Console.WriteLine("Sidebar hover: row/card crossings, flipped placement, bounded stationary exits and reentry passed");
     Console.WriteLine("Shell widths: persistence, independent panels, malformed preferences and adaptive fit passed");
 }
 finally { Directory.Delete(directory, recursive: true); }

@@ -685,7 +685,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 if (!Uri.TryCreate(args.Request.Uri, UriKind.Absolute, out var uri)) return;
                 var navigation = _navigationEpoch.Revision;
                 var operation = BrowserProjectMemory.AccountEpoch.Capture(() => _closed || navigation != _navigationEpoch.Revision);
-                var destination = args.Request.Headers.Contains("Sec-Fetch-Dest") ? args.Request.Headers.GetHeader(L10n.Text("windows.browserpage.sec_fetch_dest.9422d968")) : null;
+                var destination = args.Request.Headers.Contains("Sec-Fetch-Dest") ? args.Request.Headers.GetHeader("Sec-Fetch-Dest") : null;
                 var topLevel = BrowserRouteState.IsTopLevelDocument(args.ResourceContext == CoreWebView2WebResourceContext.Document, destination);
                 var worker = (args.RequestedSourceKind & (CoreWebView2WebResourceRequestSourceKinds.SharedWorker | CoreWebView2WebResourceRequestSourceKinds.ServiceWorker)) != 0;
                 var action = !operation.IsCurrent ? BrowserRouteState.RequestAction.Block
@@ -695,7 +695,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 if (action == BrowserRouteState.RequestAction.Pass) return;
                 // Refuse before rewriting too, so a failed WebView API call cannot
                 // send the original localhost request to this computer.
-                args.Response = core.Environment.CreateWebResourceResponse(null, 403, L10n.Text("windows.browserpage.remote_preview_address_unavailable.40246f7f"), "Content-Length: 0\r\n");
+                args.Response = core.Environment.CreateWebResourceResponse(null, 403, "Remote preview address unavailable", "Content-Length: 0\r\n");
                 if (action == BrowserRouteState.RequestAction.Rewrite && _routes.Active is { } active)
                 {
                     // Preserve the request method and body, including forms and subresources.
@@ -717,7 +717,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                     if (lease is null || !operation.IsCurrent) return;
                     // A document redirect gives the page its new proxy origin, so its
                     // relative requests follow the live listener after Back/Forward.
-                    args.Response = core.Environment.CreateWebResourceResponse(null, 302, L10n.Text("windows.browserpage.preview_listener_refreshed.fa97adde"),
+                    args.Response = core.Environment.CreateWebResourceResponse(null, 302, "Preview listener refreshed",
                         "Location: " + BrowserRouteState.Through(lease, uri) + "\r\nContent-Length: 0\r\n");
                 }
                 catch (Exception ex) { if (operation.IsCurrent) Banner(FriendlyError.Display(ex.Message)); }

@@ -17,7 +17,7 @@ struct ServerLauncher: View {
                 Label(L10n.text("apple.rootview.servers.68d7beb6"), systemImage: "server.rack")
                     .font(Theme.callout.weight(.semibold))
                 Spacer(minLength: Theme.Space.s)
-                Button(L10n.text("apple.serverlauncher.manage_servers"), action: onManage)
+                Button(L10n.text("apple.serverlauncher.manage_servers"), .settings, action: onManage)
                     .font(Theme.caption).buttonStyle(.plain).foregroundStyle(Theme.accent)
             }
             ForEach(library.launcherHosts) { host in

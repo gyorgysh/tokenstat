@@ -94,9 +94,9 @@ struct ChatTerminalPane: View {
                     .accessibilityLabel(L10n.text("apple.chatterminalpane.terminal_sessions_beside_chat.fd6daa2a"))
                     Spacer(minLength: 0)
                     Menu {
-                        Button(L10n.text("apple.terminalpane.single.8888a029")) { terminals.setLayout(.single, for: folder.id) }
-                        Button(L10n.text("apple.terminalpane.side_by_side.a3d7b387")) { terminals.setLayout(.side, for: folder.id) }
-                        Button(L10n.text("apple.terminalpane.stacked.c2fed746")) { terminals.setLayout(.stacked, for: folder.id) }
+                        Button(L10n.text("apple.terminalpane.single.8888a029"), .layout) { terminals.setLayout(.single, for: folder.id) }
+                        Button(L10n.text("apple.terminalpane.side_by_side.a3d7b387"), .compare) { terminals.setLayout(.side, for: folder.id) }
+                        Button(L10n.text("apple.terminalpane.stacked.c2fed746"), .layout) { terminals.setLayout(.stacked, for: folder.id) }
                         if layout.isSplit {
                             Divider()
                             TerminalSwapButton(layout: layout) { terminals.swapPanes(in: folder.id) }

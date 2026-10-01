@@ -62,7 +62,7 @@ struct SidebarDetailCard<Footer: View>: View {
             if let git, git.isRepo {
                 SidebarGitDetail(git: git)
             }
-            Divider().overlay(Theme.border)
+            ThemeRule()
             Text(path).font(Theme.caption).foregroundStyle(.tertiary)
                 .lineLimit(3).truncationMode(.middle)
                 .textSelection(.enabled)

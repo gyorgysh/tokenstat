@@ -290,6 +290,9 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             try { _queueBudget = queue["defaultBudgetSeconds"]?.GetValue<ulong>() ?? _queueBudget; } catch { /* keep */ }
             try { _queueConcurrent = queue["maxConcurrent"]?.GetValue<uint>() ?? _queueConcurrent; } catch { /* keep */ }
             _queueTimezone = Format.Text(queue, "timezone");
+            // Table action buttons must reflect the completed load. Quiet
+            // polling does not repaint an unchanged host response later.
+            _working = false;
             RaiseToolbarChanged();
             RenderList();
             RenderDetail();

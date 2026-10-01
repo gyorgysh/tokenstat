@@ -7,13 +7,13 @@ import SwiftTerm
 /// second connection or read loop when a server joins a project split.
 @MainActor
 final class WorkspaceTerminal: TerminalPresentable {
+    nonisolated let id: String
     let local: TerminalSession?
     let ssh: SSHLiveTerminal?
 
-    init(_ session: TerminalSession) { local = session; ssh = nil }
-    init(_ session: SSHLiveTerminal) { local = nil; ssh = session }
+    init(_ session: TerminalSession) { id = session.id; local = session; ssh = nil }
+    init(_ session: SSHLiveTerminal) { id = "ssh:" + session.id; local = nil; ssh = session }
 
-    var id: String { local?.id ?? "ssh:" + ssh!.id }
     var alive: Bool { local?.alive ?? ssh!.alive }
     var label: String {
         if let local { return local.customName ?? local.title.flatMap { $0.isEmpty ? nil : $0 } ?? local.command }

@@ -161,6 +161,7 @@ struct WorkspaceBrowserTab: Identifiable, Hashable, Sendable {
     let id: String
     var url: String
     var number: Int
+    var waitsForService = false
     var title: String { L10n.text("apple.workspacesmodel.browser_0.d9e7db6c", "\(number)") }
 }
 
@@ -522,9 +523,10 @@ final class WorkspacesModel {
         browserTabs[workspaceID]?.removeAll { $0.id == id }
     }
 
-    func setBrowserURL(_ url: String, in workspaceID: String, tabID: String) {
+    func setBrowserURL(_ url: String, in workspaceID: String, tabID: String, waitsForService: Bool = false) {
         guard let index = browserTabs[workspaceID]?.firstIndex(where: { $0.id == tabID }) else { return }
         browserTabs[workspaceID]?[index].url = url
+        browserTabs[workspaceID]?[index].waitsForService = waitsForService
     }
 
     /// After a launch that starts a local web UI, wait for the port then open
@@ -537,14 +539,13 @@ final class WorkspacesModel {
     func openHarnessPage(_ url: String, in folder: WorkspaceFolder) async {
         guard let target = BrowserTarget(url) else { return }
         let owner = WorkViewedChange.owner(folderID: folder.id)
-        if folder.id.hasPrefix("remote:") {
-            try? await Task.sleep(for: .seconds(2))
-        } else {
+        let remote = folder.id.hasPrefix("remote:")
+        if !remote {
             _ = await Self.waitForLoopback(port: target.port)
         }
         guard !Task.isCancelled, WorkViewedChange.owner(folderID: folder.id) == owner else { return }
         let tab = showBrowser(in: folder.id)
-        setBrowserURL(target.url, in: folder.id, tabID: tab.id)
+        setBrowserURL(target.url, in: folder.id, tabID: tab.id, waitsForService: remote)
     }
 
     /// True when something on this machine's loopback answered.

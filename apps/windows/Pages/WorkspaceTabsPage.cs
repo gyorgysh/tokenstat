@@ -20,12 +20,17 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
     private readonly Dictionary<string, Button> _inspectorButtons = new();
     private readonly Dictionary<string, Page> _inspectorPages = new();
     private IToolbarItems? _toolbar;
+    private readonly WorkspaceTerminalController _terminalController;
+    private WorkspaceTerminalPane? _terminalPane;
+    private WorkspaceTerminalPane TerminalPane => _terminalPane ??= new WorkspaceTerminalPane(_terminalController);
     public string WorkspaceId { get; }
     public Page? ActivePage => (_tabs.SelectedItem as TabViewItem)?.Content as Page;
 
     public WorkspaceTabsPage(string workspaceId, Func<WorkspaceSection, Page> create)
     {
         WorkspaceId = workspaceId;
+        _terminalController = new(workspaceId);
+        _terminalController.Changed += Changed;
         _create = section => { var page = create(section); page.Tag = this; return page; };
         _editor = new EditorPage(workspaceId, _tabs);
         _browser = new BrowserPage("", "127.0.0.1", 0, false,
@@ -90,20 +95,31 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
         }
         if (section == WorkspaceSection.Files) _inspectorTab = "Files";
         if (section == WorkspaceSection.Sessions) section = WorkspaceSection.Launcher;
-        var label = section switch
-        {
-            WorkspaceSection.Pulls => L10n.Text("windows.workspacetabspage.pull_requests.d9e3f260"), WorkspaceSection.Todo => L10n.Text("common.tasks"),
-            _ => section.ToString(),
-        };
-        OpenSurface("section:" + section, label,
+        OpenSurface("section:" + section, section.Label(),
             () => section == WorkspaceSection.Files ? _editor : _create(section),
             section != WorkspaceSection.Launcher);
     }
 
     public void OpenTerminal(string? sessionId)
     {
-        var key = "terminal:" + (sessionId ?? Guid.NewGuid().ToString());
-        OpenSurface(key, L10n.Text("windows.workspacetabspage.terminal.e0926fda"), () => new TerminalPage(WorkspaceId, sessionId));
+        OpenSurface("section:Terminals", L10n.Text("windows.terminalpane.terminals"), () => TerminalPane);
+        if (sessionId?.StartsWith("ssh:", StringComparison.Ordinal) == true) _ = _terminalController.OpenSSHAsync(sessionId[4..]);
+        else if (sessionId is not null) _terminalController.AddLocal(sessionId);
+        else _ = _terminalController.StartShellAsync();
+    }
+
+    internal async Task OpenServerAsync(System.Text.Json.Nodes.JsonNode host)
+    {
+        if (ActivePage is ChatPage) ShowCompanion("Terminal");
+        else OpenSurface("section:Terminals", L10n.Text("windows.terminalpane.terminals"), () => TerminalPane);
+        await _terminalController.OpenServerAsync(host);
+    }
+
+    internal void OpenTerminalInSplit(string sessionId)
+    {
+        OpenSurface("section:Terminals", L10n.Text("windows.terminalpane.terminals"), () => TerminalPane);
+        if (sessionId.StartsWith("ssh:", StringComparison.Ordinal)) _ = _terminalController.OpenSSHAsync(sessionId[4..], inSplit: true);
+        else { _terminalController.AddLocal(sessionId, select: false); _terminalController.OpenInSplit(sessionId); }
     }
 
     public void OpenBrowser(string url, string host, int port, bool unlisten, string? peer)
@@ -158,7 +174,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
     public UIElement? Inspector => _inspector;
     public double MinimumContentWidth => (ActiveSource as IInspectorContent)?.MinimumContentWidth ?? ShellWidths.ContentMinimum;
     public UIElement? ToolbarScope => (ActiveSource as IToolbarItems)?.ToolbarScope;
-    public double MinimumInspectorWidth => _companion is null ? ShellWidths.Minimum : 320;
+    public double MinimumInspectorWidth => _companion is not null && ActivePage is ChatPage ? 320 : ShellWidths.Minimum;
     public IList<UIElement> ToolbarActions() => CompanionActions((ActiveSource as IToolbarItems)?.ToolbarActions() ?? new List<UIElement>());
     public event Action? ToolbarChanged;
     private void Changed()
@@ -179,6 +195,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
     }
     private void RefreshChrome()
     {
+        var hasCompanion = _companion is not null && ActivePage is ChatPage;
         // One tree keeps expansion, selection and its loaded directory cache
         // while moving between the Files page and the workspace inspector.
         var filesPage = ReferenceEquals(ActivePage, _editor);
@@ -196,9 +213,9 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
         _toolbar = ActiveSource as IToolbarItems;
         if (_toolbar is not null) _toolbar.ToolbarChanged += Changed;
         if (_details.Content is ScrollViewer previous) previous.Content = null;
-        _inspectorTabs.Visibility = _companion is null ? Visibility.Visible : Visibility.Collapsed;
-        _companionHeader.Visibility = _companion is null ? Visibility.Collapsed : Visibility.Visible;
-        if (_companion is not null) _details.Content = _companion == "Browser" ? CompanionBrowser : CompanionTerminal;
+        _inspectorTabs.Visibility = hasCompanion ? Visibility.Collapsed : Visibility.Visible;
+        _companionHeader.Visibility = hasCompanion ? Visibility.Visible : Visibility.Collapsed;
+        if (hasCompanion) _details.Content = _companion == "Browser" ? CompanionBrowser : CompanionTerminal;
         else if (_inspectorTab is "Changes" or "History")
         {
             if (!_inspectorPages.TryGetValue(_inspectorTab, out var page))
@@ -213,8 +230,8 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
             _details.Content = _inspectorTab == "Details" || (filesPage && _inspectorTab == "Files")
                 ? new ScrollViewer { Content = (ActiveSource as IInspectorContent)?.Inspector } : null;
         }
-        _details.Visibility = _companion is null && _inspectorTab == "Files" && !filesPage ? Visibility.Collapsed : Visibility.Visible;
-        _editor.FileTree.Visibility = filesPage || _companion is null && _inspectorTab == "Files" ? Visibility.Visible : Visibility.Collapsed;
+        _details.Visibility = !hasCompanion && _inspectorTab == "Files" && !filesPage ? Visibility.Collapsed : Visibility.Visible;
+        _editor.FileTree.Visibility = filesPage || !hasCompanion && _inspectorTab == "Files" ? Visibility.Visible : Visibility.Collapsed;
         foreach (var (label, button) in _inspectorButtons)
         {
             button.Background = label == _inspectorTab ? Theme.Brush(static () => Theme.RowSelected) : Theme.PanelBrush;

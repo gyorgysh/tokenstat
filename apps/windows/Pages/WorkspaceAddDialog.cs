@@ -282,7 +282,7 @@ internal static class ProjectWorktreeDialog
         var separator = Math.Max(projectPath.LastIndexOf('/'), projectPath.LastIndexOf('\\'));
         var name = new TextBox { Header = L10n.Text("windows.workspaceadddialog.name.dcd1d522"), PlaceholderText = L10n.Text("windows.workspaceadddialog.improved_search.fda070d5") };
         var prefix = new TextBox { Header = L10n.Text("windows.workspaceadddialog.branch_prefix_optional.7797f25d"), Text = _namespace };
-        var from = new TextBox { Header = L10n.Text("windows.workspaceadddialog.start_from_branch_or_commit.1ab72550"), Text = L10n.Text("windows.workspaceadddialog.head.b5180223") };
+        var from = new TextBox { Header = L10n.Text("windows.workspaceadddialog.start_from_branch_or_commit.1ab72550"), Text = "HEAD" };
         var parent = new TextBox { Header = L10n.Text("windows.workspaceadddialog.parent_folder.158f5a01"), Text = separator >= 0 ? projectPath[..(separator + 1)] : "" };
         var tabs = new ComboBox { ItemsSource = new[] { L10n.Text("windows.workspaceadddialog.new_worktree.4f210afe"), L10n.Text("windows.workspaceadddialog.working_folders_0.b9b73029", $"{trees.Count}") }, SelectedIndex = 0,
             HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -354,7 +354,7 @@ internal static class ProjectWorktreeDialog
         var preview = new TextBlock { TextWrapping = TextWrapping.Wrap, Opacity = 0.7 };
         void UpdatePreview()
         {
-            preview.Text = L10n.Text("windows.workspaceadddialog.branch_0_1.d08c5340", $"{(prefix.Text.Length == 0 ? L10n.Text("windows.workspaceadddialog..e3b0c442") : prefix.Text + L10n.Text("windows.workspaceadddialog..8a5edab2"))}", $"{name.Text}");
+            preview.Text = L10n.Text("windows.workspaceadddialog.branch_0_1.d08c5340", $"{(prefix.Text.Length == 0 ? "" : prefix.Text + "/")}", $"{name.Text}");
             UpdateActions();
         }
         name.TextChanged += (_, _) => UpdatePreview(); prefix.TextChanged += (_, _) => UpdatePreview();
