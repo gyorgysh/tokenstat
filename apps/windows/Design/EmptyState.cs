@@ -33,6 +33,7 @@ internal enum EmptyArtKind
     Automations,
     Changes,
     Files,
+    Projects,
     Waiting,
     Vault,
     /// <summary>No machine linked yet. The Apple noMachine scene: a rack
@@ -56,6 +57,22 @@ internal enum EmptyArtKind
 /// </summary>
 internal static class EmptyState
 {
+    public static StackPanel FirstProject(UIElement action, bool compact = false)
+    {
+        var title = L10n.Text("common.projects.first_title");
+        var message = L10n.Text("common.projects.first_message");
+        if (!compact) return View(title, message, EmptyArtKind.Projects, action);
+        var stack = new StackPanel { Spacing = 8, Padding = new Thickness(8, 12, 8, 16) };
+        stack.Children.Add(new Viewbox { Width = 96, Height = 63, Child = EmptyArt(EmptyArtKind.Projects) });
+        stack.Children.Add(new TextBlock { Text = title, FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center });
+        stack.Children.Add(new TextBlock { Text = message, FontSize = 11, Opacity = 0.7,
+            TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center });
+        if (action is FrameworkElement control) control.HorizontalAlignment = HorizontalAlignment.Center;
+        stack.Children.Add(action);
+        return stack;
+    }
+
     public static StackPanel View(string title, string message, EmptyArtKind kind, UIElement? action = null)
     {
         var stack = new StackPanel
@@ -225,6 +242,20 @@ internal static class EmptyState
             case EmptyArtKind.Files:
                 canvas.Children.Add(RoundRect(0.22 * w, 0.34 * h, 0.36 * w, 0.42 * h, 6, quiet));
                 canvas.Children.Add(RoundRect(0.42 * w, 0.22 * h, 0.34 * w, 0.48 * h, 6, WithAlpha(lead, 0.55)));
+                break;
+            case EmptyArtKind.Projects:
+                canvas.Children.Add(new Polygon
+                {
+                    Points = new PointCollection { new(24, 25), new(47, 25), new(54, 32), new(100, 32), new(100, 70), new(24, 70) },
+                    Stroke = Theme.Brush(WithAlpha(lead, 0.55)), StrokeThickness = InkWidth,
+                    StrokeLineJoin = PenLineJoin.Round,
+                });
+                canvas.Children.Add(StrokeLine(28, 77, 102, 77, quiet));
+                var badge = Ring(94, 62, 14, lead);
+                badge.Fill = Theme.BackgroundBrush;
+                canvas.Children.Add(badge);
+                canvas.Children.Add(StrokeLine(87, 62, 101, 62, lead));
+                canvas.Children.Add(StrokeLine(94, 55, 94, 69, lead));
                 break;
             case EmptyArtKind.Waiting:
                 canvas.Children.Add(RoundRect(0.32 * w, 0.28 * h, 0.36 * w, 0.44 * h, 8, quiet));

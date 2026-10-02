@@ -48,6 +48,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private ScrollViewer? _scroll;
     private bool _followEnd = true;
     private readonly FlowPanel _attachStrip = new() { Spacing = Theme.SpaceS };
+    // Keep the logical owners so a rebuild can release controls even after
+    // the old composer has been removed from the visual tree.
+    private StackPanel _composerWell = new();
+    private Grid _composerRow = new();
     private readonly TextBox _draft = new()
     {
         AcceptsReturn = true,
@@ -152,6 +156,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             else await ShowListAsync();
         };
         Unloaded += (_, _) => { RememberDraft(); _openGeneration++; _poll?.Cancel(); };
+        AutomationProperties.SetAutomationId(_draft, "chat.composer");
+        AutomationProperties.SetAutomationId(_titleBox, "chat.title");
     }
 
     /// <summary>
@@ -338,6 +344,13 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return "";
     }
 
+    public Task ShowChatsAsync()
+    {
+        _newChatRequested = false;
+        _pendingReveal = null;
+        return ShowListAsync();
+    }
+
     private async Task ShowListAsync()
     {
         RememberDraft();
@@ -356,7 +369,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _composerDock.Child = null;
         _composerDock.Visibility = Visibility.Collapsed;
         _root.Children.Clear();
-        _root.Children.Add(ListHeader());
+        var header = ListHeader();
+        AutomationProperties.SetAutomationId(header, "chat.list");
+        _root.Children.Add(header);
         var skeleton = Motion.SkeletonCard();
         _root.Children.Add(skeleton);
         _folderName = await FolderNameAsync();
@@ -644,6 +659,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             if (_openId == id && generation == _openGeneration && IsLoaded)
             {
+                Program.LogStartup($"Chat open failed: {ex}");
                 _root.Children.Clear();
                 _root.Children.Add(ActionIconGlyph.Button(L10n.Text("common.chats"), ActionIcon.Back, async (_, _) => await ShowListAsync()));
                 _root.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
@@ -654,6 +670,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private void PaintConversation()
     {
+        _composerDock.Child = null;
+        _composerWell.Children.Clear();
+        _composerRow.Children.Clear();
         Detach(_transcript);
         Detach(_attachStrip);
         Detach(_draft);
@@ -1545,7 +1564,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private UIElement Composer()
     {
-        var well = new StackPanel { Spacing = Theme.SpaceS };
+        var well = _composerWell = new StackPanel { Spacing = Theme.SpaceS };
         if (_setupExpanded) well.Children.Add(SetupCard());
         _draft.Background = Theme.PanelBrush;
         _draft.BorderThickness = new Thickness(0);
@@ -1556,7 +1575,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         well.Children.Add(_draft);
         RebuildAttachStrip();
         well.Children.Add(_attachStrip);
-        var row = new Grid { ColumnSpacing = Theme.SpaceS };
+        var row = _composerRow = new Grid { ColumnSpacing = Theme.SpaceS };
         row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -2498,7 +2517,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private static void Detach(UIElement element)
     {
-        if (VisualTreeHelper.GetParent(element) is Panel panel)
+        if (((element as FrameworkElement)?.Parent ?? VisualTreeHelper.GetParent(element)) is Panel panel)
         {
             panel.Children.Remove(element);
         }

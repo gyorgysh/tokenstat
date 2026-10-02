@@ -178,6 +178,7 @@ public sealed partial class MainWindow : Window
         _nav.Resources["NavigationViewContentGridBorderBrush"] = _chromeBorder;
         _nav.Resources["NavigationViewPaneContentGridMargin"] = new Thickness(0);
         _nav.Resources["NavigationViewContentGridBorderThickness"] = new Thickness(1, 0, 0, 0);
+        _nav.Resources["NavigationViewBorderThickness"] = new Thickness(0);
         _nav.Resources["NavigationViewMinimalContentGridBorderThickness"] = new Thickness(0);
         _nav.Resources["NavigationViewContentGridCornerRadius"] = new CornerRadius(0);
         _nav.Resources["NavigationViewItemOnLeftMinHeight"] = 32d;
@@ -596,6 +597,7 @@ public sealed partial class MainWindow : Window
             if (item is NavigationViewItem nav
                 && ((nav.Tag as string)?.StartsWith("ws:") == true
                     || (nav.Tag as string)?.StartsWith("machine:") == true
+                    || (nav.Tag as string) == "workspaces:empty"
                     || (nav.Tag as string) == "workspaces:add"))
             {
                 continue;
@@ -632,12 +634,20 @@ public sealed partial class MainWindow : Window
                 machine.MenuItems.Add(FolderParent(folder.Id, folder.Name, remote: true, folder.Path, folder.Git));
             _nav.MenuItems.Add(machine);
         }
-        _nav.MenuItems.Add(new NavigationViewItem
+        if (_localFolders.Count == 0 && RemoteWorkspaces.CachedFolders().Count == 0)
         {
-            Content = L10n.Text("common.add_project"),
-            Tag = "workspaces:add",
-            Icon = new SymbolIcon { Symbol = Symbol.Add },
-        });
+            var add = Buttons.Primary(L10n.Text("common.add_project"), ActionIcon.Create, async (_, _) => await AddWorkspaceAsync());
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(add, "projects.firstAdd");
+            _nav.MenuItems.Add(new NavigationViewItem { Content = EmptyState.FirstProject(add, compact: true),
+                Tag = "workspaces:empty", SelectsOnInvoked = false, IsTabStop = false });
+        }
+        else
+        {
+            var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6,
+                Children = { new Viewbox { Width = 12, Height = 12, Child = ActionIcon.Create.Icon() },
+                    new TextBlock { Text = L10n.Text("common.add_project"), FontSize = 12, Opacity = 0.7 } } };
+            _nav.MenuItems.Add(new NavigationViewItem { Content = label, Tag = "workspaces:add" });
+        }
         _nav.MenuItems.Add(_sshGroup);
         UpdateProjectsHeader();
         foreach (var item in NavItems(_nav.MenuItems))
@@ -664,7 +674,6 @@ public sealed partial class MainWindow : Window
             Content = FolderLabel(name, git),
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Tag = "ws:" + id + ":Launcher",
-            Icon = new SymbolIcon { Symbol = remote ? Symbol.Globe : Symbol.Folder },
             IsExpanded = _nav.IsPaneOpen,
         };
         if (!string.IsNullOrEmpty(path))
@@ -724,21 +733,17 @@ public sealed partial class MainWindow : Window
             }
             catch (Exception ex) { await Chrome.ShowDialog(parent, new ContentDialog { Title = L10n.Text("windows.mainwindow_xaml.could_not_remove_folder.36080129"), Content = ex.Message, CloseButtonText = L10n.Text("common.close") }); }
         });
-        var heading = new Grid { ColumnSpacing = 2 };
-        heading.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        if (parent.Content is UIElement label) { parent.Content = null; heading.Children.Add(label); }
+        var label = (UIElement)parent.Content;
+        parent.Content = null;
         var compose = Buttons.ToolbarIcon(ActionIcon.Edit, L10n.Text("windows.mainwindow_xaml.new_chat_in_0.2436f7d3", $"{name}"), async (_, _) => await NewChat());
         compose.Width = compose.Height = 22;
-        Grid.SetColumn(compose, 1); heading.Children.Add(compose);
         var more = ActionIconGlyph.MoreButton(L10n.Text("windows.mainwindow_xaml.project_actions.5d4ef7cc"), menu);
         more.Width = more.Height = 22;
         more.MinWidth = more.MinHeight = 0;
         more.Padding = new Thickness(0);
-        Grid.SetColumn(more, 2); heading.Children.Add(more);
         SidebarChrome.RevealActions(parent, compose, more);
-        parent.Content = heading;
+        parent.Content = SidebarChrome.ProjectContent(parent, label, remote, compose, more);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(parent, name);
         return parent;
     }
 
@@ -756,6 +761,7 @@ public sealed partial class MainWindow : Window
         header.Children.Add(count);
         var add = Buttons.ToolbarIcon(ActionIcon.Create, L10n.Text("common.add_project"), async (_, _) => await AddWorkspaceAsync());
         add.Width = add.Height = 22;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(add, "sidebar.addProject");
         Grid.SetColumn(add, 2);
         header.Children.Add(add);
         _workspacesHeader.Content = header;
@@ -1114,39 +1120,12 @@ public sealed partial class MainWindow : Window
         }
         if (tag.StartsWith(SidebarLive.ChatMorePrefix, StringComparison.Ordinal))
         {
-            var folder = tag[SidebarLive.ChatMorePrefix.Length..];
-            if (!_liveChatExpanded.Remove(folder))
-            {
-                _liveChatExpanded.Add(folder);
-            }
-            RebuildSidebarLive();
-            // An expander changes the list, not the screen: the selection goes
-            // back where it was and the content stays put.
-            _suppressNav = true;
-            if (_lastNavTag is not null && FindNavItem(_lastNavTag) is NavigationViewItem back)
-            {
-                _nav.SelectedItem = back;
-            }
-            else if (ProjectRowFor("ws:" + folder + ":Chat") is NavigationViewItem chatRow)
-            {
-                _nav.SelectedItem = chatRow;
-            }
-            _suppressNav = false;
+            ToggleChatHistory(tag[SidebarLive.ChatMorePrefix.Length..]);
             return;
         }
         if (tag.StartsWith(SidebarLive.ChatAllPrefix, StringComparison.Ordinal))
         {
-            var folder = tag[SidebarLive.ChatAllPrefix.Length..];
-            var chatTag = "ws:" + folder + ":Chat";
-            if (ProjectRowFor(chatTag) is NavigationViewItem chatRow)
-            {
-                _suppressNav = true;
-                _nav.SelectedItem = chatRow;
-                _suppressNav = false;
-            }
-            _lastNavTag = chatTag;
-            Show(chatTag);
-            RefreshUpdateBadge();
+            OpenAllChats(tag[SidebarLive.ChatAllPrefix.Length..]);
             return;
         }
         if (tag == "workspaces:add")
@@ -1159,6 +1138,42 @@ public sealed partial class MainWindow : Window
         }
         _lastNavTag = tag;
         Show(tag);
+        RefreshUpdateBadge();
+    }
+
+    private void ToggleChatHistory(string folder)
+    {
+        if (!_liveChatExpanded.Remove(folder))
+        {
+            _liveChatExpanded.Add(folder);
+        }
+        RebuildSidebarLive();
+        // An expander changes the list, not the screen: the selection goes
+        // back where it was and the content stays put.
+        _suppressNav = true;
+        if (_lastNavTag is not null && FindNavItem(_lastNavTag) is NavigationViewItem back)
+        {
+            _nav.SelectedItem = back;
+        }
+        else if (ProjectRowFor("ws:" + folder + ":Chat") is NavigationViewItem chatRow)
+        {
+            _nav.SelectedItem = chatRow;
+        }
+        _suppressNav = false;
+    }
+
+    private void OpenAllChats(string folder)
+    {
+        var chatTag = "ws:" + folder + ":Chat";
+        if (ProjectRowFor(chatTag) is NavigationViewItem chatRow)
+        {
+            _suppressNav = true;
+            _nav.SelectedItem = chatRow;
+            _suppressNav = false;
+        }
+        _lastNavTag = chatTag;
+        Show(chatTag);
+        if (WorkspaceTabs(folder).ActivePage is ChatPage chat) _ = chat.ShowChatsAsync();
         RefreshUpdateBadge();
     }
 
@@ -1401,10 +1416,8 @@ public sealed partial class MainWindow : Window
         var remote = RemoteWorkspaces.CachedFolders();
         if ((array is null || array.Count == 0) && remote.Count == 0)
         {
-            root.Children.Add(EmptyState.View(
-                L10n.Text("windows.mainwindow_xaml.no_folders_yet.8a66376e"),
-                L10n.Text("windows.mainwindow_xaml.add_a_project_folder_and_it_will_appear_he.35ec7ba6"),
-                EmptyArtKind.WorkspaceAccess));
+            root.Children.Add(EmptyState.FirstProject(Buttons.Primary(L10n.Text("common.add_project"), ActionIcon.Create,
+                async (_, _) => { await AddWorkspaceAsync(); if (ReferenceEquals(_frame.Content, page)) await FillOverviewAsync(root, page); })));
             return;
         }
         var filters = new Grid { ColumnSpacing = Theme.SpaceM };
@@ -1828,18 +1841,16 @@ public sealed partial class MainWindow : Window
                     var label = expanded
                         ? L10n.Text("windows.mainwindow_xaml.show_less.94ea9b1d")
                         : L10n.Text("windows.mainwindow_xaml.show_0_more.b91c3640", $"{(Math.Min(chats.Count, SidebarLive.InlineChats) - shown)}");
-                    desiredChats.Add(SidebarLive.ActionItem(
-                        SidebarLive.ChatMorePrefix + folderId, label));
-                }
-                if (chats.Count > SidebarLive.InlineChats)
-                {
-                    desiredChats.Add(SidebarLive.ActionItem(
-                        SidebarLive.ChatAllPrefix + folderId, L10n.Text("windows.mainwindow_xaml.see_all_chats.e705024a")));
+                    desiredChats.Add(SidebarChrome.ChatFooter(
+                        SidebarLive.ChatMorePrefix + folderId, label,
+                        () => ToggleChatHistory(folderId),
+                        chats.Count > SidebarLive.InlineChats ? () => OpenAllChats(folderId) : null));
                 }
             }
             // "wschat" covers the chat rows and their Show more and See all
             // rows, which share the prefix.
             NavigationRows.Reconcile(parent.MenuItems, desiredChats, "wschat", desiredSessions.Count);
+            SidebarChrome.AlignProject(parent);
         }
 
         if (selectedTag is not null

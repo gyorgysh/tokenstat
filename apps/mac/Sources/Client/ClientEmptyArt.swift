@@ -26,6 +26,7 @@ enum EmptyArtKind {
     /// The folder is not a git repository, so there is nothing to browse.
     case notGit
     case files
+    case projects
     /// The host has not answered yet. Deliberately not one of the others: a
     /// question nobody replied to is not an empty answer.
     case waiting
@@ -119,6 +120,7 @@ struct ClientEmptyArt: View {
             case .history: HistoryScene(reduceMotion: reduceMotion)
             case .notGit: NotGitScene(reduceMotion: reduceMotion)
             case .files: FilesScene(reduceMotion: reduceMotion)
+            case .projects: FirstProjectArt()
             case .waiting: WaitingScene(reduceMotion: reduceMotion)
             case .remoteReach: RemoteReachScene(reduceMotion: reduceMotion)
             case .vault: VaultScene(reduceMotion: reduceMotion)

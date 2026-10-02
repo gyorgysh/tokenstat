@@ -803,7 +803,6 @@
   "android.hostworkspaces.needs_approval.0c66fee1": "· Needs approval",
   "android.hostworkspaces.noise_xx_handshake_x25519_keys_chacha20_po.233e27b7": "Noise XX handshake, X25519 keys, ChaCha20-Poly1305. Compare the words with the other device to be sure.",
   "android.hostworkspaces.not_a_git_repo.86308fef": "Not a git repo",
-  "android.hostworkspaces.nothing_to_work_on_yet.80d6fed9": "Nothing to work on yet",
   "android.hostworkspaces.only_computers_will_show.dcb66766": "Only computers will show",
   "android.hostworkspaces.open_device.021a82bd": "Open device",
   "android.hostworkspaces.order_of_folders_recent_chats_and_all_sess.1e31aba6": "Order of Folders, Recent chats and All sessions on the connected machine. Computers stay above.",

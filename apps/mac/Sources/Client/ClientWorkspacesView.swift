@@ -26,6 +26,7 @@ struct ClientWorkspacesView: View {
     @State private var notificationOpen = NotificationOpen.shared
     @State private var showSetup = false
     @State private var customizing = false
+    @State private var addingFirstProject = false
     @State private var layout = WorkspacesLayout.shared
     /// The folder handoff this view has already pushed, so a reconnect does
     /// not push it again after somebody backed out of it.
@@ -150,6 +151,11 @@ struct ClientWorkspacesView: View {
                     if model.connectedKey != nil {
                         if let peer = model.connectedKey,
                            let host = model.hosts.first(where: { $0.peerKey == peer }) {
+                            if model.folders.isEmpty, model.isConnecting == nil, model.errorMessage == nil {
+                                FirstProjectPrompt { addingFirstProject = true }
+                                    .frame(maxWidth: .infinity)
+                                    .cardSurface()
+                            }
                             if layout.allTasksVisible {
                                 ClientAllTasksLink(peer: peer, hostName: host.name)
                                     .padding(Theme.Space.m).cardSurface()
@@ -185,6 +191,17 @@ struct ClientWorkspacesView: View {
             }
             .sheet(isPresented: $customizing) {
                 ClientWorkspacesEditor(layout: layout)
+            }
+            .sheet(isPresented: $addingFirstProject) {
+                if let peer = model.connectedKey,
+                   let host = model.hosts.first(where: { $0.peerKey == peer }) {
+                    NavigationStack {
+                        ClientFolderPicker(peer: peer, hostName: host.name) { _ in
+                            addingFirstProject = false
+                            Task { await model.refresh(account: account.account) }
+                        }
+                    }
+                }
             }
             .onChange(of: navigation.workspacesEditorRequested, initial: true) { _, requested in
                 guard requested else { return }

@@ -71,5 +71,7 @@
   "common.local_provider_busy": "Wait for the current check to finish, then try again.",
   "common.local_provider_settings_help": "Match the port in your local server settings. Changes apply to new sessions.",
   "common.account_plan_label": "{0}, {1} plan",
-  "common.local_provider_saved_refresh": "Port saved. Refresh to check the server again."
+  "common.local_provider_saved_refresh": "Port saved. Refresh to check the server again.",
+  "common.projects.first_title": "Add your first project",
+  "common.projects.first_message": "Choose a folder to start chats, run agents, and keep your work together."
 }

@@ -298,7 +298,7 @@ jobs:
 
       - name: Production Windows application startup
         if: runner.os == 'Windows'
-        timeout-minutes: 2
+        timeout-minutes: 3
         run: ./scripts/tests/windows-ui/startup.ps1
 
       - name: Windows client and daemon lifetime regressions

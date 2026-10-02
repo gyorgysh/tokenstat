@@ -38,7 +38,7 @@ import ai.tokenstat.tokenstat.ui.theme.rememberReduceMotion
 /// drawing rather than a shared shrug.
 enum class EmptyArtKind {
     Sessions, Tasks, Notes, Workflows, Automations, Changes, History, NotGit,
-    Files, Waiting, RemoteReach, Vault, Screen, WorkspaceAccess, Chat,
+    Files, Projects, Waiting, RemoteReach, Vault, Screen, WorkspaceAccess, Chat,
     NoMachine, Provisioning, ServerReady, Connect, MacDoor, CloudDoor,
     RentServer, ByHand, FirstBars, GetCounting, RemoteGate,
 }
@@ -84,6 +84,23 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
         val fine = Stroke(width = 2.4f, cap = StrokeCap.Round)
         val dashed = Stroke(width = 3.4f, cap = StrokeCap.Round, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f))
         when (kind) {
+            EmptyArtKind.Projects -> {
+                fun point(x: Float, y: Float) = Offset(size.width * x / 128f, size.height * y / 84f)
+                val folder = Path().apply {
+                    moveTo(point(24f, 25f).x, point(24f, 25f).y)
+                    for ((x, y) in listOf(47f to 25f, 54f to 32f, 100f to 32f, 100f to 70f, 24f to 70f)) {
+                        val p = point(x, y); lineTo(p.x, p.y)
+                    }
+                    close()
+                }
+                drawPath(folder, accent.copy(alpha = 0.55f), style = stroke)
+                drawLine(border, point(28f, 77f), point(102f, 77f), strokeWidth = 1.7f, cap = StrokeCap.Round)
+                val center = point(94f, 62f)
+                drawCircle(colors.background, size.width * 14f / 128f, center)
+                drawCircle(accent, size.width * 14f / 128f, center, style = stroke)
+                drawLine(accent, point(87f, 62f), point(101f, 62f), strokeWidth = 1.7f, cap = StrokeCap.Round)
+                drawLine(accent, point(94f, 55f), point(94f, 69f), strokeWidth = 1.7f, cap = StrokeCap.Round)
+            }
             EmptyArtKind.Sessions -> {
                 drawRoundRect(border, Offset(size.width * 0.18f, size.height * 0.18f), Size(size.width * 0.64f, size.height * 0.64f), CornerRadius(10f, 10f), style = stroke)
                 drawCircle(colors.danger.copy(alpha = 0.7f), 3.5f, Offset(size.width * 0.28f, size.height * 0.32f))

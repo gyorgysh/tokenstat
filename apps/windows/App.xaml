@@ -56,6 +56,20 @@
                 <Setter Property="FontSize" Value="13" />
                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             </Style>
+            <!-- The native header uses a TextBlock bound to Content. Our
+                 project heading includes a count and a keyboard reachable button. -->
+            <Style TargetType="NavigationViewItemHeader">
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="NavigationViewItemHeader">
+                            <ContentPresenter Content="{TemplateBinding Content}"
+                                HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center"
+                                Margin="16,12,8,4" MinHeight="28" />
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

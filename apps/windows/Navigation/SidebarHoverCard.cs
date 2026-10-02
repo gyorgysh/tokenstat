@@ -92,6 +92,7 @@ internal static class SidebarHoverCard
             var remote = RemoteWorkspaces.CachedFolder(workspaceId);
             var fields = Identity(Format.Text(folder, "name", remote?.Name ?? L10n.Text("windows.sidebarlive.project.98595978")), remote);
             fields.Add(new(L10n.Text("windows.machinespage.status.920e413c"), SidebarLive.SessionState(session).Label));
+            if (SidebarLive.SessionStats(session) is string stats) fields.Add(new(L10n.Text("windows.homepage.activity.38da1505"), stats, true));
             fields.Add(new(L10n.Text("windows.workflowspage.command.71316697"), Format.Text(session, "command", "shell")));
             var window = Format.Number(session, "contextWindow");
             if (window > 0) fields.Add(new(Text("context"), Number(Format.Number(session, "contextUsed")) + " / " + Number(window), true));

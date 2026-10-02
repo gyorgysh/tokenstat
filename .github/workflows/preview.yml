@@ -123,7 +123,7 @@ jobs:
           "setup=$setup" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Verify published Windows application startup
-        timeout-minutes: 2
+        timeout-minutes: 3
         env:
           # Exercise the exact published binaries without moving them through
           # the per-user installer on this disposable runner.

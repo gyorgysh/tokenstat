@@ -149,14 +149,8 @@ struct WorkspacesOverviewView: View {
     }
 
     private var emptyState: some View {
-        Card(
-            title: L10n.text("apple.workspacesoverviewview.add_your_first_project.1a7a66c0"),
-            subtitle: L10n.text("apple.workspacesoverviewview.pick_a_folder_on_this_mac_or_on_a_paired_c.4228c461"),
-            mark: "mark_archive"
-        ) {
-            Button(L10n.text("common.add_project"), .create) { onAdd() }
-                .buttonStyle(AccentButtonStyle(small: true))
-        }
+        FirstProjectPrompt(onAdd: onAdd)
+            .frame(maxWidth: .infinity)
     }
 
     private func folderRow(_ folder: WorkspaceFolder) -> some View {

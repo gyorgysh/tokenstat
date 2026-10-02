@@ -113,6 +113,47 @@ internal static class ShellChromeSmoke
             await Task.Delay(30);
             if (firstAction.Opacity != 0 || nextAction.Opacity != 0)
                 throw new Exception("Leaving a project row kept its actions visible");
+            host.Children.Remove(row);
+            host.Children.Remove(outside);
+            var navigation = new NavigationView
+            {
+                Width = 320, Height = 360, OpenPaneLength = 272, CompactPaneLength = 0,
+                PaneDisplayMode = NavigationViewPaneDisplayMode.Left, IsPaneOpen = true,
+                IsPaneToggleButtonVisible = false, IsSettingsVisible = false,
+                IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed,
+            };
+            navigation.Resources["NavigationViewBorderThickness"] = new Thickness(0);
+            var projectRow = new NavigationViewItem { IsExpanded = true, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            var heading = SidebarChrome.ProjectContent(projectRow, new TextBlock { Text = "tokenstat", FontSize = 13 }, false);
+            projectRow.Content = heading;
+            var footer = SidebarChrome.ChatFooter("wschatmore:fixture", "Show 5 more", () => { }, () => { });
+            projectRow.MenuItems.Add(footer);
+            navigation.MenuItems.Add(projectRow);
+            host.Children.Add(navigation);
+            mounted.Add(navigation);
+            host.UpdateLayout();
+            await Task.Delay(50);
+            SidebarChrome.AlignProject(projectRow);
+            host.UpdateLayout();
+            var folderGlyph = heading.Children.OfType<Viewbox>().Single();
+            if (folderGlyph.ActualWidth != 16 || folderGlyph.ActualHeight != 16)
+                throw new Exception("The project folder icon disappeared with the native compact pane disabled");
+            var footerGrid = (Grid)footer.Content;
+            var links = footerGrid.Children.OfType<Button>().ToArray();
+            if (links.Length != 2 || links.Any(link => link.ActualWidth <= 0))
+                throw new Exception("Chat history footer does not render both actions");
+            var left = links[0].TransformToVisual(footerGrid).TransformPoint(new Point());
+            var right = links[1].TransformToVisual(footerGrid).TransformPoint(new Point());
+            if (left.X + links[0].ActualWidth > right.X + 0.5 || right.X + links[1].ActualWidth > footerGrid.ActualWidth + 0.5)
+                throw new Exception("Show more and See all chats overlap inside the sidebar");
+            var firstProject = EmptyState.FirstProject(Buttons.Primary("Add project", ActionIcon.Create, (_, _) => { }), compact: true);
+            firstProject.Width = 240;
+            host.Children.Add(firstProject);
+            mounted.Add(firstProject);
+            host.UpdateLayout();
+            if (firstProject.ActualHeight <= 100 || firstProject.ActualWidth != 240)
+                throw new Exception("The first-project illustration and action did not render in the sidebar width");
+            Program.Log("PASS: project icon survives a zero-width compact pane; chat footer actions fit together; first-project prompt renders");
             Program.Log("PASS: desktop chrome aligns, wraps without overlap, retains picker state and safely rebuilds; rail selection uses desktop metrics");
             Program.Log("PASS: project actions remain visible through keyboard navigation and hide after focus leaves");
         }

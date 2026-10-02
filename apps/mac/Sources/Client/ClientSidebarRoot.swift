@@ -32,6 +32,7 @@ struct ClientSidebarRoot: View {
     /// One workspaces model for the whole layout: the tree in the sidebar and
     /// the screen in the detail column are the same connection, not two.
     @State private var workspaces = ClientWorkspacesModel()
+    @State private var addingFirstProject = false
     /// Whether the host-wide task board link shows under a connected host.
     /// Off unless asked for in Customize Projects.
     @State private var workspacesLayout = WorkspacesLayout.shared
@@ -132,6 +133,17 @@ struct ClientSidebarRoot: View {
         // owns is replaced.
         .id(detailGeneration)
         .environment(workspaces)
+        .sheet(isPresented: $addingFirstProject) {
+            if let peer = workspaces.connectedKey,
+               let host = workspaces.hosts.first(where: { $0.peerKey == peer }) {
+                NavigationStack {
+                    ClientFolderPicker(peer: peer, hostName: host.name) { _ in
+                        addingFirstProject = false
+                        Task { await reload() }
+                    }
+                }
+            }
+        }
         .clientShortcuts(shortcuts)
         .task {
             await reload()
@@ -291,6 +303,11 @@ struct ClientSidebarRoot: View {
                 ForEach(workspaces.hosts) { host in
                     hostRow(host)
                     if workspaces.connectedKey == host.peerKey {
+                        if workspaces.folders.isEmpty, workspaces.isConnecting == nil, workspaces.errorMessage == nil {
+                            FirstProjectPrompt(compact: true) { addingFirstProject = true }
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                        }
                         if workspacesLayout.allTasksVisible {
                             ClientAllTasksLink(peer: host.peerKey, hostName: host.name)
                         }

@@ -164,7 +164,7 @@ internal static class SidebarLive
     }
 
     /// <summary>
-    /// One live session row: title, meter line, and state. Tag routes to the
+    /// One compact live session row: title and state, with meters in its hover card. Tag routes to the
     /// session's terminal through the sidebar selection handler.
     /// </summary>
     public static NavigationViewItem SessionItem(string folderId, JsonNode item, JsonNode? folder = null)
@@ -183,55 +183,34 @@ internal static class SidebarLive
             }
         }
 
-        var panel = new StackPanel { Spacing = 3, Margin = new Thickness(0, 4, 0, 4) };
+        var panel = new Grid { ColumnSpacing = 6, MinHeight = 28 };
+        panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        panel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         panel.Children.Add(new TextBlock
         {
-            Text = title,
-            FontSize = 13,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            MaxLines = 1,
-        });
-        if (Format.Number(item, "contextWindow") > 0)
-            panel.Children.Add(new ProgressBar
-            {
-                Minimum = 0, Maximum = 100,
-                Value = Math.Clamp(100 * Format.Number(item, "contextUsed") / Format.Number(item, "contextWindow"), 0, 100),
-                Height = 3, Foreground = Theme.AccentBrush, Background = Theme.BorderBrush,
-            });
-        panel.Children.Add(new TextBlock
-        {
-            Text = stats,
-            FontSize = 11,
-            FontFamily = Fonts.Mono,
-            Opacity = 0.7,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            MaxLines = 1,
+            Text = title, FontSize = 13, VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1,
         });
         var stateRow = new StackPanel
         {
-            Orientation = Orientation.Horizontal,
-            Spacing = 5,
+            Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center,
         };
         stateRow.Children.Add(new Ellipse
         {
-            Width = 7,
-            Height = 7,
-            Fill = Theme.Brush(tint),
-            VerticalAlignment = VerticalAlignment.Center,
+            Width = 5, Height = 5, Fill = Theme.Brush(tint), VerticalAlignment = VerticalAlignment.Center,
         });
         stateRow.Children.Add(new TextBlock
         {
-            Text = state,
-            FontSize = 11,
-            Foreground = Theme.Brush(tint),
-            MaxLines = 1,
+            Text = state, FontSize = 10, Opacity = 0.7, MaxWidth = 74,
+            TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1,
         });
+        Grid.SetColumn(stateRow, 1);
         panel.Children.Add(stateRow);
 
         var row = new NavigationViewItem
         {
-            Content = AgentMark.Row(command, panel),
+            Content = AgentMark.Row(command, panel, 18),
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Tag = LiveRoute.Join(SessionPrefix, folderId, id),
         };
         if (row.Content is FrameworkElement view)
@@ -318,6 +297,7 @@ internal static class SidebarLive
         };
         if (row.Content is FrameworkElement view) view.Tag = (title, detail, backend);
         ChatPreviewCache.Attach(row, folderId, id);
+        AutomationProperties.SetAutomationId(row, "sidebar.chat." + id);
         AutomationProperties.SetName(row, title + ". " + detail);
         var menu = ContextMenus.Menu(row);
         WorkPinMenu.Add(menu, folderId, id, title, folderName);
@@ -672,9 +652,8 @@ internal static class SidebarLive
 
     private static string? HarnessIdForCommand(string baseName)
     {
-        var name = baseName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
-            ? baseName[..^4]
-            : baseName;
+        var name = baseName.ToLowerInvariant();
+        if (name.EndsWith(".exe") || name.EndsWith(".cmd") || name.EndsWith(".bat")) name = name[..^4];
         return name switch
         {
             "claude" => "claude_code",

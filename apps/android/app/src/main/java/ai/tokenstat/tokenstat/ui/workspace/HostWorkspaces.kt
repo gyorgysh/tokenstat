@@ -875,9 +875,9 @@ fun EmptyWorkspacesCard(
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
         EmptyState(
             icon = Icons.Default.Folder,
-            title = L10n.text("android.hostworkspaces.nothing_to_work_on_yet.80d6fed9"),
+            title = L10n.text("common.projects.first_title"),
             message = L10n.text("android.hostworkspaces.give_0_a_folder_choose_one_it_already_has.bfd23a13", "${hostName}"),
-            art = { EmptyArt(EmptyArtKind.NoMachine) },
+            art = { EmptyArt(EmptyArtKind.Projects) },
         )
         TextButton(onClick = onChooseFolder) {
             Icon(ActionIcon.Reveal.vector, null, tint = colors.accent, modifier = Modifier.size(16.dp))

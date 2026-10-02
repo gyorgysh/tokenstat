@@ -2206,11 +2206,7 @@ struct RootView: View {
         }
 
         if workspaces.folders.isEmpty {
-            Text(L10n.text("apple.rootview.no_folders_yet.d890b00a"))
-                .font(Theme.caption)
-                .foregroundStyle(.tertiary)
-                .padding(.horizontal, Theme.Space.m)
-                .padding(.vertical, Theme.Space.xs)
+            FirstProjectPrompt(compact: true) { workspaces.requestAdd() }
         } else {
             ForEach(workspaces.folders) { folder in
                 projectRow(folder)

@@ -178,9 +178,9 @@ struct ClientHostWorkspacesView: View {
                         VStack(spacing: Theme.Space.s) {
                             ClientEmptyState(
                                 kind: .nothingYet,
-                                title: L10n.text("apple.clienthostworkspacesview.nothing_to_work_on_yet.80d6fed9"),
+                                title: L10n.text("common.projects.first_title"),
                                 message: L10n.text("apple.clienthostworkspacesview.give_0_a_folder_choose_one_it_already_has.bfd23a13", "\(hostName)"),
-                                art: .noMachine
+                                art: .projects
                             )
                             NavigationLink {
                                 ClientFolderPicker(peer: peerKey, hostName: hostName) { _ in
