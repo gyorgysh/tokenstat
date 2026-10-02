@@ -151,6 +151,7 @@ try {
     Wait-ForControl 'chat.title' | Out-Null
     Open-Place 'Setup'
     $draft = Wait-ForControl 'chat.composer'
+    Wait-ForControl 'chat.send' | Out-Null
     if ($draft.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -ne 'Retained unsent smoke draft') {
         throw 'Rebuilding the chat setup lost the draft'
     }

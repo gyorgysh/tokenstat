@@ -42,6 +42,12 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         Padding = new Thickness(Theme.SpaceM),
     };
     private readonly Border _composerDock = new() { Padding = new Thickness(Theme.SpaceL, Theme.SpaceS, Theme.SpaceL, Theme.SpaceL) };
+    private readonly ScrollViewer _setupScroll = new()
+    {
+        HorizontalScrollMode = ScrollMode.Disabled,
+        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+    };
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private string _folderName = "";
     private readonly StackPanel _transcript = new() { Spacing = Theme.SpaceM };
@@ -147,6 +153,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         layout.Children.Add(transcriptHost);
         layout.Children.Add(_composerDock);
         Content = layout;
+        SizeChanged += (_, _) => FitSetupViewport();
         RenderInspector();
         Loaded += async (_, _) =>
         {
@@ -1543,7 +1550,12 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private UIElement Composer()
     {
         var well = _composerWell = new StackPanel { Spacing = Theme.SpaceS };
-        if (_setupExpanded) well.Children.Add(SetupCard());
+        if (_setupExpanded)
+        {
+            _setupScroll.Content = SetupCard();
+            FitSetupViewport();
+            well.Children.Add(_setupScroll);
+        }
         _draft.Background = Theme.PanelBrush;
         _draft.BorderThickness = new Thickness(0);
         _draft.MinHeight = 76;
@@ -1594,6 +1606,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             Padding = new Thickness(10),
             Child = well,
         };
+    }
+
+    private void FitSetupViewport()
+    {
+        // Leave room for the draft, wrapped controls and transcript even on a
+        // short window. Setup has its own scrollbar rather than growing the
+        // auto-sized composer row beyond the page's visible bounds.
+        _setupScroll.MaxHeight = Math.Max(0, Math.Min(280, ActualHeight - 280));
     }
 
     private void DraftOnPreviewKeyDown(object sender, KeyRoutedEventArgs e)
@@ -1837,6 +1857,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 ? L10n.Text("windows.chatpage.the_agent_reads_this_on_its_next_step.aab7b1c7")
                 : L10n.Text("windows.chatpage.waits_until_this_turn_finishes_stop_and_se.2df81427");
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(queue, steering ? L10n.Text("windows.chatpage.add_a_note_for_the_next_step.4778177a") : L10n.Text("windows.chatpage.queue.3b2fe03e"));
+            AutomationProperties.SetAutomationId(queue, "chat.send");
             ToolTipService.SetToolTip(queue, tip);
             ContextMenus.AddAsync(ContextMenus.Menu(queue), L10n.Text("windows.chatpage.stop_and_send_now.8ad0a50d"), async () =>
             {
@@ -1860,6 +1881,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             var send = ActionIconGlyph.PrimaryButton(L10n.Text("windows.chatpage.send.f6f4688f"), ActionIcon.Send, async (_, _) => await SendAsync());
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(send, L10n.Text("windows.chatpage.send.f6f4688f"));
+            AutomationProperties.SetAutomationId(send, "chat.send");
             ToolTipService.SetToolTip(send, L10n.Text("windows.chatpage.send.f6f4688f"));
             _composerActions.Children.Add(send);
         }
