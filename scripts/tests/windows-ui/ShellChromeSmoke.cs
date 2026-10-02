@@ -55,6 +55,14 @@ internal static class ShellChromeSmoke
             }
             if (project.SelectedIndex != 1 || sort.Text != "Retained filter")
                 throw new Exception("Resizing chrome lost its picker or text state");
+            var empty = DetailBar.View();
+            empty.Width = 420;
+            host.Children.Add(empty);
+            mounted.Add(empty);
+            host.UpdateLayout();
+            if (Math.Abs(empty.ActualHeight - DetailBar.Height) > 0.5)
+                throw new Exception("Empty chrome does not retain the shared 40px baseline");
+            host.Children.Remove(empty);
             // Rebuilding an unmounted toolbar must release logical parents too.
             host.Children.Remove(bar);
             var rebuilt = DetailBar.View(new List<UIElement> { sidebar, scope }, trailing: new List<UIElement> { project, sort, refresh, inspector });

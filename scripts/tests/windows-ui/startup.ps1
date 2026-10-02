@@ -1,11 +1,22 @@
 # SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 # Runs only on the disposable CI runner: the real application may register its helper.
+param([string]$AppPath = '')
+
 $ErrorActionPreference = 'Stop'
 if ($env:CI -ne 'true') { throw 'Run this startup regression on a disposable CI runner.' }
-$app = Get-ChildItem "$PSScriptRoot/../../../apps/windows/bin" -Filter Tokenstat.exe -Recurse |
-    Where-Object { $_.FullName -match 'Release' } | Select-Object -First 1
-if (!$app) { throw 'Build the Windows application before running this test.' }
-Copy-Item "$PSScriptRoot/../../../target/debug/tokenstat-hostd.exe" $app.DirectoryName -Force
+if ($AppPath) {
+    # Preview uses the published folder and its actual release helper.
+    $app = Get-Item -LiteralPath $AppPath
+    if ($app.PSIsContainer) { throw 'AppPath must name Tokenstat.exe.' }
+} else {
+    $app = Get-ChildItem "$PSScriptRoot/../../../apps/windows/bin" -Filter Tokenstat.exe -Recurse |
+        Where-Object { $_.FullName -match 'Release' } | Select-Object -First 1
+    if (!$app) { throw 'Build the Windows application before running this test.' }
+    Copy-Item "$PSScriptRoot/../../../target/debug/tokenstat-hostd.exe" $app.DirectoryName -Force
+}
+if (!(Test-Path -LiteralPath (Join-Path $app.DirectoryName 'tokenstat-hostd.exe') -PathType Leaf)) {
+    throw 'The application folder is missing its host helper.'
+}
 $started = Get-Date
 $process = Start-Process -FilePath $app.FullName -WorkingDirectory $app.DirectoryName -PassThru
 try {

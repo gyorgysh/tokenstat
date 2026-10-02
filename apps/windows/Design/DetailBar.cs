@@ -129,7 +129,9 @@ internal static class DetailBar
             double y = 0;
             void Row(List<UIElement> items, bool right, double? sharedHeight = null)
             {
-                var height = sharedHeight ?? Math.Max(Height, items.Max(c => c.DesiredSize.Height) + BottomSpacing);
+                // Qualify the shared metric: Panel inherits Height, whose
+                // unset value is NaN and cannot be used in layout geometry.
+                var height = sharedHeight ?? Math.Max(DetailBar.Height, items.Max(c => c.DesiredSize.Height) + BottomSpacing);
                 var x = Theme.SpaceM + (right ? Math.Max(0, available - Length(items)) : 0);
                 foreach (var child in items)
                 {
@@ -141,8 +143,8 @@ internal static class DetailBar
             }
             if (total <= available)
             {
-                var height = Math.Max(Height, Children.Where(c => c.Visibility != Visibility.Collapsed)
-                    .Select(c => c.DesiredSize.Height + BottomSpacing).DefaultIfEmpty(Height).Max());
+                var height = Math.Max(DetailBar.Height, Children.Where(c => c.Visibility != Visibility.Collapsed)
+                    .Select(c => c.DesiredSize.Height + BottomSpacing).DefaultIfEmpty(DetailBar.Height).Max());
                 Row(leading, false, height);
                 Row(trailing, true, height);
                 return new Size(width, height);
@@ -158,7 +160,7 @@ internal static class DetailBar
                 }
                 if (row.Count > 0) Row(row, right);
             }
-            return new Size(width, Math.Max(Height, y));
+            return new Size(width, Math.Max(DetailBar.Height, y));
         }
     }
 

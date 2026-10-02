@@ -122,6 +122,16 @@ jobs:
           "asset=$name.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "setup=$setup" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
+      - name: Verify published Windows application startup
+        timeout-minutes: 2
+        env:
+          # Exercise the exact published binaries without moving them through
+          # the per-user installer on this disposable runner.
+          TOKENSTAT_DEV: '1'
+          VERSION: ${{ needs.version.outputs.version }}
+        shell: pwsh
+        run: ./scripts/tests/windows-ui/startup.ps1 -AppPath "dist/tokenstat-$env:VERSION-windows-x64/Tokenstat.exe"
+
       - uses: actions/upload-artifact@v7
         with:
           name: preview-windows-${{ github.run_number }}
