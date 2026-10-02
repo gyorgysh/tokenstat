@@ -265,30 +265,51 @@ fn ensure_symlink(source: &Path, target: &Path) -> Result<(), String> {
 
 /// Link one file from the person's own agent directory into a private home.
 ///
-/// A symlink, never a copy. This is somebody else's credential: tokenstat
-/// reads it only by pointing the tool that owns it back at its own file, and a
-/// copy would be a second place for a token to live and go stale.
+/// A link, never a bare copy while one can be had. This is somebody else's
+/// credential: tokenstat reads it only by pointing the tool that owns it back
+/// at its own file, and a copy would be a second place for a token to live
+/// and go stale. Windows symlinks need Developer Mode or a privilege most
+/// machines do not grant, so there a hard link is next (same bytes, no
+/// privilege needed) and a copy is last, rewritten every turn so it cannot
+/// age past the turn that made it.
 fn link_credential(home: &Path, directory: &str, file: &str) -> Result<(), String> {
+    // Not `$HOME`: a headless daemon started by a scheduler has none, and the
+    // credential to link sits under the real home whether or not the
+    // service's environment names it.
+    let Some(user_home) = tokenstat_paths::home_dir() else {
+        return Ok(());
+    };
+    let source = user_home.join(directory).join(file);
+    let target = home.join(file);
+    if !source.exists() {
+        return Ok(());
+    }
     #[cfg(unix)]
     {
-        // Not `$HOME`: a headless daemon started by systemd has none, and the
-        // credential to link sits under the real home whether or not the
-        // unit's environment names it.
-        let Some(user_home) = tokenstat_paths::home_dir() else {
-            return Ok(());
-        };
-        let source = user_home.join(directory).join(file);
-        let target = home.join(file);
-        if !source.exists() {
-            return Ok(());
-        }
         ensure_symlink(&source, &target)
     }
     #[cfg(not(unix))]
     {
-        let _ = (home, directory, file);
-        Ok(())
+        ensure_credential_file(&source, &target)
     }
+}
+
+/// Point `target` at `source`, replacing a stale file but never silently
+/// reusing a credential that points elsewhere.
+///
+/// Whatever a previous run left behind is removed first, so a stale regular
+/// file (or a link elsewhere) can never survive into this turn. A directory
+/// in the way is not removed: that surfaces as an error and the turn refuses
+/// to run unsigned rather than guessing.
+#[cfg(not(unix))]
+fn ensure_credential_file(source: &Path, target: &Path) -> Result<(), String> {
+    if std::fs::symlink_metadata(target).is_ok() {
+        std::fs::remove_file(target).map_err(|error| error.to_string())?;
+    }
+    std::os::windows::fs::symlink_file(source, target)
+        .or_else(|_| std::fs::hard_link(source, target))
+        .or_else(|_| std::fs::copy(source, target).map(|_| ()))
+        .map_err(|error| error.to_string())
 }
 
 /// Muse could not be given a private home for this turn's note.
@@ -693,6 +714,35 @@ mod tests {
         std::os::unix::fs::symlink(&other, &target).unwrap();
         ensure_symlink(&source, &target).unwrap();
         assert_eq!(std::fs::read_link(&target).unwrap(), source);
+    }
+
+    /// The private home must carry the person's sign-in on Windows too: a
+    /// gated turn that relocates CODEX_HOME without its auth.json runs
+    /// signed out and fails closed as a 401 rather than as anyone's answer.
+    #[test]
+    #[cfg(not(unix))]
+    fn windows_credential_file_carries_the_sign_in_and_replaces_stale_files() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("auth.json");
+        std::fs::write(&source, br#"{"access_token":"fresh"}"#).unwrap();
+        let home = root.path().join("codex-hook");
+        std::fs::create_dir_all(&home).unwrap();
+        let target = home.join("auth.json");
+
+        // A stale regular file from a previous run is replaced, never reused.
+        std::fs::write(&target, b"stale").unwrap();
+        ensure_credential_file(&source, &target).unwrap();
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            std::fs::read(&source).unwrap()
+        );
+
+        // A second run with the same source is a no-op, not an error.
+        ensure_credential_file(&source, &target).unwrap();
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            std::fs::read(&source).unwrap()
+        );
     }
 
     #[test]

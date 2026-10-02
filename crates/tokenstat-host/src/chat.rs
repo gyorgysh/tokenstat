@@ -537,9 +537,9 @@ fn note_backend(backend: &str) -> bool {
     matches!(backend, "claude" | "codex") || (backend == "muse" && cfg!(unix))
 }
 
-/// Credential links are available only on Unix. A Windows bypass turn must
-/// keep the tool's own home, where it was signed in, rather than relocate to
-/// an empty credential store. Hooked turns keep their existing private home.
+/// A Windows bypass turn keeps the tool's own home, where it was signed in,
+/// rather than relocate at all. Hooked turns use the private home everywhere:
+/// its credential link carries the sign-in along.
 fn private_codex_home(has_hooks: bool) -> bool {
     cfg!(unix) || has_hooks
 }
