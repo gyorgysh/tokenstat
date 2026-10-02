@@ -312,6 +312,7 @@ impl Parser {
             .trim()
             .trim_start_matches('\u{feff}')
             .to_string();
+        let cleaned = without_stdin_notice(&cleaned);
         if cleaned.is_empty() {
             return None;
         }
@@ -347,6 +348,7 @@ impl Parser {
             .trim()
             .trim_start_matches('\u{feff}')
             .to_string();
+        let cleaned = without_stdin_notice(&cleaned);
         if cleaned.is_empty() {
             return Vec::new();
         }
@@ -693,6 +695,32 @@ impl Parser {
         }
         events
     }
+}
+
+/// A line with the CLIs' notices about standard input taken out.
+///
+/// Run with input that is not a terminal, Codex says it is reading more input
+/// and Claude warns that none came. Both are about how the process was
+/// started, not anything the agent said, and on Windows stderr shares the
+/// reply's pipe, so they arrived in the chat as text. Claude's warning has no
+/// newline after it, so whatever follows on the line is kept.
+fn without_stdin_notice(line: &str) -> String {
+    const CODEX: &str = "Reading additional input from stdin...";
+    const CLAUDE: &str = "Warning: no stdin data received in";
+    const CLAUDE_END: &str = "or wait longer.";
+    if line == CODEX {
+        return String::new();
+    }
+    if let Some(rest) = line.strip_prefix(CODEX) {
+        return rest.trim().to_string();
+    }
+    if line.starts_with(CLAUDE) {
+        return match line.find(CLAUDE_END) {
+            Some(at) => line[at + CLAUDE_END.len()..].trim().to_string(),
+            None => String::new(),
+        };
+    }
+    line.to_string()
 }
 
 /// Headless CLIs print a refusal as plain text, not NDJSON. That is a failed
@@ -3122,6 +3150,25 @@ mod tests {
                 Some(Event::Failed { text }) if text.contains("has expired")
             ),
             "{expired_events:?}"
+        );
+
+        let mut noisy = Parser::new("codex");
+        assert!(
+            noisy
+                .push_events(b"Reading additional input from stdin...\n")
+                .is_empty()
+        );
+        let mut glued = Parser::new("claude");
+        let glued_events = glued.push_events(
+            "Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.Failed to authenticate: OAuth session expired and could not be refreshed\n"
+                .as_bytes(),
+        );
+        assert!(
+            matches!(
+                glued_events.first(),
+                Some(Event::Failed { text }) if text.contains("has expired")
+            ),
+            "{glued_events:?}"
         );
 
         let mut errored = Parser::new("claude");
