@@ -9,7 +9,6 @@ struct ClientDiffDocumentView<Header: View>: View {
     let diffs: [FileDiff]
     let revision: UUID
     var fileHeaders = true
-    var bottomInset: CGFloat = 96
     @ViewBuilder var header: () -> Header
 
     @State private var rows: [DiffDocumentRow] = []
@@ -53,7 +52,9 @@ struct ClientDiffDocumentView<Header: View>: View {
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.top, Theme.Space.s)
-            .padding(.bottom, bottomInset)
+            // Navigation and tab chrome already constrain this safe-area pane.
+            // Fill it; reserving a second tab-bar height leaves unused space.
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
         .task(id: Request(revision: revision, rowLimit: rowLimit, fileHeaders: fileHeaders)) {
             if displayedRevision != revision {

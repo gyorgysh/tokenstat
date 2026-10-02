@@ -221,7 +221,8 @@ settings:
     # 123 carries the review fixes for notes, chat delivery, browser history
     # and Muse usage recovery.
     # 123 was uploaded as 1.1.0. 124 restores iOS chat actions and wrapped diffs.
-    CURRENT_PROJECT_VERSION: "124"
+    # 125 adds list-row chat deletion and fills the native iOS diff viewport.
+    CURRENT_PROJECT_VERSION: "125"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,

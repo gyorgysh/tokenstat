@@ -87,14 +87,7 @@ struct ClientChatView: View {
                         retainedThread = nil
                         opened = copied
                     },
-                    onDelete: { deleted in
-                        if opened?.id == deleted.id {
-                            opened = nil
-                            retainedThread = nil
-                        } else if retainedThread?.id == deleted.id {
-                            retainedThread = nil
-                        }
-                    }
+                    onDelete: didDeleteChat
                 )
                 .opacity(opened == nil ? 0 : 1)
                 .allowsHitTesting(opened != nil)
@@ -183,10 +176,11 @@ struct ClientChatView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }.buttonStyle(.plain)
                     ClientChatMenu(model: model, conversation: chat, peer: peer, workspaceID: workspaceID,
+                                   hostName: hostName,
                                    onFork: { copied in
                                        guard opened == nil else { return }
                                        opened = copied
-                                   })
+                                   }, onDelete: didDeleteChat)
                 }
                 .clientCardRow()
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -269,7 +263,10 @@ struct ClientChatView: View {
                     Task {
                         guard owner != nil, owner == WorkSessionContext.shared.scope,
                               model.peer == peer, model.workspaceID == workspaceID else { return }
-                        await model.remove(chat, in: workspaceID)
+                        let removed = await model.remove(chat, in: workspaceID)
+                        guard removed, owner == WorkSessionContext.shared.scope,
+                              model.peer == peer, model.workspaceID == workspaceID else { return }
+                        didDeleteChat(chat)
                     }
                 }
                 pendingDelete = nil
@@ -298,6 +295,11 @@ struct ClientChatView: View {
         .onChange(of: navigation.requestedChat) { _, _ in
             Task { await openRequestedChat() }
         }
+    }
+
+    private func didDeleteChat(_ deleted: ChatConversation) {
+        if opened?.id == deleted.id { opened = nil }
+        if retainedThread?.id == deleted.id { retainedThread = nil }
     }
 
     private func row(_ chat: ChatConversation, draft: WorkReference?) -> some View {

@@ -207,7 +207,7 @@ struct GitReviewedFileView: View {
                 } else if diff.hunks.isEmpty {
                     Text(L10n.text("apple.gitcommitcomposer.no_text_changes_in_this_file.9c538f4a")).font(ClientType.body).foregroundStyle(.secondary)
                 } else {
-                    ClientDiffDocumentView(diffs: [diff], revision: revision, fileHeaders: false, bottomInset: 0) { EmptyView() }
+                    ClientDiffDocumentView(diffs: [diff], revision: revision, fileHeaders: false) { EmptyView() }
                 }
                 #endif
             } else { ProgressView(L10n.text("apple.gitcommitcomposer.reading_reviewed_changes.9c829fac")) }

@@ -54,7 +54,7 @@ struct WorkViewedChangeSheet: View {
             })
             #else
             GeometryReader { geometry in
-                ClientDiffDocumentView(diffs: change.diffs, revision: documentRevision, bottomInset: 0) {
+                ClientDiffDocumentView(diffs: change.diffs, revision: documentRevision) {
                     metadata(expanded: false, compact: geometry.size.height < 500)
                     if change.diffs.isEmpty {
                         Text(L10n.text("apple.workviewedchangesheet.this_saved_commit_has_no_file_changes_to_d.e10f1c5c"))
