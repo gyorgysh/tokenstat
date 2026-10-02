@@ -401,7 +401,6 @@ public sealed partial class MainWindow : Window
         RemoteWorkspaces.Changed += () => DispatcherQueue.TryEnqueue(() =>
         {
             RebuildFolderItems();
-            RebuildSidebarLive();
         });
         AppServices.AccountChanged += () => DispatcherQueue.TryEnqueue(() => _ = RefreshSidebarLiveAsync(slow: true));
         AppServices.ConversationsChanged += () => DispatcherQueue.TryEnqueue(() => _ = RefreshSidebarLiveAsync());
@@ -577,7 +576,6 @@ public sealed partial class MainWindow : Window
             DispatcherQueue.TryEnqueue(() =>
             {
                 RebuildFolderItems();
-                RebuildSidebarLive();
             });
             _ = RemoteWorkspaces.SweepAsync();
         }
@@ -653,6 +651,9 @@ public sealed partial class MainWindow : Window
         }
         _nav.MenuItems.Add(_sshGroup);
         UpdateProjectsHeader();
+        // Populate children before restoring expansion: native rows without
+        // children cannot retain an expanded state while they are mounted.
+        RebuildSidebarLive();
         foreach (var item in NavItems(_nav.MenuItems))
         {
             if (item.MenuItems.Count > 0 && item.Tag is string tag && expanded.TryGetValue(tag, out var wasExpanded))
@@ -1707,6 +1708,8 @@ public sealed partial class MainWindow : Window
             {
                 _liveChats = chats;
             }
+            if (previousChats.Count == 0 && _liveChats.Count > 0)
+                Program.LogStartup($"Sidebar history loaded; chats={_liveChats.Count}");
             var rowsChanged = !JsonNode.DeepEquals(previousSessions, _liveSessions)
                 || !JsonNode.DeepEquals(previousSshSessions, _liveSshSessions)
                 || !JsonNode.DeepEquals(previousChats, _liveChats)
@@ -1802,6 +1805,7 @@ public sealed partial class MainWindow : Window
                 continue;
             }
             var folderId = rest[..cut];
+            var hadChildren = parent.MenuItems.Count > 0;
             var folder = _localFolders.FirstOrDefault(folder => Format.Text(folder, "id") == folderId);
             var desiredSessions = new List<NavigationViewItem>();
             if (sessionsByFolder.TryGetValue(folderId, out var sessions) && sessions.Count > 0)
@@ -1856,6 +1860,14 @@ public sealed partial class MainWindow : Window
             // rows, which share the prefix.
             NavigationRows.Reconcile(parent.MenuItems, desiredChats, "wschat", desiredSessions.Count);
             SidebarChrome.AlignProject(parent);
+            // A new folder initially loads without history. Expand when its
+            // first children arrive, after WinUI has recognised the hierarchy.
+            // Existing populated folders keep the user's disclosure choice.
+            if (!hadChildren && parent.MenuItems.Count > 0 && _nav.IsPaneOpen)
+            {
+                parent.IsExpanded = true;
+                Program.LogStartup($"Sidebar project expanded; children={parent.MenuItems.Count}; expanded={parent.IsExpanded}");
+            }
         }
 
         if (selectedTag is not null
