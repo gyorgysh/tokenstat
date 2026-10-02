@@ -685,6 +685,9 @@ struct AccountView: View {
                     .disabled(localModels.isLoading)
                 }
 
+                Text(L10n.text("common.local_provider_settings_help"))
+                    .font(Theme.caption).foregroundStyle(.secondary)
+
                 if let error = localModels.errorMessage {
                     Text(error)
                         .font(Theme.caption)
@@ -957,6 +960,10 @@ struct AccountView: View {
                 .toggleStyle(.switch)
                 .controlSize(.small)
             }
+            LocalProviderPortEditor(provider: provider) { port in
+                try await localModels.setPort(port, for: provider.id)
+            }
+            .disabled(localModels.isLoading)
             if !localModels.isEnabled(provider.id) {
                 Text(L10n.text("apple.accountview.disabled_for_local_model_selection.8bd93638"))
                     .font(Theme.caption)

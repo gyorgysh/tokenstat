@@ -857,6 +857,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         Grid.SetColumn(refresh, 1);
         head.Children.Add(refresh);
         body.Children.Add(head);
+        body.Children.Add(new TextBlock { Text = L10n.Text("common.local_provider_settings_help"), FontSize = 12, Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
 
         JsonArray providers;
         try
@@ -915,14 +916,15 @@ internal sealed class AccountPage : Page, IToolbarItems
             Spacing = Theme.SpaceS,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        left.Children.Add(new Border
+        var providerDot = new Border
         {
             Width = 8,
             Height = 8,
             CornerRadius = new CornerRadius(4),
             Background = available && enabled ? Theme.AccentBrush : Theme.BorderBrush,
             VerticalAlignment = VerticalAlignment.Center,
-        });
+        };
+        left.Children.Add(providerDot);
         left.Children.Add(new TextBlock
         {
             Text = Format.Text(provider, "name", id),
@@ -946,6 +948,11 @@ internal sealed class AccountPage : Page, IToolbarItems
         Grid.SetColumn(toggle, 1);
         head.Children.Add(toggle);
         stack.Children.Add(head);
+        stack.Children.Add(LocalProviderPortEditor(provider, stack, () =>
+        {
+            providerDot.Background = Theme.BorderBrush;
+            while (stack.Children.Count > 2) stack.Children.RemoveAt(2);
+        }));
         if (!enabled)
         {
             stack.Children.Add(new TextBlock
@@ -1012,6 +1019,75 @@ internal sealed class AccountPage : Page, IToolbarItems
             });
         }
         return stack;
+    }
+
+    private UIElement LocalProviderPortEditor(JsonNode provider, StackPanel owner, Action onSaved)
+    {
+        var id = Format.Text(provider, "id");
+        var defaultPort = provider["defaultPort"]?.GetValue<int>() ?? (id == "lmstudio" ? 1234 : 11434);
+        var currentPort = provider["port"]?.GetValue<int>() ?? defaultPort;
+        if (provider["port"] is null && Uri.TryCreate(Format.Text(provider, "baseUrl"), UriKind.Absolute, out var address)) currentPort = address.Port;
+        var editor = new StackPanel { Spacing = Theme.SpaceXs };
+        var controls = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+        controls.Children.Add(new TextBlock { Text = L10n.Text("common.local_provider_port"), FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
+        var field = new TextBox { Text = currentPort.ToString(System.Globalization.CultureInfo.InvariantCulture), Width = 84, MaxLength = 5, FontFamily = Fonts.Mono };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(field, L10n.Text("common.local_provider_port_label", Format.Text(provider, "name", id)));
+        controls.Children.Add(field);
+        var error = new TextBlock { Foreground = Theme.Brush(static () => Theme.Danger), FontSize = 12, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+        var endpoint = new TextBlock { Text = Format.Text(provider, "baseUrl"), FontSize = 11, FontFamily = Fonts.Mono, Opacity = 0.7, IsTextSelectionEnabled = true };
+        var busy = false;
+        Button? save = null;
+        Button? reset = null;
+        bool Valid(out int port) => int.TryParse(field.Text.Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out port) && port is >= 1 and <= 65535;
+        void Validate()
+        {
+            var valid = Valid(out var port);
+            if (save is not null) save.IsEnabled = !busy && valid && port != currentPort;
+            if (reset is not null) reset.IsEnabled = !busy && field.Text != defaultPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            error.Text = valid ? "" : L10n.Text("common.local_provider_port_invalid");
+            error.Visibility = valid ? Visibility.Collapsed : Visibility.Visible;
+        }
+        async Task Apply(int port)
+        {
+            if (busy) return;
+            busy = true; field.IsEnabled = false; Validate();
+            error.Visibility = Visibility.Collapsed;
+            var saved = false;
+            try
+            {
+                await AppServices.Host.CallAsync("local.provider.set", new JsonObject { ["id"] = id, ["port"] = port });
+                saved = true; currentPort = port; onSaved();
+                if (Uri.TryCreate(endpoint.Text, UriKind.Absolute, out var previous)) endpoint.Text = new UriBuilder(previous) { Port = port }.Uri.AbsoluteUri;
+                var providers = await AppServices.Host.CallAsync("local.models") as JsonArray;
+                var updated = providers?.OfType<JsonNode>().FirstOrDefault(item => Format.Text(item, "id") == id);
+                if (updated is not null && owner.Parent is Panel parent)
+                {
+                    var index = parent.Children.IndexOf(owner);
+                    if (index >= 0) { parent.Children.RemoveAt(index); parent.Children.Insert(index, LocalProviderRow(updated)); }
+                }
+            }
+            catch (Exception ex) { error.Text = saved ? L10n.Text("common.local_provider_saved_refresh") : FriendlyError.Display(ex.Message); error.Visibility = Visibility.Visible; }
+            finally
+            {
+                busy = false; field.IsEnabled = true;
+                if (save is not null) save.IsEnabled = Valid(out var value) && value != currentPort;
+                if (reset is not null) reset.IsEnabled = field.Text != defaultPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+        }
+        save = Buttons.Primary(L10n.Text("common.save"), ActionIcon.Save, async (_, _) => { if (Valid(out var port)) await Apply(port); }, small: true);
+        reset = Buttons.Secondary(L10n.Text("common.local_provider_use_default"), ActionIcon.Restore, async (_, _) =>
+        {
+            field.Text = defaultPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (currentPort != defaultPort) await Apply(defaultPort);
+        }, small: true);
+        field.TextChanged += (_, _) => Validate();
+        field.KeyDown += async (_, key) => { if (key.Key == Windows.System.VirtualKey.Enter && Valid(out var port) && port != currentPort) { key.Handled = true; await Apply(port); } };
+        controls.Children.Add(save); controls.Children.Add(reset);
+        editor.Children.Add(controls);
+        editor.Children.Add(endpoint);
+        editor.Children.Add(error);
+        Validate();
+        return editor;
     }
 
     private static string LocalProviderHint(JsonNode provider, string id)

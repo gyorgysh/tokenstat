@@ -17,6 +17,7 @@
 <div id="term"></div>
 <script src="xterm.js"></script>
 <script src="xterm-fit.js"></script>
+<script src="term-scroll.js"></script>
 <script>
   // The terminal palette is TerminalPalette (Design/TerminalPalette.swift):
   // dark 0x0A0A0B / 0xDCDCE0, light 0xF7F7F8 / 0x1C1C1F, caret is the brand
@@ -51,6 +52,9 @@
   var fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(document.getElementById("term"));
+  var scroll = new TerminalScrollController(term, function (reading) {
+    if (window.TermBridge && TermBridge.onReadingChanged) TermBridge.onReadingChanged(reading);
+  });
 
   // Paint for the system appearance, the way the Apple client repaints its
   // terminal view. Kotlin calls this once the page loads and again when the
@@ -97,7 +101,7 @@
     try {
       selected = window.getSelection ? window.getSelection().toString() : "";
     } catch (e) {}
-    if (selected) return;
+    if (selected || scroll.isReading() || Date.now() < ignoreClickUntil) return;
     termFocus();
     if (window.TermBridge && TermBridge.onWantsKeyboard) TermBridge.onWantsKeyboard();
   });
@@ -130,23 +134,53 @@
   // Scrolls mode: a drag or wheel scrolls the buffer instead of reaching the
   // program, for an agent that holds mouse reporting on. Matches the Apple
   // key bar's scroll toggle, which flips allowMouseReporting on its view.
-  var scrollsHandler = null;
   function termSetScrolls(on) {
-    if (on && !scrollsHandler) {
-      scrollsHandler = function (event) {
-        var el = term.element;
-        if (!el) return true;
-        var delta = event.deltaY || event.detail || 0;
-        term.scrollLines(delta > 0 ? 3 : -3);
-        event.preventDefault();
-        return false;
-      };
-      term.attachCustomWheelEventHandler(scrollsHandler);
-    } else if (!on && scrollsHandler) {
-      term.attachCustomWheelEventHandler(function () { return true; });
-      scrollsHandler = null;
-    }
+    touchY = null;
+    scroll.setEnabled(on);
   }
+  function termFollowLatest() { scroll.followLatest(); }
+  var wheelRemainder = 0;
+  function terminalLineHeight() {
+    var screen = document.getElementById("term").querySelector(".xterm-screen");
+    return screen ? Math.max(1, screen.getBoundingClientRect().height / term.rows) : 16;
+  }
+  term.attachCustomWheelEventHandler(function (event) {
+    if (!scroll.isEnabled()) return true;
+    var delta = event.deltaY || event.detail || 0;
+    // Trackpads deliver small pixel deltas. Accumulate whole terminal rows
+    // instead of jumping several lines for each tiny movement.
+    wheelRemainder += event.deltaMode === 1 ? delta : event.deltaMode === 2 ? delta * term.rows : delta / terminalLineHeight();
+    var lines = Math.trunc(wheelRemainder);
+    if (lines) { scroll.scrollLines(lines); wheelRemainder -= lines; }
+    event.preventDefault();
+    return false;
+  });
+
+  // Capture touch before xterm's guest-mouse handler. Reading mode belongs
+  // to the viewport even when a full-screen application enables its mouse.
+  var touchY = null;
+  var touchStartY = 0;
+  var ignoreClickUntil = 0;
+  var surface = document.getElementById("term");
+  surface.addEventListener("touchstart", function (event) {
+    touchY = null;
+    if (!scroll.isEnabled() || event.touches.length !== 1) return;
+    touchY = touchStartY = event.touches[0].clientY;
+    event.stopImmediatePropagation();
+  }, { capture: true, passive: true });
+  surface.addEventListener("touchmove", function (event) {
+    if (!scroll.isEnabled() || touchY === null || event.touches.length !== 1) return;
+    var y = event.touches[0].clientY;
+    if (Math.abs(y - touchStartY) < 4) return;
+    var height = terminalLineHeight();
+    var lines = Math.trunc((touchY - y) / Math.max(1, height));
+    if (lines) { scroll.scrollLines(lines); touchY -= lines * height; }
+    ignoreClickUntil = Date.now() + 700;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, { capture: true, passive: false });
+  surface.addEventListener("touchend", function () { touchY = null; }, { passive: true });
+  surface.addEventListener("touchcancel", function () { touchY = null; }, { passive: true });
 
   // The size Kotlin measured for the view, in CSS pixels.
   //
@@ -192,7 +226,7 @@
     if (!proposed || !proposed.rows || proposed.rows < 2 || !proposed.cols) return false;
     if (proposed.rows !== term.rows || proposed.cols !== term.cols) {
       try {
-        term.resize(proposed.cols, proposed.rows);
+        scroll.resize(function () { term.resize(proposed.cols, proposed.rows); });
       } catch (e) {
         return false;
       }
@@ -220,8 +254,7 @@
     var bin = atob(base64);
     var bytes = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    term.write(bytes);
-    pushSize();
+    scroll.write(bytes, pushSize);
   }
 
   // The belt to the observers' braces: a device that reports no size for a

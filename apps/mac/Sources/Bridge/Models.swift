@@ -1830,6 +1830,10 @@ struct LocalProvider: Codable, Sendable, Hashable, Identifiable {
     var id: String
     var name: String
     var baseURL: String
+    var port: Int? = nil
+    var defaultPort: Int? = nil
+    var currentPort: Int { port ?? URL(string: baseURL)?.port ?? standardPort }
+    var standardPort: Int { defaultPort ?? (id == "lmstudio" ? 1234 : 11434) }
     var available: Bool
     var models: [LocalModel]
     var error: String?
@@ -1839,7 +1843,7 @@ struct LocalProvider: Codable, Sendable, Hashable, Identifiable {
     /// be joined here: without this the whole response fails to decode, and
     /// the launcher reported it as "no local models discovered".
     enum CodingKeys: String, CodingKey {
-        case id, name, baseURL = "baseUrl", available, models, error
+        case id, name, baseURL = "baseUrl", port, defaultPort, available, models, error
     }
 }
 

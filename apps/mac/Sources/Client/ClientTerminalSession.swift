@@ -70,6 +70,10 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     var view: TerminalView {
         if let terminalView { return terminalView }
         let created = Self.makeView(delegate: self)
+        created.scrollMode = scrolls
+        created.onReadingChanged = { [weak self] reading in
+            DispatchQueue.main.async { self?.readingOutput = reading }
+        }
         terminalView = created
         return created
     }
@@ -336,7 +340,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
             while start < bytes.count {
                 guard !removed else { return true }
                 let end = min(start + slice, bytes.count)
-                view.feed(byteArray: ArraySlice(bytes[start..<end]))
+                view.feedOutput(ArraySlice(bytes[start..<end]))
                 start = end
                 if start < bytes.count {
                     try? await Task.sleep(for: .milliseconds(8))
@@ -372,7 +376,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         return true
     }
 
-    private static func makeView(delegate: TerminalViewDelegate) -> TerminalView {
+    private static func makeView(delegate: TerminalViewDelegate) -> ClientTerminalInputView {
         let view = ClientTerminalInputView(frame: CGRect(x: 0, y: 0, width: 360, height: 640))
         let dark = UITraitCollection.current.userInterfaceStyle == .dark
         let background: UInt32 = dark ? 0x0A0A0B : 0xF7F7F8
@@ -434,9 +438,13 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     var scrolls: Bool = false {
         didSet {
             guard scrolls != oldValue else { return }
-            terminalView?.allowMouseReporting = !scrolls
+            (terminalView as? ClientTerminalInputView)?.scrollMode = scrolls
         }
     }
+
+    var readingOutput = false
+
+    func followOutput() { (terminalView as? ClientTerminalInputView)?.followLatest() }
 
     /// Put the keyboard away, or bring it back, without ending the session.
     ///
@@ -511,7 +519,7 @@ struct ClientTerminalRepresentable: UIViewRepresentable {
         // Focus is taken once, on appear. Taking it back on every update
         // would make Hide keyboard last until the next redraw, which on a
         // live terminal is immediately.
-        uiView.allowMouseReporting = !session.scrolls
+        (uiView as? ClientTerminalInputView)?.scrollMode = session.scrolls
     }
 }
 
@@ -628,7 +636,9 @@ struct ClientTerminalScreen: View {
                 control: Binding(
                     get: { session.controlArmed },
                     set: { session.controlArmed = $0 }
-                )
+                ),
+                readingOutput: session.readingOutput,
+                followOutput: { session.followOutput() }
             )
         }
         .background(TerminalPalette.surface.ignoresSafeArea())

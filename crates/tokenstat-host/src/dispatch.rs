@@ -1203,6 +1203,7 @@ fn owner_only_method(method: &str) -> bool {
                 | "account.unlinkMachine"
                 | "account.registerMachine"
                 | "account.pairingCode"
+                | "local.provider.set"
                 | "config.limitsSync"
                 | "push.register"
                 | "push.unregister"
@@ -3481,6 +3482,24 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
     #[cfg(feature = "local-host")]
     if let Some(answer) = workflows(method, params) {
         return Some(answer.map_err(DispatchError::from));
+    }
+
+    #[cfg(feature = "local-host")]
+    if method == "local.provider.set" {
+        return Some(
+            (|| {
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Params {
+                    id: String,
+                    port: u16,
+                }
+                let p: Params = serde_json::from_str(params).map_err(|error| error.to_string())?;
+                crate::local_models::set_port(&p.id, p.port)?;
+                Ok::<Value, String>(json!({ "ok": true }))
+            })()
+            .map_err(DispatchError::from),
+        );
     }
 
     #[cfg(feature = "local-host")]
@@ -5992,6 +6011,7 @@ mod tests {
                 ("open", r#"{"dbPath":"/tmp/elsewhere.db"}"#),
                 ("pricing.seed", r#"{"path":"/etc/hosts"}"#),
                 ("config.limitsSync", r#"{"enabled":true}"#),
+                ("local.provider.set", r#"{"id":"ollama","port":12345}"#),
                 ("push.register", r#"{"token":"x","platform":"ios"}"#),
                 ("push.unregister", r#"{"token":"x"}"#),
                 ("push.test", "{}"),
@@ -6006,6 +6026,34 @@ mod tests {
                     "{method}: {out}"
                 );
             }
+        });
+    }
+
+    #[cfg(feature = "local-host")]
+    #[test]
+    fn local_provider_port_requests_validate_before_writing() {
+        for params in [
+            r#"{"id":"unknown","port":1234}"#,
+            r#"{"id":"ollama","port":0}"#,
+            r#"{"id":"ollama","port":65536}"#,
+            r#"{"id":"ollama","port":-1}"#,
+            r#"{"id":"ollama","port":12.5}"#,
+            r#"{"id":"ollama","port":1234,"host":"elsewhere"}"#,
+        ] {
+            let out = call_sessionless("local.provider.set", params).expect("sessionless");
+            let value: Value = serde_json::from_str(&out).expect("envelope");
+            assert_eq!(value["ok"], false, "{out}");
+        }
+        crate::request_context::with_remote_peer("phone", || {
+            let out = call_sessionless("local.provider.set", r#"{"id":"ollama","port":12345}"#)
+                .expect("sessionless");
+            let value: Value = serde_json::from_str(&out).expect("envelope");
+            assert!(
+                value["error"]["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("local-only")),
+                "{out}"
+            );
         });
     }
 }

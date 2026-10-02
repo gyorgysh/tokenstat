@@ -63,5 +63,13 @@
   "common.waiting": "Waiting",
   "common.workflows": "Workflows",
   "common.working": "Working",
-  "common.yes": "Yes"
+  "common.yes": "Yes",
+  "common.local_provider_port": "Port",
+  "common.local_provider_port_label": "{0} port",
+  "common.local_provider_use_default": "Use default",
+  "common.local_provider_port_invalid": "Enter a port from 1 to 65535.",
+  "common.local_provider_busy": "Wait for the current check to finish, then try again.",
+  "common.local_provider_settings_help": "Match the port in your local server settings. Changes apply to new sessions.",
+  "common.account_plan_label": "{0}, {1} plan",
+  "common.local_provider_saved_refresh": "Port saved. Refresh to check the server again."
 }

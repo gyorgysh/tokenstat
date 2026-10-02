@@ -1776,32 +1776,64 @@ public sealed partial class MainWindow : Window
                 + "|" + Format.Text(account, "handle")
                 + "|" + Format.Text(account, "tier")
                 + "|" + Format.Text(account, "avatar");
+        key += "|" + _nav.IsPaneOpen;
+        _railFooter.Visibility = _nav.IsPaneOpen ? Visibility.Collapsed : Visibility.Visible;
         if (key == _liveFooterKey)
         {
             return;
         }
         _liveFooterKey = key;
-        if (!signedIn || account is null)
-        {
-            _railFooter.Child = AccountMenu(new JsonObject { ["displayName"] = "Sign in" });
-            return;
-        }
-        _railFooter.Child = AccountMenu(account);
+        var presentation = signedIn && account is not null ? account : new JsonObject { ["displayName"] = L10n.Text("common.sign_in") };
+        _railFooter.Child = AccountMenu(presentation);
+        _nav.PaneFooter = _nav.IsPaneOpen ? AccountMenu(presentation, expanded: true) : null;
     }
 
-    private UIElement AccountMenu(JsonNode account)
+    private UIElement AccountMenu(JsonNode account, bool expanded = false)
     {
-        var name = Format.Text(account, "displayName", L10n.Text("common.account"));
+        var name = Format.Text(account, "displayName");
+        if (string.IsNullOrWhiteSpace(name)) name = Format.Text(account, "handle", L10n.Text("common.account"));
+        if (string.IsNullOrWhiteSpace(name)) name = L10n.Text("common.account");
         var avatar = ProfileHoverRing.Wrap(Marks.Avatar(url: Format.Text(account, "avatar"), name: name,
-            handle: Format.Text(account, "handle"), size: 28), 28);
+            handle: Format.Text(account, "handle"), size: expanded ? 32 : 28), expanded ? 32 : 28);
+        UIElement identity = avatar;
+        if (expanded)
+        {
+            var portrait = new Grid { Width = 48, Height = 48 };
+            var glow = new LinearGradientBrush { StartPoint = new Windows.Foundation.Point(0, 0), EndPoint = new Windows.Foundation.Point(1, 1),
+                GradientStops = { new GradientStop { Color = Theme.Accent, Offset = 0 }, new GradientStop { Color = Theme.Secondary, Offset = 1 } } };
+            portrait.ActualThemeChanged += (_, _) => { glow.GradientStops[0].Color = Theme.Accent; glow.GradientStops[1].Color = Theme.Secondary; };
+            foreach (var size in new[] { 48d, 44d, 40d }) portrait.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = size, Height = size, Fill = glow, Opacity = size == 48 ? 0.06 : 0.1, IsHitTestVisible = false });
+            avatar.HorizontalAlignment = HorizontalAlignment.Center;
+            avatar.VerticalAlignment = VerticalAlignment.Center;
+            portrait.Children.Add(avatar);
+            if (Format.Flag(account, "signedIn") && Marks.TierMark(Format.Text(account, "tier"), 11) is FrameworkElement mark)
+                portrait.Children.Add(new Border { Width = 17, Height = 17, CornerRadius = new CornerRadius(9), Background = Theme.Brush(static () => Theme.Sidebar),
+                    BorderBrush = Theme.BorderBrush, BorderThickness = new Thickness(1), Child = mark,
+                    HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, IsHitTestVisible = false });
+            var content = new Grid { ColumnSpacing = Theme.SpaceS };
+            content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            content.Children.Add(portrait);
+            var labels = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
+            labels.Children.Add(new TextBlock { Text = name, FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
+            var tier = Format.Text(account, "tier");
+            var handle = Format.Text(account, "handle");
+            if (!string.IsNullOrWhiteSpace(tier)) labels.Children.Add(new TextBlock { Text = tier[..1].ToUpperInvariant() + tier[1..], FontSize = 11, Opacity = 0.7, TextTrimming = TextTrimming.CharacterEllipsis });
+            else if (!string.IsNullOrWhiteSpace(handle)) labels.Children.Add(new TextBlock { Text = "@" + handle, FontSize = 11, Opacity = 0.7, TextTrimming = TextTrimming.CharacterEllipsis });
+            Grid.SetColumn(labels, 1);
+            content.Children.Add(labels);
+            identity = content;
+        }
         var footer = new Button
         {
-            Content = avatar,
-            Width = 44, Height = 44, Padding = new Thickness(4),
+            Content = identity,
+            Width = expanded ? double.NaN : 44, Height = expanded ? 52 : 44, Padding = new Thickness(expanded ? 0 : 4),
+            MinWidth = 0, HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0),
         };
         ProfileHoverRing.Attach(avatar, footer);
         var label = AppServices.Update.IsReady || AppServices.Update.IsAvailable ? L10n.Text("windows.mainwindow_xaml.account_update_available.29a1fbd6") : L10n.Text("windows.mainwindow_xaml.account_0.d8cd9318", $"{name}");
+        if (expanded && !string.IsNullOrWhiteSpace(Format.Text(account, "tier"))) label = L10n.Text("common.account_plan_label", name, Format.Text(account, "tier"));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(footer, label);
         ToolTipService.SetToolTip(footer, label);
         var menu = new MenuFlyout();
@@ -1821,7 +1853,22 @@ public sealed partial class MainWindow : Window
             menu.Items.Add(item);
         }
         footer.Flyout = menu;
-        return footer;
+        if (!expanded) return footer;
+        var bar = new Grid { ColumnSpacing = Theme.SpaceS };
+        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        bar.Children.Add(footer);
+        var settings = Buttons.ToolbarIcon(ActionIcon.Settings, L10n.Text("common.settings"), (_, _) =>
+        {
+            _nav.SelectedItem = null;
+            _lastNavTag = "global:" + GlobalSection.Account;
+            Show(_lastNavTag);
+        });
+        settings.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(settings, 1);
+        bar.Children.Add(settings);
+        return new Border { Child = bar, Padding = new Thickness(6), Margin = new Thickness(6), CornerRadius = new CornerRadius(12),
+            Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush, BorderThickness = new Thickness(1) };
     }
 
     private void TrySize()
@@ -1913,6 +1960,7 @@ public sealed partial class MainWindow : Window
         _paneResize.Visibility = _nav.IsPaneOpen ? Visibility.Visible : Visibility.Collapsed;
         _paneResize.Margin = new Thickness(Math.Max(0, _nav.OpenPaneLength - 3), 0, 0, 0);
         _nav.PaneHeader = _nav.IsPaneOpen ? LogoOpen() : LogoClosed();
+        RefreshAccountFooter();
         var show = _nav.IsPaneOpen ? Visibility.Visible : Visibility.Collapsed;
         foreach (var button in _pinnedNavigation.Values)
             if (button.Content is StackPanel content)

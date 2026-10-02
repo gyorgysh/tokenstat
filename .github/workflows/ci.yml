@@ -222,6 +222,13 @@ jobs:
       - name: Run the standalone client tests
         run: bash scripts/run-swift-tests.sh
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Mobile terminal scroll regressions
+        run: node scripts/tests/TerminalScrollTests.cjs
+
   windows-state-tests:
     name: windows state tests
     runs-on: ubuntu-latest

@@ -131,6 +131,9 @@ fun TerminalScreen(
     bridge.onControlChanged = { controlArmed = it }
     var keyboardUp by remember { mutableStateOf(false) }
     bridge.onKeyboardChanged = { keyboardUp = it }
+    var scrolls by remember { mutableStateOf(bridge.scrolls) }
+    var readingOutput by remember { mutableStateOf(false) }
+    bridge.onReadingChanged = { readingOutput = it }
     ReconcileKeyboard(keyboardUp) { keyboardUp = false; bridge.noteKeyboardHidden() }
     // A redraw tick for bridge-owned read state (transport error, dropped
     // output, exit). The loop sets the fields and nudges this.
@@ -303,6 +306,7 @@ fun TerminalScreen(
                         override fun onPageFinished(view: WebView, url: String?) {
                             bridge.webView = view
                             bridge.pushTheme(dark)
+                            bridge.setScrolls(bridge.scrolls)
                             bridge.fit()
                             if (bridge.sessionBound) return
                             bridge.sessionBound = true
@@ -370,7 +374,10 @@ fun TerminalScreen(
         TerminalKeys(
             onSend = { bytes -> bridge.sendBytes(bytes) },
             onToggleKeyboard = { bridge.toggleKeyboard() },
-            onScrolls = { bridge.setScrolls(it) },
+            scrolls = scrolls,
+            onScrolls = { scrolls = it; bridge.setScrolls(it) },
+            readingOutput = readingOutput,
+            onFollowOutput = { bridge.followOutput() },
             control = controlArmed,
             onControl = { bridge.armControl(it) },
             keyboardUp = keyboardUp,
@@ -466,6 +473,9 @@ fun SshTerminalScreen(
     bridge.onControlChanged = { controlArmed = it }
     var keyboardUp by remember { mutableStateOf(false) }
     bridge.onKeyboardChanged = { keyboardUp = it }
+    var scrolls by remember { mutableStateOf(bridge.scrolls) }
+    var readingOutput by remember { mutableStateOf(false) }
+    bridge.onReadingChanged = { readingOutput = it }
     ReconcileKeyboard(keyboardUp) { keyboardUp = false; bridge.noteKeyboardHidden() }
     var confirmEnd by remember { mutableStateOf(false) }
     var filling by remember { mutableStateOf<JsonObject?>(null) }
@@ -580,6 +590,7 @@ fun SshTerminalScreen(
                         override fun onPageFinished(view: WebView, url: String?) {
                             bridge.webView = view
                             bridge.pushTheme(dark)
+                            bridge.setScrolls(bridge.scrolls)
                             bridge.fit()
                             if (!bridge.sessionBound) {
                                 bridge.sessionBound = true
@@ -613,7 +624,10 @@ fun SshTerminalScreen(
         TerminalKeys(
             onSend = { bytes -> bridge.sendBytes(bytes) },
             onToggleKeyboard = { bridge.toggleKeyboard() },
-            onScrolls = { bridge.setScrolls(it) },
+            scrolls = scrolls,
+            onScrolls = { scrolls = it; bridge.setScrolls(it) },
+            readingOutput = readingOutput,
+            onFollowOutput = { bridge.followOutput() },
             control = controlArmed,
             onControl = { bridge.armControl(it) },
             keyboardUp = keyboardUp,
@@ -815,7 +829,16 @@ class TerminalBridge {
         }
     }
 
+    @Volatile var scrolls = false
+        private set
+    var onReadingChanged: (Boolean) -> Unit = {}
+
+    fun followOutput() {
+        webView?.post { webView?.evaluateJavascript("termFollowLatest();", null) }
+    }
+
     fun setScrolls(on: Boolean) {
+        scrolls = on
         webView?.post {
             webView?.evaluateJavascript("termSetScrolls(${if (on) "true" else "false"});", null)
         }
@@ -1029,6 +1052,11 @@ class TerminalBridge {
 
     inner class JsApi {
         @JavascriptInterface
+        fun onReadingChanged(reading: Boolean) {
+            main.post { this@TerminalBridge.onReadingChanged(reading) }
+        }
+
+        @JavascriptInterface
         fun onInput(base64: String) {
             // Decoded rather than forwarded, so an armed Ctrl can fold the
             // key that was actually typed.
@@ -1154,6 +1182,9 @@ fun TerminalKeys(
     onSend: (ByteArray) -> Unit,
     onToggleKeyboard: () -> Unit,
     onScrolls: (Boolean) -> Unit = {},
+    scrolls: Boolean = false,
+    readingOutput: Boolean = false,
+    onFollowOutput: () -> Unit = {},
     /// Whether Ctrl is armed. Owned by the session that receives typed keys,
     /// because that is the path the letters arrive on. Twin of the `control`
     /// binding in `ClientTerminalKeys`.
@@ -1166,7 +1197,6 @@ fun TerminalKeys(
 ) {
     val colors = LocalTsColors.current
     var shift by remember { mutableStateOf(false) }
-    var scrolls by remember { mutableStateOf(false) }
     fun fire(bytes: ByteArray) {
         // No fold here. Every byte goes the one way, and the session folds an
         // armed Ctrl into whichever one arrives first.
@@ -1189,8 +1219,15 @@ fun TerminalKeys(
             onClick = onToggleKeyboard,
         )
         KeyCap("scroll", colors, armed = scrolls) {
-            scrolls = !scrolls
-            onScrolls(scrolls)
+            onScrolls(!scrolls)
+        }
+        if (readingOutput) {
+            IconKeyCap(
+                icon = ai.tokenstat.tokenstat.ui.components.ActionIcon.Latest.vector,
+                label = L10n.text("android.transcriptfollow.jump_to_latest.86752458"),
+                colors = colors,
+                onClick = onFollowOutput,
+            )
         }
         KeyCap("esc", colors) { fire(byteArrayOf(0x1B)) }
         KeyCap("ctrl", colors, armed = control) { onControl(!control) }

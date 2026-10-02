@@ -14,8 +14,11 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(250);
 const READ_TIMEOUT: Duration = Duration::from_millis(700);
@@ -27,6 +30,8 @@ pub(crate) struct LocalProvider {
     pub id: String,
     pub name: String,
     pub base_url: String,
+    pub port: u16,
+    pub default_port: u16,
     pub available: bool,
     pub models: Vec<LocalModel>,
     pub error: Option<String>,
@@ -44,7 +49,6 @@ struct ProviderSpec {
     id: &'static str,
     name: &'static str,
     port: u16,
-    base_url: &'static str,
     path: &'static str,
     parse: fn(&Value) -> Result<Vec<LocalModel>, String>,
 }
@@ -54,7 +58,6 @@ const PROVIDERS: &[ProviderSpec] = &[
         id: "lmstudio",
         name: "LM Studio",
         port: 1234,
-        base_url: "http://127.0.0.1:1234/v1",
         path: "/v1/models",
         parse: parse_lmstudio,
     },
@@ -62,7 +65,6 @@ const PROVIDERS: &[ProviderSpec] = &[
         id: "ollama",
         name: "Ollama",
         port: 11434,
-        base_url: "http://127.0.0.1:11434",
         path: "/api/tags",
         parse: parse_ollama,
     },
@@ -73,45 +75,108 @@ fn spec(provider: &str) -> Option<&'static ProviderSpec> {
     PROVIDERS.iter().find(|spec| spec.id == provider)
 }
 
-/// Where a provider listens, with no API path on the end.
-///
-/// Two harness contracts want two different forms of the same address: the
-/// Anthropic-compatible one appends its own `/v1/messages`, while the
-/// OpenAI-compatible one is handed the `/v1` prefix already. Both come from
-/// this one table so a port lives in a single place.
-pub(crate) fn origin(provider: &str) -> Option<String> {
-    spec(provider).map(|spec| format!("http://127.0.0.1:{}", spec.port))
+#[derive(Default, Serialize, Deserialize)]
+struct Ports(BTreeMap<String, u16>);
+
+fn ports_path() -> Result<PathBuf, String> {
+    tokenstat_identity::identity_dir()
+        .map(|dir| dir.join("local-providers.json"))
+        .map_err(|error| error.to_string())
 }
 
-/// The OpenAI-compatible base URL a provider answers on.
-pub(crate) fn api_base_url(provider: &str) -> Option<&'static str> {
-    spec(provider).map(|spec| spec.base_url)
+fn load_ports(path: &Path) -> Result<Ports, String> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Ports::default()),
+        Err(_) => return Err("could not read local model port settings".into()),
+    };
+    let ports: Ports = serde_json::from_str(&text)
+        .map_err(|_| "local model port settings are invalid".to_string())?;
+    if ports
+        .0
+        .iter()
+        .any(|(id, port)| spec(id).is_none() || *port == 0)
+    {
+        return Err("local model port settings are invalid".into());
+    }
+    Ok(ports)
+}
+
+fn port_for(spec: &ProviderSpec, ports: &Ports) -> u16 {
+    ports.0.get(spec.id).copied().unwrap_or(spec.port)
+}
+
+pub(crate) fn configured_port(provider: &str) -> Result<u16, String> {
+    let spec = spec(provider).ok_or("unknown local model provider")?;
+    Ok(port_for(spec, &load_ports(&ports_path()?)?))
+}
+
+/// A private host setting shared by discovery and newly launched sessions.
+pub(crate) fn set_port(provider: &str, port: u16) -> Result<(), String> {
+    set_port_in(&ports_path()?, provider, port)
+}
+
+fn set_port_in(path: &Path, provider: &str, port: u16) -> Result<(), String> {
+    let spec = spec(provider).ok_or("unknown local model provider")?;
+    if port == 0 {
+        return Err("port must be between 1 and 65535".into());
+    }
+    static WRITER: Mutex<()> = Mutex::new(());
+    let _guard = crate::identity_storage::lock_at(&path.with_extension("lock"), &WRITER)?;
+    let mut ports = load_ports(path)?;
+    if port == spec.port {
+        ports.0.remove(provider);
+    } else {
+        ports.0.insert(provider.to_string(), port);
+    }
+    let json = serde_json::to_string(&ports).map_err(|error| error.to_string())?;
+    tokenstat_sync::snapshot::write_private_atomically(path, &json)
+        .map_err(|_| "could not save local model port settings".to_string())
+}
+
+/// Loopback only, with no API path on the end.
+pub(crate) fn origin(provider: &str) -> Result<String, String> {
+    Ok(format!("http://127.0.0.1:{}", configured_port(provider)?))
+}
+
+pub(crate) fn api_base_url(provider: &str) -> Result<String, String> {
+    let origin = origin(provider)?;
+    Ok(if provider == "lmstudio" {
+        format!("{origin}/v1")
+    } else {
+        origin
+    })
 }
 
 /// Probe the supported local model servers without contacting the internet.
 pub(crate) fn discover() -> Result<Vec<LocalProvider>, String> {
+    let ports = load_ports(&ports_path()?)?;
     Ok(PROVIDERS
         .iter()
-        .map(
-            |spec| match get_json(spec.port, spec.path).and_then(|value| (spec.parse)(&value)) {
-                Ok(models) => LocalProvider {
-                    id: spec.id.to_string(),
-                    name: spec.name.to_string(),
-                    base_url: spec.base_url.to_string(),
-                    available: true,
-                    models,
-                    error: None,
-                },
-                Err(error) => LocalProvider {
-                    id: spec.id.to_string(),
-                    name: spec.name.to_string(),
-                    base_url: spec.base_url.to_string(),
-                    available: false,
-                    models: Vec::new(),
-                    error: Some(error),
-                },
-            },
-        )
+        .map(|spec| {
+            let port = port_for(spec, &ports);
+            let origin = format!("http://127.0.0.1:{port}");
+            let base_url = if spec.id == "lmstudio" {
+                format!("{origin}/v1")
+            } else {
+                origin
+            };
+            let result = get_json(port, spec.path).and_then(|value| (spec.parse)(&value));
+            let (available, models, error) = match result {
+                Ok(models) => (true, models, None),
+                Err(error) => (false, Vec::new(), Some(error)),
+            };
+            LocalProvider {
+                id: spec.id.to_string(),
+                name: spec.name.to_string(),
+                base_url,
+                port,
+                default_port: spec.port,
+                available,
+                models,
+                error,
+            }
+        })
         .collect())
 }
 
@@ -147,7 +212,7 @@ fn get_json(port: u16, path: &str) -> Result<Value, String> {
     stream
         .set_write_timeout(Some(READ_TIMEOUT))
         .map_err(|error| error.to_string())?;
-    write!(stream, "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nAccept: application/json\r\n\r\n")
+    write!(stream, "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\nAccept: application/json\r\n\r\n")
         .map_err(|error| error.to_string())?;
 
     let mut response = Vec::new();
@@ -226,6 +291,72 @@ mod tests {
     use super::{LocalModel, LocalProvider, api_base_url, origin, parse_lmstudio, parse_ollama};
     use serde_json::json;
 
+    fn fixture_dir() -> std::path::PathBuf {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "tokenstat-local-ports-{}-{now}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn ports_persist_independently_and_reset_to_defaults() {
+        let dir = fixture_dir();
+        let path = dir.join("ports.json");
+        super::set_port_in(&path, "lmstudio", 8123).expect("save LM Studio");
+        super::set_port_in(&path, "ollama", 65535).expect("save Ollama");
+        let ports = super::load_ports(&path).expect("reload");
+        assert_eq!(
+            super::port_for(super::spec("lmstudio").expect("provider"), &ports),
+            8123
+        );
+        assert_eq!(
+            super::port_for(super::spec("ollama").expect("provider"), &ports),
+            65535
+        );
+        assert!(super::set_port_in(&path, "ollama", 0).is_err());
+        assert!(super::set_port_in(&path, "unknown", 1234).is_err());
+        super::set_port_in(&path, "lmstudio", 1234).expect("reset");
+        let ports = super::load_ports(&path).expect("reload defaults");
+        assert!(!ports.0.contains_key("lmstudio"));
+        assert_eq!(ports.0.get("ollama"), Some(&65535));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path)
+                    .expect("metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+        std::fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    #[test]
+    fn corrupt_settings_never_silently_use_another_port() {
+        let dir = fixture_dir();
+        std::fs::create_dir_all(&dir).expect("directory");
+        let path = dir.join("ports.json");
+        for data in [
+            r#"{"ollama":0}"#,
+            r#"{"lmstudio":65536}"#,
+            r#"{"unknown":1234}"#,
+            "incomplete",
+        ] {
+            std::fs::write(&path, data).expect("fixture");
+            assert!(super::load_ports(&path).is_err());
+            assert!(super::set_port_in(&path, "lmstudio", 1234).is_err());
+            assert_eq!(std::fs::read_to_string(&path).expect("unchanged"), data);
+        }
+        std::fs::remove_dir_all(dir).expect("cleanup");
+    }
+
     #[test]
     fn the_wire_shape_is_camel_case() {
         // Pinned because a client decodes these names literally. `baseUrl`
@@ -236,6 +367,8 @@ mod tests {
             id: "lmstudio".into(),
             name: "LM Studio".into(),
             base_url: "http://127.0.0.1:1234/v1".into(),
+            port: 1234,
+            default_port: 1234,
             available: true,
             models: vec![LocalModel {
                 id: "qwen/a".into(),
@@ -250,7 +383,16 @@ mod tests {
         keys.sort_unstable();
         assert_eq!(
             keys,
-            ["available", "baseUrl", "error", "id", "models", "name"]
+            [
+                "available",
+                "baseUrl",
+                "defaultPort",
+                "error",
+                "id",
+                "models",
+                "name",
+                "port"
+            ]
         );
         let model = value["models"][0].as_object().expect("an object");
         let mut model_keys: Vec<_> = model.keys().map(String::as_str).collect();
@@ -260,9 +402,12 @@ mod tests {
 
     #[test]
     fn a_providers_address_comes_from_one_table() {
-        assert_eq!(origin("lmstudio").as_deref(), Some("http://127.0.0.1:1234"));
-        assert_eq!(api_base_url("lmstudio"), Some("http://127.0.0.1:1234/v1"));
-        assert_eq!(origin("nothing"), None);
+        assert_eq!(origin("lmstudio").as_deref(), Ok("http://127.0.0.1:1234"));
+        assert_eq!(
+            api_base_url("lmstudio").as_deref(),
+            Ok("http://127.0.0.1:1234/v1")
+        );
+        assert!(origin("nothing").is_err());
     }
 
     #[test]

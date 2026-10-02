@@ -2400,6 +2400,11 @@ extension Bridge {
         try await background("local.models", patience: Patience.interactive, as: [LocalProvider].self)
     }
 
+    static func setLocalProviderPort(_ id: String, port: Int) async throws {
+        struct Saved: Decodable { var ok: Bool }
+        _ = try await background("local.provider.set", ["id": id, "port": port], as: Saved.self)
+    }
+
     /// Discover local providers on the machine that owns a remote workspace.
     static func localModels(onPeer peer: String) async throws -> [LocalProvider] {
         try await onPeer(peer, "local.models", as: [LocalProvider].self)

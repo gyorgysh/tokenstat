@@ -180,6 +180,12 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         made.optionAsMetaKey = true
         made.getTerminal().changeHistorySize(4_000)
         made.terminalDelegate = self
+        #if !os(macOS)
+        made.scrollMode = scrolls
+        made.onReadingChanged = { [weak self] reading in
+            DispatchQueue.main.async { self?.readingOutput = reading }
+        }
+        #endif
         terminalView = made
         return made
     }
@@ -797,19 +803,11 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// Feed the emulator. On Mac this keeps a drag selection unless the guest
     /// enabled mouse mode; on iOS the phone's scroll toggle owns that flag.
     private func feedView(_ bytes: ArraySlice<UInt8>) {
-        #if os(macOS)
         view.feedOutput(bytes)
-        #else
-        view.feed(byteArray: bytes)
-        #endif
     }
 
     private func feedView(text: String) {
-        #if os(macOS)
         view.feedOutput(text)
-        #else
-        view.feed(text: text)
-        #endif
     }
 
     /// How many characters are typed into an unproven line before the guessing
@@ -837,10 +835,15 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         didSet {
             #if !os(macOS)
             guard scrolls != oldValue else { return }
-            terminalView?.allowMouseReporting = !scrolls
+            (terminalView as? ClientTerminalInputView)?.scrollMode = scrolls
             #endif
         }
     }
+
+    #if !os(macOS)
+    var readingOutput = false
+    func followOutput() { (terminalView as? ClientTerminalInputView)?.followLatest() }
+    #endif
 
     /// Armed Ctrl for the phone's key bar. The bar has no letter keys, so the
     /// session folds the next typed byte and this is what arms it; see
@@ -1079,6 +1082,8 @@ struct SSHLiveTerminalScreen: View {
                     get: { session.controlArmed },
                     set: { session.controlArmed = $0 }
                 ),
+                readingOutput: session.readingOutput,
+                followOutput: { session.followOutput() },
                 leading: snippetKey
             )
             #endif

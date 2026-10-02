@@ -857,8 +857,7 @@ pub(crate) fn model_environment(
     let executable = executable_name(command);
     match (executable, provider) {
         ("claude", Some("lmstudio")) => {
-            let base = crate::local_models::origin("lmstudio")
-                .ok_or("LM Studio is not a known local provider")?;
+            let base = crate::local_models::origin("lmstudio")?;
             Ok(vec![
                 ("ANTHROPIC_BASE_URL".into(), base),
                 ("ANTHROPIC_AUTH_TOKEN".into(), "lmstudio".into()),
@@ -871,12 +870,20 @@ pub(crate) fn model_environment(
         // generic OPENAI_* pair, and needs no key for a loopback server that
         // asks for none.
         ("copilot", Some(provider)) => {
-            let base = crate::local_models::api_base_url(provider)
-                .ok_or_else(|| format!("{provider} is not a known local provider"))?;
-            Ok(vec![("COPILOT_PROVIDER_BASE_URL".into(), base.into())])
+            let base = crate::local_models::api_base_url(provider)?;
+            Ok(vec![("COPILOT_PROVIDER_BASE_URL".into(), base)])
         }
-        // Codex names the provider on the command line. Do not guess OPENAI_*.
-        ("codex", Some("lmstudio" | "ollama")) => Ok(Vec::new()),
+        // Codex's OSS port override leaves its built-in provider contract intact.
+        ("codex", Some(provider @ ("lmstudio" | "ollama"))) => {
+            let port = crate::local_models::configured_port(provider)?;
+            Ok(vec![
+                ("CODEX_OSS_PORT".into(), port.to_string()),
+                (
+                    "CODEX_OSS_BASE_URL".into(),
+                    format!("http://127.0.0.1:{port}/v1"),
+                ),
+            ])
+        }
         // OpenCode only accepts a `provider/id` that is in its catalog. A
         // freshly loaded LM Studio model is often missing from that cache.
         // `OPENCODE_CONFIG_CONTENT` is per-process and registers the one
@@ -912,6 +919,7 @@ fn opencode_model_config(provider: &str, model: &str) -> Result<String, String> 
         "model": format!("{provider}/{model}"),
         "provider": {
             provider: {
+                "options": { "baseURL": format!("{}/v1", crate::local_models::origin(provider)?) },
                 "models": {
                     model: { "name": name }
                 }
@@ -1805,10 +1813,19 @@ mod tests {
     }
 
     #[test]
-    fn codex_local_providers_do_not_get_guessed_environment() {
+    fn codex_local_providers_use_the_configured_loopback_endpoint() {
         let env =
             model_environment("codex", Some("ollama"), Some("llama3.2")).expect("environment");
-        assert!(env.is_empty());
+        assert_eq!(
+            env,
+            vec![
+                ("CODEX_OSS_PORT".into(), "11434".into()),
+                (
+                    "CODEX_OSS_BASE_URL".into(),
+                    "http://127.0.0.1:11434/v1".into()
+                ),
+            ]
+        );
     }
 
     #[test]
@@ -1863,6 +1880,10 @@ mod tests {
         assert_eq!(
             parsed["provider"]["lmstudio"]["models"]["meta/muse-glimmer"]["name"],
             "muse-glimmer"
+        );
+        assert_eq!(
+            parsed["provider"]["lmstudio"]["options"]["baseURL"],
+            "http://127.0.0.1:1234/v1"
         );
         assert_eq!(env.len(), 1);
     }

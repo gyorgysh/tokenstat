@@ -65,6 +65,8 @@ struct ClientTerminalKeys: View {
     /// and this bar only arms it. Nil on a screen whose session does not take
     /// the flag; that screen keeps the arming local to the bar.
     var control: Binding<Bool>? = nil
+    var readingOutput = false
+    var followOutput: (() -> Void)? = nil
     /// Keys this session has that others do not, at the head of the bar.
     ///
     /// An SSH session has saved snippets and an agent session does not. Rather
@@ -131,6 +133,9 @@ struct ClientTerminalKeys: View {
                 // is pinned to the bottom. This is the toggle SwiftTerm's own
                 // bar carried and ours dropped.
                 modifier("scroll", isOn: scrolls) { scrolls.toggle() }
+                if readingOutput, let followOutput {
+                    iconKey("arrow.down", label: L10n.text("apple.transcriptfollow.jump_to_latest.86752458"), action: followOutput)
+                }
                 modifier("esc", isOn: false) { fire(Key.escape) }
                 modifier("ctrl", isOn: controlArmed.wrappedValue) { controlArmed.wrappedValue.toggle() }
                 modifier("shift", isOn: shift) { shift.toggle() }
