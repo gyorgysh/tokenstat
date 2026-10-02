@@ -566,9 +566,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 // of work, and carried over it left every later chat planning
                 // at somebody who had asked for something to be done.
                 ["mode"] = "execute",
+                // Don't ask unless the last chat was set to ask first. The
+                // remembered choice still wins once somebody has made one.
                 ["autonomy"] = Format.Text(chosen, "gateTier") == "bypassOnly"
                     ? "bypass"
-                    : saved?.Autonomy ?? "standard",
+                    : saved?.Autonomy ?? "bypass",
             };
             // The rest of the last setup travels when this agent still
             // offers it. A model or effort it no longer lists is dropped.

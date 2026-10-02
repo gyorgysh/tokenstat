@@ -46,7 +46,7 @@ internal sealed record ChatLaunchChoice(
                 backend,
                 Format.Text(node, "model"),
                 Format.Text(node, "effort"),
-                Format.Text(node, "autonomy", "standard"),
+                Format.Text(node, "autonomy", "bypass"),
                 node["personaId"] is null ? null : Format.Text(node, "personaId"));
         }
         catch
