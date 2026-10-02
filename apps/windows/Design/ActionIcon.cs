@@ -21,8 +21,8 @@ internal enum ActionIcon
     Save, Claim, Create, Upload, Copy, Download,
     SignIn, SignOut, Account, Settings, Security, Edit,
     Plans, Billing, AppStore, PlayStore, AutoRenew, Downgrade, CancelPlan,
-    Token, Preview, Visibility, Theme, Layout,
-    Connect, Disconnect, Approve, Pair, Refresh, Revoke, Device,
+    Token, Preview, Visibility, Theme, Layout, Sidebar,
+    Connect, Disconnect, Approve, Pair, Refresh, Revoke, Device, Computer,
     Run, Stop, History, Move, Archive, Restore, Pin, Pinned, Browser, Collapse, Commit,
     Merge, Comment, Reopen, Checkout, Filter, EnterFullScreen, ExitFullScreen,
     Delete,
@@ -48,6 +48,18 @@ internal static class ActionIconGlyph
     private static FontIcon Glyph(int code) => new() { Glyph = char.ToString((char)code), FontFamily = IconFont };
 
     private static SymbolIcon Sigil(FluentSymbol symbol) => new() { Symbol = symbol };
+
+    private static PathIcon Pane(bool leading)
+    {
+        var frame = new GeometryGroup();
+        foreach (var rect in new[]
+        {
+            new Windows.Foundation.Rect(0, 0, 16, 1), new Windows.Foundation.Rect(0, 13, 16, 1),
+            new Windows.Foundation.Rect(0, 1, 1, 12), new Windows.Foundation.Rect(15, 1, 1, 12),
+            new Windows.Foundation.Rect(leading ? 5 : 10, 1, 1, 12),
+        }) frame.Children.Add(new RectangleGeometry { Rect = rect });
+        return new PathIcon { Data = frame };
+    }
 
     /// <summary>
     /// The de-collided mark for an action. Where the Mac draws two different
@@ -91,6 +103,7 @@ internal static class ActionIconGlyph
         ActionIcon.Preview or ActionIcon.Visibility => Sigil(FluentSymbol.View),
         ActionIcon.Theme => Sigil(FluentSymbol.Highlight),
         ActionIcon.Layout => Glyph(0xECA5), // Tiles
+        ActionIcon.Sidebar => Pane(true),
         // Link went to Token and Pair, so connecting reads as joining the
         // network. The Mac draws a plain link here.
         ActionIcon.Connect => Glyph(0xE701), // Wifi
@@ -99,6 +112,7 @@ internal static class ActionIconGlyph
         ActionIcon.Refresh => Sigil(FluentSymbol.Refresh),
         ActionIcon.Revoke => Glyph(0xE738), // Remove
         ActionIcon.Device => Sigil(FluentSymbol.CellPhone),
+        ActionIcon.Computer => Glyph(0xE770), // Monitor
         ActionIcon.Run => Sigil(FluentSymbol.Play),
         ActionIcon.Stop => Sigil(FluentSymbol.Stop),
         // The clock with an arrow. Scheduled keeps the plain clock.
@@ -110,7 +124,7 @@ internal static class ActionIconGlyph
         ActionIcon.Pin => Sigil(FluentSymbol.Pin),
         ActionIcon.Pinned => Sigil(FluentSymbol.UnPin),
         ActionIcon.Browser => Sigil(FluentSymbol.Globe),
-        ActionIcon.Collapse => Sigil(FluentSymbol.ClosePane),
+        ActionIcon.Collapse => Pane(false),
         ActionIcon.Merge => Sigil(FluentSymbol.Switch),
         ActionIcon.Comment => Sigil(FluentSymbol.Message),
         ActionIcon.Reopen => Glyph(0xE7A6), // Redo
@@ -232,13 +246,16 @@ internal static class ActionIconGlyph
             BorderBrush = Theme.Brush(static () => Theme.Accent),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
+            MinWidth = 0, MinHeight = 30,
+            Padding = new Thickness(14, 0, 14, 0),
+            FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.Medium,
             Content = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
                 Spacing = 6,
                 Children =
                 {
-                    icon.Icon(),
+                    new Viewbox { Width = 12, Height = 12, Child = icon.Icon() },
                     new TextBlock { Text = title, VerticalAlignment = VerticalAlignment.Center },
                 },
             },
@@ -259,8 +276,9 @@ internal static class ActionIconGlyph
             Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
             BorderThickness = new Thickness(0),
             CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(8, 6, 8, 6),
-            Content = new SymbolIcon(FluentSymbol.More),
+            Width = 30, Height = 30, MinWidth = 0, MinHeight = 0,
+            Padding = new Thickness(0),
+            Content = new Viewbox { Width = 14, Height = 14, Child = new SymbolIcon(FluentSymbol.More) },
             Flyout = menu,
             VerticalAlignment = VerticalAlignment.Center,
         };

@@ -95,8 +95,8 @@ internal static class Chrome
     {
         var icon = action.Icon();
         icon.Foreground = Theme.AccentBrush;
-        return new Border { Width = 28, Height = 28, CornerRadius = new CornerRadius(7),
-            Background = Theme.AccentSoftBrush, Child = new Viewbox { Width = 16, Height = 16, Child = icon } };
+        return new Border { Width = 24, Height = 24, CornerRadius = new CornerRadius(7),
+            Background = Theme.AccentSoftBrush, Child = new Viewbox { Width = 13, Height = 13, Child = icon } };
     }
 
     public static StackPanel Stat(string label, string value, string? note = null, bool accent = false)

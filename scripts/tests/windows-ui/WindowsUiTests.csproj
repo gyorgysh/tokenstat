@@ -41,6 +41,11 @@
     <Compile Include="../../../apps/windows/Design/ShellWidths.cs" Link="ShellWidths.cs" />
     <Compile Include="../../../apps/windows/Design/ResizeHandle.cs" Link="ResizeHandle.cs" />
     <Compile Include="../../../apps/windows/Design/FlowPanel.cs" Link="FlowPanel.cs" />
+    <Compile Include="../../../apps/windows/Design/ActionIcon.cs" Link="ActionIcon.cs" />
+    <Compile Include="../../../apps/windows/Design/Buttons.cs" Link="Buttons.cs" />
+    <Compile Include="../../../apps/windows/Design/SidebarChrome.cs" Link="SidebarChrome.cs" />
+    <Compile Include="../../../apps/windows/Design/DetailBar.cs" Link="DetailBar.cs" />
+    <Compile Include="../../../apps/windows/Design/SegmentedCapsule.cs" Link="SegmentedCapsule.cs" />
     <Compile Include="../../../apps/windows/Design/Persona/PersonaClipper.cs" Link="PersonaClipper.cs" />
     <Compile Include="../../../apps/windows/Design/Persona/PersonaClipGeometry.cs" Link="PersonaClipGeometry.cs" />
     <Compile Include="../../../apps/windows/Design/Persona/PersonaScene.cs" Link="PersonaScene.cs" />

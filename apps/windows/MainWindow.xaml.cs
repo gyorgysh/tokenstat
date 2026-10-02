@@ -28,10 +28,12 @@ public sealed partial class MainWindow : Window
     private bool _resizing;
 
     private readonly NavigationView _nav = new();
-    private const double RailWidth = 56;
+    private const double RailWidth = ShellWidths.Rail;
     private readonly ResizeHandle _paneResize = new();
-    private readonly Border _railFooter = new() { Margin = new Thickness(4, 8, 4, 8) };
-    private readonly Dictionary<string, Button> _pinnedNavigation = new();
+    private readonly Border _railFooter = new() { Margin = new Thickness(4, 6, 4, 6) };
+    private readonly Dictionary<RailPlace, Button> _pinnedNavigation = new();
+    private readonly NavigationViewItem _sshGroup = SshGroup();
+    private string _automationRoute = "global:Automations";
     private readonly Frame _frame = new();
     /// <summary>
     /// The content area behind the frame. Opaque Background tone, so the
@@ -41,7 +43,7 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// The content body: the global toolbar above, the inspector host below.
     /// One toolbar for the window rather than one per page, mirroring the Mac
-    /// detail chrome, which carries the same search and inspector marks.
+    /// detail chrome, which carries the sidebar and inspector marks.
     /// </summary>
     private readonly Grid _bodyGrid = new();
     /// <summary>The slot the toolbar rebuilds into on navigation and theme change.</summary>
@@ -60,13 +62,10 @@ public sealed partial class MainWindow : Window
     private readonly SolidColorBrush _chromeBackground = new(Theme.Background);
     private readonly SolidColorBrush _chromeSidebar = new(Theme.Sidebar);
     private readonly SolidColorBrush _chromeBorder = new(Theme.Border);
-    private readonly NavigationViewItemHeader _globalHeader = new()
-    {
-        Content = L10n.Text("windows.mainwindow_xaml.global.e7440dd3"),
-    };
     private readonly NavigationViewItemHeader _workspacesHeader = new()
     {
-        Content = L10n.Text("windows.mainwindow_xaml.workspaces.2356c737"),
+        Content = L10n.Text("common.projects"),
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
     };
     private UIElement? _hostSplash;
     /// <summary>
@@ -168,6 +167,8 @@ public sealed partial class MainWindow : Window
         _nav.OpenPaneLength = ShellWidths.Shared.Sidebar;
         _nav.CompactPaneLength = 0;
         _nav.IsPaneToggleButtonVisible = false;
+        // The shell already reserves AppTitleBar's caption row.
+        _nav.IsTitleBarAutoPaddingEnabled = false;
         _nav.PaneDisplayMode = NavigationViewPaneDisplayMode.Auto;
         _nav.IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed;
         _nav.Background = new SolidColorBrush(Colors.Transparent);
@@ -175,26 +176,34 @@ public sealed partial class MainWindow : Window
         _nav.Resources["NavigationViewExpandedPaneBackground"] = _chromeSidebar;
         _nav.Resources["NavigationViewContentBackground"] = _chromeBackground;
         _nav.Resources["NavigationViewContentGridBorderBrush"] = _chromeBorder;
+        _nav.Resources["NavigationViewPaneContentGridMargin"] = new Thickness(0);
+        _nav.Resources["NavigationViewContentGridBorderThickness"] = new Thickness(1, 0, 0, 0);
+        _nav.Resources["NavigationViewMinimalContentGridBorderThickness"] = new Thickness(0);
+        _nav.Resources["NavigationViewContentGridCornerRadius"] = new CornerRadius(0);
+        _nav.Resources["NavigationViewItemOnLeftMinHeight"] = 32d;
+        _nav.Resources["NavigationViewItemContentPresenterMargin"] = new Thickness(4, 0, 4, 0);
 
-        var pinned = new StackPanel { Spacing = 2, Margin = new Thickness(4, 0, 4, 8) };
-        var togglePane = Buttons.ToolbarIcon(ActionIcon.Layout, L10n.Text("windows.mainwindow_xaml.show_or_hide_projects.0d518392"), (_, _) => _nav.IsPaneOpen = !_nav.IsPaneOpen);
-        pinned.Children.Add(togglePane);
+        var pinned = new StackPanel { Spacing = 4, Margin = new Thickness(0, 2, 0, 8) };
         foreach (var section in Sections.Standalone.Concat(Sections.Everywhere))
         {
             var item = Item(section);
             item.Visibility = Visibility.Collapsed;
             _nav.MenuItems.Add(item);
-            var tag = "global:" + section;
-            var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
-            content.Children.Add(GlobalIcon(section));
-
-            var button = new Button { Content = content, HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Left, BorderThickness = new Thickness(0), Padding = new Thickness(12),
-                Background = _chromeBackground, MinWidth = 0 };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, section.Label());
-            button.Click += (_, _) => { if (ReferenceEquals(_nav.SelectedItem, item)) Show(tag); else _nav.SelectedItem = item; };
-            ToolTipService.SetToolTip(button, section.Label());
-            _pinnedNavigation[tag] = button;
+        }
+        foreach (var place in Enum.GetValues<RailPlace>())
+        {
+            var button = SidebarChrome.RailButton(RailIcon(place), RailLabel(place), (_, _) =>
+            {
+                // Workflows share the Automations place; returning preserves that choice.
+                var tag = place switch
+                {
+                    RailPlace.Automations => _automationRoute,
+                    RailPlace.Ssh => "ssh:" + (_sshPage?.CurrentSection ?? SSHSection.Hosts),
+                    _ => place.Route(),
+                };
+                NavigateTo(tag);
+            });
+            _pinnedNavigation[place] = button;
             pinned.Children.Add(button);
         }
         var railBody = new Grid();
@@ -204,18 +213,16 @@ public sealed partial class MainWindow : Window
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Hidden });
         Grid.SetRow(_railFooter, 1);
         railBody.Children.Add(_railFooter);
-        var rail = new Border { Background = _chromeBackground, Child = railBody };
+        var rail = new Border { Background = _chromeSidebar, Child = railBody };
         Grid.SetRow(rail, 1);
         RootGrid.Children.Add(rail);
-        _nav.MenuItems.Add(new NavigationViewItemSeparator());
-        _nav.MenuItems.Add(SshGroup());
-        _nav.MenuItems.Add(new NavigationViewItemSeparator());
         _nav.MenuItems.Add(_workspacesHeader);
         _nav.MenuItems.Add(new NavigationViewItem
         {
             Content = L10n.Text("windows.mainwindow_xaml.all_projects.4b87271b"),
             Tag = "workspaces:all",
             Icon = new SymbolIcon { Symbol = Symbol.Folder },
+            Visibility = Visibility.Collapsed,
         });
         _nav.MenuItems.Add(new NavigationViewItem
         {
@@ -223,9 +230,14 @@ public sealed partial class MainWindow : Window
             Tag = "workspaces:add",
             Icon = new SymbolIcon { Symbol = Symbol.Add },
         });
-
-        // Search is a toolbar icon, like the Mac: it opens the search page from
-        // anywhere without taking a row. Account and About live in the profile menu.
+        _nav.MenuItems.Add(_sshGroup);
+        var searchShortcut = new Microsoft.UI.Xaml.Input.KeyboardAccelerator
+        {
+            Key = Windows.System.VirtualKey.K,
+            Modifiers = Windows.System.VirtualKeyModifiers.Control,
+        };
+        searchShortcut.Invoked += (_, args) => { OpenSearch(); args.Handled = true; };
+        RootGrid.KeyboardAccelerators.Add(searchShortcut);
         RefreshAccountFooter();
 
         _nav.Content = _contentHost;
@@ -239,7 +251,7 @@ public sealed partial class MainWindow : Window
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_paneResize, L10n.Text("windows.mainwindow_xaml.resize_projects_panel.4be39519"));
         _paneResize.DragDelta += (_, drag) =>
         {
-            _nav.OpenPaneLength = Math.Clamp(_nav.OpenPaneLength + drag.HorizontalChange, 240, 420);
+            _nav.OpenPaneLength = ShellWidths.BoundSidebar(_nav.OpenPaneLength + drag.HorizontalChange);
             SyncPaneChrome();
         };
         _paneResize.DragCompleted += (_, _) => { ShellWidths.Shared.RememberSidebar(_nav.OpenPaneLength); SyncInspectorFit(); };
@@ -247,7 +259,7 @@ public sealed partial class MainWindow : Window
         _paneResize.KeyDown += (_, key) =>
         {
             if (key.Key is not (Windows.System.VirtualKey.Left or Windows.System.VirtualKey.Right)) return;
-            _nav.OpenPaneLength = ShellWidths.BoundSidebar(_nav.OpenPaneLength + (key.Key == Windows.System.VirtualKey.Right ? 16 : -16));
+            _nav.OpenPaneLength = ShellWidths.BoundSidebar(_nav.OpenPaneLength + (key.Key == Windows.System.VirtualKey.Right ? 20 : -20));
             ShellWidths.Shared.RememberSidebar(_nav.OpenPaneLength);
             SyncPaneChrome();
             key.Handled = true;
@@ -271,17 +283,23 @@ public sealed partial class MainWindow : Window
             {
                 var workbench = WorkspaceTabs(workspaceId);
                 workbench.OpenTerminal(sessionId);
-                SetContent(workbench);
+                _lastNavTag = "ws:" + workspaceId + ":Sessions";
+                RestoreSelection(_lastNavTag);
+                SetContent(workbench, preserveSelection: true);
                 if (sessionId is not null)
-                    RestoreSelection(LiveRoute.Join(SidebarLive.SessionPrefix, workspaceId, sessionId));
-                _lastNavTag = (_nav.SelectedItem as NavigationViewItem)?.Tag as string;
+                {
+                    var liveTag = LiveRoute.Join(SidebarLive.SessionPrefix, workspaceId, sessionId);
+                    if (FindNavItem(liveTag) is not null) { _lastNavTag = liveTag; RestoreSelection(liveTag); }
+                }
             });
         };
         AppServices.OpenTerminalSplit = (workspaceId, sessionId) => DispatcherQueue.TryEnqueue(() =>
         {
             var workbench = WorkspaceTabs(workspaceId);
             workbench.OpenTerminalInSplit(sessionId);
-            SetContent(workbench);
+            _lastNavTag = "ws:" + workspaceId + ":Sessions";
+            RestoreSelection(_lastNavTag);
+            SetContent(workbench, preserveSelection: true);
         });
         WorkspaceSshTabs.Changed += () => DispatcherQueue.TryEnqueue(() =>
         {
@@ -301,7 +319,9 @@ public sealed partial class MainWindow : Window
         {
             DispatcherQueue.TryEnqueue(() =>
             {
-                SetContent(new ScreenPage(peer, name));
+                _lastNavTag = "global:Machines";
+                RestoreSelection(_lastNavTag);
+                SetContent(new ScreenPage(peer, name), preserveSelection: true);
             });
         };
         AppServices.OpenOnboarding = () =>
@@ -311,7 +331,7 @@ public sealed partial class MainWindow : Window
         AppServices.OpenMachine = id => DispatcherQueue.TryEnqueue(() =>
         {
             NavigateTo("global:Machines");
-            SetContent(new MachinesPage(id));
+            SetContent(new MachinesPage(id), preserveSelection: true);
         });
         AppServices.OpenWorkspace = (workspaceId, section) =>
         {
@@ -324,9 +344,10 @@ public sealed partial class MainWindow : Window
         {
             DispatcherQueue.TryEnqueue(() =>
             {
+                NavigateTo("ws:" + workspaceId + ":Chat");
                 var workbench = WorkspaceTabs(workspaceId);
-                workbench.Open(WorkspaceSection.Chat);
-                SetContent(workbench);
+                var liveTag = LiveRoute.Join(SidebarLive.ChatPrefix, workspaceId, chatId);
+                if (FindNavItem(liveTag) is not null) { _lastNavTag = liveTag; RestoreSelection(liveTag); }
                 if (workbench.ActivePage is ChatPage page) _ = page.RevealAsync(chatId);
             });
         };
@@ -385,12 +406,42 @@ public sealed partial class MainWindow : Window
 
     private static IconElement GlobalIcon(GlobalSection section) => section switch
     {
-        GlobalSection.Home => new FontIcon { Glyph = "\uE80A" },
+        GlobalSection.Home => ActionIcon.Home.Icon(),
         GlobalSection.Machines => new FontIcon { Glyph = char.ToString((char)0xE770), FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets") },
         GlobalSection.Notes => new SymbolIcon(Symbol.Document),
         GlobalSection.Automations => new FontIcon { Glyph = char.ToString((char)0xE945), FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets") },
         _ => new SymbolIcon(section.Symbol()),
     };
+
+    private static string RailLabel(RailPlace place) => place switch
+    {
+        RailPlace.Home => L10n.Text("common.home"),
+        RailPlace.Projects => L10n.Text("common.projects"),
+        RailPlace.Tasks => L10n.Text("common.tasks"),
+        RailPlace.Notes => L10n.Text("common.notes"),
+        RailPlace.Automations => L10n.Text("common.automations"),
+        RailPlace.Insights => L10n.Text("common.insights"),
+        RailPlace.Devices => L10n.Text("common.devices"),
+        _ => GlobalSection.Ssh.Label(),
+    };
+
+    private static IconElement RailIcon(RailPlace place) => place switch
+    {
+        RailPlace.Home => ActionIcon.Home.Icon(),
+        RailPlace.Projects => ActionIcon.Reveal.Icon(),
+        RailPlace.Tasks => ActionIcon.Apply.Icon(),
+        RailPlace.Notes => new FontIcon { Glyph = "\uE8A5" }, // All notes
+        RailPlace.Automations => GlobalIcon(GlobalSection.Automations),
+        RailPlace.Insights => new SymbolIcon(Symbol.FourBars),
+        RailPlace.Devices => GlobalIcon(GlobalSection.Machines),
+        _ => new FontIcon { Glyph = "\uE756" }, // Command prompt
+    };
+
+    private void UpdateRail(string? tag)
+    {
+        var selected = RailPlaces.Of(tag);
+        foreach (var pair in _pinnedNavigation) SidebarChrome.Select(pair.Value, pair.Key == selected);
+    }
 
     private static NavigationViewItem Item(GlobalSection section)
     {
@@ -403,9 +454,8 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// The SSH library as an expandable group, one row per section like the
-    /// Mac sidebar. The parent carries the Hosts tag so invoking it lands on
-    /// the Hosts screen rather than nowhere.
+    /// Retained SSH navigation targets plus the live servers group. Library
+    /// sections live in the page's tabs; only running sessions show here.
     /// </summary>
     private static NavigationViewItem SshGroup()
     {
@@ -414,6 +464,7 @@ public sealed partial class MainWindow : Window
             Content = GlobalSection.Ssh.Label(),
             Tag = "ssh:" + SSHSection.Hosts,
             Icon = new SymbolIcon { Symbol = GlobalSection.Ssh.Symbol() },
+            Visibility = Visibility.Collapsed,
         };
         foreach (var section in Sections.SshRows)
         {
@@ -429,6 +480,7 @@ public sealed partial class MainWindow : Window
                     _ => "\uE72E",
                 } },
                 Tag = "ssh:" + section,
+                Visibility = Visibility.Collapsed,
             });
         }
         return parent;
@@ -531,7 +583,7 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// Local folders and every reachable peer's, each opening onto its running
     /// terminals and chats (the sections are tabs on the project page). The
-    /// Add project row stays last, under whatever folders exist.
+    /// Add project row stays under the folders, followed by live SSH servers.
     /// </summary>
     private void RebuildFolderItems()
     {
@@ -540,6 +592,7 @@ public sealed partial class MainWindow : Window
         var keep = new List<object>();
         foreach (var item in _nav.MenuItems)
         {
+            if (ReferenceEquals(item, _sshGroup)) continue;
             if (item is NavigationViewItem nav
                 && ((nav.Tag as string)?.StartsWith("ws:") == true
                     || (nav.Tag as string)?.StartsWith("machine:") == true
@@ -585,6 +638,8 @@ public sealed partial class MainWindow : Window
             Tag = "workspaces:add",
             Icon = new SymbolIcon { Symbol = Symbol.Add },
         });
+        _nav.MenuItems.Add(_sshGroup);
+        UpdateProjectsHeader();
         foreach (var item in NavItems(_nav.MenuItems))
         {
             if (item.MenuItems.Count > 0 && item.Tag is string tag && expanded.TryGetValue(tag, out var wasExpanded))
@@ -674,26 +729,52 @@ public sealed partial class MainWindow : Window
         heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         if (parent.Content is UIElement label) { parent.Content = null; heading.Children.Add(label); }
-        var compose = Buttons.ToolbarIcon(ActionIcon.Create, L10n.Text("windows.mainwindow_xaml.new_chat_in_0.2436f7d3", $"{name}"), async (_, _) => await NewChat());
+        var compose = Buttons.ToolbarIcon(ActionIcon.Edit, L10n.Text("windows.mainwindow_xaml.new_chat_in_0.2436f7d3", $"{name}"), async (_, _) => await NewChat());
+        compose.Width = compose.Height = 22;
         Grid.SetColumn(compose, 1); heading.Children.Add(compose);
         var more = ActionIconGlyph.MoreButton(L10n.Text("windows.mainwindow_xaml.project_actions.5d4ef7cc"), menu);
+        more.Width = more.Height = 22;
+        more.MinWidth = more.MinHeight = 0;
+        more.Padding = new Thickness(0);
         Grid.SetColumn(more, 2); heading.Children.Add(more);
+        SidebarChrome.RevealActions(parent, compose, more);
         parent.Content = heading;
         return parent;
     }
 
+    private void UpdateProjectsHeader()
+    {
+        var header = new Grid { ColumnSpacing = Theme.SpaceS };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(new TextBlock { Text = L10n.Text("common.projects").ToUpperInvariant(),
+            FontSize = 11, Opacity = 0.55, VerticalAlignment = VerticalAlignment.Center });
+        var count = new TextBlock { Text = (_localFolders.Count + RemoteWorkspaces.CachedFolders().Count()).ToString(),
+            FontSize = 11, Opacity = 0.45, VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(count, 1);
+        header.Children.Add(count);
+        var add = Buttons.ToolbarIcon(ActionIcon.Create, L10n.Text("common.add_project"), async (_, _) => await AddWorkspaceAsync());
+        add.Width = add.Height = 22;
+        Grid.SetColumn(add, 2);
+        header.Children.Add(add);
+        _workspacesHeader.Content = header;
+    }
+
     private static UIElement FolderLabel(string name, JsonNode? git)
     {
-        var label = new StackPanel { Spacing = 3 };
+        var label = new Grid { ColumnSpacing = 6 };
+        label.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        label.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         label.Children.Add(new TextBlock { Text = name, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis });
         if (git is not null && Format.Flag(git, "isRepo"))
         {
             var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-            line.Children.Add(new TextBlock { Text = "⑂ " + Format.Text(git, "branch", L10n.Text("windows.mainwindow_xaml.detached.13438579")), FontSize = 11, Opacity = 0.65 });
             var added = Format.Long(git, "added");
             var removed = Format.Long(git, "removed");
             if (added > 0) line.Children.Add(new TextBlock { Text = "+" + added, FontSize = 11, Foreground = Theme.Brush(static () => Theme.DiffAdded) });
             if (removed > 0) line.Children.Add(new TextBlock { Text = "−" + removed, FontSize = 11, Foreground = Theme.Brush(static () => Theme.DiffRemoved) });
+            Grid.SetColumn(line, 1);
             label.Children.Add(line);
         }
         return label;
@@ -859,22 +940,50 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// Rebuild the one top bar for what is on screen, like the Mac contextual
     /// toolbar: the device scope picker on Home and Insights, then the page's
-    /// scope chip and actions before the shared search icon, and the inspector
-    /// toggle last, nearest the edge it opens. Account never
+    /// scope chip and actions, and the inspector toggle last, nearest the edge
+    /// it opens. Search lives in the project sidebar. Account never
     /// shows an inspector, so it gets no toggle either.
     /// </summary>
     private void RebuildToolbar()
     {
         var content = _frame.Content;
-        List<UIElement>? leading = null;
+        var leading = new List<UIElement>
+        {
+            Buttons.ToolbarIcon(ActionIcon.Sidebar, L10n.Text("windows.mainwindow_xaml.show_or_hide_projects.0d518392"),
+                (_, _) => _nav.IsPaneOpen = !_nav.IsPaneOpen),
+        };
         if (content is HomePage or InsightsPage)
         {
-            leading = new List<UIElement> { ScopePicker() };
+            leading.Add(ScopePicker());
         }
         if (content is IToolbarItems scoped && scoped.ToolbarScope is UIElement chip)
         {
-            leading ??= new List<UIElement>();
             leading.Add(chip);
+        }
+        else if (content is AutomationsPage or WorkflowsPage)
+        {
+            leading.Add(SegmentedCapsule.View(new List<(string Value, string Label, ActionIcon? Glyph)>
+            {
+                ("global:Automations", L10n.Text("common.automations"), ActionIcon.Scheduled),
+                ("global:Workflows", L10n.Text("common.workflows"), ActionIcon.Move),
+            }, content is WorkflowsPage ? "global:Workflows" : "global:Automations", tag =>
+            {
+                NavigateTo(tag);
+                return Task.CompletedTask;
+            }));
+        }
+        else if (content is TodoPage or NotesPage or MachinesPage or SshPage)
+        {
+            leading.Add(new TextBlock
+            {
+                Text = content switch
+                {
+                    TodoPage => L10n.Text("common.tasks"), NotesPage => L10n.Text("common.notes"),
+                    MachinesPage => L10n.Text("common.devices"), _ => GlobalSection.Ssh.Label(),
+                },
+                FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
         }
         var trailing = new List<UIElement>();
         if (content is IToolbarItems items)
@@ -884,7 +993,6 @@ public sealed partial class MainWindow : Window
                 trailing.Add(action);
             }
         }
-        trailing.Add(Buttons.ToolbarIcon(ActionIcon.Search, L10n.Text("windows.mainwindow_xaml.search_work.cc46cedc"), (_, _) => OpenSearch()));
         if (content is IInspectorContent inspector && inspector.Inspector is not null
             && _inspectorHost.RouteAllowsInspector)
         {
@@ -901,16 +1009,16 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// The This device / All devices switch. Text-only segments like the Home
-    /// page's own chips, fixed at the Mac picker's width so the bar never
+    /// The This device / All devices switch, with the same device and globe
+    /// marks as the Mac, fixed at the picker's width so the bar never
     /// jitters between selections.
     /// </summary>
     private UIElement ScopePicker()
     {
         var options = new List<(string Value, string Label, ActionIcon? Glyph)>
         {
-            ("local", L10n.Text("windows.mainwindow_xaml.this_device.d052579c"), null),
-            ("account", L10n.Text("windows.mainwindow_xaml.all_devices.0594fe82"), null),
+            ("local", L10n.Text("windows.mainwindow_xaml.this_device.d052579c"), ActionIcon.Computer),
+            ("account", L10n.Text("windows.mainwindow_xaml.all_devices.0594fe82"), ActionIcon.Browser),
         };
         var picker = SegmentedCapsule.View(options, _scope.Wire(), value =>
         {
@@ -938,8 +1046,8 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Open the search page from the toolbar. No row carries it any more, so
-    /// the selection clears: leaving the old row lit would claim the sidebar
+    /// Open search from the sidebar or Ctrl+K. The selection clears:
+    /// leaving the old row lit would claim the sidebar
     /// and the content agree when they do not, and the lit row would not
     /// navigate back.
     /// </summary>
@@ -986,9 +1094,8 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
-        // Live rows under the folder parents, like the Mac sidebar.
-        foreach (var pair in _pinnedNavigation)
-            pair.Value.Background = pair.Key == tag ? Theme.AccentSoftBrush : _chromeBackground;
+        // Live rows under the folder parents, like the Mac sidebar. Actions
+        // such as Show more leave the current rail destination selected.
         if (tag.StartsWith(SidebarLive.SessionPrefix, StringComparison.Ordinal)
             && SidebarLive.TrySplit(tag, SidebarLive.SessionPrefix, out var termFolder, out var sessionId))
         {
@@ -1057,11 +1164,16 @@ public sealed partial class MainWindow : Window
 
     private void Show(string tag)
     {
-        foreach (var pair in _pinnedNavigation)
-            pair.Value.Background = pair.Key == tag ? Theme.AccentSoftBrush : _chromeBackground;
+        if (tag == "workspaces:add")
+        {
+            _ = AddWorkspaceAsync();
+            return;
+        }
+        UpdateRail(tag);
+        if (tag is "global:Automations" or "global:Workflows") _automationRoute = tag;
         if (tag.StartsWith("sshterm:", StringComparison.Ordinal))
         {
-            SetContent(Ssh(SSHSection.Hosts, tag["sshterm:".Length..]));
+            SetContent(Ssh(SSHSection.Hosts, tag["sshterm:".Length..]), preserveSelection: true);
             return;
         }
         if (tag.StartsWith("global:", StringComparison.Ordinal))
@@ -1098,11 +1210,6 @@ public sealed partial class MainWindow : Window
         if (tag == "workspaces:all")
         {
             SetContent(WorkspacesOverviewPage(), preserveSelection: true);
-            return;
-        }
-        if (tag == "workspaces:add")
-        {
-            _ = AddWorkspaceAsync();
             return;
         }
         if (tag.StartsWith("ws:", StringComparison.Ordinal))
@@ -1209,6 +1316,7 @@ public sealed partial class MainWindow : Window
         _suppressNav = true;
         _nav.SelectedItem = tag is null ? null : FindNavItem(tag) ?? ProjectRowFor(tag);
         _suppressNav = false;
+        UpdateRail(tag);
     }
 
     /// <summary>
@@ -1550,6 +1658,8 @@ public sealed partial class MainWindow : Window
                         });
                     }
                     NavigationRows.Reconcile(sshGroup.MenuItems, wanted, "sshterm:");
+                    if (sshGroup.Visibility == Visibility.Collapsed && wanted.Count > 0) sshGroup.IsExpanded = _nav.IsPaneOpen;
+                    sshGroup.Visibility = wanted.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
                 }
             }
             catch { /* Keep reachable session rows on a transient host failure. */ }
@@ -1777,7 +1887,7 @@ public sealed partial class MainWindow : Window
                 + "|" + Format.Text(account, "tier")
                 + "|" + Format.Text(account, "avatar");
         key += "|" + _nav.IsPaneOpen;
-        _railFooter.Visibility = _nav.IsPaneOpen ? Visibility.Collapsed : Visibility.Visible;
+        _railFooter.Visibility = Visibility.Visible;
         if (key == _liveFooterKey)
         {
             return;
@@ -1793,45 +1903,41 @@ public sealed partial class MainWindow : Window
         var name = Format.Text(account, "displayName");
         if (string.IsNullOrWhiteSpace(name)) name = Format.Text(account, "handle", L10n.Text("common.account"));
         if (string.IsNullOrWhiteSpace(name)) name = L10n.Text("common.account");
-        var avatar = ProfileHoverRing.Wrap(Marks.Avatar(url: Format.Text(account, "avatar"), name: name,
-            handle: Format.Text(account, "handle"), size: expanded ? 32 : 28), expanded ? 32 : 28);
-        UIElement identity = avatar;
-        if (expanded)
+        FrameworkElement? avatar = null;
+        UIElement identity;
+        if (!expanded)
         {
-            var portrait = new Grid { Width = 48, Height = 48 };
-            var glow = new LinearGradientBrush { StartPoint = new Windows.Foundation.Point(0, 0), EndPoint = new Windows.Foundation.Point(1, 1),
-                GradientStops = { new GradientStop { Color = Theme.Accent, Offset = 0 }, new GradientStop { Color = Theme.Secondary, Offset = 1 } } };
-            portrait.ActualThemeChanged += (_, _) => { glow.GradientStops[0].Color = Theme.Accent; glow.GradientStops[1].Color = Theme.Secondary; };
-            foreach (var size in new[] { 48d, 44d, 40d }) portrait.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = size, Height = size, Fill = glow, Opacity = size == 48 ? 0.06 : 0.1, IsHitTestVisible = false });
-            avatar.HorizontalAlignment = HorizontalAlignment.Center;
-            avatar.VerticalAlignment = VerticalAlignment.Center;
+            // The rail owns the one avatar; the open sidebar carries labels
+            // beside it, rather than repeating the portrait in both columns.
+            avatar = ProfileHoverRing.Wrap(Marks.Avatar(url: Format.Text(account, "avatar"), name: name,
+                handle: Format.Text(account, "handle"), size: 28), 28);
+            var portrait = new Grid { Width = 36, Height = 36 };
             portrait.Children.Add(avatar);
             if (Format.Flag(account, "signedIn") && Marks.TierMark(Format.Text(account, "tier"), 11) is FrameworkElement mark)
                 portrait.Children.Add(new Border { Width = 17, Height = 17, CornerRadius = new CornerRadius(9), Background = Theme.Brush(static () => Theme.Sidebar),
                     BorderBrush = Theme.BorderBrush, BorderThickness = new Thickness(1), Child = mark,
                     HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, IsHitTestVisible = false });
-            var content = new Grid { ColumnSpacing = Theme.SpaceS };
-            content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            content.Children.Add(portrait);
+            identity = portrait;
+        }
+        else
+        {
             var labels = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
             labels.Children.Add(new TextBlock { Text = name, FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
             var tier = Format.Text(account, "tier");
             var handle = Format.Text(account, "handle");
             if (!string.IsNullOrWhiteSpace(tier)) labels.Children.Add(new TextBlock { Text = tier[..1].ToUpperInvariant() + tier[1..], FontSize = 11, Opacity = 0.7, TextTrimming = TextTrimming.CharacterEllipsis });
             else if (!string.IsNullOrWhiteSpace(handle)) labels.Children.Add(new TextBlock { Text = "@" + handle, FontSize = 11, Opacity = 0.7, TextTrimming = TextTrimming.CharacterEllipsis });
-            Grid.SetColumn(labels, 1);
-            content.Children.Add(labels);
-            identity = content;
+            identity = labels;
         }
         var footer = new Button
         {
             Content = identity,
-            Width = expanded ? double.NaN : 44, Height = expanded ? 52 : 44, Padding = new Thickness(expanded ? 0 : 4),
+            Width = expanded ? double.NaN : 44, Height = 44, Padding = new Thickness(expanded ? 0 : 4),
+            HorizontalAlignment = expanded ? HorizontalAlignment.Stretch : HorizontalAlignment.Center,
             MinWidth = 0, HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0),
         };
-        ProfileHoverRing.Attach(avatar, footer);
+        if (avatar is not null) ProfileHoverRing.Attach(avatar, footer);
         var label = AppServices.Update.IsReady || AppServices.Update.IsAvailable ? L10n.Text("windows.mainwindow_xaml.account_update_available.29a1fbd6") : L10n.Text("windows.mainwindow_xaml.account_0.d8cd9318", $"{name}");
         if (expanded && !string.IsNullOrWhiteSpace(Format.Text(account, "tier"))) label = L10n.Text("common.account_plan_label", name, Format.Text(account, "tier"));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(footer, label);
@@ -1867,8 +1973,8 @@ public sealed partial class MainWindow : Window
         settings.VerticalAlignment = VerticalAlignment.Center;
         Grid.SetColumn(settings, 1);
         bar.Children.Add(settings);
-        return new Border { Child = bar, Padding = new Thickness(6), Margin = new Thickness(6), CornerRadius = new CornerRadius(12),
-            Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush, BorderThickness = new Thickness(1) };
+        return new Border { Child = bar, Padding = new Thickness(0), Margin = new Thickness(6),
+            Background = new SolidColorBrush(Colors.Transparent) };
     }
 
     private void TrySize()
@@ -1959,12 +2065,9 @@ public sealed partial class MainWindow : Window
         SyncTitleBarSplit();
         _paneResize.Visibility = _nav.IsPaneOpen ? Visibility.Visible : Visibility.Collapsed;
         _paneResize.Margin = new Thickness(Math.Max(0, _nav.OpenPaneLength - 3), 0, 0, 0);
-        _nav.PaneHeader = _nav.IsPaneOpen ? LogoOpen() : LogoClosed();
+        _nav.PaneHeader = _nav.IsPaneOpen ? LogoOpen() : null;
         RefreshAccountFooter();
         var show = _nav.IsPaneOpen ? Visibility.Visible : Visibility.Collapsed;
-        foreach (var button in _pinnedNavigation.Values)
-            if (button.Content is StackPanel content)
-                foreach (var label in content.Children.OfType<TextBlock>()) label.Visibility = show;
         foreach (var item in _nav.MenuItems)
         {
             if (item is NavigationViewItemHeader header)
@@ -1981,8 +2084,9 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private UIElement LogoOpen()
     {
-        var content = new StackPanel { Spacing = Theme.SpaceM };
-        content.Children.Add(Marks.Wordmark());
+        var content = new StackPanel { Spacing = 0, Margin = new Thickness(0, 0, 0, Theme.SpaceM) };
+        content.Children.Add(new Border { Height = DetailBar.Height,
+            Padding = new Thickness(Theme.SpaceM, 0, Theme.SpaceM, 3), Child = Marks.Wordmark() });
         var menu = new MenuFlyout();
         menu.Opening += (_, _) =>
         {
@@ -2009,33 +2113,13 @@ public sealed partial class MainWindow : Window
             if (menu.Items.Count == 0)
                 menu.Items.Add(new MenuFlyoutItem { Text = L10n.Text("windows.mainwindow_xaml.add_a_project_first.cc9bc2c9"), IsEnabled = false });
         };
-        var create = Buttons.Secondary(L10n.Text("windows.mainwindow_xaml.new_chat.6696c117"), ActionIcon.Create, (_, _) => { });
+        var create = SidebarChrome.Row(L10n.Text("windows.mainwindow_xaml.new_chat.db18382a"), ActionIcon.Edit, (_, _) => { });
         create.Flyout = menu;
         create.HorizontalAlignment = HorizontalAlignment.Stretch;
         ToolTipService.SetToolTip(create, L10n.Text("windows.mainwindow_xaml.choose_which_project_the_new_chat_belongs.e9b181c8"));
         content.Children.Add(create);
-        return new Border
-        {
-            Padding = new Thickness(Theme.SpaceM, Theme.SpaceM, Theme.SpaceM, Theme.SpaceM),
-            Child = content,
-        };
-    }
-
-    /// <summary>
-    /// The collapsed pane keeps the bars alone, centred in the icon rail.
-    /// </summary>
-    private static UIElement LogoClosed()
-    {
-        return new Border
-        {
-            Padding = new Thickness(0, Theme.SpaceM, 0, Theme.SpaceM),
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            Child = new Grid
-            {
-                HorizontalAlignment = HorizontalAlignment.Center,
-                Children = { Marks.LogoMark(18) },
-            },
-        };
+        content.Children.Add(SidebarChrome.Row(L10n.Text("common.search"), ActionIcon.Search, (_, _) => OpenSearch(), "Ctrl+K"));
+        return content;
     }
 
     /// <summary>

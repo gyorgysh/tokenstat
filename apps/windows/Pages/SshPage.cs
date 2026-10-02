@@ -35,6 +35,7 @@ internal sealed class SshPage : Page, IToolbarItems
     private CancellationTokenSource? _poll;
     private Task? _pollTask;
     private SSHSection _section;
+    internal SSHSection CurrentSection => _section;
     private bool _loading;
     private bool _reloadRequested;
     private readonly Border _stripHost = new();

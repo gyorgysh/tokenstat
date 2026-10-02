@@ -688,14 +688,17 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
     /// </summary>
     private static UIElement ContinueCard(JsonArray recent)
     {
-        var list = new StackPanel { Spacing = Theme.SpaceS };
-        foreach (var item in recent)
+        var list = new StackPanel { Spacing = 0 };
+        foreach (var item in recent.Take(3))
         {
+            if (list.Children.Count > 0)
+                list.Children.Add(new Border { Height = 1, Background = Theme.BorderBrush });
             var title = Format.Text(item, "title", L10n.Text("windows.homepage.conversation.ccca1817"));
             var texts = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
             texts.Children.Add(new TextBlock
             {
                 Text = title,
+                FontSize = 13,
                 FontWeight = Microsoft.UI.Text.FontWeights.Medium,
                 TextTrimming = TextTrimming.CharacterEllipsis,
             });
@@ -712,10 +715,14 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
                 list.Children.Add(texts);
                 continue;
             }
-            var mark = AgentMark.View(Format.Text(item, "backend"), 34);
-            mark.VerticalAlignment = VerticalAlignment.Center;
+            var mark = ActionIcon.Comment.Icon();
+            mark.Foreground = Theme.AccentBrush;
+            var smallMark = new Viewbox { Width = 18, Height = 18, Child = mark,
+                VerticalAlignment = VerticalAlignment.Center };
             var chevron = ActionIcon.Next.Icon();
-            chevron.VerticalAlignment = VerticalAlignment.Center;
+            chevron.Foreground = Theme.AccentBrush;
+            var arrow = new Viewbox { Width = 14, Height = 14, Child = chevron,
+                VerticalAlignment = VerticalAlignment.Center };
             var content = new Grid { ColumnSpacing = Theme.SpaceM };
             content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             content.ColumnDefinitions.Add(new ColumnDefinition
@@ -723,11 +730,11 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
                 Width = new GridLength(1, GridUnitType.Star),
             });
             content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            content.Children.Add(mark);
+            content.Children.Add(smallMark);
             Grid.SetColumn(texts, 1);
             content.Children.Add(texts);
-            Grid.SetColumn(chevron, 2);
-            content.Children.Add(chevron);
+            Grid.SetColumn(arrow, 2);
+            content.Children.Add(arrow);
             var open = new Button
             {
                 Content = content,
@@ -735,7 +742,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,
                 Background = Theme.Brush(Microsoft.UI.Colors.Transparent),
                 BorderThickness = new Thickness(0),
-                Padding = new Thickness(Theme.SpaceS),
+                Padding = new Thickness(0, Theme.SpaceS, 0, Theme.SpaceS),
             };
             open.Click += (_, _) => AppServices.OpenConversation?.Invoke(workspaceId, id);
             list.Children.Add(open);
@@ -967,7 +974,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
     /// plan usage. A vendor with nothing to say is left out entirely: the
     /// panels on screen are the tools actually installed.
     /// </summary>
-    private static List<UIElement> PlanPanels(JsonArray limits, JsonArray planBySource)
+    private List<UIElement> PlanPanels(JsonArray limits, JsonArray planBySource)
     {
         var panels = new List<UIElement>();
         foreach (var provider in VisibleLimits(limits))
@@ -1039,7 +1046,7 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
     /// One vendor's quota, in its own panel. Quota windows, and the numbers
     /// are the vendor's own. Nothing here is derived from the archive.
     /// </summary>
-    private static UIElement PlanLimitPanel(JsonNode? provider)
+    private UIElement PlanLimitPanel(JsonNode? provider)
     {
         var source = Format.Text(provider, "source", L10n.Text("windows.homepage.plan.fa8ed0bd"));
         var body = new StackPanel { Spacing = Theme.SpaceS };
@@ -1080,7 +1087,19 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
                 TextWrapping = TextWrapping.Wrap,
             });
         }
-        return Chrome.Card(HarnessName(source), body, ProviderSubtitle(provider), mark: AgentMark.View(source, 32));
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceXs };
+        if (Format.Flag(provider, "stale"))
+        {
+            var cached = ActionIcon.History.Icon();
+            cached.Foreground = Theme.Brush(static () => Theme.Warning);
+            var mark = new Viewbox { Width = 11, Height = 11, Child = cached, VerticalAlignment = VerticalAlignment.Center };
+            ToolTipService.SetToolTip(mark, ProviderSubtitle(provider));
+            actions.Children.Add(mark);
+        }
+        var refresh = Buttons.ToolbarIcon(ActionIcon.Refresh, L10n.Text("common.refresh"), async (_, _) => await RefreshAsync());
+        refresh.Width = refresh.Height = 22;
+        actions.Children.Add(refresh);
+        return Chrome.Card(HarnessName(source), body, ProviderSubtitle(provider), accessory: actions, mark: AgentMark.View(source, 22));
     }
 
     /// <summary>

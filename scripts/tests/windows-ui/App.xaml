@@ -15,6 +15,19 @@
                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                 <Setter Property="VerticalContentAlignment" Value="Stretch" />
             </Style>
+            <!-- Use the production toolbar field metrics for layout checks. -->
+            <Style TargetType="TextBox">
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="MinHeight" Value="30" />
+                <Setter Property="Padding" Value="10,5" />
+                <Setter Property="CornerRadius" Value="8" />
+            </Style>
+            <Style TargetType="ComboBox">
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="MinHeight" Value="30" />
+                <Setter Property="Padding" Value="10,5" />
+                <Setter Property="CornerRadius" Value="8" />
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

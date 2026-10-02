@@ -12,7 +12,7 @@ try
     await TerminalSessionTests.RunAsync();
     var path = Path.Combine(directory, "widths.json");
     var widths = new ShellWidths(path);
-    Check(widths.Sidebar == 280 && widths.Inspector == 280, "Missing preferences changed the default layout");
+    Check(widths.Sidebar == 272 && widths.Inspector == 400, "Missing preferences changed the desktop layout");
     widths.RememberSidebar(360);
     widths.RememberInspector(430);
     var reopened = new ShellWidths(path);
@@ -20,15 +20,31 @@ try
     reopened.RememberSidebar(double.NaN);
     reopened.RememberInspector(9000);
     var bounded = new ShellWidths(path);
-    Check(bounded.Sidebar == 280 && bounded.Inspector == 480, "Invalid sizes escaped the panel limits");
+    Check(bounded.Sidebar == 272 && bounded.Inspector == 640, "Invalid sizes escaped the panel limits");
     File.WriteAllText(path, "{\"sidebar\": 0, \"inspector\": \"bad\"}");
     bounded = new ShellWidths(path);
-    Check(bounded.Sidebar == 240 && bounded.Inspector == 280, "Malformed sizes were not recovered independently");
+    Check(bounded.Sidebar == 220 && bounded.Inspector == 400, "Malformed sizes were not recovered independently");
     File.WriteAllText(path, "not json");
     bounded = new ShellWidths(path);
-    Check(bounded.Sidebar == 280 && bounded.Inspector == 280, "Corrupt preferences prevented a default layout");
-    Check(ShellWidths.InspectorFitEdge(480) - ShellWidths.InspectorFitEdge(280) == 200,
+    Check(bounded.Sidebar == 272 && bounded.Inspector == 400, "Corrupt preferences prevented a default layout");
+    File.WriteAllText(path, "{\"sidebar\": 280, \"inspector\": 280}");
+    bounded = new ShellWidths(path);
+    Check(bounded.Sidebar == 280 && bounded.Inspector == 300, "Older preferences were not retained within the new ranges");
+    Check(ShellWidths.InspectorFitEdge(600) - ShellWidths.InspectorFitEdge(400) == 200,
         "A wider inspector did not reserve a comfortable content column");
+    Check(RailPlaces.Of("global:Home") == RailPlace.Home && RailPlaces.Of("workspaces:all") == RailPlace.Projects,
+        "Home and Projects no longer have separate rail destinations");
+    foreach (var route in new[] { "ws:folder:Files", "ws:peer:folder:Notes", "wsterm:folder|terminal", "wschat:folder|chat" })
+        Check(RailPlaces.Of(route) == RailPlace.Projects, "A direct work route did not light Projects: " + route);
+    Check(RailPlaces.Of("global:Workflows") == RailPlace.Automations
+        && RailPlaces.Of("global:Automations") == RailPlace.Automations,
+        "Workflows and Automations split into separate places");
+    Check(RailPlaces.Of("ssh:Keys") == RailPlace.Ssh && RailPlaces.Of("sshterm:session") == RailPlace.Ssh,
+        "The SSH library and its sessions no longer share a rail place");
+    Check(RailPlaces.Of("global:Account") is null && RailPlaces.Of("global:Search") is null,
+        "An account or search screen left an unrelated rail destination lit");
+    foreach (var place in Enum.GetValues<RailPlace>())
+        Check(RailPlaces.Of(place.Route()) == place, "A rail destination cannot navigate back to itself: " + place);
     var historyPath = Path.Combine(directory, "browser.json");
     var history = new BrowserHistory(historyPath);
     var scope = BrowserHistory.AccountScope("HTTPS://EXAMPLE.INVALID:443/", "account-a");

@@ -126,6 +126,15 @@ Notes / Workflows / Automations / Account, plus folders). Buttons pick glyphs
 from `Design/ActionIcon.cs`, the same vocabulary as
 `apps/mac/Sources/Design/ActionIcon.swift`.
 
+The rail follows the desktop Mac order: Home, Projects, Tasks, Notes,
+Automations, Insights, Devices, SSH. Workflows shares Automations and is
+reachable from its content tabs. The project sidebar owns New chat and Search
+(Ctrl+K); SSH library sections live in the SSH page rather than above projects.
+Rail and sidebar chrome share one tone, with a 64px rail and a 272px default
+project pane. Inspectors default to 400px and retain independent widths.
+Toolbar marks use 30px hit areas with 14px glyphs. Whole controls wrap on narrow
+windows while retaining their selection and draft text.
+
 Terminals, SSH password and key connect, Notes, Workflows, Automations,
 Browser, and Legend screen sharing are in this cut. The canvas
 editor is not. The boards and reports are.
@@ -141,11 +150,11 @@ python3 scripts/generate-windows-icon.py
 ## Remote work and screen sharing
 
 Devices puts Remote access beside Always-on host, before the machine list.
-Connected machines group their folders in the sidebar. Folder rows include the
-branch and working-tree additions/removals. Sessions offers the target machine's
+Connected machines group their folders in the sidebar. Folder rows include
+working-tree additions/removals. Sessions offers the target machine's
 shells and agents, with Install/Reinstall in each agent's setup menu. Clicking a
 folder opens its launcher, with shortcuts to workspace sections and the Mac
-client's bundled agent artwork. Remote conversations appear under Chat.
+client's bundled agent artwork. Recent conversations appear directly under their folders.
 
 Local PTY, remote PTY and SSH sessions use the same bundled xterm surface in
 WebView2. The terminal renders VT control sequences, colors and full-screen

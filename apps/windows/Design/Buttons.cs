@@ -67,33 +67,34 @@ internal static class Buttons
     }
 
     /// <summary>
-    /// A 36px circular toolbar seat. Mirrors the Mac ToolbarIconButton: quiet
-    /// control seat, 1px hairline, control grey glyph, accent dot state via
-    /// isAccent. Hover lifts the seat and the ring like the Mac does.
+    /// The Mac toolbar's 30px hit area and 14px mark: quiet at rest, a soft
+    /// rounded seat on hover, and an accent wash for an active panel.
     /// </summary>
     public static Button ToolbarIcon(ActionIcon icon, string tooltip, RoutedEventHandler click, bool isAccent = false)
     {
         var button = new Button
         {
-            Width = 36,
-            Height = 36,
+            Width = 30,
+            Height = 30,
             MinWidth = 0,
             MinHeight = 0,
             Padding = new Thickness(0),
-            CornerRadius = new CornerRadius(18),
-            BorderThickness = new Thickness(1),
-            Background = Theme.Brush(static () => Theme.ControlSeat),
-            BorderBrush = Theme.Brush(static () => WithAlpha(Theme.Border, 0.55)),
+            CornerRadius = new CornerRadius(8),
+            BorderThickness = new Thickness(0),
+            Background = isAccent ? Theme.AccentSoftBrush : new SolidColorBrush(Microsoft.UI.Colors.Transparent),
             Foreground = isAccent ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph),
-            Content = icon.Icon(),
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Content = new Viewbox { Width = 14, Height = 14, Child = icon.Icon() },
         };
+        button.Resources["ButtonBackgroundPointerOver"] = Theme.Brush(static () => Theme.RowHighlight);
+        button.Resources["ButtonBackgroundPressed"] = Theme.AccentSoftBrush;
         button.Click += click;
         ToolTipService.SetToolTip(button, tooltip);
         AutomationProperties.SetName(button, tooltip);
         button.PointerEntered += (_, _) =>
         {
             button.Background = Theme.Brush(static () => Theme.RowHighlight);
-            button.BorderBrush = Theme.Brush(static () => WithAlpha(Theme.Border, 0.9));
             if (!isAccent)
             {
                 button.Foreground = Theme.Brush(static () => Theme.ControlGlyphHover);
@@ -101,8 +102,7 @@ internal static class Buttons
         };
         button.PointerExited += (_, _) =>
         {
-            button.Background = Theme.Brush(static () => Theme.ControlSeat);
-            button.BorderBrush = Theme.Brush(static () => WithAlpha(Theme.Border, 0.55));
+            button.Background = isAccent ? Theme.AccentSoftBrush : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             if (!isAccent)
             {
                 button.Foreground = Theme.Brush(static () => Theme.ControlGlyph);
@@ -138,7 +138,7 @@ internal static class Buttons
                 Spacing = 6,
                 Children =
                 {
-                    icon.Icon(),
+                    new Viewbox { Width = 12, Height = 12, Child = icon.Icon() },
                     new TextBlock { Text = title, VerticalAlignment = VerticalAlignment.Center },
                 },
             },

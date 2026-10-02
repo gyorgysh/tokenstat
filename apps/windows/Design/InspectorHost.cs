@@ -101,14 +101,14 @@ internal interface IScopeAware
 internal sealed class InspectorHost : Grid
 {
     /// <summary>How wide the inspector column is when it shows.</summary>
-    public const double InspectorWidth = 280;
+    public const double InspectorWidth = ShellWidths.InspectorDefault;
 
     /// <summary>
     /// Content areas narrower than this hide the inspector rather than squeezing the
     /// content for its sake. The user's open choice stands, so widening brings
     /// the column back.
     /// </summary>
-    public const double FitEdge = 700;
+    public const double FitEdge = ShellWidths.ContentMinimum + 6 + InspectorWidth;
 
     private readonly Border _rule;
     private readonly ResizeHandle _resizeHandle;
@@ -151,7 +151,8 @@ internal sealed class InspectorHost : Grid
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_resizeHandle, L10n.Text("windows.inspectorhost.resize_details_panel.e84be123"));
         _resizeHandle.DragDelta += (_, drag) =>
         {
-            _inspectorWidth = Math.Clamp(_inspectorWidth - drag.HorizontalChange, 240, Math.Min(480, Math.Max(240, ActualWidth - MinimumContentWidth - 6)));
+            _inspectorWidth = Math.Clamp(_inspectorWidth - drag.HorizontalChange, MinimumInspectorWidth,
+                Math.Min(ShellWidths.InspectorMaximum, Math.Max(MinimumInspectorWidth, ActualWidth - MinimumContentWidth - 6)));
             Refresh();
         };
         _resizeHandle.DragCompleted += (_, _) => RememberWidth();
@@ -159,7 +160,8 @@ internal sealed class InspectorHost : Grid
         _resizeHandle.KeyDown += (_, key) =>
         {
             if (key.Key is not (Windows.System.VirtualKey.Left or Windows.System.VirtualKey.Right)) return;
-            _inspectorWidth = Math.Clamp(_inspectorWidth + (key.Key == Windows.System.VirtualKey.Left ? 16 : -16), 240, 480);
+            _inspectorWidth = Math.Clamp(_inspectorWidth + (key.Key == Windows.System.VirtualKey.Left ? 20 : -20),
+                MinimumInspectorWidth, ShellWidths.InspectorMaximum);
             Refresh();
             RememberWidth();
             key.Handled = true;

@@ -62,6 +62,9 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     private long _pendingCreateRevision;
     private readonly TextBox _doingTitle = new() { PlaceholderText = L10n.Text("windows.todopage.new_task.3e992276"), HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly Button _doingAdd;
+    private Grid? _backlogEntry;
+    private Grid? _doingEntry;
+    private bool _updatingFilters;
     private string? _pendingRunOp;
     private string? _runError;
     private string? _conflictId;
@@ -115,8 +118,8 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         _attentionFilter.ItemsSource = new[] { L10n.Text("windows.todopage.all_tasks.cb664823"), L10n.Text("common.running"), L10n.Text("windows.todopage.needs_attention.c1ebc781"), L10n.Text("windows.todopage.high_priority.b699a8c8") };
         _attentionFilter.SelectedIndex = 0;
         _attentionFilter.SelectionChanged += (_, _) => RenderBoard();
-        _agentFilter.SelectionChanged += (_, _) => RenderBoard();
-        _folderFilter.SelectionChanged += (_, _) => RenderBoard();
+        _agentFilter.SelectionChanged += (_, _) => { if (!_updatingFilters) RenderBoard(); };
+        _folderFilter.SelectionChanged += (_, _) => { if (!_updatingFilters) RenderBoard(); };
         _search.TextChanged += (_, _) =>
         {
             _query = _search.Text ?? "";
@@ -264,7 +267,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
 
     private UIElement FilterBar()
     {
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceM };
+        var bar = new FlowPanel { Spacing = Theme.SpaceM };
         bar.Children.Add(Labeled(L10n.Text("windows.todopage.agent.11b39c93"), _agentFilter));
         bar.Children.Add(Labeled(L10n.Text("windows.todopage.showing.d604310a"), _attentionFilter));
         bar.Children.Add(Labeled(L10n.Text("common.search"), _search));
@@ -383,6 +386,10 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             {
                 RunNotifications.Shared.SettleAutomations(_runs);
             }
+            // Capture the current choices against the old directory before
+            // replacing it. A refresh may reorder or remove its entries.
+            var selectedFolderId = SelectedFolderId();
+            var selectedBackendId = SelectedBackendId();
             _folders = ReadFolders(foldersTask.Result);
             if (_scopeWorkspaceId is not null
                 && RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out _, out var inner))
@@ -414,13 +421,14 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             {
                 try { _defaultBudgetSeconds = budget.GetValue<ulong>(); } catch { /* keep */ }
             }
-            RefreshFilterLists();
+            RefreshFilterLists(selectedFolderId, selectedBackendId);
             RaiseToolbarChangedIfNeeded();
             RenderBoard();
             RenderDetailSafe(quiet);
         }
         catch (Exception ex)
         {
+            Program.LogStartup("Tasks load/layout failed: " + ex);
             if (!quiet)
             {
                 Banner(ex.Message);
@@ -470,27 +478,33 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         return outList;
     }
 
-    private void RefreshFilterLists()
+    private void RefreshFilterLists(string selectedFolderId, string selectedBackendId)
     {
-        var folderNames = new List<string> { L10n.Text("windows.todopage.all_projects.4b87271b"), L10n.Text("windows.todopage.uncategorized.8d40d123") };
-        folderNames.AddRange(_folders.Select(f => f.Name));
-        _folderFilter.ItemsSource = folderNames;
-        if (_scopeWorkspaceId is not null)
+        _updatingFilters = true;
+        try
         {
-            var index = _folders.FindIndex(f => f.Id == _scopeWorkspaceId);
-            _folderFilter.SelectedIndex = index >= 0 ? index + 2 : 0;
-            _folderFilter.IsEnabled = false;
+            var folderNames = new List<string> { L10n.Text("windows.todopage.all_projects.4b87271b"), L10n.Text("windows.todopage.uncategorized.8d40d123") };
+            folderNames.AddRange(_folders.Select(f => f.Name));
+            _folderFilter.ItemsSource = folderNames;
+            if (_scopeWorkspaceId is not null)
+            {
+                var index = _folders.FindIndex(f => f.Id == _scopeWorkspaceId);
+                _folderFilter.SelectedIndex = index >= 0 ? index + 2 : 0;
+                _folderFilter.IsEnabled = false;
+            }
+            else
+            {
+                var index = _folders.FindIndex(folder => folder.Id == selectedFolderId);
+                _folderFilter.SelectedIndex = selectedFolderId == "" ? 1 : index >= 0 ? index + 2 : 0;
+            }
+            var agentNames = new List<string> { L10n.Text("windows.todopage.all_agents.54c32d3e") };
+            agentNames.AddRange(_backends.Select(b => b.Label));
+            _agentFilter.ItemsSource = agentNames;
+            _agentFilter.SelectedIndex = _backends.FindIndex(backend => backend.Id == selectedBackendId) + 1;
         }
-        else if (_folderFilter.SelectedIndex < 0)
+        finally
         {
-            _folderFilter.SelectedIndex = 0;
-        }
-        var agentNames = new List<string> { L10n.Text("windows.todopage.all_agents.54c32d3e") };
-        agentNames.AddRange(_backends.Select(b => b.Label));
-        _agentFilter.ItemsSource = agentNames;
-        if (_agentFilter.SelectedIndex < 0)
-        {
-            _agentFilter.SelectedIndex = 0;
+            _updatingFilters = false;
         }
     }
 
@@ -674,18 +688,24 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             });
         }
         var body = new StackPanel { Spacing = Theme.SpaceS };
-        body.Children.Add(new TextBlock
+        var heading = new TextBlock
         {
             Text = $"{title} ({cards.Count})",
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-        });
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(heading, "tasks.column." + column);
+        body.Children.Add(heading);
         if (column is "backlog" or "doing")
         {
             var input = column == "backlog" ? _quickTitle : _doingTitle;
             var add = column == "backlog" ? _quickAdd : _doingAdd;
-            if (input.Parent is Panel oldInput) oldInput.Children.Remove(input);
-            if (add.Parent is Panel oldAdd) oldAdd.Children.Remove(add);
+            // Filter initialization can redraw before the previous column has
+            // entered the visual tree. Keep its owner explicitly: native
+            // Parent queries alone cannot safely govern reusable controls.
+            var previousEntry = column == "backlog" ? _backlogEntry : _doingEntry;
+            previousEntry?.Children.Clear();
             var entry = new Grid { ColumnSpacing = Theme.SpaceXs };
+            if (column == "backlog") _backlogEntry = entry; else _doingEntry = entry;
             entry.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             entry.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             Grid.SetColumn(add, 1);

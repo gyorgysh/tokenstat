@@ -55,10 +55,8 @@ internal enum SSHSection
 
 internal static class Sections
 {
-    // Home, Insights and Devices stand alone at the top, like the Mac. SSH
-    // is an expandable group below the Everywhere rows instead, and Search
-    // lives in the footer next to Account until it gets a toolbar home. The
-    // Ssh and Search enum cases stay so their routes keep resolving.
+    // Retained navigation targets. The shell hides these rows and presents
+    // machine-wide places through RailPlace, matching the macOS rail.
     public static readonly GlobalSection[] Standalone =
         [GlobalSection.Home, GlobalSection.Insights, GlobalSection.Machines];
 

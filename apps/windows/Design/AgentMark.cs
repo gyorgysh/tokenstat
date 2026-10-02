@@ -25,12 +25,12 @@ internal static class AgentMark
     {
         var icon = key == "shell" ? ActionIcon.Run.Icon() : ActionIcon.Persona.Icon();
         icon.Foreground = Theme.AccentBrush;
-        var body = new Grid { Children = { icon } };
+        var body = new Grid { Children = { new Viewbox { Width = size * 0.58, Height = size * 0.58, Child = icon } } };
         var image = new Image { Width = size * 0.58, Height = size * 0.58 };
         body.Children.Add(image);
         var box = new Border
         {
-            Width = size, Height = size, CornerRadius = new CornerRadius(9),
+            Width = size, Height = size, CornerRadius = new CornerRadius(Math.Min(9, size / 4)),
             Background = Theme.AccentSoftBrush, Child = body,
         };
         async Task PaintAsync()
@@ -60,12 +60,14 @@ internal static class AgentMark
         return box;
     }
 
-    public static UIElement Row(string id, FrameworkElement content)
+    public static UIElement Row(string id, FrameworkElement content, double size = 30)
     {
         var row = new Grid { ColumnSpacing = 8 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.Children.Add(View(id, 30));
+        var mark = View(id, size);
+        mark.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(mark);
         Grid.SetColumn(content, 1);
         row.Children.Add(content);
         return row;

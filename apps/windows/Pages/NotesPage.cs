@@ -31,9 +31,11 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
     private readonly NoteDraftStore _noteDrafts = new();
     private readonly Dictionary<string, CancellationTokenSource> _saveDelays = new();
     private Action<string>? _draftStatusChanged;
-    private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
-    private readonly StackPanel _bannerHost = new() { Spacing = Theme.SpaceS };
-    private readonly StackPanel _composerHost = new() { Spacing = Theme.SpaceS };
+    private readonly StackPanel _root = new() { Spacing = 0 };
+    private readonly StackPanel _bannerHost = new() { Spacing = Theme.SpaceS, Visibility = Visibility.Collapsed,
+        Margin = new Thickness(Theme.SpaceM) };
+    private readonly StackPanel _composerHost = new() { Spacing = Theme.SpaceS, Visibility = Visibility.Collapsed,
+        Margin = new Thickness(Theme.SpaceM) };
     private readonly StackPanel _libraryHost = new() { Spacing = Theme.SpaceS };
     private readonly StackPanel _scopeHost = new() { Spacing = Theme.SpaceS };
     private readonly StackPanel _listHost = new() { Spacing = Theme.SpaceL };
@@ -46,6 +48,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
     {
         PlaceholderText = L10n.Text("windows.notespage.capture_an_idea_a_decision_or_something_to.242ec14e"),
     };
+    private Grid? _draftRow;
     private TextBlock? _countText;
 
     private JsonArray _cards = new();
@@ -79,14 +82,17 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         _root.Children.Add(_composerHost);
         _root.Children.Add(_libraryHost);
         _listHost.Children.Add(Motion.SkeletonCard());
-        _root.Padding = new Thickness(Theme.SpaceM);
         _split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(300) });
+        _split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1) });
         _split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         _listScroll.Content = _listHost;
         _listScroll.Padding = new Thickness(Theme.SpaceM);
         _detailScroll.Content = _detailHost;
-        Grid.SetColumn(_detailScroll, 1);
+        Grid.SetColumn(_detailScroll, 2);
         _split.Children.Add(_listScroll);
+        var divider = new Border { Background = Theme.BorderBrush };
+        Grid.SetColumn(divider, 1);
+        _split.Children.Add(divider);
         _split.Children.Add(_detailScroll);
         var page = new Grid();
         page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -127,9 +133,18 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
 
     public IList<UIElement> ToolbarActions()
     {
-        var archive = Buttons.ToolbarIcon(
+        return new List<UIElement>
+        {
+            Buttons.ToolbarIcon(ActionIcon.Refresh, L10n.Text("windows.notespage.reload_notes.e1d102d3"),
+                async (_, _) => { LogoRefresh.Began(); await LoadAsync(); }),
+        };
+    }
+
+    private IList<UIElement> LibraryActions()
+    {
+        var archive = Buttons.Secondary(
+            _showingArchive ? L10n.Text("windows.notespage.show_current_notes.ed6f9c49") : L10n.Text("common.archive"),
             _showingArchive ? ActionIcon.Restore : ActionIcon.Archive,
-            _showingArchive ? L10n.Text("windows.notespage.show_current_notes.ed6f9c49") : L10n.Text("windows.notespage.show_archived_notes.6474dd64"),
             (_, _) =>
             {
                 _showingArchive = !_showingArchive;
@@ -137,28 +152,10 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
                 _confirmDelete = false;
                 RenderAll();
             },
-            _showingArchive);
+            small: true);
         archive.IsEnabled = ArchivedCount() > 0 || _showingArchive;
         return new List<UIElement>
         {
-            Buttons.ToolbarIcon(
-                ActionIcon.Refresh,
-                L10n.Text("windows.notespage.reload_notes.e1d102d3"),
-                async (_, _) =>
-                {
-                    LogoRefresh.Began();
-                    await LoadAsync();
-                }),
-            Buttons.ToolbarIcon(
-                ActionIcon.Create,
-                L10n.Text("windows.notespage.write_a_note.ab0f8406"),
-                (_, _) =>
-                {
-                    _showingArchive = false;
-                    _showingComposer = true;
-                    RenderAll();
-                    _draft.Focus(FocusState.Programmatic);
-                }),
             Buttons.ToolbarIcon(
                 ActionIcon.Layout,
                 _gridLayout ? L10n.Text("windows.notespage.show_notes_as_a_list.e7a6867e") : L10n.Text("windows.notespage.show_notes_as_cards.b66b5ddb"),
@@ -168,6 +165,13 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
                     RenderAll();
                 }),
             archive,
+            Buttons.Primary(L10n.Text("windows.notespage.write_a_note.ab0f8406"), ActionIcon.Create, (_, _) =>
+            {
+                _showingArchive = false;
+                _showingComposer = true;
+                RenderAll();
+                _draft.Focus(FocusState.Programmatic);
+            }, small: true),
         };
     }
 
@@ -277,6 +281,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
 
     private void Banner(string text)
     {
+        _bannerHost.Visibility = Visibility.Visible;
         _bannerHost.Children.Insert(0, Chrome.Banner(text, Theme.Danger, Symbol.Important));
         while (_bannerHost.Children.Count > 3)
         {
@@ -451,8 +456,10 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
     /// </summary>
     private void RenderComposer()
     {
-        if (_draft.Parent is Panel draftParent) draftParent.Children.Remove(_draft);
+        _draftRow?.Children.Clear();
+        _draftRow = null;
         _composerHost.Children.Clear();
+        _composerHost.Visibility = _showingArchive || !_showingComposer ? Visibility.Collapsed : Visibility.Visible;
         if (_showingArchive || !_showingComposer)
         {
             return;
@@ -485,6 +492,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         head.Children.Add(close);
         body.Children.Add(head);
         var row = new Grid { ColumnSpacing = Theme.SpaceS };
+        _draftRow = row;
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.Children.Add(_draft);
@@ -506,7 +514,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
     {
         if (_scopeHost.Parent is Panel scopeParent) scopeParent.Children.Remove(_scopeHost);
         _libraryHost.Children.Clear();
-        var bar = new FlowPanel { Spacing = Theme.SpaceS };
+        var filters = new List<UIElement>();
         var search = Chrome.SearchField(L10n.Text("windows.notespage.search_notes.6e7a2179"), text =>
         {
             _search = text ?? "";
@@ -514,10 +522,11 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
             RenderList();
         });
         search.Text = _search;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(search, "notes.search");
         search.Width = 260;
         search.VerticalAlignment = VerticalAlignment.Center;
-        bar.Children.Add(search);
-        bar.Children.Add(_scopeHost);
+        filters.Add(search);
+        filters.Add(_scopeHost);
         var sort = new ComboBox { MinWidth = 130, VerticalAlignment = VerticalAlignment.Center };
         sort.ItemsSource = new[] { L10n.Text("windows.notespage.newest_first.ffb6f576"), L10n.Text("windows.notespage.title_a_z.ab217de6") };
         sort.SelectedIndex = _sortByTitle ? 1 : 0;
@@ -526,11 +535,12 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
             _sortByTitle = sort.SelectedIndex == 1;
             RenderList();
         };
-        bar.Children.Add(sort);
+        var actions = LibraryActions();
+        actions.Insert(0, sort);
         _countText = new TextBlock { Text = ShownNotes().Count.ToString(), Opacity = 0.66,
             VerticalAlignment = VerticalAlignment.Center };
-        bar.Children.Add(_countText);
-        _libraryHost.Children.Add(bar);
+        filters.Add(_countText);
+        _libraryHost.Children.Add(DetailBar.View(leading: filters, trailing: actions));
     }
 
     private void RenderScopes()
@@ -756,7 +766,8 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         _split.ColumnDefinitions[0].Width = showList
             ? (wide ? new GridLength(Math.Min(320, ActualWidth * 0.36)) : new GridLength(1, GridUnitType.Star))
             : new GridLength(0);
-        _split.ColumnDefinitions[1].Width = wide || _selectedId is not null
+        _split.ColumnDefinitions[1].Width = new GridLength(wide ? 1 : 0);
+        _split.ColumnDefinitions[2].Width = wide || _selectedId is not null
             ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
         _listScroll.Visibility = showList ? Visibility.Visible : Visibility.Collapsed;
         _detailScroll.Visibility = wide || _selectedId is not null ? Visibility.Visible : Visibility.Collapsed;

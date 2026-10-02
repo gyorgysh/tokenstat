@@ -13,7 +13,7 @@ namespace Tokenstat.Design;
 /// A page's share of the one top bar. Mirrors the Mac DetailChromeBar, which
 /// carries the screen's own scope, accessory and actions beside the shared
 /// search and inspector toggles: the shell renders ToolbarScope on the left
-/// and ToolbarActions on the right, before its own search icon, so every
+/// and ToolbarActions on the right, before its inspector toggle, so every
 /// screen has one bar rather than a global strip over a per-page strip.
 /// </summary>
 internal interface IToolbarItems

@@ -277,15 +277,13 @@ internal static class SidebarLive
             detail += " · " + RelativeShort(ms.Value);
         }
 
-        var panel = new StackPanel { Spacing = 3, Margin = new Thickness(0, 4, 0, 4) };
-        var heading = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 6,
-        };
+        var panel = new Grid { ColumnSpacing = 6, MinHeight = 28 };
+        panel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        panel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         if (running)
         {
-            heading.Children.Add(new Ellipse
+            panel.Children.Add(new Ellipse
             {
                 Width = 6,
                 Height = 6,
@@ -293,27 +291,29 @@ internal static class SidebarLive
                 VerticalAlignment = VerticalAlignment.Center,
             });
         }
-        heading.Children.Add(new TextBlock
+        var label = new TextBlock
         {
             Text = title,
-            FontSize = 12,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            FontSize = 13,
+            FontWeight = Microsoft.UI.Text.FontWeights.Normal,
+            VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
             MaxLines = 1,
-        });
-        panel.Children.Add(heading);
-        panel.Children.Add(new TextBlock
+        };
+        Grid.SetColumn(label, 1);
+        panel.Children.Add(label);
+        var age = new TextBlock
         {
-            Text = detail,
-            FontSize = 11,
-            Opacity = 0.7,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            MaxLines = 1,
-        });
+            Text = ms is null ? "" : RelativeShort(ms.Value),
+            FontSize = 10, Opacity = 0.55, VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(age, 2);
+        panel.Children.Add(age);
 
         var row = new NavigationViewItem
         {
-            Content = AgentMark.Row(Format.Text(chat, "backend"), panel),
+            Content = AgentMark.Row(Format.Text(chat, "backend"), panel, 18),
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Tag = LiveRoute.Join(ChatPrefix, folderId, id),
         };
         if (row.Content is FrameworkElement view) view.Tag = (title, detail, backend);
