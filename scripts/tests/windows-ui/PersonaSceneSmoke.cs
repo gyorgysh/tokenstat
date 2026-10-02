@@ -63,6 +63,46 @@ internal static class PersonaSceneSmoke
                 throw new Exception("Persona curved clip degraded to its bounding rectangle");
         }
         circle.Transform = new TranslateTransform { X = 30 };
+        // The renderer paints one body geometry as a fill, outline and clip.
+        // WinUI rejects attaching that same native geometry to a second Path.
+        for (int frame = 0; frame < 100; frame++)
+        {
+            scene.Begin();
+            var body = scene.Paint(circle, new SolidColorBrush(Microsoft.UI.Colors.White));
+            var outline = scene.Paint(circle, stroke: new SolidColorBrush(Microsoft.UI.Colors.Black), clip: circle);
+            scene.End();
+            if (ReferenceEquals(body.Data, outline.Data) || ReferenceEquals(body.Data, circle))
+                throw new Exception("Persona body and outline share their native geometry");
+            var bodyData = (PathGeometry)body.Data;
+            var outlineData = (PathGeometry)outline.Data;
+            if (ReferenceEquals(bodyData.Figures[0], outlineData.Figures[0])
+                || ReferenceEquals(bodyData.Figures[0].Segments[0], ring.Segments[0]))
+                throw new Exception("Persona copied geometry without separating native figures and segments");
+            using var bodyCurve = PersonaClipGeometry.Create(bodyData);
+            using var outlineCurve = PersonaClipGeometry.Create(outlineData);
+            if (!bodyCurve.FillContainsPoint(new Vector2(40, 10))
+                || !outlineCurve.FillContainsPoint(new Vector2(40, 10)))
+                throw new Exception("Persona geometry copy lost its curved shape or transform");
+            ((ArcSegment)bodyData.Figures[0].Segments[0]).Point = new Windows.Foundation.Point(100, 100);
+            if (((ArcSegment)ring.Segments[0]).Point.X != 20
+                || ((ArcSegment)outlineData.Figures[0].Segments[0]).Point.X != 20)
+                throw new Exception("Painting a persona changed another visual or its clip source");
+            var faceTransform = new TransformGroup();
+            faceTransform.Children.Add(new ScaleTransform { ScaleX = 0.5, CenterX = 10 });
+            faceTransform.Children.Add(new TranslateTransform { X = 7 });
+            bodyData.Transform = PersonaScene.CopyTransform(faceTransform);
+            outlineData.Transform = PersonaScene.CopyTransform(faceTransform);
+            var facePoint = outlineData.Transform.TransformPoint(new Windows.Foundation.Point(20, 10));
+            if (facePoint.X != 22 || facePoint.Y != 10
+                || ReferenceEquals(bodyData.Transform, outlineData.Transform))
+                throw new Exception("Persona face transforms lost their composition or share native ownership");
+            ((MatrixTransform)bodyData.Transform).Matrix = Matrix.Identity;
+            if (outlineData.Transform.TransformPoint(new Windows.Foundation.Point(20, 10)).X != 22)
+                throw new Exception("Changing a persona face transform affected another visual");
+        }
+        if (canvas.Children.Count != 2)
+            throw new Exception("Copying persona geometry allocated additional visual slots");
+        Program.Log("PASS: shared persona body, outline, curved clips and face transforms have independent native owners");
         var mask = new RectangleGeometry { Rect = new Windows.Foundation.Rect(30, 0, 10, 20) };
         scene.Begin(); scene.Paint(new PathGeometry(), clip: circle, mask: mask); scene.End();
         var compositionClip = (CompositionGeometricClip)ElementCompositionPreview.GetElementVisual(first).Clip;

@@ -88,7 +88,7 @@ internal static class PersonaRenderer
             {
                 var path = canvas[i];
                 // Transform the face geometry, keeping its body clip fixed.
-                path.Data.Transform = transform;
+                path.Data.Transform = PersonaScene.CopyTransform(transform);
                 path.Opacity *= Math.Min(1, facing * 4);
             }
         }

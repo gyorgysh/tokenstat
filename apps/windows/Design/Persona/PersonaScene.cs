@@ -3,6 +3,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Windows.Foundation;
 using ShapesPath = Microsoft.UI.Xaml.Shapes.Path;
 
 namespace Tokenstat.Design.Persona;
@@ -37,7 +38,10 @@ internal sealed class PersonaScene(Canvas canvas)
         _clips[Count - 1] = clip is null ? null : new PersonaClip(clip, mask);
         path.Visibility = Visibility.Visible;
         ClearLocalValues(path);
-        path.Data = data;
+        // WinUI gives geometry (including its figures and segments) one native
+        // owner. The body is painted as both a fill and an outline, so each
+        // visual needs its own copy, while the source remains usable as a clip.
+        path.Data = CopyGeometry(data);
         if (fill is not null) path.Fill = fill;
         if (stroke is not null) path.Stroke = stroke;
         path.StrokeThickness = thickness;
@@ -62,6 +66,59 @@ internal sealed class PersonaScene(Canvas canvas)
     }
 
     public void ReleaseClips() => _clipper.Clear();
+
+    private static PathGeometry CopyGeometry(PathGeometry source)
+    {
+        var copy = new PathGeometry { FillRule = source.FillRule };
+        if (source.Transform is { } transform) copy.Transform = CopyTransform(transform);
+        foreach (var figure in source.Figures)
+        {
+            var added = new PathFigure
+            {
+                StartPoint = figure.StartPoint,
+                IsClosed = figure.IsClosed,
+                IsFilled = figure.IsFilled,
+            };
+            foreach (var segment in figure.Segments) added.Segments.Add(CopySegment(segment));
+            copy.Figures.Add(added);
+        }
+        return copy;
+    }
+
+    private static PathSegment CopySegment(PathSegment source) => source switch
+    {
+        LineSegment line => new LineSegment { Point = line.Point },
+        BezierSegment curve => new BezierSegment { Point1 = curve.Point1, Point2 = curve.Point2, Point3 = curve.Point3 },
+        QuadraticBezierSegment curve => new QuadraticBezierSegment { Point1 = curve.Point1, Point2 = curve.Point2 },
+        ArcSegment arc => new ArcSegment
+        {
+            Point = arc.Point, Size = arc.Size, RotationAngle = arc.RotationAngle,
+            IsLargeArc = arc.IsLargeArc, SweepDirection = arc.SweepDirection,
+        },
+        PolyLineSegment lines => CopyLines(lines),
+        _ => throw new NotSupportedException(L10n.Text("windows.personaclipgeometry.unsupported_persona_clip_segment_0.4e368260", $"{source.GetType().Name}")),
+    };
+
+    private static PolyLineSegment CopyLines(PolyLineSegment source)
+    {
+        var copy = new PolyLineSegment();
+        foreach (var point in source.Points) copy.Points.Add(point);
+        return copy;
+    }
+
+    // A TransformGroup is also a native object with one owner. Sampling its
+    // affine basis preserves yaw, roll and translation without sharing it.
+    public static MatrixTransform CopyTransform(Transform source)
+    {
+        var zero = source.TransformPoint(new Point(0, 0));
+        var x = source.TransformPoint(new Point(1, 0));
+        var y = source.TransformPoint(new Point(0, 1));
+        return new MatrixTransform
+        {
+            Matrix = new Matrix(x.X - zero.X, x.Y - zero.Y,
+                y.X - zero.X, y.Y - zero.Y, zero.X, zero.Y),
+        };
+    }
 
     // A slot can hold an eye in one frame and a prop in the next. ClearValue
     // drops the fill, stroke, and clip. The same call leaves RenderTransform
