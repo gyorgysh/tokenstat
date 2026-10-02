@@ -1148,17 +1148,27 @@ fn spawn_session_process(
             process.current_dir(cwd);
         }
         let (reader, output) = std::io::pipe()?;
+        // Empty stdin, the `< /dev/null` of a headless run. Nothing writes to
+        // a hidden session: it is never listed, so no client can type into
+        // it. A pipe left open instead made Claude wait three seconds for
+        // input on every turn and then print a warning, which arrived in the
+        // reply because stderr shares the output pipe. On a Mac the PTY is a
+        // terminal, so Claude never waited there.
         process
-            .stdin(Stdio::piped())
+            .stdin(Stdio::null())
             .stderr(output.try_clone()?)
             .stdout(output);
         process.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        let mut child = process.spawn()?;
+        let child = process.spawn()?;
         // Command owns copies of its output handles. Drop them so EOF follows
         // the child's exit, rather than waiting forever for this parent.
         drop(process);
-        let writer = child.stdin.take().expect("piped child stdin");
-        return Ok((None, Box::new(child), Box::new(reader), Box::new(writer)));
+        return Ok((
+            None,
+            Box::new(child),
+            Box::new(reader),
+            Box::new(std::io::sink()),
+        ));
     }
     #[cfg(not(windows))]
     let _ = hidden;

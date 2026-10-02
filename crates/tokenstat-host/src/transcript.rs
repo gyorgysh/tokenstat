@@ -707,7 +707,7 @@ fn cli_refusal_text(backend: &str, line: &str) -> Option<String> {
     }
     if lower.contains("please run /login") {
         return Some(
-            "Claude Code is not signed in on this Mac. Open a terminal, run claude, and use /login."
+            "Claude Code is not signed in on this computer. Open a terminal, run claude, and use /login."
                 .into(),
         );
     }
@@ -724,9 +724,23 @@ fn cli_refusal_text(backend: &str, line: &str) -> Option<String> {
                 .into(),
         );
     }
+    // A stored login that has run out and could not be renewed. Headless
+    // `claude -p` prints this as a plain line, and it read as the agent
+    // answering. The way back is the same interactive /login.
+    // Claude only: another agent's plain output may mention a token
+    // expiring without the turn having failed.
+    if backend == "claude"
+        && (lower.contains("failed to authenticate")
+            || (lower.contains("oauth") && lower.contains("expired")))
+    {
+        return Some(
+            "Claude Code's sign-in on this computer has expired. Open a terminal, run claude, and use /login."
+                .into(),
+        );
+    }
     if lower.contains("not logged in") || lower.contains("not signed in") {
         return Some(
-            "Claude Code is not signed in on this Mac. Open a terminal, run claude, and use /login."
+            "Claude Code is not signed in on this computer. Open a terminal, run claude, and use /login."
                 .into(),
         );
     }
@@ -960,7 +974,20 @@ fn events_claude(value: &Value) -> Vec<Event> {
             .unwrap_or_default();
     }
     if kind == Some("result") {
-        let mut events = event_text(value.get("result").and_then(Value::as_str));
+        let result = value.get("result").and_then(Value::as_str);
+        // An error result is the turn failing, not the agent talking: an
+        // expired login came back as a reply bubble. Say it in words when
+        // there is copy for it, and keep Claude's own line otherwise.
+        let mut events = if value.get("is_error").and_then(Value::as_bool) == Some(true) {
+            event_failed(
+                result
+                    .and_then(|text| cli_refusal_text("claude", text))
+                    .as_deref()
+                    .or(result),
+            )
+        } else {
+            event_text(result)
+        };
         events.extend(event_usage(value));
         events.push(done(
             value
@@ -3083,6 +3110,37 @@ mod tests {
                 Some(Event::Failed { text }) if text.contains("can only use Auto")
             ),
             "{cursor_events:?}"
+        );
+
+        let mut expired = Parser::new("claude");
+        let expired_events = expired.push_events(
+            "Failed to authenticate: OAuth session expired and could not be refreshed\n".as_bytes(),
+        );
+        assert!(
+            matches!(
+                expired_events.first(),
+                Some(Event::Failed { text }) if text.contains("has expired")
+            ),
+            "{expired_events:?}"
+        );
+
+        let mut errored = Parser::new("claude");
+        let errored_events = errored.push_events(
+            br#"{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed"}
+"#,
+        );
+        assert!(
+            matches!(
+                errored_events.first(),
+                Some(Event::Failed { text }) if text.contains("has expired")
+            ),
+            "{errored_events:?}"
+        );
+        assert!(
+            !errored_events
+                .iter()
+                .any(|event| matches!(event, Event::Text { .. })),
+            "{errored_events:?}"
         );
 
         let mut headless = Parser::new("claude");
