@@ -2812,7 +2812,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         self.title = title
         self.backend = backend ?? "agent"
         systemPrompt = ""
-        mode = "plan"
+        mode = "execute"
         autonomy = "standard"
         allowedTools = []
         allowedShellPrefixes = []

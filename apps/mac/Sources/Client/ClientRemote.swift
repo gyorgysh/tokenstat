@@ -524,7 +524,7 @@ enum ClientRemote {
         peer: String,
         workspaceID: String,
         backend: String = "claude",
-        mode: String = "plan",
+        mode: String = "execute",
         autonomy: String = "standard",
         personaID: String? = nil
     ) async throws -> ChatConversation {

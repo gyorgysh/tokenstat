@@ -303,6 +303,13 @@ pub struct ApprovalDecision {
 fn default_mode() -> String {
     "plan".into()
 }
+/// The mode for a chat created without one. Execute, like the clients: a
+/// new conversation exists to get something done, and a planning turn does
+/// nothing that was asked for. Stored records with no mode keep reading as
+/// plan, so no existing conversation changes underneath anyone.
+fn default_new_chat_mode() -> String {
+    "execute".into()
+}
 fn default_autonomy() -> String {
     "standard".into()
 }
@@ -1509,7 +1516,7 @@ impl Store {
                 .as_ref()
                 .map(|persona| persona.system_prompt.clone())
                 .unwrap_or_default(),
-            mode: input.mode.unwrap_or_else(default_mode),
+            mode: input.mode.unwrap_or_else(default_new_chat_mode),
             autonomy: input.autonomy.unwrap_or_else(default_autonomy),
             resume_token: None,
             resume_tokens: HashMap::new(),
@@ -5419,6 +5426,27 @@ mod tests {
     fn prepare_live_chat(store: &Store, id: &str) {
         conversation_for_receipts(store, id);
         store.set_running(id, true).unwrap();
+    }
+
+    #[test]
+    fn a_new_chat_starts_in_execute_and_an_old_record_stays_plan() {
+        // `create` reaches for this when the request names no mode.
+        assert_eq!(default_new_chat_mode(), "execute");
+        // A stored record that never had a mode still reads as plan, so no
+        // existing conversation changes underneath anyone. Deserialized for
+        // real, so the test follows the record's own default.
+        let old: Result<Conversation, _> = serde_json::from_value(serde_json::json!({
+            "id": "chat-old",
+            "workspaceId": "workspace-old",
+            "title": "Old",
+            "backend": "claude",
+            "createdAtMs": 1,
+            "updatedAtMs": 1,
+        }));
+        match old {
+            Ok(old) => assert_eq!(old.mode, "plan"),
+            Err(error) => panic!("an old record no longer reads: {error}"),
+        }
     }
 
     fn retune_chat(store: &Store, id: &str, backend: &str, autonomy: &str) {

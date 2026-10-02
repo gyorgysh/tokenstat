@@ -38,8 +38,8 @@ class LaunchChoiceTest {
     }
 
     @Test
-    fun `the last mode is what the next chat opens in`() {
-        assertEquals("plan", LaunchDefaults.mode(choice(mode = "plan")))
+    fun `a plan chat does not make the next chat plan`() {
+        assertEquals("execute", LaunchDefaults.mode(choice(mode = "plan")))
         assertEquals("execute", LaunchDefaults.mode(choice(mode = "execute")))
         assertEquals("execute", LaunchDefaults.mode(choice(mode = "")))
     }

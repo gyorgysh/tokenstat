@@ -1187,7 +1187,7 @@ extension Bridge {
         workspaceID: String,
         backend: String,
         title: String = L10n.text("apple.bridge.new_chat.db18382a"),
-        mode: String = "plan",
+        mode: String = "execute",
         autonomy: String = "standard",
         model: String? = nil,
         effort: String? = nil,

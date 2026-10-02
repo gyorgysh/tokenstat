@@ -1461,13 +1461,13 @@ final class ChatModel {
             let chat = try await Bridge.createChat(
                 workspaceID: workspaceID,
                 backend: chosen?.id ?? "claude",
-                // Execute, not plan, for a first chat on a machine. The
-                // saved choice wins as soon as there is one, so this is only
-                // ever the very first conversation somebody opens, and
-                // planning at them is a turn that does nothing they asked
-                // for. Autonomy stays standard: the agent acts, and a tool
-                // that needs permission still stops and asks.
-                mode: saved?.mode ?? "execute",
+                // Always execute. Plan is a choice for one piece of work,
+                // and carried over it left every later chat planning at
+                // somebody who had asked for something to be done. The rest
+                // of the setup is remembered. Autonomy stays standard unless
+                // chosen: the agent acts, and a tool that needs permission
+                // still stops and asks.
+                mode: "execute",
                 autonomy: chosen?.gateTier == "bypassOnly"
                     ? "bypass"
                     : (saved?.autonomy ?? "standard"),

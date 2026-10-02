@@ -41,7 +41,12 @@ object LaunchDefaults {
     const val MODE = "execute"
     const val AUTONOMY = "standard"
 
-    fun mode(saved: LaunchChoice?): String = saved?.mode?.ifBlank { null } ?: MODE
+    /// Always execute, whatever the last chat used. Plan is a choice for one
+    /// piece of work, and carried over it left every later chat planning at
+    /// somebody who had asked for something to be done. The saved mode is
+    /// still read and written so older saved choices stay readable.
+    @Suppress("UNUSED_PARAMETER")
+    fun mode(saved: LaunchChoice?): String = MODE
 
     /// An agent with no approval protocol of its own runs on Bypass or not at
     /// all, so it is put there whatever was last used.

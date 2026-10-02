@@ -555,15 +555,31 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         try
         {
             await RefreshCatalogAsync();
-            var chosen = DefaultBackend();
-            var created = await CallChatAsync("chat.create", new JsonObject
+            var saved = ChatLaunchChoice.Load();
+            var chosen = DefaultBackend(saved?.Backend);
+            var request = new JsonObject
             {
                 ["workspaceId"] = _workspaceId,
                 ["backend"] = Format.Text(chosen, "id", "claude"),
                 ["title"] = "New chat",
-                ["mode"] = "plan",
-                ["autonomy"] = Format.Text(chosen, "gateTier") == "bypassOnly" ? "bypass" : "standard",
-            });
+                // Always Execute, like the Mac. Plan is a choice for one piece
+                // of work, and carried over it left every later chat planning
+                // at somebody who had asked for something to be done.
+                ["mode"] = "execute",
+                ["autonomy"] = Format.Text(chosen, "gateTier") == "bypassOnly"
+                    ? "bypass"
+                    : saved?.Autonomy ?? "standard",
+            };
+            // The rest of the last setup travels when this agent still
+            // offers it. A model or effort it no longer lists is dropped.
+            if (saved is not null && Format.Text(chosen, "id") == saved.Backend)
+            {
+                if (Offers(chosen, "models", saved.Model)) request["model"] = saved.Model;
+                if (Offers(chosen, "efforts", saved.Effort)) request["effort"] = saved.Effort;
+            }
+            if (RememberedPersona(saved) is string personaId) request["personaId"] = personaId;
+            var created = await CallChatAsync("chat.create", request);
+            ChatLaunchChoice.Save(created);
             AppServices.NotifyConversationsChanged();
             await OpenAsync(Format.Text(created, "id"), created);
         }
@@ -885,6 +901,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             if (backend is null) continue;
             var id = Format.Text(backend, "id");
             if (id == "sh" && id != current) continue;
+            // Installed agents only. The current one stays listed so the
+            // picker can still name it.
+            if (!Installed(backend) && id != current) continue;
             box.Items.Add(new ComboBoxItem
             {
                 Content = Format.Text(backend, "label", id),
@@ -942,14 +961,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             }
             var persona = FindPersona(id);
             if (persona is null) return;
+            // Like the Mac: a persona is a name and a brief. It leaves the
+            // agent, model, mode and autonomy as the person set them.
             await UpdateAsync(new JsonObject
             {
                 ["personaId"] = id,
-                ["backend"] = Format.Text(persona, "backend"),
-                ["model"] = Format.Text(persona, "model"),
-                ["effort"] = Format.Text(persona, "effort"),
-                ["mode"] = Format.Text(persona, "defaultMode", "plan"),
-                ["autonomy"] = Format.Text(persona, "defaultAutonomy", "standard"),
                 ["systemPrompt"] = Format.Text(persona, "systemPrompt"),
             });
             PaintConversation();
@@ -1562,6 +1578,38 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return Card(_aggregateUsage is null && _hasEarlier ? L10n.Text("windows.chatpage.loaded_messages.0202f0cd") : L10n.Text("windows.chatpage.this_conversation.0e82ebfc"), body);
     }
 
+    /// <summary>
+    /// The chat's agent is not on this computer. Like the Mac notice: say so
+    /// above the draft, keep the draft, and offer the way out. Send stays off
+    /// until another agent is chosen, rather than failing a turn.
+    /// </summary>
+    private UIElement MissingAgentNotice()
+    {
+        var backendId = Format.Text(_openChat, "backend");
+        var label = Format.Text(Backend(backendId), "label", backendId);
+        var body = new StackPanel { Spacing = Theme.SpaceS };
+        body.Children.Add(new TextBlock
+        {
+            Text = L10n.Text("windows.chatpage.0_isn_t_installed_on_this_computer.27bea130", $"{label}"),
+            TextWrapping = TextWrapping.Wrap,
+        });
+        body.Children.Add(ActionIconGlyph.Button(
+            L10n.Text("windows.chatpage.set_up_or_choose_another_agent.f544267b"), ActionIcon.Create, (_, _) =>
+            {
+                _setupExpanded = true;
+                PaintConversation();
+            }));
+        return new Border
+        {
+            Background = Theme.Brush(static () => Windows.UI.Color.FromArgb(20, Theme.Warning.R, Theme.Warning.G, Theme.Warning.B)),
+            BorderBrush = Theme.Brush(static () => Windows.UI.Color.FromArgb(89, Theme.Warning.R, Theme.Warning.G, Theme.Warning.B)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(Theme.SpaceM, Theme.SpaceS, Theme.SpaceM, Theme.SpaceS),
+            Child = body,
+        };
+    }
+
     private UIElement Composer()
     {
         var well = _composerWell = new StackPanel { Spacing = Theme.SpaceS };
@@ -1577,6 +1625,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var steerNote = PendingSteerText(_openChat);
         if (steerNote.Length > 0) well.Children.Add(SteerNoteBanner(steerNote));
         well.Children.Add(PendingMessages());
+        if (OpenBackendMissing()) well.Children.Add(MissingAgentNotice());
         well.Children.Add(_draft);
         RebuildAttachStrip();
         well.Children.Add(_attachStrip);
@@ -1717,9 +1766,17 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 foreach (var item in matches)
                 {
                     var text = new TextBlock { Text = item.Label, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+                    FrameworkElement label = text;
+                    if (field == "backend" && Readiness(Backend(item.Value)) is string note)
+                    {
+                        var lines = new StackPanel { Spacing = 1 };
+                        lines.Children.Add(text);
+                        lines.Children.Add(new TextBlock { Text = note, FontSize = 11, Opacity = 0.7, TextTrimming = TextTrimming.CharacterEllipsis });
+                        label = lines;
+                    }
                     var pick = new Button
                     {
-                        Content = field == "backend" ? AgentMark.Row(item.Value, text) : text,
+                        Content = field == "backend" ? AgentMark.Row(item.Value, label) : label,
                         HorizontalAlignment = HorizontalAlignment.Stretch,
                         HorizontalContentAlignment = HorizontalAlignment.Stretch,
                         Background = item.Value == current ? Theme.AccentSoftBrush : Theme.PanelBrush,
@@ -1737,10 +1794,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     choices.Children.Add(pick);
                 }
             }
-            Group(L10n.Text("windows.chatpage.agent.b62db7d0"), _backends.Where(item => item is not null && (Format.Text(item, "id") != "sh" || backendId == "sh"))
+            // Installed agents only, like the Mac. The shell appears only on
+            // the chat that already uses it.
+            Group(L10n.Text("windows.chatpage.agent.b62db7d0"), _backends.Where(item => item is not null
+                    && (Format.Text(item, "id") != "sh" || backendId == "sh") && Installed(item))
                 .Select(item => (Format.Text(item, "id"), Format.Text(item, "label", Format.Text(item, "id")))), "backend", backendId);
             foreach (var field in new[] { "model", "effort" })
             {
+                if (!Installed(backend)) break;
                 if (backend?[field + "s"] is not JsonArray values || values.Count == 0) continue;
                 var options = new List<(string, string)> { ("", L10n.Text("windows.chatpage.default.21b111cb")) };
                 foreach (var value in values)
@@ -1879,6 +1940,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         else
         {
             var send = ActionIconGlyph.PrimaryButton(L10n.Text("windows.chatpage.send.f6f4688f"), ActionIcon.Send, async (_, _) => await SendAsync());
+            send.IsEnabled = !OpenBackendMissing();
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(send, L10n.Text("windows.chatpage.send.f6f4688f"));
             AutomationProperties.SetAutomationId(send, "chat.send");
             ToolTipService.SetToolTip(send, L10n.Text("windows.chatpage.send.f6f4688f"));
@@ -1945,6 +2007,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     {
         if (_opening) return;
         if (_openId is not string chat || _sending || _queueing) return;
+        if (OpenBackendMissing()) return;
         var generation = _openGeneration;
         bool Current() => OpenChatIs(chat) && generation == _openGeneration;
         var text = _draft.Text.Trim();
@@ -2057,6 +2120,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             // chat.update returns the saved record, which has no parked note.
             // Preserve the current note, which may have changed while awaiting.
             _openChat = ChatSteerOverlay.MergeRecord(updated, _openChat);
+            ChatLaunchChoice.Save(_openChat);
         }
         catch (Exception ex)
         {
@@ -2232,13 +2296,61 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return null;
     }
 
-    private JsonNode? DefaultBackend()
+    /// <summary>
+    /// The agent a new chat starts with, like the Mac: the last one used if it
+    /// is still installed, then Codex, then the first installed agent. The
+    /// shell is never a default.
+    /// </summary>
+    private JsonNode? DefaultBackend(string? remembered)
     {
-        foreach (var backend in _backends)
-        {
-            if (Format.Text(backend, "id") != "sh") return backend;
-        }
-        return _backends.Count > 0 ? _backends[0] : null;
+        var available = _backends
+            .Where(backend => backend is not null && Format.Text(backend, "id") != "sh" && Installed(backend))
+            .ToList();
+        return available.FirstOrDefault(backend => Format.Text(backend, "id") == remembered)
+            ?? available.FirstOrDefault(backend => Format.Text(backend, "id") == "codex")
+            ?? available.FirstOrDefault()
+            ?? _backends.FirstOrDefault(backend => backend is not null && Format.Text(backend, "id") != "sh");
+    }
+
+    /// <summary>
+    /// Whether an agent is on this computer. Missing means the host did not
+    /// say, which is not the same as absent: only an explicit false hides it.
+    /// </summary>
+    private static bool Installed(JsonNode? backend) =>
+        backend?["installed"] is not JsonValue flag
+        || flag.GetValueKind() != System.Text.Json.JsonValueKind.False;
+
+    private static bool Offers(JsonNode? backend, string list, string value) =>
+        !string.IsNullOrEmpty(value)
+        && backend?[list] is JsonArray values
+        && values.Any(item => item?.ToString() == value);
+
+    /// <summary>
+    /// The persona a new chat should start with, or null to take the
+    /// workspace default. "No persona" travels as an empty id. A persona from
+    /// another folder is not available here, so an unknown id falls back to
+    /// this folder's own default.
+    /// </summary>
+    private string? RememberedPersona(ChatLaunchChoice? saved)
+    {
+        if (saved?.PersonaId is not string remembered) return null;
+        if (remembered.Length == 0) return "";
+        return FindPersona(remembered) is null ? null : remembered;
+    }
+
+    /// <summary>A short note on an agent row when it may not run as is.</summary>
+    private static string? Readiness(JsonNode? backend) => Format.Text(backend, "readiness") switch
+    {
+        "needsSignIn" => L10n.Text("windows.chatpage.sign_in_may_be_needed.c3dde98c"),
+        "expired" => L10n.Text("windows.chatpage.stored_login_has_expired.bf189dae"),
+        _ => null,
+    };
+
+    /// <summary>The open chat's agent is known to the host and not installed.</summary>
+    private bool OpenBackendMissing()
+    {
+        var backend = Backend(Format.Text(_openChat, "backend"));
+        return backend is not null && !Installed(backend);
     }
 
     private List<DisplayItem> Coalesce(JsonArray events)
