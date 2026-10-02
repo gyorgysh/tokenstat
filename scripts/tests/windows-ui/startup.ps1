@@ -163,7 +163,7 @@ try {
     Invoke-Control (Wait-ForControl 'sidebar.chatMore')
     Wait-ForControl "sidebar.chat.$($chats[4].id)" | Out-Null
     Invoke-Control (Wait-ForControl 'sidebar.chatAll')
-    Wait-ForControl 'chat.list' | Out-Null
+    Wait-ForControl 'chat.list.create' | Out-Null
     # Create uses the same composer path as opening an archived conversation.
     Open-Place 'New chat in UI smoke project'
     Wait-ForControl 'chat.composer' 30 | Out-Null

@@ -377,7 +377,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _composerDock.Visibility = Visibility.Collapsed;
         _root.Children.Clear();
         var header = ListHeader();
-        AutomationProperties.SetAutomationId(header, "chat.list");
         _root.Children.Add(header);
         var skeleton = Motion.SkeletonCard();
         _root.Children.Add(skeleton);
@@ -468,6 +467,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         Grid.SetColumn(titles, 1);
         row.Children.Add(titles);
         var create = ActionIconGlyph.PrimaryButton(L10n.Text("windows.chatpage.new_chat.db18382a"), ActionIcon.Create, async (_, _) => await CreateAsync());
+        AutomationProperties.SetAutomationId(create, "chat.list.create");
         Grid.SetColumn(create, 2);
         row.Children.Add(create);
         return row;
