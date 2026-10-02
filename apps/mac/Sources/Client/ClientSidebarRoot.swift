@@ -242,6 +242,7 @@ struct ClientSidebarRoot: View {
                         // the traffic lights sit in.
                         .padding(.leading, 2)
                 }
+                .clientAvatarChrome()
                 ToolbarItem(placement: .principal) {
                     Wordmark(size: 19, fills: false)
                         .accessibilityAddTraits(.isHeader)

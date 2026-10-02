@@ -18,39 +18,54 @@ struct ClientDiffDocumentView<Header: View>: View {
     @State private var textWidth: CGFloat = 0
     @State private var preparing = true
     @State private var displayedRevision: UUID?
+    @State private var metadataHeight: CGFloat = 1
 
     var body: some View {
         GeometryReader { geometry in
             let paneWidth = max(0, geometry.size.width - Theme.Space.m * 2)
             let documentWidth = max(paneWidth, textWidth + 88 * codeSize / 13)
-            ScrollView([.vertical, .horizontal]) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    header()
-                        .padding(.bottom, Theme.Space.s)
+            let headerLimit = max(1, geometry.size.height * 0.4)
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                // Metadata never joins the code's horizontal coordinate space.
+                // A long message can scroll in its own bounded header area.
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: Theme.Space.s) { header() }
                         .frame(width: paneWidth, alignment: .leading)
-                    ForEach(rows) { row in
-                        rowView(row, width: documentWidth)
-                    }
-                    if preparing {
-                        ProgressView()
-                            .frame(width: paneWidth, height: 64)
-                    } else if totalRows > rowLimit {
-                        Button(L10n.text("apple.clientdiffdocumentview.show_more_lines", "\(min(2_000, totalRows - rowLimit))", "\(totalRows - rowLimit)"), .reveal) {
-                            rowLimit += 2_000
+                        .fixedSize(horizontal: false, vertical: true)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                            metadataHeight = $0
                         }
-                        .buttonStyle(SecondaryButtonStyle(comfortable: true))
-                        .padding(.vertical, Theme.Space.m)
-                        .frame(width: paneWidth)
-                    }
                 }
-                // A known width keeps newly materialized lines from moving
-                // the horizontal offset during an ordinary vertical scroll.
-                .frame(width: documentWidth, alignment: .leading)
-                .padding(.horizontal, Theme.Space.m)
-                .padding(.top, Theme.Space.s)
-                .padding(.bottom, 96)
+                .frame(height: min(metadataHeight, headerLimit))
+                .scrollBounceBehavior(.basedOnSize)
+
+                ScrollView([.vertical, .horizontal]) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(rows) { row in
+                            rowView(row, width: documentWidth)
+                        }
+                    }
+                    .frame(width: documentWidth, alignment: .leading)
+                    .padding(.bottom, Theme.Space.s)
+                    .background(ClientDiffDirectionLock())
+                }
+                .defaultScrollAnchor(.topLeading)
+                .frame(width: paneWidth)
+                .overlay {
+                    if preparing && rows.isEmpty { ProgressView() }
+                }
+                if totalRows > rowLimit {
+                    Button(L10n.text("apple.clientdiffdocumentview.show_more_lines", "\(min(2_000, totalRows - rowLimit))", "\(totalRows - rowLimit)"), .reveal) {
+                        rowLimit += 2_000
+                    }
+                    .buttonStyle(SecondaryButtonStyle(comfortable: true))
+                    .disabled(preparing)
+                    .frame(width: paneWidth)
+                }
             }
-            .defaultScrollAnchor(.topLeading)
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.top, Theme.Space.s)
+            .padding(.bottom, 96)
         }
         .task(id: Request(revision: revision, rowLimit: rowLimit, codeSize: codeSize, fileHeaders: fileHeaders)) {
             if displayedRevision != revision {
@@ -129,6 +144,29 @@ struct ClientDiffDocumentView<Header: View>: View {
         let rows: [DiffDocumentRow]
         let total: Int
         let width: CGFloat
+    }
+}
+
+/// UIScrollView chooses one axis for a diagonal drag instead of drifting on both.
+private struct ClientDiffDirectionLock: UIViewRepresentable {
+    func makeUIView(context: Context) -> Probe { Probe() }
+    func updateUIView(_ view: Probe, context: Context) { view.configure() }
+
+    final class Probe: UIView {
+        override func didMoveToWindow() { super.didMoveToWindow(); configure() }
+        override func didMoveToSuperview() { super.didMoveToSuperview(); configure() }
+        override func layoutSubviews() { super.layoutSubviews(); configure() }
+
+        func configure() {
+            var ancestor = superview
+            while let view = ancestor {
+                if let scroll = view as? UIScrollView {
+                    scroll.isDirectionalLockEnabled = true
+                    return
+                }
+                ancestor = view.superview
+            }
+        }
     }
 }
 #endif

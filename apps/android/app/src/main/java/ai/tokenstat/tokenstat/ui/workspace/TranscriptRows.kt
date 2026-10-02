@@ -132,6 +132,7 @@ internal fun TranscriptItemRow(
                 text = item.text,
                 baseStyle = TextStyle(fontSize = 12.sp),
                 color = LocalTsColors.current.textSecondary,
+                presentation = MarkdownPresentation.Aside,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -233,6 +234,7 @@ private fun AssistantPanel(text: String, agentName: String) {
             text = text,
             baseStyle = TsType.chatBody,
             color = colors.textPrimary,
+            presentation = MarkdownPresentation.Chat,
             modifier = Modifier.fillMaxWidth(),
         )
     }
@@ -649,6 +651,8 @@ private fun AttachmentRow(
     }
 }
 
+internal enum class MarkdownPresentation { Document, Chat, Aside }
+
 /// Lightweight chat markdown: fences, headers, bullets, quotes, inline
 /// code, bold, italic and links. Full Markwon would need View interop in
 /// every lazy row; the transcript only ever uses this subset.
@@ -658,6 +662,7 @@ internal fun MarkdownText(
     baseStyle: TextStyle,
     color: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier,
+    presentation: MarkdownPresentation = MarkdownPresentation.Document,
 ) {
     val colors = LocalTsColors.current
     val blocks = remember(text) { parseMarkdown(text) }
@@ -677,14 +682,23 @@ internal fun MarkdownText(
                     )
                 }
                 is MdBlock.Header -> {
-                    val size = when (block.level) {
-                        1 -> 18.sp
-                        2 -> 16.sp
-                        else -> 15.sp
+                    val headingStyle = when (presentation) {
+                        MarkdownPresentation.Chat -> when (block.level) {
+                            1 -> baseStyle.merge(TsType.chatHeading)
+                            2 -> baseStyle.merge(TsType.chatSubheading)
+                            else -> baseStyle.copy(fontWeight = FontWeight.SemiBold)
+                        }
+                        MarkdownPresentation.Aside -> baseStyle.copy(
+                            fontWeight = if (block.level <= 2) FontWeight.Bold else FontWeight.SemiBold,
+                        )
+                        MarkdownPresentation.Document -> baseStyle.merge(TextStyle(
+                            fontSize = when (block.level) { 1 -> 18.sp; 2 -> 16.sp; else -> 15.sp },
+                            fontWeight = FontWeight.SemiBold,
+                        ))
                     }
                     InlineMarkdown(
                         block.text,
-                        baseStyle.merge(TextStyle(fontSize = size, fontWeight = FontWeight.SemiBold)),
+                        headingStyle,
                         color,
                     )
                 }

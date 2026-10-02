@@ -17,9 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.History
@@ -38,7 +36,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ai.tokenstat.tokenstat.AppViewModel
@@ -263,105 +260,62 @@ private fun CommitDetailPage(
     val added = detail?.get("added")?.jsonPrimitive?.longOrNull ?: 0L
     val removed = detail?.get("removed")?.jsonPrimitive?.longOrNull ?: 0L
 
-    Column(
-        modifier.verticalScroll(rememberScrollState()).padding(bottom = TabBarChrome.contentBottomInset),
-        verticalArrangement = Arrangement.spacedBy(Space.s),
-    ) {
-            TextButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
-                Text(L10n.text("android.workspacehistory.history.dd1768e5"), modifier = Modifier.fillMaxWidth())
+    DiffDocumentView(diffs = diffs, modifier = modifier) {
+        TextButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
+            Text(L10n.text("android.workspacehistory.history.dd1768e5"), modifier = Modifier.fillMaxWidth())
+        }
+        Text(shortId(id), style = TsType.mono(13), color = LocalTsColors.current.textSecondary)
+        if (error != null) {
+            StickyErrorCard(
+                message = error!!,
+                onRetry = { scope.launch { load() } },
+                onDismiss = { error = null },
+            )
+        }
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(cardRadiusDp))
+                .background(LocalTsColors.current.panel)
+                .padding(Space.m),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            Text(subject, style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
+            if (body.isNotEmpty()) {
+                Text(body, style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textSecondary)
             }
-            Text(shortId(id), style = TsType.mono(13), color = LocalTsColors.current.textSecondary)
-            if (error != null) {
-                StickyErrorCard(
-                    message = error!!,
-                    onRetry = { scope.launch { load() } },
-                    onDismiss = { error = null },
-                )
-            }
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(cardRadiusDp))
-                    .background(LocalTsColors.current.panel)
-                    .padding(Space.m),
-                verticalArrangement = Arrangement.spacedBy(Space.s),
-            ) {
-                Text(subject, style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold), color = LocalTsColors.current.textPrimary)
-                if (body.isNotEmpty()) {
-                    Text(body, style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textSecondary)
+            CommitTagPills(tags)
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
+                Text(author, style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary, maxLines = 1)
+                if (timestamp > 0) {
+                    RelativeTimeText(timestamp * 1000, style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textTertiary)
                 }
-                CommitTagPills(tags)
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
-                    Text(author, style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary, maxLines = 1)
-                    if (timestamp > 0) {
-                        RelativeTimeText(timestamp * 1000, style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textTertiary)
-                    }
-                    Text(shortId(id), style = TsType.mono(12), color = LocalTsColors.current.textTertiary)
-                    if (isMerge) {
-                        Text(L10n.text("android.workspacehistory.merge.283128ac"), style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium), color = LocalTsColors.current.textSecondary)
-                    }
-                }
-                if (detail != null) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                        if (added > 0) Text("+$added", style = TsType.numeric(12), color = LocalTsColors.current.diffAdded)
-                        if (removed > 0) Text("−$removed", style = TsType.numeric(12), color = LocalTsColors.current.diffRemoved)
-                        Text(
-                            (if (files.size == 1) L10n.text("android.workspacehistory.0_file_1.ac7c9517.one", files.size) else L10n.text("android.workspacehistory.0_file_1.ac7c9517.other", files.size)),
-                            style = TextStyle(fontSize = 12.sp),
-                            color = LocalTsColors.current.textSecondary,
-                        )
-                    }
+                Text(shortId(id), style = TsType.mono(12), color = LocalTsColors.current.textTertiary)
+                if (isMerge) {
+                    Text(L10n.text("android.workspacehistory.merge.283128ac"), style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium), color = LocalTsColors.current.textSecondary)
                 }
             }
-            if (!loaded) {
-                Text(L10n.text("android.workspacehistory.loading.ba3bbbe1"), color = LocalTsColors.current.textSecondary)
-            } else if (detail != null) {
-                if (diffs.isEmpty()) {
-                    EmptyState(
-                        Icons.Default.History,
-                        if (isMerge) L10n.text("android.workspacehistory.a_merge_with_no_patch_of_its_own.862cd9e3") else L10n.text("android.workspacehistory.no_files_in_this_commit.db8823ee"),
-                        if (isMerge) L10n.text("android.workspacehistory.the_changes_live_on_the_parents.24d17008") else L10n.text("android.workspacehistory.this_commit_changed_no_files.9786b223"),
-                        art = { EmptyArt(EmptyArtKind.History) },
+            if (detail != null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                    if (added > 0) Text("+$added", style = TsType.numeric(12), color = LocalTsColors.current.diffAdded)
+                    if (removed > 0) Text("−$removed", style = TsType.numeric(12), color = LocalTsColors.current.diffRemoved)
+                    Text(
+                        (if (files.size == 1) L10n.text("android.workspacehistory.0_file_1.ac7c9517.one", files.size) else L10n.text("android.workspacehistory.0_file_1.ac7c9517.other", files.size)),
+                        style = TextStyle(fontSize = 12.sp),
+                        color = LocalTsColors.current.textSecondary,
                     )
-                } else {
-                    diffs.forEach { diff ->
-                        val path = diff.str("path") ?: ""
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(cardRadiusDp))
-                                .background(LocalTsColors.current.panel)
-                                .padding(Space.m),
-                            verticalArrangement = Arrangement.spacedBy(Space.xs),
-                        ) {
-                            Text(
-                                path.substringAfterLast('/').ifBlank { path },
-                                style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
-                                color = LocalTsColors.current.textPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            if (path.contains('/')) {
-                                Text(path, style = TextStyle(fontSize = 11.sp), color = LocalTsColors.current.textSecondary, maxLines = 1)
-                            }
-                            if (diff.bol("binary")) {
-                                Text(
-                                    L10n.text("android.workspacehistory.this_is_a_binary_file_there_is_nothing_to.6573d54c"),
-                                    style = TextStyle(fontSize = 12.sp),
-                                    color = LocalTsColors.current.textSecondary,
-                                )
-                            } else if (asObjects(diff["hunks"]).isEmpty()) {
-                                Text(
-                                    L10n.text("android.workspacehistory.no_line_changes_in_this_file.2406d2d9"),
-                                    style = TextStyle(fontSize = 12.sp),
-                                    color = LocalTsColors.current.textSecondary,
-                                )
-                            } else {
-                                HunkDiffView(diff)
-                            }
-                        }
-                    }
                 }
             }
+        }
+        if (!loaded) {
+            Text(L10n.text("android.workspacehistory.loading.ba3bbbe1"), color = LocalTsColors.current.textSecondary)
+        } else if (detail != null && diffs.isEmpty()) {
+            EmptyState(
+                Icons.Default.History,
+                if (isMerge) L10n.text("android.workspacehistory.a_merge_with_no_patch_of_its_own.862cd9e3") else L10n.text("android.workspacehistory.no_files_in_this_commit.db8823ee"),
+                if (isMerge) L10n.text("android.workspacehistory.the_changes_live_on_the_parents.24d17008") else L10n.text("android.workspacehistory.this_commit_changed_no_files.9786b223"),
+                art = { EmptyArt(EmptyArtKind.History) },
+            )
+        }
     }
 }

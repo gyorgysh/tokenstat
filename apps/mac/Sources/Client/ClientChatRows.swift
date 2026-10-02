@@ -61,6 +61,7 @@ struct ClientChatEventRow: View {
                     text,
                     bodyFont: Theme.chatBody,
                     codeFont: Theme.chatCode,
+                    style: .chat,
                     selectable: !isLive,
                     live: isLive,
                     liveID: "\(markdownCacheID):\(item.id)"

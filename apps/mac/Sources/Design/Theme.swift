@@ -416,6 +416,10 @@ enum Theme {
     static var chatCode: Font { monoText(12, relativeTo: .body) }
     #endif
 
+    /// Chat headings use the same compact scale on desktop and mobile.
+    static var chatHeading: Font { font(17, weight: .semibold, relativeTo: .body) }
+    static var chatSubheading: Font { font(15, weight: .semibold, relativeTo: .body) }
+
     /// Material for the window's edges: the sidebar and the inspector.
     ///
     /// Not for the content column, and never behind the terminal. A terminal

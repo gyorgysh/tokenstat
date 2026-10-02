@@ -21,8 +21,6 @@ struct ClientWorkspacesView: View {
     @Environment(ClientStore.self) private var store
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Namespace private var projectTransitions
     @State private var model: ClientWorkspacesModel
     @State private var pendingClose: PtySessionInfo?
     @State private var notificationOpen = NotificationOpen.shared
@@ -170,7 +168,6 @@ struct ClientWorkspacesView: View {
                 .padding(.top, Theme.Space.s)
                 .padding(.bottom, 96)
             }
-            .clientSwipeActionsContainer()
             .background(Theme.background)
             .sheet(item: $starting) { section in
                 if let peer = model.connectedKey,
@@ -437,10 +434,8 @@ struct ClientWorkspacesView: View {
                         hostName: hostName,
                         folder: folder
                     )
-                    .clientProjectTransition(id: folder.id, in: projectTransitions, enabled: !reduceMotion)
                 } label: {
                     ClientFolderRow(folder: folder)
-                        .clientProjectTransitionSource(id: folder.id, in: projectTransitions)
                 }
                 .buttonStyle(.plain)
                 .modifier(ClientProjectRename(peer: peer, folder: folder,

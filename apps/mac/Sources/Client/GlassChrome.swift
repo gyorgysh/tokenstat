@@ -10,6 +10,18 @@ import SwiftUI
 // The client is iOS and iPadOS only.
 #if !os(macOS)
 
+extension ToolbarContent {
+    /// The avatar draws its own circular surface and plan ring.
+    @ToolbarContentBuilder
+    func clientAvatarChrome() -> some ToolbarContent {
+        if #available(iOS 26, *) {
+            sharedBackgroundVisibility(.hidden)
+        } else {
+            self
+        }
+    }
+}
+
 /// Surfaces the client shares, in one file so the rule is visible in one place.
 ///
 /// **Glass is chrome, content is opaque.** The tab bar, the top bar and sheets
@@ -28,30 +40,6 @@ import SwiftUI
 /// that, chrome falls back to the same Theme capsules the Mac already
 /// uses: content stays opaque, accent stays one colour.
 extension View {
-    /// Custom project cards keep their native row actions coordinated on iOS 27.
-    @ViewBuilder
-    func clientSwipeActionsContainer() -> some View {
-        #if compiler(>=6.4)
-        if #available(iOS 27, *) { swipeActionsContainer() } else { self }
-        #else
-        self
-        #endif
-    }
-
-    @ViewBuilder
-    func clientProjectTransitionSource(id: some Hashable, in namespace: Namespace.ID) -> some View {
-        if #available(iOS 18, *) { matchedTransitionSource(id: id, in: namespace) } else { self }
-    }
-
-    @ViewBuilder
-    func clientProjectTransition(id: some Hashable, in namespace: Namespace.ID, enabled: Bool) -> some View {
-        if #available(iOS 18, *), enabled {
-            navigationTransition(.zoom(sourceID: id, in: namespace))
-        } else {
-            self
-        }
-    }
-
     /// A content card: opaque panel, hairline, card radius.
     func cardSurface() -> some View {
         background(Theme.panel, in: .rect(cornerRadius: Theme.cardRadius))

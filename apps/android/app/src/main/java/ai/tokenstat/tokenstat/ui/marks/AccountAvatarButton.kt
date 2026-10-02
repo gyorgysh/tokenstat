@@ -12,6 +12,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.IconButton
@@ -54,43 +55,49 @@ fun AccountAvatarButton(
     val sweep = remember(colors.accent, colors.secondary) {
         Brush.sweepGradient(listOf(colors.accent, colors.secondary, colors.accent))
     }
-    IconButton(
-        onClick = onClick,
-        interactionSource = interaction,
-        modifier = Modifier.semantics {
-            contentDescription = if (signedIn) L10n.text("android.marks.account_0.1342b321", name)
-                else L10n.text("android.marks.sign_in_to_tokenstat.9a950fc4")
-            if (showsPlan) stateDescription = L10n.text("android.tiermark.0_tier.c75a2e12", plan.replaceFirstChar { it.uppercase() })
-        },
-    ) {
-        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
-            Box(
-                Modifier.size(38.dp)
-                    .shadow(2.dp, CircleShape)
-                    .clip(CircleShape)
-                    .background(colors.panel)
-                    .border(1.dp, colors.border, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Avatar(name, size = 34, avatarUrl = avatarUrl, signedIn = signedIn, decorative = true)
-            }
-            if (showsPlan) {
-                Canvas(Modifier.size(38.dp)) {
-                    val width = 1.5.dp.toPx()
-                    rotate(if (reduceMotion) 0f else ring * 120f) {
-                        drawCircle(sweep, radius = (size.minDimension - width) / 2f, alpha = ring, style = Stroke(width))
-                    }
-                }
+    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+        IconButton(
+            onClick = onClick,
+            interactionSource = interaction,
+            modifier = Modifier.size(48.dp).semantics {
+                contentDescription = if (signedIn) L10n.text("android.marks.account_0.1342b321", name)
+                    else L10n.text("android.marks.sign_in_to_tokenstat.9a950fc4")
+                if (showsPlan) stateDescription = L10n.text("android.tiermark.0_tier.c75a2e12", plan.replaceFirstChar { it.uppercase() })
+            },
+        ) {
+            Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
                 Box(
-                    Modifier.align(Alignment.BottomEnd).size(16.dp)
+                    Modifier.size(38.dp)
+                        .shadow(2.dp, CircleShape)
                         .clip(CircleShape)
                         .background(colors.panel)
-                        .border(1.dp, colors.border, CircleShape)
-                        .clearAndSetSemantics {},
+                        .border(1.dp, colors.border, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    TierMark(plan, markSize = 10)
+                    Avatar(name, size = 34, avatarUrl = avatarUrl, signedIn = signedIn, decorative = true)
                 }
+                if (showsPlan) {
+                    Canvas(Modifier.size(38.dp)) {
+                        val width = 1.5.dp.toPx()
+                        rotate(if (reduceMotion) 0f else ring * 120f) {
+                            drawCircle(sweep, radius = (size.minDimension - width) / 2f, alpha = ring, style = Stroke(width))
+                        }
+                    }
+                }
+            }
+        }
+        // A sibling of IconButton: its circular ripple/clip must not crop
+        // the plan badge where it extends beyond the avatar's ring.
+        if (showsPlan) {
+            Box(
+                Modifier.align(Alignment.BottomEnd).padding(4.dp).size(16.dp)
+                    .clip(CircleShape)
+                    .background(colors.panel)
+                    .border(1.dp, colors.border, CircleShape)
+                    .clearAndSetSemantics {},
+                contentAlignment = Alignment.Center,
+            ) {
+                TierMark(plan, markSize = 10)
             }
         }
     }

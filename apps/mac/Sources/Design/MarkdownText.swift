@@ -130,15 +130,13 @@ enum MarkdownStyle: String {
         if self == .aside {
             return bodyFont.weight(level <= 2 ? .bold : .semibold)
         }
-        #if os(macOS)
         if self == .chat {
             switch level {
-            case 1: return Theme.title2.weight(.semibold)
-            case 2: return Theme.title3.weight(.semibold)
+            case 1: return Theme.chatHeading
+            case 2: return Theme.chatSubheading
             default: return bodyFont.weight(.semibold)
             }
         }
-        #endif
         switch level {
         case 1: return Theme.title
         case 2: return Theme.title2
@@ -1120,7 +1118,7 @@ private struct MarkdownTable: View {
             ForEach(0..<columnCount, id: \.self) { column in
                 InlineMarkdown(
                     column < values.count ? values[column] : "",
-                    font: header ? Theme.headline : bodyFont,
+                    font: header ? bodyFont.weight(.semibold) : bodyFont,
                     selectable: selectable
                 )
                 .padding(.horizontal, Theme.Space.m)

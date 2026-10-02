@@ -46,10 +46,6 @@ struct ClientProjectRename: ViewModifier {
         content.contextMenu {
             Button(L10n.text("apple.clientnameeditor.rename_project.2a0478ee"), .edit) { showing = true }
         }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(L10n.text("apple.clientnameeditor.rename_project.2a0478ee"), .edit) { showing = true }
-                .tint(Theme.accent)
-        }
         .sheet(isPresented: $showing) {
             ClientNameEditor(title: L10n.text("apple.clientnameeditor.rename_project.2a0478ee"), initial: folder.name) { name in
                 guard owner != nil, owner == WorkSessionContext.shared.scope else { throw ClientActionOwnership.changed }

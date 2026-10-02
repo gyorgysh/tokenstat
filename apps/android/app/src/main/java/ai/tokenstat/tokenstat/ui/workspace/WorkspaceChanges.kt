@@ -22,9 +22,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Difference
 import androidx.compose.material3.Text
@@ -398,10 +396,7 @@ fun FileDiffPage(
         loading = false
     }
     LaunchedEffect(path) { load() }
-    Column(
-        modifier.verticalScroll(rememberScrollState()).padding(bottom = TabBarChrome.contentBottomInset),
-        verticalArrangement = Arrangement.spacedBy(Space.s),
-    ) {
+    DiffDocumentView(diffs = listOfNotNull(diff), modifier = modifier, fileHeaders = false) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack, modifier = Modifier.weight(1f)) {
                 Text(L10n.text("android.workspacechanges.changes.47127cfb"), modifier = Modifier.fillMaxWidth())
@@ -420,9 +415,7 @@ fun FileDiffPage(
         }
         if (loading) {
             Text(L10n.text("android.workspacechanges.loading.ba3bbbe1"), color = LocalTsColors.current.textSecondary)
-        } else if (diff != null) {
-            HunkDiffView(diff!!)
-        } else if (error == null) {
+        } else if (diff == null && error == null) {
             Text(L10n.text("android.workspacechanges.that_file_is_not_in_this_folder_any_more.da5bd527"), color = LocalTsColors.current.textSecondary)
         }
     }

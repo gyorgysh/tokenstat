@@ -572,6 +572,7 @@ private extension View {
                 ToolbarItem(placement: .topBarLeading) {
                     AvatarButton { showAccount.wrappedValue = true }
                 }
+                .clientAvatarChrome()
                 // The wordmark, not the screen's name. The tab bar already
                 // says which screen this is, and the middle of the top bar is
                 // the one piece of pure brand the client gets.

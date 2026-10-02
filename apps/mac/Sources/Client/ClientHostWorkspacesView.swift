@@ -21,8 +21,6 @@ struct ClientHostWorkspacesView: View {
     let hostName: String
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Namespace private var projectTransitions
     @State private var model = ClientHostWorkspacesModel()
     /// Which folder chooser is showing, if any. Chats and sessions live
     /// inside folders, so starting one means picking the folder first.
@@ -242,7 +240,6 @@ struct ClientHostWorkspacesView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        .clientSwipeActionsContainer()
         .navigationTitle(hostName)
         .searchable(text: $search, prompt: L10n.text("apple.clienthostworkspacesview.search_projects.9e079c7d"))
         .navigationBarTitleDisplayMode(.inline)
@@ -338,10 +335,8 @@ struct ClientHostWorkspacesView: View {
                             hostName: hostName,
                             folder: folder
                         )
-                        .clientProjectTransition(id: folder.id, in: projectTransitions, enabled: !reduceMotion)
                     } label: {
                         ClientFolderRow(folder: folder)
-                            .clientProjectTransitionSource(id: folder.id, in: projectTransitions)
                     }
                     .buttonStyle(.plain)
                     .modifier(ClientProjectRename(peer: peerKey, folder: folder,

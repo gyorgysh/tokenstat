@@ -107,6 +107,9 @@ object TsType {
     val caption = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Normal, fontFamily = interfaceFamily)
     val caption2 = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Normal, fontFamily = interfaceFamily)
 
+    val chatHeading = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold, fontFamily = interfaceFamily)
+    val chatSubheading = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.SemiBold, fontFamily = interfaceFamily)
+
     /// Conversation prose is read for minutes at a time, not scanned as
     /// chrome: one rung below body, the same step the Apple client takes.
     val chatBody = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Normal, fontFamily = interfaceFamily)

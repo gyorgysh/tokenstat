@@ -218,7 +218,7 @@ settings:
     # 118 identifies the 1.1.0 preview across the native apps.
     # 119 was uploaded as 1.1.0 to App Store Connect.
     # 120 carries the mobile navigation, diff performance and terminal fixes.
-    CURRENT_PROJECT_VERSION: "120"
+    CURRENT_PROJECT_VERSION: "121"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
