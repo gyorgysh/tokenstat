@@ -42,6 +42,7 @@
     <Compile Include="../../../apps/windows/Design/ResizeHandle.cs" Link="ResizeHandle.cs" />
     <Compile Include="../../../apps/windows/Design/FlowPanel.cs" Link="FlowPanel.cs" />
     <Compile Include="../../../apps/windows/Design/ActionIcon.cs" Link="ActionIcon.cs" />
+    <Compile Include="../../../apps/windows/Design/FriendlyError.cs" Link="FriendlyError.cs" />
     <Compile Include="../../../apps/windows/Design/Buttons.cs" Link="Buttons.cs" />
     <Compile Include="../../../apps/windows/Design/SidebarChrome.cs" Link="SidebarChrome.cs" />
     <Compile Include="../../../apps/windows/Design/DetailBar.cs" Link="DetailBar.cs" />

@@ -382,6 +382,9 @@ final class AccountModel {
                 // app closes the window it opened.
                 signInDismisser?()
                 await load()
+                // A fresh login can relink a removed machine or replace a
+                // revoked credential even when the account's plan is unchanged.
+                _ = try? await Bridge.reconsiderPlan()
                 #if !os(macOS)
                 // One haptic for a real sign-in, not for discovering an
                 // existing session on cold launch.

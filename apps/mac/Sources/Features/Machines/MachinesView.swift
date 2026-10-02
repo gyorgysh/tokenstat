@@ -31,10 +31,11 @@ struct MachinesView: View {
     /// business picking between Hosts and Keys.
     var onNavigate: ((NavigationRequest) -> Void)?
     var onInspect: (() -> Void)?
+    var onSignIn: (() -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var addingDevice = false
     @State private var encryptionExpanded = false
-    private enum DevicePage: String, CaseIterable { case devices = "Devices", access = "Access", settings = "Settings" }
+    private enum DevicePage: String, CaseIterable { case devices = "Devices", access = "Access" }
     @State private var devicePage: DevicePage = .devices
     @State private var deviceSearch = ""
     /// The account machine waiting on a Remove confirmation. Destructive on
@@ -195,6 +196,10 @@ struct MachinesView: View {
         }
         switch devicePage {
         case .devices:
+            thisMachine()
+            #if os(macOS)
+            alwaysOnHost
+            #endif
             SearchField(text: $deviceSearch, prompt: L10n.text("apple.machinesview.find_a_device.d8cd5f42"))
             if !filteredAccountMachines.isEmpty { accountDevices }
             if !filteredKnownMachines.isEmpty { knownMachines }
@@ -210,11 +215,6 @@ struct MachinesView: View {
             DevicePermissionCard(peers: model.known.filter { $0.trust == .approved })
             DevicePermissionCard(peers: [], localOnly: true)
             encryptionNote
-        case .settings:
-            thisMachine()
-            #if os(macOS)
-            alwaysOnHost
-            #endif
         }
     }
 
@@ -424,7 +424,7 @@ struct MachinesView: View {
                                 .frame(width: 30, height: 30)
                                 .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 8))
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(L10n.text("apple.machinesview.reach_devices_from_anywhere.aaa32bd4"))
+                                Text(L10n.text("apple.machinesview.enable_remote_access"))
                                     .font(Theme.callout.weight(.semibold))
                                 Text(L10n.text("apple.machinesview.connect_to_this_mac_from_your_signed_in_de.a81e4e37"))
                                     .font(Theme.caption)
@@ -432,13 +432,13 @@ struct MachinesView: View {
                             }
                         }
                         Spacer(minLength: Theme.Space.m)
-                        Toggle(L10n.text("apple.machinesview.reach_devices_from_anywhere.aaa32bd4"), isOn: Binding(
+                        Toggle(L10n.text("apple.machinesview.enable_remote_access"), isOn: Binding(
                             get: { allowed && status.tunnel },
                             set: { enabled in Task { await model.setTunnel(enabled) } }
                         ))
                         .toggleStyle(.switch)
                         .labelsHidden()
-                        .accessibilityLabel(L10n.text("apple.machinesview.reach_devices_from_anywhere.aaa32bd4"))
+                        .accessibilityLabel(L10n.text("apple.machinesview.enable_remote_access"))
                         .disabled(!allowed)
                         .fixedSize()
                     }
@@ -498,12 +498,17 @@ struct MachinesView: View {
                         // socket. The plan gate, a revoked token and a dead
                         // endpoint all land here, and each needs different
                         // words from "wait".
-                        Banner(
-                            text: status.tunnelError.map {
-                                L10n.text("apple.machinesview.remote_reach_is_on_but_the_tunnel_is_not_c.c73ccbbf", "\($0)")
-                            } ?? L10n.text("apple.machinesview.remote_reach_is_on_but_the_tunnel_has_not.024544f1"),
-                            severity: .warning
-                        )
+                        if let raw = status.tunnelError {
+                            ErrorBanner(message: raw) {
+                                if FriendlyError.from(raw).requiresSignIn {
+                                    onSignIn?()
+                                } else {
+                                    Task { await model.load() }
+                                }
+                            }
+                        } else {
+                            Banner(text: L10n.text("apple.machinesview.remote_reach_is_on_but_the_tunnel_has_not.024544f1"), severity: .warning)
+                        }
                     }
                     if status.tunnel, status.tunnelOnline == true, status.tunnelRegistered == false {
                         Banner(

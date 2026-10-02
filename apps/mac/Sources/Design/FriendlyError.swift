@@ -33,10 +33,11 @@ struct FriendlyError {
     var raw: String
     /// The button should open plans, not retry. iOS uses the in-app paywall.
     var opensPlans: Bool = false
+    var requiresSignIn: Bool = false
 
     /// The glyph on that button, from the shared action vocabulary: a crown
     /// when it leads to plans, the retry arrow when it retries.
-    var actionIcon: ActionIcon { opensPlans ? .plans : .refresh }
+    var actionIcon: ActionIcon { opensPlans ? .plans : requiresSignIn ? .signIn : .refresh }
 
     /// Whether this is something the user can fix now, as opposed to something
     /// that has to be waited out.
@@ -129,6 +130,16 @@ struct FriendlyError {
                 raw: raw
             )
         }
+        if lower.contains("machine_unlinked") {
+            return FriendlyError(
+                title: L10n.text("apple.friendlyerror.this_computer_is_not_on_your_account.6ce371f7"),
+                message: L10n.text("apple.friendlyerror.machine_unlinked"),
+                symbol: "person.crop.circle.badge.exclamationmark",
+                actionTitle: L10n.text("common.sign_in"),
+                raw: raw,
+                requiresSignIn: true
+            )
+        }
         if lower.contains("machine_required") || lower.contains("machine_not_registered")
             || lower.contains("not registered on the account")
             || lower.contains("not bound to an account device")
@@ -209,7 +220,8 @@ struct FriendlyError {
                 message: L10n.text("apple.friendlyerror.this_device_s_login_is_no_longer_valid_sig.e2c0cd69"),
                 symbol: "person.crop.circle.badge.exclamationmark",
                 actionTitle: L10n.text("common.sign_in"),
-                raw: raw
+                raw: raw,
+                requiresSignIn: true
             )
         }
         if lower.contains("credential") || lower.contains("tunnel token")
@@ -231,7 +243,8 @@ struct FriendlyError {
                 message: L10n.text("apple.friendlyerror.this_device_s_login_is_no_longer_valid_sig.e2c0cd69"),
                 symbol: "person.crop.circle.badge.exclamationmark",
                 actionTitle: L10n.text("common.sign_in"),
-                raw: raw
+                raw: raw,
+                requiresSignIn: true
             )
         }
         if lower.contains("already on the tunnel") || lower.contains("key_already_live") {

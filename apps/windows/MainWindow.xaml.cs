@@ -204,6 +204,7 @@ public sealed partial class MainWindow : Window
                     _ => place.Route(),
                 };
                 NavigateTo(tag);
+                if (place == RailPlace.Projects) _ = RefreshSidebarLiveAsync(slow: true);
             });
             _pinnedNavigation[place] = button;
             pinned.Children.Add(button);
@@ -1650,6 +1651,8 @@ public sealed partial class MainWindow : Window
             var previousSummaries = _liveSummaries;
             var previousAccount = _liveAccount;
             var previousSshSessions = _liveSshSessions;
+            // Discover newly registered folders before asking for their chats.
+            if (slow) await TryLoadFoldersAsync(refresh: true);
             var (sessions, chats) = await SidebarLive.FetchFastAsync(
                 _localFolders.Select(folder => Format.Text(folder, "id"))
                     .Concat(RemoteWorkspaces.CachedFolders().Select(folder => folder.Id)));
@@ -1685,7 +1688,6 @@ public sealed partial class MainWindow : Window
             catch { /* Keep reachable session rows on a transient host failure. */ }
             if (slow)
             {
-                await TryLoadFoldersAsync(refresh: true);
                 _ = RemoteWorkspaces.SweepAsync();
                 var (summaries, account) = await SidebarLive.FetchSlowAsync();
                 if (summaries is not null)

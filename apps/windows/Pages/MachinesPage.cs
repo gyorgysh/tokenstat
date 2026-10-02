@@ -19,8 +19,8 @@ namespace Tokenstat.Pages;
 
 /// <summary>
 /// This PC, who may reach it, and who it can reach. Mirrors the Mac Devices
-/// screen: approvals first, then the account devices, then this PC's own
-/// connection settings, then the encryption note. Ordered by what somebody
+/// screen: approvals first, then this PC's connection settings and account
+/// devices, then the encryption note. Ordered by what somebody
 /// came here to do: decide about a machine that is knocking, then read this
 /// PC's own two words to compare with the other end, then add something new.
 /// </summary>
@@ -51,11 +51,12 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
         new(StringComparer.Ordinal);
     private DispatcherQueueTimer? _poll;
     private bool _refreshing;
-    private enum DevicePage { Devices, Access, Settings }
+    private enum DevicePage { Devices, Access }
     private DevicePage _devicePage;
     private readonly TextBox _deviceSearch = new() { PlaceholderText = L10n.Text("windows.machinespage.search_devices.3aebaefc"), MinHeight = 36 };
     private readonly StackPanel _deviceInventory = new() { Spacing = Theme.SpaceM };
     private ScrollViewer? _scroll;
+    private readonly StackPanel _signSlot = new() { Spacing = Theme.SpaceM, Visibility = Visibility.Collapsed };
 
     /// <summary>
     /// What the inspector is showing. Keys only, so a refresh cannot pin a
@@ -412,6 +413,8 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             _root.Children.Add(Chrome.Banner(_notice, Theme.Accent, Symbol.Contact));
             _notice = null;
         }
+        // Keep an active sign-in visible across device tabs and refreshes.
+        _root.Children.Add(_signSlot);
         var account = _account;
         if (account is null)
         {
@@ -445,17 +448,15 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             var navigation = new Grid { ColumnSpacing = Theme.SpaceM };
             navigation.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             navigation.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var sections = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-            foreach (var section in Enum.GetValues<DevicePage>())
-            {
-                var tab = new Microsoft.UI.Xaml.Controls.Primitives.ToggleButton
+            var sections = Chrome.Segmented(
+                [(nameof(DevicePage.Devices), L10n.Text("common.devices")),
+                    (nameof(DevicePage.Access), L10n.Text("windows.machinespage.access_tab"))],
+                _devicePage.ToString(), section =>
                 {
-                    Content = section.ToString(), IsChecked = _devicePage == section,
-                    MinHeight = 36, MinWidth = 88,
-                };
-                tab.Click += (_, _) => { _devicePage = section; Render(); };
-                sections.Children.Add(tab);
-            }
+                    _devicePage = Enum.Parse<DevicePage>(section);
+                    Render();
+                    return Task.CompletedTask;
+                });
             navigation.Children.Add(sections);
             var add = Buttons.Primary(L10n.Text("common.add_device"), ActionIcon.Create, async (_, _) => await PairAsync());
             Grid.SetColumn(add, 1);
@@ -465,6 +466,8 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             switch (_devicePage)
             {
                 case DevicePage.Devices:
+                    _root.Children.Add(ThisMachineCard(account, allowed, TunnelOn()));
+                    _root.Children.Add(AlwaysOnHostCard());
                     _root.Children.Add(_deviceSearch);
                     _root.Children.Add(_deviceInventory);
                     RenderDeviceInventory();
@@ -479,10 +482,6 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                         _root.Children.Add(EmptyState.View(L10n.Text("windows.machinespage.no_access_granted.a6972918"),
                             L10n.Text("windows.machinespage.pair_a_device_first_its_access_controls_wi.3d1f4240"), EmptyArtKind.Devices));
                     _root.Children.Add(EncryptionNote());
-                    break;
-                case DevicePage.Settings:
-                    _root.Children.Add(ThisMachineCard(account, allowed, TunnelOn()));
-                    _root.Children.Add(AlwaysOnHostCard());
                     break;
             }
         }
@@ -1250,7 +1249,7 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             });
             body.Children.Add(knownRow);
         }
-        body.Children.Add(Chrome.SettingSwitch(L10n.Text("windows.machinespage.enable_remote_access.d4c2690c"), allowed && tunnel, async on =>
+        var remoteSwitch = Chrome.SettingSwitch(L10n.Text("windows.machinespage.enable_remote_access.d4c2690c"), allowed && tunnel, async on =>
         {
             if (!allowed)
             {
@@ -1274,7 +1273,9 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
                 ? L10n.Text("windows.machinespage.remote_reach_is_on_direct_connections_are.f9aa785a")
                 : L10n.Text("windows.machinespage.remote_reach_is_off.701869a6");
             await LoadAsync();
-        }));
+        });
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(remoteSwitch, "devices.remoteAccess");
+        body.Children.Add(remoteSwitch);
         body.Children.Add(new TextBlock
         {
             Text = allowed && tunnel
@@ -1317,9 +1318,16 @@ internal sealed class MachinesPage : Page, IInspectorContent, IInspectorRequest,
             body.Children.Add(Chrome.Banner(
                 string.IsNullOrEmpty(tunnelError)
                     ? L10n.Text("windows.machinespage.remote_reach_is_on_but_the_tunnel_has_not.024544f1")
-                    : L10n.Text("windows.machinespage.remote_reach_is_on_but_the_tunnel_is_not_c.c73ccbbf", $"{tunnelError}"),
+                    : FriendlyError.Display(tunnelError),
                 Theme.Warning,
                 Symbol.Important));
+            if (FriendlyError.From(tunnelError).RequiresSignIn)
+                body.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.friendlyerror.sign_in_again.51fbe1dc"), ActionIcon.SignIn,
+                    async (_, _) => await SignInFlow.RunAsync(this, _signSlot, async () =>
+                    {
+                        await AppServices.Host.CallAsync("remote.reconsiderPlan");
+                        await LoadAsync();
+                    })));
         }
         body.Children.Add(ActionIconGlyph.Button(
             L10n.Text("windows.machinespage.details.45989de4"), ActionIcon.Reveal, (_, _) =>

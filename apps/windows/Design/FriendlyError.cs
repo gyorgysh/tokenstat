@@ -26,13 +26,14 @@ internal sealed record FriendlyErrorInfo(
     string Raw,
     string? ActionTitle = null,
     bool OpensPlans = false,
+    bool RequiresSignIn = false,
     Symbol Symbol = Symbol.Important)
 {
     /// <summary>
     /// The glyph on the action button, from the shared action vocabulary: a
     /// crown when it leads to plans, the retry arrow when it retries.
     /// </summary>
-    public ActionIcon ActionIcon => OpensPlans ? ActionIcon.Plans : ActionIcon.Refresh;
+    public ActionIcon ActionIcon => OpensPlans ? ActionIcon.Plans : RequiresSignIn ? ActionIcon.SignIn : ActionIcon.Refresh;
 
     /// <summary>Whether this is something the user can fix now.</summary>
     public bool IsActionable => ActionTitle is not null;
@@ -112,6 +113,16 @@ internal static class FriendlyError
                 ActionTitle: L10n.Text("windows.friendlyerror.try_again.d8b8392e"),
                 Symbol: Symbol.People);
         }
+        if (lower.Contains("machine_unlinked"))
+        {
+            return new FriendlyErrorInfo(
+                L10n.Text("windows.friendlyerror.this_computer_is_not_on_your_account.6ce371f7"),
+                L10n.Text("windows.friendlyerror.machine_unlinked"),
+                raw,
+                ActionTitle: L10n.Text("common.sign_in"),
+                RequiresSignIn: true,
+                Symbol: Symbol.Contact);
+        }
         if (lower.Contains("machine_required") || lower.Contains("machine_not_registered")
             || lower.Contains("not registered on the account")
             || lower.Contains("not bound to an account device"))
@@ -186,6 +197,7 @@ internal static class FriendlyError
                 L10n.Text("windows.friendlyerror.this_device_s_login_is_no_longer_valid_sig.e2c0cd69"),
                 raw,
                 ActionTitle: L10n.Text("common.sign_in"),
+                RequiresSignIn: true,
                 Symbol: Symbol.Contact);
         }
         if (lower.Contains("credential") || lower.Contains("tunnel token")
@@ -205,6 +217,7 @@ internal static class FriendlyError
                 L10n.Text("windows.friendlyerror.this_device_s_login_is_no_longer_valid_sig.e2c0cd69"),
                 raw,
                 ActionTitle: L10n.Text("common.sign_in"),
+                RequiresSignIn: true,
                 Symbol: Symbol.Contact);
         }
         // No Apple row for this one. A refused account or device is not a

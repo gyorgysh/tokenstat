@@ -51,6 +51,9 @@ try {
         Write-Host "Waiting for '$Id'"
         $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $Id)
         for ($attempt = 0; $attempt -lt $Seconds * 4; $attempt++) {
+            $process.Refresh()
+            if ($process.HasExited) { throw "GUI exited while waiting for '$Id'" }
+            $script:window = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
             $control = $window.FindFirst($descendants, $condition)
             if ($control -and !$control.Current.IsOffscreen) { return $control }
             Start-Sleep -Milliseconds 250
@@ -58,7 +61,7 @@ try {
         $window.FindAll($descendants, [System.Windows.Automation.Condition]::TrueCondition) |
             Where-Object { $_.Current.AutomationId -match '^(sidebar|chat|projects)\.' -or (!$_.Current.IsOffscreen -and $_.Current.Name) } |
             Select-Object -First 100 |
-            ForEach-Object { Write-Output "UI: $($_.Current.AutomationId); offscreen=$($_.Current.IsOffscreen); $($_.Current.Name)" }
+            ForEach-Object { Write-Host "UI: $($_.Current.AutomationId); offscreen=$($_.Current.IsOffscreen); $($_.Current.Name)" }
         throw "Production page did not render '$Id'"
     }
     # Exercise real pages, including the task board's reusable composer controls.

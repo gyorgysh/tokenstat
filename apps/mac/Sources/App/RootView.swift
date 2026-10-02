@@ -2762,6 +2762,9 @@ struct RootView: View {
                     isOverlayVisible = true
                     overlayHeldByPress = true
                 }
+            }, onSignIn: {
+                handle(.global(.account))
+                account.signIn()
             })
         case .global(.account):
             AccountView(model: account)

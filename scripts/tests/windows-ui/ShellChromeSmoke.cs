@@ -23,6 +23,13 @@ internal static class ShellChromeSmoke
 
     internal static async Task Run(StackPanel host)
     {
+        var removed = FriendlyError.From("remote reach registration failed (403 Forbidden): {\"error\":\"machine_unlinked\"}");
+        if (!removed.RequiresSignIn || removed.OpensPlans || removed.ActionIcon != ActionIcon.SignIn)
+            throw new Exception("An unlinked device must offer fresh sign-in, rather than retrying or changing plans");
+        var connecting = FriendlyError.From("the connection credential was refused");
+        if (connecting.RequiresSignIn || connecting.ActionIcon != ActionIcon.Refresh)
+            throw new Exception("A reconnecting credential must retain automatic recovery");
+        Program.Log("PASS: removed devices require sign-in and transient tunnel credentials retain retry");
         var setup = ActionIconGlyph.Button("Setup", ActionIcon.Settings, (_, _) => { });
         if (Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(setup) != "Setup")
             throw new Exception("Icon-and-text actions must expose their label to accessibility and automation");

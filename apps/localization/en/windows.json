@@ -542,7 +542,7 @@
   "windows.friendlyerror.helper_is_out_of_date.ff2cd175": "Helper is out of date",
   "windows.friendlyerror.it_did_not_answer.4f030967": "It did not answer",
   "windows.friendlyerror.it_has_not_been_let_in_yet_unlock_the_vaul.0e352acf": "It has not been let in yet. Unlock the vault here to give this device its copy of the key.",
-  "windows.friendlyerror.it_has_to_be_awake_with_tokenstat_running.73405e61": "It has to be awake with tokenstat running, and set up for remote reach. If this worked before, wake it and try again. If it never worked, on that computer open Devices and turn on \"Reach devices from anywhere\". Until that is on, it never tells the relay where it is.",
+  "windows.friendlyerror.it_has_to_be_awake_with_tokenstat_running.73405e61": "It has to be awake with tokenstat running, and set up for remote reach. If this worked before, wake it and try again. If it never worked, on that computer open Devices and turn on \"Enable remote access\". Until that is on, it never tells the relay where it is.",
   "windows.friendlyerror.manage_devices.3511575c": "Manage devices",
   "windows.friendlyerror.no_connection.c9e1a200": "No connection",
   "windows.friendlyerror.not_on_this_plan.92dff92e": "Not on this plan",
@@ -1004,7 +1004,6 @@
   "windows.machinespage.remote_is_on_patron.d25dea13": "Remote is on Patron",
   "windows.machinespage.remote_reach_is_off.701869a6": "Remote reach is off.",
   "windows.machinespage.remote_reach_is_on_but_the_tunnel_has_not.024544f1": "Remote reach is on, but the tunnel has not connected yet. It retries automatically.",
-  "windows.machinespage.remote_reach_is_on_but_the_tunnel_is_not_c.c73ccbbf": "Remote reach is on, but the tunnel is not connected: {0}",
   "windows.machinespage.remote_reach_is_on_direct_connections_are.f9aa785a": "Remote reach is on. Direct connections are preferred when available.",
   "windows.machinespage.remote_reach_needs_a_signed_in_patron_acco.7f190960": "Remote reach needs a signed-in Patron account.",
   "windows.machinespage.remove_from_account.6bfa319e": "Remove from account",
@@ -2142,5 +2141,7 @@
   "windows.workspacetabspage_companion.browser_beside_chat.84f3340a": "Browser beside chat",
   "windows.workspacetabspage_companion.close_companion_pane.319641bf": "Close companion pane",
   "windows.workspacetabspage_companion.terminal.e0926fda": "Terminal",
-  "windows.workspacetabspage_companion.terminal_beside_chat.40991a3f": "Terminal beside chat"
+  "windows.workspacetabspage_companion.terminal_beside_chat.40991a3f": "Terminal beside chat",
+  "windows.friendlyerror.machine_unlinked": "This computer was removed from your account. Sign in again on this computer to reconnect it.",
+  "windows.machinespage.access_tab": "Access"
 }
