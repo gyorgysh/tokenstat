@@ -77,7 +77,10 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -638,6 +641,7 @@ private fun SecurityKeyRow(
 fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> Unit)? = null) {
     val colors = LocalTsColors.current
     val git = folder["git"] as? JsonObject
+    var actionsOpen by remember(folder.str("id"), folder.str("path")) { mutableStateOf(false) }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.s),
@@ -696,8 +700,19 @@ fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> 
             }
         }
         if (onRename != null) {
-            androidx.compose.material3.IconButton(onClick = onRename) {
-                Icon(ai.tokenstat.tokenstat.ui.components.ActionIcon.Edit.vector, L10n.text("android.hostworkspaces.rename_project.2a0478ee"), tint = colors.textTertiary)
+            Box {
+                IconButton(onClick = { actionsOpen = true }) {
+                    Icon(ActionIcon.More.vector, L10n.text("android.sshrows.more_actions.f8d46c25"), tint = colors.textTertiary)
+                }
+                DropdownMenu(expanded = actionsOpen, onDismissRequest = { actionsOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(L10n.text("android.hostworkspaces.rename_project.2a0478ee")) },
+                        onClick = {
+                            actionsOpen = false
+                            onRename()
+                        },
+                    )
+                }
             }
         }
         Icon(Icons.Default.ChevronRight, null, tint = colors.textTertiary, modifier = Modifier.size(12.dp))

@@ -6,9 +6,11 @@ import ai.tokenstat.tokenstat.ui.localization.L10n
 import ai.tokenstat.tokenstat.AppViewModel
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -86,6 +88,18 @@ fun orderVaultRecords(records: List<JsonObject>, localFolderIds: Set<String>): L
 
 data class VaultSyncResult(val changed: Boolean, val error: String?, val vaultError: String?)
 
+private class VaultSyncAccess(model: AppViewModel, isCurrentOwner: () -> Boolean) {
+    val guard = VaultOperationGuard(isCurrentOwner)
+    private val model = model
+
+    suspend fun core(method: String, params: JsonObject): JsonElement =
+        guard.run { model.core(method, params) }
+
+    suspend fun <T> secret(operation: () -> T): T = guard.run {
+        withContext(Dispatchers.IO) { guard.run { operation() } }
+    }
+}
+
 object SshVaultSync {
     /// Both directions, in the one order that converges: the pull answers
     /// with what the vault holds, and everything here that is not in that
@@ -102,14 +116,18 @@ object SshVaultSync {
         snippets: List<JsonObject>,
         folders: List<JsonObject>,
         asked: Boolean,
+        isCurrentOwner: () -> Boolean,
     ): VaultSyncResult {
+        val access = VaultSyncAccess(model, isCurrentOwner)
+        access.guard.check()
         val records = try {
-            val answer = model.core(
+            val answer = access.core(
                 "ssh.vault.record.list",
                 buildJsonObject { put("recovery", ""); put("tier", tier) },
             ) as? JsonObject
             (answer?.get("records") as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             return VaultSyncResult(false, null, if (asked) e.message else null)
         }
         // Every id the vault holds, decodable or not: pushing over an
@@ -123,8 +141,9 @@ object SshVaultSync {
             val id = record.optStr("id") ?: continue
             if (record.optBool("deleted") == true) {
                 try {
-                    if (applyDeletion(model, context, id, keys)) changed = true
+                    if (applyDeletion(access, context, id, keys)) changed = true
                 } catch (e: Exception) {
+                    if (e is CancellationException) throw e
                     error = e.message
                 }
                 continue
@@ -139,10 +158,10 @@ object SshVaultSync {
                     val local = hosts.firstOrNull { it.optStr("id") == host.optStr("id") }
                     when (vaultVerdict(host.optLong("updatedMs") ?: 0L, local?.optLong("updatedMs"))) {
                         VaultVerdict.TAKE_REMOTE -> {
-                            applySave(model, "ssh.host.save", host); changed = true
+                            applySave(access, "ssh.host.save", host); changed = true
                         }
                         VaultVerdict.PUSH_LOCAL -> {
-                            if (local != null) mirror(model, tier, "host:${local.optStr("id")}", "host", local)
+                            if (local != null) mirror(access, tier, "host:${local.optStr("id")}", "host", local)
                                 ?.let { vaultError = it }
                         }
                         VaultVerdict.SAME -> {}
@@ -151,10 +170,10 @@ object SshVaultSync {
                     val local = folders.firstOrNull { it.optStr("id") == folder.optStr("id") }
                     when (vaultVerdict(folder.optLong("updatedMs") ?: 0L, local?.optLong("updatedMs"))) {
                         VaultVerdict.TAKE_REMOTE -> {
-                            applySave(model, "ssh.folder.save", folder); changed = true
+                            applySave(access, "ssh.folder.save", folder); changed = true
                         }
                         VaultVerdict.PUSH_LOCAL -> {
-                            if (local != null) mirror(model, tier, "folder:${local.optStr("id")}", "folder", local)
+                            if (local != null) mirror(access, tier, "folder:${local.optStr("id")}", "folder", local)
                                 ?.let { vaultError = it }
                         }
                         VaultVerdict.SAME -> {}
@@ -163,18 +182,19 @@ object SshVaultSync {
                     val local = snippets.firstOrNull { it.optStr("id") == snippet.optStr("id") }
                     when (vaultVerdict(snippet.optLong("updatedMs") ?: 0L, local?.optLong("updatedMs"))) {
                         VaultVerdict.TAKE_REMOTE -> {
-                            applySave(model, "ssh.snippet.save", snippet); changed = true
+                            applySave(access, "ssh.snippet.save", snippet); changed = true
                         }
                         VaultVerdict.PUSH_LOCAL -> {
-                            if (local != null) mirror(model, tier, "snippet:${local.optStr("id")}", "snippet", local)
+                            if (local != null) mirror(access, tier, "snippet:${local.optStr("id")}", "snippet", local)
                                 ?.let { vaultError = it }
                         }
                         VaultVerdict.SAME -> {}
                     }
                 } else if (key != null) {
-                    if (applyKey(model, context, tier, key, keys)) changed = true
+                    if (applyKey(access, context, tier, key, keys)) changed = true
                 }
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 error = e.message
             }
         }
@@ -184,42 +204,43 @@ object SshVaultSync {
         for (folder in folders) {
             val id = folder.optStr("id") ?: continue
             if (!known.contains("folder:$id")) {
-                mirror(model, tier, "folder:$id", "folder", folder)?.let { vaultError = it }
+                mirror(access, tier, "folder:$id", "folder", folder)?.let { vaultError = it }
             }
         }
         for (host in hosts) {
             val id = host.optStr("id") ?: continue
             if (!known.contains("host:$id")) {
-                mirror(model, tier, "host:$id", "host", host)?.let { vaultError = it }
+                mirror(access, tier, "host:$id", "host", host)?.let { vaultError = it }
             }
         }
         for (snippet in snippets) {
             val id = snippet.optStr("id") ?: continue
             if (!known.contains("snippet:$id")) {
-                mirror(model, tier, "snippet:$id", "snippet", snippet)?.let { vaultError = it }
+                mirror(access, tier, "snippet:$id", "snippet", snippet)?.let { vaultError = it }
             }
         }
         for (key in keys) {
             val id = key.optStr("id") ?: continue
             if (!known.contains("key:$id")) {
-                pushMissingKey(model, context, tier, key)?.let { vaultError = it }
+                pushMissingKey(access, context, tier, key)?.let { vaultError = it }
             }
         }
+        access.guard.check()
         return VaultSyncResult(changed, error, vaultError)
     }
 
     /// Write a record that arrived from the vault, keeping the timestamp it
     /// came with so the next verdict compares revisions, not arrivals.
-    private suspend fun applySave(model: AppViewModel, method: String, record: JsonObject) {
+    private suspend fun applySave(access: VaultSyncAccess, method: String, record: JsonObject) {
         val stamped = JsonObject(record + ("keepUpdatedMs" to JsonPrimitive(true)))
-        model.core(method, stamped)
+        access.core(method, stamped)
     }
 
     /// A key is the one record where an equal stamp still means work: the
     /// row can be here while the private half is not, which is what a
     /// freshly enrolled device looks like.
     private suspend fun applyKey(
-        model: AppViewModel,
+        access: VaultSyncAccess,
         context: Context,
         tier: String,
         remote: JsonObject,
@@ -228,20 +249,20 @@ object SshVaultSync {
         val id = remote.optStr("id") ?: return false
         val local = localKeys.firstOrNull { it.optStr("id") == id }
         val havePrivate = local?.optStr("secretRef")?.let {
-            withContext(Dispatchers.IO) { SshSecrets.get(context, it) }
+            access.secret { SshSecrets.get(context, it) }
         } != null
         when (vaultVerdict(remote.optLong("updatedMs") ?: 0L, local?.optLong("updatedMs"))) {
             VaultVerdict.TAKE_REMOTE -> {}
             VaultVerdict.SAME -> if (havePrivate) return false
             VaultVerdict.PUSH_LOCAL -> {
-                if (local != null) pushMissingKey(model, context, tier, local)
+                if (local != null) pushMissingKey(access, context, tier, local)
                 return false
             }
         }
         val pem = remote.optStr("privateKey") ?: return false
         val ref = "android:$id"
-        withContext(Dispatchers.IO) { SshSecrets.put(context, ref, pem) }
-        model.core(
+        access.secret { SshSecrets.put(context, ref, pem) }
+        access.core(
             "ssh.key.save",
             buildJsonObject {
                 put("id", id)
@@ -261,14 +282,14 @@ object SshVaultSync {
     /// no private half on this device is skipped, not pushed as a row
     /// nothing can connect with.
     private suspend fun pushMissingKey(
-        model: AppViewModel,
+        access: VaultSyncAccess,
         context: Context,
         tier: String,
         local: JsonObject,
     ): String? {
         val id = local.optStr("id") ?: return null
         val material = local.optStr("secretRef")?.let {
-            withContext(Dispatchers.IO) { SshSecrets.get(context, it) }
+            access.secret { SshSecrets.get(context, it) }
         } ?: return null
         val synced = buildJsonObject {
             put("id", id)
@@ -279,17 +300,17 @@ object SshVaultSync {
             put("hardwareBacked", local.optBool("hardwareBacked") == true)
             put("updatedMs", local.optLong("updatedMs") ?: 0L)
         }
-        return mirror(model, tier, "key:$id", "key", synced)
+        return mirror(access, tier, "key:$id", "key", synced)
     }
 
     /// Copy a record into the encrypted vault for the other devices.
     /// Returns the failure to report, if any: every caller has already
     /// written the record locally by the time this runs, so a failure here
     /// must not turn a save that worked into one that looks like it did not.
-    private suspend fun mirror(model: AppViewModel, tier: String, id: String, kind: String, payload: JsonObject): String? {
+    private suspend fun mirror(access: VaultSyncAccess, tier: String, id: String, kind: String, payload: JsonObject): String? {
         val plaintext = buildJsonObject { put("kind", kind); put(kind, payload) }.toString()
         return try {
-            model.core(
+            access.core(
                 "ssh.vault.record.put",
                 buildJsonObject {
                     put("id", id); put("plaintext", plaintext); put("recovery", ""); put("tier", tier)
@@ -297,26 +318,27 @@ object SshVaultSync {
             )
             null
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             e.message
         }
     }
 
     private suspend fun applyDeletion(
-        model: AppViewModel,
+        access: VaultSyncAccess,
         context: Context,
         id: String,
         localKeys: List<JsonObject>,
     ): Boolean {
         when {
-            id.startsWith("host:") -> model.core("ssh.host.delete", buildJsonObject { put("id", id.removePrefix("host:")) })
-            id.startsWith("folder:") -> model.core("ssh.folder.delete", buildJsonObject { put("id", id.removePrefix("folder:")) })
-            id.startsWith("snippet:") -> model.core("ssh.snippet.delete", buildJsonObject { put("id", id.removePrefix("snippet:")) })
+            id.startsWith("host:") -> access.core("ssh.host.delete", buildJsonObject { put("id", id.removePrefix("host:")) })
+            id.startsWith("folder:") -> access.core("ssh.folder.delete", buildJsonObject { put("id", id.removePrefix("folder:")) })
+            id.startsWith("snippet:") -> access.core("ssh.snippet.delete", buildJsonObject { put("id", id.removePrefix("snippet:")) })
             id.startsWith("key:") -> {
                 val keyId = id.removePrefix("key:")
                 localKeys.firstOrNull { it.optStr("id") == keyId }?.optStr("secretRef")?.let {
-                    withContext(Dispatchers.IO) { SshSecrets.delete(context, it) }
+                    access.secret { SshSecrets.delete(context, it) }
                 }
-                model.core("ssh.key.delete", buildJsonObject { put("id", keyId) })
+                access.core("ssh.key.delete", buildJsonObject { put("id", keyId) })
             }
             else -> return false
         }

@@ -4,8 +4,6 @@ package ai.tokenstat.tokenstat.ui.ssh
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
 import android.content.Context
-import ai.tokenstat.tokenstat.ui.components.Banner
-import ai.tokenstat.tokenstat.ui.components.BannerSeverity
 import ai.tokenstat.tokenstat.ui.components.TsCard
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
@@ -13,11 +11,10 @@ import ai.tokenstat.tokenstat.ui.theme.Space
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -90,8 +87,11 @@ data class VaultLockSnapshot(
 object VaultLockCache {
     private const val STORE = "ai.tokenstat.ssh.vaultlock.v1"
 
-    fun read(context: Context): VaultLockSnapshot? {
+    fun read(context: Context, owner: String): VaultLockSnapshot? {
+        if (owner.isBlank()) return null
         val prefs = context.getSharedPreferences(STORE, Context.MODE_PRIVATE)
+        // The old global cache has no owner and cannot be attributed safely.
+        if (prefs.getString("owner", null) != owner) return null
         if (!prefs.contains("created")) return null
         return VaultLockSnapshot(
             created = prefs.getBoolean("created", false),
@@ -103,9 +103,10 @@ object VaultLockCache {
 
     /// Store a fresh answer. Null (no answer, or the account unreachable)
     /// keeps the cache: a failed read must not wipe what is known.
-    fun write(context: Context, snapshot: VaultLockSnapshot?) {
-        if (snapshot == null) return
+    fun write(context: Context, owner: String, snapshot: VaultLockSnapshot?) {
+        if (snapshot == null || owner.isBlank()) return
         context.getSharedPreferences(STORE, Context.MODE_PRIVATE).edit()
+            .putString("owner", owner)
             .putBoolean("created", snapshot.created)
             .putBoolean("locked", snapshot.locked)
             .putBoolean("enrolled", snapshot.enrolled)
@@ -121,6 +122,7 @@ object VaultLockCache {
 /// the row resolves cached versus live itself, so callers do not branch.
 @Composable
 fun VaultLockRow(
+    owner: String,
     status: JsonObject?,
     canWrite: Boolean,
     unconfirmedRecovery: Boolean,
@@ -129,16 +131,16 @@ fun VaultLockRow(
 ) {
     val colors = LocalTsColors.current
     val context = LocalContext.current
-    val cached = remember { VaultLockCache.read(context) }
+    val cached = remember(owner) { VaultLockCache.read(context, owner) }
     val live = remember(status) { VaultLockSnapshot.of(status) }
     if (live != null) {
-        LaunchedEffect(live) { VaultLockCache.write(context, live) }
+        LaunchedEffect(owner, live) { VaultLockCache.write(context, owner, live) }
     }
     // The live answer wins the moment it exists. Until then the cache says
     // what the vault was, which beats a sentence that will be rewritten.
     val shown = live ?: cached
     val checking = live == null
-    TsCard(modifier = modifier.clickable(onClick = onOpen)) {
+    TsCard(modifier = modifier.heightIn(min = 48.dp).clickable(onClick = onOpen)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Icon(
                 Icons.Default.EnhancedEncryption,
@@ -155,6 +157,7 @@ fun VaultLockRow(
                 modifier = Modifier.weight(1f),
             )
             when {
+                unconfirmedRecovery -> Unit
                 shown == null -> Text(
                     L10n.text("android.vaultlockcache.checking.a0ec28fd"),
                     style = TsType.caption,
@@ -169,18 +172,11 @@ fun VaultLockRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (checking && shown != null) {
+            if (checking && shown != null && !unconfirmedRecovery) {
                 Spacer(Modifier.width(Space.xs))
                 Text(L10n.text("android.vaultlockcache.checking.a0ec28fd"), style = TsType.caption, color = colors.textTertiary)
             }
             Icon(Icons.Default.ChevronRight, contentDescription = null, tint = colors.textTertiary)
-        }
-        if (unconfirmedRecovery) {
-            Spacer(Modifier.height(Space.s))
-            Banner(
-                L10n.text("android.vaultlockcache.the_code_has_been_generated_but_not_writte.e121ffb4"),
-                BannerSeverity.WARNING,
-            )
         }
     }
 }

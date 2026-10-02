@@ -3,10 +3,25 @@ package ai.tokenstat.tokenstat.ui.ssh
 
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
-import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
+import ai.tokenstat.tokenstat.ui.components.TsType
+import ai.tokenstat.tokenstat.ui.components.cardRadiusDp
+import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
+import ai.tokenstat.tokenstat.ui.theme.Space
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.dp
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -74,6 +89,18 @@ fun TunnelState.message(): String? = when (this) {
 @Composable
 fun TunnelStatusBanner(status: JsonObject?, modifier: Modifier = Modifier) {
     tunnelStateOf(status).message()?.let { text ->
-        Banner(text, BannerSeverity.WARNING, modifier = modifier)
+        val colors = LocalTsColors.current
+        Row(
+            modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(cardRadiusDp))
+                .background(colors.warning.copy(alpha = 0.12f))
+                .padding(Space.s),
+            horizontalArrangement = Arrangement.spacedBy(Space.s),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(BannerSeverity.WARNING.symbol, null, tint = colors.warning, modifier = Modifier.size(16.dp))
+            Text(text, style = TsType.footnote, color = colors.warning, modifier = Modifier.weight(1f))
+        }
     }
 }

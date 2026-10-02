@@ -185,7 +185,6 @@ import ai.tokenstat.tokenstat.ui.ssh.SshKeyRow
 import ai.tokenstat.tokenstat.ui.ssh.SshOpenSessionsSection
 import ai.tokenstat.tokenstat.ui.ssh.SshSessionEntry
 import ai.tokenstat.tokenstat.ui.ssh.SshSnippetRow
-import ai.tokenstat.tokenstat.ui.ssh.TunnelStatusBanner
 import ai.tokenstat.tokenstat.ui.ssh.VaultLockRow
 import ai.tokenstat.tokenstat.ui.ssh.startupCommands
 import ai.tokenstat.tokenstat.ui.marks.EmptyArt
@@ -2081,6 +2080,9 @@ private fun VaultDeleteDialog(
     model: AppViewModel,
     tier: String,
     localKeys: List<JsonObject>,
+    available: Boolean,
+    isCurrentOwner: () -> Boolean,
+    onDelete: suspend () -> Unit,
     onDismiss: () -> Unit,
     onDeleted: () -> Unit,
 ) {
@@ -2090,37 +2092,46 @@ private fun VaultDeleteDialog(
     var working by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var stranded by remember { mutableStateOf<List<String>?>(null) }
+    var keyCheckFailed by remember { mutableStateOf(false) }
+    val ownerGuard = remember { ai.tokenstat.tokenstat.ui.ssh.VaultOperationGuard(isCurrentOwner) }
     LaunchedEffect(Unit) {
         // Keys whose private half only ever lived in the vault. Nothing
         // recovers these, so they are named before the button, not after.
         runCatching {
-            val answer = model.core(
-                "ssh.vault.record.list",
-                buildJsonObject { put("recovery", ""); put("tier", tier) },
-            ) as? JsonObject
+            val answer = ownerGuard.run {
+                model.core("ssh.vault.record.list", buildJsonObject { put("recovery", ""); put("tier", tier) })
+            } as? JsonObject
             val records = (answer?.get("records") as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
             val names = mutableListOf<String>()
             for (record in records) {
+                ownerGuard.check()
                 val key = vaultEnvelopeOf(record)?.get("key") as? JsonObject ?: continue
                 val id = key.string("id") ?: continue
                 val local = localKeys.firstOrNull { it.string("id") == id }
                 val hasLocal = local?.string("secretRef")?.let {
-                    withContext(Dispatchers.IO) { SshSecrets.get(context, it) }
+                    ownerGuard.run { withContext(Dispatchers.IO) { ownerGuard.run { SshSecrets.get(context, it) } } }
                 } != null
-                val hasPulled = withContext(Dispatchers.IO) { SshSecrets.get(context, "android:$id") } != null
+                val hasPulled = ownerGuard.run {
+                    withContext(Dispatchers.IO) { ownerGuard.run { SshSecrets.get(context, "android:$id") } }
+                } != null
                 if (!hasLocal && !hasPulled) {
                     names.add(key.string("label")?.takeIf { it.isNotBlank() } ?: id)
                 }
             }
             names
-        }.onSuccess { stranded = it }.onFailure { stranded = emptyList() }
+        }.onSuccess { if (isCurrentOwner()) stranded = it }.onFailure {
+            if (it is kotlinx.coroutines.CancellationException) throw it
+            if (isCurrentOwner()) { keyCheckFailed = true; stranded = emptyList() }
+        }
     }
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!working) onDismiss() },
         title = { Text(L10n.text("android.tokenstatapp.delete_the_vault_and_start_over.e49d06f1")) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(L10n.text("android.tokenstatapp.for_when_the_password_is_forgotten_and_no.fd06b159"))
+                if (stranded == null) Text(L10n.text("android.vaultmanagement.checking_keys"), style = TsType.caption)
+                if (keyCheckFailed) Banner(L10n.text("android.vaultmanagement.key_loss_unavailable"), BannerSeverity.WARNING)
                 if (stranded?.isNotEmpty() == true) {
                     Text(L10n.text("android.tokenstatapp.nothing_recovers_these_keys.46273eb6"), fontWeight = FontWeight.SemiBold)
                     stranded!!.forEach { Text("· $it") }
@@ -2137,18 +2148,26 @@ private fun VaultDeleteDialog(
         },
         confirmButton = {
             Button(
-                enabled = typed.trim().uppercase() == "DELETE" && !working,
+                enabled = typed.trim().uppercase() == "DELETE" && stranded != null && available && !working && isCurrentOwner(),
                 onClick = {
+                    if (working || !available || !isCurrentOwner()) return@Button
                     working = true
                     scope.launch {
-                        runCatching { model.core("ssh.vault.reset") }
-                            .onSuccess { onDeleted() }
-                            .onFailure { error = it.message; working = false }
+                        try {
+                            runCatching { onDelete() }
+                                .onSuccess { if (isCurrentOwner()) onDeleted() }
+                                .onFailure {
+                                    if (it is kotlinx.coroutines.CancellationException) throw it
+                                    if (isCurrentOwner()) error = it.message
+                                }
+                        } finally {
+                            working = false
+                        }
                     }
                 },
             ) { Text(if (working) L10n.text("android.tokenstatapp.deleting.43b5894c") else L10n.text("android.tokenstatapp.delete_vault.9fd7de76")) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(L10n.text("common.cancel")) } },
+        dismissButton = { TextButton(enabled = !working, onClick = onDismiss) { Text(L10n.text("common.cancel")) } },
     )
 }
 
@@ -2160,6 +2179,22 @@ private fun AndroidSSHScreen(
     onPlans: () -> Unit,
     onBack: (() -> Unit)? = null,
     tabBarScroll: NestedScrollConnection? = null,
+) {
+    val accountOwner = HomeStores.pinIdentity(state.account)
+    key(accountOwner) {
+        AndroidSSHScreenForAccount(model, state, onPlans, onBack, tabBarScroll, accountOwner)
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun AndroidSSHScreenForAccount(
+    model: AppViewModel,
+    state: ClientState,
+    onPlans: () -> Unit,
+    onBack: (() -> Unit)?,
+    tabBarScroll: NestedScrollConnection?,
+    accountOwner: String,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -2183,15 +2218,25 @@ private fun AndroidSSHScreen(
     val openSessions by connections.sessions.collectAsState()
     val selectedSessionId by connections.selectedId.collectAsState()
     var startupBySession by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
+    var vaultOpen by remember { mutableStateOf(false) }
     var vaultSetup by remember { mutableStateOf(false) }
+    var vaultWorking by remember { mutableStateOf(false) }
+    var vaultSyncing by remember { mutableStateOf(false) }
+    var vaultSyncCount by remember { mutableIntStateOf(0) }
     var recoveryWords by remember { mutableStateOf<String?>(null) }
+    var recoveryOrigin by remember { mutableStateOf<ai.tokenstat.tokenstat.ui.ssh.VaultRecoveryOrigin?>(null) }
     var showingRecovery by remember { mutableStateOf(false) }
     var confirmDrop by remember { mutableStateOf(false) }
     var editHost by remember { mutableStateOf<JsonObject?>(null) }
     var editSnippet by remember { mutableStateOf<JsonObject?>(null) }
     var editKey by remember { mutableStateOf<JsonObject?>(null) }
     val vaultAllowed = state.vaultAllowed
+    val canWriteVault = state.account?.string("tier")?.lowercase() in listOf("supporter", "patron", "legend")
     val clipboard = LocalClipboard.current
+    fun currentVaultOwner() = accountOwner.isNotEmpty() && accountOwner == HomeStores.pinIdentity(model.state.value.account)
+    val vaultOwnerGuard = remember(accountOwner) { ai.tokenstat.tokenstat.ui.ssh.VaultOperationGuard(::currentVaultOwner) }
+    suspend fun ownedCore(method: String, params: JsonObject = buildJsonObject {}): JsonElement =
+        vaultOwnerGuard.run { model.core(method, params) }
     fun copyText(label: String, text: String) {
         scope.launch {
             clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(label, text)))
@@ -2199,45 +2244,95 @@ private fun AndroidSSHScreen(
     }
 
     suspend fun loadLists() {
-        hosts = model.core("ssh.host.list") as? JsonArray ?: JsonArray(emptyList())
-        keys = model.core("ssh.key.list") as? JsonArray ?: JsonArray(emptyList())
-        snippets = model.core("ssh.snippet.list") as? JsonArray ?: JsonArray(emptyList())
-        folders = model.core("ssh.folder.list") as? JsonArray ?: JsonArray(emptyList())
-        if (vaultAllowed) vault = model.core("ssh.vault.status") as? JsonObject
+        val freshHosts = ownedCore("ssh.host.list") as? JsonArray ?: JsonArray(emptyList())
+        val freshKeys = ownedCore("ssh.key.list") as? JsonArray ?: JsonArray(emptyList())
+        val freshSnippets = ownedCore("ssh.snippet.list") as? JsonArray ?: JsonArray(emptyList())
+        val freshFolders = ownedCore("ssh.folder.list") as? JsonArray ?: JsonArray(emptyList())
+        val freshVault = if (vaultAllowed) ownedCore("ssh.vault.status") as? JsonObject else null
+        vaultOwnerGuard.check()
+        hosts = freshHosts
+        keys = freshKeys
+        snippets = freshSnippets
+        folders = freshFolders
+        vault = freshVault
     }
 
     suspend fun load(syncAsked: Boolean = false) {
-        runCatching { loadLists() }.onFailure { error = it.message; return }
+        runCatching { loadLists() }.onFailure {
+            if (it is kotlinx.coroutines.CancellationException) throw it
+            if (currentVaultOwner()) error = it.message
+            return
+        }
         // An unlocked vault syncs on every arrival, like the iOS library:
         // without the pull a second device unlocks into empty lists.
         if (!vaultAllowed || vault?.bool("created") != true || vault?.bool("locked") == true) return
+        // A list reload from another library action cannot start a sync
+        // while a vault mutation is reserved. Setup's own follow-up may.
+        if (vaultWorking && !syncAsked) return
         val tier = state.account?.string("tier")?.lowercase() ?: "legend"
-        val result = SshVaultSync.sync(
-            model = model,
-            context = context,
-            tier = tier,
-            hosts = hosts.filterIsInstance<JsonObject>(),
-            keys = keys.filterIsInstance<JsonObject>(),
-            snippets = snippets.filterIsInstance<JsonObject>(),
-            folders = folders.filterIsInstance<JsonObject>(),
-            asked = syncAsked,
-        )
-        result.error?.let { error = it }
-        vaultError = result.vaultError
-        if (result.changed) runCatching { loadLists() }.onFailure { error = it.message }
+        vaultSyncCount += 1
+        try {
+            val result = SshVaultSync.sync(
+                model = model,
+                context = context,
+                tier = tier,
+                hosts = hosts.filterIsInstance<JsonObject>(),
+                keys = keys.filterIsInstance<JsonObject>(),
+                snippets = snippets.filterIsInstance<JsonObject>(),
+                folders = folders.filterIsInstance<JsonObject>(),
+                asked = syncAsked,
+                isCurrentOwner = ::currentVaultOwner,
+            )
+            vaultOwnerGuard.check()
+            result.error?.let { error = it }
+            vaultError = result.vaultError
+            if (result.changed) runCatching { loadLists() }.onFailure {
+                if (it is kotlinx.coroutines.CancellationException) throw it
+                error = it.message
+            }
+            if (!result.changed) vault = ownedCore("ssh.vault.status") as? JsonObject
+        } finally {
+            vaultSyncCount -= 1
+        }
     }
 
     // Discard a vault that was just created here and never confirmed. No
     // typing: there is nothing in it no other device could rebuild.
     suspend fun dropFreshVault() {
-        runCatching { model.core("ssh.vault.reset") }
-            .onSuccess {
-                recoveryWords = null
-                showingRecovery = false
-                vaultSetup = false
-                load()
+        vaultOwnerGuard.check()
+        if (vaultWorking || vaultSyncing || vaultSyncCount > 0 || recoveryWords == null || recoveryOrigin?.allowsDiscard != true) return
+        vaultWorking = true
+        try {
+            runCatching { ownedCore("ssh.vault.reset") }
+                .onSuccess {
+                    recoveryWords = null
+                    recoveryOrigin = null
+                    showingRecovery = false
+                    vaultSetup = false
+                    load()
+                }
+                .onFailure {
+                    if (it is kotlinx.coroutines.CancellationException) throw it
+                    if (currentVaultOwner()) error = it.message
+                }
+        } finally {
+            vaultWorking = false
+        }
+    }
+    fun performVaultOperation(operation: suspend () -> Unit) {
+        if (!currentVaultOwner() || vaultWorking || vaultSyncing || vaultSyncCount > 0) return
+        vaultWorking = true
+        error = null
+        scope.launch {
+            try {
+                runCatching { vaultOwnerGuard.check(); operation(); vaultOwnerGuard.check() }.onFailure {
+                    if (it is kotlinx.coroutines.CancellationException) throw it
+                    if (currentVaultOwner()) error = it.message
+                }
+            } finally {
+                vaultWorking = false
             }
-            .onFailure { error = it.message }
+        }
     }
     LaunchedEffect(Unit) {
         load()
@@ -2280,50 +2375,13 @@ private fun AndroidSSHScreen(
                 VaultUpgradeCard(onPlans)
             } else {
                 Spacer(Modifier.height(10.dp))
-                // The row shows the last-known state at once; the actions
-                // stay visible until the vault needs nothing, then tuck away
-                // behind a tap.
-                val vaultNeedsAction = recoveryWords != null ||
-                    vault?.bool("created") != true ||
-                    vault?.bool("locked") == true ||
-                    vault?.bool("enrolled") != true
-                // What the comment above always meant: open while the vault
-                // wants something, behind the row once it does not. It was
-                // hard-coded open, so a vault with nothing to do still put
-                // three buttons under its own row.
-                var vaultActions by remember(vaultNeedsAction) { mutableStateOf(vaultNeedsAction) }
                 VaultLockRow(
+                    owner = accountOwner,
                     status = vault,
-                    canWrite = state.account?.string("tier")?.lowercase() in listOf("supporter", "patron", "legend"),
+                    canWrite = canWriteVault,
                     unconfirmedRecovery = recoveryWords != null,
-                    onOpen = { vaultActions = !vaultActions },
+                    onOpen = { vaultOpen = true },
                 )
-                if (vaultActions && (vaultNeedsAction || vault?.bool("created") == true)) {
-                    Spacer(Modifier.height(10.dp))
-                    TsCard {
-                        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (recoveryWords != null) {
-                                    TsAccentButton(label = L10n.text("android.tokenstatapp.show_code.c9eab29c"), small = true, onClick = { showingRecovery = true })
-                                    TsSecondaryButton(label = L10n.text("android.tokenstatapp.discard_vault.cea8fd68"), small = true, onClick = { scope.launch { dropFreshVault() } })
-                                } else if (vault?.bool("created") != true) {
-                                    TsAccentButton(label = L10n.text("android.tokenstatapp.set_up.4da10f1f"), small = true, onClick = { vaultSetup = true })
-                                } else if (vault?.bool("locked") == true || vault?.bool("enrolled") != true) {
-                                    TsAccentButton(label = L10n.text("android.tokenstatapp.unlock.4ac709aa"), small = true, onClick = { vaultSetup = true })
-                                }
-                            }
-                            // Sync and delete stay one tap away on a vault
-                            // that exists: the typed confirmation dialog still
-                            // carries the destroy-everywhere warning.
-                            if (vault?.bool("created") == true && recoveryWords == null) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    TsSecondaryButton(label = L10n.text("common.sync_now"), small = true, onClick = { scope.launch { load(syncAsked = true) } })
-                                    TsSecondaryButton(label = L10n.text("android.tokenstatapp.delete_vault.9fd7de76"), small = true, onClick = { confirmDrop = true })
-                                }
-                            }
-                        }
-                    }
-                }
                 vaultError?.let {
                     Spacer(Modifier.height(10.dp))
                     Banner(it, BannerSeverity.WARNING)
@@ -2495,6 +2553,37 @@ private fun AndroidSSHScreen(
             }
         }
     }
+    if (vaultOpen && vaultAllowed) ai.tokenstat.tokenstat.ui.ssh.VaultManagementSheet(
+        status = vault,
+        canWrite = canWriteVault,
+        unconfirmedRecovery = recoveryWords != null,
+        busy = vaultWorking,
+        syncing = vaultSyncing || vaultSyncCount > 0,
+        error = error,
+        syncError = vaultError,
+        onDismiss = { vaultOpen = false },
+        onSetup = { vaultSetup = true },
+        onSync = {
+            if (currentVaultOwner() && !vaultWorking && !vaultSyncing && vaultSyncCount == 0) {
+                vaultSyncing = true
+                scope.launch {
+                    try {
+                        runCatching { load(syncAsked = true) }.onFailure {
+                            if (it is kotlinx.coroutines.CancellationException) throw it
+                            if (currentVaultOwner()) error = it.message
+                        }
+                    } finally {
+                        vaultSyncing = false
+                    }
+                }
+            }
+        },
+        onShowRecovery = { showingRecovery = true },
+        onDiscard = if (recoveryOrigin?.allowsDiscard == true) ({ scope.launch { dropFreshVault() }; Unit }) else null,
+        onDelete = { if (currentVaultOwner() && !vaultWorking && !vaultSyncing && vaultSyncCount == 0) confirmDrop = true },
+        onRetry = { performVaultOperation { load() } },
+        onPlans = onPlans,
+    )
     if (addHost) SSHHostDialog(folders = folders, keys = keys, onDismiss = { addHost = false }) { body ->
         scope.launch { runCatching { model.core("ssh.host.save", body); load() }.onFailure { error = it.message }; addHost = false }
     }
@@ -2521,38 +2610,43 @@ private fun AndroidSSHScreen(
     }
     if (vaultSetup) AndroidVaultDialog(
         existing = vault?.bool("created") == true,
+        working = vaultWorking || vaultSyncing || vaultSyncCount > 0,
+        error = error,
         onDismiss = { vaultSetup = false },
         onCreate = { password ->
-            scope.launch {
-                runCatching {
-                    model.core("ssh.vault.create", buildJsonObject { put("password", password) }).jsonObject.string("recovery")!!
-                }.onSuccess { recoveryWords = it; showingRecovery = true; load(syncAsked = true); vaultSetup = false }.onFailure { error = it.message }
+            performVaultOperation {
+                recoveryWords = ownedCore("ssh.vault.create", buildJsonObject { put("password", password) }).jsonObject.string("recovery")!!
+                recoveryOrigin = ai.tokenstat.tokenstat.ui.ssh.VaultRecoveryOrigin.Created
+                showingRecovery = true
+                load(syncAsked = true)
+                vaultSetup = false
             }
         },
         onUnlock = { password ->
-            scope.launch {
-                runCatching {
-                    model.core("ssh.vault.unlock", buildJsonObject {
-                        put("password", password); put("migrate", true)
-                    }).jsonObject.string("recovery")?.let { recoveryWords = it; showingRecovery = true }
-                }.onSuccess { load(syncAsked = true); vaultSetup = false }.onFailure { error = it.message }
+            performVaultOperation {
+                ownedCore("ssh.vault.unlock", buildJsonObject {
+                    put("password", password); put("migrate", true)
+                }).jsonObject.string("recovery")?.let {
+                    recoveryWords = it
+                    recoveryOrigin = ai.tokenstat.tokenstat.ui.ssh.VaultRecoveryOrigin.UnlockMigration
+                    showingRecovery = true
+                }
+                load(syncAsked = true)
+                vaultSetup = false
             }
         },
         onReset = { code, password ->
-            scope.launch {
-                runCatching {
-                    model.core(
-                        "ssh.vault.password.set",
-                        buildJsonObject { put("recovery", code); put("newPassword", password) },
-                    ).jsonObject.string("recovery")
-                }.onSuccess { code ->
-                    if (code != null) {
-                        recoveryWords = code
-                        showingRecovery = true
-                    }
-                    load(syncAsked = true)
-                    vaultSetup = false
-                }.onFailure { error = it.message }
+            performVaultOperation {
+                ownedCore(
+                    "ssh.vault.password.set",
+                    buildJsonObject { put("recovery", code); put("newPassword", password) },
+                ).jsonObject.string("recovery")?.let {
+                    recoveryWords = it
+                    recoveryOrigin = ai.tokenstat.tokenstat.ui.ssh.VaultRecoveryOrigin.PasswordRecovery
+                    showingRecovery = true
+                }
+                load(syncAsked = true)
+                vaultSetup = false
             }
         },
         onDrop = { vaultSetup = false; confirmDrop = true },
@@ -2560,19 +2654,29 @@ private fun AndroidSSHScreen(
     if (showingRecovery) recoveryWords?.let { phrase ->
         RecoveryCodeDialog(
             phrase,
-            onDone = { recoveryWords = null; showingRecovery = false },
+            working = vaultWorking || vaultSyncing || vaultSyncCount > 0,
+            onDone = { recoveryWords = null; recoveryOrigin = null; showingRecovery = false },
             onDismiss = { showingRecovery = false },
-            onDiscard = { showingRecovery = false; scope.launch { dropFreshVault() } },
+            onDiscard = if (recoveryOrigin?.allowsDiscard == true) ({ scope.launch { dropFreshVault() }; Unit }) else null,
         )
     }
     if (confirmDrop) VaultDeleteDialog(
         model = model,
         tier = state.account?.string("tier")?.lowercase() ?: "legend",
         localKeys = keys.filterIsInstance<JsonObject>(),
+        available = !vaultWorking && !vaultSyncing && vaultSyncCount == 0,
+        isCurrentOwner = ::currentVaultOwner,
+        onDelete = {
+            vaultOwnerGuard.check()
+            if (vaultWorking || vaultSyncing || vaultSyncCount > 0) throw kotlinx.coroutines.CancellationException()
+            vaultWorking = true
+            try { ownedCore("ssh.vault.reset"); Unit } finally { vaultWorking = false }
+        },
         onDismiss = { confirmDrop = false },
         onDeleted = {
             confirmDrop = false
             recoveryWords = null
+            recoveryOrigin = null
             showingRecovery = false
             vaultSetup = false
             scope.launch { load() }
@@ -2766,6 +2870,8 @@ private fun SSHSnippetDialog(existing: JsonObject? = null, onDismiss: () -> Unit
 @Composable
 private fun AndroidVaultDialog(
     existing: Boolean,
+    working: Boolean,
+    error: String?,
     onDismiss: () -> Unit,
     onCreate: (String) -> Unit,
     onUnlock: (String) -> Unit,
@@ -2786,10 +2892,11 @@ private fun AndroidVaultDialog(
         password.isNotEmpty()
     }
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!working) onDismiss() },
         title = { Text(if (existing) L10n.text("android.tokenstatapp.unlock_your_vault.67a7b04b") else L10n.text("android.tokenstatapp.create_your_vault.de203ed0")) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                error?.let { Banner(it, BannerSeverity.DANGER) }
                 if (existing && forgot) {
                     Text(L10n.text("android.tokenstatapp.enter_your_recovery_code_and_choose_a_new.42e12740"))
                     OutlinedTextField(recovery, { recovery = it }, label = { Text(L10n.text("android.tokenstatapp.recovery_code.5bda8302")) }, minLines = 2)
@@ -2810,7 +2917,7 @@ private fun AndroidVaultDialog(
         },
         confirmButton = {
             Button(
-                enabled = canSubmit,
+                enabled = canSubmit && !working,
                 onClick = {
                     when {
                         !existing -> onCreate(password)
@@ -2822,15 +2929,15 @@ private fun AndroidVaultDialog(
         },
         dismissButton = {
             Row {
-                if (existing) TextButton(onClick = onDrop) { Text(L10n.text("android.tokenstatapp.delete_vault.9fd7de76")) }
-                TextButton(onClick = onDismiss) { Text(L10n.text("common.cancel")) }
+                if (existing) TextButton(enabled = !working, onClick = onDrop) { Text(L10n.text("android.tokenstatapp.delete_vault.9fd7de76")) }
+                TextButton(enabled = !working, onClick = onDismiss) { Text(L10n.text("common.cancel")) }
             }
         },
     )
 }
 
 @Composable
-private fun RecoveryCodeDialog(phrase: String, onDone: () -> Unit, onDismiss: () -> Unit, onDiscard: () -> Unit) {
+private fun RecoveryCodeDialog(phrase: String, working: Boolean, onDone: () -> Unit, onDismiss: () -> Unit, onDiscard: (() -> Unit)?) {
     var step by remember { mutableStateOf(0) }
     var typed by remember { mutableStateOf("") }
     val match = normalizedRecovery(phrase).isNotEmpty() && normalizedRecovery(phrase) == normalizedRecovery(typed)
@@ -2858,7 +2965,7 @@ private fun RecoveryCodeDialog(phrase: String, onDone: () -> Unit, onDismiss: ()
         },
         dismissButton = {
             Row {
-                TextButton(onClick = onDiscard) { Text(L10n.text("android.tokenstatapp.discard_vault.cea8fd68")) }
+                if (onDiscard != null) TextButton(enabled = !working, onClick = onDiscard) { Text(L10n.text("android.tokenstatapp.discard_vault.cea8fd68")) }
                 TextButton(onClick = onDismiss) { Text(L10n.text("common.close")) }
             }
         },
@@ -3755,7 +3862,7 @@ private fun WorkspaceList(
                 if (!currentProjectOwner()) return@launch
                 runCatching { model.workspaceSection(connectedPeer.orEmpty(), "workspace.rename", buildJsonObject { put("id", project.string("id") ?: ""); put("name", name) }) }
                     .onSuccess { if (currentProjectOwner()) onRetry?.invoke() }
-                    .onFailure { renameError = friendlyError(it.message).message }
+                    .onFailure { if (currentProjectOwner()) renameError = friendlyError(it.message).message }
             }
         }
     }
@@ -4161,47 +4268,12 @@ private fun LocalTrafficCard(model: AppViewModel) {
         }
     }
     LaunchedEffect(Unit) { load() }
-    TsCard(title = L10n.text("android.tokenstatapp.this_device.d052579c"), subtitle = L10n.text("android.tokenstatapp.how_connections_leave_this_machine.a5ac544a"), mark = "mark_activity") {
-        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-            error?.let { Text(it, color = LocalTsColors.current.warning) }
-            TunnelStatusBanner(status = status)
-            val snapshot = status?.get("traffic") as? JsonObject
-            if (snapshot == null && !loading && error == null) {
-                Text(
-                    L10n.text("android.tokenstatapp.this_computer_does_not_report_local_traffi.c31505cb"),
-                    color = LocalTsColors.current.textSecondary,
-                )
-            } else if (snapshot != null) {
-                UsageRow(L10n.text("android.tokenstatapp.direct.002c7c68"), snapshot.long("directBytes") ?: 0L)
-                UsageRow(L10n.text("android.tokenstatapp.relayed.feb39b70"), snapshot.long("relayBytes") ?: 0L)
-                Text(
-                    L10n.text("android.tokenstatapp.counted_on_this_device_since_tokenstat_sta.0fc360a7"),
-                    style = TextStyle(fontSize = 12.sp),
-                    color = LocalTsColors.current.textSecondary,
-                )
-                val peers = (snapshot["peers"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
-                if (peers.isEmpty()) {
-                    Text(L10n.text("android.tokenstatapp.no_live_connections_right_now.a7f971c5"), style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
-                } else {
-                    peers.forEach { peer ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(peer.string("label")?.ifBlank { null } ?: peer.string("peer").orEmpty())
-                            Text(
-                                transportLabel(peer.string("route")),
-                                color = LocalTsColors.current.textSecondary,
-                            )
-                        }
-                    }
-                }
-            }
-            TsSecondaryButton(
-                label = if (loading) L10n.text("android.tokenstatapp.refreshing.1c0def7b") else L10n.text("android.tokenstatapp.refresh_traffic.9e5ac8c2"),
-                onClick = { load() },
-                enabled = !loading,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
+    ai.tokenstat.tokenstat.ui.connection.LocalTrafficPanel(
+        status = status,
+        loading = loading,
+        error = error,
+        onRefresh = { load() },
+    )
 }
 
 @Composable
@@ -4237,34 +4309,7 @@ private fun UsageRow(label: String, bytes: Long) {
     }
 }
 
-private fun binaryBytes(n: Long): String {
-    val value = n.coerceAtLeast(0).toDouble()
-    val kibi = 1024.0
-    fun fmt(x: Double, unit: String): String {
-        // Trim the tenth only when there is one. Trimming zeros off a whole
-        // number turned a 20 GiB allowance into "2 GiB". The separator is
-        // whatever the locale uses, so drop a trailing dot or comma rather
-        // than assuming a dot.
-        val shown = if (x >= 10) {
-            "%.0f".format(x)
-        } else {
-            "%.1f".format(x).trimEnd('0').trimEnd('.', ',')
-        }
-        return shown + " " + unit
-    }
-    return when {
-        value >= kibi * kibi * kibi -> fmt(value / (kibi * kibi * kibi), "GiB")
-        value >= kibi * kibi -> fmt(value / (kibi * kibi), "MiB")
-        value >= kibi -> fmt(value / kibi, "KiB")
-        else -> "${n.coerceAtLeast(0)} B"
-    }
-}
-
-private fun transportLabel(raw: String?): String = when (raw) {
-    "direct" -> L10n.text("android.tokenstatapp.direct_connection.28d0ad54")
-    "relay" -> L10n.text("android.tokenstatapp.encrypted_relay.153d7b1c")
-    else -> raw ?: L10n.text("common.unknown")
-}
+private fun binaryBytes(n: Long): String = ai.tokenstat.tokenstat.ui.connection.formatTrafficBytes(n)
 
 /// One headline figure with its label and period mark, top trailing the way
 /// every other figure card on the client carries its mark. Ported from
