@@ -95,6 +95,21 @@ internal sealed partial class ChatPage
         UpdateFollowPill();
     }
 
+    /// <summary>
+    /// Stay on the newest message while following. Called after layout, when
+    /// <c>ScrollableHeight</c> already counts what was just added; asking from
+    /// the rebuild itself read the old height and stopped one reply short.
+    /// </summary>
+    private void KeepFollowing()
+    {
+        if (_scroll is null || _openId is null || !_followEnd || _sliceOlder != 0) return;
+        _lastScrollable = _scroll.ScrollableHeight;
+        if (_scroll.ScrollableHeight - _scroll.VerticalOffset > 0.5)
+        {
+            _scroll.ChangeView(null, _scroll.ScrollableHeight, null, true);
+        }
+    }
+
     private void ResumeFollow()
     {
         _followPaused = false;

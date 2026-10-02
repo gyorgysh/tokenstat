@@ -143,6 +143,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             Content = _root,
         };
         _scroll.ViewChanged += (_, _) => OnTranscriptViewChanged();
+        // Growth is not a scroll: a reply streaming in below the fold, or the
+        // composer taking height from the viewport, moves no offset and raises
+        // no ViewChanged. Pin again once layout has the new size.
+        _root.SizeChanged += (_, _) => KeepFollowing();
+        _scroll.SizeChanged += (_, _) => KeepFollowing();
         var transcriptHost = new Grid();
         transcriptHost.Children.Add(_scroll);
         transcriptHost.Children.Add(_followPillHost);
