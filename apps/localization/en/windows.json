@@ -1343,7 +1343,7 @@
   "windows.remoteworkspaces.connected_to_0_its_workspaces_are_now_avai.c79dc8f5": "Connected to {0}. Its workspaces are now available in the sidebar.",
   "windows.remoteworkspaces.that_machine.1c4194c9": "That machine",
   "windows.remoteworkspaces.the_connection_to_0_dropped_mid_answer_it.0e22c33a": "The connection to {0} dropped mid-answer. It reconnects automatically. Try again in a moment.",
-  "windows.remoteworkspaces.turn_on_reach_devices_from_anywhere_before.4930ed6e": "Turn on Reach devices from anywhere before connecting to {0}.",
+  "windows.remoteworkspaces.turn_on_reach_devices_from_anywhere_before.4930ed6e": "In Devices, enable remote access before connecting to {0}.",
   "windows.remoteworkspaces.workspace_approval_requested": "{0} has been asked to let this device open its work. Approve it on that computer and its folders will appear here.",
   "windows.resizehandle.drag_or_use_left_and_right_arrows_to_resiz.7cd7cd98": "Drag or use Left and Right arrows to resize. Double-click to reset.",
   "windows.resizehandle.drag_or_use_up_and_down": "Drag or use up and down arrows to resize.",

@@ -1063,11 +1063,20 @@ impl Manager {
     /// Stop the process. Killing an already dead session is not an error.
     pub fn kill(&self, id: &str) -> Result<(), PtyError> {
         let s = self.get(id)?;
-        let _ = s
-            .child
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .kill();
+        #[cfg(windows)]
+        let hidden = s.info.lock().unwrap_or_else(PoisonError::into_inner).hidden;
+        let mut child = s.child.lock().unwrap_or_else(PoisonError::into_inner);
+        #[cfg(windows)]
+        if hidden
+            && matches!(child.try_wait(), Ok(None))
+            && let Some(pid) = child.process_id()
+        {
+            // Launchers such as Muse's PowerShell shim own another process.
+            // Kill descendants before the root, while its retained process
+            // handle and live PID still identify this exact agent session.
+            kill_windows_process_tree(pid);
+        }
+        let _ = child.kill();
         s.alive.store(false, Ordering::SeqCst);
         s.buffer_space.notify_all();
         Ok(())
@@ -1082,6 +1091,23 @@ impl Manager {
             .remove(id);
         Ok(())
     }
+}
+
+#[cfg(windows)]
+fn kill_windows_process_tree(pid: u32) {
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+    let Some(root) = std::env::var_os("SystemRoot") else {
+        return;
+    };
+    // Resolve the Windows utility directly, rather than a workspace/PATH shim.
+    let _ = Command::new(PathBuf::from(root).join("System32/taskkill.exe"))
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .status();
 }
 
 /// The login shell to run: the user's own when it exists, otherwise the
@@ -2815,6 +2841,62 @@ mod tests {
         assert_eq!(String::from_utf8(output).unwrap().trim(), json);
         assert!(manager.list().iter().all(|info| info.id != session.id));
         manager.close(&session.id).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn stopping_hidden_agents_also_stops_launcher_children() {
+        use std::os::windows::process::CommandExt;
+        use std::process::{Command, Stdio};
+        let manager = Manager::new();
+        let session = manager
+            .spawn(&Spawn {
+                command: "powershell.exe".into(),
+                args: vec![
+                    "-NoProfile".into(),
+                    "-Command".into(),
+                    "$start = [Diagnostics.ProcessStartInfo]::new('powershell.exe', '-NoProfile -Command \"Start-Sleep -Seconds 300\"'); $start.UseShellExecute = $false; $start.CreateNoWindow = $true; $agent = [Diagnostics.Process]::Start($start); [Console]::WriteLine('CHILD:' + $agent.Id); $agent.WaitForExit()".into(),
+                ],
+                cwd: std::env::temp_dir(),
+                workspace_id: None,
+                hidden: true,
+                rows: 24,
+                cols: 80,
+                no_color: true,
+                dark: None,
+                environment: vec![],
+            })
+            .unwrap();
+        let mut child_pid = None;
+        let started = wait_for(|| {
+            let output = manager.read(&session.id, 0).unwrap().bytes;
+            child_pid = String::from_utf8_lossy(&output)
+                .lines()
+                .find_map(|line| line.strip_prefix("CHILD:")?.trim().parse::<u32>().ok());
+            child_pid.is_some()
+        });
+        manager.kill(&session.id).unwrap();
+        if !started {
+            manager.close(&session.id).unwrap();
+            panic!("the launcher did not report its child PID");
+        }
+        let status = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-Command",
+                &format!(
+                    "if (Get-Process -Id {} -ErrorAction SilentlyContinue) {{ exit 1 }} else {{ exit 0 }}",
+                    child_pid.unwrap()
+                ),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(0x08000000)
+            .status()
+            .unwrap();
+        manager.close(&session.id).unwrap();
+        assert!(status.success(), "the launcher's agent survived Stop");
     }
 
     #[cfg(windows)]
