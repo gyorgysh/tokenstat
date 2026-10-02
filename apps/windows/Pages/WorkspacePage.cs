@@ -21,6 +21,9 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
 
     private readonly string _id;
     private readonly WorkspaceSection _section;
+
+    /// <summary>Which section this page shows, so the tab bar knows the launcher.</summary>
+    internal WorkspaceSection Section => _section;
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private readonly StackPanel _inspector = new()
     {
@@ -687,51 +690,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         column.Children.Add(links);
     }
 
-    /// <summary>
-    /// The Mac's Bypass switch: a lock and a word, amber while on, so what it
-    /// turns off stays visible for as long as it is off. Remembered per
-    /// project, and read again at every launch.
-    /// </summary>
-    private Button BypassControl(StackPanel host)
-    {
-        var on = WorkspaceBypass.IsOn(_id);
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
-        row.Children.Add(new FontIcon { Glyph = on ? "\uE785" : "\uE72E", FontSize = 11 }); // Unlock, Lock
-        row.Children.Add(new TextBlock
-        {
-            Text = on ? L10n.Text("windows.workspacepage.bypass_on.57526f50") : L10n.Text("windows.workspacepage.bypass_off.bd6707b9"),
-            FontSize = 11,
-        });
-        var tip = on
-            ? L10n.Text("windows.workspacepage.launches_here_skip_permission_prompts_shel.b6b1d520")
-            : L10n.Text("windows.workspacepage.launches_here_ask_before_acting_turn_on_to.7f74555d");
-        var button = new Button
-        {
-            Content = row,
-            Foreground = on ? Theme.Brush(static () => Theme.Warning) : Theme.Brush(static () => Theme.ControlGlyph),
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
-            BorderThickness = new Thickness(0),
-            Padding = new Thickness(4, 2, 4, 2),
-            MinHeight = 0,
-            MinWidth = 0,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        // The template's hover and pressed states repaint the text in the
-        // default colour, which turned the amber "on" grey under the pointer.
-        button.Resources["ButtonForegroundPointerOver"] = button.Foreground;
-        button.Resources["ButtonForegroundPressed"] = button.Foreground;
-        button.Resources["ButtonBackgroundPointerOver"] = Theme.Brush(static () => Theme.RowHighlight);
-        ToolTipService.SetToolTip(button, tip);
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, tip);
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(button, "launcher.bypass");
-        button.Click += async (_, _) =>
-        {
-            WorkspaceBypass.Set(_id, !on);
-            await LoadLaunchersAsync(host);
-        };
-        return button;
-    }
-
     /// <summary>A small caption over a group of tiles, like the Mac launcher.</summary>
     private static TextBlock LauncherHeading(string title) => new()
     {
@@ -834,14 +792,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         {
             var catalog = await CallTargetAsync("launcher.catalog");
             var profiles = (Format.Items(catalog) ?? new JsonArray()).OfType<JsonNode>().ToArray();
-            var heading = new Grid();
-            heading.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            heading.Children.Add(LauncherHeading(L10n.Text("windows.workspacepage.run_an_agent.b7046310")));
-            var bypass = BypassControl(host);
-            Grid.SetColumn(bypass, 1);
-            heading.Children.Add(bypass);
-            host.Children.Add(heading);
+            host.Children.Add(LauncherHeading(L10n.Text("windows.workspacepage.run_an_agent.b7046310")));
             var tiles = new FlowPanel { MinimumItemWidth = LauncherTileMinWidth, Spacing = Theme.SpaceM };
             // Like the Mac: the launcher's tools, then More, then the catalog
             // when it is open.

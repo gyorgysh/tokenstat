@@ -175,7 +175,20 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
     public double MinimumContentWidth => (ActiveSource as IInspectorContent)?.MinimumContentWidth ?? ShellWidths.ContentMinimum;
     public UIElement? ToolbarScope => (ActiveSource as IToolbarItems)?.ToolbarScope;
     public double MinimumInspectorWidth => _companion is not null && ActivePage is ChatPage ? 320 : ShellWidths.Minimum;
-    public IList<UIElement> ToolbarActions() => CompanionActions((ActiveSource as IToolbarItems)?.ToolbarActions() ?? new List<UIElement>());
+    public IList<UIElement> ToolbarActions()
+    {
+        // A copy: the switch is inserted at the front, and a page is free to
+        // hand back a fixed array or a list it keeps.
+        var actions = new List<UIElement>(CompanionActions((ActiveSource as IToolbarItems)?.ToolbarActions() ?? new List<UIElement>()));
+        // The bypass switch sits in the bar, where the Mac has it, on the
+        // tabs that start agents. Chats have their own Don't ask.
+        if (ActivePage is WorkspacePage { Section: WorkspaceSection.Launcher or WorkspaceSection.Sessions }
+            or WorkspaceTerminalPane or TerminalPage)
+        {
+            actions.Insert(0, WorkspaceBypass.Control(WorkspaceId, Changed));
+        }
+        return actions;
+    }
     public event Action? ToolbarChanged;
     private void Changed()
     {
