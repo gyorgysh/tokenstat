@@ -59,14 +59,14 @@ extension View {
             .transformEnvironment(\.detailChromeToggles) { if !isActive { $0 = nil } }
     }
 
-    /// The left chrome's surface: a native clear glass backdrop on macOS 26
+    /// The left chrome's surface: native glass over a frosted backdrop on macOS 26
     /// and later, the flat sidebar colour before that.
     ///
     /// Chrome only. `Theme` keeps the rule that content sits on flat colour,
     /// because vibrancy pulls whatever is behind the window into columns of
     /// digits. A list of project names and a rail of glyphs is chrome.
     ///
-    /// Sample behind the window, rather than tinting an opaque colour plate.
+    /// Blur behind the window, rather than tinting an opaque colour plate.
     /// A translucent black (or white) wash keeps the frost close to the
     /// content surface while allowing a restrained amount of the blurred
     /// backdrop through.
@@ -79,9 +79,7 @@ extension View {
                     SidebarGlassSurface()
                 }
                 .overlay {
-                    RoundedRectangle(cornerRadius: ShellMetrics.panelRadius)
-                        .strokeBorder(.white.opacity(0.08), lineWidth: 0.5)
-                        .allowsHitTesting(false)
+                    SidebarPanelRim()
                 }
                 .padding([.leading, .top, .bottom], ShellMetrics.panelInset)
                 .background {
@@ -93,7 +91,8 @@ extension View {
                                 width: max(0, proxy.size.width - ShellMetrics.panelInset),
                                 height: max(0, proxy.size.height - ShellMetrics.panelInset * 2)),
                                 cornerSize: CGSize(width: ShellMetrics.panelRadius,
-                                    height: ShellMetrics.panelRadius))
+                                    height: ShellMetrics.panelRadius),
+                                style: .continuous)
                         }.fill(Theme.background, style: FillStyle(eoFill: true))
                     }.allowsHitTesting(false)
                 }
@@ -151,50 +150,108 @@ private struct RetainedPaneLayout: Layout {
 
 @available(macOS 26, *)
 private struct SidebarGlassSurface: View {
-    /// How much of the panel is black or white over the glass.
-    static let wash: Double = 0.86
+    /// Settle the native glass against either bright or dark backgrounds.
+    /// The remaining 20% admits the blurred backdrop; AppKit still controls
+    /// the glass material's own transmission and edge highlights.
+    static let wash: Double = 0.80
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         if reduceTransparency {
-            RoundedRectangle(cornerRadius: ShellMetrics.panelRadius).fill(Theme.sidebar)
+            RoundedRectangle(cornerRadius: ShellMetrics.panelRadius, style: .continuous).fill(Theme.sidebar)
         } else {
-            // The wash carries readability, the glass only a hint of what is
-            // behind. At 72% a bright wallpaper behind dark mode (or a dark
-            // one behind light mode) pulled its shapes into the row text.
-            // Pure black or white, not the theme's sidebar colour: that
-            // tinted wash read as a grey plate over the glass.
+            // Keep native glass's depth and edge while the backing softens
+            // background detail and this neutral wash protects row contrast.
+            // Match the app's theme, even when it differs from macOS.
             SidebarBackdrop()
                 .overlay {
-                    RoundedRectangle(cornerRadius: ShellMetrics.panelRadius)
+                    RoundedRectangle(cornerRadius: ShellMetrics.panelRadius, style: .continuous)
                         .fill((colorScheme == .dark ? Color.black : Color.white).opacity(Self.wash))
                 }
         }
     }
 }
 
-/// Native clear glass supplies actual backdrop transmission. Regular sidebar
-/// material became a solid grey plate in this shell; tint is layered separately
-/// so the wash over it still lets a restrained amount of background colour show.
+/// The frost and Liquid Glass are separate siblings, in that order. Putting
+/// the visual effect inside the glass's content view would cover the glass.
 @available(macOS 26, *)
 private struct SidebarBackdrop: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSGlassEffectView {
-        let view = NSGlassEffectView()
-        view.style = .clear
-        view.cornerRadius = ShellMetrics.panelRadius
-        view.tintColor = tint(context)
+    func makeNSView(context: Context) -> FrostedGlassView {
+        let view = FrostedGlassView()
+        updateNSView(view, context: context)
         return view
     }
 
-    func updateNSView(_ view: NSGlassEffectView, context: Context) {
-        view.tintColor = tint(context)
+    func updateNSView(_ view: FrostedGlassView, context: Context) {
+        view.setTheme(dark: context.environment.colorScheme == .dark)
+    }
+}
+
+@available(macOS 26, *)
+private final class FrostedGlassView: NSView {
+    private let glass = NSGlassEffectView()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        let frost = NSVisualEffectView(frame: bounds)
+        frost.material = .underWindowBackground
+        frost.blendingMode = .behindWindow
+        frost.state = .active
+        // A full-strength legacy material flattens the native glass. Use it
+        // only to soften detail; the glass and wash carry the appearance.
+        frost.alphaValue = 0.35
+        frost.maskImage = Self.mask(radius: ShellMetrics.panelRadius)
+        frost.autoresizingMask = [.width, .height]
+        addSubview(frost)
+
+        glass.frame = bounds
+        glass.style = .clear
+        glass.cornerRadius = ShellMetrics.panelRadius
+        glass.autoresizingMask = [.width, .height]
+        addSubview(glass)
     }
 
-    private func tint(_ context: Context) -> NSColor {
-        (context.environment.colorScheme == .dark ? NSColor.black : NSColor.white)
-            .withAlphaComponent(0.25)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Honour the app's theme even when it differs from the system's.
+    func setTheme(dark: Bool) {
+        appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        glass.tintColor = (dark ? NSColor.black : NSColor.white).withAlphaComponent(0.15)
+    }
+
+    // This is a background. Sidebar controls own every pointer interaction.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    /// A stretchable continuous-corner mask keeps the behind-window frost
+    /// inside the panel, including where its native glass edge is rounded.
+    private static func mask(radius: CGFloat) -> NSImage {
+        let cap = (radius * 1.6).rounded(.up)
+        let edge = cap * 2 + 1
+        let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
+            guard let context = NSGraphicsContext.current?.cgContext else { return false }
+            context.setFillColor(NSColor.black.cgColor)
+            context.addPath(RoundedRectangle(cornerRadius: radius, style: .continuous).path(in: rect).cgPath)
+            context.fillPath()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: cap, left: cap, bottom: cap, right: cap)
+        image.resizingMode = .stretch
+        return image
+    }
+}
+
+/// The panel's edge. Light on dark and dark on light, strong enough to read
+/// as the edge of a pane of glass rather than a seam.
+@available(macOS 26, *)
+private struct SidebarPanelRim: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: ShellMetrics.panelRadius, style: .continuous)
+            .strokeBorder(colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.10), lineWidth: 1)
+            .allowsHitTesting(false)
     }
 }
 
@@ -209,9 +266,7 @@ struct FloatingSidebarSurface: ViewModifier {
                     SidebarGlassSurface()
                 }
                 .overlay {
-                    RoundedRectangle(cornerRadius: ShellMetrics.panelRadius)
-                        .strokeBorder(.white.opacity(0.08), lineWidth: 0.5)
-                        .allowsHitTesting(false)
+                    SidebarPanelRim()
                 }
                 .padding(.vertical, ShellMetrics.panelInset)
         } else {
