@@ -16,7 +16,8 @@
 # The --rust form is needed when tokenstat-ffi or another Rust crate exposed
 # through the FFI changes. Ordinary Swift changes do not need that rebuild.
 # An iOS-only xcframework leftover from an archive still occupies this path,
-# so the script also rebuilds when the macOS slice is missing.
+# so the script also rebuilds when the macOS slice is missing, and when any
+# Rust source is newer than the framework.
 #
 # Before launching it quits any running copy of the app and puts the new
 # hostd in place under the launch agent. `open` on a running app only brings
@@ -59,6 +60,20 @@ ffi_has_macos() {
 
 if [ "$refresh_rust" -eq 0 ] && ! ffi_has_macos; then
     echo "TokenstatFFI has no macOS slice, rebuilding"
+    refresh_rust=1
+fi
+
+# The app and hostd must speak the same protocol, and hostd is rebuilt on
+# every run. A framework older than any Rust source or manifest is a stale
+# one, and the app then refuses the fresh hostd as "does not match".
+ffi_is_stale() {
+    [ -n "$(find "$ROOT/crates" "$ROOT/Cargo.toml" "$ROOT/Cargo.lock" \
+        \( -name '*.rs' -o -name 'Cargo.toml' -o -name 'Cargo.lock' \) \
+        -newer "$FFI" -print -quit 2> /dev/null)" ]
+}
+
+if [ "$refresh_rust" -eq 0 ] && ffi_is_stale; then
+    echo "Rust sources changed since TokenstatFFI was built, rebuilding"
     refresh_rust=1
 fi
 
