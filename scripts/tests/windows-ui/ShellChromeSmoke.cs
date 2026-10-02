@@ -9,6 +9,18 @@ namespace NativeUiTests;
 
 internal static class ShellChromeSmoke
 {
+    private static async Task Settled(Func<bool> condition, string message)
+    {
+        // Native focus notifications settle through the dispatcher. A fixed
+        // 30ms pause is not reliable on a loaded Windows runner.
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            if (condition()) return;
+            await Task.Delay(20);
+        }
+        throw new Exception(message);
+    }
+
     internal static async Task Run(StackPanel host)
     {
         var sidebar = Buttons.ToolbarIcon(ActionIcon.Sidebar, "Projects", (_, _) => { });
@@ -104,15 +116,14 @@ internal static class ShellChromeSmoke
             await Task.Delay(50);
             if (firstAction.Opacity != 0 || !firstAction.Focus(FocusState.Keyboard))
                 throw new Exception("Project row actions are not quietly keyboard reachable");
-            await Task.Delay(30);
-            if (firstAction.Opacity != 1 || nextAction.Opacity != 1 || !nextAction.Focus(FocusState.Keyboard))
-                throw new Exception("Focusing a project action did not reveal the row's actions");
-            await Task.Delay(30);
-            if (firstAction.Opacity != 1 || nextAction.Opacity != 1 || !outside.Focus(FocusState.Keyboard))
-                throw new Exception("Moving keyboard focus within a project row hid its actions");
-            await Task.Delay(30);
-            if (firstAction.Opacity != 0 || nextAction.Opacity != 0)
-                throw new Exception("Leaving a project row kept its actions visible");
+            await Settled(() => firstAction.Opacity == 1 && nextAction.Opacity == 1,
+                "Focusing a project action did not reveal the row's actions");
+            if (!nextAction.Focus(FocusState.Keyboard)) throw new Exception("The next project action could not receive focus");
+            await Settled(() => nextAction.FocusState == FocusState.Keyboard && firstAction.Opacity == 1 && nextAction.Opacity == 1,
+                "Moving keyboard focus within a project row hid its actions");
+            if (!outside.Focus(FocusState.Keyboard)) throw new Exception("The search row could not receive focus");
+            await Settled(() => firstAction.Opacity == 0 && nextAction.Opacity == 0,
+                "Leaving a project row kept its actions visible");
             host.Children.Remove(row);
             host.Children.Remove(outside);
             var navigation = new NavigationView
