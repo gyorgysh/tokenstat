@@ -186,8 +186,9 @@ struct GitReviewedFileView: View {
     let review: GitCommitReview
     let path: String
     @State private var diff: FileDiff?
-    @State private var rows: [DiffDocumentRow] = []
     @State private var error: String?
+    @State private var revision = UUID()
+    @State private var loadRevision = UUID()
 
     var body: some View {
         Group {
@@ -203,26 +204,10 @@ struct GitReviewedFileView: View {
                 if diff.binary {
                     Text(L10n.text("apple.gitcommitcomposer.binary_file_included_in_this_reviewed_sele.7b9e8582"))
                         .font(ClientType.body).foregroundStyle(.secondary).padding(Theme.Space.m)
-                } else if rows.isEmpty {
+                } else if diff.hunks.isEmpty {
                     Text(L10n.text("apple.gitcommitcomposer.no_text_changes_in_this_file.9c538f4a")).font(ClientType.body).foregroundStyle(.secondary)
                 } else {
-                    GeometryReader { geometry in
-                        ScrollView([.horizontal, .vertical]) {
-                            LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(rows) { row in
-                                    switch row.content {
-                                    case let .line(line): DiffLineRow(line: line, minWidth: geometry.size.width)
-                                    case let .hunk(header):
-                                        Text(header).font(ClientType.code).foregroundStyle(.secondary)
-                                            .padding(Theme.Space.s).frame(minWidth: geometry.size.width, alignment: .leading)
-                                            .background(Theme.panel)
-                                    case .file: EmptyView()
-                                    case let .note(note): Text(note).font(ClientType.body).padding(Theme.Space.m)
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    ClientDiffDocumentView(diffs: [diff], revision: revision, fileHeaders: false, bottomInset: 0) { EmptyView() }
                 }
                 #endif
             } else { ProgressView(L10n.text("apple.gitcommitcomposer.reading_reviewed_changes.9c829fac")) }
@@ -238,11 +223,18 @@ struct GitReviewedFileView: View {
     }
 
     private func load() async {
+        let request = UUID()
+        loadRevision = request
+        let scope = WorkSessionContext.shared.scope
         do {
             let fresh = try await service.diff(review, path: path)
-            let lines = await Task.detached(priority: .userInitiated) { DiffDocumentRow.make([fresh], fileHeaders: false) }.value
-            guard !Task.isCancelled else { return }
-            diff = fresh; rows = lines; error = nil
-        } catch { self.error = error.localizedDescription }
+            guard !Task.isCancelled, request == loadRevision,
+                  scope == WorkSessionContext.shared.scope else { return }
+            diff = fresh; revision = UUID(); error = nil
+        } catch {
+            guard !Task.isCancelled, request == loadRevision,
+                  scope == WorkSessionContext.shared.scope else { return }
+            self.error = error.localizedDescription
+        }
     }
 }

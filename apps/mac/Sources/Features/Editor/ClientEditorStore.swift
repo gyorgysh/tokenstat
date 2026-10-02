@@ -28,14 +28,16 @@ extension Notification.Name {
 final class ClientEditorTab: Identifiable {
     let id: ClientEditorKey
     let document: EditorDocument
+    fileprivate let ownerSession: AnyHashable?
     var isSaving = false
     var errorMessage: String?
     /// Host content that arrived while the draft was dirty. Saving stays off
     /// until the person chooses a copy.
     var conflictHostContent: String?
 
-    init(id: ClientEditorKey, content: String) {
+    init(id: ClientEditorKey, content: String, ownerSession: AnyHashable? = nil) {
         self.id = id
+        self.ownerSession = ownerSession
         document = EditorDocument(workspaceID: id.workspace, path: id.path, content: content)
     }
 }
@@ -50,23 +52,27 @@ final class ClientEditorStore {
     private var selections: [ClientEditorScope: ClientEditorKey] = [:]
     @ObservationIgnored private let write: Writer
     @ObservationIgnored private let read: Reader
+    @ObservationIgnored private let sessionID: @MainActor () -> AnyHashable?
 
-    init(write: @escaping Writer, read: @escaping Reader) {
+    init(write: @escaping Writer, read: @escaping Reader,
+         sessionID: @escaping @MainActor () -> AnyHashable? = { nil }) {
         self.write = write
         self.read = read
+        self.sessionID = sessionID
     }
 
     func tabs(peer: String, workspace: String) -> [ClientEditorTab] {
-        tabs.filter { $0.id.peer == peer && $0.id.workspace == workspace }
+        let owner = sessionID()
+        return tabs.filter { $0.ownerSession == owner && $0.id.peer == peer && $0.id.workspace == workspace }
     }
 
     func selected(peer: String, workspace: String) -> ClientEditorTab? {
         let key = selections[ClientEditorScope(peer: peer, workspace: workspace)]
-        return tabs.first { $0.id == key }
+        return tabs.first { $0.ownerSession == sessionID() && $0.id == key }
     }
 
     func tab(for key: ClientEditorKey) -> ClientEditorTab? {
-        tabs.first(where: { $0.id == key })
+        tabs.first(where: { $0.ownerSession == sessionID() && $0.id == key })
     }
 
     @discardableResult
@@ -92,6 +98,7 @@ final class ClientEditorStore {
     }
 
     func select(_ tab: ClientEditorTab) {
+        guard tab.ownerSession == sessionID(), tabs.contains(where: { $0 === tab }) else { return }
         selections[ClientEditorScope(peer: tab.id.peer, workspace: tab.id.workspace)] = tab.id
     }
 
@@ -101,7 +108,7 @@ final class ClientEditorStore {
 
     func open(_ key: ClientEditorKey, content: String) {
         guard !selectExisting(key) else { return }
-        let tab = ClientEditorTab(id: key, content: content)
+        let tab = ClientEditorTab(id: key, content: content, ownerSession: sessionID())
         tabs.append(tab)
         select(tab)
     }
@@ -109,9 +116,10 @@ final class ClientEditorStore {
     /// Dirty buffers need explicit discard. An in-flight save cannot be closed.
     @discardableResult
     func close(_ tab: ClientEditorTab, discard: Bool = false) -> Bool {
-        guard !tab.isSaving, discard || !tab.document.isDirty else { return false }
+        guard tab.ownerSession == sessionID(), tabs.contains(where: { $0 === tab }),
+              !tab.isSaving, discard || !tab.document.isDirty else { return false }
         let wasSelected = selected(peer: tab.id.peer, workspace: tab.id.workspace)?.id == tab.id
-        tabs.removeAll { $0.id == tab.id }
+        tabs.removeAll { $0 === tab }
         if wasSelected {
             if let next = tabs(peer: tab.id.peer, workspace: tab.id.workspace).last {
                 select(next)
@@ -123,7 +131,8 @@ final class ClientEditorStore {
     }
 
     func save(_ tab: ClientEditorTab) async {
-        guard tabs.contains(where: { $0 === tab }), !tab.isSaving, tab.document.isDirty,
+        let owner = sessionID()
+        guard owns(tab, session: owner), !tab.isSaving, tab.document.isDirty,
               tab.conflictHostContent == nil else { return }
         tab.isSaving = true
         tab.errorMessage = nil
@@ -135,9 +144,11 @@ final class ClientEditorStore {
         do {
             host = try await read(tab.id.peer, tab.id.workspace, tab.id.path)
         } catch {
+            guard owns(tab, session: owner) else { return }
             tab.errorMessage = L10n.text("apple.clienteditorstore.could_not_re_read_this_file_on_that_comput.dacb7165")
             return
         }
+        guard owns(tab, session: owner) else { return }
         let draft = tab.document.text
         if host != draft, host != tab.document.savedText {
             tab.conflictHostContent = host
@@ -152,12 +163,14 @@ final class ClientEditorStore {
         let sent = draft
         do {
             try await write(tab.id.peer, tab.id.workspace, tab.id.path, sent)
+            guard owns(tab, session: owner) else { return }
             tab.document.markSaved(content: sent)
             NotificationCenter.default.post(
                 name: .clientFileDidChange,
                 object: ClientFileChangeNotice(peer: tab.id.peer, workspace: tab.id.workspace, path: tab.id.path)
             )
         } catch {
+            guard owns(tab, session: owner) else { return }
             tab.errorMessage = error.localizedDescription
         }
     }
@@ -165,7 +178,8 @@ final class ClientEditorStore {
     /// Choose a copy after a conflict. Reloading adopts the host and clears
     /// the draft; keeping writes the draft through explicitly.
     func resolveConflict(_ tab: ClientEditorTab, keepMine: Bool) async {
-        guard tabs.contains(where: { $0 === tab }), !tab.isSaving,
+        let owner = sessionID()
+        guard owns(tab, session: owner), !tab.isSaving,
               let host = tab.conflictHostContent else { return }
         if keepMine {
             tab.conflictHostContent = nil
@@ -175,12 +189,14 @@ final class ClientEditorStore {
             defer { tab.isSaving = false }
             do {
                 try await write(tab.id.peer, tab.id.workspace, tab.id.path, sent)
+                guard owns(tab, session: owner) else { return }
                 tab.document.markSaved(content: sent)
                 NotificationCenter.default.post(
                     name: .clientFileDidChange,
                     object: ClientFileChangeNotice(peer: tab.id.peer, workspace: tab.id.workspace, path: tab.id.path)
                 )
             } catch {
+                guard owns(tab, session: owner) else { return }
                 tab.errorMessage = error.localizedDescription
             }
         } else {
@@ -194,6 +210,13 @@ final class ClientEditorStore {
     func reset() {
         tabs = []
         selections = [:]
+    }
+
+    /// Resetting the store or changing accounts retires an in-flight save.
+    /// In particular, a host read must not resume by writing into a new session.
+    private func owns(_ tab: ClientEditorTab, session owner: AnyHashable?) -> Bool {
+        !Task.isCancelled && tab.ownerSession == owner && sessionID() == owner
+            && tabs.contains(where: { $0 === tab })
     }
 }
 

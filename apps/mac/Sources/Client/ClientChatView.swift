@@ -27,6 +27,7 @@ struct ClientChatView: View {
     @State private var alphabetical = false
     @State private var retainedThread: ChatConversation?
     @State private var deleteAll = false
+    @State private var deleteAllOwner: WorkReference.Scope?
     @State private var supportsDeleteAll = false
 
     private var filteredChats: [ChatConversation] {
@@ -57,6 +58,7 @@ struct ClientChatView: View {
     /// the same, and the state goes away with the view that owns it.
     @State private var opened: ChatConversation?
     @State private var pendingDelete: ChatConversation?
+    @State private var pendingDeleteOwner: WorkReference.Scope?
     /// The launcher may skip the list once. Back from the thread must still
     /// reach the list rather than immediately pushing the same chat again.
     @State private var didOpenConversation = false
@@ -80,7 +82,19 @@ struct ClientChatView: View {
                     hostName: hostName,
                     isActive: opened != nil,
                     onBack: { retainedThread = opened; self.opened = nil },
-                    onFork: { copied in retainedThread = nil; opened = copied }
+                    onFork: { copied in
+                        guard opened?.id == thread.id else { return }
+                        retainedThread = nil
+                        opened = copied
+                    },
+                    onDelete: { deleted in
+                        if opened?.id == deleted.id {
+                            opened = nil
+                            retainedThread = nil
+                        } else if retainedThread?.id == deleted.id {
+                            retainedThread = nil
+                        }
+                    }
                 )
                 .opacity(opened == nil ? 0 : 1)
                 .allowsHitTesting(opened != nil)
@@ -169,11 +183,17 @@ struct ClientChatView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }.buttonStyle(.plain)
                     ClientChatMenu(model: model, conversation: chat, peer: peer, workspaceID: workspaceID,
-                                   onFork: { opened = $0 })
+                                   onFork: { copied in
+                                       guard opened == nil else { return }
+                                       opened = copied
+                                   })
                 }
                 .clientCardRow()
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button(L10n.text("common.delete"), role: .destructive) { pendingDelete = chat }
+                    Button(L10n.text("common.delete"), role: .destructive) {
+                        pendingDeleteOwner = WorkSessionContext.shared.scope
+                        pendingDelete = chat
+                    }
                 }
             }
         }
@@ -203,10 +223,16 @@ struct ClientChatView: View {
             }
             if supportsDeleteAll && !model.chats.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu { Button(L10n.text("apple.clientchatview.delete_all_chats.9753e785"), role: .destructive) { deleteAll = true } }
+                    Menu {
+                        Button(L10n.text("apple.clientchatview.delete_all_chats.9753e785"), role: .destructive) {
+                            deleteAllOwner = WorkSessionContext.shared.scope
+                            deleteAll = true
+                        }
+                    }
                     label: {
-                        ActionIcon.more.label(L10n.text("apple.clientchatview.chat_list_actions.43ea56ad"))
-                            .environment(\.compactActions, true)
+                        Label(L10n.text("apple.clientchatview.chat_list_actions.43ea56ad"), systemImage: "ellipsis")
+                            .labelStyle(.iconOnly)
+                            .frame(width: 44, height: 44)
                     }
                     .menuIndicator(.hidden)
                 }
@@ -215,7 +241,15 @@ struct ClientChatView: View {
         .task(id: peer) { supportsDeleteAll = await RemoteHostFeature.chatRemoveAll.isSupported(peer: peer) }
         .confirmationDialog(L10n.text("apple.clientchatview.delete_all_chats.7d0b4340"), isPresented: $deleteAll, titleVisibility: .visible) {
             Button(L10n.text("apple.clientchatview.delete_all_chats.3fbb0f9c"), role: .destructive) {
-                Task { await model.removeAll(in: workspaceID, peer: peer); if model.error == nil { retainedThread = nil; opened = nil } }
+                let owner = deleteAllOwner
+                Task {
+                    guard owner != nil, owner == WorkSessionContext.shared.scope,
+                          model.peer == peer, model.workspaceID == workspaceID else { return }
+                    await model.removeAll(in: workspaceID, peer: peer)
+                    guard owner == WorkSessionContext.shared.scope,
+                          model.peer == peer, model.workspaceID == workspaceID else { return }
+                    if model.error == nil { retainedThread = nil; opened = nil }
+                }
             }
             Button(L10n.text("common.cancel"), role: .cancel) {}
         } message: {
@@ -231,7 +265,12 @@ struct ClientChatView: View {
         ) {
             Button(L10n.text("apple.clientchatview.delete_chat.93291d9c"), role: .destructive) {
                 if let chat = pendingDelete {
-                    Task { await model.remove(chat) }
+                    let owner = pendingDeleteOwner
+                    Task {
+                        guard owner != nil, owner == WorkSessionContext.shared.scope,
+                              model.peer == peer, model.workspaceID == workspaceID else { return }
+                        await model.remove(chat, in: workspaceID)
+                    }
                 }
                 pendingDelete = nil
             }
@@ -405,6 +444,7 @@ struct ClientChatThread: View {
     var isActive = true
     var onBack: (() -> Void)?
     var onFork: ((ChatConversation) -> Void)?
+    var onDelete: ((ChatConversation) -> Void)?
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
     /// A row the transcript should jump to, set by the pending-approval bar.
@@ -454,7 +494,7 @@ struct ClientChatThread: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     private var chat: ChatConversation? {
-        model.chats.first { $0.id == chatID } ?? model.selected
+        model.chats.first { $0.id == chatID } ?? model.selected.flatMap { $0.id == chatID ? $0 : nil }
     }
 
     /// Files, Changes and History for this folder, beside the transcript.
@@ -630,41 +670,34 @@ struct ClientChatThread: View {
                     Button(action: onBack) { ActionIcon.back.label(L10n.text("common.chats")) }
                 }
             }
-            if isActive && chat != nil && (pinReference != nil || model.savedCopy == nil) {
+            if isActive, let chat, pinReference != nil || model.savedCopy == nil {
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 0) {
-                        PinToggleButton(
-                            reference: pinReference,
-                            label: chat?.title ?? L10n.text("apple.clientchatview.chat.460b3a7d"),
-                            folderName: folderName
-                        )
-                        if toolsIdentity != nil {
-                            Button(L10n.text("apple.clientchatview.project_tools.c50826a7"), .source) {
-                                if sizeClass == .regular,
-                                   UIDevice.current.userInterfaceIdiom == .pad {
-                                    showingToolsPane.toggle()
-                                } else {
-                                    pushingTools = true
-                                }
+                    PinToggleButton(reference: pinReference, label: chat.title, folderName: folderName)
+                }
+                if toolsIdentity != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(L10n.text("apple.clientchatview.project_tools.c50826a7"), .source) {
+                            if sizeClass == .regular,
+                               UIDevice.current.userInterfaceIdiom == .pad {
+                                showingToolsPane.toggle()
+                            } else {
+                                pushingTools = true
                             }
-                            .accessibilityLabel(L10n.text("apple.clientchatview.project_files_changes_and_history.4da56c40"))
-                            // The inspector chord, on the real control. Wide
-                            // iPad toggles the trailing pane; compact pushes
-                            // the same surface and Back returns to the
-                            // transcript position. Never mounted in the
-                            // terminal, so forwarded keys are untouched.
-                            .keyboardShortcut("i", modifiers: [.command, .option])
                         }
-                        if model.savedCopy == nil {
-                            if let chat, let tools = toolsIdentity {
-                                ClientChatMenu(model: model, conversation: chat, peer: tools.peer,
-                                               workspaceID: tools.workspaceID, onFork: onFork)
-                            }
-                            Button(L10n.text("apple.clientchatview.continue_on_another_device.b5836f9a"), .device) { showingHandoff = true }
-                            Button(L10n.text("apple.clientchatview.setup.7013af4c"), .settings) { showingSetup = true }
-                        }
+                        .labelStyle(.iconOnly)
+                        .accessibilityLabel(L10n.text("apple.clientchatview.project_files_changes_and_history.4da56c40"))
+                        // The inspector chord stays on the real control.
+                        .keyboardShortcut("i", modifiers: [.command, .option])
                     }
-                    .labelStyle(.iconOnly)
+                }
+                if model.savedCopy == nil, let tools = toolsIdentity {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        ClientChatMenu(model: model, conversation: chat, peer: tools.peer,
+                            workspaceID: tools.workspaceID, hostName: hostName, onFork: onFork,
+                            onSetup: { showingSetup = true }, onHandoff: { showingHandoff = true },
+                            onDelete: onDelete)
+                            .id(chat.id)
+                    }
                 }
             }
         }

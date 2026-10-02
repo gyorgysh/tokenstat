@@ -314,6 +314,7 @@ struct ClientRecentChatView: View {
     private var needsSavedCopy: Bool { connectivity.isOffline || machine?.online == false }
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dismiss) private var dismiss
 
     private var availability: WorkDestinationResolver.Availability {
         WorkDestinationResolver.availability(.init(
@@ -373,7 +374,18 @@ struct ClientRecentChatView: View {
                     model: model,
                     chatID: chatID,
                     folderName: folderName,
-                    hostName: hostName
+                    hostName: hostName,
+                    onDelete: { deleted in
+                        guard visible, deleted.id == chatID else { return }
+                        let reference = navigation.reference(peer: peer, workspaceID: workspaceID, chatID: chatID)
+                        if let presented = navigation.presentedChat {
+                            if WorkDestinationResolver.sameConversation(presented.reference, reference) {
+                                navigation.presentedChat = nil
+                            }
+                        } else if WorkDestinationResolver.sameConversation(navigation.visibleChat, reference) {
+                            dismiss()
+                        }
+                    }
                 )
             } else if let error = model.error {
                 ClientErrorCard(message: ClientTunnelCopy.display(error, host: hostName)) {

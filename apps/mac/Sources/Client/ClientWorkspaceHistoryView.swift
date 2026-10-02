@@ -193,21 +193,24 @@ struct ClientCommitDetailView: View {
     @State private var loaded = false
     @State private var revision = UUID()
     @State private var loadRevision = UUID()
+    @State private var showingMessage = false
 
     var body: some View {
-        ClientDiffDocumentView(diffs: detail?.diffs ?? [], revision: revision) {
-            if let errorMessage {
-                ClientErrorCard(message: errorMessage) { Task { await load() } }
-            }
-            header
-            if !loaded {
-                ProgressView().frame(maxWidth: .infinity, minHeight: 80)
-            } else if let detail, detail.diffs.isEmpty {
-                ClientSectionEmpty(
-                    text: detail.isMerge ? L10n.text("apple.clientworkspacehistoryview.a_merge_with_no_patch_of_its_own.862cd9e3") : L10n.text("apple.clientworkspacehistoryview.no_files_in_this_commit.db8823ee"),
-                    art: .history,
-                    message: detail.isMerge ? L10n.text("apple.clientworkspacehistoryview.the_changes_live_on_the_parents.24d17008") : nil
-                )
+        GeometryReader { geometry in
+            ClientDiffDocumentView(diffs: detail?.diffs ?? [], revision: revision) {
+                if let errorMessage {
+                    ClientErrorCard(message: errorMessage) { Task { await load() } }
+                }
+                metadata(expanded: false, compact: geometry.size.height < 500)
+                if !loaded {
+                    ProgressView().frame(maxWidth: .infinity, minHeight: 80)
+                } else if let detail, detail.diffs.isEmpty {
+                    ClientSectionEmpty(
+                        text: detail.isMerge ? L10n.text("apple.clientworkspacehistoryview.a_merge_with_no_patch_of_its_own.862cd9e3") : L10n.text("apple.clientworkspacehistoryview.no_files_in_this_commit.db8823ee"),
+                        art: .history,
+                        message: detail.isMerge ? L10n.text("apple.clientworkspacehistoryview.the_changes_live_on_the_parents.24d17008") : nil
+                    )
+                }
             }
         }
         .background(Theme.background)
@@ -219,19 +222,35 @@ struct ClientCommitDetailView: View {
             }
         }
         .task { await load() }
+        .sheet(isPresented: $showingMessage) {
+            ThemedSheet(title: L10n.text("apple.clientworkspacehistoryview.commit_message"),
+                        subtitle: commit.shortID, icon: .commit, scrolls: true,
+                        onClose: { showingMessage = false }) {
+                metadata(expanded: true)
+            }
+            .presentationBackground(Theme.background)
+            .presentationDetents([.large])
+        }
     }
 
-    private var header: some View {
+    /// The fixed summary reserves room for code; its message and tags remain
+    /// available in full through a separate sheet, including in landscape.
+    private func metadata(expanded: Bool, compact: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text(commit.subject)
                 .font(ClientType.sectionTitle)
-            if let body = detail?.body, !body.isEmpty {
+                .lineLimit(expanded ? nil : (compact ? 1 : 2))
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+            if let body = detail?.body, !body.isEmpty, expanded || !compact {
                 Text(body)
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
+                    .lineLimit(expanded ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             }
-            CommitTagPills(tags: detail?.tagList ?? commit.tagList)
+            if expanded { CommitTagPills(tags: detail?.tagList ?? commit.tagList) }
             HStack(spacing: Theme.Space.s) {
                 Text(commit.author)
                     .font(ClientType.caption)
@@ -251,8 +270,8 @@ struct ClientCommitDetailView: View {
                 }
                 Spacer(minLength: 0)
             }
-            if let detail {
-                HStack(spacing: Theme.Space.s) {
+            HStack(spacing: Theme.Space.s) {
+                if let detail {
                     if detail.added > 0 {
                         Text("+\(detail.added)")
                             .font(ClientType.diffFigure)
@@ -266,6 +285,14 @@ struct ClientCommitDetailView: View {
                     Text((detail.files.count == 1 ? L10n.text("apple.clientworkspacehistoryview.0_file_1.ac7c9517.one", "\(detail.files.count)") : L10n.text("apple.clientworkspacehistoryview.0_file_1.ac7c9517.other", "\(detail.files.count)")))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
+                }
+                if !expanded {
+                    Spacer(minLength: 0)
+                    Button(L10n.text("apple.clientworkspacehistoryview.read_full_message"), .reveal) { showingMessage = true }
+                        .font(ClientType.caption)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.accent)
+                        .disabled(!loaded)
                 }
             }
         }

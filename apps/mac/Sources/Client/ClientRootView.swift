@@ -58,7 +58,8 @@ struct ClientRootView: View {
         write: ClientRemote.writeFile,
         read: { peer, workspace, path in
             try await ClientRemote.readFile(peer: peer, workspace: workspace, path: path).content
-        }
+        },
+        sessionID: { WorkSessionContext.shared.scope.map(AnyHashable.init) }
     )
     /// The account sheet, opened from the avatar rather than from a tab. See
     /// `AvatarButton`.

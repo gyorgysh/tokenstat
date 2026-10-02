@@ -13,6 +13,13 @@ enum Bridge {
     static func highlight(path: String, text: String) async throws -> Highlighting { Highlighting() }
 }
 
+private final class EditorSaveNoticeCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    var count: Int { lock.withLock { value } }
+    func record() { lock.withLock { value += 1 } }
+}
+
 @main
 struct ClientEditorStoreTests {
     @MainActor
@@ -132,6 +139,90 @@ struct ClientEditorStoreTests {
         await blind.save(offline)
         precondition(blindWrites == 0 && offline.document.isDirty, "Unreadable host waits, edits kept")
         precondition(offline.errorMessage != nil, "Refusal says why")
+
+        // A read can ignore task cancellation and answer after the account's
+        // buffers have been removed. It must never start a subsequent write.
+        for retirement in ["reset", "account", "cancel"] {
+            var readGate: CheckedContinuation<String, Error>?
+            var retiredWrites = 0
+            var session = "account-a"
+            let retired = ClientEditorStore(write: { _, _, _, _ in
+                retiredWrites += 1
+            }, read: { _, _, _ in
+                try await withCheckedThrowingContinuation { readGate = $0 }
+            }, sessionID: { AnyHashable(session) })
+            retired.open(key, content: "opened")
+            let retiredTab = retired.tab(for: key)!
+            retiredTab.document.setText("private draft")
+            let operation = Task { await retired.save(retiredTab) }
+            while readGate == nil { await Task.yield() }
+            switch retirement {
+            case "reset": retired.reset()
+            case "account": session = "account-b"
+            default: operation.cancel()
+            }
+            readGate?.resume(returning: "opened")
+            await operation.value
+            precondition(retiredWrites == 0, "Retired \(retirement) read cannot write the draft")
+            precondition(retiredTab.document.isDirty && !retiredTab.isSaving,
+                         "Retired save cannot acknowledge the draft or keep the save slot")
+            precondition(retiredTab.errorMessage == nil && retiredTab.conflictHostContent == nil,
+                         "Retired read cannot publish stale state")
+        }
+
+        var session = "account-a"
+        var staleReads = 0
+        let stale = ClientEditorStore(write: { _, _, _, _ in
+            preconditionFailure("An old account's tab must not write")
+        }, read: { _, _, _ in
+            staleReads += 1
+            return "opened"
+        }, sessionID: { AnyHashable(session) })
+        stale.open(key, content: "opened")
+        let staleTab = stale.tab(for: key)!
+        staleTab.document.setText("old account draft")
+        session = "account-b"
+        await stale.save(staleTab)
+        precondition(staleReads == 0, "A stale action is refused before the root's reset callback")
+        precondition(stale.tabs(peer: key.peer, workspace: key.workspace).isEmpty,
+                     "A new account cannot display the previous account's buffers before reset")
+        stale.adoptSaved(key, content: "new account file")
+        let newSessionTab = stale.tab(for: key)!
+        precondition(newSessionTab !== staleTab && newSessionTab.document.text == "new account file",
+                     "A same-path new-account read cannot adopt or expose the old dirty buffer")
+        stale.select(staleTab)
+        precondition(stale.selected(peer: key.peer, workspace: key.workspace) === newSessionTab,
+                     "An old view cannot select another account's buffer")
+        precondition(!stale.close(staleTab, discard: true) && stale.tab(for: key) === newSessionTab,
+                     "An old view cannot close a same-path buffer belonging to the new account")
+
+        // A write already sent cannot be recalled, but its delayed answer must
+        // not mark a retired buffer saved or refresh a new account's surfaces.
+        for keepingConflict in [false, true] {
+            var writeGate: CheckedContinuation<Void, Error>?
+            let notices = EditorSaveNoticeCounter()
+            let observer = NotificationCenter.default.addObserver(forName: .clientFileDidChange,
+                                                                  object: nil, queue: nil) { _ in notices.record() }
+            let retired = ClientEditorStore(write: { _, _, _, _ in
+                try await withCheckedThrowingContinuation { writeGate = $0 }
+            }, read: { _, _, _ in "opened" })
+            retired.open(key, content: "opened")
+            let retiredTab = retired.tab(for: key)!
+            retiredTab.document.setText("private draft")
+            if keepingConflict { retiredTab.conflictHostContent = "host changes" }
+            let operation = Task {
+                if keepingConflict { await retired.resolveConflict(retiredTab, keepMine: true) }
+                else { await retired.save(retiredTab) }
+            }
+            while writeGate == nil { await Task.yield() }
+            retired.reset()
+            writeGate?.resume()
+            await operation.value
+            NotificationCenter.default.removeObserver(observer)
+            precondition(retiredTab.document.isDirty && retiredTab.document.savedAt == nil,
+                         "Retired write answer cannot acknowledge an old buffer")
+            precondition(notices.count == 0, "Retired write answer cannot refresh another session")
+        }
         print("ClientEditorStoreTests passed")
     }
 }

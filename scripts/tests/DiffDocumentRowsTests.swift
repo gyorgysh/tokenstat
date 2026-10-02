@@ -2,7 +2,11 @@
 // Compile with DiffDocumentRows.swift.
 import Foundation
 
-struct DiffLine: Sendable { let text: String }
+struct DiffLine: Sendable {
+    var text: String
+    var oldLine: UInt32? = nil
+    var newLine: UInt32? = nil
+}
 struct DiffHunk: Sendable { let header: String; let lines: [DiffLine] }
 struct FileDiff: Sendable { let path: String; let hunks: [DiffHunk]; let binary: Bool; let untracked: Bool }
 
@@ -51,6 +55,32 @@ struct FileDiff: Sendable { let path: String; let hunks: [DiffHunk]; let binary:
             precondition(DiffDocumentRow.count(mixed, fileHeaders: headers) == DiffDocumentRow.make(mixed, fileHeaders: headers).count)
             precondition(DiffDocumentRow.make(mixed, fileHeaders: headers, rowLimit: 0).isEmpty)
         }
+        // Wrapping may introduce display items, but must never invent source
+        // numbers, lose Unicode text, or turn one minified line into a huge item.
+        let unicode = String(repeating: "\t👩🏽‍💻e\u{301}界", count: 100)
+        let source = DiffLine(text: unicode, oldLine: 42, newLine: 43)
+        let wrapping = FileDiff(path: "wrapped", hunks: [DiffHunk(header: "@@", lines: [source, DiffLine(text: "")])], binary: false, untracked: false)
+        let wrapped = DiffDocumentRow.make([wrapping], fileHeaders: false, maxLineCharacters: 16)
+        precondition(DiffDocumentRow.count([wrapping], fileHeaders: false, maxLineCharacters: 16) == wrapped.count)
+        var restored = ""
+        var part = 0
+        for row in wrapped.dropFirst().dropLast() {
+            guard case let .line(piece) = row.content else { fatalError("expected wrapped text") }
+            precondition(piece.text.count <= 16 && piece.oldLine == 42 && piece.newLine == 43)
+            precondition(row.continuation == (part > 0))
+            restored += piece.text
+            part += 1
+        }
+        precondition(restored == unicode, "wrapping must preserve graphemes, tabs and text")
+        precondition(!wrapped.last!.continuation, "the next source line must reset its gutter")
+        let hugeLine = FileDiff(path: "minified", hunks: [DiffHunk(header: "@@", lines: [DiffLine(text: String(repeating: "x", count: 400_000), newLine: 7)])], binary: false, untracked: false)
+        let wrappedPage = DiffDocumentRow.make([hugeLine], fileHeaders: false, rowLimit: 60, maxLineCharacters: 256)
+        let wrappedNext = DiffDocumentRow.make([hugeLine], fileHeaders: false, rowLimit: 120, maxLineCharacters: 256)
+        precondition(wrappedPage.count == 60 && wrappedNext.count == 120)
+        precondition(wrappedPage.map(\.id) == Array(wrappedNext.prefix(60)).map(\.id))
+        precondition(Set(wrappedNext.map(\.id)).count == wrappedNext.count)
+        precondition(DiffDocumentRow.count([hugeLine], fileHeaders: false, maxLineCharacters: 256) == 1_564)
+        print("Wrapped Unicode/source counters, bounded minified lines and stable expansion passed")
         print("Bounded 400,000-line document pages and stable expansion passed (\(pageStart.duration(to: .now)))")
         print("Diff document: 200,000 lines, unique IDs, ordering, binary/empty files passed (\(start.duration(to: .now)))")
     }

@@ -33,14 +33,7 @@ struct ClientReviewAllView: View {
     @State private var failures = 0
     @State private var loaded = false
     @State private var loadRevision = UUID()
-    /// The width of the screen, measured.
-    ///
-    /// Inside a horizontally scrolling container `maxWidth: .infinity` means
-    /// *unbounded* rather than "fill", so rows grow enormous and the content
-    /// ends up somewhere off to the right. A row takes it as a minimum
-    /// instead, which is also what makes the tint behind a short line span
-    /// the screen rather than stop at the last character. Same measure as
-    /// the per-file diff and the commit detail.
+    /// Wrapped rows use the viewport, less both the outer and card padding.
     @State private var paneWidth: CGFloat = 0
 
     private var shown: [FileChange] { Array(files.prefix(Self.maxFiles)) }
@@ -79,9 +72,7 @@ struct ClientReviewAllView: View {
         .background(
             GeometryReader { proxy in
                 Color.clear
-                    // Quantised: `minWidth` relays every row in the diff, and
-                    // a rotation or a split-view drag would otherwise deliver
-                    // a new width, and a full relayout, on every frame.
+                    // Avoid relaying every preview during a split-view drag.
                     .onAppear { paneWidth = (proxy.size.width / 8).rounded(.down) * 8 }
                     .onChange(of: (proxy.size.width / 8).rounded(.down) * 8) { _, new in
                         paneWidth = new
@@ -149,43 +140,37 @@ struct ClientReviewAllView: View {
 
     /// The width a row should fill, less the card's own horizontal padding.
     private var rowWidth: CGFloat {
-        max(0, paneWidth - Theme.Space.m * 2)
+        max(1, paneWidth - Theme.Space.m * 4)
     }
 
-    /// One horizontal scroll around each file's diff, not one per row, so the
-    /// gutter and the code cannot slide out of step with each other. The same
-    /// container the per-file diff and the commit detail use: without it a
-    /// long line, which never wraps, forces its row wider than the screen and
-    /// the card overflows with nowhere to scroll.
+    /// A bounded preview wraps inside its card without a second scroll axis.
     private func hunks(_ preview: Preview) -> some View {
         let cut = max(0, preview.total - preview.rows.count)
         return VStack(alignment: .leading, spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(preview.rows) { row in
-                        switch row.content {
-                        case let .hunk(header):
-                            Text(header)
-                                .font(ClientType.code)
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(1)
-                                .padding(.horizontal, Theme.Space.s)
-                                .padding(.vertical, 6)
-                                .frame(minWidth: rowWidth, alignment: .leading)
-                                .background(Theme.panel)
-                        case let .line(line):
-                            DiffLineRow(line: line, minWidth: rowWidth)
-                        case let .note(text):
-                            Text(text)
-                                .font(ClientType.caption)
-                                .foregroundStyle(.secondary)
-                        case .file:
-                            EmptyView()
-                        }
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(preview.rows) { row in
+                    switch row.content {
+                    case let .hunk(header):
+                        Text(header)
+                            .font(ClientType.code)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .padding(.horizontal, Theme.Space.s)
+                            .padding(.vertical, 6)
+                            .frame(width: rowWidth, alignment: .leading)
+                            .background(Theme.panel)
+                    case let .line(line):
+                        DiffLineRow(line: line, minWidth: rowWidth, continuation: row.continuation)
+                    case let .note(text):
+                        Text(text)
+                            .font(ClientType.caption)
+                            .foregroundStyle(.secondary)
+                    case .file:
+                        EmptyView()
                     }
                 }
-                .padding(.vertical, Theme.Space.xs)
             }
+            .padding(.vertical, Theme.Space.xs)
             if cut > 0 {
                 Text(L10n.text("apple.clientreviewallview.showing_0_of_1_lines_here.f2764462", "\(preview.rows.count)", "\(preview.total)"))
                     .font(ClientType.caption)
@@ -207,8 +192,10 @@ struct ClientReviewAllView: View {
                 guard !Task.isCancelled else { return }
                 let limit = Self.linesPerFile
                 let task = Task.detached(priority: .userInitiated) {
-                    Preview(rows: DiffDocumentRow.make([diff], fileHeaders: false, rowLimit: limit),
-                            total: DiffDocumentRow.count([diff], fileHeaders: false))
+                    Preview(rows: DiffDocumentRow.make([diff], fileHeaders: false, rowLimit: limit,
+                                                       maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit),
+                            total: DiffDocumentRow.count([diff], fileHeaders: false,
+                                                        maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit))
                 }
                 let preview = await withTaskCancellationHandler {
                     await task.value

@@ -1645,7 +1645,8 @@ final class ChatModel {
         }
     }
 
-    func remove(_ chat: ChatConversation) async {
+    @discardableResult
+    func remove(_ chat: ChatConversation) async -> Bool {
         await remove(chat, in: folderID)
     }
 
@@ -1655,7 +1656,8 @@ final class ChatModel {
     /// folder on screen and not the conversation's host. Routing by folder id
     /// deletes from the owning host and drops the row from the cache, leaving
     /// the open transcript alone.
-    func remove(_ chat: ChatConversation, in folderID: String?) async {
+    @discardableResult
+    func remove(_ chat: ChatConversation, in folderID: String?) async -> Bool {
         let targetPeer = WorkDestinationResolver.deletionPeer(folderID: folderID, currentFolderID: self.folderID, currentPeer: peer)
         let cacheKey = (folderID ?? self.folderID).flatMap { folder in
             continuityOwner(folderID: folder).map { owner in
@@ -1664,15 +1666,17 @@ final class ChatModel {
             }
         }
         let context = loadGeneration
+        let scope = WorkSessionContext.shared.scope
         do {
             try await Bridge.removeChat(id: chat.id, peer: targetPeer)
+            guard context == loadGeneration, scope == WorkSessionContext.shared.scope else { return false }
+            error = nil
             // Only this chat. Every other warm conversation is still right.
             previewCacheEpoch &+= 1
             if let cacheKey { recentMessages.remove(cacheKey) }
             if (folderID == nil || folderID == self.folderID) && selected?.id == chat.id {
                 clearRecentMessagePreview()
             }
-            guard context == loadGeneration else { return }
             if let folderID { forgetDraft(chatID: chat.id, folderID: folderID) }
             if let folderID, folderID != self.folderID {
                 chatListCache[folderID]?.removeAll { $0.id == chat.id }
@@ -1692,8 +1696,10 @@ final class ChatModel {
                     await select(chats.first)
                 }
             }
+            return context == loadGeneration && scope == WorkSessionContext.shared.scope
         } catch {
-            if context == loadGeneration { self.error = error.localizedDescription }
+            if context == loadGeneration, scope == WorkSessionContext.shared.scope { self.error = error.localizedDescription }
+            return false
         }
     }
 
@@ -1708,11 +1714,10 @@ final class ChatModel {
             // currently loaded in this model. Let the bridge route the folder
             // itself instead of borrowing the current conversation's peer.
             _ = try await Bridge.removeAllChats(workspaceID: folderID, peer: peer)
-            guard scope == WorkSessionContext.shared.scope else { return }
+            guard context == loadGeneration, scope == WorkSessionContext.shared.scope else { return }
             previewCacheEpoch &+= 1
             if let cachePrefix { recentMessages.retain([], in: cachePrefix) }
             if self.folderID == folderID { clearRecentMessagePreview() }
-            guard context == loadGeneration else { return }
             error = nil
             storeChatListCache([], folderID: folderID)
             forgetLastSelected(folderID: folderID)
@@ -1721,7 +1726,7 @@ final class ChatModel {
                 await select(nil)
             }
         } catch {
-            if context == loadGeneration { self.error = error.localizedDescription }
+            if context == loadGeneration, scope == WorkSessionContext.shared.scope { self.error = error.localizedDescription }
         }
     }
 

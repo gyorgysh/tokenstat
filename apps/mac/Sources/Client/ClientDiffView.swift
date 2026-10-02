@@ -29,6 +29,8 @@ struct ClientDiffView: View {
     @State private var editorContent: EditableFile?
     @State private var revision = UUID()
     @State private var loadRevision = UUID()
+    @State private var editorRevision = UUID()
+    @State private var openingEditor = false
     @Environment(\.fileContent) private var files
 
     private struct EditableFile: Identifiable {
@@ -59,7 +61,7 @@ struct ClientDiffView: View {
                     Task { await openEditor() }
                 }
                 .labelStyle(.iconOnly)
-                .disabled(diff?.binary == true)
+                .disabled(!loaded || diff == nil || diff?.binary == true || openingEditor)
             }
         }
         .sheet(item: $editorContent, onDismiss: {
@@ -80,6 +82,10 @@ struct ClientDiffView: View {
             }
         }
         .task { await load() }
+        .onDisappear {
+            editorRevision = UUID()
+            openingEditor = false
+        }
     }
 
     /// What file, where, and how much of it moved. The path is here rather
@@ -138,12 +144,21 @@ struct ClientDiffView: View {
     }
 
     private func openEditor() async {
-        guard diff?.binary != true else { return }
+        guard loaded, diff != nil, diff?.binary != true, !openingEditor else { return }
+        let request = UUID()
+        editorRevision = request
+        let owner = WorkSessionContext.shared.scope
+        openingEditor = true
+        defer { if request == editorRevision { openingEditor = false } }
         do {
             let text = try await files.read(peer: peer, workspace: workspaceID, path: file.path)
+            guard !Task.isCancelled, request == editorRevision,
+                  owner == WorkSessionContext.shared.scope else { return }
             errorMessage = nil
             editorContent = EditableFile(path: file.path, text: text)
         } catch {
+            guard !Task.isCancelled, request == editorRevision,
+                  owner == WorkSessionContext.shared.scope else { return }
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
     }
@@ -157,9 +172,9 @@ struct ClientDiffView: View {
 /// side it belongs to.
 struct DiffLineRow: View {
     let line: DiffLine
-    /// At least this wide, so the tint behind a short line spans the screen
-    /// rather than stopping at the last character. Zero sizes to content.
+    /// The available pane width, including the source-number gutter.
     let minWidth: CGFloat
+    var continuation = false
     @ScaledMetric(relativeTo: .footnote) private var gutterWidth: CGFloat = 34
     @ScaledMetric(relativeTo: .footnote) private var markerWidth: CGFloat = 12
 
@@ -167,7 +182,7 @@ struct DiffLineRow: View {
     /// together because they share a font, so the columns stay aligned at
     /// every size.
     private var number: String {
-        (line.newLine ?? line.oldLine).map(String.init) ?? "·"
+        continuation ? "↳" : (line.newLine ?? line.oldLine).map(String.init) ?? "·"
     }
 
     private var marker: String {
@@ -199,7 +214,9 @@ struct DiffLineRow: View {
             Text(number)
                 .font(ClientType.code)
                 .foregroundStyle(.tertiary)
-                .frame(minWidth: gutterWidth, alignment: .trailing)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .frame(width: gutterWidth, alignment: .trailing)
                 .padding(.trailing, Theme.Space.xs)
             Text(marker)
                 .font(ClientType.code)
@@ -209,13 +226,15 @@ struct DiffLineRow: View {
                 .font(ClientType.code)
                 .foregroundStyle(tint)
                 .textSelection(.enabled)
-                // Never wrap: a wrapped line loses its place against the
-                // gutter, and long lines are what the horizontal scroll is for.
-                .fixedSize(horizontal: true, vertical: false)
+                // One source number stays at the top of all visual wraps.
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.trailing, Theme.Space.m)
         }
         .padding(.leading, Theme.Space.xs)
-        .frame(minWidth: minWidth, alignment: .leading)
+        .padding(.vertical, 1)
+        .frame(width: max(1, minWidth), alignment: .leading)
         .background(wash)
     }
 }

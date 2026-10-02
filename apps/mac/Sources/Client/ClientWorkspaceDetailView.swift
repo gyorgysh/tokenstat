@@ -825,6 +825,10 @@ struct ClientFilesView: View {
     /// has read yet look identical and mean opposite things, so the empty
     /// state waits rather than calling a full folder empty for a moment.
     @State private var loaded = false
+    @State private var loadRevision = UUID()
+    @State private var openRevision = UUID()
+    @State private var visible = false
+    @State private var owner = WorkSessionContext.shared.scope
 
     private var currentPath: String { pathStack.last ?? "" }
 
@@ -898,14 +902,22 @@ struct ClientFilesView: View {
                 if pathStack.count > 1 {
                     Button(L10n.text("apple.clientworkspacedetailview.up.55490a4b")) {
                         pathStack.removeLast()
-                        Task { await load() }
                     }
                 }
             }
         }
         .task(id: currentPath) {
+            visible = true
             loaded = false
+            children = []
+            openRevision = UUID()
             await load()
+        }
+        .onAppear { visible = true }
+        .onDisappear {
+            visible = false
+            loadRevision = UUID()
+            openRevision = UUID()
         }
         .sheet(item: $openFile) { file in
             ClientFileEditor(peer: peer, workspace: workspace, path: file.path, content: file.content)
@@ -913,10 +925,21 @@ struct ClientFilesView: View {
     }
 
     private func load() async {
+        let owner = self.owner
+        guard visible, !Task.isCancelled, owner != nil,
+              owner == WorkSessionContext.shared.scope else { return }
+        let path = currentPath
+        let request = UUID()
+        loadRevision = request
         errorMessage = nil
         do {
-            children = try await ClientRemote.tree(peer: peer, workspace: workspace, path: currentPath)
+            let fresh = try await ClientRemote.tree(peer: peer, workspace: workspace, path: path)
+            guard visible, !Task.isCancelled, request == loadRevision, path == currentPath,
+                  owner != nil, owner == WorkSessionContext.shared.scope else { return }
+            children = fresh
         } catch {
+            guard visible, !Task.isCancelled, request == loadRevision, path == currentPath,
+                  owner != nil, owner == WorkSessionContext.shared.scope else { return }
             errorMessage = error.localizedDescription
             children = []
         }
@@ -924,10 +947,16 @@ struct ClientFilesView: View {
     }
 
     private func open(_ entry: TreeEntry) async {
+        guard visible, !Task.isCancelled, let owner,
+              owner == WorkSessionContext.shared.scope else { return }
         if entry.isDir {
+            openRevision = UUID()
             pathStack.append(entry.path)
             return
         }
+        let path = currentPath
+        let request = UUID()
+        openRevision = request
         let key = ClientEditorKey(peer: peer, workspace: workspace, path: entry.path)
         if usesEditorTabs, let tab = editors.tab(for: key), tab.document.isDirty || tab.isSaving {
             editors.select(tab)
@@ -935,12 +964,16 @@ struct ClientFilesView: View {
         }
         do {
             let file = try await ClientRemote.readFile(peer: peer, workspace: workspace, path: entry.path)
+            guard visible, !Task.isCancelled, request == openRevision, path == currentPath,
+                  owner == WorkSessionContext.shared.scope else { return }
             if usesEditorTabs {
                 editors.adoptSaved(key, content: file.content)
             } else {
                 openFile = OpenFile(path: entry.path, content: file.content)
             }
         } catch {
+            guard visible, !Task.isCancelled, request == openRevision, path == currentPath,
+                  owner == WorkSessionContext.shared.scope else { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -970,6 +1003,9 @@ struct ClientFileEditor: View {
     @State private var confirmClose = false
     @State private var find: EditorFindSession
     @State private var conflictHostContent: String?
+    @State private var owner = WorkSessionContext.shared.scope
+    @State private var visible = false
+    @State private var saveGeneration = UUID()
     private let read: ClientEditorStore.Reader
     private let write: ClientEditorStore.Writer
 
@@ -1050,6 +1086,12 @@ struct ClientFileEditor: View {
         // The first parse, before anybody types. Colour is not worth blocking
         // the sheet on, so the text is up either way.
         .task { await document.highlightNow() }
+        .onAppear { visible = true }
+        .onDisappear {
+            visible = false
+            saveGeneration = UUID()
+            isSaving = false
+        }
         #if WORKBENCH_QA
         .task {
             if ProcessInfo.processInfo.environment["FILE_DIRTY"] == "1", !document.isDirty {
@@ -1140,16 +1182,19 @@ struct ClientFileEditor: View {
     }
 
     private func save() async {
-        guard !isSaving, conflictHostContent == nil else { return }
+        let generation = saveGeneration
+        guard ownsSave(generation), !isSaving, conflictHostContent == nil else { return }
         isSaving = true
-        defer { isSaving = false }
+        defer { if saveGeneration == generation { isSaving = false } }
         let host: String
         do {
             host = try await read(peer, workspace, path)
         } catch {
+            guard ownsSave(generation) else { return }
             errorMessage = L10n.text("apple.clientworkspacedetailview.could_not_re_read_this_file_on_that_comput.dacb7165")
             return
         }
+        guard ownsSave(generation) else { return }
         let draft = document.text
         if host != draft, host != document.savedText {
             errorMessage = nil
@@ -1164,6 +1209,7 @@ struct ClientFileEditor: View {
         let sent = draft
         do {
             try await write(peer, workspace, path, sent)
+            guard ownsSave(generation) else { return }
             document.markSaved(content: sent)
             errorMessage = nil
             NotificationCenter.default.post(
@@ -1171,29 +1217,34 @@ struct ClientFileEditor: View {
                 object: ClientFileChangeNotice(peer: peer, workspace: workspace, path: path)
             )
         } catch {
+            guard ownsSave(generation) else { return }
             errorMessage = error.localizedDescription
         }
     }
 
     private func resolveConflict(keepMine: Bool) {
-        guard conflictHostContent != nil, !isSaving else { return }
+        let generation = saveGeneration
+        guard ownsSave(generation), conflictHostContent != nil, !isSaving else { return }
         if keepMine {
             // Explicit choice: write the draft through without re-verifying.
             // Re-reading first would raise the same conflict again.
             conflictHostContent = nil
             errorMessage = nil
             let sent = document.text
+            isSaving = true
             Task {
-                isSaving = true
-                defer { isSaving = false }
+                defer { if saveGeneration == generation { isSaving = false } }
+                guard ownsSave(generation) else { return }
                 do {
                     try await write(peer, workspace, path, sent)
+                    guard ownsSave(generation) else { return }
                     document.markSaved(content: sent)
                     NotificationCenter.default.post(
                         name: .clientFileDidChange,
                         object: ClientFileChangeNotice(peer: peer, workspace: workspace, path: path)
                     )
                 } catch {
+                    guard ownsSave(generation) else { return }
                     errorMessage = error.localizedDescription
                 }
             }
@@ -1204,6 +1255,11 @@ struct ClientFileEditor: View {
             conflictHostContent = nil
             errorMessage = nil
         }
+    }
+
+    private func ownsSave(_ generation: UUID) -> Bool {
+        visible && !Task.isCancelled && saveGeneration == generation
+            && owner != nil && owner == WorkSessionContext.shared.scope
     }
 }
 
