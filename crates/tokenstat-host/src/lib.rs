@@ -225,4 +225,4 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 25 adds `chat.steer`, `chat.steerClear` and `chat.steerDeliver`,
 /// so a short note can ride the next tool step while a turn is still running.
 /// Version 26 adds independent saved-transcript copies with `chat.fork`.
-pub const PROTOCOL_VERSION: &str = "26";
+pub const PROTOCOL_VERSION: &str = "27";

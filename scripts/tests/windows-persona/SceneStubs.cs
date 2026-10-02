@@ -27,11 +27,68 @@ namespace Microsoft.UI.Xaml.Controls
 namespace Microsoft.UI.Xaml.Media
 {
     public class Brush;
-    public class Geometry { public object Bounds { get; set; } = new(); }
-    public sealed class PathGeometry : Geometry;
+    public class Geometry
+    {
+        public object Bounds { get; set; } = new();
+        public Transform? Transform { get; set; }
+    }
+    public enum FillRule { EvenOdd, Nonzero }
+    public sealed class PathGeometry : Geometry
+    {
+        public FillRule FillRule { get; set; }
+        public List<PathFigure> Figures { get; } = new();
+    }
+    public sealed class PathFigure
+    {
+        public Windows.Foundation.Point StartPoint { get; set; }
+        public bool IsClosed { get; set; }
+        public bool IsFilled { get; set; }
+        public List<PathSegment> Segments { get; } = new();
+    }
+    public abstract class PathSegment;
+    public sealed class LineSegment : PathSegment { public Windows.Foundation.Point Point { get; set; } }
+    public sealed class BezierSegment : PathSegment
+    {
+        public Windows.Foundation.Point Point1 { get; set; }
+        public Windows.Foundation.Point Point2 { get; set; }
+        public Windows.Foundation.Point Point3 { get; set; }
+    }
+    public sealed class QuadraticBezierSegment : PathSegment
+    {
+        public Windows.Foundation.Point Point1 { get; set; }
+        public Windows.Foundation.Point Point2 { get; set; }
+    }
+    public enum SweepDirection { Counterclockwise, Clockwise }
+    public sealed class ArcSegment : PathSegment
+    {
+        public Windows.Foundation.Point Point { get; set; }
+        public Windows.Foundation.Size Size { get; set; }
+        public double RotationAngle { get; set; }
+        public bool IsLargeArc { get; set; }
+        public SweepDirection SweepDirection { get; set; }
+    }
+    public sealed class PolyLineSegment : PathSegment { public List<Windows.Foundation.Point> Points { get; } = new(); }
+    public abstract class Transform { public abstract Windows.Foundation.Point TransformPoint(Windows.Foundation.Point point); }
+    public readonly record struct Matrix(double M11, double M12, double M21, double M22, double OffsetX, double OffsetY);
+    public sealed class MatrixTransform : Transform
+    {
+        public Matrix Matrix { get; set; }
+        public override Windows.Foundation.Point TransformPoint(Windows.Foundation.Point point) =>
+            new(point.X * Matrix.M11 + point.Y * Matrix.M21 + Matrix.OffsetX,
+                point.X * Matrix.M12 + point.Y * Matrix.M22 + Matrix.OffsetY);
+    }
     public sealed class RectangleGeometry : Geometry { public object? Rect { get; set; } }
     public enum PenLineCap { Flat, Round }
     public enum PenLineJoin { Miter, Round }
+}
+namespace Windows.Foundation
+{
+    public readonly record struct Point(double X, double Y);
+    public readonly record struct Size(double Width, double Height);
+}
+namespace Tokenstat.Design
+{
+    internal static class L10n { public static string Text(string key, params string[] args) => key; }
 }
 namespace Microsoft.UI.Xaml.Shapes
 {

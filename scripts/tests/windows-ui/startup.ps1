@@ -38,6 +38,7 @@ try {
     $window = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
     $descendants = [System.Windows.Automation.TreeScope]::Descendants
     function Open-Place([string]$Name) {
+        Write-Host "Opening '$Name'"
         $condition = [System.Windows.Automation.AndCondition]::new(
             [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, $Name),
             [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button))
@@ -47,6 +48,7 @@ try {
         $invoke.Invoke()
     }
     function Wait-ForControl([string]$Id, [int]$Seconds = 10) {
+        Write-Host "Waiting for '$Id'"
         $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, $Id)
         for ($attempt = 0; $attempt -lt $Seconds * 4; $attempt++) {
             $control = $window.FindFirst($descendants, $condition)
@@ -54,7 +56,8 @@ try {
             Start-Sleep -Milliseconds 250
         }
         $window.FindAll($descendants, [System.Windows.Automation.Condition]::TrueCondition) |
-            Where-Object { $_.Current.AutomationId -match '^(sidebar|chat|projects)\.' } |
+            Where-Object { $_.Current.AutomationId -match '^(sidebar|chat|projects)\.' -or (!$_.Current.IsOffscreen -and $_.Current.Name) } |
+            Select-Object -First 100 |
             ForEach-Object { Write-Output "UI: $($_.Current.AutomationId); offscreen=$($_.Current.IsOffscreen); $($_.Current.Name)" }
         throw "Production page did not render '$Id'"
     }
@@ -96,6 +99,7 @@ try {
         }
     }
     function Invoke-Control($Control) {
+        Write-Host "Invoking '$($Control.Current.Name)'"
         $pattern = $null
         if ($Control.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$pattern)) { $pattern.Invoke(); return }
         if ($Control.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$pattern)) { $pattern.Select(); return }
@@ -158,7 +162,9 @@ try {
     Wait-ForControl 'chat.list' | Out-Null
     # Create uses the same composer path as opening an archived conversation.
     Open-Place 'New chat in UI smoke project'
-    Wait-ForControl 'chat.composer' | Out-Null
+    Wait-ForControl 'chat.composer' 30 | Out-Null
+    $latest = @(Call-Host 'chat.list' @{workspaceId = $folder.id}) | Select-Object -First 1
+    Wait-ForControl "sidebar.chat.$($latest.id)" | Out-Null
     $trace = Get-Content "$env:LOCALAPPDATA/tokenstat/logs/startup.log" | Where-Object { $_ -match "pid=$($process.Id) " }
     if ($trace -match 'Chat open failed|[Uu]nhandled exception') { throw 'Production chat or sidebar raised a XAML exception' }
     Write-Output 'PASS: production chats open, rebuild setup, retain drafts on reopen, expand history and create a new conversation'

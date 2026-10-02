@@ -77,6 +77,7 @@ public sealed partial class MainWindow : Window
     private int _sidebarTick;
     private bool _sidebarRefreshing;
     private bool _sidebarSlowRefreshPending;
+    private bool _sidebarRefreshPending;
     private bool _suppressNav;
     private string? _lastNavTag;
     private JsonArray _liveSessions = new();
@@ -402,6 +403,7 @@ public sealed partial class MainWindow : Window
             RebuildSidebarLive();
         });
         AppServices.AccountChanged += () => DispatcherQueue.TryEnqueue(() => _ = RefreshSidebarLiveAsync(slow: true));
+        AppServices.ConversationsChanged += () => DispatcherQueue.TryEnqueue(() => _ = RefreshSidebarLiveAsync());
         AppServices.Update.Changed += () => DispatcherQueue.TryEnqueue(RefreshUpdateBadge);
     }
 
@@ -683,6 +685,8 @@ public sealed partial class MainWindow : Window
         var menu = ContextMenus.Menu(parent);
         async Task NewChat()
         {
+            // Finish the native row's selection before opening its action.
+            await Task.Yield();
             NavigateTo("ws:" + id + ":Chat");
             if (WorkspaceTabs(id).ActivePage is ChatPage chat) await chat.BeginNewChatAsync();
         }
@@ -1634,6 +1638,7 @@ public sealed partial class MainWindow : Window
     {
         if (_sidebarRefreshing)
         {
+            _sidebarRefreshPending = true;
             _sidebarSlowRefreshPending |= slow;
             return;
         }
@@ -1645,7 +1650,9 @@ public sealed partial class MainWindow : Window
             var previousSummaries = _liveSummaries;
             var previousAccount = _liveAccount;
             var previousSshSessions = _liveSshSessions;
-            var (sessions, chats) = await SidebarLive.FetchFastAsync();
+            var (sessions, chats) = await SidebarLive.FetchFastAsync(
+                _localFolders.Select(folder => Format.Text(folder, "id"))
+                    .Concat(RemoteWorkspaces.CachedFolders().Select(folder => folder.Id)));
             try
             {
                 var sshSessions = Format.Items(await AppServices.Host.CallAsync("ssh.session.list"));
@@ -1712,10 +1719,12 @@ public sealed partial class MainWindow : Window
         finally
         {
             _sidebarRefreshing = false;
-            if (_sidebarSlowRefreshPending)
+            if (_sidebarRefreshPending)
             {
+                var pendingSlow = _sidebarSlowRefreshPending;
+                _sidebarRefreshPending = false;
                 _sidebarSlowRefreshPending = false;
-                _ = RefreshSidebarLiveAsync(slow: true);
+                _ = RefreshSidebarLiveAsync(slow: pendingSlow);
             }
         }
     }
@@ -1750,11 +1759,6 @@ public sealed partial class MainWindow : Window
             list.Add(session);
         }
         var chatsByFolder = new Dictionary<string, List<JsonNode>>(StringComparer.Ordinal);
-        string? selectedChatId = null;
-        if (selectedTag is not null && LiveRoute.TrySplit(selectedTag, SidebarLive.ChatPrefix, out _, out var litChat))
-        {
-            selectedChatId = litChat;
-        }
         foreach (var chat in _liveChats)
         {
             if (chat is null)
@@ -1763,8 +1767,7 @@ public sealed partial class MainWindow : Window
             }
             var folder = Format.Text(chat, "workspaceId");
             var id = Format.Text(chat, "id");
-            if (string.IsNullOrEmpty(folder) || string.IsNullOrEmpty(id)
-                || SidebarLive.IsUntouched(chat, selectedChatId))
+            if (string.IsNullOrEmpty(folder) || string.IsNullOrEmpty(id))
             {
                 continue;
             }
@@ -1970,6 +1973,13 @@ public sealed partial class MainWindow : Window
             menu.Items.Add(item);
         }
         footer.Flyout = menu;
+        var checkUpdate = new MenuFlyoutItem { Text = L10n.Text("windows.accountpage.check_for_updates") };
+        checkUpdate.Click += async (_, _) =>
+        {
+            NavigateTo("global:" + GlobalSection.Account);
+            await AppServices.Update.CheckNowAsync();
+        };
+        menu.Items.Add(checkUpdate);
         if (!expanded) return footer;
         var bar = new Grid { ColumnSpacing = Theme.SpaceS };
         bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -2140,6 +2150,7 @@ public sealed partial class MainWindow : Window
     private void SyncTitleBarSplit()
     {
         TitlePaneColumn.Width = new GridLength(RailWidth + (_nav.IsPaneOpen ? _nav.OpenPaneLength : _nav.CompactPaneLength));
+        TitlePaneSide.Background = _nav.IsPaneOpen ? _chromeSidebar : _chromeBackground;
     }
 
     /// <summary>

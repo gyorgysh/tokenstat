@@ -1416,7 +1416,7 @@ impl Store {
         if backend.trim().is_empty() || backend == "sh" {
             return Err("pick an agent to write the draft".into());
         }
-        let argv = crate::automations::persona_draft_command(
+        let mut argv = crate::automations::persona_draft_command(
             backend,
             &draft_prompt(brief, name),
             DRAFT_TIMEOUT.as_secs(),
@@ -1426,6 +1426,8 @@ impl Store {
         // handing it a chance to do something nobody asked for.
         let cwd = std::env::temp_dir().join("tokenstat-persona-draft");
         fs::create_dir_all(&cwd).map_err(|error| error.to_string())?;
+        let _prompt_file =
+            crate::chat_turn::PromptFile::for_windows_muse(backend, &mut argv, &cwd)?;
         let manager = tokenstat_pty::manager();
         let info = manager
             .spawn(&tokenstat_pty::Spawn {
@@ -2640,7 +2642,7 @@ impl Store {
         let agy_customization_dir =
             (chat.backend == "agy" && chat.autonomy == "standard").then(|| self.agy_hook_home(id));
         let grok_allow_rules = grok_allow_rules(&chat);
-        let argv = crate::automations::chat_agent_command(
+        let mut argv = crate::automations::chat_agent_command(
             &chat.backend,
             prompt,
             chat.model.as_deref(),
@@ -2791,6 +2793,11 @@ impl Store {
         // message the host already took is answered even if the folder has
         // since been unregistered.
         let workspace = crate::workspaces::folder(&chat.workspace_id)?;
+        let prompt_file = crate::chat_turn::PromptFile::for_windows_muse(
+            &chat.backend,
+            &mut argv,
+            &response_output_dir,
+        )?;
         // Written before anything is started, so a host that dies between the
         // spawn and its answer leaves a record to reconcile against rather
         // than a message the next attempt would run a second time.
@@ -2957,6 +2964,7 @@ impl Store {
                 &raw_path,
                 &response_output_dir,
             );
+            drop(prompt_file);
             let _ = store.finish_turn(
                 &chat_id,
                 &info.id,

@@ -34,6 +34,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
     private string _summary = "";
     private DispatcherQueueTimer? _sessionsPoll;
     private bool _sessionsLoading;
+    private bool _showingLauncherCatalog;
 
     public WorkspacePage(string id, WorkspaceSection section)
     {
@@ -684,13 +685,20 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         try
         {
             var catalog = await CallTargetAsync("launcher.catalog");
+            var profiles = (Format.Items(catalog) ?? new JsonArray()).OfType<JsonNode>().ToArray();
             host.Children.Add(new TextBlock { Text = L10n.Text("windows.workspacepage.run_an_agent.b7046310"), Opacity = 0.7, FontSize = 12 });
             var tiles = new FlowPanel { MinimumItemWidth = 220, Spacing = Theme.SpaceM };
-            foreach (var profile in Format.Items(catalog) ?? new JsonArray())
+            foreach (var profile in profiles)
             {
-                if (profile is null || Format.Flag(profile, "hidden")) continue;
                 var id = Format.Text(profile, "id");
                 var installed = Format.Flag(profile, "installed");
+                var hidden = Format.Flag(profile, "hidden");
+                var canInstall = !string.IsNullOrEmpty(Format.Text(profile, "installCommand"));
+                var actionLabel = installed ? hidden ? L10n.Text("common.add")
+                    : L10n.Text("windows.workspacepage.launch.ccf56ef5")
+                    : canInstall ? L10n.Text("windows.workspacepage.install.569ca49f")
+                    : L10n.Text("windows.chatpage.not_available_on_this_computer.ffcbd9b9");
+                if ((!installed || hidden) && !_showingLauncherCatalog) continue;
                 var body = new StackPanel { Spacing = Theme.SpaceM, HorizontalAlignment = HorizontalAlignment.Center };
                 body.Children.Add(AgentMark.View(Format.Text(profile, "harnessId", id), 42));
                 body.Children.Add(new TextBlock
@@ -698,12 +706,22 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     Text = Format.Text(profile, "name", id), HorizontalAlignment = HorizontalAlignment.Center,
                     FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 });
+                if (!installed || hidden)
+                    body.Children.Add(new TextBlock { Text = actionLabel, FontSize = 12,
+                        TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center,
+                        Opacity = 0.7, HorizontalAlignment = HorizontalAlignment.Center });
                 var actions = new StackPanel { Spacing = Theme.SpaceS };
                 async Task RunAsync(Button button, string operation)
                 {
                     button.IsEnabled = false;
                     try
                     {
+                        if (operation == "show")
+                        {
+                            await CallTargetAsync("launcher.show", new JsonObject { ["id"] = id });
+                            await LoadLaunchersAsync(host);
+                            return;
+                        }
                         if (operation == "install")
                         {
                             var result = await CallTargetAsync("launcher.install", new JsonObject { ["id"] = id }, TimeSpan.FromMinutes(5));
@@ -732,11 +750,14 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     Content = body, HorizontalAlignment = HorizontalAlignment.Stretch,
                     HorizontalContentAlignment = HorizontalAlignment.Center,
                     Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush,
-                    CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(24), MinHeight = 110,
+                    CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(16), MinHeight = 110,
                 };
-                launch.Click += async (_, _) => await RunAsync(launch, installed ? "launch" : "install");
-                launch.IsEnabled = installed || !string.IsNullOrEmpty(Format.Text(profile, "installCommand"));
-                ToolTipService.SetToolTip(launch, installed ? L10n.Text("windows.workspacepage.launch_0.7c80096e", $"{Format.Text(profile, "name", id)}") : L10n.Text("windows.workspacepage.install_0.234d862d", $"{Format.Text(profile, "name", id)}"));
+                launch.Click += async (_, _) => await RunAsync(launch, installed ? hidden ? "show" : "launch" : "install");
+                if (!installed || hidden) launch.Opacity = 0.65;
+                launch.IsEnabled = installed || canInstall;
+                ToolTipService.SetToolTip(launch, hidden || !installed && !canInstall ? actionLabel
+                    : installed ? L10n.Text("windows.workspacepage.launch_0.7c80096e", Format.Text(profile, "name", id))
+                    : L10n.Text("windows.workspacepage.install_0.234d862d", Format.Text(profile, "name", id)));
                 var tile = new Grid();
                 tile.Children.Add(launch);
                 var setup = Buttons.ToolbarIcon(ActionIcon.Settings, L10n.Text("windows.workspacepage.set_up_0.4e4ef4a2", $"{Format.Text(profile, "name", id)}"), (_, _) => { }, isAccent: true);
@@ -754,35 +775,35 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     install.Click += async (_, _) => { options.Hide(); await RunAsync(install, "install"); };
                     actions.Children.Add(install);
                 }
-                if (actions.Children.Count > 0) tile.Children.Add(setup);
+                if (installed && !hidden && actions.Children.Count > 0) tile.Children.Add(setup);
                 var menu = ContextMenus.Menu(tile);
-                ContextMenus.AddButton(menu, launch, installed ? L10n.Text("windows.workspacepage.launch.ccf56ef5") : L10n.Text("windows.workspacepage.install.569ca49f"));
+                ContextMenus.AddButton(menu, launch, actionLabel);
                 ContextMenus.AddButtons(menu, actions);
-                ContextMenus.AddAsync(menu, L10n.Text("windows.workspacepage.remove_from_launcher.b107a73b"), async () =>
+                if (installed && !hidden) ContextMenus.AddAsync(menu, L10n.Text("windows.workspacepage.remove_from_launcher.b107a73b"), async () =>
                 {
                     try { await CallTargetAsync("launcher.hide", new JsonObject { ["id"] = id }); await LoadLaunchersAsync(host); }
                     catch (Exception ex) { host.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important)); }
                 });
                 tiles.Children.Add(tile);
             }
-            host.Children.Add(tiles);
-            var hidden = (Format.Items(catalog) ?? new JsonArray()).Where(profile => Format.Flag(profile, "hidden")).ToList();
-            if (hidden.Count > 0)
+            if (profiles.Any(profile => !Format.Flag(profile, "installed") || Format.Flag(profile, "hidden")))
             {
-                var restore = ActionIconGlyph.Button(L10n.Text("windows.workspacepage.restore_hidden_launchers.9b6fdaaa"), ActionIcon.Restore, (_, _) => { });
-                var menu = new MenuFlyout();
-                foreach (var profile in hidden)
-                {
-                    var hiddenId = Format.Text(profile, "id");
-                    ContextMenus.AddAsync(menu, Format.Text(profile, "name", hiddenId), async () =>
-                    {
-                        try { await CallTargetAsync("launcher.show", new JsonObject { ["id"] = hiddenId }); await LoadLaunchersAsync(host); }
-                        catch (Exception ex) { host.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important)); }
-                    });
-                }
-                restore.Flyout = menu;
-                host.Children.Add(restore);
+                var moreBody = new StackPanel { Spacing = Theme.SpaceM, HorizontalAlignment = HorizontalAlignment.Center };
+                moreBody.Children.Add(new Viewbox { Width = 28, Height = 28, Child =
+                    (_showingLauncherCatalog ? ActionIcon.Collapse : ActionIcon.Create).Icon() });
+                moreBody.Children.Add(new TextBlock { Text = _showingLauncherCatalog ? L10n.Text("windows.workspacepage.hide_catalog")
+                    : L10n.Text("windows.workspacepage.more_tools"), FontSize = 13 });
+                var more = new Button { Content = moreBody, MinHeight = 110,
+                    HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center,
+                    Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush,
+                    CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(16) };
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(more, "launcher.more");
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(more, _showingLauncherCatalog
+                    ? L10n.Text("windows.workspacepage.hide_catalog") : L10n.Text("windows.workspacepage.more_tools"));
+                more.Click += async (_, _) => { _showingLauncherCatalog = !_showingLauncherCatalog; await LoadLaunchersAsync(host); };
+                tiles.Children.Add(more);
             }
+            host.Children.Add(tiles);
         }
         catch (Exception ex) { host.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important)); }
     }

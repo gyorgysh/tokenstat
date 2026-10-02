@@ -21,7 +21,8 @@ internal static class SceneTests
         scene.Begin();
         var replacement = new PathGeometry();
         Check(ReferenceEquals(first, scene.Paint(replacement)), "A repaint replaced its visual slot");
-        Check(first.Data == replacement && first.Fill is null && first.Stroke is null
+        Check(first.Data is not null && !ReferenceEquals(first.Data, replacement)
+            && first.Fill is null && first.Stroke is null
             && first.Clip is null && first.RenderTransform is null && first.Opacity == 1
             && first.StrokeThickness == 1 && first.StrokeStartLineCap == PenLineCap.Flat
             && first.StrokeEndLineCap == PenLineCap.Flat && first.StrokeLineJoin == PenLineJoin.Miter,

@@ -189,6 +189,7 @@ internal sealed partial class ChatPage
                 ["expectedRevision"] = attempted.Revision,
             });
             ChatOutbox.Shared.Accept(key, attempted, Format.Long(updated, "sendRevision"));
+            AppServices.NotifyConversationsChanged();
             _authorizedQueue.Remove(attempted.Id);
             if (Current())
             { _openChat = ChatSteerOverlay.MergeRecord(updated, _openChat); _running = true; _started = true; }

@@ -19,6 +19,8 @@ internal static class AppServices
     public static HostClient Host { get; } = new(HostProcess.RecoverIfMissing);
     public static event Action? AccountChanged;
     public static void NotifyAccountChanged() => AccountChanged?.Invoke();
+    public static event Action? ConversationsChanged;
+    public static void NotifyConversationsChanged() => ConversationsChanged?.Invoke();
 
     public static AppUpdateModel Update { get; } = new();
 

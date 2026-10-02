@@ -2808,11 +2808,21 @@ fn tunnel_dial(
     // Signed in is a precondition for the session's HELLO; the multiplexed
     // session itself was started when remote reach turned on.
     let _ = account_token()?;
+    if tunnel_session()
+        .lock()
+        .ok()
+        .is_some_and(|guard| guard.is_none())
+    {
+        start_tunnel_if_enabled(session_for_serving()?, settings);
+    }
     let tunnel = tunnel_session()
         .lock()
         .ok()
         .and_then(|guard| guard.clone())
-        .ok_or("remote reach is on but the tunnel session is not running")?;
+        .ok_or_else(|| {
+            tunnel_state().lock().ok().and_then(|state| state.error.clone())
+                .unwrap_or_else(|| "This device's remote connection is paused. Open tokenstat on this device or turn on Always-on host, then connect again.".into())
+        })?;
     // The target's relay socket can be mid-reconnect (its daemon restarted),
     // which the relay answers with an ERROR channel, or the pairing can drop
     // before the answer arrives. All of those are transient, so a few short

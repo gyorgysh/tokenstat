@@ -107,7 +107,7 @@ enum Piece {
 /// Incremental NDJSON (or plain) renderer for one backend.
 pub struct Parser {
     backend: String,
-    leftover: String,
+    leftover: Vec<u8>,
     last_block: String,
     last_was_text: bool,
     /// Tool starts that have not seen a matching end yet. Closed on Done,
@@ -160,7 +160,7 @@ impl Parser {
     pub fn new(backend: &str) -> Self {
         Self {
             backend: backend.to_string(),
-            leftover: String::new(),
+            leftover: Vec::new(),
             last_block: String::new(),
             last_was_text: false,
             open_tools: Vec::new(),
@@ -176,14 +176,19 @@ impl Parser {
         }
     }
 
+    // Decode only complete records, so a pipe read splitting an emoji or
+    // accented character does not replace either half with U+FFFD.
+    fn take_line(&mut self) -> Option<String> {
+        let newline = self.leftover.iter().position(|byte| *byte == b'\n')?;
+        let bytes = self.leftover.drain(..=newline).collect::<Vec<_>>();
+        Some(String::from_utf8_lossy(&bytes[..newline]).into_owned())
+    }
+
     /// Consume a drain chunk and return any newly completed display text.
     pub fn push(&mut self, bytes: &[u8]) -> String {
-        let incoming = String::from_utf8_lossy(bytes);
-        self.leftover.push_str(&incoming);
+        self.leftover.extend_from_slice(bytes);
         let mut out = String::new();
-        while let Some(idx) = self.leftover.find('\n') {
-            let mut line = self.leftover[..idx].to_string();
-            self.leftover = self.leftover[idx + 1..].to_string();
+        while let Some(mut line) = self.take_line() {
             if line.ends_with('\r') {
                 line.pop();
             }
@@ -200,12 +205,9 @@ impl Parser {
     /// either this API or [`Self::push`] for a stream; chat uses this one while
     /// the existing automation inspector keeps its byte-identical renderer.
     pub fn push_events(&mut self, bytes: &[u8]) -> Vec<Event> {
-        let incoming = String::from_utf8_lossy(bytes);
-        self.leftover.push_str(&incoming);
+        self.leftover.extend_from_slice(bytes);
         let mut events = Vec::new();
-        while let Some(idx) = self.leftover.find('\n') {
-            let mut line = self.leftover[..idx].to_string();
-            self.leftover = self.leftover[idx + 1..].to_string();
+        while let Some(mut line) = self.take_line() {
             if line.ends_with('\r') {
                 line.pop();
             }
@@ -219,8 +221,8 @@ impl Parser {
         let mut events = if self.leftover.is_empty() {
             Vec::new()
         } else {
-            let line = std::mem::take(&mut self.leftover);
-            self.line_events(&line)
+            let bytes = std::mem::take(&mut self.leftover);
+            self.line_events(&String::from_utf8_lossy(&bytes))
         };
         events.extend(self.close_open_tools(false, Some("ended".into())));
         self.cursor_reset();
@@ -235,7 +237,7 @@ impl Parser {
         }
         let leftover = std::mem::take(&mut self.leftover);
         let mut out = String::new();
-        if let Some(piece) = self.line(&leftover) {
+        if let Some(piece) = self.line(&String::from_utf8_lossy(&leftover)) {
             self.emit(&mut out, piece);
         }
         out
@@ -314,7 +316,9 @@ impl Parser {
             return None;
         }
         if !cleaned.starts_with('{') {
-            if self.backend == "muse" && cleaned.starts_with("muse:") {
+            if self.backend == "muse"
+                && (cleaned.starts_with("muse:") || cleaned.starts_with("Muse Code updated "))
+            {
                 return None;
             }
             if self.is_json_backend() {
@@ -347,7 +351,9 @@ impl Parser {
             return Vec::new();
         }
         if !cleaned.starts_with('{') {
-            if self.backend == "muse" && cleaned.starts_with("muse:") {
+            if self.backend == "muse"
+                && (cleaned.starts_with("muse:") || cleaned.starts_with("Muse Code updated "))
+            {
                 return Vec::new();
             }
             let events = if self.is_json_backend() && cleaned.contains("\"type\":") {
@@ -2917,6 +2923,35 @@ mod tests {
                 "{backend} leaked its stream marker as a process outcome: {events:?}"
             );
         }
+    }
+
+    #[test]
+    fn byte_boundaries_preserve_unicode_in_json_and_hide_muse_updates() {
+        let record = format!(
+            "Muse Code updated 1.3 -> 1.4\r\n{}\r\n",
+            serde_json::json!({
+                "payload_type": "run.output.delta", "payload": {"text": "hihi 😀 café"}
+            })
+        );
+        let mut structured = Parser::new("muse");
+        let events = record
+            .as_bytes()
+            .chunks(1)
+            .flat_map(|chunk| structured.push_events(chunk))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            events,
+            vec![Event::Text {
+                delta: "hihi 😀 café".into()
+            }]
+        );
+        let mut prose = Parser::new("muse");
+        let text = record
+            .as_bytes()
+            .chunks(1)
+            .map(|chunk| prose.push(chunk))
+            .collect::<String>();
+        assert_eq!(text, "hihi 😀 café");
     }
 
     #[test]

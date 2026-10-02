@@ -231,7 +231,7 @@ struct Session {
     /// Shared with the reader thread, which answers the terminal's own
     /// questions. See `wants_cursor_position`.
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    master: Mutex<Box<dyn portable_pty::MasterPty + Send>>,
+    master: Mutex<Option<Box<dyn portable_pty::MasterPty + Send>>>,
     child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
     alive: Arc<AtomicBool>,
     exit_code: Arc<AtomicI32>,
@@ -394,10 +394,6 @@ impl Manager {
             pixel_width: 0,
             pixel_height: 0,
         };
-        let pair = native_pty_system()
-            .openpty(size)
-            .map_err(|e| PtyError::Spawn(e.to_string()))?;
-
         let mut cmd = session_command(&req.command, &req.args);
         #[cfg(windows)]
         cmd.cwd(windows_shell_path(&req.cwd.to_string_lossy()));
@@ -428,22 +424,7 @@ impl Manager {
             cmd.env(key, value);
         }
 
-        let child = pair
-            .slave
-            .spawn_command(cmd)
-            .map_err(|e| PtyError::Spawn(e.to_string()))?;
-        // The slave has to be dropped, or the reader never sees EOF when the
-        // child exits and the session looks alive forever.
-        drop(pair.slave);
-
-        let mut reader = pair
-            .master
-            .try_clone_reader()
-            .map_err(|e| PtyError::Spawn(e.to_string()))?;
-        let writer = pair
-            .master
-            .take_writer()
-            .map_err(|e| PtyError::Spawn(e.to_string()))?;
+        let (master, child, mut reader, writer) = spawn_session_process(cmd, size, req.hidden)?;
 
         let buffer = Arc::new(Mutex::new(Buffer::new()));
         let buffer_space = Arc::new(Condvar::new());
@@ -516,7 +497,7 @@ impl Manager {
             buffer,
             buffer_space,
             writer,
-            master: Mutex::new(pair.master),
+            master: Mutex::new(master),
             child: Mutex::new(child),
             alive,
             exit_code,
@@ -571,6 +552,8 @@ impl Manager {
                 .master
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
+                .as_ref()
+                .expect("pooled shells own a terminal")
                 .resize(size)
                 .map_err(|e| PtyError::Spawn(e.to_string()))?;
 
@@ -883,11 +866,16 @@ impl Manager {
             pixel_width: 0,
             pixel_height: 0,
         };
-        s.master
+        if let Some(master) = s
+            .master
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .resize(size)
-            .map_err(|e| PtyError::Spawn(e.to_string()))?;
+            .as_ref()
+        {
+            master
+                .resize(size)
+                .map_err(|e| PtyError::Spawn(e.to_string()))?;
+        }
         let mut info = s.info.lock().unwrap_or_else(PoisonError::into_inner);
         info.rows = size.rows;
         info.cols = size.cols;
@@ -1108,6 +1096,65 @@ pub fn login_shell() -> String {
     resolve_shell(std::env::var("SHELL").ok().as_deref())
 }
 
+type SessionIo = (
+    Option<Box<dyn portable_pty::MasterPty + Send>>,
+    Box<dyn portable_pty::Child + Send + Sync>,
+    Box<dyn Read + Send>,
+    Box<dyn Write + Send>,
+);
+
+fn spawn_session_process(
+    cmd: CommandBuilder,
+    size: PtySize,
+    hidden: bool,
+) -> Result<SessionIo, PtyError> {
+    // ConPTY is a screen renderer: it wraps and redraws long JSON records.
+    // Daemon-owned Windows agents need their original byte stream instead.
+    #[cfg(windows)]
+    if hidden {
+        use std::os::windows::process::CommandExt;
+        use std::process::{Command, Stdio};
+        let argv = cmd.get_argv();
+        let mut process = Command::new(&argv[0]);
+        process.args(&argv[1..]);
+        process.env_clear().envs(cmd.iter_full_env_as_str());
+        if let Some(cwd) = cmd.get_cwd() {
+            process.current_dir(cwd);
+        }
+        let (reader, output) = std::io::pipe()?;
+        process
+            .stdin(Stdio::piped())
+            .stderr(output.try_clone()?)
+            .stdout(output);
+        process.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        let mut child = process.spawn()?;
+        // Command owns copies of its output handles. Drop them so EOF follows
+        // the child's exit, rather than waiting forever for this parent.
+        drop(process);
+        let writer = child.stdin.take().expect("piped child stdin");
+        return Ok((None, Box::new(child), Box::new(reader), Box::new(writer)));
+    }
+    #[cfg(not(windows))]
+    let _ = hidden;
+    let pair = native_pty_system()
+        .openpty(size)
+        .map_err(|e| PtyError::Spawn(e.to_string()))?;
+    let child = pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|e| PtyError::Spawn(e.to_string()))?;
+    drop(pair.slave);
+    let reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| PtyError::Spawn(e.to_string()))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|e| PtyError::Spawn(e.to_string()))?;
+    Ok((Some(pair.master), child, reader, writer))
+}
+
 #[cfg(windows)]
 fn windows_shell_path(path: &str) -> &str {
     // canonicalize adds the extended drive prefix; cmd treats it as a UNC
@@ -1238,7 +1285,7 @@ fn session_command(command: &str, args: &[String]) -> CommandBuilder {
         use base64::Engine;
         let quote = |value: &str| format!("'{}'", value.replace('\'', "''"));
         let mut script = format!(
-            "$ErrorActionPreference = 'Stop'; & {}",
+            "$ErrorActionPreference = 'Stop'; [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding; & {}",
             quote(windows_shell_path(command))
         );
         for arg in args {
@@ -2724,6 +2771,50 @@ mod tests {
         }
         let _ = manager.close(&session.id);
         let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn hidden_agents_keep_long_json_records_and_utf8_intact() {
+        use base64::Engine;
+        let json = format!(
+            r#"{{"payload_type":"run.output.delta","payload":{{"text":"{}😀 café"}}}}"#,
+            "x".repeat(5000)
+        );
+        let script = format!(
+            "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); [Console]::WriteLine('{json}'); exit 7"
+        );
+        let encoded = base64::engine::general_purpose::STANDARD.encode(
+            script
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>(),
+        );
+        let manager = Manager::new();
+        let session = manager
+            .spawn(&Spawn {
+                command: "powershell.exe".into(),
+                args: vec!["-NoProfile".into(), "-EncodedCommand".into(), encoded],
+                cwd: std::env::temp_dir(),
+                workspace_id: None,
+                hidden: true,
+                rows: 24,
+                cols: 80,
+                no_color: true,
+                dark: None,
+                environment: vec![],
+            })
+            .unwrap();
+        assert!(wait_for(|| manager
+            .info(&session.id)
+            .is_ok_and(|info| info.exit_code == Some(7))));
+        assert!(wait_for(|| manager.read(&session.id, 0).is_ok_and(
+            |chunk| String::from_utf8_lossy(&chunk.bytes).trim() == json
+        )));
+        let output = manager.read(&session.id, 0).unwrap().bytes;
+        assert_eq!(String::from_utf8(output).unwrap().trim(), json);
+        assert!(manager.list().iter().all(|info| info.id != session.id));
+        manager.close(&session.id).unwrap();
     }
 
     #[cfg(windows)]

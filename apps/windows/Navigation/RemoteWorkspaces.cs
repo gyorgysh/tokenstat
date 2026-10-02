@@ -206,6 +206,9 @@ internal static class RemoteWorkspaces
         }
         try
         {
+            // Foreground Connect should repair a relay that failed to start
+            // at login, rather than immediately reusing that startup failure.
+            await AppServices.Host.CallAsync("remote.nudge");
             var folders = await ReadPeerFoldersAsync(peerKey, label);
             lock (Gate)
             {

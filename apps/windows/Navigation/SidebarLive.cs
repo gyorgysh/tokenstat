@@ -19,16 +19,16 @@ using Tokenstat.Pages;
 namespace Tokenstat.Navigation;
 
 /// <summary>
-/// Live sidebar content under each folder row: session rows, recent chats,
+/// Live sidebar content under each folder row: session rows, folder chats,
 /// section count badges, and the signed-in footer. Mirrors the Mac sidebar:
 /// session rows show context percent, cost, tokens, and Idle/Working state,
 /// chats show relative ages with Show more and See all entries, and a zero
 /// count draws no badge anywhere. Feeds are the same host methods the Mac
-/// uses: pty.list, chat.recent, workspace.summary, and account.status.
+/// uses: pty.list, chat.list, workspace.summary, and account.status.
 /// </summary>
 internal static class SidebarLive
 {
-    private static readonly Dictionary<string, JsonArray> RemoteChats = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, JsonArray> FolderChats = new(StringComparer.Ordinal);
 
     public const string SessionPrefix = "wsterm:";
     public const string ChatPrefix = "wschat:";
@@ -39,20 +39,6 @@ internal static class SidebarLive
     public const int CollapsedChats = 5;
     /// <summary>Chat rows drawn when expanded, like the Mac inline limit.</summary>
     public const int InlineChats = 10;
-
-    /// <summary>
-    /// A chat that was opened and never used: the host's default title, no
-    /// message either way and nothing running. The sidebar leaves these out
-    /// so rows of "New chat" do not bury real conversations, except the one
-    /// that is selected. The title test keeps chats from a host too old to
-    /// send lastMessageAtMs, because every host renames a chat from its first
-    /// prompt. Same rule as the Mac's ChatModel.isUntouched.
-    /// </summary>
-    public static bool IsUntouched(JsonNode chat, string? selectedChatId) =>
-        Format.Text(chat, "title") == "New chat"
-        && chat["lastMessageAtMs"] is null
-        && !Format.Flag(chat, "running")
-        && Format.Text(chat, "id") != selectedChatId;
 
     public static bool IsLiveTag(string? tag) =>
         tag is not null
@@ -69,58 +55,41 @@ internal static class SidebarLive
         LiveRoute.TrySplit(tag, prefix, out folderId, out leaf);
 
     /// <summary>
-    /// The fast poll: live sessions and recent chats. Null on a failed call,
-    /// so a transient failure keeps the current rows instead of clearing them.
+    /// Live sessions and every registered folder's chats, including new chats
+    /// without messages. A failed call keeps that folder's last known rows.
     /// </summary>
-    public static async Task<(JsonArray? Sessions, JsonArray? Chats)> FetchFastAsync()
+    public static async Task<(JsonArray? Sessions, JsonArray? Chats)> FetchFastAsync(IEnumerable<string> workspaceIds)
     {
         JsonArray? sessions = null;
-        JsonArray? chats = null;
-        try
-        {
-            sessions = Format.Items(await AppServices.Host.CallAsync("pty.list"));
-        }
-        catch
-        {
-            // Quiet poll: a missed tick keeps the last rows.
-        }
-        try
-        {
-            chats = Format.Items(await AppServices.Host.CallAsync(
-                "chat.recent", new JsonObject { ["limit"] = 50 }));
-        }
-        catch
-        {
-            // Same: nothing new is not the same as nothing there.
-        }
-        var peers = RemoteWorkspaces.CachedFolders().Select(folder => folder.PeerKey).Distinct().ToArray();
-        foreach (var gone in RemoteChats.Keys.Except(peers).ToArray()) RemoteChats.Remove(gone);
-        foreach (var peer in peers)
+        try { sessions = Format.Items(await AppServices.Host.CallAsync("pty.list")); }
+        catch { /* A missed tick keeps the last session rows. */ }
+        var folders = workspaceIds.Where(id => id.Length > 0).Distinct().ToArray();
+        foreach (var gone in FolderChats.Keys.Except(folders).ToArray()) FolderChats.Remove(gone);
+        await Task.WhenAll(folders.Select(async folder =>
         {
             try
             {
-                var recent = Format.Items(await RemoteWorkspaces.CallOnPeerAsync(peer,
-                    "chat.recent", new JsonObject { ["limit"] = 100 }, TimeSpan.FromSeconds(5)));
-                if (recent is null) continue;
+                var remote = RemoteWorkspaces.TrySplit(folder, out var peer, out var inner);
+                var parameters = new JsonObject { ["workspaceId"] = remote ? inner : folder };
+                var reply = remote
+                    ? await RemoteWorkspaces.CallOnPeerAsync(peer, "chat.list", parameters, TimeSpan.FromSeconds(5))
+                    : await AppServices.Host.CallAsync("chat.list", parameters);
+                if (Format.Items(reply) is not JsonArray listed) return;
                 var mapped = new JsonArray();
-                foreach (var item in recent)
+                foreach (var item in listed)
                 {
                     if (item?.DeepClone() is not JsonObject chat) continue;
-                    var folder = Format.Text(chat, "workspaceId");
-                    if (string.IsNullOrEmpty(folder)) continue;
-                    chat["workspaceId"] = RemoteWorkspaces.Join(peer, folder);
+                    chat["workspaceId"] = folder;
                     mapped.Add(chat);
                 }
-                RemoteChats[peer] = mapped;
+                FolderChats[folder] = mapped;
             }
-            catch { /* Keep that peer's last known chats on a missed poll. */ }
-        }
-        if (chats is not null)
-        {
-            chats = (JsonArray)chats.DeepClone();
-            foreach (var remote in RemoteChats.Values)
-                foreach (var chat in remote) chats.Add(chat?.DeepClone());
-        }
+            catch { /* Keep this folder's last known chats on a missed poll. */ }
+        }));
+        var chats = new JsonArray();
+        foreach (var chat in FolderChats.Values.SelectMany(rows => rows).OfType<JsonNode>()
+            .OrderByDescending(chat => Format.Long(chat, "updatedAtMs")))
+            chats.Add(chat.DeepClone());
         return (sessions, chats);
     }
 

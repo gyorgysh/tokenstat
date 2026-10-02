@@ -91,6 +91,8 @@ internal sealed class AccountPage : Page, IToolbarItems
     public IList<UIElement> ToolbarActions()
     {
         var trailing = new List<UIElement>();
+        trailing.Add(Buttons.ToolbarIcon(ActionIcon.Refresh, L10n.Text("windows.accountpage.check_for_updates"),
+            async (_, _) => await AppServices.Update.CheckNowAsync()));
         if (_signedIn)
         {
             trailing.Add(Buttons.ToolbarIcon(
@@ -193,6 +195,7 @@ internal sealed class AccountPage : Page, IToolbarItems
             }
             content.Children.Add(await PullConnectionCardAsync());
             content.Children.Add(PrivacyNote());
+            content.Children.Add(UpdateCard());
             content.Children.Add(AboutBlurb());
             return;
         }
@@ -214,6 +217,7 @@ internal sealed class AccountPage : Page, IToolbarItems
             content.Children.Add(DeleteAccountCard(account));
         }
         content.Children.Add(AboutBlurb());
+        content.Children.Add(UpdateCard());
     }
 
     private async Task RenderLimitsPaneAsync(StackPanel content)
@@ -1645,7 +1649,7 @@ internal sealed class AccountPage : Page, IToolbarItems
             {
                 body.Children.Add(new TextBlock { Text = update.CheckNotice, Opacity = 0.8 });
             }
-            body.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.accountpage.check.9d60841e"), ActionIcon.Refresh, async (_, _) => await update.CheckNowAsync()));
+            body.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.accountpage.check_for_updates"), ActionIcon.Refresh, async (_, _) => await update.CheckNowAsync()));
         }
         return Chrome.Card(L10n.Text("windows.accountpage.updates.22e2bada"), body, L10n.Text("windows.accountpage.sha_256_against_the_release_publisher_chec.2ded308f"));
     }

@@ -557,7 +557,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 ["mode"] = "plan",
                 ["autonomy"] = Format.Text(chosen, "gateTier") == "bypassOnly" ? "bypass" : "standard",
             });
-            await OpenAsync(Format.Text(created, "id"));
+            AppServices.NotifyConversationsChanged();
+            await OpenAsync(Format.Text(created, "id"), created);
         }
         catch (Exception ex)
         {
@@ -600,7 +601,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private int _openGeneration;
     private bool _opening;
 
-    private async Task OpenAsync(string id)
+    private async Task OpenAsync(string id, JsonNode? created = null)
     {
         if (string.IsNullOrEmpty(id)) return;
         RememberDraft();
@@ -637,7 +638,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             var approvals = CallChatAsync("chat.approvals", new JsonObject { ["id"] = id });
             await Task.WhenAll(catalog, identity, events, approvals);
             if (_openId != id || generation != _openGeneration || !IsLoaded) return;
-            _openChat = _chats.FirstOrDefault(chat => Format.Text(chat, "id") == id);
+            _openChat = _chats.FirstOrDefault(chat => Format.Text(chat, "id") == id) ?? created;
             if (_openChat is null) { await ShowListAsync(); return; }
             _outboxKey = identity.Result;
             _authorizedQueue.Clear();
@@ -1031,29 +1032,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var prefix = start > 0 || _hasEarlier ? 1 : 0;
         var visible = end - start;
         var desiredCount = prefix + visible + (Busy() ? 1 : 0);
-
-        // The host has not answered yet. A question nobody replied to is not
-        // an empty answer, so it gets the waiting picture, not a blank.
-        if (items.Count == 0 && Busy())
-        {
-            const string waitingKey = "__waiting__";
-            var current = _transcript.Children.Count == 1
-                ? _transcript.Children[0] as FrameworkElement
-                : null;
-            if (current?.Tag as string != waitingKey)
-            {
-                _transcript.Children.Clear();
-                var waiting = EmptyState.View(
-                    L10n.Text("windows.chatpage.waiting_for_that_computer.da4d8f33"),
-                    L10n.Text("windows.chatpage.that_computer_has_not_answered_yet.da66b3c8"),
-                    EmptyArtKind.Waiting);
-                waiting.Tag = waitingKey;
-                _transcript.Children.Add(waiting);
-            }
-            if (_followEnd) _scroll?.ChangeView(null, _scroll.ScrollableHeight, null, true);
-            UpdateFollowPill();
-            return;
-        }
 
         if (prefix == 1)
         {
@@ -2034,6 +2012,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         try
         {
             await CallChatAsync("chat.remove", new JsonObject { ["id"] = id });
+            AppServices.NotifyConversationsChanged();
             await ShowListAsync();
         }
         catch (Exception ex)
@@ -2052,6 +2031,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             _suppress = true;
             var updated = await CallChatAsync("chat.update", patch);
+            AppServices.NotifyConversationsChanged();
             if (!OpenChatIs(chat) || generation != _openGeneration) return;
             // chat.update returns the saved record, which has no parked note.
             // Preserve the current note, which may have changed while awaiting.
@@ -2184,14 +2164,21 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private async Task RefreshCatalogAsync(bool refreshMenus = true)
     {
+        var generation = _openGeneration;
         var request = _steerOverlay.BeginRead();
         var chats = CallChatAsync("chat.list", new JsonObject { ["workspaceId"] = _workspaceId });
-        if (!refreshMenus) { _chats = _steerOverlay.Apply(AsArray(await chats), request, _chats); return; }
+        if (!refreshMenus)
+        {
+            var listed = await chats;
+            if (generation == _openGeneration) _chats = _steerOverlay.Apply(AsArray(listed), request, _chats);
+            return;
+        }
         var backends = CallChatAsync("chat.backends");
         var personas = CallChatAsync(
             "chat.personas",
             new JsonObject { ["workspaceId"] = _workspaceId });
         await Task.WhenAll(chats, backends, personas);
+        if (generation != _openGeneration) return;
         _chats = _steerOverlay.Apply(AsArray(chats.Result), request, _chats);
         _backends = AsArray(backends.Result);
         _personas = AsArray(personas.Result, "personas");

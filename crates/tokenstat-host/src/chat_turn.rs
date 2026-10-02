@@ -22,6 +22,57 @@
 
 use std::path::{Path, PathBuf};
 
+/// Muse's Windows launcher passes through cmd and Windows PowerShell 5.1.
+/// Its prompt-file option keeps multiline instructions and user text out of
+/// those interpreters' argument quoting. The turn owns and removes the file.
+pub(crate) struct PromptFile(PathBuf);
+
+impl PromptFile {
+    pub(crate) fn for_windows_muse(
+        backend: &str,
+        argv: &mut Vec<String>,
+        directory: &Path,
+    ) -> Result<Option<Self>, String> {
+        if !cfg!(windows) || backend != "muse" {
+            return Ok(None);
+        }
+        Self::create(argv, directory).map(Some)
+    }
+
+    fn create(argv: &mut Vec<String>, directory: &Path) -> Result<Self, String> {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        if argv.len() < 2 || argv[argv.len() - 2] != "--" {
+            return Err("Muse headless command is missing its prompt boundary".into());
+        }
+        let path = directory.join(format!(
+            ".tokenstat-prompt-{}-{}.txt",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|error| error.to_string())?;
+        let owner = Self(path);
+        let written = file.write_all(argv.last().expect("prompt argument").as_bytes());
+        // Windows cannot unlink an open file if a write fails.
+        drop(file);
+        written.map_err(|error| error.to_string())?;
+        argv.truncate(argv.len() - 2);
+        argv.extend(["--prompt-file".into(), owner.0.display().to_string()]);
+        Ok(owner)
+    }
+}
+
+impl Drop for PromptFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// Backends that accept text appended to their system prompt.
 ///
 /// Only append, never override: replacing a CLI's own system prompt would
@@ -201,6 +252,34 @@ pub fn stable_hash(text: &str) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn muse_prompt_file_keeps_the_entire_turn_and_is_removed_after_use() {
+        let directory = std::env::temp_dir().join(format!(
+            "tokenstat-prompt-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let prompt = "<system-instructions>\nRead only & %PATH% 'quoted'\n</system-instructions>\n\nhihi 😀 café";
+        let mut argv = vec![
+            "muse".into(),
+            "exec".into(),
+            "--json".into(),
+            "--".into(),
+            prompt.into(),
+        ];
+        let file = super::PromptFile::create(&mut argv, &directory).unwrap();
+        assert_eq!(&argv[..4], &["muse", "exec", "--json", "--prompt-file"]);
+        assert_eq!(std::fs::read_to_string(&argv[4]).unwrap(), prompt);
+        let path = std::path::PathBuf::from(&argv[4]);
+        drop(file);
+        assert!(!path.exists());
+        std::fs::remove_dir(directory).unwrap();
+    }
+
     use super::*;
 
     fn dir() -> PathBuf {

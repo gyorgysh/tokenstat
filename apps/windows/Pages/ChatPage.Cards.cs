@@ -188,8 +188,7 @@ internal sealed partial class ChatPage
 
     private static Button FollowButton(string title, Action click, string tip)
     {
-        var button = Buttons.Primary(title, ActionIcon.Latest, (_, _) => click(), small: true);
-        button.CornerRadius = new CornerRadius(999);
+        var button = Buttons.Primary(title, ActionIcon.Latest, (_, _) => click());
         ToolTipService.SetToolTip(button, tip);
         return button;
     }
