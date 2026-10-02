@@ -679,6 +679,15 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             ? RemoteWorkspaces.CallOnPeerAsync(peer, method, parameters, patience)
             : AppServices.Host.CallAsync(method, parameters, patience);
 
+    /// <summary>
+    /// The least height of a launcher tile, enough for a two-line status. An
+    /// installed agent has no status line, so sized to content it came out
+    /// shorter than an Install tile. A minimum rather than a fixed height so
+    /// larger text grows the row instead of clipping it, and the tiles
+    /// stretch to the row the flow panel gives them.
+    /// </summary>
+    private const double LauncherTileHeight = 156;
+
     private async Task LoadLaunchersAsync(StackPanel host)
     {
         host.Children.Clear();
@@ -709,6 +718,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                 if (!installed || hidden)
                     body.Children.Add(new TextBlock { Text = actionLabel, FontSize = 12,
                         TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center,
+                        MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis,
                         Opacity = 0.7, HorizontalAlignment = HorizontalAlignment.Center });
                 var actions = new StackPanel { Spacing = Theme.SpaceS };
                 async Task RunAsync(Button button, string operation)
@@ -750,7 +760,9 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     Content = body, HorizontalAlignment = HorizontalAlignment.Stretch,
                     HorizontalContentAlignment = HorizontalAlignment.Center,
                     Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush,
-                    CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(16), MinHeight = 110,
+                    CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(16),
+                    MinHeight = LauncherTileHeight, VerticalAlignment = VerticalAlignment.Stretch,
+                    VerticalContentAlignment = VerticalAlignment.Center,
                 };
                 launch.Click += async (_, _) => await RunAsync(launch, installed ? hidden ? "show" : "launch" : "install");
                 if (!installed || hidden) launch.Opacity = 0.65;
@@ -793,7 +805,8 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     (_showingLauncherCatalog ? ActionIcon.Collapse : ActionIcon.Create).Icon() });
                 moreBody.Children.Add(new TextBlock { Text = _showingLauncherCatalog ? L10n.Text("windows.workspacepage.hide_catalog")
                     : L10n.Text("windows.workspacepage.more_tools"), FontSize = 13 });
-                var more = new Button { Content = moreBody, MinHeight = 110,
+                var more = new Button { Content = moreBody, MinHeight = LauncherTileHeight,
+                    VerticalAlignment = VerticalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Center,
                     HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center,
                     Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush,
                     CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(16) };

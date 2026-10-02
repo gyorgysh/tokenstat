@@ -67,8 +67,9 @@ extension View {
     /// digits. A list of project names and a rail of glyphs is chrome.
     ///
     /// Sample behind the window, rather than tinting an opaque colour plate.
-    /// A translucent black tint keeps the frost close to the dark content surface
-    /// while allowing a restrained amount of the blurred backdrop through.
+    /// A wash of the theme's sidebar colour keeps the frost close to the
+    /// content surface while allowing a restrained amount of the blurred
+    /// backdrop through.
     /// Reduce Transparency uses an opaque theme surface.
     @ViewBuilder
     func leftChromeSurface() -> some View {
@@ -150,18 +151,24 @@ private struct RetainedPaneLayout: Layout {
 
 @available(macOS 26, *)
 private struct SidebarGlassSurface: View {
-    @Environment(\.colorScheme) private var colorScheme
+    /// How much of the panel is flat theme colour over the glass.
+    static let wash: Double = 0.86
+
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         if reduceTransparency {
             RoundedRectangle(cornerRadius: ShellMetrics.panelRadius).fill(Theme.sidebar)
         } else {
+            // The wash carries readability, the glass only a hint of what is
+            // behind. At 72% a bright wallpaper behind dark mode (or a dark
+            // one behind light mode) pulled its shapes into the row text, so
+            // the theme's own sidebar colour now covers all but about a
+            // seventh of the backdrop.
             SidebarBackdrop()
                 .overlay {
                     RoundedRectangle(cornerRadius: ShellMetrics.panelRadius)
-                        .fill(colorScheme == .dark
-                            ? Color.black.opacity(0.72) : Color.white.opacity(0.72))
+                        .fill(Theme.sidebar.opacity(Self.wash))
                 }
         }
     }
@@ -169,7 +176,7 @@ private struct SidebarGlassSurface: View {
 
 /// Native clear glass supplies actual backdrop transmission. Regular sidebar
 /// material became a solid grey plate in this shell; tint is layered separately
-/// so the black frost still lets a restrained amount of background colour show.
+/// so the wash over it still lets a restrained amount of background colour show.
 @available(macOS 26, *)
 private struct SidebarBackdrop: NSViewRepresentable {
     func makeNSView(context: Context) -> NSGlassEffectView {

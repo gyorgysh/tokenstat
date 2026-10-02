@@ -1132,7 +1132,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         UIElement view = item.Kind switch
         {
         ItemKind.User => UserBubble(item.Text),
-        ItemKind.Assistant => AssistantBody(item.Text),
+        ItemKind.Assistant => AssistantBubble(item.Text),
         ItemKind.Thinking => ThinkingRow(item.Text),
         ItemKind.Tool => ToolRow(item),
         ItemKind.Edit => EditRow(item),
@@ -1301,6 +1301,21 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             },
         };
     }
+
+    /// <summary>
+    /// The reply side of the conversation, like the Mac row: full width,
+    /// panel fill and a hairline, the same radius as the user bubble.
+    /// </summary>
+    private static UIElement AssistantBubble(string text) => new Border
+    {
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        Background = Theme.PanelBrush,
+        BorderBrush = Theme.BorderBrush,
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(16),
+        Padding = new Thickness(Theme.SpaceM),
+        Child = AssistantBody(text),
+    };
 
     private static UIElement AssistantBody(string text)
     {
@@ -1647,15 +1662,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         row.Children.Add(CompactAgentMenu(locked));
         row.Children.Add(ModePills(Format.Text(chat, "mode", "plan"), !locked));
         var gate = Format.Text(Backend(Format.Text(chat, "backend")), "gateTier", "full");
-        var bypassOnly = gate == "bypassOnly";
-        if (bypassOnly)
-        {
-            row.Children.Add(Chip(L10n.Text("windows.chatpage.don_t_ask.15dae980")));
-        }
-        else
-        {
-            row.Children.Add(AutonomyPills(Format.Text(chat, "autonomy", "standard"), !locked));
-        }
+        row.Children.Add(AutonomyPills(Format.Text(chat, "autonomy", "standard"), !locked, gate == "bypassOnly"));
         row.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.chatpage.setup.7013af4c"), ActionIcon.Settings, (_, _) =>
         {
             _setupExpanded = true;
@@ -1770,35 +1777,27 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return button;
     }
 
-    private UIElement AutonomyPills(string current, bool enabled)
+    /// <summary>
+    /// The same segmented strip as Plan and Execute, so the two choices read
+    /// as one row. A backend with no approval gate offers only "Don't ask",
+    /// shown as a strip of one rather than a different kind of chip.
+    /// </summary>
+    private UIElement AutonomyPills(string current, bool enabled, bool bypassOnly)
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        row.Children.Add(AutonomyPill(L10n.Text("windows.chatpage.ask_first.4a9e8cf3"), "standard", current, enabled));
-        row.Children.Add(AutonomyPill(L10n.Text("windows.chatpage.don_t_ask.15dae980"), "bypass", current, enabled));
-        return row;
-    }
-
-    private UIElement AutonomyPill(string label, string value, string current, bool enabled)
-    {
-        var selected = value == current;
-        var button = new Button
+        var dontAsk = ("bypass", L10n.Text("windows.chatpage.don_t_ask.15dae980"));
+        if (bypassOnly)
         {
-            Content = label,
-            IsEnabled = enabled,
-            Background = selected ? Theme.AccentSoftBrush : Theme.PanelBrush,
-            Foreground = selected ? Theme.AccentBrush : Theme.Brush(static () => Theme.Secondary),
-            BorderBrush = Theme.BorderBrush,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(10, 6, 10, 6),
-        };
-        button.Click += async (_, _) =>
-        {
-            if (value == current) return;
-            await UpdateAsync(new JsonObject { ["autonomy"] = value });
-            PaintConversation();
-        };
-        return button;
+            return Chrome.Segmented([dontAsk], "bypass", _ => Task.CompletedTask);
+        }
+        return Chrome.Segmented(
+            [("standard", L10n.Text("windows.chatpage.ask_first.4a9e8cf3")), dontAsk],
+            current,
+            async value =>
+            {
+                await UpdateAsync(new JsonObject { ["autonomy"] = value });
+                PaintConversation();
+            },
+            enabled: enabled);
     }
 
     private void RebuildAttachStrip()
