@@ -402,12 +402,14 @@ mod tests {
 
     #[test]
     fn a_providers_address_comes_from_one_table() {
-        assert_eq!(origin("lmstudio").as_deref(), Ok("http://127.0.0.1:1234"));
-        assert_eq!(
-            api_base_url("lmstudio").as_deref(),
-            Ok("http://127.0.0.1:1234/v1")
-        );
-        assert!(origin("nothing").is_err());
+        crate::test_identity::isolated(|| {
+            assert_eq!(origin("lmstudio").as_deref(), Ok("http://127.0.0.1:1234"));
+            assert_eq!(
+                api_base_url("lmstudio").as_deref(),
+                Ok("http://127.0.0.1:1234/v1")
+            );
+            assert!(origin("nothing").is_err());
+        });
     }
 
     #[test]

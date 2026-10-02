@@ -1792,10 +1792,12 @@ mod tests {
 
     #[test]
     fn claude_gets_lm_studio_anthropic_environment() {
-        let env =
-            model_environment("claude", Some("lmstudio"), Some("qwen/model")).expect("environment");
-        assert!(env.contains(&("ANTHROPIC_BASE_URL".into(), "http://127.0.0.1:1234".into())));
-        assert!(env.contains(&("ANTHROPIC_AUTH_TOKEN".into(), "lmstudio".into())));
+        crate::test_identity::isolated(|| {
+            let env = model_environment("claude", Some("lmstudio"), Some("qwen/model"))
+                .expect("environment");
+            assert!(env.contains(&("ANTHROPIC_BASE_URL".into(), "http://127.0.0.1:1234".into())));
+            assert!(env.contains(&("ANTHROPIC_AUTH_TOKEN".into(), "lmstudio".into())));
+        });
     }
 
     #[test]
@@ -1814,31 +1816,35 @@ mod tests {
 
     #[test]
     fn codex_local_providers_use_the_configured_loopback_endpoint() {
-        let env =
-            model_environment("codex", Some("ollama"), Some("llama3.2")).expect("environment");
-        assert_eq!(
-            env,
-            vec![
-                ("CODEX_OSS_PORT".into(), "11434".into()),
-                (
-                    "CODEX_OSS_BASE_URL".into(),
-                    "http://127.0.0.1:11434/v1".into()
-                ),
-            ]
-        );
+        crate::test_identity::isolated(|| {
+            let env =
+                model_environment("codex", Some("ollama"), Some("llama3.2")).expect("environment");
+            assert_eq!(
+                env,
+                vec![
+                    ("CODEX_OSS_PORT".into(), "11434".into()),
+                    (
+                        "CODEX_OSS_BASE_URL".into(),
+                        "http://127.0.0.1:11434/v1".into()
+                    ),
+                ]
+            );
+        });
     }
 
     #[test]
     fn copilot_gets_the_providers_openai_endpoint() {
-        let env =
-            model_environment("copilot", Some("ollama"), Some("llama3.2")).expect("environment");
-        assert_eq!(
-            env,
-            vec![(
-                "COPILOT_PROVIDER_BASE_URL".to_string(),
-                "http://127.0.0.1:11434".to_string()
-            )]
-        );
+        crate::test_identity::isolated(|| {
+            let env = model_environment("copilot", Some("ollama"), Some("llama3.2"))
+                .expect("environment");
+            assert_eq!(
+                env,
+                vec![(
+                    "COPILOT_PROVIDER_BASE_URL".to_string(),
+                    "http://127.0.0.1:11434".to_string()
+                )]
+            );
+        });
     }
 
     #[test]
@@ -1868,24 +1874,75 @@ mod tests {
 
     #[test]
     fn opencode_registers_a_slashed_local_model_for_this_process() {
-        let env = model_environment("opencode2", Some("lmstudio"), Some("meta/muse-glimmer"))
-            .expect("environment");
-        let content = env
-            .iter()
-            .find(|(key, _)| key == "OPENCODE_CONFIG_CONTENT")
-            .map(|(_, value)| value.as_str())
-            .expect("OPENCODE_CONFIG_CONTENT");
-        let parsed: serde_json::Value = serde_json::from_str(content).expect("json");
-        assert_eq!(parsed["model"], "lmstudio/meta/muse-glimmer");
-        assert_eq!(
-            parsed["provider"]["lmstudio"]["models"]["meta/muse-glimmer"]["name"],
-            "muse-glimmer"
-        );
-        assert_eq!(
-            parsed["provider"]["lmstudio"]["options"]["baseURL"],
-            "http://127.0.0.1:1234/v1"
-        );
-        assert_eq!(env.len(), 1);
+        crate::test_identity::isolated(|| {
+            let env = model_environment("opencode2", Some("lmstudio"), Some("meta/muse-glimmer"))
+                .expect("environment");
+            let content = env
+                .iter()
+                .find(|(key, _)| key == "OPENCODE_CONFIG_CONTENT")
+                .map(|(_, value)| value.as_str())
+                .expect("OPENCODE_CONFIG_CONTENT");
+            let parsed: serde_json::Value = serde_json::from_str(content).expect("json");
+            assert_eq!(parsed["model"], "lmstudio/meta/muse-glimmer");
+            assert_eq!(
+                parsed["provider"]["lmstudio"]["models"]["meta/muse-glimmer"]["name"],
+                "muse-glimmer"
+            );
+            assert_eq!(
+                parsed["provider"]["lmstudio"]["options"]["baseURL"],
+                "http://127.0.0.1:1234/v1"
+            );
+            assert_eq!(env.len(), 1);
+        });
+    }
+
+    #[test]
+    fn local_model_launches_follow_saved_ports_and_provider_resets() {
+        crate::test_identity::isolated(|| {
+            crate::local_models::set_port("lmstudio", 8123).expect("save LM Studio port");
+            crate::local_models::set_port("ollama", 8124).expect("save Ollama port");
+            for (provider, port) in [("lmstudio", 8123), ("ollama", 8124)] {
+                let origin = format!("http://127.0.0.1:{port}");
+                let codex = model_environment("codex", Some(provider), Some("local/model"))
+                    .expect("Codex environment");
+                assert!(codex.contains(&("CODEX_OSS_PORT".into(), port.to_string())));
+                assert!(codex.contains(&("CODEX_OSS_BASE_URL".into(), format!("{origin}/v1"))));
+                let copilot = model_environment("copilot", Some(provider), Some("local/model"))
+                    .expect("Copilot environment");
+                let copilot_base = if provider == "lmstudio" {
+                    format!("{origin}/v1")
+                } else {
+                    origin.clone()
+                };
+                assert_eq!(
+                    copilot,
+                    vec![("COPILOT_PROVIDER_BASE_URL".into(), copilot_base)]
+                );
+                for command in ["opencode", "opencode2"] {
+                    let env = model_environment(command, Some(provider), Some("local/model"))
+                        .expect("OpenCode environment");
+                    let config: serde_json::Value =
+                        serde_json::from_str(&env[0].1).expect("config");
+                    assert_eq!(
+                        config["provider"][provider]["options"]["baseURL"],
+                        format!("{origin}/v1")
+                    );
+                }
+            }
+            let claude = model_environment("claude", Some("lmstudio"), Some("local/model"))
+                .expect("Claude environment");
+            assert!(
+                claude.contains(&("ANTHROPIC_BASE_URL".into(), "http://127.0.0.1:8123".into()))
+            );
+            crate::local_models::set_port("lmstudio", 1234).expect("reset LM Studio port");
+            let reset = model_environment("claude", Some("lmstudio"), Some("local/model"))
+                .expect("reset environment");
+            assert!(reset.contains(&("ANTHROPIC_BASE_URL".into(), "http://127.0.0.1:1234".into())));
+            assert_eq!(
+                crate::local_models::configured_port("ollama").expect("Ollama port"),
+                8124
+            );
+        });
     }
 
     #[test]

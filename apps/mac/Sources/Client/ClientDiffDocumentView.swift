@@ -2,7 +2,8 @@
 #if !os(macOS)
 import SwiftUI
 
-/// Fixed metadata sits outside a vertical-only, width-bounded code pane.
+/// Metadata sits outside a vertical-only, width-bounded code pane, with its
+/// own scroll area when a short viewport or large text cannot fit the header.
 /// Long source lines wrap and retain their source number; oversized lines are
 /// split into bounded lazy items so a minified file cannot monopolize layout.
 struct ClientDiffDocumentView<Header: View>: View {
@@ -20,9 +21,15 @@ struct ClientDiffDocumentView<Header: View>: View {
     var body: some View {
         GeometryReader { geometry in
             let paneWidth = max(0, geometry.size.width - Theme.Space.m * 2)
+            let headerLimit = max(0, geometry.size.height - Theme.Space.s) * 0.4
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                VStack(alignment: .leading, spacing: Theme.Space.s) { header() }
-                    .frame(width: paneWidth, alignment: .leading)
+                ViewThatFits(in: .vertical) {
+                    headerContent(width: paneWidth)
+                    ScrollView(.vertical) { headerContent(width: paneWidth) }
+                        .scrollBounceBehavior(.basedOnSize)
+                        .frame(height: headerLimit)
+                }
+                    .frame(maxHeight: headerLimit, alignment: .top)
                     .fixedSize(horizontal: false, vertical: true)
                     .layoutPriority(1)
 
@@ -83,6 +90,12 @@ struct ClientDiffDocumentView<Header: View>: View {
             totalRows = result.total
             preparing = false
         }
+    }
+
+    private func headerContent(width: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) { header() }
+            .frame(width: width, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder
