@@ -53,6 +53,9 @@ try {
             if ($control -and !$control.Current.IsOffscreen) { return $control }
             Start-Sleep -Milliseconds 250
         }
+        $window.FindAll($descendants, [System.Windows.Automation.Condition]::TrueCondition) |
+            Where-Object { $_.Current.AutomationId -match '^(sidebar|chat|projects)\.' } |
+            ForEach-Object { Write-Output "UI: $($_.Current.AutomationId); offscreen=$($_.Current.IsOffscreen); $($_.Current.Name)" }
         throw "Production page did not render '$Id'"
     }
     # Exercise real pages, including the task board's reusable composer controls.
@@ -110,6 +113,27 @@ try {
     for ($index = 1; $index -le 12; $index++) {
         $chats += Call-Host 'chat.create' @{workspaceId = $folder.id; backend = 'codex'; title = "UI smoke chat $index"}
     }
+    # chat.recent deliberately omits chats without messages. Give the fixture
+    # a synthetic archived user event without sending anything to an agent.
+    $indexFile = Get-ChildItem -Path "$env:APPDATA/tokenstat", "$env:LOCALAPPDATA/tokenstat" -Filter conversations.json -Recurse -ErrorAction SilentlyContinue |
+        Where-Object { (Get-Content -LiteralPath $_.FullName -Raw).Contains($chats[-1].id) } | Select-Object -First 1
+    if (!$indexFile) { throw 'The disposable conversation index was not found' }
+    $archive = Get-Content -LiteralPath $indexFile.FullName -Raw | ConvertFrom-Json
+    $timestamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    for ($index = 0; $index -lt $chats.Count; $index++) {
+        $id = $chats[$index].id
+        $directory = Join-Path $indexFile.DirectoryName $id
+        New-Item -Path $directory -ItemType Directory -Force | Out-Null
+        $event = @{kind = 'user'; at_ms = $timestamp + $index; text = "Archived UI fixture message $index"}
+        [System.IO.File]::WriteAllText((Join-Path $directory 'events.ndjson'), (($event | ConvertTo-Json -Compress) + "`n"))
+        $record = $archive.conversations | Where-Object { $_.id -eq $id } | Select-Object -First 1
+        $record | Add-Member -MemberType NoteProperty -Name lastMessageAtMs -Value ($timestamp + $index) -Force
+        $record | Add-Member -MemberType NoteProperty -Name lastMessageAuthor -Value 'user' -Force
+    }
+    [System.IO.File]::WriteAllText($indexFile.FullName, ($archive | ConvertTo-Json -Depth 30))
+    # A normal update reloads the durable index into the helper's memory.
+    Call-Host 'chat.update' @{id = $chats[-1].id; title = $chats[-1].title} | Out-Null
+    if (@(Call-Host 'chat.recent' @{limit = 50}).Count -lt 12) { throw 'Archived fixture chats did not enter the recent feed' }
     # The slow sidebar poll discovers externally registered folders once a minute.
     Open-Place 'Projects'
     $chatRow = Wait-ForControl "sidebar.chat.$($chats[-1].id)" 65
