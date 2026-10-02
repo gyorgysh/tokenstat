@@ -281,11 +281,11 @@ fn link_credential(home: &Path, directory: &str, file: &str) -> Result<(), Strin
     };
     let source = user_home.join(directory).join(file);
     let target = home.join(file);
-    if !source.exists() {
-        return Ok(());
-    }
     #[cfg(unix)]
     {
+        if !source.exists() {
+            return Ok(());
+        }
         ensure_symlink(&source, &target)
     }
     #[cfg(not(unix))]
@@ -305,6 +305,12 @@ fn link_credential(home: &Path, directory: &str, file: &str) -> Result<(), Strin
 fn ensure_credential_file(source: &Path, target: &Path) -> Result<(), String> {
     if std::fs::symlink_metadata(target).is_ok() {
         std::fs::remove_file(target).map_err(|error| error.to_string())?;
+    }
+    // A hard link or copy outlives the original file. Signing out of the
+    // tool must retire that private credential too, rather than leave this
+    // chat using the previous login on its next turn.
+    if !source.try_exists().map_err(|error| error.to_string())? {
+        return Ok(());
     }
     std::os::windows::fs::symlink_file(source, target)
         .or_else(|_| std::fs::hard_link(source, target))
@@ -775,6 +781,24 @@ mod tests {
             std::fs::read(&target).unwrap(),
             std::fs::read(&source).unwrap()
         );
+    }
+
+    #[test]
+    #[cfg(not(unix))]
+    fn windows_sign_out_retires_a_private_credential_copy() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("auth.json");
+        let target = root.path().join("private-auth.json");
+        // Force the fallback's durable file, regardless of whether this
+        // machine allows credential symlinks.
+        std::fs::write(&source, b"previous login").unwrap();
+        std::fs::hard_link(&source, &target).unwrap();
+        std::fs::remove_file(&source).unwrap();
+        assert!(target.exists());
+        ensure_credential_file(&source, &target).unwrap();
+        assert!(!target.exists());
+        // A first turn with no login remains valid preparation.
+        ensure_credential_file(&source, &target).unwrap();
     }
 
     #[test]

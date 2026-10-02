@@ -2043,14 +2043,27 @@ mod tests {
         assert_eq!(tail_since(data, 0, 0, 4), b"and\n");
     }
 
-    fn wait_for(mut f: impl FnMut() -> bool) -> bool {
-        for _ in 0..200 {
+    fn wait_for(f: impl FnMut() -> bool) -> bool {
+        wait_for_timeout(f, std::time::Duration::from_secs(5))
+    }
+
+    /// Wait up to `timeout`, polling every 25 ms.
+    ///
+    /// PowerShell starts slowly on a loaded CI runner. Cold .NET JIT plus a
+    /// Defender scan, while sibling tests compile with rustc, once pushed a
+    /// start past the 5 s budget `wait_for` gives. Tests that launch
+    /// PowerShell use 20 s, the same budget the batch shim test already uses.
+    fn wait_for_timeout(mut f: impl FnMut() -> bool, timeout: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
             if f() {
                 return true;
             }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
             std::thread::sleep(std::time::Duration::from_millis(25));
         }
-        false
     }
 
     #[cfg(unix)]
@@ -2841,12 +2854,28 @@ mod tests {
                 environment: vec![],
             })
             .unwrap();
-        assert!(wait_for(|| manager
-            .info(&session.id)
-            .is_ok_and(|info| info.exit_code == Some(7))));
-        assert!(wait_for(|| manager.read(&session.id, 0).is_ok_and(
-            |chunk| String::from_utf8_lossy(&chunk.bytes).trim() == json
-        )));
+        assert!(
+            wait_for_timeout(
+                || manager
+                    .info(&session.id)
+                    .is_ok_and(|info| info.exit_code == Some(7)),
+                std::time::Duration::from_secs(20)
+            ),
+            "powershell did not exit 7: {:?}",
+            manager.info(&session.id)
+        );
+        assert!(
+            wait_for_timeout(
+                || manager
+                    .read(&session.id, 0)
+                    .is_ok_and(|chunk| String::from_utf8_lossy(&chunk.bytes).trim() == json),
+                std::time::Duration::from_secs(20)
+            ),
+            "long record changed: {:?}",
+            manager
+                .read(&session.id, 0)
+                .map(|chunk| String::from_utf8_lossy(&chunk.bytes).into_owned())
+        );
         let output = manager.read(&session.id, 0).unwrap().bytes;
         assert_eq!(String::from_utf8(output).unwrap().trim(), json);
         assert!(manager.list().iter().all(|info| info.id != session.id));
@@ -2878,17 +2907,24 @@ mod tests {
             })
             .unwrap();
         let mut child_pid = None;
-        let started = wait_for(|| {
-            let output = manager.read(&session.id, 0).unwrap().bytes;
-            child_pid = String::from_utf8_lossy(&output)
-                .lines()
-                .find_map(|line| line.strip_prefix("CHILD:")?.trim().parse::<u32>().ok());
-            child_pid.is_some()
-        });
+        let started = wait_for_timeout(
+            || {
+                let output = manager.read(&session.id, 0).unwrap().bytes;
+                child_pid = String::from_utf8_lossy(&output)
+                    .lines()
+                    .find_map(|line| line.strip_prefix("CHILD:")?.trim().parse::<u32>().ok());
+                child_pid.is_some()
+            },
+            std::time::Duration::from_secs(20),
+        );
         manager.kill(&session.id).unwrap();
         if !started {
+            let output = manager
+                .read(&session.id, 0)
+                .map(|chunk| String::from_utf8_lossy(&chunk.bytes).into_owned())
+                .unwrap_or_default();
             manager.close(&session.id).unwrap();
-            panic!("the launcher did not report its child PID");
+            panic!("the launcher did not report its child PID: {output:?}");
         }
         let status = Command::new("powershell.exe")
             .args([
