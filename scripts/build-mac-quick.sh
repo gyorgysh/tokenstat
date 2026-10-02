@@ -17,6 +17,11 @@
 # through the FFI changes. Ordinary Swift changes do not need that rebuild.
 # An iOS-only xcframework leftover from an archive still occupies this path,
 # so the script also rebuilds when the macOS slice is missing.
+#
+# Before launching it quits any running copy of the app and puts the new
+# hostd in place under the launch agent. `open` on a running app only brings
+# it forward, and the daemon outlives the app, so without this the old app
+# and the old hostd kept answering after a build.
 
 set -euo pipefail
 
@@ -108,6 +113,54 @@ cp "$ROOT/target/release/tokenstat-hostd" \
 chmod 755 "$APP/Contents/Resources/tokenstat-hostd"
 
 python3 "$ROOT/scripts/sign-mac-app.py" "$APP" --optional
+
+# The Mac app, by its bundle layout. A simulator copy is also a process
+# named Tokenstat, but it has no Contents/MacOS and is left alone.
+mac_app_pids() {
+    pgrep -f '/Tokenstat\.app/Contents/MacOS/Tokenstat$' || true
+}
+
+quit_running_app() {
+    [ -n "$(mac_app_pids)" ] || return 0
+    echo "Quitting the running app"
+    osascript -e 'tell application id "ai.tokenstat.tokenstat" to quit' > /dev/null 2>&1 || true
+    for _ in $(seq 1 50); do
+        [ -n "$(mac_app_pids)" ] || return 0
+        sleep 0.2
+    done
+    echo "the app did not quit, stopping it"
+    mac_app_pids | xargs kill 2> /dev/null || true
+    sleep 1
+}
+
+# Install the signed helper from the bundle where the launch agent runs it,
+# then restart the agent so the socket answers with this build. When no agent
+# is loaded the app installs and starts one itself on launch.
+deploy_hostd() {
+    local support="$HOME/Library/Application Support/tokenstat/bin"
+    local helper="$support/tokenstat-hostd"
+    local service="gui/$(id -u)/ai.tokenstat.hostd"
+    mkdir -p "$support"
+    local staged="$support/.tokenstat-hostd-quick.$$"
+    # -p keeps the bundle copy's date: the app compares size and date on
+    # launch, and a fresh date would make it reinstall and restart hostd again.
+    cp -p "$APP/Contents/Resources/tokenstat-hostd" "$staged"
+    chmod 755 "$staged"
+    mv -f "$staged" "$helper"
+    if launchctl print "$service" > /dev/null 2>&1; then
+        echo "Restarting hostd"
+        if launchctl kickstart -k "$service"; then
+            # This build is the one running, so a marker left by an earlier
+            # failed install no longer asks the app for another restart.
+            rm -f "$helper.restart-required"
+        else
+            echo "could not restart hostd, the app will start it" >&2
+        fi
+    fi
+}
+
+quit_running_app
+deploy_hostd
 
 echo "Launching $APP"
 open "$APP"

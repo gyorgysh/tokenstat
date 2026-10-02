@@ -67,7 +67,7 @@ extension View {
     /// digits. A list of project names and a rail of glyphs is chrome.
     ///
     /// Sample behind the window, rather than tinting an opaque colour plate.
-    /// A wash of the theme's sidebar colour keeps the frost close to the
+    /// A translucent black (or white) wash keeps the frost close to the
     /// content surface while allowing a restrained amount of the blurred
     /// backdrop through.
     /// Reduce Transparency uses an opaque theme surface.
@@ -151,9 +151,10 @@ private struct RetainedPaneLayout: Layout {
 
 @available(macOS 26, *)
 private struct SidebarGlassSurface: View {
-    /// How much of the panel is flat theme colour over the glass.
+    /// How much of the panel is black or white over the glass.
     static let wash: Double = 0.86
 
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
@@ -162,13 +163,13 @@ private struct SidebarGlassSurface: View {
         } else {
             // The wash carries readability, the glass only a hint of what is
             // behind. At 72% a bright wallpaper behind dark mode (or a dark
-            // one behind light mode) pulled its shapes into the row text, so
-            // the theme's own sidebar colour now covers all but about a
-            // seventh of the backdrop.
+            // one behind light mode) pulled its shapes into the row text.
+            // Pure black or white, not the theme's sidebar colour: that
+            // tinted wash read as a grey plate over the glass.
             SidebarBackdrop()
                 .overlay {
                     RoundedRectangle(cornerRadius: ShellMetrics.panelRadius)
-                        .fill(Theme.sidebar.opacity(Self.wash))
+                        .fill((colorScheme == .dark ? Color.black : Color.white).opacity(Self.wash))
                 }
         }
     }

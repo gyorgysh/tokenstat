@@ -86,6 +86,12 @@ public sealed partial class MainWindow : Window
     private JsonNode? _liveAccount;
     private JsonArray _liveSshSessions = new();
     private string _liveFooterKey = "";
+    /// <summary>
+    /// A check still running after a moment. A quiet check that answers
+    /// quickly never draws a card, like the Mac.
+    /// </summary>
+    private bool _showUpdateChecking;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _updateCheckingDelay;
 
     private readonly HashSet<string> _compactExpanded = new(StringComparer.Ordinal);
 
@@ -1627,6 +1633,30 @@ public sealed partial class MainWindow : Window
 
     private void RefreshUpdateBadge()
     {
+        if (AppServices.Update.Current == Tokenstat.Install.AppUpdateModel.Stage.Checking)
+        {
+            if (!_showUpdateChecking && _updateCheckingDelay is null)
+            {
+                var delay = DispatcherQueue.CreateTimer();
+                delay.Interval = TimeSpan.FromMilliseconds(400);
+                delay.IsRepeating = false;
+                delay.Tick += (_, _) =>
+                {
+                    _updateCheckingDelay = null;
+                    if (AppServices.Update.Current != Tokenstat.Install.AppUpdateModel.Stage.Checking) return;
+                    _showUpdateChecking = true;
+                    RefreshUpdateBadge();
+                };
+                _updateCheckingDelay = delay;
+                delay.Start();
+            }
+        }
+        else
+        {
+            _updateCheckingDelay?.Stop();
+            _updateCheckingDelay = null;
+            _showUpdateChecking = false;
+        }
         _liveFooterKey = "";
         RefreshAccountFooter();
     }
@@ -1923,7 +1953,20 @@ public sealed partial class MainWindow : Window
         _liveFooterKey = key;
         var presentation = signedIn && account is not null ? account : new JsonObject { ["displayName"] = L10n.Text("common.sign_in") };
         _railFooter.Child = AccountMenu(presentation);
-        _nav.PaneFooter = _nav.IsPaneOpen ? AccountMenu(presentation, expanded: true) : null;
+        if (!_nav.IsPaneOpen)
+        {
+            _nav.PaneFooter = null;
+            return;
+        }
+        // The update card sits above the account row, the same slot as the
+        // Mac sidebar footer, so a check reports where it was asked for.
+        var paneFooter = new StackPanel();
+        if (SidebarUpdateCard.For(AppServices.Update, _showUpdateChecking) is UIElement updateCard)
+        {
+            paneFooter.Children.Add(updateCard);
+        }
+        paneFooter.Children.Add(AccountMenu(presentation, expanded: true));
+        _nav.PaneFooter = paneFooter;
     }
 
     private UIElement AccountMenu(JsonNode account, bool expanded = false)
@@ -1990,7 +2033,9 @@ public sealed partial class MainWindow : Window
         var checkUpdate = new MenuFlyoutItem { Text = L10n.Text("windows.accountpage.check_for_updates") };
         checkUpdate.Click += async (_, _) =>
         {
-            NavigateTo("global:" + GlobalSection.Account);
+            // The open sidebar shows the answer in its update card. The rail
+            // has no room for one, so it opens the account page instead.
+            if (!_nav.IsPaneOpen) NavigateTo("global:" + GlobalSection.Account);
             await AppServices.Update.CheckNowAsync();
         };
         menu.Items.Add(checkUpdate);
@@ -2159,12 +2204,14 @@ public sealed partial class MainWindow : Window
 
     /// <summary>
     /// Keep the titlebar split on the pane edge: full length while the pane is
-    /// open, compact length once it collapses to icons.
+    /// open, compact length once it collapses to icons. Sidebar tone either
+    /// way, because the rail under it stays on screen: painting it the content
+    /// tone left a dark band over the rail's top whenever the pane closed.
     /// </summary>
     private void SyncTitleBarSplit()
     {
         TitlePaneColumn.Width = new GridLength(RailWidth + (_nav.IsPaneOpen ? _nav.OpenPaneLength : _nav.CompactPaneLength));
-        TitlePaneSide.Background = _nav.IsPaneOpen ? _chromeSidebar : _chromeBackground;
+        TitlePaneSide.Background = _chromeSidebar;
     }
 
     /// <summary>
