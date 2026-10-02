@@ -34,6 +34,9 @@ internal static class AppServices
     /// <summary>Open a linked device and select its connection details.</summary>
     public static Action<string>? OpenMachine { get; set; }
 
+    /// <summary>Open the saved servers list, for Manage servers in a launcher.</summary>
+    public static Action? OpenServers { get; set; }
+
     /// <summary>
     /// Open WebView2 on a loopback URL. Host and port are what
     /// <c>proxy.unlisten</c> needs when this tab opened the listener, plus

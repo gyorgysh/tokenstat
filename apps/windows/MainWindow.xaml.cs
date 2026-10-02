@@ -251,6 +251,7 @@ public sealed partial class MainWindow : Window
 
         _nav.Content = _contentHost;
         _nav.SelectionChanged += NavOnSelectionChanged;
+        _nav.ItemInvoked += NavOnItemInvoked;
         Grid.SetRow(_nav, 1);
         Grid.SetColumn(_nav, 1);
         RootGrid.Children.Add(_nav);
@@ -337,6 +338,7 @@ public sealed partial class MainWindow : Window
         {
             DispatcherQueue.TryEnqueue(() => ShowOnboarding(firstRun: false));
         };
+        AppServices.OpenServers = () => DispatcherQueue.TryEnqueue(() => NavigateTo("ssh:Hosts"));
         AppServices.OpenMachine = id => DispatcherQueue.TryEnqueue(() =>
         {
             NavigateTo("global:Machines");
@@ -1149,8 +1151,39 @@ public sealed partial class MainWindow : Window
             return;
         }
         _lastNavTag = tag;
+        _selectionNavigated = (tag, Environment.TickCount64);
         Show(tag);
         RefreshUpdateBadge();
+    }
+
+    /// <summary>
+    /// The tag a selection change just opened, and when, so an invoke from
+    /// the same click does not open it a second time. Timed, so a selection
+    /// made from the keyboard cannot swallow a later click.
+    /// </summary>
+    private (string Tag, long At)? _selectionNavigated;
+
+    /// <summary>
+    /// A click on a project row opens its launcher, like the Mac, whatever is
+    /// selected. While a chat or another section is open the project row is
+    /// already the selected one (sections have no rows of their own), so the
+    /// native row saw no selection change and only folded its children away.
+    /// The chevron still folds and unfolds; the row itself only opens.
+    /// </summary>
+    private void NavOnItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
+    {
+        if (args.InvokedItemContainer is not NavigationViewItem item || item.Tag is not string tag) return;
+        if (!tag.StartsWith("ws:", StringComparison.Ordinal) || !tag.EndsWith(":Launcher", StringComparison.Ordinal)) return;
+        // After the native row has finished with the click: its own expand
+        // toggle and any selection change both happen first.
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            item.IsExpanded = true;
+            var opened = _selectionNavigated is { } last && last.Tag == tag
+                && Environment.TickCount64 - last.At < 500;
+            _selectionNavigated = null;
+            if (!opened) NavigateTo(tag);
+        });
     }
 
     private void ToggleChatHistory(string folder)

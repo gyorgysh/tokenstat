@@ -147,14 +147,8 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     await LoadTodoAsync();
                     break;
                 case WorkspaceSection.Launcher:
-                    LoadQuickActions();
-                    _root.Children.Add(await ServerLauncher.CreateAsync(host => WorkspaceTabsPage.Find(this)?.OpenServerAsync(host) ?? Task.CompletedTask));
-                    await LoadSessionsAsync();
-                    break;
                 case WorkspaceSection.Sessions:
-                    LoadQuickActions();
-                    _root.Children.Add(await ServerLauncher.CreateAsync(host => WorkspaceTabsPage.Find(this)?.OpenServerAsync(host) ?? Task.CompletedTask));
-                    await LoadSessionsAsync();
+                    await LoadLauncherAsync();
                     break;
                 case WorkspaceSection.Browser:
                     await LoadBrowserAsync();
@@ -619,19 +613,61 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         await LoadAsync();
     }
 
-    private void LoadQuickActions()
+    /// <summary>
+    /// The launcher's one column, the Mac's width: what to open, the saved
+    /// servers, then the agents. Everything shares the column so the servers
+    /// line up with the tiles above and below them.
+    /// </summary>
+    private const double LauncherColumnWidth = 620;
+
+    /// <summary>The Mac grid: tiles 150 to 200 wide, three to a row in the column.</summary>
+    private const double LauncherTileMinWidth = 150;
+
+    private async Task LoadLauncherAsync()
     {
-        var body = new StackPanel { Spacing = Theme.SpaceM, MaxWidth = 780, HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 32, 0, 16) };
-        body.Children.Add(new TextBlock
+        var column = new StackPanel
+        {
+            Spacing = Theme.SpaceM,
+            MaxWidth = LauncherColumnWidth,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Margin = new Thickness(0, Theme.SpaceM, 0, Theme.SpaceL),
+        };
+        _root.Children.Add(column);
+        AddQuickActions(column);
+        var servers = await ServerLauncher.CreateAsync(
+            host => WorkspaceTabsPage.Find(this)?.OpenServerAsync(host) ?? Task.CompletedTask,
+            () => AppServices.OpenServers?.Invoke());
+        if (servers is FrameworkElement placed) placed.Margin = new Thickness(0, Theme.SpaceS, 0, 0);
+        column.Children.Add(servers);
+        await LoadSessionsAsync(column);
+    }
+
+    private void AddQuickActions(StackPanel column)
+    {
+        var mark = new FontIcon
+        {
+            Glyph = "\uF0E2", // GridView
+            FontSize = 34,
+            Foreground = Theme.AccentBrush,
+            Opacity = 0.65,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, Theme.SpaceM, 0, 0),
+        };
+        column.Children.Add(mark);
+        column.Children.Add(new TextBlock
         {
             Text = L10n.Text("windows.workspacepage.what_do_you_want_to_do_in_0.d6c232de", $"{_folderName}"),
-            TextAlignment = TextAlignment.Center, FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextAlignment = TextAlignment.Center, FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.Medium,
             TextWrapping = TextWrapping.Wrap,
         });
-        body.Children.Add(new TextBlock { Text = L10n.Text("windows.workspacepage.open_the_project_where_you_left_it_or_star.4f0ed092"),
-            Opacity = 0.65, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 16) });
-        body.Children.Add(new TextBlock { Text = L10n.Text("common.open"), FontSize = 12, Opacity = 0.7 });
-        var links = new FlowPanel { MinimumItemWidth = 220, Spacing = Theme.SpaceM };
+        column.Children.Add(new TextBlock
+        {
+            Text = L10n.Text("windows.workspacepage.open_the_project_where_you_left_it_or_star.4f0ed092"),
+            Opacity = 0.65, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 380, HorizontalAlignment = HorizontalAlignment.Center,
+        });
+        column.Children.Add(LauncherHeading(L10n.Text("common.open")));
+        var links = new FlowPanel { MinimumItemWidth = LauncherTileMinWidth, Spacing = Theme.SpaceM };
         // Every section of the project, because the sidebar lists only what
         // is running and the chats; this page is where the rest open.
         foreach (var section in new[]
@@ -642,34 +678,101 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             WorkspaceSection.Workflows,
         })
         {
-            var content = new StackPanel { Spacing = Theme.SpaceS, HorizontalAlignment = HorizontalAlignment.Center };
             var icon = section.Action().Icon();
             icon.Foreground = Theme.AccentBrush;
-            content.Children.Add(icon);
-            content.Children.Add(new TextBlock { Text = section.Label(), HorizontalAlignment = HorizontalAlignment.Center });
-            var button = new Button
-            {
-                Content = content, HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Center,
-                Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush,
-                CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(Theme.SpaceL),
-            };
+            var button = LauncherTile(TileBody(new Viewbox { Width = 18, Height = 18, Child = icon }, section.Label()));
             button.Click += (_, _) => AppServices.OpenWorkspace?.Invoke(_id, section);
             links.Children.Add(button);
         }
-        body.Children.Add(links);
-        _root.Children.Add(body);
+        column.Children.Add(links);
     }
 
-    private async Task LoadSessionsAsync()
+    /// <summary>A small caption over a group of tiles, like the Mac launcher.</summary>
+    private static TextBlock LauncherHeading(string title) => new()
     {
-        var launchers = new StackPanel { Spacing = Theme.SpaceS };
-        launchers.MaxWidth = 780;
-        launchers.HorizontalAlignment = HorizontalAlignment.Stretch;
-        _root.Children.Add(launchers);
+        Text = title,
+        FontSize = 12,
+        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        Foreground = Theme.Brush(static () => Theme.ControlGlyph),
+        Margin = new Thickness(0, 4, 0, 0),
+    };
+
+    /// <summary>
+    /// A tile's face: the mark in a 34 high slot, then one line of label. The
+    /// slot is fixed so a glyph and a brand mark sit on the same baseline.
+    /// </summary>
+    private static StackPanel TileBody(UIElement mark, string label, double markOpacity = 1)
+    {
+        var slot = new Grid { Height = 34, Opacity = markOpacity };
+        if (mark is FrameworkElement element)
+        {
+            element.HorizontalAlignment = HorizontalAlignment.Center;
+            element.VerticalAlignment = VerticalAlignment.Center;
+        }
+        slot.Children.Add(mark);
+        var body = new StackPanel { Spacing = Theme.SpaceS, HorizontalAlignment = HorizontalAlignment.Center };
+        body.Children.Add(slot);
+        body.Children.Add(new TextBlock
+        {
+            Text = label,
+            FontSize = 13,
+            FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            MaxLines = 1,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+        return body;
+    }
+
+    /// <summary>
+    /// The Mac tile: panel fill, hairline, card radius, 12 above and below.
+    /// It stretches to its row, so a row of tiles is one height.
+    /// </summary>
+    private static Button LauncherTile(UIElement body) => new()
+    {
+        Content = body,
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        VerticalAlignment = VerticalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Center,
+        VerticalContentAlignment = VerticalAlignment.Center,
+        Background = Theme.PanelBrush,
+        BorderBrush = Theme.BorderBrush,
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(Theme.CardRadius),
+        Padding = new Thickness(Theme.SpaceS, Theme.SpaceM, Theme.SpaceS, Theme.SpaceM),
+    };
+
+    /// <summary>
+    /// A tool that is not on the launcher yet: a faint fill and a dashed
+    /// outline, like the Mac, so it reads as something to add rather than
+    /// something to run. The outline sits over the button and takes no input.
+    /// </summary>
+    private static Grid DashedTile(Button button)
+    {
+        button.Background = Theme.Brush(static () => Windows.UI.Color.FromArgb(102, Theme.Panel.R, Theme.Panel.G, Theme.Panel.B));
+        button.BorderThickness = new Thickness(0);
+        var outline = new Microsoft.UI.Xaml.Shapes.Rectangle
+        {
+            RadiusX = Theme.CardRadius,
+            RadiusY = Theme.CardRadius,
+            Stroke = Theme.BorderBrush,
+            StrokeThickness = 1,
+            StrokeDashArray = new DoubleCollection { 4, 3 },
+            IsHitTestVisible = false,
+        };
+        var tile = new Grid();
+        tile.Children.Add(button);
+        tile.Children.Add(outline);
+        return tile;
+    }
+
+    private async Task LoadSessionsAsync(StackPanel column)
+    {
+        var launchers = new StackPanel { Spacing = Theme.SpaceM };
+        column.Children.Add(launchers);
         await LoadLaunchersAsync(launchers);
         _sessionsHost.Children.Clear();
-        _root.Children.Add(_sessionsHost);
+        column.Children.Add(_sessionsHost);
         await RefreshSessionsAsync();
         StartSessionsPoll();
     }
@@ -679,15 +782,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             ? RemoteWorkspaces.CallOnPeerAsync(peer, method, parameters, patience)
             : AppServices.Host.CallAsync(method, parameters, patience);
 
-    /// <summary>
-    /// The least height of a launcher tile, enough for a two-line status. An
-    /// installed agent has no status line, so sized to content it came out
-    /// shorter than an Install tile. A minimum rather than a fixed height so
-    /// larger text grows the row instead of clipping it, and the tiles
-    /// stretch to the row the flow panel gives them.
-    /// </summary>
-    private const double LauncherTileHeight = 156;
-
     private async Task LoadLaunchersAsync(StackPanel host)
     {
         host.Children.Clear();
@@ -695,8 +789,12 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         {
             var catalog = await CallTargetAsync("launcher.catalog");
             var profiles = (Format.Items(catalog) ?? new JsonArray()).OfType<JsonNode>().ToArray();
-            host.Children.Add(new TextBlock { Text = L10n.Text("windows.workspacepage.run_an_agent.b7046310"), Opacity = 0.7, FontSize = 12 });
-            var tiles = new FlowPanel { MinimumItemWidth = 220, Spacing = Theme.SpaceM };
+            host.Children.Add(LauncherHeading(L10n.Text("windows.workspacepage.run_an_agent.b7046310")));
+            var tiles = new FlowPanel { MinimumItemWidth = LauncherTileMinWidth, Spacing = Theme.SpaceM };
+            // Like the Mac: the launcher's tools, then More, then the catalog
+            // when it is open.
+            var visible = new List<UIElement>();
+            var extra = new List<UIElement>();
             foreach (var profile in profiles)
             {
                 var id = Format.Text(profile, "id");
@@ -708,18 +806,12 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     : canInstall ? L10n.Text("windows.workspacepage.install.569ca49f")
                     : L10n.Text("windows.chatpage.not_available_on_this_computer.ffcbd9b9");
                 if ((!installed || hidden) && !_showingLauncherCatalog) continue;
-                var body = new StackPanel { Spacing = Theme.SpaceM, HorizontalAlignment = HorizontalAlignment.Center };
-                body.Children.Add(AgentMark.View(Format.Text(profile, "harnessId", id), 42));
-                body.Children.Add(new TextBlock
-                {
-                    Text = Format.Text(profile, "name", id), HorizontalAlignment = HorizontalAlignment.Center,
-                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                });
-                if (!installed || hidden)
-                    body.Children.Add(new TextBlock { Text = actionLabel, FontSize = 12,
-                        TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center,
-                        MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis,
-                        Opacity = 0.7, HorizontalAlignment = HorizontalAlignment.Center });
+                var onLauncher = installed && !hidden;
+                // No status line, like the Mac: the faint mark and the dashed
+                // outline say "not here yet", and the tooltip says what a
+                // click does.
+                var body = TileBody(AgentMark.View(Format.Text(profile, "harnessId", id), 34),
+                    Format.Text(profile, "name", id), onLauncher ? 1 : 0.35);
                 var actions = new StackPanel { Spacing = Theme.SpaceS };
                 async Task RunAsync(Button button, string operation)
                 {
@@ -755,23 +847,14 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     }
                     finally { button.IsEnabled = true; }
                 }
-                var launch = new Button
-                {
-                    Content = body, HorizontalAlignment = HorizontalAlignment.Stretch,
-                    HorizontalContentAlignment = HorizontalAlignment.Center,
-                    Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush,
-                    CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(16),
-                    MinHeight = LauncherTileHeight, VerticalAlignment = VerticalAlignment.Stretch,
-                    VerticalContentAlignment = VerticalAlignment.Center,
-                };
+                var launch = LauncherTile(body);
                 launch.Click += async (_, _) => await RunAsync(launch, installed ? hidden ? "show" : "launch" : "install");
-                if (!installed || hidden) launch.Opacity = 0.65;
                 launch.IsEnabled = installed || canInstall;
                 ToolTipService.SetToolTip(launch, hidden || !installed && !canInstall ? actionLabel
                     : installed ? L10n.Text("windows.workspacepage.launch_0.7c80096e", Format.Text(profile, "name", id))
                     : L10n.Text("windows.workspacepage.install_0.234d862d", Format.Text(profile, "name", id)));
-                var tile = new Grid();
-                tile.Children.Add(launch);
+                var tile = onLauncher ? new Grid() : DashedTile(launch);
+                if (onLauncher) tile.Children.Add(launch);
                 var setup = Buttons.ToolbarIcon(ActionIcon.Settings, L10n.Text("windows.workspacepage.set_up_0.4e4ef4a2", $"{Format.Text(profile, "name", id)}"), (_, _) => { }, isAccent: true);
                 setup.HorizontalAlignment = HorizontalAlignment.Right;
                 setup.VerticalAlignment = VerticalAlignment.Top;
@@ -796,26 +879,23 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     try { await CallTargetAsync("launcher.hide", new JsonObject { ["id"] = id }); await LoadLaunchersAsync(host); }
                     catch (Exception ex) { host.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important)); }
                 });
-                tiles.Children.Add(tile);
+                (onLauncher ? visible : extra).Add(tile);
             }
+            foreach (var tile in visible) tiles.Children.Add(tile);
             if (profiles.Any(profile => !Format.Flag(profile, "installed") || Format.Flag(profile, "hidden")))
             {
-                var moreBody = new StackPanel { Spacing = Theme.SpaceM, HorizontalAlignment = HorizontalAlignment.Center };
-                moreBody.Children.Add(new Viewbox { Width = 28, Height = 28, Child =
-                    (_showingLauncherCatalog ? ActionIcon.Collapse : ActionIcon.Create).Icon() });
-                moreBody.Children.Add(new TextBlock { Text = _showingLauncherCatalog ? L10n.Text("windows.workspacepage.hide_catalog")
-                    : L10n.Text("windows.workspacepage.more_tools"), FontSize = 13 });
-                var more = new Button { Content = moreBody, MinHeight = LauncherTileHeight,
-                    VerticalAlignment = VerticalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Center,
-                    HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center,
-                    Background = Theme.PanelBrush, BorderBrush = Theme.BorderBrush,
-                    CornerRadius = new CornerRadius(Theme.CardRadius), Padding = new Thickness(16) };
+                var glyph = (_showingLauncherCatalog ? ActionIcon.Collapse : ActionIcon.Create).Icon();
+                var moreBody = TileBody(new Viewbox { Width = 18, Height = 18, Child = glyph },
+                    _showingLauncherCatalog ? L10n.Text("windows.workspacepage.hide_catalog")
+                        : L10n.Text("windows.workspacepage.more_tools"), 0.6);
+                var more = LauncherTile(moreBody);
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(more, "launcher.more");
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(more, _showingLauncherCatalog
                     ? L10n.Text("windows.workspacepage.hide_catalog") : L10n.Text("windows.workspacepage.more_tools"));
                 more.Click += async (_, _) => { _showingLauncherCatalog = !_showingLauncherCatalog; await LoadLaunchersAsync(host); };
-                tiles.Children.Add(more);
+                tiles.Children.Add(DashedTile(more));
             }
+            foreach (var tile in extra) tiles.Children.Add(tile);
             host.Children.Add(tiles);
         }
         catch (Exception ex) { host.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important)); }
