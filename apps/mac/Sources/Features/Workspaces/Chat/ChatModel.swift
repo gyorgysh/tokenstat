@@ -1743,6 +1743,7 @@ final class ChatModel {
     @ObservationIgnored private var steerProbeStarted = false
     /// Set before any await so a poll and a queue drain cannot both send.
     @ObservationIgnored private var deliveringSteer: ChatSteerContext?
+    @ObservationIgnored private var deliveringSteerToken: UInt64?
     @ObservationIgnored private var clearingSteer: ChatSteerContext?
     @ObservationIgnored private var clearingSteerToken: UInt64?
     /// Messages waiting for the open turn to finish. Kept per conversation so
@@ -2535,7 +2536,7 @@ final class ChatModel {
         let asked = context.peer
         Task {
             defer {
-                if clearingSteer == context {
+                if clearingSteer == context && clearingSteerToken == token {
                     clearingSteer = nil
                     clearingSteerToken = nil
                 }
@@ -2552,6 +2553,12 @@ final class ChatModel {
                 let removed = sameNote && rememberSteerMutation(reference, note: nil, since: mutation)
                 guard current() else { return }
                 if removed && self.selected?.pendingSteer == note { clearLocalSteer() }
+                if removed {
+                    clearingSteer = nil
+                    clearingSteerToken = nil
+                    noteSendFinished(token)
+                    if !busy { await drainQueue() }
+                }
             } catch {
                 guard current() else { return }
                 if isUnknownMethod(error) {
@@ -2567,6 +2574,8 @@ final class ChatModel {
     /// Late completions still hold their context and cannot release a newer one.
     private func discardSteerReservations() {
         deliveringSteer = nil
+        if let token = deliveringSteerToken { noteSendFinished(token) }
+        deliveringSteerToken = nil
         clearingSteer = nil
         if let token = clearingSteerToken { noteSendFinished(token) }
         clearingSteerToken = nil
@@ -2627,7 +2636,16 @@ final class ChatModel {
         let context = ChatSteerContext(reference: reference,
             generation: selectionGeneration, peer: peer)
         deliveringSteer = context
+        deliveringSteerToken = noteSendStarted()
         return context
+    }
+
+    private func finishSteerDelivery(_ context: ChatSteerContext, token: UInt64) {
+        if deliveringSteer == context && deliveringSteerToken == token {
+            deliveringSteer = nil
+            deliveringSteerToken = nil
+        }
+        noteSendFinished(token)
     }
 
     /// Learn whether a remote host can carry a note, once per busy stretch.
@@ -2650,8 +2668,9 @@ final class ChatModel {
     /// Send a note the turn ended without taking. The queue runs only when
     /// that note is gone and this conversation is still the one on screen.
     private func performSteerDelivery(_ context: ChatSteerContext) async {
-        guard deliveringSteer == context, let id = context.reference.itemID else { return }
-        defer { if deliveringSteer == context { deliveringSteer = nil } }
+        guard deliveringSteer == context, let token = deliveringSteerToken,
+              let id = context.reference.itemID else { return }
+        defer { finishSteerDelivery(context, token: token) }
         let asked = context.peer
         @MainActor func current() -> Bool {
             !Task.isCancelled && context.matches(reference: currentReference,
@@ -2677,17 +2696,17 @@ final class ChatModel {
                 return
             }
             if isUnknownMethod(error) {
-                deliveringSteer = nil
+                finishSteerDelivery(context, token: token)
                 if let asked, !asked.isEmpty, self.peer == asked { remoteSteer = false }
                 if await reloadOpenChats(), current(), !busy { await drainQueue() }
                 return
             }
-            deliveringSteer = nil
+            finishSteerDelivery(context, token: token)
             if self.error != message { self.error = message }
             _ = await reloadOpenChats()
             return
         }
-        deliveringSteer = nil
+        finishSteerDelivery(context, token: token)
         guard current() else { return }
         _ = await reloadOpenChats()
         guard current() else { return }

@@ -1253,7 +1253,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             var item = items[index];
             if (!item.Running) continue;
             if (item.Kind == ItemKind.Tool) return SeatStep.Phrase(item.Verb, item.Target);
-            if (item.Kind == ItemKind.Edit) return SeatStep.Phrase(L10n.Text("common.edit"), item.Path);
+            if (item.Kind == ItemKind.Edit) return SeatStep.Phrase("Edit", item.Path);
         }
         return L10n.Text("common.working");
     }
@@ -1927,6 +1927,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     {
         if (_opening) return;
         if (_openId is not string chat || _sending || _queueing) return;
+        var generation = _openGeneration;
+        bool Current() => OpenChatIs(chat) && generation == _openGeneration;
         var text = _draft.Text.Trim();
         if (text.Length == 0 && _attachments.Count == 0) return;
         var attachmentIds = _attachments.Select(file => file.Id).ToArray();
@@ -1934,8 +1936,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         try
         {
             var key = await OutboxKeyAsync(chat);
-            if (_openId != chat || !IsLoaded) return;
+            if (!Current()) return;
             if (await TryParkSteerAsync(chat, text, sendNext, attachmentIds)) return;
+            if (!Current()) return;
             if (_openChat?["sendRevision"] is null) throw new InvalidOperationException(L10n.Text("windows.chatpage.update_the_host_to_use_reliable_message_de.fcb58190"));
             var item = new QueuedChatMessage(Guid.NewGuid().ToString("N"), text, attachmentIds, Format.Long(_openChat, "sendRevision"));
             ChatOutbox.Shared.Update(key, rows =>
@@ -1952,9 +1955,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             if (_draft.Text.Trim() == text) _draft.Text = "";
             _attachments.RemoveAll(file => attachmentIds.Contains(file.Id));
             await DrainQueueAsync();
-            PaintConversation(); StartPoll();
+            if (Current()) { PaintConversation(); StartPoll(); }
         }
-        catch (Exception ex) { Banner(ex.Message); }
+        catch (Exception ex) { if (Current()) Banner(ex.Message); }
         finally { _queueing = false; }
     }
 

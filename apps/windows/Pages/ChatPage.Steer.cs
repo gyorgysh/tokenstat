@@ -145,6 +145,8 @@ internal sealed partial class ChatPage
     /// </summary>
     private async Task<bool> TryParkSteerAsync(string chat, string text, bool sendNext, string[] attachmentIds)
     {
+        var generation = _openGeneration;
+        bool Current() => OpenChatIs(chat) && generation == _openGeneration;
         if (sendNext || attachmentIds.Length > 0 || text.Length == 0 || !Busy()) return false;
         if (SteerUnsupported()) return false;
         var backend = Format.Text(_openChat, "backend");
@@ -152,14 +154,14 @@ internal sealed partial class ChatPage
         if (backend != "muse" && Format.Text(_openChat, "autonomy", "standard") != "standard") return false;
 
         var protocol = await ReadProtocolAsync();
-        if (!OpenChatIs(chat)) return true;
+        if (!Current()) return true;
         if (protocol is null || protocol < RemoteFeatureGate.SteerMinProtocol) return false;
 
         try
         {
             await CallChatAsync("chat.steer", new JsonObject { ["id"] = chat, ["text"] = text });
             _steerOverlay.Remember(chat, text);
-            if (!OpenChatIs(chat)) return true;
+            if (!Current()) return true;
             ParkLocalSteer(text);
             if (_draft.Text.Trim() == text) _draft.Text = "";
             _steerError = null;
@@ -169,7 +171,7 @@ internal sealed partial class ChatPage
         }
         catch (Exception ex)
         {
-            if (!OpenChatIs(chat)) return true;
+            if (!Current()) return true;
             if (IsUnknownMethod(ex))
             {
                 RememberUnsupported();

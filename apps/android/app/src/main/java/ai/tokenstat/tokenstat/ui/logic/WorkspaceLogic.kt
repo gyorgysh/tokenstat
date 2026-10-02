@@ -141,6 +141,7 @@ object NoteList {
         val body: String,
         val column: String,
         val createdAtMs: Long,
+        val revision: Long? = null,
     )
 
     fun visible(

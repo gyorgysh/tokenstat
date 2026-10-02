@@ -14,15 +14,19 @@ internal sealed class NoteDraftStore
         public string? Error { get; set; }
         public bool Dirty => Value != Saved;
         public Task? Pending { get; set; }
+        public long SavedAfterRead { get; set; }
     }
 
     private readonly Dictionary<string, Entry> _entries = new();
+    private long _reads;
     public event Action<string>? Changed;
     public Entry? Get(string id) => _entries.GetValueOrDefault(id);
+    public long BeginRead() => ++_reads;
 
-    public Text Open(string id, Text saved)
+    public Text Open(string id, Text saved, long read = long.MaxValue)
     {
-        if (_entries.TryGetValue(id, out var current) && (current.Dirty || current.Saving || current.Error is not null))
+        if (_entries.TryGetValue(id, out var current) && (current.Dirty || current.Saving || current.Error is not null
+            || current.HasSaved && read <= current.SavedAfterRead))
             return current.Value;
         _entries[id] = new Entry(saved);
         return saved;
@@ -62,6 +66,9 @@ internal sealed class NoteDraftStore
                 if (entry.Value == submitted) entry.Value = normalized;
                 entry.Saved = normalized;
                 entry.HasSaved = true;
+                // Lists already in flight can still carry the previous body.
+                // Only a read begun after this acknowledgement may replace it.
+                entry.SavedAfterRead = _reads;
             }
         }
         catch (Exception ex) { entry.Error = ex.Message; }

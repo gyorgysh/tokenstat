@@ -1671,7 +1671,6 @@
   "android.terminalscreen.keep_it.fdce5da2": "Keep it",
   "android.terminalscreen.new_shell.8a926ed7": "New shell",
   "android.terminalscreen.output_paused_while_the_terminal_catches_u.c3cbbc1c": "Output paused while the terminal catches up.",
-  "android.terminalscreen.resize_0_1.ac3609a3": "__resize__:{0}:{1}",
   "android.terminalscreen.run_snippet.9fba9773": "Run snippet",
   "android.terminalscreen.show_keyboard.585f7659": "Show keyboard",
   "android.terminalscreen.snip.b0e6a23a": "snip",
@@ -2517,5 +2516,7 @@
   "android.workspacetaskresult.this_folder_is_no_longer_available_on_the.be3071ed": "This folder is no longer available on the connected computer.",
   "android.workspacetaskresult.this_task_has_no_folder_assign_one_to_revi.ec78820b": "This task has no folder. Assign one to review files and history.",
   "android.workspacetaskresult.uncommitted_files_in_this_folder.9b817339": "Uncommitted files in this folder",
-  "android.workspacetaskresult.working_tree_matches_the_last_commit.419b69e6": "Working tree matches the last commit"
+  "android.workspacetaskresult.working_tree_matches_the_last_commit.419b69e6": "Working tree matches the last commit",
+  "android.workspacenotes.revision_required": "This computer did not return the note’s revision. Update tokenstat there before saving. Your draft stays here.",
+  "android.workspacenotes.deleted_while_editing": "This note was deleted on the computer. Your draft stays here."
 }

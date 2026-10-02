@@ -49,6 +49,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
     private TextBlock? _countText;
 
     private JsonArray _cards = new();
+    private long _cardsRead;
     private List<(string Id, string Name)> _folders = new();
     private string _search = "";
     private bool _sortByTitle;
@@ -198,15 +199,26 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
 
     private async Task LoadAsync()
     {
+        var read = _noteDrafts.BeginRead();
         try
         {
             var cardsTask = CallTodoAsync(
                 "todo.list", new JsonObject { ["includeArchived"] = true });
             var foldersTask = CallTodoAsync("workspace.list", new JsonObject());
             await Task.WhenAll(cardsTask, foldersTask);
+            if (read < _cardsRead) return;
+            _cardsRead = read;
             _cards = cardsTask.Result as JsonArray
                 ?? cardsTask.Result["cards"] as JsonArray
                 ?? new JsonArray();
+            foreach (var card in _cards.OfType<JsonObject>())
+            {
+                var id = Format.Text(card, "id");
+                if (Format.Text(card, "kind") != "note" || _noteDrafts.Get(id) is null) continue;
+                var text = _noteDrafts.Open(id, new(Format.Text(card, "title"), Format.Text(card, "notes")), read);
+                card["title"] = text.Title;
+                card["notes"] = text.Notes;
+            }
             _folders = ReadFolders(foldersTask.Result);
             if (_workspaceId is not null
                 && RemoteWorkspaces.TrySplit(_workspaceId, out _, out var inner))
@@ -788,7 +800,7 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
             FontSize = 12,
             Opacity = 0.66,
         });
-        var draft = _noteDrafts.Open(id, new(Format.Text(note, "title"), Format.Text(note, "notes")));
+        var draft = _noteDrafts.Open(id, new(Format.Text(note, "title"), Format.Text(note, "notes")), _cardsRead);
         var text = new TextBox { Header = L10n.Text("windows.notespage.title.7e8cd205"), Text = draft.Title };
         var content = new TextBox { Header = L10n.Text("windows.notespage.note.d8da2c49"), Text = draft.Notes, AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap, MinHeight = 320 };

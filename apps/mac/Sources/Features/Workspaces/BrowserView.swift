@@ -20,7 +20,14 @@ struct BrowserView: View {
     var recentPorts: [Int]
     var onNavigate: ((String) -> Void)?
     var displayAddress: ((String) -> String)?
-    var onLocalNavigation: ((URLRequest, Bool) -> Bool)?
+    var onLocalNavigation: ((URLRequest, Bool, BrowserPageHistoryTraversal?) -> Bool)?
+    var historyCanGoBack: Bool?
+    var historyCanGoForward: Bool?
+    var onBack: (() -> Void)?
+    var onForward: (() -> Void)?
+    var historyItemToRestore: UUID?
+    var onPageHistoryChange: ((BrowserPageHistoryMutation, [BrowserPageHistoryItem], UUID, Int) -> Bool)?
+    var onPageHistoryTraverse: ((Int, Int) -> Bool)?
 
     /// What the user is typing. Never what the page is: a half-typed URL must
     /// not start loading, or the first keystroke throws a DNS error.
@@ -39,7 +46,12 @@ struct BrowserView: View {
 
     init(url: String, allowsExternalNavigation: Bool = false, navigationGeneration: Int = 0, loadRevision: Int = 0, displayURL: String? = nil,
          recentPorts: [Int] = [], onNavigate: ((String) -> Void)? = nil,
-         displayAddress: ((String) -> String)? = nil, onLocalNavigation: ((URLRequest, Bool) -> Bool)? = nil,
+         displayAddress: ((String) -> String)? = nil, onLocalNavigation: ((URLRequest, Bool, BrowserPageHistoryTraversal?) -> Bool)? = nil,
+         canGoBack: Bool? = nil, canGoForward: Bool? = nil,
+         onBack: (() -> Void)? = nil, onForward: (() -> Void)? = nil,
+         historyItemToRestore: UUID? = nil,
+         onPageHistoryChange: ((BrowserPageHistoryMutation, [BrowserPageHistoryItem], UUID, Int) -> Bool)? = nil,
+         onPageHistoryTraverse: ((Int, Int) -> Bool)? = nil,
          onURLChange: @escaping (String, BrowserNavigationEpoch.Completion) -> Bool) {
         initialURL = url
         self.allowsExternalNavigation = allowsExternalNavigation
@@ -51,6 +63,13 @@ struct BrowserView: View {
         self.onNavigate = onNavigate
         self.displayAddress = displayAddress
         self.onLocalNavigation = onLocalNavigation
+        self.historyCanGoBack = canGoBack
+        self.historyCanGoForward = canGoForward
+        self.onBack = onBack
+        self.onForward = onForward
+        self.historyItemToRestore = historyItemToRestore
+        self.onPageHistoryChange = onPageHistoryChange
+        self.onPageHistoryTraverse = onPageHistoryTraverse
         _text = State(initialValue: displayURL ?? url)
         _loadedURL = State(initialValue: url)
     }
@@ -71,6 +90,7 @@ struct BrowserView: View {
                     allowsExternalNavigation: allowsExternalNavigation,
                     url: normalizedURL(loadedURL),
                     navigationGeneration: navigationGeneration,
+                    historyItemToRestore: historyItemToRestore,
                     command: command,
                     commandID: commandID,
                     onURLChange: { url, completion in
@@ -86,7 +106,15 @@ struct BrowserView: View {
                     onLoadingChange: { isLoading = $0 },
                     onHistoryChange: { back, forward in canGoBack = back; canGoForward = forward },
                     onError: { loadError = $0 },
-                    onLocalNavigation: onLocalNavigation
+                    onLocalNavigation: onLocalNavigation,
+                    onPageHistoryTraverse: onPageHistoryTraverse,
+                    onPageHistoryChange: { mutation, items, currentID, generation in
+                        guard onPageHistoryChange?(mutation, items, currentID, generation) == true,
+                              let current = items.first(where: { $0.id == currentID }) else { return false }
+                        text = displayAddress?(current.url) ?? current.url
+                        loadedURL = current.url
+                        return true
+                    }
                 )
             }
         }
@@ -123,18 +151,18 @@ struct BrowserView: View {
 
     private var toolbar: some View {
         HStack(spacing: Theme.Space.xs) {
-            Button { send(.back) } label: {
+            Button { if let onBack { onBack() } else { send(.back) } } label: {
                 Image(systemName: "chevron.left")
             }
             .help(L10n.text("common.back"))
             .accessibilityLabel(L10n.text("common.back"))
-            .disabled(!canGoBack)
-            Button { send(.forward) } label: {
+            .disabled(!(historyCanGoBack ?? canGoBack))
+            Button { if let onForward { onForward() } else { send(.forward) } } label: {
                 Image(systemName: "chevron.right")
             }
             .help(L10n.text("apple.browserview.forward.f1c65e14"))
             .accessibilityLabel(L10n.text("apple.browserview.forward.f1c65e14"))
-            .disabled(!canGoForward)
+            .disabled(!(historyCanGoForward ?? canGoForward))
             Button { send(isLoading ? .stop : .reload) } label: {
                 Image(systemName: isLoading ? "xmark" : "arrow.clockwise")
             }
@@ -279,6 +307,7 @@ private struct WebBrowser: NSViewRepresentable {
     var allowsExternalNavigation: Bool
     var url: URL?
     var navigationGeneration: Int
+    var historyItemToRestore: UUID?
     var command: BrowserCommand
     var commandID: Int
     var onURLChange: (String, BrowserNavigationEpoch.Completion) -> Bool
@@ -286,7 +315,9 @@ private struct WebBrowser: NSViewRepresentable {
     var onLoadingChange: (Bool) -> Void
     var onHistoryChange: (Bool, Bool) -> Void
     var onError: (String) -> Void
-    var onLocalNavigation: ((URLRequest, Bool) -> Bool)?
+    var onLocalNavigation: ((URLRequest, Bool, BrowserPageHistoryTraversal?) -> Bool)?
+    var onPageHistoryTraverse: ((Int, Int) -> Bool)?
+    var onPageHistoryChange: (BrowserPageHistoryMutation, [BrowserPageHistoryItem], UUID, Int) -> Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -296,18 +327,23 @@ private struct WebBrowser: NSViewRepresentable {
             onLoadingChange: onLoadingChange,
             onHistoryChange: onHistoryChange,
             onError: onError,
-            onLocalNavigation: onLocalNavigation
+            onLocalNavigation: onLocalNavigation,
+            onPageHistoryTraverse: onPageHistoryTraverse,
+            onPageHistoryChange: onPageHistoryChange
         )
     }
 
     func makeNSView(context: Context) -> WKWebView {
-        let view = WKWebView()
+        let configuration = WKWebViewConfiguration()
+        context.coordinator.pageHistory.install(in: configuration)
+        let view = WKWebView(frame: .zero, configuration: configuration)
         // A deterministic, current Safari UA: some sites treat a bare WebKit
         // UA as a bot and stall instead of answering.
         view.customUserAgent = Self.safariUserAgent
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
         context.coordinator.epochs.current = navigationGeneration
+        context.coordinator.pageHistory.attach(view, generation: navigationGeneration)
         if let url {
             context.coordinator.epochs.register(view.load(URLRequest(url: url)), generation: navigationGeneration)
         }
@@ -321,13 +357,19 @@ private struct WebBrowser: NSViewRepresentable {
         context.coordinator.webView = view
         context.coordinator.onLocalNavigation = onLocalNavigation
         context.coordinator.onURLChange = onURLChange
+        context.coordinator.onPageHistoryChange = onPageHistoryChange
+        context.coordinator.pageHistory.onTraverse = onPageHistoryTraverse
         context.coordinator.epochs.current = navigationGeneration
+        context.coordinator.pageHistory.attach(view, generation: navigationGeneration)
         view.customUserAgent = Self.safariUserAgent
         guard context.coordinator.lastCommandID != commandID else { return }
         context.coordinator.lastCommandID = commandID
         switch command {
         case .navigate:
-            if let url { context.coordinator.epochs.register(view.load(URLRequest(url: url)), generation: navigationGeneration) }
+            if let url {
+                let navigation = context.coordinator.pageHistory.load(view, url: url, restoring: historyItemToRestore)
+                context.coordinator.epochs.register(navigation, generation: navigationGeneration)
+            }
         case .back:
             if view.canGoBack { context.coordinator.epochs.register(view.goBack(), generation: navigationGeneration) }
         case .forward:
@@ -346,6 +388,7 @@ private struct WebBrowser: NSViewRepresentable {
         view.navigationDelegate = nil
         view.uiDelegate = nil
         view.stopLoading()
+        coordinator.pageHistory.dismantle(view)
         coordinator.webView = nil
     }
 
@@ -364,7 +407,14 @@ private struct WebBrowser: NSViewRepresentable {
         let onLoadingChange: (Bool) -> Void
         let onHistoryChange: (Bool, Bool) -> Void
         let onError: (String) -> Void
-        var onLocalNavigation: ((URLRequest, Bool) -> Bool)?
+        var onLocalNavigation: ((URLRequest, Bool, BrowserPageHistoryTraversal?) -> Bool)?
+        var onPageHistoryChange: (BrowserPageHistoryMutation, [BrowserPageHistoryItem], UUID, Int) -> Bool
+        var onPageHistoryTraverse: ((Int, Int) -> Bool)?
+        lazy var pageHistory = BrowserNativeHistory(onChange: { [weak self] mutation, items, id, generation in
+            self?.onPageHistoryChange(mutation, items, id, generation) ?? false
+        }, onTraverse: onPageHistoryTraverse, onAbandon: { [weak self] navigation in
+            self?.epochs.abandonIfNotStarted(navigation)
+        })
 
         init(
             allowsExternalNavigation: Bool,
@@ -373,7 +423,9 @@ private struct WebBrowser: NSViewRepresentable {
             onLoadingChange: @escaping (Bool) -> Void,
             onHistoryChange: @escaping (Bool, Bool) -> Void,
             onError: @escaping (String) -> Void,
-            onLocalNavigation: ((URLRequest, Bool) -> Bool)?
+            onLocalNavigation: ((URLRequest, Bool, BrowserPageHistoryTraversal?) -> Bool)?,
+            onPageHistoryTraverse: ((Int, Int) -> Bool)?,
+            onPageHistoryChange: @escaping (BrowserPageHistoryMutation, [BrowserPageHistoryItem], UUID, Int) -> Bool
         ) {
             self.allowsExternalNavigation = allowsExternalNavigation
             self.onURLChange = onURLChange
@@ -382,6 +434,8 @@ private struct WebBrowser: NSViewRepresentable {
             self.onHistoryChange = onHistoryChange
             self.onError = onError
             self.onLocalNavigation = onLocalNavigation
+            self.onPageHistoryChange = onPageHistoryChange
+            self.onPageHistoryTraverse = onPageHistoryTraverse
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
@@ -415,7 +469,8 @@ private struct WebBrowser: NSViewRepresentable {
             decidePolicyFor navigationAction: WKNavigationAction,
             decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
         ) {
-            if onLocalNavigation?(navigationAction.request, navigationAction.targetFrame?.isMainFrame != false) == true {
+            let traversal = pageHistory.traversal(for: navigationAction, in: webView)
+            if onLocalNavigation?(navigationAction.request, navigationAction.targetFrame?.isMainFrame != false, traversal) == true {
                 decisionHandler(.cancel)
                 return
             }
@@ -444,7 +499,7 @@ private struct WebBrowser: NSViewRepresentable {
                      for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
             if navigationAction.targetFrame == nil, let url = navigationAction.request.url,
                ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
-                if onLocalNavigation?(navigationAction.request, true) == true { return nil }
+                if onLocalNavigation?(navigationAction.request, true, nil) == true { return nil }
                 if (allowsExternalNavigation || isLoopbackHost(url)) && (!isLoopbackHost(url) || BrowserTarget(url.absoluteString) != nil) {
                     epochs.register(webView.load(navigationAction.request), generation: epochs.current)
                 } else {
@@ -455,12 +510,14 @@ private struct WebBrowser: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            guard let completion = epochs.finish(navigation) else { return }
+            guard var completion = epochs.finish(navigation) else { return }
             onLoadingChange(false)
             onHistoryChange(webView.canGoBack, webView.canGoForward)
+            completion.nativeHistoryID = pageHistory.report(.pop, in: webView, generation: completion.generation)
             if let url = webView.url?.absoluteString {
                 _ = onURLChange(url, completion)
             }
+            pageHistory.report(.snapshot, in: webView, generation: completion.generation)
         }
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {

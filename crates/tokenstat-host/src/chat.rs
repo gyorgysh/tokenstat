@@ -2133,12 +2133,43 @@ impl Store {
             } else {
                 None
             };
+            // A retained summary already includes its discarded prefix, and
+            // a fork's copied history belongs to the original vendor session.
+            // Only reconcile complete visible turns created in this conversation.
+            // The older aggregate has no per-backend attribution, so repairing
+            // it from the full vendor log would count those tokens twice.
+            // A partial turn before the first surviving user stays at its
+            // recorded total until there is a complete turn to reconcile.
+            let since_ms = records
+                .iter()
+                .rposition(|record| record["kind"] == "retainedUsage")
+                .map(|index| {
+                    records[index + 1..]
+                        .iter()
+                        .filter(|record| record["kind"] == "user")
+                        .find_map(record_at_ms)
+                        .unwrap_or(i64::MAX)
+                })
+                .unwrap_or(chat.created_at_ms)
+                .max(chat.created_at_ms);
             if let Some(directory) = directory
-                && let Ok(recovered) = muse_log_usage(&directory)
+                && let Ok(recovered) = muse_log_usage(&directory, since_ms)
             {
                 let mut stored = crate::work_transcript_identity::UsageTotals::default();
+                // A fork strips old Session markers. The current token's
+                // marker distinguishes inherited records even when their
+                // timestamp equals the fork's creation millisecond. Older
+                // transcripts without markers retain the timestamp fallback.
+                let mut current_session = !records.iter().any(|record| {
+                    record["backend"] == "muse" && record["event"]["kind"] == "session"
+                });
                 for record in &records {
-                    if record["backend"] == "muse"
+                    if record["backend"] == "muse" && record["event"]["kind"] == "session" {
+                        current_session = record["event"]["id"].as_str() == Some(token);
+                    }
+                    if current_session
+                        && record["backend"] == "muse"
+                        && record_at_ms(record).is_some_and(|at| at >= since_ms)
                         && let Some(record) = record.as_object()
                     {
                         stored.add(&crate::work_transcript_identity::UsageTotals::from_record(
@@ -4409,6 +4440,7 @@ pub struct EventPage {
 /// No unbounded vendor-file walks on a sidebar hover.
 const VENDOR_USAGE_BYTES: u64 = 32 * 1024 * 1024;
 const VENDOR_USAGE_FILES: usize = 256;
+const VENDOR_USAGE_ENTRIES: usize = VENDOR_USAGE_FILES * 4;
 
 fn add_usage_value(total: &mut Value, extra: &Value) -> Result<(), String> {
     let mut sum = crate::work_transcript_identity::UsageTotals::from_record(
@@ -4518,40 +4550,43 @@ fn muse_session_directory(root: &Path, token: &str) -> Result<Option<PathBuf>, S
     if fs::symlink_metadata(&direct).is_ok_and(|metadata| metadata.is_dir()) {
         return Ok(Some(direct));
     }
-    let date_parts =
-        |directory: &Path, width: usize, maximum: u32| -> Result<Vec<PathBuf>, String> {
-            let entries = match fs::read_dir(directory) {
-                Ok(entries) => entries,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-                Err(error) => return Err(error.to_string()),
-            };
-            let mut paths = Vec::new();
-            for entry in entries {
-                let entry = entry.map_err(|error| error.to_string())?;
-                let name = entry.file_name();
-                let Some(name) = name.to_str().filter(|name| name.len() == width) else {
-                    continue;
-                };
-                if name.bytes().all(|byte| byte.is_ascii_digit())
-                    && name
-                        .parse::<u32>()
-                        .is_ok_and(|value| value > 0 && value <= maximum)
-                    && entry
-                        .file_type()
-                        .map_err(|error| error.to_string())?
-                        .is_dir()
-                {
-                    paths.push(entry.path());
-                }
-                if paths.len() > VENDOR_USAGE_FILES {
-                    return Err("saved usage exceeds the directory reading limit".into());
-                }
-            }
-            Ok(paths)
+    let date_parts = |directory: &Path,
+                      width: usize,
+                      maximum: u32,
+                      remaining: &mut usize|
+     -> Result<Vec<PathBuf>, String> {
+        let entries = match fs::read_dir(directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error.to_string()),
         };
-    for year in date_parts(root, 4, 9999)? {
-        for month in date_parts(&year, 2, 12)? {
-            for day in date_parts(&month, 2, 31)? {
+        let mut paths = Vec::new();
+        for entry in entries {
+            charge_vendor_entry(remaining)?;
+            let entry = entry.map_err(|error| error.to_string())?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str().filter(|name| name.len() == width) else {
+                continue;
+            };
+            if name.bytes().all(|byte| byte.is_ascii_digit())
+                && name
+                    .parse::<u32>()
+                    .is_ok_and(|value| value > 0 && value <= maximum)
+                && entry
+                    .file_type()
+                    .map_err(|error| error.to_string())?
+                    .is_dir()
+            {
+                paths.push(entry.path());
+            }
+        }
+        paths.sort_unstable_by(|a, b| b.cmp(a));
+        Ok(paths)
+    };
+    let mut remaining = VENDOR_USAGE_ENTRIES;
+    for year in date_parts(root, 4, 9999, &mut remaining)? {
+        for month in date_parts(&year, 2, 12, &mut remaining)? {
+            for day in date_parts(&month, 2, 31, &mut remaining)? {
                 let directory = day.join(token);
                 if fs::symlink_metadata(&directory).is_ok_and(|metadata| metadata.is_dir()) {
                     return Ok(Some(directory));
@@ -4562,15 +4597,47 @@ fn muse_session_directory(root: &Path, token: &str) -> Result<Option<PathBuf>, S
     Ok(None)
 }
 
-fn muse_log_usage(directory: &Path) -> Result<Value, String> {
+fn record_at_ms(record: &Value) -> Option<i64> {
+    record["at_ms"].as_i64().or_else(|| record["atMs"].as_i64())
+}
+
+fn charge_vendor_entry(remaining: &mut usize) -> Result<(), String> {
+    *remaining = remaining
+        .checked_sub(1)
+        .ok_or("saved usage exceeds the directory reading limit")?;
+    Ok(())
+}
+
+/// Bound discovery itself, including unrelated files and directories. Applying
+/// the file cap after a recursive walk still lets that walk block a chat read.
+fn muse_usage_files(directory: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut directories = vec![directory.to_path_buf()];
+    let mut remaining = VENDOR_USAGE_ENTRIES;
+    let mut files = Vec::new();
+    while let Some(directory) = directories.pop() {
+        for entry in fs::read_dir(directory).map_err(|error| error.to_string())? {
+            charge_vendor_entry(&mut remaining)?;
+            let entry = entry.map_err(|error| error.to_string())?;
+            let kind = entry.file_type().map_err(|error| error.to_string())?;
+            if kind.is_dir() {
+                directories.push(entry.path());
+            } else if kind.is_file() && entry.file_name() == "session.jsonl" {
+                files.push(entry.path());
+                if files.len() > VENDOR_USAGE_FILES {
+                    return Err("saved usage exceeds the reading limit".into());
+                }
+            }
+        }
+    }
+    Ok(files)
+}
+
+fn muse_log_usage(directory: &Path, since_ms: i64) -> Result<Value, String> {
     let mut totals = crate::work_transcript_identity::UsageTotals::default();
     if !directory.is_dir() {
         return Ok(totals.value());
     }
-    let files = tokenstat_core::sources::muse::shards(directory);
-    if files.len() > VENDOR_USAGE_FILES {
-        return Err("saved usage exceeds the reading limit".into());
-    }
+    let files = muse_usage_files(directory)?;
     let mut remaining = VENDOR_USAGE_BYTES;
     let mut seen = HashSet::new();
     for path in files {
@@ -4579,7 +4646,7 @@ fn muse_log_usage(directory: &Path) -> Result<Value, String> {
         let parsed =
             tokenstat_core::sources::muse::parse_file(&path, &String::from_utf8_lossy(&bytes));
         for event in parsed.events {
-            if !seen.insert(event.id) {
+            if event.ts.utc_ms < since_ms || !seen.insert(event.id) {
                 continue;
             }
             let counters = event.counters;
@@ -6380,6 +6447,211 @@ mod tests {
     }
 
     #[test]
+    fn compacted_muse_usage_does_not_recount_the_retained_prefix() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "original");
+        retune_chat(&store, "original", "muse", "standard");
+        store.set_resume("original", "muse", "session-a").unwrap();
+        let directory = root.path().join("muse/session-a");
+        fs::create_dir_all(&directory).unwrap();
+        let vendor = |id: &str, time: i64, input: u64| {
+            json!({"id":id,"recorded_at":time * 1000,
+                "payload":{"event":{"kind":"model_completed","model":"test-model",
+                    "usage":{"input_tokens":input,"output_tokens":20}}}})
+        };
+        fs::write(
+            directory.join("session.jsonl"),
+            format!("{}\n{}\n", vendor("old", 100, 100), vendor("new", 200, 200)),
+        )
+        .unwrap();
+        let path = store.events_path("original");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, concat!(
+            "{\"kind\":\"retainedUsage\",\"usage\":{\"turns\":1,\"input\":100,\"output\":20,\"cacheRead\":0,\"cacheWrite\":0,\"cost\":0.0},\"seq\":1}\n",
+            "{\"kind\":\"user\",\"text\":\"continue\",\"at_ms\":150,\"seq\":2}\n",
+            "{\"kind\":\"agent\",\"backend\":\"muse\",\"event\":{\"kind\":\"usage\",\"input\":200,\"output\":20},\"at_ms\":250,\"seq\":3}\n"
+        )).unwrap();
+        let expected = usage_totals(&path).unwrap();
+        assert_eq!(expected["input"], 300);
+        assert_eq!(
+            store
+                .conversation_usage_with_muse_root(
+                    &store.get("original").unwrap(),
+                    &path,
+                    Some(&root.path().join("muse")),
+                )
+                .unwrap(),
+            expected,
+        );
+    }
+
+    #[test]
+    fn compacted_muse_usage_repairs_only_complete_following_turns() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "original");
+        retune_chat(&store, "original", "muse", "standard");
+        store.set_resume("original", "muse", "session-a").unwrap();
+        let directory = root.path().join("muse/session-a");
+        fs::create_dir_all(&directory).unwrap();
+        let vendor = |id: &str, time: i64, input: u64| {
+            json!({"id":id,"recorded_at":time * 1000,
+                "payload":{"event":{"kind":"model_completed","model":"test-model",
+                    "usage":{"input_tokens":input,"output_tokens":20}}}})
+        };
+        fs::write(
+            directory.join("session.jsonl"),
+            format!(
+                "{}\n{}\n{}\n{}\n",
+                vendor("old", 100, 100),
+                vendor("partial", 200, 200),
+                vendor("complete", 400, 100),
+                vendor("missing", 500, 50),
+            ),
+        )
+        .unwrap();
+        let path = store.events_path("original");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, concat!(
+            "{\"kind\":\"retainedUsage\",\"usage\":{\"turns\":1,\"input\":100,\"output\":20,\"cacheRead\":0,\"cacheWrite\":0,\"cost\":0.0},\"seq\":1}\n",
+            "{\"kind\":\"agent\",\"backend\":\"muse\",\"event\":{\"kind\":\"usage\",\"input\":200,\"output\":20},\"at_ms\":250,\"seq\":2}\n",
+            "{\"kind\":\"user\",\"text\":\"continue\",\"at_ms\":350,\"seq\":3}\n",
+            "{\"kind\":\"agent\",\"backend\":\"muse\",\"event\":{\"kind\":\"usage\",\"input\":100,\"output\":20},\"at_ms\":450,\"seq\":4}\n"
+        )).unwrap();
+        let usage = store
+            .conversation_usage_with_muse_root(
+                &store.get("original").unwrap(),
+                &path,
+                Some(&root.path().join("muse")),
+            )
+            .unwrap();
+        assert_eq!(usage["input"], 450);
+        assert_eq!(usage["turns"], 4);
+    }
+
+    #[test]
+    fn a_fork_recovers_new_muse_usage_without_subtracting_copied_history() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "original");
+        store
+            .append(
+                "original",
+                &StoredEvent::Agent {
+                    event: Event::Usage {
+                        input: 100,
+                        output: 20,
+                        cache_read: 0,
+                        cache_write: 0,
+                        cost_usd: None,
+                    },
+                    backend: "muse".into(),
+                    at_ms: 100,
+                },
+            )
+            .unwrap();
+        let fork = store.fork("original").unwrap();
+        retune_chat(&store, &fork.id, "muse", "standard");
+        store.set_resume(&fork.id, "muse", "session-new").unwrap();
+        // A copied record can share the fork's creation millisecond. Its
+        // logical position still precedes the new vendor Session marker.
+        let path = store.events_path(&fork.id);
+        let mut copied: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        copied["at_ms"] = json!(fork.created_at_ms);
+        fs::write(&path, format!("{copied}\n")).unwrap();
+        store
+            .append(
+                &fork.id,
+                &StoredEvent::Agent {
+                    event: Event::Session {
+                        id: "session-new".into(),
+                    },
+                    backend: "muse".into(),
+                    at_ms: fork.created_at_ms + 1,
+                },
+            )
+            .unwrap();
+        let directory = root.path().join("muse/session-new");
+        fs::create_dir_all(&directory).unwrap();
+        let vendor = json!({"id":"new","recorded_at":(fork.created_at_ms + 10) * 1000,
+            "payload":{"event":{"kind":"model_completed","model":"test-model",
+                "usage":{"input_tokens":100,"output_tokens":20}}}});
+        fs::write(directory.join("session.jsonl"), format!("{vendor}\n")).unwrap();
+        let usage = store
+            .conversation_usage_with_muse_root(
+                &store.get(&fork.id).unwrap(),
+                &store.events_path(&fork.id),
+                Some(&root.path().join("muse")),
+            )
+            .unwrap();
+        assert_eq!(usage["input"], 200);
+        assert_eq!(usage["turns"], 2);
+    }
+
+    #[test]
+    fn muse_usage_reconciliation_subtracts_only_the_current_vendor_session() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "original");
+        retune_chat(&store, "original", "muse", "standard");
+        store.set_resume("original", "muse", "session-a").unwrap();
+        for (token, at_ms, input) in [
+            ("session-a", 100, 100),
+            ("session-b", 200, 200),
+            ("session-a", 300, 50),
+        ] {
+            store
+                .append(
+                    "original",
+                    &StoredEvent::Agent {
+                        event: Event::Session { id: token.into() },
+                        backend: "muse".into(),
+                        at_ms: at_ms - 1,
+                    },
+                )
+                .unwrap();
+            store
+                .append(
+                    "original",
+                    &StoredEvent::Agent {
+                        event: Event::Usage {
+                            input,
+                            output: 20,
+                            cache_read: 0,
+                            cache_write: 0,
+                            cost_usd: None,
+                        },
+                        backend: "muse".into(),
+                        at_ms,
+                    },
+                )
+                .unwrap();
+        }
+        let directory = root.path().join("muse/session-a");
+        fs::create_dir_all(&directory).unwrap();
+        let vendor = |id: &str, time: i64| {
+            json!({"id":id,"recorded_at":time * 1000,
+                "payload":{"event":{"kind":"model_completed","model":"test-model",
+                    "usage":{"input_tokens":100,"output_tokens":20}}}})
+        };
+        fs::write(
+            directory.join("session.jsonl"),
+            format!("{}\n{}\n", vendor("old", 100), vendor("new", 300)),
+        )
+        .unwrap();
+        let usage = store
+            .conversation_usage_with_muse_root(
+                &store.get("original").unwrap(),
+                &store.events_path("original"),
+                Some(&root.path().join("muse")),
+            )
+            .unwrap();
+        assert_eq!(usage["input"], 400);
+        assert_eq!(usage["turns"], 3);
+    }
+
+    #[test]
     fn retained_other_backend_usage_does_not_hide_a_new_muse_session() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
@@ -6404,7 +6676,8 @@ mod tests {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, concat!(
             "{\"kind\":\"retainedUsage\",\"usage\":{\"turns\":1,\"input\":100,\"output\":20,\"cacheRead\":0,\"cacheWrite\":0,\"cost\":0.0},\"seq\":1}\n",
-            "{\"kind\":\"agent\",\"backend\":\"claude\",\"event\":{\"kind\":\"usage\",\"input\":100,\"output\":20},\"seq\":2}\n"
+            "{\"kind\":\"user\",\"text\":\"continue\",\"at_ms\":10,\"seq\":2}\n",
+            "{\"kind\":\"agent\",\"backend\":\"claude\",\"event\":{\"kind\":\"usage\",\"input\":100,\"output\":20},\"at_ms\":20,\"seq\":3}\n"
         )).unwrap();
         assert_eq!(usage_totals(&path).unwrap()["input"], 200);
         assert_eq!(
@@ -6435,7 +6708,7 @@ mod tests {
         let second = record("second", 200, 30, 100);
         fs::write(root.path().join("session.jsonl"), format!("{first}\n")).unwrap();
         fs::write(child.join("session.jsonl"), format!("{first}\n{second}\n")).unwrap();
-        let usage = muse_log_usage(root.path()).unwrap();
+        let usage = muse_log_usage(root.path(), 0).unwrap();
         assert_eq!(
             usage,
             json!({"turns":2,"input":140,"output":50,"cacheRead":160,"cacheWrite":0,"cost":0.0})
@@ -6446,6 +6719,16 @@ mod tests {
         assert_eq!(extra["input"], 100);
         assert_eq!(extra["cacheRead"], 100);
         assert!(usage_difference(&previous, &usage).unwrap().is_none());
+    }
+
+    #[test]
+    fn muse_usage_discovery_bounds_unrelated_directory_entries() {
+        let root = tempfile::tempdir().unwrap();
+        for index in 0..=VENDOR_USAGE_ENTRIES {
+            fs::write(root.path().join(format!("unrelated-{index}")), b"").unwrap();
+        }
+        assert!(muse_session_directory(root.path(), "missing").is_err());
+        assert!(muse_log_usage(root.path(), 0).is_err());
     }
 
     #[test]

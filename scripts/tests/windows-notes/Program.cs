@@ -43,6 +43,21 @@ gate.SetResult(); await saving;
 Check(writes.Count == 2 && writes[^1] == saved && !store.Get("a")!.Dirty, "Reverting during save persisted the wrong version");
 Console.WriteLine("Windows notes: ordered saves, concurrent edits, navigation, retry and blank titles passed");
 
+var reloading = new NoteDraftStore();
+var firstRead = reloading.BeginRead();
+reloading.Open("note", original, firstRead);
+var staleRead = reloading.BeginRead();
+var latest = original with { Notes = "saved while the list was in flight" };
+reloading.Edit("note", latest);
+await reloading.SaveAsync("note", _ => Task.CompletedTask);
+Check(reloading.Open("note", original, staleRead) == latest,
+    "A delayed list replaced a body that was saved after its read began");
+var afterSave = reloading.BeginRead();
+var external = original with { Notes = "edited on another client" };
+Check(reloading.Open("note", external, afterSave) == external,
+    "A fresh host read could not replace a clean locally saved body");
+Console.WriteLine("Windows notes: delayed reads preserve acknowledged saves and fresh reads reconcile clean notes");
+
 var markdown = NoteMarkdown.Parse("# Heading\n\n- [x] Done\n- [ ] Later\n\n> Quote\n\n**Bold** &amp; *italic* ~~removed~~\n\n```swift\nlet n = 1\n```\n\n<script>alert(1)</script>");
 Check(markdown.OfType<Markdig.Syntax.HeadingBlock>().Count() == 1, "Heading was not parsed");
 Check(markdown.OfType<Markdig.Syntax.ListBlock>().Count() == 1, "Checklist was not parsed");

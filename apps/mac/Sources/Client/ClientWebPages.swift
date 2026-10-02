@@ -7,8 +7,6 @@
 
 import Foundation
 
-#if !os(macOS)
-
 /// Website URLs the iOS client opens inside the app.
 ///
 /// Always add `mobile=1` so tokenstat.ai hides the site chrome. The same
@@ -17,11 +15,11 @@ enum ClientWebPages {
     static let host = "https://tokenstat.ai"
 
     static func privacy(host: String = host) -> URL {
-        withMobileFlag(url(L10n.text("apple.clientwebpages.0_privacy.543e033a", "\(host)")))
+        withMobileFlag(url("\(host)/privacy"))
     }
 
     static func terms(host: String = host) -> URL {
-        withMobileFlag(url(L10n.text("apple.clientwebpages.0_terms.15a96a22", "\(host)")))
+        withMobileFlag(url("\(host)/terms"))
     }
 
     static func publicProfile(host: String, handle: String) -> URL {
@@ -67,5 +65,3 @@ enum ClientWebPages {
         return parts.url ?? url
     }
 }
-
-#endif

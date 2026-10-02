@@ -1065,7 +1065,7 @@ class TerminalBridge {
 
         @JavascriptInterface
         fun onResize(rows: Int, cols: Int) {
-            inbound.trySend(L10n.text("android.terminalscreen.resize_0_1.ac3609a3", "${rows}", "${cols}"))
+            inbound.trySend("__resize__:$rows:$cols")
         }
 
         @JavascriptInterface

@@ -194,7 +194,15 @@ fun PortBrowserScreen(
                             val target = request?.url?.toString()
                             return when (listeners.route(target, request?.isForMainFrame == true, request?.method)) {
                                 BrowserListenerSession.Route.Direct -> false
-                                BrowserListenerSession.Route.Open -> { navigate(original(target)!!.url); true }
+                                // Interception replaces the proxy URL in this
+                                // entry. Loading a new URL here would insert a
+                                // duplicate every time Back revisits an old lease.
+                                BrowserListenerSession.Route.Open -> if (request?.isRedirect == true) {
+                                    // WebView does not intercept a redirect's
+                                    // destination, so acquire it explicitly.
+                                    navigate(original(target)!!.url)
+                                    true
+                                } else false
                                 BrowserListenerSession.Route.Block -> { blockNavigation(); true }
                             }
                         }
@@ -218,8 +226,9 @@ fun PortBrowserScreen(
                                 BrowserListenerSession.Route.Direct -> null
                                 BrowserListenerSession.Route.Open -> {
                                     val canonical = original(target)!!
-                                    v?.post { navigate(canonical.url) }
-                                    blockedResponse()
+                                    runCatching { listeners.replayResponse(canonical) }
+                                        .onFailure { failure -> v?.post { loadError = failure.message } }
+                                        .getOrNull() ?: blockedResponse()
                                 }
                                 BrowserListenerSession.Route.Block -> {
                                     v?.post { blockNavigation() }
@@ -231,6 +240,7 @@ fun PortBrowserScreen(
                         override fun onPageCommitVisible(v: WebView?, url: String?) {
                             if (!listeners.isCurrent) return
                             val canonical = original(url)
+                            if (canonical != null) store.record(request.owner, canonical)
                             address = canonical?.url ?: url.orEmpty()
                             shownHost = canonical?.host ?: BrowserPolicy.title(url)
                         }

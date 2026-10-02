@@ -17,6 +17,10 @@ TECHNICAL_CONTEXTS = (
     r'\bFontFamily\s+[A-Za-z_][A-Za-z0-9_]*\s*(?:\{[^}]*\}\s*)?=\s*new\s*\(\s*',
     r'\bGetHeader\(\s*',
     r'\bCreateWebResourceResponse\([^,\n]*,\s*[^,\n]*,\s*',
+    r'\bSeatStep\.(?:Phrase|Word|ApprovalWord|Speaks|IsShell|AllowAlwaysNote)\(\s*',
+    r'\bonInput\(\s*',
+    r'\binbound\.trySend\(\s*',
+    r'"ProcessType"\s*:\s*',
 )
 
 # Ignore delimiters inside strings and comments when limiting checks to the
@@ -44,7 +48,7 @@ def technical_uses(source):
             yield match.start(), match[1]
     # Filesystem segments, font families and URI references are resolved by
     # the platform. A translated word there cannot identify the shipped asset.
-    for call in re.finditer(r'\b(?:Path\.(?:Combine|Join)|new\s+(?:FontFamily|Uri))\s*\(', source):
+    for call in re.finditer(r'\b(?:Path\.(?:Combine|Join)|new\s+(?:FontFamily|Uri)|URL|url)\s*\(', source):
         end = call_end(source, call.end() - 1)
         for match in re.finditer(TEXT_CALL, source[call.end():end]):
             yield call.end() + match.start(), match[1]

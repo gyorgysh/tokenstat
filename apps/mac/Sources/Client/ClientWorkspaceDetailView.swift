@@ -1272,9 +1272,18 @@ struct ClientBrowserScreen: View {
             }
             ClientWebView(urlString: session.transportURL, reloadToken: reloadToken, navigationGeneration: session.navigationGeneration, loadRevision: session.loadRevision,
                 onError: { loadError = $0 }, onURLChange: { actual, completion in
-                    session.observed(actual, generation: completion.generation, registered: completion.registered)
+                    session.observed(actual, generation: completion.generation, registered: completion.registered,
+                        nativeHistoryID: completion.nativeHistoryID)
                 },
-                onLocalNavigation: { request, isMainFrame in session.intercept(request, isMainFrame: isMainFrame) })
+                onLocalNavigation: { request, isMainFrame, traversal in
+                    session.intercept(request, isMainFrame: isMainFrame, historyItemID: traversal?.id,
+                        historyDirection: traversal?.direction ?? 0)
+                },
+                historyItemToRestore: session.historyItemToRestore,
+                onPageHistoryChange: { mutation, items, id, generation in
+                    session.observedHistory(mutation, items: items, currentID: id, generation: generation)
+                },
+                onPageHistoryTraverse: { delta, generation in session.traverseHistory(delta, generation: generation) })
                 .id(session.id)
         }
         .background(Theme.background)
@@ -1294,20 +1303,27 @@ struct ClientWebView: UIViewRepresentable {
     var loadRevision = 0
     var onError: (String) -> Void = { _ in }
     var onURLChange: (String, BrowserNavigationEpoch.Completion) -> Bool = { _, _ in true }
-    var onLocalNavigation: ((URLRequest, Bool) -> Bool)?
+    var onLocalNavigation: ((URLRequest, Bool, BrowserPageHistoryTraversal?) -> Bool)?
+    var historyItemToRestore: UUID?
+    var onPageHistoryChange: ((BrowserPageHistoryMutation, [BrowserPageHistoryItem], UUID, Int) -> Bool)?
+    var onPageHistoryTraverse: ((Int, Int) -> Bool)?
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onError: onError, onURLChange: onURLChange, onLocalNavigation: onLocalNavigation)
+        Coordinator(onError: onError, onURLChange: onURLChange, onLocalNavigation: onLocalNavigation,
+            onPageHistoryChange: onPageHistoryChange, onPageHistoryTraverse: onPageHistoryTraverse)
     }
 
     func makeUIView(context: Context) -> WKWebView {
-        let view = WKWebView()
+        let configuration = WKWebViewConfiguration()
+        context.coordinator.pageHistory.install(in: configuration)
+        let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
         context.coordinator.requestedURL = urlString
         context.coordinator.reloadToken = reloadToken
         context.coordinator.loadRevision = loadRevision
         context.coordinator.epochs.current = navigationGeneration
+        context.coordinator.pageHistory.attach(view, generation: navigationGeneration)
         if let url = URL(string: urlString), !urlString.isEmpty {
             context.coordinator.epochs.register(view.load(URLRequest(url: url)), generation: navigationGeneration)
         }
@@ -1318,13 +1334,17 @@ struct ClientWebView: UIViewRepresentable {
         context.coordinator.onError = onError
         context.coordinator.onURLChange = onURLChange
         context.coordinator.onLocalNavigation = onLocalNavigation
+        context.coordinator.onPageHistoryChange = onPageHistoryChange
+        context.coordinator.pageHistory.onTraverse = onPageHistoryTraverse
         context.coordinator.epochs.current = navigationGeneration
+        context.coordinator.pageHistory.attach(view, generation: navigationGeneration)
         let explicitLoad = context.coordinator.loadRevision != loadRevision
         if explicitLoad || context.coordinator.requestedURL != urlString {
             context.coordinator.requestedURL = urlString
             context.coordinator.loadRevision = loadRevision
             if let url = URL(string: urlString), !urlString.isEmpty, explicitLoad || view.url?.absoluteString != urlString {
-                context.coordinator.epochs.register(view.load(URLRequest(url: url)), generation: navigationGeneration)
+                let navigation = context.coordinator.pageHistory.load(view, url: url, restoring: historyItemToRestore)
+                context.coordinator.epochs.register(navigation, generation: navigationGeneration)
             }
         }
         if context.coordinator.reloadToken != reloadToken {
@@ -1337,27 +1357,41 @@ struct ClientWebView: UIViewRepresentable {
         view.stopLoading()
         view.navigationDelegate = nil
         view.uiDelegate = nil
+        coordinator.pageHistory.dismantle(view)
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         var onError: (String) -> Void
         var onURLChange: (String, BrowserNavigationEpoch.Completion) -> Bool
-        var onLocalNavigation: ((URLRequest, Bool) -> Bool)?
+        var onLocalNavigation: ((URLRequest, Bool, BrowserPageHistoryTraversal?) -> Bool)?
+        var onPageHistoryChange: ((BrowserPageHistoryMutation, [BrowserPageHistoryItem], UUID, Int) -> Bool)?
+        var onPageHistoryTraverse: ((Int, Int) -> Bool)?
+        lazy var pageHistory = BrowserNativeHistory(onChange: { [weak self] mutation, items, id, generation in
+            guard let self, self.onPageHistoryChange?(mutation, items, id, generation) == true else { return false }
+            self.requestedURL = items.first(where: { $0.id == id })?.url ?? self.requestedURL
+            return true
+        }, onTraverse: onPageHistoryTraverse, onAbandon: { [weak self] navigation in
+            self?.epochs.abandonIfNotStarted(navigation)
+        })
         var requestedURL = ""
         var reloadToken = 0
         var loadRevision = 0
         var epochs = BrowserNavigationEpoch()
 
         init(onError: @escaping (String) -> Void, onURLChange: @escaping (String, BrowserNavigationEpoch.Completion) -> Bool,
-             onLocalNavigation: ((URLRequest, Bool) -> Bool)?) {
+             onLocalNavigation: ((URLRequest, Bool, BrowserPageHistoryTraversal?) -> Bool)?,
+             onPageHistoryChange: ((BrowserPageHistoryMutation, [BrowserPageHistoryItem], UUID, Int) -> Bool)?,
+             onPageHistoryTraverse: ((Int, Int) -> Bool)?) {
             self.onError = onError
             self.onURLChange = onURLChange
             self.onLocalNavigation = onLocalNavigation
+            self.onPageHistoryChange = onPageHistoryChange
+            self.onPageHistoryTraverse = onPageHistoryTraverse
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            if onLocalNavigation?(action.request, action.targetFrame?.isMainFrame != false) == true {
+            if onLocalNavigation?(action.request, action.targetFrame?.isMainFrame != false, pageHistory.traversal(for: action, in: webView)) == true {
                 decisionHandler(.cancel)
                 return
             }
@@ -1376,10 +1410,12 @@ struct ClientWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            guard let completion = epochs.finish(navigation) else { return }
+            guard var completion = epochs.finish(navigation) else { return }
+            completion.nativeHistoryID = pageHistory.report(.pop, in: webView, generation: completion.generation)
             if let url = webView.url?.absoluteString {
                 if onURLChange(url, completion) { requestedURL = url }
             }
+            pageHistory.report(.snapshot, in: webView, generation: completion.generation)
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
@@ -1395,7 +1431,7 @@ struct ClientWebView: UIViewRepresentable {
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                      for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
             guard action.targetFrame == nil, let url = action.request.url else { return nil }
-            if onLocalNavigation?(action.request, true) == true { return nil }
+            if onLocalNavigation?(action.request, true, nil) == true { return nil }
             if Self.allows(url) { epochs.register(webView.load(action.request), generation: epochs.current) }
             return nil
         }

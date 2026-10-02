@@ -174,7 +174,7 @@ internal static class SidebarLive
         var title = SessionTitle(command);
         var (state, tint) = SessionState(item);
         var stats = SessionStats(item) ?? command;
-        if (state == "Idle")
+        if (Format.Text(item, "activity") == "idle" && Format.Text(item, "attention").Length == 0)
         {
             var since = Format.Long(item, "lastActivityAtMs");
             if (item["lastActivityAtMs"] is not null && since > 0)

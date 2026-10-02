@@ -33,6 +33,12 @@ class LocalizationRulesTests(unittest.TestCase):
             'new[] { L10n.Text("windows.exe"), ".cmd" }.Any(extension => command.EndsWith(extension, StringComparison.OrdinalIgnoreCase))',
             'args.Request.Headers.GetHeader(L10n.Text("windows.header"))',
             'core.Environment.CreateWebResourceResponse(null, 403, L10n.Text("windows.reason"), "Content-Length: 0")',
+            'SeatStep.Phrase(L10n.Text("common.edit"), Path.GetFileName(path))',
+            'onInput(L10n.text("android.resize", rows, cols))',
+            'inbound.trySend(L10n.text("android.resize", rows, cols))',
+            'url(L10n.text("apple.privacy", language))',
+            'URL(string: L10n.text("apple.service_route", language))',
+            '["ProcessType": L10n.text("apple.process_type")]',
         )
         for source in sources:
             with self.subTest(source=source):

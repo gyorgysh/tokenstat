@@ -24,7 +24,9 @@ internal sealed partial class ChatPage
     private UIElement PendingMessages()
     {
         var body = new StackPanel { Spacing = Theme.SpaceS };
-        if (_outboxKey is not string key) return body;
+        if (_outboxKey is not string key || _openId is not string chat) return body;
+        var generation = _openGeneration;
+        bool Current() => OpenChatIs(chat) && generation == _openGeneration && _outboxKey == key;
         try
         {
             var items = ChatOutbox.Shared.Read(key);
@@ -44,14 +46,17 @@ internal sealed partial class ChatPage
                     {
                         try
                         {
-                            if (_openId is not string currentChat || await OutboxKeyAsync(currentChat) != key)
+                            if (!Current()) return;
+                            var currentKey = await OutboxKeyAsync(chat);
+                            if (!Current()) return;
+                            if (currentKey != key)
                                 throw new InvalidOperationException(L10n.Text("windows.chatpage_queue.reopen_this_conversation_with_its_original.bb0e73dd"));
-                            var receipt = await CallChatAsync("chat.receipt", new JsonObject { ["id"] = _openId, ["clientMessageId"] = item.Id });
+                            var receipt = await CallChatAsync("chat.receipt", new JsonObject { ["id"] = chat, ["clientMessageId"] = item.Id });
                             if (Format.Text(receipt, "state") == "accepted") ChatOutbox.Shared.Accept(key, item, null);
-                            else Banner(L10n.Text("windows.chatpage_queue.delivery_is_not_confirmed_review_the_conve.8a519f20"));
-                            PaintConversation();
+                            else if (Current()) Banner(L10n.Text("windows.chatpage_queue.delivery_is_not_confirmed_review_the_conve.8a519f20"));
+                            if (Current()) PaintConversation();
                         }
-                        catch (Exception ex) { Banner(ex.Message); }
+                        catch (Exception ex) { if (Current()) Banner(ex.Message); }
                     }));
                 }
                 else
@@ -60,8 +65,10 @@ internal sealed partial class ChatPage
                     {
                         try
                         {
+                            if (!Current()) return;
                             await RefreshCatalogAsync();
-                            _openChat = FindChat(_openId!);
+                            if (!Current()) return;
+                            _openChat = FindChat(chat);
                             var revision = Format.Long(_openChat, "sendRevision");
                             ChatOutbox.Shared.Update(key, rows =>
                             {
@@ -69,9 +76,10 @@ internal sealed partial class ChatPage
                                 if (index >= 0 && !rows[index].AttemptedAt.HasValue) rows[index] = rows[index] with { Revision = revision, State = "waiting" };
                             });
                             _authorizedQueue.Add(item.Id);
-                            await DrainQueueAsync(); PaintConversation(); StartPoll();
+                            await DrainQueueAsync();
+                            if (Current()) { PaintConversation(); StartPoll(); }
                         }
-                        catch (Exception ex) { Banner(ex.Message); }
+                        catch (Exception ex) { if (Current()) Banner(ex.Message); }
                     }));
                     if (items.IndexOf(item) > 0 && !items[items.IndexOf(item) - 1].AttemptedAt.HasValue)
                         actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.chatpage_queue.move_up.c66feb5e"), ActionIcon.Move, (_, _) =>
@@ -128,11 +136,12 @@ internal sealed partial class ChatPage
             return await done.Task;
         }
         if (!IsLoaded || _openId != chat) return false;
+        var generation = _openGeneration;
         var before = Busy();
         var hasAuthorizedQueue = _authorizedQueue.Count > 0;
         var hasNote = PendingSteerText(_openChat).Length > 0;
         if (hasAuthorizedQueue || hasNote) await DrainQueueAsync();
-        if (!IsLoaded || _openId != chat) return false;
+        if (!IsLoaded || _openId != chat || generation != _openGeneration) return false;
         if (hasAuthorizedQueue || before != Busy()) PaintConversation();
         return true;
     }
@@ -150,14 +159,18 @@ internal sealed partial class ChatPage
             return;
         }
         if (Busy() || _outboxKey is not string key) return;
+        var generation = _openGeneration;
+        bool Current() => OpenChatIs(chat) && generation == _openGeneration && _outboxKey == key;
         var candidate = ChatOutbox.Shared.Read(key).FirstOrDefault();
         if (candidate is null || candidate.AttemptedAt.HasValue || !_authorizedQueue.Contains(candidate.Id)) return;
         _sending = true;
         try
         {
-            if (await OutboxKeyAsync(chat) != key) throw new InvalidOperationException(L10n.Text("windows.chatpage_queue.the_signed_in_account_changed_pending_mess.54c18f45"));
+            var currentKey = await OutboxKeyAsync(chat);
+            if (!Current()) return;
+            if (currentKey != key) throw new InvalidOperationException(L10n.Text("windows.chatpage_queue.the_signed_in_account_changed_pending_mess.54c18f45"));
             await RefreshCatalogAsync();
-            if (!IsLoaded || _openId != chat) return;
+            if (!Current()) return;
             var live = _chats.FirstOrDefault(row => Format.Text(row, "id") == chat)
                 ?? throw new InvalidOperationException(L10n.Text("windows.chatpage_queue.this_conversation_is_no_longer_available.07f8c47b"));
             if (Format.Flag(live, "running")) return;
@@ -177,13 +190,13 @@ internal sealed partial class ChatPage
             });
             ChatOutbox.Shared.Accept(key, attempted, Format.Long(updated, "sendRevision"));
             _authorizedQueue.Remove(attempted.Id);
-            if (IsLoaded && _openId == chat)
+            if (Current())
             { _openChat = ChatSteerOverlay.MergeRecord(updated, _openChat); _running = true; _started = true; }
         }
         catch (Exception ex)
         {
             _authorizedQueue.Remove(candidate.Id);
-            if (IsLoaded && _openId == chat) Banner(L10n.Text("windows.chatpage_queue.the_pending_copy_is_saved_0.215c8440", $"{ex.Message}"));
+            if (Current()) Banner(L10n.Text("windows.chatpage_queue.the_pending_copy_is_saved_0.215c8440", $"{ex.Message}"));
         }
         finally { _sending = false; }
     }

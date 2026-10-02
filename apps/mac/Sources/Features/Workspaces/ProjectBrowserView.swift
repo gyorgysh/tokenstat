@@ -51,9 +51,21 @@ private struct ProjectBrowserContent: View {
                 displayURL: session.targetURL, recentPorts: session.recentPorts,
                 onNavigate: { address in Task { await session.open(address) } },
                 displayAddress: session.canonicalURL,
-                onLocalNavigation: { request, isMainFrame in session.intercept(request, isMainFrame: isMainFrame) },
+                onLocalNavigation: { request, isMainFrame, traversal in
+                    session.intercept(request, isMainFrame: isMainFrame, historyItemID: traversal?.id,
+                        historyDirection: traversal?.direction ?? 0)
+                },
+                canGoBack: session.canGoBack, canGoForward: session.canGoForward,
+                onBack: { Task { await session.goBack() } },
+                onForward: { Task { await session.goForward() } },
+                historyItemToRestore: session.historyItemToRestore,
+                onPageHistoryChange: { mutation, items, currentID, generation in
+                    session.observedHistory(mutation, items: items, currentID: currentID, generation: generation)
+                },
+                onPageHistoryTraverse: { delta, generation in session.traverseHistory(delta, generation: generation) },
                 onURLChange: { actual, completion in
-                    session.observed(actual, generation: completion.generation, registered: completion.registered)
+                    session.observed(actual, generation: completion.generation, registered: completion.registered,
+                        nativeHistoryID: completion.nativeHistoryID)
                 })
                 .id(session.id)
         }

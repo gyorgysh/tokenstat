@@ -89,7 +89,20 @@ final class ProjectBrowserSession: Identifiable {
     @ObservationIgnored private let history: BrowserHistory
     @ObservationIgnored private var leases: [String: ProjectBrowserBridges.Lease] = [:]
     @ObservationIgnored private var pendingExplicitNavigation = false
+    @ObservationIgnored private var pendingHistoryIndex: Int?
     @ObservationIgnored private var targets: [String: BrowserTarget] = [:]
+    private struct Page {
+        var url: String
+        var nativeID: UUID?
+        var nativeIDs = Set<UUID>()
+        init(url: String, nativeID: UUID?) {
+            self.url = url
+            self.nativeID = nativeID
+            if let nativeID { nativeIDs.insert(nativeID) }
+        }
+    }
+    private var pageHistory: [Page] = []
+    private var pageHistoryIndex = -1
 
     init(owner: WorkReference?, peer: String?, history: BrowserHistory? = nil,
          isCurrent: @escaping () -> Bool) {
@@ -101,6 +114,39 @@ final class ProjectBrowserSession: Identifiable {
     }
 
     var recentPorts: [Int] { history.entry(for: owner).ports }
+    private var requestedHistoryIndex: Int { pendingHistoryIndex ?? pageHistoryIndex }
+    var canGoBack: Bool { requestedHistoryIndex > 0 }
+    var canGoForward: Bool { requestedHistoryIndex + 1 < pageHistory.count }
+    var historyItemToRestore: UUID? {
+        guard let index = pendingHistoryIndex, pageHistory.indices.contains(index) else { return nil }
+        return pageHistory[index].nativeID
+    }
+
+    @discardableResult
+    func traverseHistory(_ delta: Int, generation: Int) -> Bool {
+        guard !isClosed, isCurrent(), !pendingExplicitNavigation, generation == navigationGeneration,
+              pageHistory.indices.contains(pageHistoryIndex), delta != 0,
+              delta >= -pageHistoryIndex, delta <= pageHistory.count - 1 - pageHistoryIndex else { return false }
+        let index = pageHistoryIndex + delta
+        let address = pageHistory[index].url
+        Task {
+            guard navigationGeneration == generation else { return }
+            await open(address, restoringHistoryAt: index)
+        }
+        return true
+    }
+
+    func goBack() async {
+        guard canGoBack else { return }
+        let index = requestedHistoryIndex - 1
+        await open(pageHistory[index].url, restoringHistoryAt: index)
+    }
+
+    func goForward() async {
+        guard canGoForward else { return }
+        let index = requestedHistoryIndex + 1
+        await open(pageHistory[index].url, restoringHistoryAt: index)
+    }
 
     func canonicalURL(_ actual: String) -> String {
         for (listener, target) in targets {
@@ -119,17 +165,41 @@ final class ProjectBrowserSession: Identifiable {
         }
     }
 
-    func intercept(_ request: URLRequest, isMainFrame: Bool) -> Bool {
-        guard let url = request.url, intercepts(url) else { return false }
+    func intercept(_ request: URLRequest, isMainFrame: Bool, historyItemID: UUID? = nil, historyDirection: Int = 0) -> Bool {
+        guard let url = request.url else { return false }
+        let mappedIndex = historyItemID.flatMap { pageIndex(for: $0) }
+        let redirectsHistory = !pendingExplicitNavigation && historyDirection != 0
+            && (mappedIndex == nil || (historyDirection < 0 ? mappedIndex! >= pageHistoryIndex : mappedIndex! <= pageHistoryIndex))
+        let replaysHistory = mappedIndex.map { canonicalURL(url.absoluteString) != pageHistory[$0].url } ?? false
+        guard redirectsHistory || replaysHistory || intercepts(url) else { return false }
         guard isMainFrame, (request.httpMethod ?? "GET").uppercased() == "GET" else {
             error = L10n.text("apple.projectbrowsersession.open_this_service_s_address_first_this_req.4a65188f")
             return true
         }
-        Task { await open(canonicalURL(url.absoluteString)) }
+        var restoring = pendingExplicitNavigation ? pendingHistoryIndex : mappedIndex
+        var address = restoring.map { pageHistory[$0].url } ?? canonicalURL(url.absoluteString)
+        if redirectsHistory {
+            // Replaying a retired listener creates another native copy of the
+            // same canonical entry. Native traversal can also select an alias
+            // on the opposite side of canonical history; skip those copies.
+            let index = pageHistoryIndex + (historyDirection < 0 ? -1 : 1)
+            guard pageHistory.indices.contains(index) else { return true }
+            restoring = index
+            address = pageHistory[index].url
+        }
+        let generation = navigationGeneration
+        Task {
+            guard navigationGeneration == generation else { return }
+            await open(address, restoringHistoryAt: restoring)
+        }
         return true
     }
 
     func open(_ raw: String, waitsForService: Bool = false) async {
+        await open(raw, waitsForService: waitsForService, restoringHistoryAt: nil)
+    }
+
+    private func open(_ raw: String, waitsForService: Bool = false, restoringHistoryAt: Int?) async {
         guard !isClosed, isCurrent() else { return }
         let original = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let target = BrowserTarget(original)
@@ -154,6 +224,7 @@ final class ProjectBrowserSession: Identifiable {
         }
         navigationGeneration += 1
         pendingExplicitNavigation = true
+        pendingHistoryIndex = restoringHistoryAt
         let operation = navigationGeneration
         isOpening = true
         error = nil
@@ -196,20 +267,110 @@ final class ProjectBrowserSession: Identifiable {
         } catch {
             guard navigationGeneration == operation, isCurrent(), !Task.isCancelled else { return }
             pendingExplicitNavigation = false
+            pendingHistoryIndex = nil
             self.error = error.localizedDescription
         }
     }
 
     @discardableResult
-    func observed(_ actual: String, generation: Int? = nil, registered: Bool = true) -> Bool {
+    func observed(_ actual: String, generation: Int? = nil, registered: Bool = true, nativeHistoryID: UUID? = nil) -> Bool {
         guard !isClosed, isCurrent(), generation == nil || generation == navigationGeneration,
               registered || !pendingExplicitNavigation else { return false }
-        if registered { pendingExplicitNavigation = false }
         let original = canonicalURL(actual)
+        // Only completed pages enter canonical history. The native history
+        // contains disposable listener addresses, so replaying it after a
+        // port change would append a replacement page and trap Back in a loop.
+        if pendingExplicitNavigation, let index = pendingHistoryIndex, pageHistory.indices.contains(index) {
+            pageHistoryIndex = index
+            pageHistory[index].url = original
+        } else if registered && !pendingExplicitNavigation, pageHistory.indices.contains(pageHistoryIndex),
+                  nativeHistoryID == nil || nativeHistoryID == pageHistory[pageHistoryIndex].nativeID {
+            pageHistory[pageHistoryIndex].url = original
+        } else if pendingExplicitNavigation || !pageHistory.indices.contains(pageHistoryIndex)
+                    || pageHistory[pageHistoryIndex].url != original
+                    || (nativeHistoryID != nil && nativeHistoryID != pageHistory[pageHistoryIndex].nativeID) {
+            pageHistory = Array(pageHistory.prefix(pageHistoryIndex + 1))
+            pageHistory.append(Page(url: original, nativeID: nil))
+            pageHistoryIndex = pageHistory.count - 1
+        }
+        if registered {
+            pendingExplicitNavigation = false
+            pendingHistoryIndex = nil
+        }
         targetURL = original
         transportURL = actual
         if let target = BrowserTarget(original) { history.record(target, for: owner) }
         return true
+    }
+
+    /// WebKit remains authoritative for same-document history and its states.
+    /// Canonical entries only replay a URL when its native listener has retired.
+    @discardableResult
+    func observedHistory(_ mutation: BrowserPageHistoryMutation, items: [BrowserPageHistoryItem],
+                         currentID: UUID, generation: Int) -> Bool {
+        guard !isClosed, isCurrent(), generation == navigationGeneration,
+              let current = items.first(where: { $0.id == currentID }) else { return false }
+        if pendingExplicitNavigation {
+            guard mutation == .pop, let index = pendingHistoryIndex,
+                  pageHistory.indices.contains(index), pageHistory[index].nativeIDs.contains(currentID) else { return false }
+            return observed(current.url, generation: generation)
+        }
+        guard pageHistory.indices.contains(pageHistoryIndex) else { return false }
+        let end = items.firstIndex(where: { $0.id == currentID })!
+        switch mutation {
+        case .push, .replace, .pop:
+            // A snapshot can already include later pushes or a following Back.
+            // Reconcile native IDs, including items currently in Forward.
+            if let index = pageIndex(for: currentID) {
+                pageHistoryIndex = index
+            } else if let prior = items[..<end].lastIndex(where: { pageIndex(for: $0.id) != nil }),
+                      let index = pageIndex(for: items[prior].id) {
+                pageHistoryIndex = appendHistory(Array(items[(prior + 1)...end]), after: index)
+            } else if mutation == .push {
+                pageHistoryIndex = appendHistory([current], after: pageHistoryIndex)
+            } else if mutation == .pop {
+                return false
+            }
+        case .snapshot:
+            if pageHistory[pageHistoryIndex].nativeID == nil {
+                // Routers can push before the first completed document load.
+                let previous = pageHistoryIndex > 0 ? items[..<end].lastIndex(where: {
+                    pageHistory[pageHistoryIndex - 1].nativeIDs.contains($0.id)
+                }) : nil
+                let start = previous.map { $0 + 1 } ?? (pageHistoryIndex == 0 ? 0 : end)
+                pageHistoryIndex = appendHistory(Array(items[start...end]), after: pageHistoryIndex - 1)
+            }
+        }
+        attach(current, at: pageHistoryIndex)
+        let selected = pageHistoryIndex
+        var forwardIndex = selected
+        for item in items.dropFirst(end + 1) {
+            if let index = pageIndex(for: item.id) { forwardIndex = index }
+            else if forwardIndex >= selected {
+                forwardIndex = appendHistory([item], after: forwardIndex)
+            }
+        }
+        pageHistoryIndex = pageIndex(for: currentID) ?? selected
+        targetURL = pageHistory[pageHistoryIndex].url
+        transportURL = current.url
+        if let target = BrowserTarget(targetURL) { history.record(target, for: owner) }
+        return true
+    }
+
+    private func pageIndex(for nativeID: UUID) -> Int? {
+        pageHistory.firstIndex(where: { $0.nativeIDs.contains(nativeID) })
+    }
+
+    private func attach(_ item: BrowserPageHistoryItem, at index: Int) {
+        pageHistory[index].url = canonicalURL(item.url)
+        pageHistory[index].nativeID = item.id
+        pageHistory[index].nativeIDs.insert(item.id)
+    }
+
+    private func appendHistory(_ items: [BrowserPageHistoryItem], after index: Int) -> Int {
+        pageHistory = Array(pageHistory.prefix(index + 1))
+        pageHistory.append(contentsOf: items.map { Page(url: canonicalURL($0.url), nativeID: $0.id) })
+        return pageHistory.count - 1
     }
 
     func close() {

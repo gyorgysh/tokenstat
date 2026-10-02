@@ -48,6 +48,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.rememberCoroutineScope
@@ -69,6 +70,7 @@ import ai.tokenstat.tokenstat.ui.components.EmptyState
 import ai.tokenstat.tokenstat.ui.components.RelativeTimeText
 import ai.tokenstat.tokenstat.ui.components.SectionLabel
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
+import ai.tokenstat.tokenstat.ui.components.TsCard
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
 import ai.tokenstat.tokenstat.ui.components.TsSearchField
 import ai.tokenstat.tokenstat.ui.components.cardRadiusDp
@@ -78,6 +80,7 @@ import ai.tokenstat.tokenstat.ui.marks.EmptyArt
 import ai.tokenstat.tokenstat.ui.marks.EmptyArtKind
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -91,6 +94,7 @@ private fun JsonObject.toNoteCard(): NoteList.NoteCard? {
         body = str("notes") ?: "",
         column = str("column") ?: "backlog",
         createdAtMs = long("createdAtMs") ?: 0L,
+        revision = long("revision"),
     )
 }
 
@@ -197,19 +201,26 @@ fun NotesSection(
         if (title.isEmpty()) return false
         if (title == note.title && body == note.body) return true
         return runCatching {
-            model.workspaceSection(peer, "todo.update", buildJsonObject {
-                put("id", note.id)
-                put("title", title)
-                put("notes", body)
-            }) as JsonObject
+            editNote(note, title, body) { method, params ->
+                model.workspaceSection(peer, method, params) as JsonObject
+            }
         }.fold(onSuccess = { updated ->
             updated.toNoteCard()?.let { fresh -> cards = cards.map { if (it.id == fresh.id) fresh else it } }
             error = null
             true
         }, onFailure = {
+            if (it is CancellationException) throw it
             error = TunnelCopy.display(it.message ?: L10n.text("android.workspacenotes.the_request_failed.db4fb447"), hostLabel)
             false
         })
+    }
+
+    suspend fun readNote(id: String): NoteList.NoteCard? {
+        val fresh = (model.workspaceSection(peer, "todo.get", buildJsonObject { put("id", id) }) as? JsonObject)
+            ?.toNoteCard()
+        cards = if (fresh == null) cards.filterNot { it.id == id }
+            else cards.map { if (it.id == id) fresh else it }
+        return fresh
     }
 
     fun convert(note: NoteList.NoteCard) {
@@ -393,8 +404,9 @@ fun NotesSection(
             note = target,
             onDismiss = { editing = null },
             error = error,
-            onSave = { title, body ->
-                val saved = updateNote(target, title, body)
+            onRead = { readNote(target.id) },
+            onSave = { baseline, title, body ->
+                val saved = updateNote(baseline, title, body)
                 if (saved) editing = null
                 saved
             },
@@ -409,8 +421,21 @@ private fun NoteEditorDialog(
     note: NoteList.NoteCard,
     onDismiss: () -> Unit,
     error: String?,
-    onSave: suspend (String, String) -> Boolean,
+    onRead: suspend () -> NoteList.NoteCard?,
+    onSave: suspend (NoteList.NoteCard, String, String) -> Boolean,
 ) {
+    // Restore the reviewed revision with the writing. A recreated Activity
+    // must not silently rebase an old draft onto a newer host note.
+    val baselineSaver = remember {
+        listSaver<NoteList.NoteCard, Any>(
+            save = { listOf(it.id, it.title, it.body, it.column, it.createdAtMs, it.revision ?: -1L) },
+            restore = { NoteList.NoteCard(it[0] as String, it[1] as String, it[2] as String, it[3] as String,
+                it[4] as Long, (it[5] as Long).takeIf { revision -> revision >= 0 }) },
+        )
+    }
+    var baseline by rememberSaveable(note.id, stateSaver = baselineSaver) { mutableStateOf(note) }
+    var changed by remember(note.id) { mutableStateOf<NoteList.NoteCard?>(null) }
+    var missing by remember(note.id) { mutableStateOf(false) }
     var title by rememberSaveable(note.id) { mutableStateOf(note.title) }
     var body by rememberSaveable(note.id, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(note.body)) }
     var formatting by remember { mutableStateOf(false) }
@@ -425,9 +450,22 @@ private fun NoteEditorDialog(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 TextButton(enabled = !saving, onClick = onDismiss) { Text(L10n.text("common.cancel")) }
                 Text(L10n.text("android.workspacenotes.note.d8da2c49"), style = TsType.chatBody)
-                TextButton(enabled = !saving && title.trim().isNotEmpty(), onClick = {
+                TextButton(enabled = !saving && !missing && changed == null && baseline.revision != null && title.trim().isNotEmpty(), onClick = {
                     saving = true
-                    scope.launch { try { onSave(title.trim(), body.text) } finally { saving = false } }
+                    scope.launch {
+                        try {
+                            if (!onSave(baseline, title.trim(), body.text)) {
+                                // A checked save keeps the writing in the editor. Read
+                                // the competing version before offering an explicit choice.
+                                try {
+                                    val fresh = onRead()
+                                    missing = fresh == null
+                                    changed = fresh?.takeIf { it.revision != baseline.revision }
+                                } catch (cancelled: CancellationException) { throw cancelled }
+                                catch (_: Exception) { /* Keep the save failure and the draft. */ }
+                            }
+                        } finally { saving = false }
+                    }
                 }) { Text(if (saving) L10n.text("android.workspacenotes.saving.23e39291") else L10n.text("common.save")) }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
@@ -450,6 +488,28 @@ private fun NoteEditorDialog(
                 }
             }
             if (error != null) Text(error, color = colors.danger, style = TsType.caption)
+            if (baseline.revision == null) Text(L10n.text("android.workspacenotes.revision_required"), color = colors.danger, style = TsType.caption)
+            if (missing) Text(L10n.text("android.workspacenotes.deleted_while_editing"), color = colors.danger, style = TsType.caption)
+            changed?.let { fresh ->
+                TsCard {
+                    Column(Modifier.padding(Space.s), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                        Text(L10n.text("android.taskeditor.changed_on_the_computer.aefb92cf"), style = TsType.caption)
+                        Text(fresh.title, maxLines = 2)
+                        Text(fresh.body, maxLines = 4)
+                        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                            TextButton(enabled = !saving, onClick = {
+                                baseline = fresh
+                                title = fresh.title
+                                body = TextFieldValue(fresh.body)
+                                changed = null
+                            }) { Text(L10n.text("android.taskeditor.use_computer_version.f0d6599f")) }
+                            TextButton(enabled = !saving, onClick = { baseline = fresh; changed = null }) {
+                                Text(L10n.text("android.taskeditor.keep_my_draft.cdb80bb9"))
+                            }
+                        }
+                    }
+                }
+            }
             OutlinedTextField(title, { title = it }, enabled = !saving, label = { Text(L10n.text("android.workspacenotes.title.7e8cd205")) }, modifier = Modifier.fillMaxWidth())
             if (preview) {
                 MarkdownText(body.text.ifBlank { L10n.text("android.workspacenotes.nothing_written_yet.4f01da04") }, TsType.chatBody, colors.textPrimary,

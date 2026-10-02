@@ -871,7 +871,7 @@ struct RootView: View {
                 ) { openRail(place) }
             }
             Spacer(minLength: Theme.Space.s)
-            if !showsSidebar { railAccount }
+            railAccount
         }
         // The first mark sits level with the first row of the sidebar and the
         // content bar, below the traffic lights.
@@ -2491,7 +2491,6 @@ struct RootView: View {
 
     private var sidebarAccountBar: some View {
         SidebarAccountBar(
-            avatar: AnyView(railAccount),
             name: account.signedIn ? (account.account?.title ?? L10n.text("common.account")) : L10n.text("common.sign_in"),
             detail: account.signedIn ? (railAccountTier?.capitalized ?? account.account?.handle.map { "@\($0)" }) : nil,
             accessibilityLabel: railAccountLabel,

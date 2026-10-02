@@ -123,7 +123,7 @@ enum HostAgentInstaller {
             "ProgramArguments": [helper.path],
             "KeepAlive": alwaysOn,
             "RunAtLoad": alwaysOn,
-            "ProcessType": L10n.text("apple.hostagentinstaller.interactive.39a4a7ae"),
+            "ProcessType": "Interactive",
             "StandardOutPath": logs.appendingPathComponent("hostd.out.log").path,
             "StandardErrorPath": logs.appendingPathComponent("hostd.err.log").path
         ]
