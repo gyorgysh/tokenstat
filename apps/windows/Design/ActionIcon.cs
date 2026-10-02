@@ -260,6 +260,7 @@ internal static class ActionIconGlyph
                 },
             },
         };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(btn, title);
         btn.Click += click;
         return btn;
     }

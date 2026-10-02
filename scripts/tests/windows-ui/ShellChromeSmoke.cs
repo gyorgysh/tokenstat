@@ -23,6 +23,9 @@ internal static class ShellChromeSmoke
 
     internal static async Task Run(StackPanel host)
     {
+        var setup = ActionIconGlyph.Button("Setup", ActionIcon.Settings, (_, _) => { });
+        if (Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(setup) != "Setup")
+            throw new Exception("Icon-and-text actions must expose their label to accessibility and automation");
         var sidebar = Buttons.ToolbarIcon(ActionIcon.Sidebar, "Projects", (_, _) => { });
         var scope = SegmentedCapsule.View(new List<(string Value, string Label, ActionIcon? Glyph)>
         {
