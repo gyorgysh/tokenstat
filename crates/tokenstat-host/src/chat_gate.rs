@@ -486,6 +486,37 @@ fn mirror_muse_config(user_config: Option<&Path>, private_muse_dir: &Path) -> Re
     Ok(())
 }
 
+/// `XDG_CONFIG_HOME` is inherited by every tool the agent runs, not only by
+/// muse. Link the rest of the person's config root beside the private `muse`
+/// directory so git, gh and the others still find their own settings and
+/// sign-ins. Best effort: a sibling that cannot be linked only loses itself.
+#[cfg(unix)]
+fn mirror_xdg_siblings(user_config: Option<&Path>, root: &Path) {
+    let Some(user_config) = user_config else {
+        return;
+    };
+    if user_config.file_name().and_then(|name| name.to_str()) != Some("muse") {
+        return;
+    }
+    let Some(config_root) = user_config.parent() else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(config_root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if name == "muse" || name == "hook" {
+            continue;
+        }
+        let source = entry.path();
+        if source == root {
+            continue;
+        }
+        let _ = std::os::unix::fs::symlink(&source, root.join(&name));
+    }
+}
+
 /// Build `root/muse/settings.json` and `root/hook` for one turn.
 ///
 /// `root` is what muse sees as `XDG_CONFIG_HOME`. A second call on a root that
@@ -513,6 +544,7 @@ fn install_muse_note_home_at(
         let muse = root.join("muse");
         create_private_dir(&muse)?;
         mirror_muse_config(user_config, &muse)?;
+        mirror_xdg_siblings(user_config, root);
         write_private_file(&hook, script.as_bytes(), 0o700)?;
         write_private_file(&muse.join("settings.json"), &settings_bytes, 0o600)?;
         Ok(())

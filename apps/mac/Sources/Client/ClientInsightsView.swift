@@ -141,7 +141,7 @@ struct ClientInsightsView: View {
                     // The breakdown had no name at all, so the cards under the
                     // chart read as a continuation of it rather than as the
                     // answer to a different question. The cut names itself.
-                    ClientSectionTitle(title: model.cut.plural.capitalized, mark: "mark_insights")
+                    ClientSectionTitle(title: model.cut.label, mark: "mark_insights")
                     ClientAdaptiveCards {
                     ForEach(shown) { row in
                         InsightRow(row: row, cut: model.cut, peak: peak)
@@ -182,7 +182,7 @@ struct ClientInsightsView: View {
                 tokens: rows.reduce(0) { $0 + $1.counters.total },
                 events: rows.reduce(0) { $0 + $1.events },
                 count: rows.count,
-                countLabel: model.cut.plural.capitalized,
+                countLabel: model.cut.label,
                 formatCompact: formatTokens
             )).padding(.top, Theme.Space.s)
             // A remembered answer says so. The numbers are real, they are just

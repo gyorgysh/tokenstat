@@ -2109,9 +2109,16 @@ impl Store {
             .filter_map(|line| serde_json::from_slice(line).ok())
             .collect();
         let mut totals = baseline.clone();
-        if !records.iter().any(|row| {
-            row["kind"] == "retainedUsage" && row["usage"]["turns"].as_u64().unwrap_or(0) > 0
-        }) {
+        // Only Codex raw output carries `turn.completed`. Without this gate
+        // every first-page read of any other chat scanned its raw folder.
+        let used_codex = chat.backend == "codex"
+            || chat.resume_tokens.contains_key("codex")
+            || records.iter().any(|row| row["backend"] == "codex");
+        if used_codex
+            && !records.iter().any(|row| {
+                row["kind"] == "retainedUsage" && row["usage"]["turns"].as_u64().unwrap_or(0) > 0
+            })
+        {
             let times: Vec<i64> = records
                 .iter()
                 .filter(|row| row["backend"] == "codex" && row["event"]["kind"] == "usage")
