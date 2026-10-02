@@ -148,12 +148,14 @@ internal static class ShellChromeSmoke
             var heading = SidebarChrome.ProjectContent(projectRow, new TextBlock { Text = "tokenstat", FontSize = 13 }, false);
             projectRow.Content = heading;
             var footer = SidebarChrome.ChatFooter("wschatmore:fixture", "Show 5 more", () => { }, () => { });
-            projectRow.MenuItems.Add(footer);
             navigation.MenuItems.Add(projectRow);
             host.Children.Add(navigation);
             mounted.Add(navigation);
             host.UpdateLayout();
             await Task.Delay(50);
+            // History arrives after the folder has already been mounted.
+            projectRow.MenuItems.Add(footer);
+            SidebarChrome.ExpandNewHistory(projectRow, hadChildren: false, paneOpen: true);
             SidebarChrome.AlignProject(projectRow);
             host.UpdateLayout();
             var folderGlyph = heading.Children.OfType<Viewbox>().Single();

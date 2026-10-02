@@ -10,6 +10,16 @@ namespace Tokenstat.Design;
 /// <summary>Shared sidebar and rail metrics, independent of native template defaults.</summary>
 internal static class SidebarChrome
 {
+    public static void ExpandNewHistory(NavigationViewItem row, bool hadChildren, bool paneOpen)
+    {
+        if (hadChildren || row.MenuItems.Count == 0 || !paneOpen) return;
+        // WinUI creates its child repeater lazily. Setting an already-true
+        // IsExpanded leaves that newly created repeater collapsed, so refresh
+        // the state after the first history rows exist.
+        row.IsExpanded = false;
+        row.IsExpanded = true;
+    }
+
     public static Grid ProjectContent(NavigationViewItem row, UIElement label, bool remote, params Control[] actions)
     {
         var grid = new Grid { ColumnSpacing = 6, MinHeight = 28 };

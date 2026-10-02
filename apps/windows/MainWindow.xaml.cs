@@ -1865,7 +1865,7 @@ public sealed partial class MainWindow : Window
             // Existing populated folders keep the user's disclosure choice.
             if (!hadChildren && parent.MenuItems.Count > 0 && _nav.IsPaneOpen)
             {
-                parent.IsExpanded = true;
+                SidebarChrome.ExpandNewHistory(parent, hadChildren, _nav.IsPaneOpen);
                 Program.LogStartup($"Sidebar project expanded; children={parent.MenuItems.Count}; expanded={parent.IsExpanded}");
             }
         }
