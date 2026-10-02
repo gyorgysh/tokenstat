@@ -222,7 +222,9 @@ settings:
     # and Muse usage recovery.
     # 123 was uploaded as 1.1.0. 124 restores iOS chat actions and wrapped diffs.
     # 125 adds list-row chat deletion and fills the native iOS diff viewport.
-    CURRENT_PROJECT_VERSION: "125"
+    # 125 was uploaded as 1.1.0. 126 is the October 3 release, including the
+    # final chat, project and remote access fixes.
+    CURRENT_PROJECT_VERSION: "126"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,

@@ -13,6 +13,8 @@ at the end.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-03
+
 A simpler desktop. Machine-wide places move to an icon rail, the sidebar
 lists your projects with their chats and terminals, and each screen has
 one toolbar row. A project can open another branch in a folder of its
@@ -31,6 +33,10 @@ can mix local coding tools with saved SSH servers.
   list, checklist, quote and code, applied to the selection, with Undo.
   A note can be read as a preview.
 - Search on the Devices screen.
+- A clearer Add your first project screen on every client.
+- Windows chat replies render headings, lists, tables, links and code.
+  Update progress and a restart button appear above the sidebar account row,
+  and updates can be checked from the account menu.
 - Windows project and chat menus can rename, fork a finished chat, and
   pin work to Home. A browser or terminal can sit beside a chat.
 - Phones gain chat and project menus, terminal rename and duplication,
@@ -57,9 +63,13 @@ can mix local coding tools with saved SSH servers.
   Both remember their widths. Windows keeps its opaque surfaces.
 - Workspaces are called Projects everywhere a person reads it. On desktop,
   New chat asks which project the chat belongs to.
-- Chats that were opened and never used no longer fill the lists, and
+- On Mac and phones, chats that were opened and never used no longer fill the lists, and
   Home's Continue shows only work that can still open. On Android a chat
   row is its title and one line, so about twice as many fit.
+- New chats start in Execute, even when the previous chat used Plan. Windows
+  remembers the agent, model, effort, permission choice and persona.
+- Windows project terminals gain a Bypass switch for tools launched there.
+  New Windows chats start on Don't ask unless a saved choice says Ask first.
 - The chat composer names only the settings you changed, and its
   permission switch reads Ask first or Don't ask instead of Ask or Bypass.
 - On Mac and Windows, Automations are a table that fits a normal window: name, schedule,
@@ -91,12 +101,21 @@ can mix local coding tools with saved SSH servers.
 - A file change in one project refreshes only that project, and an idle
   computer answers about a quarter as many background requests.
 - A long chat shows its latest turn sooner after opening.
+- Phone and iPad project navigation keeps chat actions within reach. Chat rows
+  can delete a conversation on iOS, and file changes wrap to the viewport with
+  scrollable headers so long paths and large text leave room for the diff.
 - Android keeps unsent writing when switching conversations or leaving a chat.
   Older queued messages can be reviewed and recovered into the current account.
 - Closing or reopening a remote browser keeps its listener ownership intact,
   and stale account responses cannot replace the current page or saved ports.
 - Starting a coding tool in a remote project waits for the browser tunnel to
   become ready instead of failing while the connection is still opening.
+- Devices puts remote access controls beside the computer they affect, and
+  offers Sign in when a removed computer or revoked login needs reconnecting.
+- Windows agent replies keep long lines, emoji and accented text intact.
+  Stopping a chat also stops the launcher's child processes. Private chat
+  homes follow the coding tool's sign-in and sign-out, and startup notices
+  no longer appear as replies.
 - In a narrow window the project bar, chat composer and terminal controls
   stay readable on the Mac, and the chat composer wraps on Windows.
 - Chat rows respond across their full width. Mac project New chat opens the

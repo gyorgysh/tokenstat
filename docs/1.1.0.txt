@@ -1,0 +1,11 @@
+What's new in 1.1.0
+
+- Work on another Git branch in its own project folder with worktrees.
+- Format notes with headings, bold, lists, checklists, quotes and code, with undo and preview.
+- Send a short note to guide the next step of a running chat. Edit or cancel it before delivery.
+- Manage work in a To Do, In progress and Done task board.
+- Find devices with search and reach their connection and access controls more easily.
+- Use richer chat and project menus, Home pins, terminal rename and duplication, and automation templates and sorting.
+- Project browsers remember their last page and recent ports.
+- See clearer usage charts and new plush characters that keep their shape as they move.
+- Bug fixes and performance improvements for chat, project navigation and reviewing file changes.
