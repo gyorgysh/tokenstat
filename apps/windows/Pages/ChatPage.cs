@@ -1333,54 +1333,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         Child = AssistantBody(text),
     };
 
-    private static UIElement AssistantBody(string text)
-    {
-        var stack = new StackPanel { Spacing = Theme.SpaceS };
-        var rest = text;
-        while (true)
-        {
-            var start = rest.IndexOf("```", StringComparison.Ordinal);
-            if (start < 0)
-            {
-                if (!string.IsNullOrWhiteSpace(rest))
-                {
-                    stack.Children.Add(new TextBlock
-                    {
-                        Text = rest.Trim(),
-                        TextWrapping = TextWrapping.Wrap,
-                        IsTextSelectionEnabled = true,
-                    });
-                }
-                break;
-            }
-            var before = rest[..start].Trim();
-            if (!string.IsNullOrEmpty(before))
-            {
-                stack.Children.Add(new TextBlock
-                {
-                    Text = before,
-                    TextWrapping = TextWrapping.Wrap,
-                    IsTextSelectionEnabled = true,
-                });
-            }
-            var afterFence = rest[(start + 3)..];
-            var nl = afterFence.IndexOf('\n');
-            var close = afterFence.IndexOf("```", StringComparison.Ordinal);
-            if (close < 0)
-            {
-                stack.Children.Add(CodeBlock(afterFence.Trim()));
-                break;
-            }
-            var code = nl >= 0 && nl < close ? afterFence[(nl + 1)..close] : afterFence[..close];
-            stack.Children.Add(CodeBlock(code.TrimEnd()));
-            rest = afterFence[(close + 3)..];
-        }
-        if (stack.Children.Count == 0)
-        {
-            stack.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap });
-        }
-        return stack;
-    }
+    /// <summary>
+    /// The reply as markdown, like the Mac. Fenced code keeps this page's
+    /// code block, with its copy menu and horizontal scrolling.
+    /// </summary>
+    private static UIElement AssistantBody(string text) => ChatMarkdown.Create(text, CodeBlock);
 
     private static UIElement CodeBlock(string code)
     {
