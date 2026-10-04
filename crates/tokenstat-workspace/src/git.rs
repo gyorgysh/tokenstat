@@ -738,6 +738,15 @@ fn parse_tags(decorations: &str) -> Vec<String> {
 /// One `git status` is enough to decide "is this a repo": a separate
 /// `rev-parse` was a full process spawn for every folder on every list, and
 /// the status command already fails cleanly outside a work tree.
+/// The checked-out branch's short name. None when HEAD is detached or the
+/// folder is not a repository. One cheap read, for callers that need only
+/// the name and not a whole status.
+pub fn current_branch(dir: &Path) -> Option<String> {
+    git(dir, &["symbolic-ref", "--short", "-q", "HEAD"])
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+}
+
 pub fn status(dir: &Path) -> GitStatus {
     let raw = match git(
         dir,

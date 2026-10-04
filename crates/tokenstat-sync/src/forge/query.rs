@@ -3,8 +3,8 @@
 use serde::Deserialize;
 
 use super::{
-    CheckState, ForgeError, PullActor, PullCheck, PullDetail, PullFile, PullReview, PullSummary,
-    Repo, Scope, State, TimelineEvent, TimelinePage,
+    BranchPull, CheckState, ForgeError, PullActor, PullCheck, PullDetail, PullFile, PullReview,
+    PullSummary, Repo, Scope, State, TimelineEvent, TimelinePage,
 };
 
 pub(super) const LIST: &str = r#"
@@ -30,6 +30,19 @@ query PullRequestList($query: String!, $limit: Int!) {
         commits(last: 1) {
           nodes { commit { statusCheckRollup { state } } }
         }
+      }
+    }
+  }
+}
+"#;
+
+pub(super) const BRANCH: &str = r#"
+query BranchPull($owner: String!, $repo: String!, $branch: String!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequests(headRefName: $branch, first: 10, orderBy: {field: CREATED_AT, direction: DESC}) {
+      nodes {
+        number title url state isDraft baseRefName
+        headRepositoryOwner { login }
       }
     }
   }
@@ -312,6 +325,43 @@ pub(super) fn decode_list(
             }
         })
         .collect())
+}
+
+/// The branch's open pull request, or failing that its newest one.
+///
+/// A fork can open a pull request from a branch of the same name, so only
+/// rows whose head lives in this repository's owner count.
+pub(super) fn decode_branch(
+    raw: &str,
+    rate_limit_reset: Option<u64>,
+    owner: &str,
+) -> Result<Option<BranchPull>, ForgeError> {
+    let body = graphql_body(raw, rate_limit_reset)?;
+    let rows: Vec<BranchPull> = array(&body["data"]["repository"]["pullRequests"]["nodes"])
+        .into_iter()
+        .filter(|node| {
+            node["headRepositoryOwner"]["login"]
+                .as_str()
+                .is_some_and(|login| login.eq_ignore_ascii_case(owner))
+        })
+        .filter_map(|node| {
+            let number = integer(&node["number"]);
+            let url = text(&node["url"]);
+            (number > 0 && url.starts_with("https://")).then(|| BranchPull {
+                number,
+                title: text(&node["title"]),
+                url,
+                state: text(&node["state"]).to_ascii_lowercase(),
+                draft: node["isDraft"].as_bool().unwrap_or(false),
+                base_ref: text(&node["baseRefName"]),
+            })
+        })
+        .collect();
+    Ok(rows
+        .iter()
+        .find(|pull| pull.state == "open")
+        .or_else(|| rows.first())
+        .cloned())
 }
 
 pub(super) fn decode_detail(
@@ -671,6 +721,27 @@ fn integer(value: &serde_json::Value) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_branch_prefers_its_open_pull_and_ignores_forks() {
+        let raw = r#"{"data":{"repository":{"pullRequests":{"nodes":[
+            {"number":9,"title":"Fork","url":"https://github.com/x/y/pull/9","state":"OPEN","isDraft":false,"baseRefName":"main","headRepositoryOwner":{"login":"someone"}},
+            {"number":7,"title":"Old","url":"https://github.com/pueev/t/pull/7","state":"MERGED","isDraft":false,"baseRefName":"main","headRepositoryOwner":{"login":"pueev"}},
+            {"number":8,"title":"Now","url":"https://github.com/pueev/t/pull/8","state":"OPEN","isDraft":true,"baseRefName":"main","headRepositoryOwner":{"login":"Pueev"}}
+        ]}}}}"#;
+        let pull = decode_branch(raw, None, "pueev").unwrap().unwrap();
+        assert_eq!(pull.number, 8);
+        assert!(pull.draft);
+        let merged = r#"{"data":{"repository":{"pullRequests":{"nodes":[
+            {"number":7,"title":"Old","url":"https://github.com/pueev/t/pull/7","state":"MERGED","isDraft":false,"baseRefName":"main","headRepositoryOwner":{"login":"pueev"}}
+        ]}}}}"#;
+        assert_eq!(
+            decode_branch(merged, None, "pueev").unwrap().unwrap().state,
+            "merged"
+        );
+        let none = r#"{"data":{"repository":{"pullRequests":{"nodes":[]}}}}"#;
+        assert!(decode_branch(none, None, "pueev").unwrap().is_none());
+    }
 
     #[test]
     fn filters_are_composed_as_two_axes() {

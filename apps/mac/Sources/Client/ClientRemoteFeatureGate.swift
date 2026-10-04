@@ -27,6 +27,8 @@ enum RemoteHostFeature: Hashable {
     case selectedCommit
     case worktrees
     case reviewedPush
+    case reviewedPull
+    case branchPulls
     case taskEditing
     case taskDeletion
     case taskCreation
@@ -55,6 +57,8 @@ enum RemoteHostFeature: Hashable {
         case .selectedCommit: L10n.text("apple.clientremotefeaturegate.committing_selected_files.c40972a7")
         case .worktrees: L10n.text("apple.clientremotefeaturegate.project_worktrees.0c15733b")
         case .reviewedPush: L10n.text("apple.clientremotefeaturegate.pushing_a_branch.e4403991")
+        case .reviewedPull: L10n.text("apple.clientremotefeaturegate.pulling_a_branch")
+        case .branchPulls: L10n.text("apple.clientremotefeaturegate.pull_requests.d9e3f260")
         case .taskEditing: L10n.text("apple.clientremotefeaturegate.editing_tasks.1663f4eb")
         case .taskDeletion: L10n.text("apple.clientremotefeaturegate.deleting_tasks.faf65d2e")
         case .taskCreation: L10n.text("apple.clientremotefeaturegate.creating_tasks.ca462a92")
@@ -91,6 +95,8 @@ enum RemoteHostFeature: Hashable {
     /// Version 21 adds revision-checked automation edits and create/run receipts.
     /// Version 22 adds revision-checked workflow edits.
     /// Version 25 adds a short note that rides the next tool step.
+    /// Version 30 adds the reviewed fast-forward pull, `pulls.branch`, and
+    /// the branch and pull request beside each conversation.
     var minimumProtocol: Int {
         switch self {
         case .worktrees: 24
@@ -113,6 +119,8 @@ enum RemoteHostFeature: Hashable {
         case .hostUpdate: 14
         case .selectedCommit: 15
         case .reviewedPush: 16
+        case .reviewedPull: 30
+        case .branchPulls: 30
         case .taskEditing: 17
         case .taskDeletion: 18
         case .taskCreation: 19
@@ -143,6 +151,8 @@ enum RemoteHostFeature: Hashable {
         case .selectedCommit: "checkmark.circle"
         case .worktrees: "arrow.triangle.branch"
         case .reviewedPush: "arrow.up.circle"
+        case .reviewedPull: "arrow.down.circle"
+        case .branchPulls: "arrow.triangle.pull"
         case .taskEditing: "pencil"
         case .taskDeletion: "trash"
         case .taskCreation: "plus"

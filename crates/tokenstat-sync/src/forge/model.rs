@@ -116,6 +116,19 @@ pub struct PullSummary {
     pub checks: Option<CheckState>,
 }
 
+/// The pull request a branch belongs to, in the few words a chip needs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchPull {
+    pub number: u32,
+    pub title: String,
+    pub url: String,
+    /// `open`, `merged` or `closed`.
+    pub state: String,
+    pub draft: bool,
+    pub base_ref: String,
+}
+
 /// A forge account or team shown around a pull request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

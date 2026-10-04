@@ -71,6 +71,58 @@ pub(crate) fn cached_open_count(workspace_id: &str) -> Option<usize> {
         .map(|(_, entry)| entry.rows.len())
 }
 
+/// What the forge last said about one branch. `None` is an answer too: the
+/// branch has no pull request.
+#[derive(Clone)]
+struct BranchEntry {
+    at: Instant,
+    pull: Option<tokenstat_sync::forge::BranchPull>,
+}
+
+/// How long `pulls.branch` reuses an answer before asking the forge again.
+const BRANCH_TTL: Duration = Duration::from_secs(60);
+/// How long a chat list keeps showing what was last learned. Chat lists
+/// never ask the forge themselves, so this is all they have, and a badge a
+/// few minutes old beats none.
+const BRANCH_SHOWN: Duration = Duration::from_secs(15 * 60);
+
+fn branch_cache() -> &'static Mutex<HashMap<(String, String), BranchEntry>> {
+    static CACHE: OnceLock<Mutex<HashMap<(String, String), BranchEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn remember_branch(
+    workspace_id: &str,
+    branch: &str,
+    pull: Option<tokenstat_sync::forge::BranchPull>,
+) {
+    let mut cache = branch_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    cache.retain(|_, entry| entry.at.elapsed() < BRANCH_SHOWN);
+    cache.insert(
+        (workspace_id.to_string(), branch.to_string()),
+        BranchEntry {
+            at: Instant::now(),
+            pull,
+        },
+    );
+}
+
+/// The pull request last seen for a workspace's branch, without a request.
+/// Chat lists read this, so a sidebar never makes a forge call of its own.
+pub(crate) fn cached_branch_pull(
+    workspace_id: &str,
+    branch: &str,
+) -> Option<tokenstat_sync::forge::BranchPull> {
+    branch_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&(workspace_id.to_string(), branch.to_string()))
+        .filter(|entry| entry.at.elapsed() < BRANCH_SHOWN)
+        .and_then(|entry| entry.pull.clone())
+}
+
 fn clear_list_cache() {
     list_cache()
         .lock()
@@ -161,6 +213,10 @@ fn diff_cache()
 
 fn clear_read_cache() {
     clear_list_cache();
+    branch_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clear();
     detail_cache()
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
@@ -176,6 +232,10 @@ fn clear_read_cache() {
 }
 
 fn invalidate_workspace(workspace_id: &str) {
+    branch_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .retain(|(workspace, _), _| workspace != workspace_id);
     list_cache()
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
@@ -288,6 +348,7 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
             Ok(json!({"stored": true}))
         }
         "pulls.list" => list(&p),
+        "pulls.branch" => branch(&p),
         "pulls.prepareCreate" => prepare_create(&p),
         "pulls.create" => create(&p),
         "pulls.view" => view(&p),
@@ -313,6 +374,51 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
         }),
         "pulls.checkout" => checkout(&p),
         other => Err(format!("unknown pull-request method: {other}")),
+    }
+}
+
+/// The pull request for one branch of a workspace: the named one, or the
+/// branch the folder is on. A workspace that is not connected to its forge
+/// answers with no pull request rather than an error, because the chips that
+/// ask are decoration and must not turn into warnings.
+fn branch(p: &Params) -> Result<Value, String> {
+    if p.workspace_id.trim().is_empty() {
+        return Err("pulls.branch needs workspaceId".into());
+    }
+    let workspace = crate::workspaces::folder(&p.workspace_id)?;
+    let named = p.branch.trim();
+    let branch = if named.is_empty() {
+        match tokenstat_workspace::git::current_branch(&workspace.path) {
+            Some(branch) => branch,
+            None => return Ok(json!({"branch": null, "pull": null, "connected": true})),
+        }
+    } else {
+        named.to_string()
+    };
+    let Some(remote) = tokenstat_workspace::git::remote(&workspace.path) else {
+        return Ok(json!({"branch": branch, "pull": null, "connected": false}));
+    };
+    let key = (p.workspace_id.clone(), branch.clone());
+    if !p.refresh {
+        let hit = branch_cache()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&key)
+            .filter(|entry| entry.at.elapsed() < BRANCH_TTL)
+            .cloned();
+        if let Some(hit) = hit {
+            return Ok(json!({"branch": branch, "pull": hit.pull, "connected": true}));
+        }
+    }
+    match tokenstat_sync::forge::for_branch(&forge_repo(remote), &branch) {
+        Ok(pull) => {
+            remember_branch(&p.workspace_id, &branch, pull.clone());
+            Ok(json!({"branch": branch, "pull": pull, "connected": true}))
+        }
+        Err(tokenstat_sync::forge::ForgeError::NotSignedIn) => {
+            Ok(json!({"branch": branch, "pull": null, "connected": false}))
+        }
+        Err(error) => Err(error.to_string()),
     }
 }
 
@@ -359,6 +465,23 @@ fn create(p: &Params) -> Result<Value, String> {
         tokenstat_sync::forge::create(&repo, &p.branch, &p.base, &p.title, &p.body, p.draft)
             .map_err(|e| e.to_string())?;
     invalidate_workspace(&p.workspace_id);
+    // The chat that asked for it can show its badge straight away. A pull
+    // request that already existed is left for the next look, since its
+    // title and draft state are its own, not this request's.
+    if !result.existing {
+        remember_branch(
+            &p.workspace_id,
+            &p.branch,
+            Some(tokenstat_sync::forge::BranchPull {
+                number: result.number,
+                title: p.title.trim().to_string(),
+                url: result.url.clone(),
+                state: "open".into(),
+                draft: p.draft,
+                base_ref: p.base.clone(),
+            }),
+        );
+    }
     serde_json::to_value(result).map_err(|e| e.to_string())
 }
 

@@ -13,8 +13,9 @@ pub use auth::{
     device_poll, device_start, set_token, sign_out,
 };
 pub use model::{
-    Availability, CheckState, ForgeConnection, MergeMethod, PullActor, PullCheck, PullDetail,
-    PullFile, PullReview, PullSummary, Repo, Scope, State, TimelineEvent, TimelinePage, Verdict,
+    Availability, BranchPull, CheckState, ForgeConnection, MergeMethod, PullActor, PullCheck,
+    PullDetail, PullFile, PullReview, PullSummary, Repo, Scope, State, TimelineEvent, TimelinePage,
+    Verdict,
 };
 pub use write::{
     CreatedPull, close, comment, create, default_branch, merge, ready, reopen, review,
@@ -100,6 +101,41 @@ fn list_once(
         )))),
         _ => query::decode_list(&text, reset).map_err(HttpFailure::from),
     }
+}
+
+/// The pull request opened from `branch` in this repository, if any.
+pub fn for_branch(repo: &Repo, branch: &str) -> Result<Option<BranchPull>, ForgeError> {
+    let Some(credential) = credential(&repo.host) else {
+        return Err(ForgeError::NotSignedIn);
+    };
+    match for_branch_once(repo, branch, &credential) {
+        Err(HttpFailure::Unauthorized) if credential.source() == CredentialSource::Tokenstat => {
+            let refreshed = auth::refresh_stored(&repo.host, credential.bearer())?;
+            for_branch_once(repo, branch, &refreshed).map_err(Into::into)
+        }
+        result => result.map_err(Into::into),
+    }
+}
+
+fn for_branch_once(
+    repo: &Repo,
+    branch: &str,
+    credential: &Credential,
+) -> Result<Option<BranchPull>, HttpFailure> {
+    let response = auth::http_client()?
+        .post(graphql_endpoint(repo))
+        .header("accept", "application/vnd.github+json")
+        .header("x-github-api-version", "2022-11-28")
+        .bearer_auth(credential.bearer())
+        .json(&serde_json::json!({
+            "query": query::BRANCH,
+            "variables": {"owner": repo.owner, "repo": repo.repo, "branch": branch},
+        }))
+        .send()
+        .map_err(ForgeError::from)?;
+    let reset = rate_limit_reset(&response);
+    let text = response_text(response)?;
+    query::decode_branch(&text, reset, &repo.owner).map_err(HttpFailure::from)
 }
 
 /// Read the pull request's summary, people, files, reviews and check runs.

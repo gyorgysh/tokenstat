@@ -1608,6 +1608,7 @@
   "apple.clientremotefeaturegate.project_worktrees.0c15733b": "Project worktrees",
   "apple.clientremotefeaturegate.pull_requests.d9e3f260": "Pull requests",
   "apple.clientremotefeaturegate.pushing_a_branch.e4403991": "Pushing a branch",
+  "apple.clientremotefeaturegate.pulling_a_branch": "Pulling a branch",
   "apple.clientremotefeaturegate.running_tasks.99ad64f5": "Running tasks",
   "apple.clientremotefeaturegate.saving_automations.1673f244": "Saving automations",
   "apple.clientremotefeaturegate.saving_workflows.9ca663b4": "Saving workflows",

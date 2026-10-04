@@ -147,6 +147,12 @@ pub struct Conversation {
     pub last_message_author: Option<String>,
     #[serde(default)]
     pub running: bool,
+    /// The branch the workspace was on when a turn last started or ended.
+    /// Agents create branches and open pull requests, so this is what ties
+    /// a conversation to its pull request. None for a folder that is not a
+    /// repository, a detached HEAD, or a chat from before this was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
 }
 
 /// The only conversation metadata needed by a host-wide recent-chat list.
@@ -165,6 +171,8 @@ pub struct RecentConversation {
     pub last_message_author: Option<String>,
     pub running: bool,
     pub needs_attention: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
 }
 
 /// A voice, not a launcher.
@@ -818,6 +826,7 @@ impl Store {
                 last_message_author: chat.last_message_author.clone(),
                 running: chat.running,
                 needs_attention: needs_attention.contains(&chat.id),
+                branch: chat.branch.clone(),
             })
             .collect();
         // An approval that is waiting must survive the host cap even when an
@@ -2022,6 +2031,7 @@ impl Store {
             send_revision: 0,
             last_message_author: None,
             running: false,
+            branch: None,
         };
         fs::create_dir_all(&self.root).map_err(|e| e.to_string())?;
         let lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
@@ -3349,8 +3359,12 @@ impl Store {
         crate::workspace_policy::require_current_access()?;
         // Reserve a new revision durably before launch. Even a failed spawn
         // consumes it: another client must review the changed launch intent.
+        let branch = tokenstat_workspace::git::current_branch(&workspace.path);
         self.edit_conversation(id, |current| {
             current.send_revision = next_send_revision(current.send_revision)?;
+            if branch.is_some() {
+                current.branch = branch;
+            }
             Ok(())
         })?;
         let accepted_at = now_ms();
@@ -3737,7 +3751,7 @@ impl Store {
             return Ok(());
         }
         cleanup();
-        let status = self.set_running(id, false);
+        let status = self.stop_running(id);
         // The guard goes even when that write fails, or every later send is
         // refused as already responding while Stop reports success without
         // changing anything. A newer turn cannot have appeared in between:
@@ -3964,6 +3978,24 @@ impl Store {
                 chat.updated_at_ms = now_ms();
             }
             Ok(())
+        })
+    }
+
+    /// The turn is over: clear the running bit, and note the branch the
+    /// agent left the folder on, which may be one it just created.
+    fn stop_running(&self, id: &str) -> Result<Conversation, String> {
+        let branch = self
+            .get(id)
+            .ok()
+            .and_then(|chat| crate::workspaces::folder(&chat.workspace_id).ok())
+            .and_then(|workspace| tokenstat_workspace::git::current_branch(&workspace.path));
+        self.edit_conversation(id, |chat| {
+            chat.running = false;
+            chat.updated_at_ms = now_ms();
+            if branch.is_some() {
+                chat.branch = branch;
+            }
+            Ok(chat.clone())
         })
     }
 
@@ -5987,6 +6019,7 @@ mod tests {
             send_revision: 0,
             last_message_author: None,
             running: true,
+            branch: None,
         });
         store.save().unwrap();
         store.record_events(
@@ -7188,6 +7221,7 @@ mod tests {
             send_revision: 0,
             last_message_author: None,
             running: false,
+            branch: None,
         };
         store.conversations.lock().unwrap().extend([
             sample("chat-a1", "workspace-a"),
@@ -7284,6 +7318,7 @@ mod tests {
             send_revision: 0,
             last_message_author: None,
             running: false,
+            branch: None,
         };
         store.conversations.lock().unwrap().push(chat);
         store.save().unwrap();
@@ -7387,6 +7422,7 @@ mod tests {
             send_revision: 0,
             last_message_author: None,
             running: false,
+            branch: None,
         });
         let attachment = store
             .attach(
@@ -7441,6 +7477,7 @@ mod tests {
             send_revision: 0,
             last_message_author: None,
             running: false,
+            branch: None,
         });
         store.save().unwrap();
     }
@@ -9515,6 +9552,7 @@ mod tests {
             send_revision: 0,
             last_message_author: None,
             running: false,
+            branch: None,
         };
         store.conversations.lock().unwrap().push(chat.clone());
         store.save().unwrap();
@@ -9629,6 +9667,7 @@ mod tests {
             send_revision: 0,
             last_message_author: None,
             running: false,
+            branch: None,
         };
         store.conversations.lock().unwrap().push(chat.clone());
         store.save().unwrap();
@@ -9768,6 +9807,7 @@ mod tests {
             send_revision: 0,
             last_message_author: None,
             running: false,
+            branch: None,
         };
         store.conversations.lock().unwrap().push(chat.clone());
         store.save().unwrap();
@@ -9870,6 +9910,7 @@ mod tests {
             send_revision: 0,
             last_message_author: None,
             running: false,
+            branch: None,
         });
         store.save().unwrap();
         let source = root.path().join("answer.txt");
@@ -9982,6 +10023,7 @@ mod tests {
             send_revision: 0,
             last_message_author: None,
             running: false,
+            branch: None,
         });
         store.save().unwrap();
         store.record_events(
@@ -10032,6 +10074,7 @@ mod tests {
             send_revision: 0,
             last_message_author: None,
             running: false,
+            branch: None,
         });
         {
             let mut chats = store.conversations.lock().unwrap();
@@ -10109,6 +10152,7 @@ mod tests {
             send_revision: 0,
             last_message_author: None,
             running: false,
+            branch: None,
         });
         store.save().unwrap();
         let turn_token = store.register_turn_token("chat-test", "claude").unwrap();
@@ -10395,6 +10439,7 @@ mod tests {
             send_revision: 0,
             last_message_author: None,
             running: false,
+            branch: None,
         });
         let other = store
             .save_persona(Persona {

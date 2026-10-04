@@ -228,4 +228,7 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 26 adds independent saved-transcript copies with `chat.fork`.
 /// Version 28 adds guided agent setup checks and published-branch PR creation.
 /// Version 29 adds agent questions in chat, answered with `chat.answerQuestion`.
-pub const PROTOCOL_VERSION: &str = "29";
+/// Version 30 adds reviewed fast-forward pulls (`workspace.pullReview` and
+/// `workspace.pullReviewed`) and `pulls.branch`, and conversations carry the
+/// branch they last worked on with its cached pull request.
+pub const PROTOCOL_VERSION: &str = "30";

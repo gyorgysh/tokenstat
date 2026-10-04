@@ -15,6 +15,7 @@ use std::process::Command;
 use serde::Serialize;
 
 mod lease;
+pub mod reviewed_pull;
 pub mod reviewed_push;
 pub mod selected;
 pub mod worktree;

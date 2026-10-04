@@ -292,6 +292,14 @@ struct SelectedCommitParams {
 #[cfg(feature = "local-host")]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ReviewedPullParams {
+    id: String,
+    review: Option<tokenstat_workspace::gitwrite::reviewed_pull::Review>,
+}
+
+#[cfg(feature = "local-host")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ReviewedPushParams {
     id: String,
     review: Option<tokenstat_workspace::gitwrite::reviewed_push::Review>,
@@ -2056,6 +2064,26 @@ fn handoff_call(method: &str, params: &str) -> Result<Value, DispatchError> {
     }
 }
 
+/// Put the pull request last seen for each conversation's branch beside it.
+/// Read from the host's cache only: a chat list never asks the forge.
+#[cfg(feature = "local-host")]
+fn attach_branch_pulls(rows: &mut Value) {
+    let Some(rows) = rows.as_array_mut() else {
+        return;
+    };
+    for row in rows {
+        let (Some(workspace), Some(branch)) = (row["workspaceId"].as_str(), row["branch"].as_str())
+        else {
+            continue;
+        };
+        if let Some(pull) = crate::pulls::cached_branch_pull(workspace, branch)
+            && let Ok(pull) = serde_json::to_value(pull)
+        {
+            row["pull"] = pull;
+        }
+    }
+}
+
 #[cfg(feature = "local-host")]
 fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
     let p: ChatParams = parse(params)?;
@@ -2067,10 +2095,14 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             )
             .envelope()?;
             store.attach_pending_steers(&mut value);
+            attach_branch_pulls(&mut value);
             Ok(value)
         }
         "chat.recent" => {
-            serde_json::to_value(store.recent(p.limit.unwrap_or(20) as usize)).envelope()
+            let mut value =
+                serde_json::to_value(store.recent(p.limit.unwrap_or(20) as usize)).envelope()?;
+            attach_branch_pulls(&mut value);
+            Ok(value)
         }
         "chat.create" => serde_json::to_value(store.create(p.create())?).envelope(),
         "chat.fork" => {
@@ -2743,6 +2775,8 @@ fn folders(method: &str, params: &str) -> Option<Result<Value, String>> {
         | "workspace.pushReviewed"
         | "workspace.pushReceipt"
         | "workspace.pushRecover"
+        | "workspace.pullReview"
+        | "workspace.pullReviewed"
         | "workspace.write"
         | "workspace.push"
         | "pty.spawn" => {}
@@ -3234,6 +3268,24 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             if matches!(method, "workspace.pushReviewed" | "workspace.pushRecover") {
                 invalidate_workspace_status(Some(&p.id));
             }
+            result.map_err(|e| e.to_string())
+        }
+
+        "workspace.pullReview" | "workspace.pullReviewed" => {
+            use tokenstat_workspace::gitwrite::reviewed_pull;
+            let p: ReviewedPullParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let ws = crate::workspaces::folder(&p.id)?;
+            let result = if method == "workspace.pullReview" {
+                serde_json::to_value(reviewed_pull::review(&ws.path)?)
+            } else {
+                serde_json::to_value(reviewed_pull::pull(
+                    &ws.path,
+                    p.review.as_ref().ok_or("A pull needs a reviewed branch")?,
+                )?)
+            };
+            // Review fetched, so ahead and behind moved even when nothing else did.
+            invalidate_workspace_status(Some(&p.id));
             result.map_err(|e| e.to_string())
         }
 

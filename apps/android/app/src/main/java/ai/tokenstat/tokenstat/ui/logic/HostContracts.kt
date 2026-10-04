@@ -11,7 +11,7 @@ import kotlinx.serialization.json.longOrNull
 /// `expectedProtocolVersion` and `RemoteHostFeature` minimums, plus the
 /// `insights.snapshot` (proto 5) shape the Mac uses.
 object HostContracts {
-    const val PROTOCOL_VERSION = "29"
+    const val PROTOCOL_VERSION = "30"
     const val WORKTREES_MIN_PROTOCOL = 24
     const val CHAT_MIN_PROTOCOL = 4
     const val CHAT_FORK_MIN_PROTOCOL = 26
@@ -27,6 +27,13 @@ object HostContracts {
     /// older host never records one, so this guards the answer, not the card.
     fun supportsChatQuestions(protocol: Long?): Boolean =
         protocol == null || protocol >= CHAT_QUESTIONS_MIN_PROTOCOL
+
+    /// Version 30 adds the reviewed fast-forward pull and `pulls.branch`,
+    /// and conversations carry their branch with its pull request.
+    const val REVIEWED_PULL_MIN_PROTOCOL = 30
+
+    fun supportsReviewedPull(protocol: Long?): Boolean =
+        protocol != null && protocol >= REVIEWED_PULL_MIN_PROTOCOL
 
     fun protocolOf(status: kotlinx.serialization.json.JsonObject?): Long? =
         status?.get("protocol")?.jsonPrimitive?.longOrNull
