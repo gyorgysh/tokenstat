@@ -19,8 +19,15 @@ enum ChatDetail: String, CaseIterable, Sendable {
     case detailed
 }
 
-/// One folded line standing in for several transcript rows.
+/// A folded group standing in for several transcript rows.
 struct ChatStepGroup: Equatable, Sendable {
+    struct Activity: Equatable, Sendable, Identifiable {
+        let id: String
+        let verb: String
+        let target: String
+        let running: Bool
+    }
+
     enum Style: Equatable, Sendable {
         /// Compact: a stretch of tool activity between visible replies.
         case work
@@ -52,6 +59,14 @@ struct ChatStepGroup: Equatable, Sendable {
     /// The step running right now, for the collapsed line to name.
     var liveVerb: String?
     var liveTarget: String?
+    /// A few recent actions, with running calls kept ahead of finished ones
+    /// when choosing what fits. Output stays in the expandable member rows.
+    var recentActivity: [Activity] = []
+    /// Keep Compact informative while work runs, and return to one line
+    /// afterwards. Opening the group already shows these calls in full.
+    var activityPreview: [Activity] {
+        style == .work && running && !open ? recentActivity : []
+    }
     /// The first step's start and the last step's end, when the host
     /// recorded them.
     var startedAtMs: Int64?
@@ -254,6 +269,23 @@ enum ChatTranscriptFold {
         var paths = Set<String>()
         var anyRunning = false
 
+        func activity(_ member: ChatDisplayItem, verb: String, target: String, running: Bool) {
+            guard style == .work else { return }
+            let line = String(target.prefix(160))
+                .split(omittingEmptySubsequences: false, whereSeparator: { $0.isNewline })
+                .first.map(String.init) ?? ""
+            group.recentActivity.append(.init(
+                id: member.id, verb: verb,
+                target: line.trimmingCharacters(in: .whitespaces), running: running
+            ))
+            if group.recentActivity.count > 3 {
+                // A long-running call may precede several quick completions.
+                // Keep it visible rather than implying everything has ended.
+                let oldestFinished = group.recentActivity.firstIndex { !$0.running }
+                group.recentActivity.remove(at: oldestFinished ?? 0)
+            }
+        }
+
         func span(_ start: Int64, _ end: Int64?) {
             if start > 0 { group.startedAtMs = min(group.startedAtMs ?? start, start) }
             if let end, end > 0 { group.endedAtMs = max(group.endedAtMs ?? end, end) }
@@ -263,6 +295,7 @@ enum ChatTranscriptFold {
             switch member.kind {
             case let .tool(state):
                 group.steps += 1
+                activity(member, verb: state.verb, target: state.target, running: state.running)
                 if readVerbs.contains(state.verb) { group.reads += 1 }
                 if searchVerbs.contains(state.verb) { group.searches += 1 }
                 if pageVerbs.contains(state.verb) { group.pages += 1 }
@@ -274,6 +307,7 @@ enum ChatTranscriptFold {
                 }
             case let .edit(state):
                 group.steps += 1
+                activity(member, verb: "Edit", target: state.path, running: state.running)
                 paths.insert(state.path)
                 group.added += state.added
                 group.removed += state.removed

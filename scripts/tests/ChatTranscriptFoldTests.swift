@@ -23,9 +23,9 @@ struct ChatTranscriptFoldTests {
     static func handoff(_ id: String) -> ChatDisplayItem { .init(id: id, kind: .handoff(to: "codex", brief: "b")) }
 
     static func tool(_ id: String, _ verb: String, running: Bool = false, failed: Bool = false,
-                     start: Int64 = 0, end: Int64? = nil) -> ChatDisplayItem {
+                     start: Int64 = 0, end: Int64? = nil, target: String? = nil) -> ChatDisplayItem {
         .init(id: id, kind: .tool(ChatToolState(
-            callId: id, verb: verb, target: "t-\(id)", running: running, failed: failed,
+            callId: id, verb: verb, target: target ?? "t-\(id)", running: running, failed: failed,
             detail: nil, startedAtMs: start, endedAtMs: end, snippet: []
         )))
     }
@@ -64,6 +64,9 @@ struct ChatTranscriptFoldTests {
         compactKeepsUsageWhenThereIsNoWork()
         compactKeepsEveryReplyVisible()
         compactLiveTurn()
+        compactActivitySurvivesBetweenCalls()
+        compactActivityKeepsRunningCallsVisible()
+        compactActivityIsBoundedAndDoesNotHideFailures()
         standardFoldsReadsAndThinking()
         standardKeepsALoneReadAndBreaksRuns()
         standardLeavesStreamingThoughtOpen()
@@ -144,6 +147,61 @@ struct ChatTranscriptFoldTests {
 
         let settled = fold([user("u1"), think("k1"), tool("t1", "Read"), say("a1")], .compact, running: true)
         require(group(settled, "g:k1")?.running == false, "work before the answer is not running once its steps end")
+    }
+
+    static func compactActivitySurvivesBetweenCalls() {
+        let rows = [user("u1"), think("k1"), tool("r1", "Read"), tool("w1", "Write"),
+                    edit("e1", "src/App.swift"), tool("d1", "Diff", running: true)]
+        let active = group(fold(rows, .compact, running: true), "g:k1")!
+        require(active.activityPreview.map(\.id) == ["w1", "e1", "d1"], "the latest actions remain visible in order")
+        require(active.activityPreview.map(\.verb) == ["Write", "Edit", "Diff"], "writes, native edits and comparisons name their action")
+        require(active.activityPreview.map(\.running) == [false, false, true], "only the active comparison uses present tense")
+        require(active.activityPreview[1].target == "src/App.swift", "the edit identifies its file")
+
+        let between = Array(rows.dropLast()) + [tool("d1", "Diff")]
+        let waiting = group(fold(between, .compact, running: true), "g:k1")!
+        require(waiting.liveVerb == nil, "no tool is still running between calls")
+        require(waiting.activityPreview.map(\.id) == ["w1", "e1", "d1"], "finished actions still show while the agent continues")
+        require(waiting.activityPreview.allSatisfy { !$0.running }, "finished calls never claim to be running")
+        require(group(fold(between, .compact), "g:k1")!.activityPreview.isEmpty, "a finished turn returns to a compact header")
+        require(group(fold(between + [say("a1")], .compact, running: true), "g:k1")!.activityPreview.isEmpty,
+                "a reply closes the preceding work preview")
+        let open = fold(rows, .compact, running: true, isOpen: allOpen)
+        require(group(open, "g:k1")!.activityPreview.isEmpty, "opening full steps removes the duplicate preview")
+        require(open.contains { $0.id == "d1" && $0.groupID == "g:k1" }, "the active call is available as its full row")
+    }
+
+    static func compactActivityKeepsRunningCallsVisible() {
+        let rows = [user("u1"), tool("slow", "Shell", running: true),
+                    tool("r1", "Read"), tool("r2", "Read"), tool("r3", "Read"), tool("r4", "Read")]
+        let preview = group(fold(rows, .compact, running: true), "g:slow")!.activityPreview
+        require(preview.map(\.id) == ["slow", "r3", "r4"], "recent completions cannot push the running call out of view")
+        require(preview.first?.running == true, "the retained older call still says it is running")
+        let concurrent = [user("u1")] + (1...5).map { tool("t\($0)", "Shell", running: true) }
+        require(group(fold(concurrent, .compact, running: true), "g:t1")!.activityPreview.map(\.id) == ["t3", "t4", "t5"],
+                "many active calls show the newest three without growing the preview")
+    }
+
+    static func compactActivityIsBoundedAndDoesNotHideFailures() {
+        let long = tool("long", "CustomTool", target: String(repeating: "x", count: 10_000) + "\nsecond line")
+        let rows = [user("u1"), long, tool("bad", "Write", failed: true), edit("e1", "a.swift"), tool("blank", "")]
+        let out = fold(rows, .compact, running: true)
+        let first = group(out, "g:long")!
+        require(first.recentActivity.first?.verb == "CustomTool", "an unknown tool keeps its real name")
+        require(first.recentActivity.first?.target.count == 160, "long commands cannot produce a document-sized preview")
+        require(out.contains { $0.id == "bad" }, "a failed call keeps its visible error row")
+        let last = group(out, "g:e1")!
+        require(last.activityPreview.map(\.id) == ["e1", "blank"], "a failure divides the work history")
+        require(last.activityPreview.last?.verb == "", "unnamed calls retain the generic work fallback")
+        let multiline = group(fold([tool("line", "Shell", target: "  swift test  \nmore code")], .compact, running: true), "g:line")!
+        require(multiline.activityPreview.first?.target == "swift test", "only the first command line is shown")
+        let blank = group(fold([tool("line", "Shell", target: "\nmore code")], .compact, running: true), "g:line")!
+        require(blank.activityPreview.first?.target == "", "a blank first line stays blank")
+
+        let exploration = group(fold([tool("r1", "Read"), tool("r2", "Read")], .standard, running: true), "g:r1")!
+        require(exploration.activityPreview.isEmpty, "Standard exploration stays a single header")
+        let thought = group(fold([user("u1"), think("k1")], .compact, running: true), "g:k1")!
+        require(thought.activityPreview.isEmpty, "reasoning alone does not invent tool activity")
     }
 
     static func standardFoldsReadsAndThinking() {

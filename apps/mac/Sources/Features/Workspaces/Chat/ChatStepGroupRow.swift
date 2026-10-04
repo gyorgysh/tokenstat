@@ -2,7 +2,8 @@
 
 import SwiftUI
 
-/// One line standing in for folded transcript steps. Tapping it shows the
+/// A header standing in for folded transcript steps, with a few recent
+/// actions visible while Compact work runs. Tapping anywhere shows the
 /// steps below it as rows of their own, and tapping again folds them away.
 ///
 /// Shared by the Mac and the phone. The whole line is the control: it is
@@ -25,45 +26,27 @@ struct ChatStepGroupRow: View {
 
     var body: some View {
         Button(action: toggle) {
-            HStack(alignment: .center, spacing: Theme.Space.s) {
-                Image(systemName: "chevron.right")
-                    .font(Theme.font(10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(group.open ? 90 : 0))
-                    .frame(width: 12)
-                Group {
-                    if group.running, animatesRunning {
-                        ProgressView()
-                            .controlSize(.mini)
-                    } else {
-                        Image(systemName: symbol)
-                            .font(Theme.font(12, weight: .medium))
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                header
+                ForEach(group.activityPreview) { activity in
+                    HStack(spacing: Theme.Space.s) {
+                        Image(systemName: activity.running ? "arrow.right" : "checkmark")
+                            .font(Theme.font(10, weight: .medium))
+                            .frame(width: 16)
+                        Text(SeatStep.word(verb: activity.verb, running: activity.running))
+                            .font(Self.titleFont)
+                            .lineLimit(1)
+                            .layoutPriority(1)
+                        if !activity.target.isEmpty {
+                            Text(activity.target)
+                                .font(Self.metaFont)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        Spacer(minLength: 0)
                     }
-                }
-                .foregroundStyle(group.running ? Theme.accent : .secondary)
-                .frame(width: 16)
-                Text(title)
-                    .font(Self.titleFont)
-                    .foregroundStyle(group.running ? Theme.accent : .primary)
-                    .lineLimit(1)
-                    .layoutPriority(1)
-                if let meta = summary, !meta.isEmpty {
-                    Text(meta)
-                        .font(Self.metaFont)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                Spacer(minLength: 0)
-                if group.added + group.removed > 0 {
-                    DiffStat(added: Int(group.added), removed: Int(group.removed), font: Self.metaFont)
-                        .fixedSize()
-                }
-                if let cost = group.cost, cost > 0 {
-                    Text(cost, format: .currency(code: "USD").precision(.fractionLength(2...4)))
-                        .font(Self.metaFont)
-                        .foregroundStyle(Theme.accent)
-                        .fixedSize()
+                    .foregroundStyle(activity.running ? Theme.accent : .secondary)
+                    .padding(.leading, 12 + Theme.Space.s)
                 }
             }
             .padding(.vertical, 6)
@@ -78,6 +61,50 @@ struct ChatStepGroupRow: View {
         .accessibilityLabel(accessibility)
         .accessibilityHint(group.open ? L10n.text("apple.chatdetail.hide_steps") : L10n.text("apple.chatdetail.show_steps"))
         .accessibilityAddTraits(.isButton)
+    }
+
+    private var header: some View {
+        HStack(alignment: .center, spacing: Theme.Space.s) {
+            Image(systemName: "chevron.right")
+                .font(Theme.font(10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .rotationEffect(.degrees(group.open ? 90 : 0))
+                .frame(width: 12)
+            Group {
+                if group.running, animatesRunning {
+                    ProgressView()
+                        .controlSize(.mini)
+                } else {
+                    Image(systemName: symbol)
+                        .font(Theme.font(12, weight: .medium))
+                }
+            }
+            .foregroundStyle(group.running ? Theme.accent : .secondary)
+            .frame(width: 16)
+            Text(title)
+                .font(Self.titleFont)
+                .foregroundStyle(group.running ? Theme.accent : .primary)
+                .lineLimit(1)
+                .layoutPriority(1)
+            if let meta = summary, !meta.isEmpty {
+                Text(meta)
+                    .font(Self.metaFont)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            Spacer(minLength: 0)
+            if group.added + group.removed > 0 {
+                DiffStat(added: Int(group.added), removed: Int(group.removed), font: Self.metaFont)
+                    .fixedSize()
+            }
+            if let cost = group.cost, cost > 0 {
+                Text(cost, format: .currency(code: "USD").precision(.fractionLength(2...4)))
+                    .font(Self.metaFont)
+                    .foregroundStyle(Theme.accent)
+                    .fixedSize()
+            }
+        }
     }
 
     private var symbol: String {
@@ -133,7 +160,12 @@ struct ChatStepGroupRow: View {
     }
 
     private var accessibility: String {
-        [title, summary].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
+        let actions = group.activityPreview.map {
+            [SeatStep.word(verb: $0.verb, running: $0.running), $0.target]
+                .filter { !$0.isEmpty }.joined(separator: " ")
+        }
+        return ([title, summary].compactMap { $0 } + actions)
+            .filter { !$0.isEmpty }.joined(separator: ", ")
     }
 }
 
