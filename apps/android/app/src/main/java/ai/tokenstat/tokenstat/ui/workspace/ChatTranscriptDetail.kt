@@ -52,19 +52,16 @@ data class ChatStepGroup(
 }
 
 /// The detail level, kept on this device the way the Apple client keeps it
-/// in UserDefaults. A phone defaults to Compact, a tablet to Standard.
-class ChatDetailStore(private val context: Context) {
+/// in UserDefaults. Every device starts at Compact until somebody picks.
+class ChatDetailStore(context: Context) {
     private val prefs = context.getSharedPreferences("tokenstat.chat.v1", Context.MODE_PRIVATE)
 
     fun level(): ChatDetail =
-        ChatDetail.fromKey(prefs.getString("detail", null)) ?: platformDefault()
+        ChatDetail.fromKey(prefs.getString("detail", null)) ?: ChatDetail.Compact
 
     fun setLevel(level: ChatDetail) {
         prefs.edit().putString("detail", level.key).apply()
     }
-
-    private fun platformDefault(): ChatDetail =
-        if (context.resources.configuration.smallestScreenWidthDp >= 600) ChatDetail.Standard else ChatDetail.Compact
 }
 
 private val readVerbs = setOf("Read")

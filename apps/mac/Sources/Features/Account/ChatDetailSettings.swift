@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
 import SwiftUI
-#if canImport(UIKit)
-import UIKit
-#endif
 
 /// The chosen transcript detail level, shared by every chat on this device.
 ///
@@ -20,18 +17,12 @@ final class ChatDetailPreference {
     }
 
     private init() {
-        level = UserDefaults.standard.string(forKey: Self.key).flatMap(ChatDetail.init(rawValue:)) ?? Self.platformDefault
+        level = UserDefaults.standard.string(forKey: Self.key).flatMap(ChatDetail.init(rawValue:)) ?? Self.defaultLevel
     }
 
-    /// A phone has room for the question and the answer, not for forty steps
-    /// between them. Everything wider starts at Standard.
-    static var platformDefault: ChatDetail {
-        #if canImport(UIKit)
-        UIDevice.current.userInterfaceIdiom == .phone ? .compact : .standard
-        #else
-        .standard
-        #endif
-    }
+    /// Every device starts at Compact: the question and the answers, with the
+    /// steps between them one tap away. A choice somebody made is kept.
+    static let defaultLevel: ChatDetail = .compact
 
     static func label(_ level: ChatDetail) -> String {
         switch level {

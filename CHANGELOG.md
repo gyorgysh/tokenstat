@@ -22,10 +22,10 @@ at the end.
 - Chat sign-in guidance for installed coding agents. Open the agent's
   terminal on the chat's computer, follow browser or code instructions,
   and check sign-in without losing the chat draft.
-- Chat detail levels on Apple, Windows and Android. Compact folds an agent's
-  thinking and tool steps between visible replies, Standard folds
-  thinking and runs of reads, and Detailed shows every step with its output
-  open. Approvals, failures and handoffs always show.
+- Chat detail levels on Apple, Windows and Android. Compact, the default,
+  folds an agent's thinking and tool steps between visible replies, Standard
+  folds thinking and runs of reads, and Detailed shows every step with its
+  output open. Approvals, failures and handoffs always show.
 - Agents can ask you a question in the chat, with choices to tap or an
   answer of your own. In a chat that runs without asking first, the agent
   never stops for it: it says what it is going with and keeps working, and

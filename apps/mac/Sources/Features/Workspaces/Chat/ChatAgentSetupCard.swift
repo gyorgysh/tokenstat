@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 struct AgentSetupStatus: Decodable, Sendable {
     let readiness: String
@@ -216,6 +221,11 @@ struct AgentSignInSheet: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var error: String?
     @State private var checking = false
+    @State private var deviceCode: AgentDeviceCode?
+    @State private var codeCopied = false
+    /// Which copy the tick belongs to, so an older copy's timer cannot clear
+    /// the tick of a newer one.
+    @State private var copyGeneration = 0
     @State private var info: PtySessionInfo?
     @State private var checkMessage: String?
     @State private var starting = false
@@ -257,6 +267,7 @@ struct AgentSignInSheet: View {
                             .buttonStyle(SecondaryButtonStyle(small: true)).disabled(starting)
                     }
                 }
+                if let deviceCode { deviceCodePanel(deviceCode) }
                 if let terminal {
                     #if os(macOS)
                     TerminalViewRepresentable(session: terminal).id(terminal.id)
@@ -294,7 +305,87 @@ struct AgentSignInSheet: View {
         }
         .modalFrame(width: 860, height: 740)
         .task { await start() }
+        .task(id: info?.id) { await watchForDeviceCode() }
         .onDisappear { close() }
+    }
+
+    /// The code the terminal printed, already on the clipboard, with the page
+    /// already open. The buttons are for a second try: a closed tab, or a
+    /// clipboard that something else has since replaced.
+    private func deviceCodePanel(_ found: AgentDeviceCode) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.text("apple.agentsetup.code_label")).font(Theme.caption).foregroundStyle(.secondary)
+            Text(found.code).font(Theme.mono(24)).textSelection(.enabled)
+                .foregroundStyle(codeCopied ? Theme.accent : .primary)
+                .scaleEffect(codeCopied ? 1.04 : 1, anchor: .leading)
+            Text(L10n.text("apple.agentsetup.code_ready"))
+                .font(Theme.callout).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Button(codeCopied ? L10n.text("apple.agentsetup.code_copied") : L10n.text("apple.agentsetup.copy_code"),
+                       codeCopied ? .done : .copy) { copy(found.code) }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+                    .contentTransition(.symbolEffect(.replace))
+                Button(L10n.text("apple.agentsetup.open_page"), .external) { openInBrowser(found.url) }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.accent.opacity(0.20)))
+    }
+
+    /// A device sign-in prints a page and a code, then waits. Read them off
+    /// the screen, copy the code and open the page, once, so the person only
+    /// has to paste. The terminal stays the sign-in either way, so a screen
+    /// this does not recognise loses nothing.
+    private func watchForDeviceCode() async {
+        guard backend.signInFlow?.kind == "deviceCode", info != nil, deviceCode == nil else { return }
+        // The code needs a round trip to the provider first. A minute covers
+        // a slow network, and after that the screen is not going to change.
+        for _ in 0..<240 {
+            try? await Task.sleep(for: .milliseconds(250))
+            if Task.isCancelled { return }
+            guard let found = AgentDeviceCode.parse(screenText) else { continue }
+            deviceCode = found
+            copy(found.code)
+            openInBrowser(found.url)
+            return
+        }
+    }
+
+    private var screenText: String {
+        #if os(macOS)
+        terminal?.followSnapshot(lines: 200) ?? ""
+        #else
+        terminal?.screenText() ?? ""
+        #endif
+    }
+
+    /// Copy, then say so where the person is looking: the button turns into
+    /// a tick and the code itself pulses, then both settle back.
+    private func copy(_ code: String) {
+        ChatClipboard.copy(code)
+        copyGeneration += 1
+        let generation = copyGeneration
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.6)) { codeCopied = true }
+        AccessibilityNotification.Announcement(L10n.text("apple.agentsetup.code_copied")).post()
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.6))
+            guard generation == copyGeneration else { return }
+            withAnimation(.easeOut(duration: 0.25)) { codeCopied = false }
+        }
+    }
+
+    /// Straight to the system's default browser. The environment's `openURL`
+    /// is the chat's link router on the Mac, which asks where to open a link
+    /// with a sheet of its own, and a sheet cannot open over this one.
+    private func openInBrowser(_ url: URL) {
+        #if os(macOS)
+        NSWorkspace.shared.open(url)
+        #else
+        UIApplication.shared.open(url)
+        #endif
     }
 
     private func start() async {

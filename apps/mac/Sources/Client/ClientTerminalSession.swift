@@ -446,6 +446,16 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
 
     func followOutput() { (terminalView as? ClientTerminalInputView)?.followLatest() }
 
+    /// The visible screen as plain text. Empty until the view exists, and it
+    /// never creates one: the sheet that reads it does not own the mount.
+    func screenText() -> String {
+        guard let terminal = terminalView?.getTerminal() else { return "" }
+        let dims = terminal.getDims()
+        let top = terminal.getTopVisibleRow()
+        return terminal.getText(start: Position(col: 0, row: top),
+                                end: Position(col: max(0, dims.cols), row: top + max(0, dims.rows)))
+    }
+
     /// Put the keyboard away, or bring it back, without ending the session.
     ///
     /// Hiding it is what makes a phone readable, and until the terminal is
