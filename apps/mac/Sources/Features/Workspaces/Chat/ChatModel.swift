@@ -1908,8 +1908,18 @@ final class ChatModel {
     private var queuedReference: WorkReference?
     @ObservationIgnored private var sendingNow = false
     private var authorizedQueueItems: Set<String> = []
+    /// The message the queue sends next. One held for another agent's
+    /// sign-in waits in its place, for the person to switch back or remove
+    /// it, and does not hold up the messages behind it for this agent.
+    private var queueHead: ChatQueuedMessage? {
+        queued.first { item in
+            guard let held = item.signInBackend else { return true }
+            return held == selected?.backend
+        }
+    }
+
     var queuePaused: Bool {
-        guard let first = queued.first else { return false }
+        guard let first = queueHead else { return false }
         return first.signInBackend != nil || !authorizedQueueItems.contains(first.id) || first.delivery != .waiting
     }
 
@@ -2052,7 +2062,7 @@ final class ChatModel {
         if let note = selected?.pendingSteer?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
             return
         }
-        guard !busy, !sending, !sendingNow, !queuePaused, let item = queued.first else { return }
+        guard !busy, !sending, !sendingNow, !queuePaused, let item = queueHead else { return }
         if await deliverQueued(item, stopCurrent: false), !busy {
             await drainQueue()
         }
@@ -4035,13 +4045,16 @@ extension ChatDisplayItem {
                 ))
                 continue
             }
-            if event.kind == "answer" {
+            if event.kind == "answer" || event.kind == "answerWithdrawn" {
                 // Lands on its question's card. An answer whose question is
-                // on an older page than this one waits for that page.
+                // on an older page than this one waits for that page. A
+                // withdrawn answer never reached the agent, so the card opens
+                // again.
                 if let questionID = event.questionID, let at = questionIndex[questionID],
                    case var .question(question) = items[at].kind {
-                    question.answer = event.text ?? ""
-                    question.delivery = event.delivery
+                    let withdrawn = event.kind == "answerWithdrawn"
+                    question.answer = withdrawn ? nil : event.text ?? ""
+                    question.delivery = withdrawn ? nil : event.delivery
                     items[at] = ChatDisplayItem(id: items[at].id, kind: .question(question))
                 }
                 continue

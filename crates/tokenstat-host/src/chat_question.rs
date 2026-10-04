@@ -36,6 +36,9 @@ pub const FENCE: &str = "tokenstat-question";
 const QUESTION_MAX_CHARS: usize = 600;
 const OPTION_MAX_CHARS: usize = 200;
 const MAX_OPTIONS: usize = 8;
+/// Far more than a question's own caps can fill, even with every option
+/// written at length and escaped. Past this an unclosed block is given up.
+const BLOCK_MAX_BYTES: usize = 64 * 1024;
 /// An answer is one note on the agent's next step, the same size as a steer.
 pub const ANSWER_MAX_CHARS: usize = 1_500;
 
@@ -78,6 +81,13 @@ impl Scanner {
         found
     }
 
+    /// The caller dropped `removed` bytes from the front of the reply, which
+    /// it does to bound a long turn's memory. Offsets move with the text, so
+    /// the next scan neither runs past the end nor skips what is still there.
+    pub fn shift(&mut self, removed: usize) {
+        self.from = self.from.saturating_sub(removed);
+    }
+
     /// The last scan, once the reply is complete. A reply may end on its
     /// closing fence with no newline after it, which a growing reply never
     /// treats as finished.
@@ -116,7 +126,18 @@ fn next_block<'a>(text: &'a str, from: &mut usize) -> Option<(&'a str, usize)> {
             continue;
         }
         let body_start = at + 3 + newline + 1;
-        let close = closing_fence(text, body_start)?;
+        let Some(close) = closing_fence(text, body_start) else {
+            // A question is a few lines of JSON. A block that has run this
+            // long without closing is not one, and waiting on it would rescan
+            // the whole rest of the reply on every chunk and hide every later
+            // question behind it.
+            if text.len() - body_start > BLOCK_MAX_BYTES {
+                search = at + 3;
+                *from = search;
+                continue;
+            }
+            return None;
+        };
         return Some((&text[body_start..close.0], close.1));
     }
 }
@@ -277,6 +298,29 @@ mod tests {
         let finished = format!("{prose}`{FENCE}\n{{\"question\":\"Pick?\"}}\n```\n");
         assert_eq!(scanner.scan(&finished).len(), 1);
         assert!(scanner.scan(&finished).is_empty());
+    }
+
+    #[test]
+    fn a_trimmed_reply_keeps_finding_questions() {
+        let mut scanner = Scanner::default();
+        let mut text = "x".repeat(1_000);
+        assert!(scanner.scan(&text).is_empty());
+        // The caller drops the front of a long reply to bound its memory.
+        text.drain(..900);
+        scanner.shift(900);
+        text.push_str(&format!("\n{}", block(r#"{"question":"Still here?"}"#)));
+        assert_eq!(scanner.scan(&text).len(), 1);
+    }
+
+    #[test]
+    fn an_unclosed_block_does_not_hide_later_questions() {
+        let mut scanner = Scanner::default();
+        let runaway = format!("```{FENCE}\n{}\n", "y\n".repeat(BLOCK_MAX_BYTES));
+        assert!(scanner.scan(&runaway).is_empty());
+        let later = format!("{runaway}{}", block(r#"{"question":"Later?"}"#));
+        let found = scanner.scan(&later);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].question, "Later?");
     }
 
     #[test]

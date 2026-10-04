@@ -421,13 +421,19 @@ fun coalesceTranscript(
             }
             continue
         }
-        if (kind == "answer") {
+        if (kind == "answer" || kind == "answerwithdrawn") {
             // Lands on its question's card. One whose question is on an
-            // older page waits for that page.
+            // older page waits for that page. A withdrawn answer never
+            // reached the agent, so the card opens again.
             val at = ev.str("questionId")?.let { questionIndex[it] }
             val row = at?.let { items.getOrNull(it) } as? ChatDisplayItem.Question
             if (at != null && row != null) {
-                items[at] = row.copy(question = row.question.copy(answer = ev.str("text") ?: "", delivery = ev.str("delivery")))
+                val question = if (kind == "answer") {
+                    row.question.copy(answer = ev.str("text") ?: "", delivery = ev.str("delivery"))
+                } else {
+                    row.question.copy(answer = null, delivery = null)
+                }
+                items[at] = row.copy(question = question)
             }
             continue
         }

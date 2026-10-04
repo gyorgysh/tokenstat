@@ -2576,7 +2576,7 @@
   "android.agentsetup.check_again": "Check sign-in",
   "android.agentsetup.check_setup": "Check {0} setup",
   "android.agentsetup.draft_kept": "Sign in to {0} before sending. Your draft is still here.",
-  "android.agentsetup.finished": "I finished — check sign-in",
+  "android.agentsetup.finished": "I finished, check sign-in",
   "android.agentsetup.open_terminal": "Open sign-in terminal",
   "android.agentsetup.remote": "Sign in on the computer running this chat. Open its terminal here, complete setup, then check again.",
   "android.agentsetup.setup_title": "Set up {0}",
@@ -2609,7 +2609,7 @@
   "android.pullcreate.step_publish": "3. Publish your branch",
   "android.pullcreate.step_describe": "4. Describe the pull request",
   "android.agentsetup.step_open": "1. Follow the sign-in prompt in the terminal below.",
-  "android.agentsetup.step_return": "3. When setup is complete, choose “I finished — check sign-in” and return to your draft.",
+  "android.agentsetup.step_return": "3. When setup is complete, choose “I finished, check sign-in” and return to your draft.",
   "android.pullcreate.existing_help": "Open the existing pull request to update its description. Your writing is kept in this draft.",
   "android.agentsetup.legacy": "Open a workspace terminal and choose {0} to complete setup. Update tokenstat on the chat’s computer to use guided sign-in here."
 }

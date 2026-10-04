@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
+// Compile with RetainedPaneLayout.swift.
 import SwiftUI
 
 @main

@@ -223,7 +223,7 @@ struct ChatEventRow: View {
             .font(Theme.caption)
             .foregroundStyle(.secondary)
         case let .failed(text):
-            if ChatAuthenticationFailure.needsSignIn(text, backend: "claude") {
+            if ChatAuthenticationFailure.isClaudeSignInRefusal(text) {
                 Label(L10n.text("apple.agentsetup.history"), systemImage: "person.crop.circle.badge.key")
                     .font(Theme.caption).foregroundStyle(.secondary)
             } else {

@@ -56,27 +56,27 @@ pub fn create(
             "Choose different source and target branches".into(),
         ));
     }
+    // Branch names may hold characters a query string must escape.
+    let query: String = reqwest::Url::parse_with_params(
+        "https://query.invalid/",
+        &[
+            ("state", "open"),
+            ("head", &format!("{}:{head}", repo.owner)),
+            ("base", base),
+        ],
+    )
+    .map_err(|error| ForgeError::Api(error.to_string()))?
+    .query()
+    .unwrap_or_default()
+    .to_owned();
     with_credential(repo, |credential| {
-        let mut url = reqwest::Url::parse(&format!(
-            "{}/repos/{}/{}/pulls",
-            rest_base(repo),
-            repo.owner,
-            repo.repo
-        ))
-        .map_err(|error| ForgeError::Api(error.to_string()))?;
-        url.query_pairs_mut()
-            .append_pair("state", "open")
-            .append_pair("head", &format!("{}:{head}", repo.owner))
-            .append_pair("base", base);
-        let response = auth::http_client()?
-            .get(url)
-            .header("accept", "application/vnd.github+json")
-            .header("x-github-api-version", "2022-11-28")
-            .bearer_auth(credential.bearer())
-            .send()
-            .map_err(ForgeError::from)?;
-        let matches: Value =
-            serde_json::from_str(&response_text(response)?).map_err(ForgeError::from)?;
+        let matches = rest(
+            repo,
+            credential,
+            Method::GET,
+            &format!("/repos/{}/{}/pulls?{query}", repo.owner, repo.repo),
+            Value::Null,
+        )?;
         let rows = matches.as_array().ok_or_else(|| ForgeError::Api("GitHub did not confirm whether this branch already has a pull request. Check the list before retrying.".into()))?;
         if let Some(pull) = rows.first() {
             return created_pull(pull, true).map_err(Into::into);

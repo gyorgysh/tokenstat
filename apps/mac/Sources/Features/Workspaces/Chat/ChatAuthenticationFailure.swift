@@ -29,8 +29,16 @@ enum ChatAuthenticationFailure {
         latestRecovery(in: items, backend: backend)?.failureID
     }
 
+    /// Whether this chat, on this backend, can be offered sign-in recovery
+    /// for the failure. Only a Claude chat can: the guided terminal is Claude's.
     static func needsSignIn(_ text: String, backend: String) -> Bool {
-        guard ["claude", "claude_code"].contains(backend) else { return false }
+        ["claude", "claude_code"].contains(backend) && isClaudeSignInRefusal(text)
+    }
+
+    /// Whether a failure row is Claude's normalized sign-in refusal. The host
+    /// writes this wording only for a Claude turn, so the text names its own
+    /// backend, including in a chat that has since moved to another agent.
+    static func isClaudeSignInRefusal(_ text: String) -> Bool {
         let lower = text.lowercased()
         return lower.hasPrefix("claude code is not signed in")
             || lower.hasPrefix("claude code's sign-in on this computer has expired")
@@ -43,7 +51,7 @@ enum ChatAuthenticationFailure {
         var turn: [ChatDisplayItem] = []
         func flush() {
             let refused = turn.contains { if case let .failed(text) = $0.kind {
-                return needsSignIn(text, backend: "claude")
+                return isClaudeSignInRefusal(text)
             }; return false }
             output += turn.filter { item in
                 guard refused else { return true }

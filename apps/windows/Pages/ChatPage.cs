@@ -2307,21 +2307,40 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (generation != _openGeneration) return;
         _chats = _steerOverlay.Apply(AsArray(chats.Result), request, _chats);
         _backends = AsArray(backends.Result);
+        // Before the sign-in probe, which can take seconds to answer.
+        _personas = AsArray(personas.Result, "personas");
         var selectedBackend = Backend(Format.Text(_openChat, "backend"));
         if (selectedBackend is not null && Format.Flag(selectedBackend, "canCheckSignIn") && Format.Text(selectedBackend, "id") is "claude" or "claude_code" or "codex")
         {
-            try
-            {
-                var status = await CallChatAsync("launcher.checkSignIn", new JsonObject { ["id"] = Format.Text(selectedBackend, "launcherId") });
-                if (generation == _openGeneration)
-                {
-                    selectedBackend["readiness"] = Format.Text(status, "readiness", "unknown");
-                    selectedBackend["signInVerified"] = Format.Flag(status, "checked");
-                }
-            }
-            catch { /* Older hosts retain their file-based, three-valued answer. */ }
+            // In the background. The CLI can take seconds to answer, and the
+            // chat, its menus and its personas are ready without it.
+            _ = CheckSignInAsync(selectedBackend, generation);
         }
-        _personas = AsArray(personas.Result, "personas");
+    }
+
+    private bool _checkingSignIn;
+
+    /// <summary>
+    /// Ask the agent's own CLI whether it is signed in, one probe at a time,
+    /// and repaint only when the answer changes what the chat shows.
+    /// </summary>
+    private async Task CheckSignInAsync(JsonNode backend, int generation)
+    {
+        if (_checkingSignIn) return;
+        _checkingSignIn = true;
+        try
+        {
+            var status = await CallChatAsync("launcher.checkSignIn", new JsonObject { ["id"] = Format.Text(backend, "launcherId") });
+            if (generation != _openGeneration) return;
+            var readiness = Format.Text(status, "readiness", "unknown");
+            var verified = Format.Flag(status, "checked");
+            if (Format.Text(backend, "readiness") == readiness && Format.Flag(backend, "signInVerified") == verified) return;
+            backend["readiness"] = readiness;
+            backend["signInVerified"] = verified;
+            PaintConversation();
+        }
+        catch { /* Older hosts retain their file-based, three-valued answer. */ }
+        finally { _checkingSignIn = false; }
     }
 
     private JsonNode? FindChat(string id)
@@ -2481,14 +2500,17 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 }
                 continue;
             }
-            if (kind == "answer")
+            if (kind is "answer" or "answerWithdrawn")
             {
                 // Lands on its question's card. One whose question is on an
-                // older page waits for that page.
+                // older page waits for that page. A withdrawn answer never
+                // reached the agent, so the card opens again.
                 if (questions.TryGetValue(Format.Text(row, "questionId"), out var at) && items[at].Question is { } asked)
                 {
                     var card = items[at];
-                    card.Question = asked with { Answer = Format.Text(row, "text"), Delivery = Format.Text(row, "delivery") };
+                    card.Question = kind == "answer"
+                        ? asked with { Answer = Format.Text(row, "text"), Delivery = Format.Text(row, "delivery") }
+                        : asked with { Answer = null, Delivery = null };
                     items[at] = card;
                 }
                 continue;

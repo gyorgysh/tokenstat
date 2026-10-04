@@ -394,6 +394,33 @@ enum StoredEvent {
         delivery: String,
         at_ms: i64,
     },
+    /// An answer that was parked for the agent and never reached it: Stop,
+    /// a cleared note, a new message, or a restart dropped it. The question
+    /// is open again on every device.
+    AnswerWithdrawn {
+        #[serde(rename = "questionId")]
+        question_id: String,
+        at_ms: i64,
+    },
+}
+
+/// One answer riding a parked note, until the agent takes the note.
+struct ParkedAnswer {
+    question_id: String,
+    /// The words the answer added to the note, so a replaced or restored
+    /// note can be checked for whether it still carries them.
+    note: String,
+}
+
+/// Answers riding parked notes in this process, by conversation.
+///
+/// Mirrored by question id to a file beside a lease this process holds, so
+/// the next process can tell which answers died with this one and reopen
+/// their questions. See [`Store::withdraw_orphaned_answers`].
+#[derive(Default)]
+struct ParkedAnswers {
+    by_chat: HashMap<String, Vec<ParkedAnswer>>,
+    owner: Option<(crate::chat_receipts::OwnerLease, PathBuf)>,
 }
 
 /// What an incoming backend is told, and whether the person is told about it.
@@ -458,6 +485,9 @@ pub struct Store {
     /// removed note set this so a delivery that already holds the text comes
     /// back without launching. A person's own send, or a newer note, clears it.
     suppress_follow_up: Mutex<HashSet<String>>,
+    /// Answers that ride the parked note in `steers`. Never locked together
+    /// with `steers`, for the same reason as `suppress_follow_up`.
+    parked_answers: Mutex<ParkedAnswers>,
 }
 
 /// How `send` finished. A suppressed follow-up is a note Stop already retired,
@@ -583,6 +613,7 @@ impl Store {
             turn_tokens: Mutex::new(HashMap::new()),
             steers: Mutex::new(HashMap::new()),
             suppress_follow_up: Mutex::new(HashSet::new()),
+            parked_answers: Mutex::new(ParkedAnswers::default()),
         }
     }
 
@@ -638,7 +669,9 @@ impl Store {
             turn_tokens: Mutex::new(HashMap::new()),
             steers: Mutex::new(HashMap::new()),
             suppress_follow_up: Mutex::new(HashSet::new()),
+            parked_answers: Mutex::new(ParkedAnswers::default()),
         };
+        store.withdraw_orphaned_answers();
         for (id, backend) in interrupted {
             store.record_events(
                 &id,
@@ -1020,6 +1053,8 @@ impl Store {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&id);
+        // The agent has the note, and every answer riding it.
+        self.take_parked_answers(&id);
         let _ = self.mark_last_message(&id, at_ms, "user");
         Ok(Some(note))
     }
@@ -1054,10 +1089,16 @@ impl Store {
                 "That note is too long to ride the next step. Send it as its own message.".into(),
             );
         }
+        // A new note replaces the person's last one, never an answer riding
+        // beside it: the answer is already recorded against its question.
+        let parked = match self.parked_answer_notes(id) {
+            Some(answers) => format!("{note}\n\n{answers}"),
+            None => note.to_string(),
+        };
         self.steers
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(id.to_string(), note.to_string());
+            .insert(id.to_string(), parked);
         self.suppress_follow_up
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -1110,10 +1151,11 @@ impl Store {
                     let mut steers = self.steers.lock().unwrap_or_else(PoisonError::into_inner);
                     let merged = match steers.get(id) {
                         Some(existing) => format!("{existing}\n\n{note}"),
-                        None => note,
+                        None => note.clone(),
                     };
                     steers.insert(id.to_string(), merged);
                 }
+                self.park_answer(id, question_id, note);
                 self.suppress_follow_up
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
@@ -1143,7 +1185,9 @@ impl Store {
     fn open_question(&self, id: &str, question_id: &str) -> Result<String, String> {
         let (events, _) = self.events(id, 0)?;
         let mut asked = None;
+        let mut answered = false;
         for event in &events {
+            let about_it = event.get("questionId").and_then(Value::as_str) == Some(question_id);
             match event.get("kind").and_then(Value::as_str) {
                 Some("question")
                     if event.get("id").and_then(Value::as_str) == Some(question_id) =>
@@ -1153,13 +1197,14 @@ impl Store {
                         .and_then(Value::as_str)
                         .map(str::to_owned);
                 }
-                Some("answer")
-                    if event.get("questionId").and_then(Value::as_str) == Some(question_id) =>
-                {
-                    return Err("This question already has an answer.".into());
-                }
+                Some("answer") if about_it => answered = true,
+                // The answer never reached the agent, so the question is open.
+                Some("answerWithdrawn") if about_it => answered = false,
                 _ => {}
             }
+        }
+        if answered {
+            return Err("This question already has an answer.".into());
         }
         asked.ok_or_else(|| "That question is no longer in this conversation.".into())
     }
@@ -1184,13 +1229,26 @@ impl Store {
             return Ok(json!({ "delivered": false }));
         };
         match self.send_inner(id, &note, &[], None, None, None, true) {
-            Ok(SendOutcome::Started(chat)) => Ok(json!({
-                "delivered": true,
-                "conversation": chat,
-            })),
-            Ok(SendOutcome::Suppressed(_)) => Ok(json!({ "delivered": false })),
+            Ok(SendOutcome::Started(chat)) => {
+                self.take_parked_answers(id);
+                Ok(json!({
+                    "delivered": true,
+                    "conversation": chat,
+                }))
+            }
+            Ok(SendOutcome::Suppressed(_)) => {
+                self.reconcile_parked_answers(id);
+                Ok(json!({ "delivered": false }))
+            }
             Err(error) => {
                 self.restore_steer_if_idle(id, &note, &error);
+                if error.code == crate::error::DELIVERY_UNKNOWN {
+                    // It may well have launched. Reopening the question then
+                    // would invite the same answer twice.
+                    self.take_parked_answers(id);
+                } else {
+                    self.reconcile_parked_answers(id);
+                }
                 Err(error)
             }
         }
@@ -1230,6 +1288,183 @@ impl Store {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(id.to_string());
+        self.reconcile_parked_answers(id);
+    }
+
+    /// Remember an answer riding the parked note until the agent takes it.
+    fn park_answer(&self, id: &str, question_id: &str, note: String) {
+        let mut parked = self
+            .parked_answers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        parked
+            .by_chat
+            .entry(id.to_string())
+            .or_default()
+            .push(ParkedAnswer {
+                question_id: question_id.to_string(),
+                note,
+            });
+        self.persist_parked_answers(&mut parked);
+    }
+
+    /// Forget this conversation's parked answers, because the agent has them.
+    fn take_parked_answers(&self, id: &str) -> Vec<ParkedAnswer> {
+        let mut parked = self
+            .parked_answers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let Some(taken) = parked.by_chat.remove(id) else {
+            return Vec::new();
+        };
+        self.persist_parked_answers(&mut parked);
+        taken
+    }
+
+    /// The words of this conversation's parked answers, to keep beside a
+    /// note that replaces the person's last one.
+    fn parked_answer_notes(&self, id: &str) -> Option<String> {
+        let parked = self
+            .parked_answers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let answers = parked
+            .by_chat
+            .get(id)
+            .filter(|answers| !answers.is_empty())?;
+        Some(
+            answers
+                .iter()
+                .map(|answer| answer.note.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+        )
+    }
+
+    /// Reopen every parked answer whose words are no longer in the parked
+    /// note. Stop, a cleared note and a new message all drop the note, and an
+    /// answer recorded against its question would otherwise read as given to
+    /// an agent that never saw it.
+    fn reconcile_parked_answers(&self, id: &str) {
+        let note = self
+            .steers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(id)
+            .cloned();
+        let dropped = {
+            let mut parked = self
+                .parked_answers
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let Some(answers) = parked.by_chat.remove(id) else {
+                return;
+            };
+            let (kept, dropped): (Vec<_>, Vec<_>) = answers.into_iter().partition(|answer| {
+                note.as_deref()
+                    .is_some_and(|note| note.contains(&answer.note))
+            });
+            if !kept.is_empty() {
+                parked.by_chat.insert(id.to_string(), kept);
+            }
+            self.persist_parked_answers(&mut parked);
+            dropped
+        };
+        for answer in dropped {
+            let _ = self.append(
+                id,
+                &StoredEvent::AnswerWithdrawn {
+                    question_id: answer.question_id,
+                    at_ms: now_ms(),
+                },
+            );
+        }
+    }
+
+    /// Mirror this process's parked answers, by question id, to its own file.
+    ///
+    /// Best effort. A file that cannot be written costs only the reopening
+    /// after a restart, never the answer itself.
+    fn persist_parked_answers(&self, parked: &mut ParkedAnswers) {
+        if parked.owner.is_none() {
+            if parked.by_chat.is_empty() {
+                return;
+            }
+            let dir = self.root.join("parked-answers");
+            let mut bytes = [0u8; 12];
+            if fs::create_dir_all(&dir).is_err() || getrandom::fill(&mut bytes).is_err() {
+                return;
+            }
+            let name: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+            let Ok(Some(lease)) =
+                crate::chat_receipts::OwnerLease::try_acquire(&dir.join(format!("{name}.lock")))
+            else {
+                return;
+            };
+            parked.owner = Some((lease, dir.join(format!("{name}.json"))));
+        }
+        let Some((_, path)) = &parked.owner else {
+            return;
+        };
+        let ids: HashMap<&str, Vec<&str>> = parked
+            .by_chat
+            .iter()
+            .map(|(id, answers)| {
+                (
+                    id.as_str(),
+                    answers
+                        .iter()
+                        .map(|answer| answer.question_id.as_str())
+                        .collect(),
+                )
+            })
+            .collect();
+        if let Ok(body) = serde_json::to_vec(&ids) {
+            let _ = fs::write(path, body);
+        }
+    }
+
+    /// Reopen the questions whose answers were parked by a process that has
+    /// since ended. Its lease is free exactly when it is gone, and a parked
+    /// note never outlives the process that held it.
+    fn withdraw_orphaned_answers(&self) {
+        let dir = self.root.join("parked-answers");
+        let Ok(entries) = fs::read_dir(&dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let lock = path.with_extension("lock");
+            // A live owner still holds its lease and may yet deliver these.
+            let Ok(Some(lease)) = crate::chat_receipts::OwnerLease::try_acquire(&lock) else {
+                continue;
+            };
+            let parked: HashMap<String, Vec<String>> = fs::read(&path)
+                .ok()
+                .and_then(|body| serde_json::from_slice(&body).ok())
+                .unwrap_or_default();
+            for (id, questions) in parked {
+                // A removed conversation has nothing left to reopen.
+                if self.get(&id).is_err() {
+                    continue;
+                }
+                for question_id in questions {
+                    let _ = self.append(
+                        &id,
+                        &StoredEvent::AnswerWithdrawn {
+                            question_id,
+                            at_ms: now_ms(),
+                        },
+                    );
+                }
+            }
+            let _ = fs::remove_file(&path);
+            drop(lease);
+            let _ = fs::remove_file(&lock);
+        }
     }
 
     /// A follow-up is the note Stop may already have retired. A person's own
@@ -3086,6 +3321,7 @@ impl Store {
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
                     .remove(id);
+                self.reconcile_parked_answers(id);
             }
             OpenOptions::new()
                 .read(true)
@@ -3274,7 +3510,7 @@ impl Store {
                 if !chunk.bytes.is_empty() {
                     let _ = append_raw(raw_path, &chunk.bytes);
                     let events = parser.push_events(&chunk.bytes);
-                    collect_agent_text(&events, &mut assistant_text);
+                    questions.shift(collect_agent_text(&events, &mut assistant_text));
                     self.record_events(id, backend, events);
                     // Mid-turn, so the card is in front of the person while
                     // an answer can still reach this turn.
@@ -3295,11 +3531,11 @@ impl Store {
         {
             let _ = append_raw(raw_path, &chunk.bytes);
             let events = parser.push_events(&chunk.bytes);
-            collect_agent_text(&events, &mut assistant_text);
+            questions.shift(collect_agent_text(&events, &mut assistant_text));
             self.record_events(id, backend, events);
         }
         let events = parser.finish_events();
-        collect_agent_text(&events, &mut assistant_text);
+        questions.shift(collect_agent_text(&events, &mut assistant_text));
         self.record_events(id, backend, events);
         self.record_questions(id, backend, questions.finish(&assistant_text));
         self.record_response_attachments(id, backend, &assistant_text, response_output_dir);
@@ -4131,10 +4367,26 @@ fn safe_file_name(name: &str) -> String {
     }
 }
 
-fn collect_agent_text(events: &[Event], text: &mut String) {
+/// Append the turn's reply text, and say how many bytes were dropped from the
+/// front, so anything holding an offset into the text can move it along.
+///
+/// A tool call, an edit or a thought between two runs of text ends a line.
+/// The agent wrote them as separate blocks, and joined back to back a fence
+/// that closed one block or opened the next would sit mid-line, where the
+/// question scanner rightly refuses to see a fence.
+fn collect_agent_text(events: &[Event], text: &mut String) -> usize {
     for event in events {
-        if let Event::Text { delta } = event {
-            text.push_str(delta);
+        match event {
+            Event::Text { delta } => text.push_str(delta),
+            Event::ToolStart { .. }
+            | Event::ToolEnd { .. }
+            | Event::Edit { .. }
+            | Event::Thinking { .. }
+                if !text.is_empty() && !text.ends_with('\n') =>
+            {
+                text.push('\n');
+            }
+            _ => {}
         }
     }
     // Trim in one pass once the buffer is twice the tail, rather than moving
@@ -4145,7 +4397,9 @@ fn collect_agent_text(events: &[Event], text: &mut String) {
             cut += 1;
         }
         text.drain(..cut);
+        return cut;
     }
+    0
 }
 
 /// Extract only Markdown destinations that unambiguously name a local file.
@@ -4507,7 +4761,8 @@ fn last_message_in(path: &Path) -> Option<(i64, &'static str)> {
             StoredEvent::Approval { .. }
             | StoredEvent::Handoff { .. }
             | StoredEvent::Question { .. }
-            | StoredEvent::Answer { .. } => None,
+            | StoredEvent::Answer { .. }
+            | StoredEvent::AnswerWithdrawn { .. } => None,
         }
     })
 }
@@ -5725,6 +5980,106 @@ mod tests {
             .unwrap();
         assert_eq!(answer["delivery"], "queued");
         assert!(parked_note(&store, "chat-test").unwrap().contains("yes"));
+    }
+
+    fn withdrawn(store: &Store, id: &str, question: &str) -> usize {
+        let (events, _) = store.events(id, 0).unwrap();
+        events
+            .iter()
+            .filter(|event| event["kind"] == "answerWithdrawn" && event["questionId"] == question)
+            .count()
+    }
+
+    #[test]
+    fn a_dropped_answer_reopens_its_question() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        prepare_live_chat(&store, "chat-test");
+        retune_chat(&store, "chat-test", "claude", "standard");
+        let question = ask(&store, "chat-test", "Which database?");
+        store.answer_question("chat-test", &question, "B").unwrap();
+        assert_eq!(withdrawn(&store, "chat-test", &question), 0);
+
+        // Clearing the note, like Stop, takes the answer with it.
+        store.steer_clear("chat-test").unwrap();
+        assert_eq!(withdrawn(&store, "chat-test", &question), 1);
+        let again = store.answer_question("chat-test", &question, "A").unwrap();
+        assert_eq!(again["delivery"], "note", "the question is open again");
+    }
+
+    #[test]
+    fn a_new_note_keeps_a_parked_answer_and_the_agent_takes_both() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        prepare_live_chat(&store, "chat-test");
+        retune_chat(&store, "chat-test", "claude", "standard");
+        let question = ask(&store, "chat-test", "Which database?");
+        store.answer_question("chat-test", &question, "B").unwrap();
+        store.steer("chat-test", "also check the tests").unwrap();
+        let parked = parked_note(&store, "chat-test").unwrap();
+        assert!(parked.starts_with("also check the tests\n\n"), "{parked}");
+        assert!(parked.ends_with("Answer to your question \"Which database?\": B"));
+
+        let token = store.register_turn_token("chat-test", "claude").unwrap();
+        assert_eq!(store.take_steer_for_token(&token).unwrap(), Some(parked));
+        // Delivered: nothing is left to withdraw, whatever happens next.
+        store.steer_clear("chat-test").unwrap();
+        assert_eq!(withdrawn(&store, "chat-test", &question), 0);
+    }
+
+    #[test]
+    fn answers_left_parked_by_an_ended_process_are_reopened_once() {
+        let root = tempfile::tempdir().unwrap();
+        let reader = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&reader, "chat-test");
+        let owner = Store::at(root.path().join("chat"));
+        owner.park_answer("chat-test", "question-1", "note".into());
+
+        // The owner still holds its lease, so its answers may yet arrive.
+        reader.withdraw_orphaned_answers();
+        assert_eq!(withdrawn(&reader, "chat-test", "question-1"), 0);
+
+        drop(owner);
+        reader.withdraw_orphaned_answers();
+        assert_eq!(withdrawn(&reader, "chat-test", "question-1"), 1);
+        reader.withdraw_orphaned_answers();
+        assert_eq!(
+            withdrawn(&reader, "chat-test", "question-1"),
+            1,
+            "only once"
+        );
+    }
+
+    #[test]
+    fn a_question_beside_a_tool_call_is_still_found() {
+        let fence = crate::chat_question::FENCE;
+        let tool = || Event::ToolStart {
+            call_id: "t1".into(),
+            verb: "Read".into(),
+            target: "schema.sql".into(),
+            input: Value::Null,
+        };
+        let text = |delta: &str| Event::Text {
+            delta: delta.into(),
+        };
+        let mut reply = String::new();
+        let mut scanner = crate::chat_question::Scanner::default();
+        let mut found = Vec::new();
+        for batch in [
+            vec![text("Checking the schema.")],
+            vec![tool()],
+            vec![text(&format!(
+                "```{fence}\n{{\"question\":\"Which database?\",\"default\":\"SQLite\"}}\n```"
+            ))],
+            vec![tool()],
+            vec![text("Going with SQLite.")],
+        ] {
+            scanner.shift(collect_agent_text(&batch, &mut reply));
+            found.extend(scanner.scan(&reply));
+        }
+        found.extend(scanner.finish(&reply));
+        assert_eq!(found.len(), 1, "{reply:?}");
+        assert_eq!(found[0].question, "Which database?");
     }
 
     #[test]

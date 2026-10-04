@@ -108,25 +108,12 @@ private struct MarkdownLinkTracking: NSViewRepresentable {
         var changed: ((URL?) -> Void)?
         private var current: URL?
         private var tracking: NSTrackingArea?
-        private var monitor: Any?
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            stop()
-            guard window != nil else { return }
-            // Selection overlays can own mouse-move delivery. Observe only
-            // this window and always return the original event unchanged.
-            monitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown, .leftMouseDragged]) { [weak self] event in
-                guard let self, event.window === self.window else { return event }
-                self.note(event)
-                return event
-            }
+            if window == nil { stop() }
         }
-        func stop() {
-            if let monitor { NSEvent.removeMonitor(monitor) }
-            monitor = nil
-        }
-        deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
+        func stop() { LinkHoverMonitor.leave(self) }
         override var isFlipped: Bool { true }
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
@@ -143,19 +130,55 @@ private struct MarkdownLinkTracking: NSViewRepresentable {
         override func mouseMoved(with event: NSEvent) { note(event) }
         override func cursorUpdate(with event: NSEvent) { note(event) }
         override func mouseExited(with event: NSEvent) {
+            LinkHoverMonitor.leave(self)
             if current != nil { current = nil; changed?(nil); toolTip = nil }
             NSCursor.arrow.set()
         }
-        private func note(_ event: NSEvent) {
+        fileprivate func note(_ event: NSEvent) {
             let point = convert(event.locationInWindow, from: nil)
             guard bounds.contains(point) else {
+                LinkHoverMonitor.leave(self)
                 if current != nil { current = nil; changed?(nil); toolTip = nil; NSCursor.arrow.set() }
                 return
             }
+            LinkHoverMonitor.enter(self)
             let url = map?.url(at: point)
             if current != url { current = url; changed?(url); toolTip = url?.absoluteString }
             (url == nil ? NSCursor.iBeam : NSCursor.pointingHand).set()
         }
+    }
+}
+
+/// One window-wide monitor for every paragraph with a link, not one each.
+///
+/// Selection overlays can own mouse-move delivery, so tracking areas alone
+/// miss moves over selectable text. The monitor fills that gap, but it only
+/// reaches the paragraphs the pointer is inside, which the tracking areas
+/// report on entry and exit. A long transcript then costs the same per mouse
+/// move as a short one. It always returns the event unchanged.
+@MainActor
+private enum LinkHoverMonitor {
+    private static var monitor: Any?
+    private static let inside = NSHashTable<MarkdownLinkTracking.TrackingView>.weakObjects()
+
+    static func enter(_ view: MarkdownLinkTracking.TrackingView) {
+        inside.add(view)
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown, .leftMouseDragged]) { event in
+            MainActor.assumeIsolated {
+                for view in inside.allObjects where view.window === event.window {
+                    view.note(event)
+                }
+            }
+            return event
+        }
+    }
+
+    static func leave(_ view: MarkdownLinkTracking.TrackingView) {
+        inside.remove(view)
+        guard inside.count == 0, let monitor else { return }
+        NSEvent.removeMonitor(monitor)
+        self.monitor = nil
     }
 }
 

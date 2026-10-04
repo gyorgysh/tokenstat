@@ -28,7 +28,7 @@ struct AgentSignInArtwork: View {
             PersonaMark(seed: seed, size: 58, state: ready ? .ok : .idle)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             Image(systemName: ready ? "checkmark" : "key.fill")
-                .font(.system(size: 12, weight: .bold))
+                .font(Theme.font(12, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 25, height: 25)
                 .background(ready ? Theme.success : Theme.accent, in: Circle())
@@ -46,16 +46,16 @@ struct AgentSignInSteps: View {
         HStack(spacing: 8) {
             ForEach(0..<3) { index in
                 if index > 0 {
-                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                    Image(systemName: "chevron.right").font(Theme.font(9, weight: .semibold))
                         .foregroundStyle(.tertiary)
                 }
                 HStack(spacing: 6) {
                     ZStack {
                         Circle().fill(index <= step ? Theme.accent : Theme.border)
                         if index < step {
-                            Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                            Image(systemName: "checkmark").font(Theme.font(9, weight: .bold)).foregroundStyle(.white)
                         } else {
-                            Text("\(index + 1)").font(.system(size: 10, weight: .bold))
+                            Text("\(index + 1)").font(Theme.font(10, weight: .bold))
                                 .foregroundStyle(index == step ? .white : .secondary)
                         }
                     }.frame(width: 20, height: 20)

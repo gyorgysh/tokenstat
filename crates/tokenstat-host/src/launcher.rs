@@ -572,12 +572,21 @@ pub(crate) fn check_sign_in(id: &str) -> Result<Value, String> {
     let args: &[&str] = match id {
         "claude_code" => &["auth", "status"],
         "codex" => &["login", "status"],
-        _ => return Ok(crate::agent_readiness::describe(id, true)),
+        _ => {
+            // File evidence only. A missing login file is not the CLI saying
+            // it is signed out (an environment key has no file at all), so it
+            // must never be reported as checked, which lets a client stop a send.
+            let mut result = crate::agent_readiness::describe(id, true);
+            result["checked"] = json!(false);
+            return Ok(result);
+        }
     };
     let mut result = crate::agent_readiness::describe(id, true);
     // Older CLI versions may lack a status command. A timeout or an unknown
     // response proves neither signed-in nor signed-out.
-    let state = probe_sign_in(&command, args, id).unwrap_or_else(|| {
+    let probe = probe_sign_in(&command, args, id);
+    let probed = probe.is_some();
+    let state = probe.unwrap_or_else(|| {
         // An older CLI or a Windows npm shim may not support this process
         // probe. Keep positive saved-login evidence; inconclusive failures
         // must not block a working environment/provider credential.
@@ -588,7 +597,9 @@ pub(crate) fn check_sign_in(id: &str) -> Result<Value, String> {
         }
     });
     result["readiness"] = json!(state);
-    result["checked"] = json!(state != "unknown");
+    // Only the CLI's own answer counts as checked. A fallback to saved-login
+    // evidence keeps its readiness but is not proof either way.
+    result["checked"] = json!(probed && state != "unknown");
     result["signedIn"] = match state {
         "signedIn" => json!(true),
         "needsSignIn" => json!(false),
@@ -598,6 +609,13 @@ pub(crate) fn check_sign_in(id: &str) -> Result<Value, String> {
 }
 
 fn probe_sign_in(command: &str, args: &[&str], id: &str) -> Option<&'static str> {
+    status_readiness(id, &run_probe(command, args)?)
+}
+
+/// Run one of an agent's own commands to completion, for what it prints on
+/// stdout and stderr. None when it cannot start or takes longer than five
+/// seconds, which is killed rather than left behind.
+fn run_probe(command: &str, args: &[&str]) -> Option<[Vec<u8>; 2]> {
     use std::io::Read;
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
@@ -648,11 +666,35 @@ fn probe_sign_in(command: &str, args: &[&str], id: &str) -> Option<&'static str>
         }
         std::thread::sleep(Duration::from_millis(25));
     }
-    let parts = [
+    Some([
         rx.recv_timeout(Duration::from_millis(200)).ok()?,
         rx.recv_timeout(Duration::from_millis(200)).ok()?,
-    ];
-    status_readiness(id, &parts)
+    ])
+}
+
+/// The arguments that start this agent's sign-in, for the version installed.
+///
+/// Claude Code gained `claude auth login` along the way. An older version
+/// answers `claude auth --help` with its general help, and exits zero either
+/// way, so the help text decides. Without the subcommand, plain `claude` is
+/// its documented first-launch login. Anything inconclusive keeps the
+/// current command.
+fn sign_in_args(id: &str, command: &str) -> &'static [&'static str] {
+    let args = crate::agent_readiness::sign_in(id).map_or(&[][..], |flow| flow.args);
+    if id == "claude_code"
+        && let Some(parts) = run_probe(command, &["auth", "--help"])
+        && !claude_has_auth_login(&parts)
+    {
+        return &[];
+    }
+    args
+}
+
+fn claude_has_auth_login(parts: &[Vec<u8>]) -> bool {
+    parts.iter().any(|part| {
+        let text = String::from_utf8_lossy(part);
+        text.contains("claude auth") && text.contains("login")
+    })
 }
 
 fn status_readiness(id: &str, parts: &[Vec<u8>]) -> Option<&'static str> {
@@ -695,7 +737,6 @@ pub(crate) fn sign_in(id: &str, rows: u16, cols: u16, dark: Option<bool>) -> Res
             "This profile has no sign-in. Choose an installed command-line agent to set up.".into(),
         );
     }
-    let args = crate::agent_readiness::sign_in(id).map_or(&[][..], |flow| flow.args);
     let path = search_path();
     let home = user_home();
     let command = if absolute_command(profile.command) && is_executable(Path::new(profile.command))
@@ -705,6 +746,7 @@ pub(crate) fn sign_in(id: &str, rows: u16, cols: u16, dark: Option<bool>) -> Res
         resolve_profile(profile, &path, Path::new(&home))
             .ok_or_else(|| format!("{} is not installed on this machine", profile.name))?
     };
+    let args = sign_in_args(id, &command);
     let info = tokenstat_pty::manager()
         .spawn(&tokenstat_pty::Spawn {
             command,
@@ -1408,6 +1450,19 @@ fn nvm_bin_paths(home: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_older_claude_without_auth_login_signs_in_with_plain_claude() {
+        let has =
+            |text: &str| super::claude_has_auth_login(&[text.as_bytes().to_vec(), Vec::new()]);
+        assert!(has(
+            "Usage: claude auth [options] [command]\n\nCommands:\n  login [options]   Sign in"
+        ));
+        // An older CLI prints its general help for an unknown subcommand.
+        assert!(!has(
+            "Usage: claude [options] [command] [prompt]\n\nClaude Code - starts an interactive session"
+        ));
+    }
+
     #[test]
     fn login_checks_require_an_explicit_cli_answer() {
         let classify = |id, text: &str| super::status_readiness(id, &[text.as_bytes().to_vec()]);

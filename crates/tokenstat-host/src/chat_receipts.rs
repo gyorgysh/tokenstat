@@ -203,37 +203,61 @@ pub(crate) struct RunnerLease {
     _path: PathBuf,
 }
 
+/// An exclusive lock on `path` without waiting, or None when someone else
+/// holds it. The lock goes with the process, however that process ends.
+fn try_lock_exclusive(path: &Path) -> Result<Option<File>, String> {
+    let file = private_options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .map_err(|error| error.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        loop {
+            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+                break;
+            }
+            let error = std::io::Error::last_os_error();
+            if error.kind() == std::io::ErrorKind::WouldBlock {
+                return Ok(None);
+            }
+            if error.kind() != std::io::ErrorKind::Interrupted {
+                return Err(error.to_string());
+            }
+        }
+    }
+    #[cfg(windows)]
+    if !crate::win32::try_lock(&file, false, true) {
+        return Ok(None);
+    }
+    Ok(Some(file))
+}
+
+/// Held by one process for as long as it lives, to say that a file of state
+/// beside it still has an owner. Taking it from another process proves that
+/// owner is gone. Not a runner, so it never counts as a running turn.
+pub(crate) struct OwnerLease {
+    _lock: FileLock,
+}
+
+impl OwnerLease {
+    pub(crate) fn try_acquire(path: &Path) -> Result<Option<Self>, String> {
+        Ok(try_lock_exclusive(path)?.map(|file| Self {
+            _lock: FileLock(file),
+        }))
+    }
+}
+
 impl RunnerLease {
     pub(crate) fn try_acquire(root: &Path, id: &str) -> Result<Option<Self>, String> {
         let name = digest(id, &[]).replace(':', "-");
         let path = root.join(format!("runner-{name}.lock"));
-        let file = private_options()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&path)
-            .map_err(|error| error.to_string())?;
-        #[cfg(unix)]
-        {
-            use std::os::fd::AsRawFd;
-            loop {
-                if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
-                    break;
-                }
-                let error = std::io::Error::last_os_error();
-                if error.kind() == std::io::ErrorKind::WouldBlock {
-                    return Ok(None);
-                }
-                if error.kind() != std::io::ErrorKind::Interrupted {
-                    return Err(error.to_string());
-                }
-            }
-        }
-        #[cfg(windows)]
-        if !crate::win32::try_lock(&file, false, true) {
+        let Some(file) = try_lock_exclusive(&path)? else {
             return Ok(None);
-        }
+        };
         tracked_running_leases()
             .lock()
             .unwrap_or_else(|e| e.into_inner())

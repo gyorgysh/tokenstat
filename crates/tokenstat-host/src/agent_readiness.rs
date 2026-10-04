@@ -93,16 +93,10 @@ const STORES: &[Store] = &[
         expiry: None,
         keychain_on_macos: false,
     },
-    Store {
-        id: "opencode",
-        paths: &[
-            ".local/share/opencode/auth.json",
-            "Library/Application Support/opencode/auth.json",
-        ],
-        home_var: None,
-        expiry: None,
-        keychain_on_macos: false,
-    },
+    // opencode is deliberately absent. Its free models work with no login at
+    // all, so a missing credentials file says nothing about whether it can
+    // answer, and reading it as "needs sign-in" would send somebody to set up
+    // an account they do not need.
 ];
 
 /// Claude Code writes its OAuth expiry as milliseconds, in the clear, beside
