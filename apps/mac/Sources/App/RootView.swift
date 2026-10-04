@@ -73,6 +73,7 @@ struct RootView: View {
     @State private var connection = ConnectionModel()
     @State private var isInspectorPresented = true
     @AppStorage(ChatBrowserPreferences.opensLinksKey) private var opensChatLinksInBrowser = true
+    @State private var pendingChatLink: PendingChatLink?
     @AppStorage("chat.browserPaneWidth") private var browserPaneWidth = 520.0
     @State private var browserResizeStart: Double?
     @State private var browserLiveWidth: Double?
@@ -509,6 +510,7 @@ struct RootView: View {
             workspaceBrowserURLs = [:]
             browserWorkspaceID = nil
             terminalWorkspaceID = nil
+            pendingChatLink = nil
             worktreeProject = nil
             await BridgeLaunch.wait()
             await savedWorkCatalog.observe(scope: WorkSessionContext.shared.scope)
@@ -533,6 +535,19 @@ struct RootView: View {
             }.modalFrame(width: 580, height: 610)
         }
         .sheet(item: $savedConversation) { DesktopSavedConversation(destination: $0) }
+        .sheet(item: $pendingChatLink) { link in
+            ChatLinkOpenSheet(url: link.url, preferred: opensChatLinksInBrowser ? .tokenstat : .system,
+                              onOpen: { destination, remember in
+                pendingChatLink = nil
+                guard link.scope == WorkSessionContext.shared.scope else { return }
+                if remember { ChatBrowserPreferences.remember(destination) }
+                if destination == .tokenstat {
+                    openChatBrowser(link.url, workspaceID: link.workspaceID)
+                } else {
+                    NSWorkspace.shared.open(link.url)
+                }
+            }, onClose: { pendingChatLink = nil })
+        }
         .sheet(item: $savedFolder) { destination in
             WorkFolderCacheSettings(destination: destination)
         }
@@ -783,14 +798,32 @@ struct RootView: View {
         .toolbar(removing: .sidebarToggle)
         .toolbarBackground(.hidden, for: .windowToolbar)
         .environment(\.openURL, OpenURLAction { url in
-            guard route.workspaceSection == .chat, opensChatLinksInBrowser,
+            guard route.workspaceSection == .chat,
                   ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
                   let id = route.workspaceID else { return .systemAction }
-            workspaceBrowserURLs[id] = url.absoluteString
-            terminalWorkspaceID = nil
-            browserWorkspaceID = id
+            switch ChatBrowserPreferences.savedDestination() {
+            case nil:
+                pendingChatLink = PendingChatLink(url: url, workspaceID: id, scope: WorkSessionContext.shared.scope)
+            case .tokenstat:
+                openChatBrowser(url, workspaceID: id)
+            case .system:
+                return .systemAction
+            }
             return .handled
         })
+    }
+
+    private struct PendingChatLink: Identifiable {
+        let id = UUID()
+        let url: URL
+        let workspaceID: String
+        let scope: WorkReference.Scope?
+    }
+
+    private func openChatBrowser(_ url: URL, workspaceID: String) {
+        workspaceBrowserURLs[workspaceID] = url.absoluteString
+        terminalWorkspaceID = nil
+        browserWorkspaceID = workspaceID
     }
 
     /// The rail and the sidebar, on one surface.

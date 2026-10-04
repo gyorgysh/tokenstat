@@ -103,6 +103,14 @@ final class ChatModel {
     var responseAttachmentData: [String: Data] = [:]
     var backends: [ChatBackend] = []
     var backendRefreshError: String?
+    /// A failed authentication attempt is useful evidence even when the CLI's
+    /// status command is unavailable. Only the latest turn may offer recovery;
+    /// earlier failures in an otherwise working conversation are history.
+    var signInFailureID: String? {
+        guard let selected,
+              let failure = ChatAuthenticationFailure.latestFailureID(in: displayItems, backend: selected.backend) else { return nil }
+        return "\(selected.id):\(failure)"
+    }
     var selectedBackendMissing: Bool {
         backend(for: selected?.backend ?? "")?.installed == false
     }

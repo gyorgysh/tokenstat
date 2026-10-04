@@ -6,7 +6,7 @@ import Foundation
 /// its answer.
 ///
 /// One setting rather than a page of switches. Every level keeps the rows a
-/// person has to see: what they asked, the answer, an approval the agent is
+/// person has to see: what they asked, every reply, an approval the agent is
 /// waiting on, a failure, a handoff and an attachment. The levels differ only
 /// in how the steps in between are drawn.
 enum ChatDetail: String, CaseIterable, Sendable {
@@ -22,11 +22,11 @@ enum ChatDetail: String, CaseIterable, Sendable {
 /// One folded line standing in for several transcript rows.
 struct ChatStepGroup: Equatable, Sendable {
     enum Style: Equatable, Sendable {
-        /// Compact: everything between the question and the answer.
+        /// Compact: a stretch of tool activity between visible replies.
         case work
         /// Standard: consecutive reads, searches and page fetches.
         case explored
-        /// Standard: one block of reasoning.
+        /// A block of reasoning, in Compact or Standard.
         case thought
     }
 
@@ -37,7 +37,7 @@ struct ChatStepGroup: Equatable, Sendable {
     /// reading place can name one of these, and the group has to be found
     /// and opened for it.
     var memberIDs: [String]
-    /// Tool calls and edits. Thinking and in-between text are not steps.
+    /// Tool calls and edits. Thinking is not counted as a step.
     var steps = 0
     /// Distinct files edited, and the lines those edits added and removed.
     var files = 0
@@ -182,9 +182,6 @@ enum ChatTranscriptFold {
         isOpen: (String) -> Bool,
         into out: inout [ChatDisplayItem]
     ) {
-        // The answer is the turn's last prose. Earlier prose ("Let me look
-        // at the tests") is part of the work, and folds with it.
-        let answer = turn.lastIndex { if case .assistant = $0.kind { return true } else { return false } }
         var members: [ChatDisplayItem] = []
         var usage: [ChatDisplayItem] = []
         var cost = 0.0
@@ -193,29 +190,27 @@ enum ChatTranscriptFold {
         func flush(trailing: Bool) {
             guard !members.isEmpty else { return }
             lastHeader = out.count
-            emit(make(.work, members, running: live && trailing), members: members, into: &out, isOpen: isOpen)
+            let thoughtsOnly = members.allSatisfy { if case .thinking = $0.kind { return true } else { return false } }
+            var group = make(thoughtsOnly ? .thought : .work, members, running: live && trailing)
+            if thoughtsOnly, case let .thinking(text) = members[0].kind { group.preview = preview(of: text) }
+            emit(group, members: members, into: &out, isOpen: isOpen)
             members = []
         }
 
         for index in turn.indices {
             let item = turn[index]
-            if index == answer {
-                flush(trailing: false)
-                out.append(item)
-                continue
-            }
             switch item.kind {
             case let .usage(_, _, spent):
                 cost += spent ?? 0
                 usage.append(item)
-            case .thinking, .assistant:
+            case .thinking:
                 members.append(item)
             case let .tool(state) where !state.failed:
                 members.append(item)
             case let .edit(state) where !state.failed:
                 members.append(item)
             default:
-                // Asked, failed, handed over or attached: never folded.
+                // Replies, questions, failures and handoffs stay in order.
                 flush(trailing: false)
                 out.append(item)
             }

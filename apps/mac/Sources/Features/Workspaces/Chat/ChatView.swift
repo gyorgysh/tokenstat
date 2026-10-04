@@ -346,7 +346,8 @@ struct ChatView: View {
                         .frame(maxWidth: .infinity)
                     }
                     if let backend = model.backend(for: chat.backend), model.savedCopy == nil {
-                        ChatAgentSetupCard(model: model, backend: backend, running: model.busy)
+                        ChatAgentSetupCard(model: model, backend: backend, running: model.busy,
+                                           recoveryFailureID: model.signInFailureID)
                             .frame(maxWidth: ReadingRoom.laneWidth)
                             .padding(.horizontal, Theme.Space.l)
                             .padding(.bottom, Theme.Space.s)
@@ -612,6 +613,7 @@ struct ChatView: View {
                             isLive: !model.isShowingCachedTranscript && model.busy && item.id == model.transcriptItems.last?.id,
                             animatesRunning: !model.isShowingCachedTranscript && item.id == spinning,
                             expandsOutput: detail.level == .detailed,
+                            compactTools: detail.level == .compact,
                             toggleGroup: { model.toggleGroup($0) },
                             answerQuestion: { question, text in
                                 Task { await model.answerQuestion(question, answer: text) }

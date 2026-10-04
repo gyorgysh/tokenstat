@@ -57,10 +57,11 @@ class ChatTranscriptDetailTest {
             user("u2"), tool("t2", "Read"), say("a2"),
         )
         val out = fold(rows, ChatDetail.Compact)
-        assertEquals(listOf("u1", "g:k1", "a1", "u2", "g:t2", "a2"), ids(out))
-        val first = group(out, "g:k1")!!
+        assertEquals(listOf("u1", "g:k1", "a0", "g:t1", "a1", "u2", "g:t2", "a2"), ids(out))
+        assertEquals(ChatStepGroup.Style.Thought, group(out, "g:k1")!!.style)
+        val first = group(out, "g:t1")!!
         assertEquals(ChatStepGroup.Style.Work, first.style)
-        assertEquals(listOf("k1", "a0", "t1", "e1"), first.memberIds)
+        assertEquals(listOf("t1", "e1"), first.memberIds)
         assertEquals(2, first.steps)
         assertEquals(0.25, first.cost!!, 0.0)
         assertNull(group(out, "g:t2")!!.cost)
@@ -89,6 +90,17 @@ class ChatTranscriptDetailTest {
     @Test
     fun compactKeepsUsageWhenThereIsNoWork() {
         assertEquals(listOf("u1", "a1", "x1"), ids(fold(listOf(user("u1"), say("a1"), usage("x1", 0.5)), ChatDetail.Compact)))
+    }
+
+    @Test
+    fun compactKeepsEveryReplyVisible() {
+        val rows = listOf(user("u1"), say("a0"), tool("t1", "Read"), say("a1"),
+            tool("t2", "Bash", running = true), say("a2"))
+        for (running in listOf(false, true)) {
+            val out = fold(rows, ChatDetail.Compact, running = running)
+            assertEquals(listOf("u1", "a0", "g:t1", "a1", "g:t2", "a2"), ids(out))
+            for (id in listOf("a0", "a1", "a2")) assertNull(stepGroupOwner(id, out))
+        }
     }
 
     @Test

@@ -33,6 +33,7 @@ struct ChatEventRow: View {
     var animatesRunning = true
     /// The chat's Detailed level: tool output and diffs start open.
     var expandsOutput = false
+    var compactTools = false
     /// Opens or folds a step group, by the group's row id.
     var toggleGroup: (String) -> Void = { _ in }
     /// Answers one of the agent's questions.
@@ -185,10 +186,11 @@ struct ChatEventRow: View {
                 running: state.running,
                 failed: state.failed,
                 animatesRunning: animatesRunning,
-                expandsOutput: expandsOutput
+                expandsOutput: expandsOutput,
+                compact: compactTools
             )
         case let .edit(state):
-            ChatFileEditRow(state: state, animatesRunning: animatesRunning, expandsOutput: expandsOutput)
+            ChatFileEditRow(state: state, animatesRunning: animatesRunning, expandsOutput: expandsOutput, compact: compactTools)
         case let .group(group):
             ChatStepGroupRow(group: group, animatesRunning: animatesRunning) { toggleGroup(item.id) }
         case let .question(question):
@@ -749,6 +751,7 @@ extension ChatEventRow: Equatable {
             && lhs.isLive == rhs.isLive
             && lhs.animatesRunning == rhs.animatesRunning
             && lhs.expandsOutput == rhs.expandsOutput
+            && lhs.compactTools == rhs.compactTools
             && lhs.answeringQuestion == rhs.answeringQuestion
             && lhs.canAnswerQuestions == rhs.canAnswerQuestions
         else { return false }

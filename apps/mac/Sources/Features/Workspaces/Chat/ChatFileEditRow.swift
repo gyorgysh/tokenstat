@@ -17,6 +17,8 @@ struct ChatFileEditRow: View {
     /// The chat's Detailed level: open every finished diff, not only a
     /// small one. A hand toggle still wins.
     var expandsOutput: Bool = false
+    var compact: Bool = false
+    private var usesCompactStyle: Bool { compact && !state.failed }
     #if os(macOS)
     private static let nameFont = Theme.callout.weight(.semibold)
     private static let metaFont = Theme.mono(11)
@@ -39,14 +41,16 @@ struct ChatFileEditRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            Capsule()
-                .fill(bar)
-                .frame(width: 3)
-                .padding(.vertical, 6)
-                .padding(.leading, 8)
+            if !usesCompactStyle {
+                Capsule()
+                    .fill(bar)
+                    .frame(width: 3)
+                    .padding(.vertical, 6)
+                    .padding(.leading, 8)
+            }
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 header
-                if let meta, !meta.isEmpty {
+                if !usesCompactStyle, let meta, !meta.isEmpty {
                     Text(meta)
                         .font(Self.metaFont)
                         .foregroundStyle(.secondary)
@@ -67,14 +71,14 @@ struct ChatFileEditRow: View {
                     }
                 }
             }
-            .padding(.vertical, Theme.Space.s)
+            .padding(.vertical, usesCompactStyle ? 4 : Theme.Space.s)
             .padding(.horizontal, Theme.Space.s)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .background(usesCompactStyle ? Color.clear : Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                .strokeBorder(border, lineWidth: 1)
+                .strokeBorder(usesCompactStyle ? Color.clear : border, lineWidth: 1)
         }
         .onAppear { autoExpand() }
         .onChange(of: state.patch) { _, _ in
@@ -83,6 +87,7 @@ struct ChatFileEditRow: View {
         }
         .onChange(of: state.running) { _, _ in autoExpand() }
         .onChange(of: expandsOutput) { _, _ in autoExpand() }
+        .onChange(of: compact) { _, _ in autoExpand() }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibility)
     }
@@ -101,12 +106,13 @@ struct ChatFileEditRow: View {
             .foregroundStyle(tint)
             .frame(width: 16)
 
-            Text(state.fileName)
+            Text(usesCompactStyle ? state.path : state.fileName)
                 .font(Self.nameFont)
                 .foregroundStyle(tint)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .layoutPriority(1)
+                .help(state.path)
 
             Spacer(minLength: 0)
 
@@ -131,24 +137,47 @@ struct ChatFileEditRow: View {
                     .fixedSize()
             }
             if !state.patch.isEmpty && !state.running {
-                Button(expanded ? L10n.text("apple.chatfileeditrow.hide_changes.c960be38") : L10n.text("apple.chatfileeditrow.show_changes.b12a6ef8"), .preview) {
-                    toggled = true
-                    if expanded {
-                        shownText = nil
-                    } else {
-                        parse()
-                    }
-                    expanded.toggle()
-                }
+                outputToggle.fixedSize()
+            }
+        }
+    }
+
+    private var outputLabel: String {
+        expanded ? L10n.text("apple.chatfileeditrow.hide_changes.c960be38") : L10n.text("apple.chatfileeditrow.show_changes.b12a6ef8")
+    }
+
+    @ViewBuilder
+    private var outputToggle: some View {
+        if usesCompactStyle {
+            Button(action: toggleOutput) {
+                Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    .font(Theme.font(11, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    #if os(macOS)
+                    .frame(width: 22, height: 22)
+                    #else
+                    .frame(width: 44, height: 44)
+                    #endif
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help(outputLabel)
+            .accessibilityLabel(outputLabel)
+        } else {
+            Button(outputLabel, .preview, action: toggleOutput)
                 #if os(macOS)
                 .buttonStyle(AccentButtonStyle(small: true))
                 #else
                 .clientGlassStyle()
                 .controlSize(.small)
                 #endif
-                .fixedSize()
-            }
         }
+    }
+
+    private func toggleOutput() {
+        toggled = true
+        if expanded { shownText = nil } else { parse() }
+        expanded.toggle()
     }
 
     private var meta: String? {
@@ -202,7 +231,7 @@ struct ChatFileEditRow: View {
     private func autoExpand() {
         guard !toggled, !state.running, !state.patch.isEmpty else { return }
         let lines = state.patch.split(separator: "\n", omittingEmptySubsequences: false).count
-        if expandsOutput || (lines > 0 && lines <= Self.autoExpandLines) {
+        if expandsOutput || (!usesCompactStyle && lines > 0 && lines <= Self.autoExpandLines) {
             if shownText == nil { parse() }
             expanded = true
         } else {

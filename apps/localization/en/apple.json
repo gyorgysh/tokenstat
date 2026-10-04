@@ -548,7 +548,7 @@
   "apple.chatbrowsersettings.chat_browser.d2fc9820": "Chat browser",
   "apple.chatbrowsersettings.keep_previews_beside_your_conversation.3df6d610": "Keep previews beside your conversation",
   "apple.chatbrowsersettings.open_chat_links_beside_the_conversation.c4350d58": "Open chat links beside the conversation",
-  "apple.chatbrowsersettings.web_links_open_in_the_resizable_browser_pa.27b4b20a": "Web links open in the resizable browser pane. Turn this off to use your default browser. You can always open the pane from the chat toolbar.",
+  "apple.chatbrowsersettings.web_links_open_in_the_resizable_browser_pa.27b4b20a": "Choose the default destination for chat links. When asking is enabled, you can choose a browser and see the full URL before opening each link.",
   "apple.chatcachesettings.0_days.af78beb0": "{0} days",
   "apple.chatcachesettings.cache_cleared.61a13722": "Cache cleared",
   "apple.chatcachesettings.chat_files.c826719c": "Chat files",
@@ -597,7 +597,7 @@
   "apple.chatdetail.compact": "Compact",
   "apple.chatdetail.standard": "Standard",
   "apple.chatdetail.detailed": "Detailed",
-  "apple.chatdetail.compact_explanation": "Your question, one line for the work, then the answer. Approvals, failures and handoffs always show.",
+  "apple.chatdetail.compact_explanation": "Every reply stays visible. Thinking and tool steps fold between replies. Approvals, failures and handoffs always show.",
   "apple.chatdetail.standard_explanation": "Thinking and runs of reads and searches fold to one line each. Commands and edits keep their own rows.",
   "apple.chatdetail.detailed_explanation": "Every step on its own row, with its output open.",
   "apple.chatdetail.show_steps": "Shows the steps.",
@@ -5588,5 +5588,12 @@
   "apple.pullcreate.same_branch": "Create a feature branch or choose a different target. A pull request cannot merge a branch into itself.",
   "apple.pullcreate.title": "Pull request title",
   "apple.pullcreate.existing_help": "Open the existing pull request to update its description. Your writing is kept in this draft.",
-  "apple.agentsetup.legacy": "Open a workspace terminal and choose {0} to complete setup. Update tokenstat on the chat’s computer to use guided sign-in here."
+  "apple.agentsetup.legacy": "Open a workspace terminal and choose {0} to complete setup. Update tokenstat on the chat’s computer to use guided sign-in here.",
+  "apple.chatlinks.title": "Open this link",
+  "apple.chatlinks.subtitle": "Choose where to open the web page.",
+  "apple.chatlinks.explanation": "tokenstat opens the page beside your conversation. Your default browser opens it in its own window. You can change this choice in Settings → Chat browser.",
+  "apple.chatlinks.remember": "Don’t ask again",
+  "apple.chatlinks.system": "Default browser",
+  "apple.chatlinks.tokenstat": "Open in tokenstat",
+  "apple.chatlinks.ask": "Ask before opening chat links"
 }

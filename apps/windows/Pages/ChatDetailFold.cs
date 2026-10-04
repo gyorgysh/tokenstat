@@ -8,7 +8,7 @@ namespace Tokenstat.Pages;
 /// <summary>
 /// How much of an agent's work a transcript shows between a question and its
 /// answer. Port of ChatTranscriptFold.swift <c>ChatDetail</c>. Every level
-/// keeps the question, the answer, an approval, a failure and an attachment.
+/// keeps the question, every reply, an approval, a failure and an attachment.
 /// </summary>
 internal enum ChatDetail
 {
@@ -166,8 +166,6 @@ internal static class ChatDetailFold
     private static void CompactTurn(
         List<ChatPage.DisplayItem> turn, bool live, Func<string, bool> isOpen, List<ChatPage.DisplayItem> output)
     {
-        // The answer is the turn's last prose. Earlier prose folds with the work.
-        var answer = turn.FindLastIndex(item => item.Kind == ChatPage.ItemKind.Assistant);
         var members = new List<ChatPage.DisplayItem>();
         var usage = new List<ChatPage.DisplayItem>();
         var cost = 0.0;
@@ -177,19 +175,16 @@ internal static class ChatDetailFold
         {
             if (members.Count == 0) return;
             lastHeader = output.Count;
-            Emit(Make(ChatStepGroupStyle.Work, members, live && trailing), [.. members], output, isOpen);
+            var thoughtsOnly = members.All(item => item.Kind == ChatPage.ItemKind.Thinking);
+            var group = Make(thoughtsOnly ? ChatStepGroupStyle.Thought : ChatStepGroupStyle.Work, members, live && trailing);
+            if (thoughtsOnly) group = group with { Preview = Preview(members[0].Text) };
+            Emit(group, [.. members], output, isOpen);
             members.Clear();
         }
 
         for (var index = 0; index < turn.Count; index++)
         {
             var item = turn[index];
-            if (index == answer)
-            {
-                Flush(false);
-                output.Add(item);
-                continue;
-            }
             switch (item.Kind)
             {
                 case ChatPage.ItemKind.Usage:
@@ -197,13 +192,12 @@ internal static class ChatDetailFold
                     usage.Add(item);
                     break;
                 case ChatPage.ItemKind.Thinking:
-                case ChatPage.ItemKind.Assistant:
                 case ChatPage.ItemKind.Tool when !item.Failed:
                 case ChatPage.ItemKind.Edit when !item.Failed:
                     members.Add(item);
                     break;
                 default:
-                    // Asked, failed or attached: never folded.
+                    // Replies, questions, failures and handoffs stay in order.
                     Flush(false);
                     output.Add(item);
                     break;

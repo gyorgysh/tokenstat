@@ -15,19 +15,26 @@ struct ChatAgentSetupCard: View {
     @Bindable var model: ChatModel
     let backend: ChatBackend
     let running: Bool
+    var recoveryFailureID: String? = nil
     @State private var showingSignIn = false
     @State private var checking = false
+    @State private var clearedFailureID: String?
+
+    private var needsRecovery: Bool {
+        recoveryFailureID != nil && recoveryFailureID != clearedFailureID
+    }
 
     var body: some View {
         Group {
             // Only a state with a next step. Many agents keep their login
             // where nothing can read it and are always "unknown", and a
             // banner over every one of those chats would be noise.
-            if backend.installed != false && backend.id != "sh" && ["needsSignIn", "expired"].contains(backend.readiness ?? "") {
+            if backend.installed != false && backend.id != "sh" &&
+                (["needsSignIn", "expired"].contains(backend.readiness ?? "") || needsRecovery) {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     Label(backend.readiness == "expired"
                           ? L10n.text("apple.agentsetup.expired", backend.label)
-                          : backend.readiness == "needsSignIn"
+                          : backend.readiness == "needsSignIn" || needsRecovery
                           ? L10n.text("apple.agentsetup.sign_in", backend.label)
                           : L10n.text("apple.agentsetup.check_setup", backend.label), systemImage: "person.crop.circle.badge.key")
                         .font(Theme.callout.weight(.semibold))
@@ -41,7 +48,7 @@ struct ChatAgentSetupCard: View {
                                 .disabled(running || checking)
                         }
                         Button(checking ? L10n.text("apple.agentsetup.checking") : L10n.text("apple.agentsetup.check_again"), .refresh) {
-                            Task { await check() }
+                            Task { await check(clearsRecovery: true) }
                         }.buttonStyle(SecondaryButtonStyle(small: true)).disabled(checking || running)
                     }
                     if backend.signInFlow?.supported != true {
@@ -63,16 +70,21 @@ struct ChatAgentSetupCard: View {
         .sheet(isPresented: $showingSignIn, onDismiss: signInDismissed) {
             AgentSignInSheet(backend: backend, peer: model.peer) {
                 await model.reloadBackends()
-                await check()
+                await check(clearsRecovery: true)
             }
         }
     }
 
-    private func check() async {
+    private func check(clearsRecovery: Bool = false) async {
         guard !checking else { return }
         checking = true
         defer { checking = false }
+        let offeredFailureID = recoveryFailureID
         await model.checkSignIn(backend)
+        if clearsRecovery, model.backendRefreshError == nil, let fresh = model.backend(for: backend.id),
+           fresh.signInVerified, fresh.readiness == "signedIn" {
+            clearedFailureID = offeredFailureID
+        }
     }
 
     private func signInDismissed() { Task { await check() } }

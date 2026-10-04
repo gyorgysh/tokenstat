@@ -30,11 +30,15 @@ struct ToolRow: View {
     /// The chat's Detailed level: open every finished output, not only a
     /// small diff. A hand toggle still wins.
     var expandsOutput: Bool = false
+    /// A single activity line when inspecting steps in Compact chat mode.
+    var compact: Bool = false
     @State private var showSnippet = false
     /// Set once the person toggles the snippet by hand. Auto-expand must
     /// not overrule it: lazy rows re-run `onAppear` scrolling back, and a
     /// diff that streams in after appear must still open on its own.
     @State private var snippetToggled = false
+
+    private var usesCompactStyle: Bool { compact && !failed }
 
     private var snippetIsOutput: Bool {
         snippet.contains { $0.hasPrefix("|") }
@@ -74,7 +78,7 @@ struct ToolRow: View {
         guard !snippetToggled, !running else { return }
         if expandsOutput, !snippet.isEmpty {
             showSnippet = true
-        } else if hasDiff, snippet.count <= Self.autoExpandLines {
+        } else if !usesCompactStyle, hasDiff, snippet.count <= Self.autoExpandLines {
             showSnippet = true
         } else if !expandsOutput {
             // Detailed was switched off: what it opened closes again.
@@ -127,9 +131,10 @@ struct ToolRow: View {
                     Text(arg)
                         .font(Theme.mono(11))
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(usesCompactStyle ? 1 : 2)
                         .truncationMode(.middle)
                         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                        .help(arg)
                 } else {
                     Spacer(minLength: 0)
                 }
@@ -154,18 +159,13 @@ struct ToolRow: View {
                         .fixedSize()
                 }
                 if !snippet.isEmpty && !running {
-                    Button(showSnippet ? hideLabel : showLabel, .preview) {
-                        snippetToggled = true
-                        showSnippet.toggle()
-                    }
-                    .buttonStyle(AccentButtonStyle(small: true))
-                    .fixedSize()
+                    outputToggle.fixedSize()
                 }
             }
             // Collapsed but with something to show: a shell command's first
             // output line, an edit's +/- line. Without this a target-less
             // row is just "Tool" + a button and reads as empty space.
-            if !showSnippet, !running, let preview {
+            if !usesCompactStyle, !showSnippet, !running, let preview {
                 Text(preview)
                     .font(Theme.mono(11))
                     .foregroundStyle(.secondary)
@@ -193,13 +193,43 @@ struct ToolRow: View {
         .onChange(of: snippet.count) { _, _ in autoExpand() }
         .onChange(of: running) { _, _ in autoExpand() }
         .onChange(of: expandsOutput) { _, _ in autoExpand() }
-        .padding(Theme.Space.s)
+        .onChange(of: compact) { _, _ in autoExpand() }
+        .padding(.horizontal, Theme.Space.s)
+        .padding(.vertical, usesCompactStyle ? 4 : Theme.Space.s)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .background(usesCompactStyle ? Color.clear : Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.cardRadius)
-                .strokeBorder(border, lineWidth: 1)
+                .strokeBorder(usesCompactStyle ? Color.clear : border, lineWidth: 1)
         )
+    }
+
+    @ViewBuilder
+    private var outputToggle: some View {
+        if usesCompactStyle {
+            Button(action: toggleSnippet) {
+                Image(systemName: showSnippet ? "chevron.up" : "chevron.down")
+                    .font(Theme.font(11, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    #if os(macOS)
+                    .frame(width: 22, height: 22)
+                    #else
+                    .frame(width: 44, height: 44)
+                    #endif
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help(showSnippet ? hideLabel : showLabel)
+            .accessibilityLabel(showSnippet ? hideLabel : showLabel)
+        } else {
+            Button(showSnippet ? hideLabel : showLabel, .preview, action: toggleSnippet)
+                .buttonStyle(AccentButtonStyle(small: true))
+        }
+    }
+
+    private func toggleSnippet() {
+        snippetToggled = true
+        showSnippet.toggle()
     }
 
     private var symbol: String {

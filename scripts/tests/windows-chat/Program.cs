@@ -245,10 +245,17 @@ var turns = new List<ChatPage.DisplayItem>
     Row("x1", ChatPage.ItemKind.Usage, cost: 0.25), Ask("u2"), Tool("t2", "Read"), Say("a2"),
 };
 var compact = FoldRows(turns, ChatDetail.Compact);
-Check(Ids(compact) == "u1,g:k1,a1,u2,g:t2,a2", "Compact is question, work line, answer: " + Ids(compact));
-var work = GroupOf(compact, "g:k1")!;
-Check(work.Style == ChatStepGroupStyle.Work && string.Join(",", work.MemberIds) == "k1,a0,t1,e1", "in-between prose folds with the work");
+Check(Ids(compact) == "u1,g:k1,a0,g:t1,a1,u2,g:t2,a2", "Compact keeps replies between work groups: " + Ids(compact));
+Check(GroupOf(compact, "g:k1")!.Style == ChatStepGroupStyle.Thought, "reasoning alone is a thought line");
+var work = GroupOf(compact, "g:t1")!;
+Check(work.Style == ChatStepGroupStyle.Work && string.Join(",", work.MemberIds) == "t1,e1", "only tool activity folds with the work");
 Check(work.Steps == 2 && work.Cost == 0.25 && GroupOf(compact, "g:t2")!.Cost is null, "steps and spend ride on the work line");
+foreach (var running in new[] { false, true })
+{
+    var replies = FoldRows([Ask("u1"), Say("a0"), Tool("t1", "Read"), Say("a1"), Tool("t2", "Bash", running: true), Say("a2")], ChatDetail.Compact, running: running);
+    Check(Ids(replies) == "u1,a0,g:t1,a1,g:t2,a2", "all replies remain in order");
+    Check(new[] { "a0", "a1", "a2" }.All(id => ChatDetailFold.Owner(id, replies) is null), "replies are never folded members");
+}
 
 var mustSee = new List<ChatPage.DisplayItem>
 {

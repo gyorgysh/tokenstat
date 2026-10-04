@@ -23,7 +23,7 @@ at the end.
   terminal on the chat's computer, follow browser or code instructions,
   and check sign-in without losing the chat draft.
 - Chat detail levels on Apple, Windows and Android. Compact folds an agent's
-  work into one line between your question and its answer, Standard folds
+  thinking and tool steps between visible replies, Standard folds
   thinking and runs of reads, and Detailed shows every step with its output
   open. Approvals, failures and handoffs always show.
 - Agents can ask you a question in the chat, with choices to tap or an
@@ -32,6 +32,13 @@ at the end.
   your answer reaches it on its next step or as the next message.
 
 ### Fixed
+
+- Compact chat keeps every assistant reply visible, including progress updates
+  between tool calls. Expanded Mac tool steps use single activity lines.
+- Chat links have visible accent underlines. The Mac asks where to open a
+  web link, shows the full URL, and can remember your browser choice.
+- Claude authentication failures still offer the guided sign-in terminal
+  when a CLI status check cannot confirm the agent's login.
 
 - Retained Mac screens keep finite dimensions during startup and resizing,
   avoiding invalid view geometry that could crash native controls.

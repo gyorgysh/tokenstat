@@ -478,9 +478,6 @@ private struct MarkdownListRow: View {
 /// Separated from the view so the same work can be done ahead of time, off the
 /// main thread, by `MarkdownText.warm`.
 private enum MarkdownInline {
-    /// The only schemes a conversation may hand the URL handler.
-    private static let linkSchemes: Set<String> = ["http", "https", "mailto"]
-
     static func attributed(_ source: String) -> AttributedString {
         MarkdownCache.inline.value(for: source) {
             let safe = MarkdownSanitizer.inline(source)
@@ -489,28 +486,8 @@ private enum MarkdownInline {
                 failurePolicy: .returnPartiallyParsedIfPossible
             )
             let parsed = (try? AttributedString(markdown: safe, options: options)) ?? AttributedString(source)
-            return strippingUnsafeLinks(parsed)
+            return MarkdownLinks.styled(parsed, color: Theme.accent)
         }
-    }
-
-    /// Remove links to anything but the three schemes above.
-    ///
-    /// The block sanitizer polices the href of an HTML anchor, but Markdown's
-    /// own `[label](url)` never goes through it, and `AttributedString` makes
-    /// any scheme tappable: `x-man-page:`, `file:`, and an app's custom
-    /// scheme all became live links. This walks the runs once and drops the
-    /// link, leaving the label as plain text.
-    private static func strippingUnsafeLinks(_ attributed: AttributedString) -> AttributedString {
-        guard attributed.runs.contains(where: { $0.link != nil }) else { return attributed }
-        var result = attributed
-        for run in attributed.runs {
-            guard let url = run.link else { continue }
-            let scheme = url.scheme?.lowercased() ?? ""
-            if !linkSchemes.contains(scheme) {
-                result[run.range].link = nil
-            }
-        }
-        return result
     }
 }
 

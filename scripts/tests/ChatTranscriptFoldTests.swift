@@ -62,6 +62,7 @@ struct ChatTranscriptFoldTests {
         compactFoldsWorkBetweenQuestionAndAnswer()
         compactNeverFoldsWhatAPersonMustSee()
         compactKeepsUsageWhenThereIsNoWork()
+        compactKeepsEveryReplyVisible()
         compactLiveTurn()
         standardFoldsReadsAndThinking()
         standardKeepsALoneReadAndBreaksRuns()
@@ -85,10 +86,11 @@ struct ChatTranscriptFoldTests {
             user("u2"), tool("t2", "Read"), say("a2"),
         ]
         let out = fold(rows, .compact)
-        require(ids(out) == ["u1", "g:k1", "a1", "u2", "g:t2", "a2"], "Compact is question, work line, answer: \(ids(out))")
-        let first = group(out, "g:k1")
+        require(ids(out) == ["u1", "g:k1", "a0", "g:t1", "a1", "u2", "g:t2", "a2"], "Compact keeps replies between work groups: \(ids(out))")
+        require(group(out, "g:k1")?.style == .thought, "reasoning alone is a thought line")
+        let first = group(out, "g:t1")
         require(first?.style == .work, "a work line")
-        require(first?.memberIDs == ["k1", "a0", "t1", "e1"], "in-between prose folds with the work")
+        require(first?.memberIDs == ["t1", "e1"], "only tool activity folds with the work")
         require(first?.steps == 2, "thinking and prose are not steps")
         require(first?.cost == 0.25, "the turn's spend rides on its work line")
         require(group(out, "g:t2")?.cost == nil, "no usage, no figure")
@@ -115,6 +117,18 @@ struct ChatTranscriptFoldTests {
     static func compactKeepsUsageWhenThereIsNoWork() {
         let out = fold([user("u1"), say("a1"), usage("x1", 0.5)], .compact)
         require(ids(out) == ["u1", "a1", "x1"], "nothing to fold keeps the usage row: \(ids(out))")
+    }
+
+    static func compactKeepsEveryReplyVisible() {
+        let rows = [user("u1"), say("a0"), tool("t1", "Read"), say("a1"),
+                    tool("t2", "Bash", running: true), say("a2")]
+        for running in [false, true] {
+            let out = fold(rows, .compact, running: running)
+            require(ids(out) == ["u1", "a0", "g:t1", "a1", "g:t2", "a2"], "all replies remain in order")
+            for id in ["a0", "a1", "a2"] {
+                require(ChatTranscriptFold.owner(of: id, in: out) == nil, "a reply is never owned by a folded group")
+            }
+        }
     }
 
     static func compactLiveTurn() {

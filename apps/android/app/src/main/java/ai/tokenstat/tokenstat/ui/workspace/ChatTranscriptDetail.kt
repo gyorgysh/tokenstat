@@ -6,7 +6,7 @@ import android.content.Context
 /// How much of an agent's work a transcript shows between a question and
 /// its answer. Port of ChatTranscriptFold.swift `ChatDetail`.
 ///
-/// Every level keeps what a person has to see: the question, the answer, an
+/// Every level keeps what a person has to see: the question, every reply, an
 /// approval the agent is waiting on, a failure, a handoff and an attachment.
 enum class ChatDetail(val key: String) {
     /// One line per stretch of work: "Worked 3m · 14 steps · 2 files".
@@ -164,8 +164,6 @@ private fun foldCompactTurn(
     isOpen: (String) -> Boolean,
     out: MutableList<ChatDisplayItem>,
 ) {
-    // The answer is the turn's last prose. Earlier prose folds with the work.
-    val answer = turn.indexOfLast { it is ChatDisplayItem.Assistant }
     val members = ArrayList<ChatDisplayItem>()
     val usage = ArrayList<ChatDisplayItem>()
     var cost = 0.0
@@ -174,26 +172,29 @@ private fun foldCompactTurn(
     fun flush(trailing: Boolean) {
         if (members.isEmpty()) return
         lastHeader = out.size
-        emitGroup(makeGroup(ChatStepGroup.Style.Work, members, live && trailing), members.toList(), out, isOpen)
+        val thoughtsOnly = members.all { it is ChatDisplayItem.Thinking }
+        var group = makeGroup(
+            if (thoughtsOnly) ChatStepGroup.Style.Thought else ChatStepGroup.Style.Work,
+            members, live && trailing,
+        )
+        if (thoughtsOnly) {
+            group = group.copy(preview = thoughtPreview((members.first() as ChatDisplayItem.Thinking).text))
+        }
+        emitGroup(group, members.toList(), out, isOpen)
         members.clear()
     }
 
-    turn.forEachIndexed { index, item ->
-        if (index == answer) {
-            flush(trailing = false)
-            out.add(item)
-            return@forEachIndexed
-        }
+    turn.forEach { item ->
         when {
             item is ChatDisplayItem.Usage -> {
                 cost += item.costUsd ?: 0.0
                 usage.add(item)
             }
-            item is ChatDisplayItem.Thinking || item is ChatDisplayItem.Assistant -> members.add(item)
+            item is ChatDisplayItem.Thinking -> members.add(item)
             item is ChatDisplayItem.Tool && !item.state.failed -> members.add(item)
             item is ChatDisplayItem.Edit && !item.state.failed -> members.add(item)
             else -> {
-                // Asked, failed, handed over or attached: never folded.
+                // Replies, questions, failures and handoffs stay in order.
                 flush(trailing = false)
                 out.add(item)
             }
