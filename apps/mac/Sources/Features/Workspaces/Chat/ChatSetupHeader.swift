@@ -654,7 +654,7 @@ struct ChatAgentPanel: View {
                             }
                             .disabled(installing != nil || locked)
                         } else if backend.signInFlow?.supported == true {
-                            Button(L10n.text("apple.agentsetup.open_terminal"), .signIn) { signInBackend = backend }
+                            Button(L10n.text("apple.agentsetup.sign_in", backend.label), .signIn) { signInBackend = backend }
                                 .disabled(installing != nil || locked)
                         }
                     }
@@ -662,7 +662,14 @@ struct ChatAgentPanel: View {
             }.padding(Theme.Space.s)
         }
         .sheet(item: $signInBackend) { backend in
-            AgentSignInSheet(backend: backend, peer: model.peer) { await model.checkSignIn(backend) }
+            AgentSignInSheet(backend: backend, peer: model.peer) {
+                let status = await model.checkSignIn(backend)
+                guard model.backendRefreshError == nil else { return .unavailable }
+                guard status?.checked == true else { return .unconfirmed }
+                if status?.readiness == "signedIn" { return .signedIn }
+                if ["needsSignIn", "expired"].contains(status?.readiness ?? "") { return .needsSignIn }
+                return .unconfirmed
+            }
         }
         .onChange(of: signInBackend?.id) { _, id in
             if id == nil { Task { await model.reloadBackends() } }

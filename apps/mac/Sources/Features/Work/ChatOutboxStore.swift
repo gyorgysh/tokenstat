@@ -15,6 +15,9 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
     var expectedRevision: UInt64? = nil
     var whenConnected = false
     var sourceDraftText: String? = nil
+    /// Held until the person explicitly continues with this same agent.
+    /// Optional so existing outbox records remain readable.
+    var signInBackend: String? = nil
 
     var needsReceipt: Bool { delivery == .sending || delivery == .deliveryUnknown }
     var canEdit: Bool { !needsReceipt }
@@ -109,6 +112,22 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
             defer { Darwin.close(parent) }
             guard Darwin.fsync(parent) == 0 else { throw Failure.unavailable }
             return items
+        }
+    }
+
+    /// Move only visible slots, using the live payloads from disk. A second
+    /// window's text edits or delivery updates must survive a stale row drag.
+    func reorder(_ reference: WorkReference, expectedIDs: [String], visibleOrder: [String]) throws -> [ChatQueuedMessage] {
+        try update(reference) { items in
+            guard items.map(\.id) == expectedIDs else { throw Failure.conflict }
+            let visible = Set(visibleOrder)
+            guard visible.count == visibleOrder.count, visible.isSubset(of: Set(expectedIDs)) else { throw Failure.invalid }
+            let live = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+            var order = visibleOrder.makeIterator()
+            for index in items.indices where visible.contains(items[index].id) {
+                guard let id = order.next(), let item = live[id] else { throw Failure.invalid }
+                items[index] = item
+            }
         }
     }
 

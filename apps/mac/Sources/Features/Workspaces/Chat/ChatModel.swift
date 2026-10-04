@@ -106,10 +106,59 @@ final class ChatModel {
     /// A failed authentication attempt is useful evidence even when the CLI's
     /// status command is unavailable. Only the latest turn may offer recovery;
     /// earlier failures in an otherwise working conversation are history.
+    private var signInRecovery: ChatAuthenticationFailure.Recovery? {
+        guard let selected else { return nil }
+        return ChatAuthenticationFailure.latestRecovery(in: displayItems, backend: selected.backend)
+    }
+    var signInQueuedMessage: ChatQueuedMessage? {
+        guard savedCopy == nil, ownsQueue, let selected else { return nil }
+        return queued.first { $0.signInBackend == selected.backend && $0.delivery == .waiting }
+    }
+    var signInGateRowID: String? {
+        if let item = signInQueuedMessage { return "signin-gate-\(item.id)" }
+        return signInRecovery?.failureID
+    }
     var signInFailureID: String? {
-        guard let selected,
-              let failure = ChatAuthenticationFailure.latestFailureID(in: displayItems, backend: selected.backend) else { return nil }
-        return "\(selected.id):\(failure)"
+        guard let selected, let gate = signInGateRowID else { return nil }
+        return "\(selected.id):\(gate)"
+    }
+
+    /// Explicit Continue reuses durable delivery and receipts, keeping any new
+    /// composer draft untouched. A stale card cannot send into a different chat.
+    func continueAfterSignIn(gateID: String?, owner: WorkReference?) async {
+        guard let owner, owner == currentReference, ownsQueue, savedCopy == nil,
+              gateID == signInGateRowID, !busy, !sending, unconfirmedSend == nil, heldSubmission == nil, let selected else { return }
+        if let backend = backend(for: selected.backend), backend.signInVerified,
+           ["needsSignIn", "expired"].contains(backend.readiness ?? "") { return }
+        do {
+            let candidate: ChatQueuedMessage
+            if let held = signInQueuedMessage {
+                var resumed = held
+                resumed.signInBackend = nil
+                queued = try ChatOutboxStore.shared.update(owner) { items in
+                    guard let index = items.firstIndex(where: { $0.id == held.id }), items[index] == held else {
+                        throw ChatOutboxStore.Failure.conflict
+                    }
+                    items[index] = resumed
+                }
+                candidate = resumed
+            } else if let recovery = signInRecovery {
+                var retry = ChatQueuedMessage(id: "signin-retry-\(recovery.failureID)",
+                                              text: recovery.text, attachments: recovery.attachments)
+                retry.expectedRevision = contextRevision
+                queued = try ChatOutboxStore.shared.update(owner) { items in
+                    if items.contains(where: { $0.id == retry.id }) { return }
+                    guard items.count < ChatOutboxStore.capacity else { throw ChatOutboxStore.Failure.full }
+                    items.insert(retry, at: 0)
+                }
+                guard let stored = queued.first(where: { $0.id == retry.id }), !stored.needsReceipt else { return }
+                candidate = stored
+            } else { return }
+            authorizedQueueItems.insert(candidate.id)
+            _ = await deliverQueued(candidate, stopCurrent: false)
+        } catch {
+            self.error = L10n.text("apple.chatmodel.this_message_could_not_be_saved_to_the_que.95da1002")
+        }
     }
     var selectedBackendMissing: Bool {
         backend(for: selected?.backend ?? "")?.installed == false
@@ -843,12 +892,18 @@ final class ChatModel {
         let rows = coalescedItems
         let key = FoldKey(display: displayKey, detail: detail, open: open, toggled: toggled)
         if key != foldKey {
-            foldCache = ChatTranscriptFold.fold(rows, detail: detail, running: selected?.running == true) {
+            foldCache = ChatTranscriptFold.fold(ChatAuthenticationFailure.presented(rows), detail: detail, running: selected?.running == true) {
                 open != toggled.contains($0)
             }
             foldKey = key
         }
-        return pending.isEmpty ? foldCache : foldCache + pending
+        var shown = pending.isEmpty ? foldCache : foldCache + pending
+        if let item = signInQueuedMessage {
+            shown.append(ChatDisplayItem(id: "signin-message-\(item.id)", kind: .user(item.text)))
+            shown += item.attachments.map { ChatDisplayItem(id: "signin-attachment-\(item.id)-\($0.id)", kind: .attachment($0)) }
+            shown.append(ChatDisplayItem(id: "signin-gate-\(item.id)", kind: .failed("")))
+        }
+        return shown
     }
 
     /// Every group starts open (Expand all) or closed. A group in
@@ -1591,21 +1646,24 @@ final class ChatModel {
         }
     }
 
-    func checkSignIn(_ backend: ChatBackend) async {
-        guard let id = backend.launcherID, backend.installed != false, savedCopy == nil else { return }
-        guard backend.canCheckSignIn else { await reloadBackends(); return }
+    @discardableResult
+    func checkSignIn(_ backend: ChatBackend) async -> AgentSetupStatus? {
+        guard let id = backend.launcherID, backend.installed != false, savedCopy == nil else { return nil }
+        guard backend.canCheckSignIn else { await reloadBackends(); return nil }
         let context = loadGeneration
         let owner = peer
         do {
             let status = try await Bridge.agentSetupCheck(peer: owner, id: id)
             guard context == loadGeneration, peer == owner,
-                  let index = backends.firstIndex(where: { $0.id == backend.id }) else { return }
+                  let index = backends.firstIndex(where: { $0.id == backend.id }) else { return nil }
             backends[index].readiness = status.readiness
             backends[index].signInVerified = status.checked == true
             backendRefreshError = nil
+            return status
         } catch {
-            guard context == loadGeneration else { return }
+            guard context == loadGeneration else { return nil }
             backendRefreshError = error.localizedDescription
+            return nil
         }
     }
 
@@ -1844,15 +1902,15 @@ final class ChatModel {
     /// refused or unconfirmed send clears this on its way out, so it appears
     /// the moment it really is pending.
     var pendingQueue: [ChatQueuedMessage] {
-        guard let deliveringFromComposer else { return queued }
-        return queued.filter { $0.id != deliveringFromComposer }
+        let signInID = signInQueuedMessage?.id
+        return queued.filter { $0.id != deliveringFromComposer && $0.id != signInID }
     }
     private var queuedReference: WorkReference?
     @ObservationIgnored private var sendingNow = false
     private var authorizedQueueItems: Set<String> = []
     var queuePaused: Bool {
         guard let first = queued.first else { return false }
-        return !authorizedQueueItems.contains(first.id) || first.delivery != .waiting
+        return first.signInBackend != nil || !authorizedQueueItems.contains(first.id) || first.delivery != .waiting
     }
 
     private var ownsQueue: Bool {
@@ -1861,10 +1919,11 @@ final class ChatModel {
     }
 
     @discardableResult
-    func enqueue(_ text: String, atFront: Bool = false, whenConnected: Bool = false) -> ChatQueuedMessage? {
+    func enqueue(_ text: String, atFront: Bool = false, whenConnected: Bool = false, awaitingSignIn: Bool = false) -> ChatQueuedMessage? {
         guard stagingAttachments == 0, (savedCopy == nil || whenConnected), ownsQueue, let reference = queuedReference else { return nil }
         var item = ChatQueuedMessage(id: draftMessageID ?? UUID().uuidString, text: text, attachments: attachments)
         item.whenConnected = whenConnected
+        item.signInBackend = awaitingSignIn ? selected?.backend : nil
         item.expectedRevision = contextRevision
         do {
             queued = try ChatOutboxStore.shared.update(reference) { items in
@@ -1931,11 +1990,11 @@ final class ChatModel {
     func moveQueued(from offsets: IndexSet, to destination: Int, owner: WorkReference?) {
         guard let owner, owner == queuedReference, ownsQueue, let reference = queuedReference else { return }
         let expected = queued.map(\.id)
+        var reordered = pendingQueue
+        guard offsets.allSatisfy({ reordered.indices.contains($0) }), (0...reordered.count).contains(destination) else { return }
+        reordered.move(fromOffsets: offsets, toOffset: destination)
         do {
-            queued = try ChatOutboxStore.shared.update(reference) { items in
-                guard items.map(\.id) == expected else { throw ChatOutboxStore.Failure.conflict }
-                items.move(fromOffsets: offsets, toOffset: destination)
-            }
+            queued = try ChatOutboxStore.shared.reorder(reference, expectedIDs: expected, visibleOrder: reordered.map(\.id))
         } catch { self.error = L10n.text("apple.chatmodel.the_queue_changed_or_could_not_be_saved_re.fa598b04") }
     }
 
@@ -1955,6 +2014,10 @@ final class ChatModel {
 
     func sendNow(_ item: ChatQueuedMessage, owner: WorkReference?) async {
         guard let owner, owner == queuedReference, ownsQueue else { return }
+        if let backend = item.signInBackend {
+            error = L10n.text("apple.agentsetup.pending_other_agent", self.backend(for: backend)?.label ?? backend.capitalized)
+            return
+        }
         guard savedCopy == nil else {
             error = L10n.text("apple.chatmodel.check_for_updates_to_return_to_the_live_co.3b041e43")
             return
@@ -2004,7 +2067,7 @@ final class ChatModel {
     /// Acceptance updates the captured owner's disk record even if navigation
     /// changes. Nothing leaves the outbox before the host's acknowledgement.
     private func deliverQueued(_ candidate: ChatQueuedMessage, stopCurrent: Bool, reserved: Bool = false) async -> Bool {
-        guard savedCopy == nil, ownsQueue, (!sending || reserved), let reference = queuedReference,
+        guard candidate.signInBackend == nil, savedCopy == nil, ownsQueue, (!sending || reserved), let reference = queuedReference,
               WorkCacheAccess.canSave(reference), let conversationID = reference.itemID,
               ChatOutboxStore.shared.beginDelivery(reference) else { return false }
         let token = noteSendStarted()

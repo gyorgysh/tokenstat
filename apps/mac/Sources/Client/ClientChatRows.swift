@@ -169,16 +169,21 @@ struct ClientChatEventRow: View {
             .font(ClientType.caption)
             .foregroundStyle(.secondary)
         case let .failed(text):
-            HStack(alignment: .top, spacing: Theme.Space.s) {
-                PersonaMark(seed: faceSeed, size: 26, state: .failed)
-                Text(text)
-                    .font(ClientType.label)
-                    .foregroundStyle(Theme.danger)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contextMenu {
-                        Button(L10n.text("common.copy")) { ChatClipboard.copy(text) }
-                    }
+            if ChatAuthenticationFailure.needsSignIn(text, backend: "claude") {
+                Label(L10n.text("apple.agentsetup.history"), systemImage: "person.crop.circle.badge.key")
+                    .font(Theme.caption).foregroundStyle(.secondary)
+            } else {
+                HStack(alignment: .top, spacing: Theme.Space.s) {
+                    PersonaMark(seed: faceSeed, size: 26, state: .failed)
+                    Text(text)
+                        .font(ClientType.label)
+                        .foregroundStyle(Theme.danger)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contextMenu {
+                            Button(L10n.text("common.copy")) { ChatClipboard.copy(text) }
+                        }
+                }
             }
         }
     }

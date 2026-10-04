@@ -851,7 +851,7 @@ struct ClientChatThread: View {
                     )
                     .padding(.horizontal, Theme.Space.s)
                 }
-                if let backend = model.backend(for: chat.backend), model.savedCopy == nil {
+                if let backend = model.backend(for: chat.backend), model.savedCopy == nil, model.signInGateRowID == nil {
                     ChatAgentSetupCard(model: model, backend: backend, running: model.busy,
                                        recoveryFailureID: model.signInFailureID)
                         .padding(.horizontal, Theme.Space.s)
@@ -934,37 +934,45 @@ struct ClientChatThread: View {
                         .accessibilityLabel(L10n.text("apple.clientchatview.show_earlier_messages.b6badd18"))
                     }
                     ForEach(rows) { item in
-                        ClientChatEventRow(
-                            item: item,
-                            attachmentData: attachmentData(for: item),
-                            defaultAgentName: model.backend(for: chat.backend)?.label ?? chat.backend.capitalized,
-                            agentLabel: { backend in
-                                model.backend(for: backend)?.label ?? backend.capitalized
-                            },
-                            isPending: pendingApproval(item),
-                            resolve: { approval, choice in
-                                let owner = model.currentReference
-                                Task { await model.resolve(approval, choice: choice, owner: owner) }
-                            },
-                            attachmentIsLoading: model.loadingResponseAttachments.contains(attachmentID(for: item)),
-                            attachmentError: model.responseAttachmentErrors[attachmentID(for: item)],
-                            downloadAttachment: { attachment in
-                                Task { await model.downloadResponseAttachment(attachment) }
-                            },
-                            openAttachment: open(_:data:),
-                            faceSeed: model.faceSeed,
-                            isLive: !model.isShowingCachedTranscript && model.busy && item.id == model.transcriptItems.last?.id,
-                            animatesRunning: !model.isShowingCachedTranscript && item.id == spinning,
-                            expandsOutput: detail.level == .detailed,
-                            compactTools: detail.level == .compact,
-                            toggleGroup: { model.toggleGroup($0) },
-                            answerQuestion: { question, text in
-                                Task { await model.answerQuestion(question, answer: text) }
-                            },
-                            answeringQuestion: model.answeringQuestions.contains(item.questionID ?? ""),
-                            canAnswerQuestions: model.savedCopy == nil && !model.isShowingCachedTranscript
-                        )
-                        .equatable()
+                        Group {
+                            if item.id == model.signInGateRowID, model.savedCopy == nil,
+                               let backend = model.backend(for: chat.backend) {
+                                ChatAgentSetupCard(model: model, backend: backend, running: model.busy,
+                                                   recoveryFailureID: model.signInFailureID)
+                            } else {
+                                ClientChatEventRow(
+                                    item: item,
+                                    attachmentData: attachmentData(for: item),
+                                    defaultAgentName: model.backend(for: chat.backend)?.label ?? chat.backend.capitalized,
+                                    agentLabel: { backend in
+                                        model.backend(for: backend)?.label ?? backend.capitalized
+                                    },
+                                    isPending: pendingApproval(item),
+                                    resolve: { approval, choice in
+                                        let owner = model.currentReference
+                                        Task { await model.resolve(approval, choice: choice, owner: owner) }
+                                    },
+                                    attachmentIsLoading: model.loadingResponseAttachments.contains(attachmentID(for: item)),
+                                    attachmentError: model.responseAttachmentErrors[attachmentID(for: item)],
+                                    downloadAttachment: { attachment in
+                                        Task { await model.downloadResponseAttachment(attachment) }
+                                    },
+                                    openAttachment: open(_:data:),
+                                    faceSeed: model.faceSeed,
+                                    isLive: !model.isShowingCachedTranscript && model.busy && item.id == model.transcriptItems.last?.id,
+                                    animatesRunning: !model.isShowingCachedTranscript && item.id == spinning,
+                                    expandsOutput: detail.level == .detailed,
+                                    compactTools: detail.level == .compact,
+                                    toggleGroup: { model.toggleGroup($0) },
+                                    answerQuestion: { question, text in
+                                        Task { await model.answerQuestion(question, answer: text) }
+                                    },
+                                    answeringQuestion: model.answeringQuestions.contains(item.questionID ?? ""),
+                                    canAnswerQuestions: model.savedCopy == nil && !model.isShowingCachedTranscript
+                                )
+                                .equatable()
+                            }
+                        }
                         // No geometry readers mid-fling: each one reports per
                         // frame, and a fast scroll turns those reports into a
                         // transaction per frame that placement never drains.
@@ -1481,7 +1489,15 @@ struct ClientChatThread: View {
         guard !text.isEmpty || !model.attachments.isEmpty, !model.sending else { return }
         if let backend = model.backend(for: chat.backend), backend.signInVerified,
            ["needsSignIn", "expired"].contains(backend.readiness ?? "") {
-            model.backendRefreshError = L10n.text("apple.agentsetup.draft_kept", backend.label)
+            guard model.signInQueuedMessage == nil else {
+                model.backendRefreshError = L10n.text("apple.agentsetup.finish_saved")
+                return
+            }
+            guard model.enqueue(text, awaitingSignIn: true) != nil else { return }
+            model.clearDraft()
+            showNewest()
+            follow.jump()
+            followPulse += 1
             return
         }
         // Enqueue first: a full queue reports an error and returns nil, and

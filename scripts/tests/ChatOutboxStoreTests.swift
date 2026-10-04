@@ -38,6 +38,16 @@ struct ChatAttachment: Codable, Equatable, Sendable { let id: String; let name: 
         // readable and retain attemptedAt for the protocol migration.
         let legacy = Data(#"{"id":"legacy","text":"keep me","attachments":[],"delivery":"failed","attemptedAt":42,"whenConnected":false}"#.utf8)
         let decoded = try JSONDecoder().decode(ChatQueuedMessage.self, from: legacy)
+        assert(decoded.signInBackend == nil, "Existing outboxes must decode without the new hold marker")
+        var signIn = ChatQueuedMessage(id: "signin", text: "Original message", attachments: [.init(id: "local-file", name: "photo.png")])
+        signIn.signInBackend = "claude"
+        try first.update(ref("sign-in-host")) { $0.append(signIn) }
+        let signInReopened = try reopened.items(for: ref("sign-in-host"))[0]
+        assert(signInReopened == signIn && signInReopened.signInBackend == "claude")
+        assert(signInReopened.text == "Original message" && signInReopened.attachments[0].id == "local-file")
+        try first.update(ref("sign-in-host")) { $0[0].signInBackend = nil }
+        let resumed = try reopened.items(for: ref("sign-in-host"))[0]
+        assert(resumed.id == signIn.id && resumed.signInBackend == nil && resumed.text == signIn.text)
         assert(decoded.expectedRevision == nil)
         assert(decoded.firstAttemptAt == nil && decoded.attemptedAt != nil)
         assert(first.beginDelivery(ref()))
@@ -54,6 +64,21 @@ struct ChatAttachment: Codable, Equatable, Sendable { let id: String; let name: 
         try first.update(ref("host-b")) { $0[0].delivery = .deliveryUnknown }
         let uncertain = try reopened.items(for: ref("host-b"))[0]
         assert(uncertain.whenConnected && uncertain.needsReceipt && !uncertain.canEdit)
+        // A sign-in hold is hidden from the pending strip. Reordering visible
+        // rows keeps its slot and merges edits made after the UI snapshot.
+        let ordering = ref("reorder")
+        let before = ChatQueuedMessage(id: "before", text: "Before", attachments: [])
+        let after = ChatQueuedMessage(id: "after", text: "After", attachments: [])
+        try first.update(ordering) { $0 = [before, signIn, after] }
+        try second.update(ordering) { $0[0].text = "Changed in another window"; $0[2].delivery = .deliveryUnknown }
+        let reordered = try first.reorder(ordering, expectedIDs: ["before", "signin", "after"], visibleOrder: ["after", "before"])
+        assert(reordered.map(\.id) == ["after", "signin", "before"])
+        assert(reordered[1] == signIn && reordered[2].text == "Changed in another window")
+        assert(reordered[0].needsReceipt, "A reorder cannot reset another window’s uncertain delivery")
+        do {
+            _ = try first.reorder(ordering, expectedIDs: ["before", "signin", "after"], visibleOrder: ["before", "after"])
+            assertionFailure("A stale order must require a fresh review")
+        } catch ChatOutboxStore.Failure.conflict {}
         // A rejected write cannot delete a previously persisted message.
         let small = ChatOutboxStore(directory: root, byteLimit: 16)
         do { try small.update(ref()) { $0.removeAll() }; assertionFailure("Overwrote an unreadable file") }

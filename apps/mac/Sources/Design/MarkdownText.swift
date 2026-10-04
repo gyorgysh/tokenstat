@@ -478,6 +478,8 @@ private struct MarkdownListRow: View {
 /// Separated from the view so the same work can be done ahead of time, off the
 /// main thread, by `MarkdownText.warm`.
 private enum MarkdownInline {
+    static func hasLinks(_ source: String) -> Bool { attributed(source).runs.contains { $0.link != nil } }
+
     static func attributed(_ source: String) -> AttributedString {
         MarkdownCache.inline.value(for: source) {
             let safe = MarkdownSanitizer.inline(source)
@@ -503,13 +505,13 @@ private struct InlineMarkdown: View {
     }
 
     var body: some View {
-        let text = Text(attributed)
+        let text = MarkdownLinks.text(attributed)
             .font(font)
             .tint(Theme.accent)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
         if selectable {
-            text.textSelection(.enabled)
+            text.textSelection(.enabled).modifier(MarkdownLinkHover(enabled: attributed.runs.contains { $0.link != nil }))
         } else {
             text
         }
@@ -536,7 +538,7 @@ private struct InlineMarkdown: View {
 /// One prose chain or one block needing its own view. File scope so the
 /// segment cache can hold finished chains across view inits.
 private enum MessageSegment {
-    case text(Text)
+    case text(Text, hasLinks: Bool)
     case block(MarkdownBlock)
 }
 
@@ -629,15 +631,17 @@ struct MessageMarkdown: View {
         var out: [MessageSegment] = []
         var chain: Text? = nil
         var chainLength = 0
+        var chainHasLinks = false
         func gap() -> Text { Text("\n\n").font(bodyFont) }
         func flush() {
             if let current = chain {
-                out.append(.text(current))
+                out.append(.text(current, hasLinks: chainHasLinks))
                 chain = nil
                 chainLength = 0
+                chainHasLinks = false
             }
         }
-        func push(_ piece: Text, length: Int, separator: Text? = nil) {
+        func push(_ piece: Text, length: Int, separator: Text? = nil, links: Bool = false) {
             if chain != nil, chainLength + length > Self.chainCharCap {
                 flush()
             }
@@ -648,6 +652,7 @@ struct MessageMarkdown: View {
                 chain = piece
                 chainLength = length
             }
+            chainHasLinks = chainHasLinks || links
         }
         /// Split an oversized block on blank lines (then lines), so no
         /// single piece can blow past the cap on its own.
@@ -687,22 +692,22 @@ struct MessageMarkdown: View {
                     .font(bodyFont)
                     .foregroundStyle(Theme.accent)
             }
-            return row + Text(text).font(bodyFont)
+            return row + MarkdownLinks.text(text).font(bodyFont)
         }
         for block in blocks {
             switch block.kind {
             case let .heading(level, text):
                 push(
-                    Text(MarkdownInline.attributed(text))
+                    MarkdownLinks.text(MarkdownInline.attributed(text))
                         .font(Self.headingFont(style: style, bodyFont: bodyFont, level: level)),
-                    length: text.count
+                    length: text.count, links: MarkdownInline.hasLinks(text)
                 )
             case let .paragraph(text):
                 for chunk in chunks(text) {
                     push(
-                        Text(MarkdownInline.attributed(chunk))
+                        MarkdownLinks.text(MarkdownInline.attributed(chunk))
                             .font(bodyFont),
-                        length: chunk.count
+                        length: chunk.count, links: MarkdownInline.hasLinks(chunk)
                     )
                 }
             case let .list(items):
@@ -717,7 +722,7 @@ struct MessageMarkdown: View {
                             list = row
                         }
                     }
-                    if let list { push(list, length: total) }
+                    if let list { push(list, length: total, links: items.contains { MarkdownInline.hasLinks($0.text) }) }
                 } else {
                     // Huge lists chain item by item; a giant item chunks
                     // further, marker on its first piece only.
@@ -726,12 +731,13 @@ struct MessageMarkdown: View {
                         for (part, chunk) in parts.enumerated() {
                             let piece = (part == 0)
                                 ? listRow(item, text: MarkdownInline.attributed(chunk))
-                                : Text(MarkdownInline.attributed(chunk)).font(bodyFont)
+                                : MarkdownLinks.text(MarkdownInline.attributed(chunk)).font(bodyFont)
                             push(
                                 piece,
                                 length: chunk.count,
                                 separator: index == 0 && part == 0
-                                    ? nil : Text("\n").font(bodyFont)
+                                    ? nil : Text("\n").font(bodyFont),
+                                links: MarkdownInline.hasLinks(chunk)
                             )
                         }
                     }
@@ -758,12 +764,13 @@ struct MessageMarkdown: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             ForEach(Array(shownSegments.enumerated()), id: \.offset) { _, segment in
                 switch segment {
-                case let .text(chain):
+                case let .text(chain, hasLinks):
                     Group {
                         if selectable {
                             chain
                                 .tint(Theme.accent)
                                 .textSelection(.enabled)
+                                .modifier(MarkdownLinkHover(enabled: hasLinks))
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         } else {
