@@ -9,6 +9,9 @@ import android.content.Context
 /// Every level keeps what a person has to see: the question, every reply, an
 /// approval the agent is waiting on, a failure, a handoff and an attachment.
 enum class ChatDetail(val key: String) {
+    /// One quiet line per step: "Edited vault.rs +6 −2", "Ran cargo test".
+    /// What most editors show.
+    Minimal("minimal"),
     /// One line per stretch of work: "Worked 3m · 14 steps · 2 files".
     Compact("compact"),
     /// Thinking and runs of reads and searches fold to one line each.
@@ -47,17 +50,23 @@ data class ChatStepGroup(
     val cost: Double? = null,
     /// The first line of a folded thought.
     val preview: String? = null,
+    /// Drawn as Minimal draws it: a plain line, no icon or chevron.
+    val minimal: Boolean = false,
+    /// The one step a single-member group stands for: its tool name and
+    /// the file or command it acted on.
+    val verb: String? = null,
+    val subject: String? = null,
 ) {
-    enum class Style { Work, Explored, Thought }
+    enum class Style { Work, Explored, Thought, Step }
 }
 
 /// The detail level, kept on this device the way the Apple client keeps it
-/// in UserDefaults. Every device starts at Compact until somebody picks.
+/// in UserDefaults. Every device starts at Minimal until somebody picks.
 class ChatDetailStore(context: Context) {
     private val prefs = context.getSharedPreferences("tokenstat.chat.v1", Context.MODE_PRIVATE)
 
     fun level(): ChatDetail =
-        ChatDetail.fromKey(prefs.getString("detail", null)) ?: ChatDetail.Compact
+        ChatDetail.fromKey(prefs.getString("detail", null)) ?: ChatDetail.Minimal
 
     fun setLevel(level: ChatDetail) {
         prefs.edit().putString("detail", level.key).apply()
@@ -83,10 +92,114 @@ fun foldTranscript(
     detail: ChatDetail,
     running: Boolean,
     isOpen: (String) -> Boolean,
-): List<ChatDisplayItem> = when (detail) {
-    ChatDetail.Detailed -> items
-    ChatDetail.Standard -> foldStandard(items, running, isOpen)
-    ChatDetail.Compact -> foldCompact(items, running, isOpen)
+): List<ChatDisplayItem> {
+    val folded = when (detail) {
+        ChatDetail.Detailed -> items
+        ChatDetail.Standard -> foldStandard(items, running, isOpen)
+        ChatDetail.Compact -> foldCompact(items, running, isOpen)
+        ChatDetail.Minimal -> foldMinimal(items, running, isOpen)
+    }
+    return withTurnChanges(folded, items, running)
+}
+
+/// A turn's edits, one row per file, after the turn has finished. Read from
+/// the raw rows, since a closed group hides its edits from the folded list.
+/// User rows are never folded, so the n-th one starts the same turn in both.
+fun withTurnChanges(
+    folded: List<ChatDisplayItem>,
+    raw: List<ChatDisplayItem>,
+    running: Boolean,
+): List<ChatDisplayItem> {
+    val changes = HashMap<Int, ChatDisplayItem.Changes>()
+    var turn = 0
+    var id = ""
+    val files = LinkedHashMap<String, ChangedFile>()
+    fun close() {
+        if (files.isNotEmpty()) changes[turn] = ChatDisplayItem.Changes(id, files.values.toList())
+        files.clear()
+    }
+    for (item in raw) {
+        when {
+            item is ChatDisplayItem.User -> {
+                close()
+                turn++
+            }
+            item is ChatDisplayItem.Edit && !item.state.failed && !item.state.running -> {
+                if (files.isEmpty()) id = "changes:${item.id}"
+                val path = item.state.path
+                val prior = files[path]
+                files[path] = if (prior == null) {
+                    ChangedFile(path, item.state.added, item.state.removed)
+                } else {
+                    prior.copy(added = prior.added + item.state.added, removed = prior.removed + item.state.removed)
+                }
+            }
+        }
+    }
+    close()
+    if (changes.isEmpty()) return folded
+    val out = ArrayList<ChatDisplayItem>(folded.size + changes.size)
+    turn = 0
+    for (item in folded) {
+        if (item is ChatDisplayItem.User) {
+            changes[turn]?.let { out.add(it) }
+            turn++
+        }
+        out.add(item)
+    }
+    // The turn still running gets its card when it ends.
+    if (!running) changes[turn]?.let { out.add(it) }
+    return out
+}
+
+/// Every step is one line. Runs of reads and searches still read as one,
+/// even a run of one. Port of `ChatTranscriptFold.minimal`.
+private fun foldMinimal(
+    items: List<ChatDisplayItem>,
+    running: Boolean,
+    isOpen: (String) -> Boolean,
+): List<ChatDisplayItem> {
+    val out = ArrayList<ChatDisplayItem>(items.size)
+    val run = ArrayList<ChatDisplayItem>()
+
+    fun line(style: ChatStepGroup.Style, members: List<ChatDisplayItem>, live: Boolean) {
+        emitGroup(makeGroup(style, members, live).copy(minimal = true), members, out, isOpen)
+    }
+
+    fun flushRun(trailing: Boolean) {
+        if (run.isNotEmpty()) line(ChatStepGroup.Style.Explored, run.toList(), running && trailing)
+        run.clear()
+    }
+
+    items.forEachIndexed { index, item ->
+        when {
+            item is ChatDisplayItem.Tool && !item.state.failed && isExploration(item.state.verb) -> run.add(item)
+            item is ChatDisplayItem.Thinking -> {
+                flushRun(trailing = false)
+                if (running && index == items.lastIndex) {
+                    out.add(item)
+                } else {
+                    val group = makeGroup(ChatStepGroup.Style.Thought, listOf(item), false)
+                        .copy(preview = thoughtPreview(item.text), minimal = true)
+                    emitGroup(group, listOf(item), out, isOpen)
+                }
+            }
+            item is ChatDisplayItem.Tool && !item.state.failed -> {
+                flushRun(trailing = false)
+                line(ChatStepGroup.Style.Step, listOf(item), item.state.running)
+            }
+            item is ChatDisplayItem.Edit && !item.state.failed -> {
+                flushRun(trailing = false)
+                line(ChatStepGroup.Style.Step, listOf(item), item.state.running)
+            }
+            else -> {
+                flushRun(trailing = false)
+                out.add(item)
+            }
+        }
+    }
+    flushRun(trailing = true)
+    return out
 }
 
 /// The group header standing for `id`, when `id` is one of a closed group's
@@ -272,7 +385,18 @@ private fun makeGroup(style: ChatStepGroup.Style, members: List<ChatDisplayItem>
             else -> Unit
         }
     }
+    val single = members.singleOrNull()
     return ChatStepGroup(
+        verb = when (single) {
+            is ChatDisplayItem.Tool -> single.state.verb
+            is ChatDisplayItem.Edit -> "Edit"
+            else -> null
+        },
+        subject = when (single) {
+            is ChatDisplayItem.Tool -> single.state.target
+            is ChatDisplayItem.Edit -> single.state.path
+            else -> null
+        },
         style = style,
         open = false,
         memberIds = members.map { it.id },

@@ -61,6 +61,18 @@ sealed interface ChatDisplayItem {
     /// One of an open group's steps, drawn below its header. Keeps the
     /// step's own id, so the list keys it the same as when it is unfolded.
     data class GroupStep(override val id: String, val groupId: String, val item: ChatDisplayItem) : ChatDisplayItem
+
+    /// The files a finished turn edited. Added by the fold after the turn's
+    /// last row, at every detail level. Port of `ChatTurnChanges`.
+    data class Changes(override val id: String, val files: List<ChangedFile>) : ChatDisplayItem {
+        val added: Int get() = files.sumOf { it.added }
+        val removed: Int get() = files.sumOf { it.removed }
+    }
+}
+
+/// One file a turn changed. Counts are summed over the turn's edits to it.
+data class ChangedFile(val path: String, val added: Int, val removed: Int) {
+    val fileName: String get() = path.substringAfterLast('/').ifEmpty { path }
 }
 
 /// A tool call on a transcript. Ported from ChatModel.swift `ChatToolState`.

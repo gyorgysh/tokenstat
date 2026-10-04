@@ -101,10 +101,18 @@ internal fun TranscriptItemRow(
     /// Opens or folds a step group, by the group's row id.
     onToggleGroup: (String) -> Unit = {},
     canAnswerQuestions: Boolean = true,
+    /// Opens the folder's changes. Null where there is no folder to open.
+    onReviewChanges: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     when (item) {
-        is ChatDisplayItem.Group -> StepGroupRow(group = item.group, onClick = { onToggleGroup(item.id) })
+        is ChatDisplayItem.Group ->
+            if (item.group.minimal) {
+                MinimalStepLine(group = item.group, onClick = { onToggleGroup(item.id) })
+            } else {
+                StepGroupRow(group = item.group, onClick = { onToggleGroup(item.id) })
+            }
+        is ChatDisplayItem.Changes -> TurnChangesCard(item, onReviewChanges)
         is ChatDisplayItem.GroupStep -> {
             // Inset under its open header, with a rule down the left so the
             // steps read as belonging to the line above them.
@@ -127,6 +135,7 @@ internal fun TranscriptItemRow(
                     expandsOutput = expandsOutput,
                     onToggleGroup = onToggleGroup,
                     canAnswerQuestions = canAnswerQuestions,
+                    onReviewChanges = onReviewChanges,
                 )
             }
         }
@@ -413,7 +422,7 @@ private fun TranscriptToolRow(state: ChatToolState, expandsOutput: Boolean = fal
                     style = TsType.mono(11),
                     color = colors.textSecondary,
                     maxLines = 2,
-                    overflow = TextOverflow.MiddleEllipsis,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
             } else {
@@ -579,7 +588,7 @@ private fun TranscriptEditCard(state: ChatEditState, expandsOutput: Boolean = fa
                     style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
                     color = tint,
                     maxLines = 1,
-                    overflow = TextOverflow.MiddleEllipsis,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
                 if (state.added + state.removed > 0 && !state.running) {
@@ -613,7 +622,7 @@ private fun TranscriptEditCard(state: ChatEditState, expandsOutput: Boolean = fa
                     style = TextStyle(fontSize = 12.sp),
                     color = colors.textSecondary,
                     maxLines = 1,
-                    overflow = TextOverflow.MiddleEllipsis,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             if (expanded && state.patch.isNotEmpty()) {
@@ -1007,12 +1016,14 @@ private fun StepGroupRow(group: ChatStepGroup, onClick: () -> Unit) {
         ChatStepGroup.Style.Explored ->
             if (group.running) L10n.text("android.chatdetail.exploring") else L10n.text("android.chatdetail.explored")
         ChatStepGroup.Style.Thought -> L10n.text("android.chatdetail.thought")
+        ChatStepGroup.Style.Step -> ChatSeat.word(group.verb, group.running)
     }
     val summary = stepGroupSummary(group)
     val glyph = when (group.style) {
         ChatStepGroup.Style.Work -> Icons.AutoMirrored.Filled.List
         ChatStepGroup.Style.Explored -> Icons.Default.Search
         ChatStepGroup.Style.Thought -> Icons.Default.Lightbulb
+        ChatStepGroup.Style.Step -> Icons.AutoMirrored.Filled.KeyboardArrowRight
     }
     val tint = if (group.running) colors.accent else colors.textSecondary
     Row(
@@ -1079,6 +1090,142 @@ private fun stepGroupSummary(group: ChatStepGroup): String? = when (group.style)
         if (group.pages > 0) add(if (group.pages == 1) L10n.text("android.chatdetail.pages.one", "1") else L10n.text("android.chatdetail.pages.other", "${group.pages}"))
     }.joinToString(", ")
     ChatStepGroup.Style.Thought -> group.preview
+    ChatStepGroup.Style.Step -> group.subject?.let { shortStepSubject(group.verb, it) }
+}
+
+/// A path becomes its file name. A command keeps its first line.
+internal fun shortStepSubject(verb: String?, subject: String): String {
+    val line = subject.lineSequence().firstOrNull()?.trim() ?: subject.trim()
+    return when (verb) {
+        "Read", "Edit", "NotebookEdit", "Write", "Diff" -> line.substringAfterLast('/').ifEmpty { line }
+        else -> line.take(160)
+    }
+}
+
+/// Minimal: the verb, what it acted on and the lines it changed, in one
+/// quiet line. Port of ChatStepGroupRow.swift `minimalLine`.
+@Composable
+private fun MinimalStepLine(group: ChatStepGroup, onClick: () -> Unit) {
+    val colors = LocalTsColors.current
+    val title = when (group.style) {
+        ChatStepGroup.Style.Step -> ChatSeat.word(group.verb, group.running)
+        ChatStepGroup.Style.Explored ->
+            if (group.running) L10n.text("android.chatdetail.exploring") else L10n.text("android.chatdetail.explored")
+        ChatStepGroup.Style.Thought -> L10n.text("android.chatdetail.thought")
+        ChatStepGroup.Style.Work -> L10n.text("android.chatdetail.worked")
+    }
+    val subject = when {
+        group.style == ChatStepGroup.Style.Thought -> group.preview
+        group.memberIds.size == 1 && group.subject != null -> shortStepSubject(group.verb, group.subject)
+        else -> stepGroupSummary(group)
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 36.dp)
+            .clip(RoundedCornerShape(cardRadius))
+            .clickable(
+                onClickLabel = if (group.open) L10n.text("android.chatdetail.hide_steps") else L10n.text("android.chatdetail.show_steps"),
+                onClick = onClick,
+            )
+            .padding(horizontal = Space.s, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (group.running) {
+            CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp, color = colors.accent)
+        }
+        Text(
+            title,
+            style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium),
+            color = if (group.running) colors.accent else colors.textSecondary,
+            maxLines = 1,
+        )
+        Text(
+            subject.orEmpty(),
+            style = TextStyle(fontSize = 13.sp),
+            color = colors.textTertiary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        if (group.added + group.removed > 0) {
+            DiffStat(added = group.added, removed = group.removed)
+        }
+        Spacer(Modifier.weight(1f))
+    }
+}
+
+/// The files a finished turn changed, under its last reply. Port of
+/// ChatTurnChangesCard.swift: the first four files, the rest one tap away,
+/// and Review opens the folder's changes.
+@Composable
+private fun TurnChangesCard(changes: ChatDisplayItem.Changes, onReview: (() -> Unit)?) {
+    val colors = LocalTsColors.current
+    var showingAll by remember(changes.id) { mutableStateOf(false) }
+    val shown = if (showingAll) changes.files else changes.files.take(4)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(cardRadius))
+            .background(colors.panel)
+            .border(1.dp, colors.border, RoundedCornerShape(cardRadius))
+            .padding(Space.m),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            Text(
+                if (changes.files.size == 1) L10n.text("android.chatchanges.files_changed.one", "1")
+                else L10n.text("android.chatchanges.files_changed.other", "${changes.files.size}"),
+                style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium),
+                color = colors.textPrimary,
+            )
+            DiffStat(added = changes.added, removed = changes.removed)
+            Spacer(Modifier.weight(1f))
+            if (onReview != null) {
+                TsSecondaryButton(
+                    label = L10n.text("android.chatchanges.review"),
+                    icon = ActionIcon.Preview.vector,
+                    small = true,
+                    onClick = onReview,
+                )
+            }
+        }
+        shown.forEach { file ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 36.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(enabled = onReview != null) { onReview?.invoke() }
+                    .padding(vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+            ) {
+                Text(
+                    file.fileName,
+                    style = TextStyle(fontSize = 13.sp),
+                    color = colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                DiffStat(added = file.added, removed = file.removed)
+            }
+        }
+        if (changes.files.size > 4) {
+            Text(
+                if (showingAll) L10n.text("android.chatchanges.show_less")
+                else L10n.text("android.chatchanges.show_more", "${changes.files.size - 4}"),
+                style = TextStyle(fontSize = 13.sp),
+                color = colors.textSecondary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable { showingAll = !showingAll }
+                    .padding(vertical = 4.dp),
+            )
+        }
+    }
 }
 
 /// "10s", "3m", "1h 5m", floored, the way the Apple client's turn timer reads.

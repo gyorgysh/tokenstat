@@ -29,6 +29,7 @@ class CommitUiState(val peer: String, val workspace: String) {
     var branch by mutableStateOf<String?>(null)
     var files by mutableStateOf<List<JsonObject>>(emptyList())
     var ahead by mutableStateOf(0)
+    var behind by mutableStateOf(0)
     var isRepo by mutableStateOf(true)
     var exists by mutableStateOf(true)
     var selection by mutableStateOf<Set<String>>(emptySet())
@@ -75,6 +76,7 @@ class CommitUiState(val peer: String, val workspace: String) {
             isRepo = git?.bol("isRepo") ?: true
             branch = git?.str("branch")
             ahead = git?.get("ahead")?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+            behind = git?.get("behind")?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
             val fresh = git?.get("files")?.let { asObjects(it) }
                 ?: asObjects(element).ifEmpty { asObjects(folder?.get("files")) }
             files = fresh

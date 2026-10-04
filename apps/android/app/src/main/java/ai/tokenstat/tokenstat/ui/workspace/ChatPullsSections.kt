@@ -1618,6 +1618,7 @@ fun ChatSection(
                                 defaultAgentName = openChat?.str("backend")?.let { harnessName(it) } ?: L10n.text("android.chatpullssections.agent.11b39c93"),
                                 expandsOutput = detail == ChatDetail.Detailed,
                                 canAnswerQuestions = !offline && HostContracts.supportsChatQuestions(protocol),
+                                onReviewChanges = if (offline) null else ({ onOpenSection("Changes") }),
                                 onToggleGroup = { id ->
                                     toggledGroups = if (id in toggledGroups) toggledGroups - id else toggledGroups + id
                                 },
@@ -2022,6 +2023,7 @@ private fun ChatStatPanels(chats: List<JsonObject>) {
 }
 
 private fun chatDetailLabel(level: ChatDetail): String = when (level) {
+    ChatDetail.Minimal -> L10n.text("android.chatdetail.minimal")
     ChatDetail.Compact -> L10n.text("android.chatdetail.compact")
     ChatDetail.Standard -> L10n.text("android.chatdetail.standard")
     ChatDetail.Detailed -> L10n.text("android.chatdetail.detailed")

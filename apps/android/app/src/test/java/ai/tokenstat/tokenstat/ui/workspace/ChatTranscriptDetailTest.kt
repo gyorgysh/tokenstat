@@ -29,8 +29,8 @@ class ChatTranscriptDetailTest {
         end: Long? = null,
     ) = ChatDisplayItem.Tool(id, ChatToolState(id, verb, "t-$id", running, failed, null, start, end, emptyList()))
 
-    private fun edit(id: String, path: String, added: Int = 0, removed: Int = 0, failed: Boolean = false) =
-        ChatDisplayItem.Edit(id, ChatEditState(path, added, removed, "", 1, false, failed, 0, null))
+    private fun edit(id: String, path: String, added: Int = 0, removed: Int = 0, failed: Boolean = false, running: Boolean = false) =
+        ChatDisplayItem.Edit(id, ChatEditState(path, added, removed, "", 1, running, failed, 0, null))
 
     private fun ids(rows: List<ChatDisplayItem>) = rows.map { it.id }
 
@@ -57,7 +57,7 @@ class ChatTranscriptDetailTest {
             user("u2"), tool("t2", "Read"), say("a2"),
         )
         val out = fold(rows, ChatDetail.Compact)
-        assertEquals(listOf("u1", "g:k1", "a0", "g:t1", "a1", "u2", "g:t2", "a2"), ids(out))
+        assertEquals(listOf("u1", "g:k1", "a0", "g:t1", "a1", "changes:e1", "u2", "g:t2", "a2"), ids(out))
         assertEquals(ChatStepGroup.Style.Thought, group(out, "g:k1")!!.style)
         val first = group(out, "g:t1")!!
         assertEquals(ChatStepGroup.Style.Work, first.style)
@@ -131,7 +131,7 @@ class ChatTranscriptDetailTest {
             tool("t4", "Bash"), edit("e1", "a"), say("a1"), usage("x1", 0.1),
         )
         val out = fold(rows, ChatDetail.Standard)
-        assertEquals(listOf("u1", "g:k1", "g:t1", "t4", "e1", "a1", "x1"), ids(out))
+        assertEquals(listOf("u1", "g:k1", "g:t1", "t4", "e1", "a1", "x1", "changes:e1"), ids(out))
         assertEquals(ChatStepGroup.Style.Thought, group(out, "g:k1")!!.style)
         val explored = group(out, "g:t1")!!
         assertEquals(ChatStepGroup.Style.Explored, explored.style)
@@ -216,5 +216,45 @@ class ChatTranscriptDetailTest {
         assertEquals("Plan** it", thoughtPreview("\n\n## **Plan** it\nmore"))
         assertEquals("check the tests", thoughtPreview("  \n- check the tests"))
         assertNull(thoughtPreview("\n  \n"))
+    }
+
+    @Test
+    fun minimalMakesEveryStepOneLine() {
+        val rows = listOf(
+            user("u1"), think("k1"), tool("t1", "Read"), tool("t2", "Grep"), tool("t3", "Bash"),
+            edit("e1", "src/a.kt", added = 6, removed = 2), tool("t4", "Read"), say("a1"), tool("t5", "Bash", failed = true),
+        )
+        val out = fold(rows, ChatDetail.Minimal)
+        assertEquals(listOf("u1", "g:k1", "g:t1", "g:t3", "g:e1", "g:t4", "a1", "t5", "changes:e1"), ids(out))
+        for (id in listOf("g:k1", "g:t1", "g:t3", "g:e1", "g:t4")) assertTrue(id, group(out, id)!!.minimal)
+        val ran = group(out, "g:t3")!!
+        assertEquals(ChatStepGroup.Style.Step, ran.style)
+        assertEquals("Bash", ran.verb)
+        val edited = group(out, "g:e1")!!
+        assertEquals("Edit", edited.verb)
+        assertEquals("src/a.kt", edited.subject)
+        assertEquals(6, edited.added)
+        assertEquals(ChatStepGroup.Style.Explored, group(out, "g:t4")!!.style)
+        assertNull(stepGroupOwner("t5", out))
+        assertEquals("a.kt", shortStepSubject("Edit", "src/a.kt"))
+        assertEquals("cargo test", shortStepSubject("Bash", "cargo test\nmore"))
+    }
+
+    @Test
+    fun turnChangesSumPerFileAndWaitForTheTurn() {
+        val rows = listOf(
+            user("u1"), edit("e1", "/w/a.kt", added = 3, removed = 1), edit("e2", "/w/a.kt", added = 2),
+            edit("e3", "/w/b.kt", added = 1, removed = 4), edit("ef", "/w/c.kt", failed = true), say("a1"),
+            user("u2"), edit("e4", "/w/c.kt", added = 1), edit("er", "/w/d.kt", running = true), say("a2"),
+        )
+        val live = fold(rows, ChatDetail.Compact, running = true)
+        assertEquals(listOf("changes:e1"), ids(live).filter { it.startsWith("changes:") })
+        val first = live.first { it.id == "changes:e1" } as ChatDisplayItem.Changes
+        assertEquals(listOf("/w/a.kt", "/w/b.kt"), first.files.map { it.path })
+        assertEquals(5, first.files[0].added)
+        assertEquals(6, first.added)
+        assertEquals(5, first.removed)
+        val finished = fold(rows, ChatDetail.Compact, running = false)
+        assertEquals(listOf("/w/c.kt"), (finished.last() as ChatDisplayItem.Changes).files.map { it.path })
     }
 }

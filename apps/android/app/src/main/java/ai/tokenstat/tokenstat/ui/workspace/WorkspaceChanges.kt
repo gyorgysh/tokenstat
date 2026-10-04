@@ -254,12 +254,24 @@ fun ChangesSection(
                 )
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                state.branch ?: L10n.text("android.workspacechanges.current_branch.7c5b2da1"),
-                style = TextStyle(fontSize = 12.sp),
-                color = LocalTsColors.current.textSecondary,
-                modifier = Modifier.weight(1f),
+        Text(
+            state.branch ?: L10n.text("android.workspacechanges.current_branch.7c5b2da1"),
+            style = TextStyle(fontSize = 12.sp),
+            color = LocalTsColors.current.textSecondary,
+            maxLines = 1,
+        )
+        // Bring commits in, send them out, and the pull request they belong
+        // to, side by side like the Apple Changes footer.
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            PullButton(
+                model = model,
+                peer = peer,
+                workspace = workspace,
+                folderName = folderName,
+                hostLabel = hostLabel,
+                incoming = state.behind,
+                protocol = protocol,
+                onPulled = { scope.launch { load() } },
             )
             PushButton(
                 model = model,
@@ -270,6 +282,15 @@ fun ChangesSection(
                 outgoing = state.ahead,
                 protocol = protocol,
                 onPushed = { scope.launch { load() } },
+            )
+            BranchPullButton(
+                model = model,
+                peer = peer,
+                workspace = workspace,
+                branch = state.branch,
+                folderName = folderName,
+                hostLabel = hostLabel,
+                protocol = protocol,
             )
         }
         BranchRow(
