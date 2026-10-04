@@ -98,6 +98,15 @@ import Foundation
         assert(ChatReadingPosition.from(atEnd: false, pinned: false, anchorID: "s7",
                                         anchorTop: 200, anchorHeight: 44, viewportHeight: 800, at: when)
             == .away(mark("s7", 0.25, when)))
+        // Folded headers keep a compatible archive-row identifier, rather
+        // than dropping the place or saving a group id older clients reject.
+        let folded = ChatReadingPosition.from(atEnd: false, pinned: false, anchorID: "g:think-s7",
+            anchorTop: 200, anchorHeight: 44, viewportHeight: 800, at: when)
+        assert(folded == .away(mark("think-s7", 0.25, when)))
+        if case let .away(place) = folded { store.remember(place, for: chat(id: "folded")) }
+        assert(ChatReadingStore(defaults: defaults).mark(for: chat(id: "folded"))?.eventID == "think-s7")
+        assert(ChatReadingPosition.from(atEnd: false, pinned: false, anchorID: "g:tool-call-id",
+            anchorTop: 0, anchorHeight: 44, viewportHeight: 800) == .unknown)
         // A row whose top has scrolled past the viewport's edge means the
         // reader is inside the row itself, so the mark keeps how far down
         // it they are. Near the top that is still roughly the top edge;

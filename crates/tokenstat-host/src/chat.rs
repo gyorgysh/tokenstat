@@ -1137,7 +1137,15 @@ impl Store {
             self.withdraw_pending_answers(id);
             let question = self.open_question(id, question_id)?;
             let note = crate::chat_question::answer_note(&question, answer);
-            if self.turn_is_live(id)? {
+            // An earlier idle answer may already have launched even though its
+            // answer row could not be written. Replay its shared receipt before
+            // deciding to park a note on that very same running turn.
+            let ledger = crate::chat_receipts::Ledger::load(self.receipts_path(id), now_ms())
+                .map_err(DispatchError::delivery_unknown)?;
+            let replay = ledger
+                .get(&crate::chat_receipts::question_key(question_id))
+                .is_some();
+            if !replay && self.turn_is_live(id)? {
                 let chat = self.get(id)?;
                 let takes_notes = note_backend(&chat.backend)
                     && (chat.backend == "muse" || chat.autonomy == "standard");
@@ -1173,7 +1181,8 @@ impl Store {
         // question open, so the person can try again.
         // Keep acceptance through launch and recording the answer. Otherwise
         // a second device can accept the same question between those steps.
-        let outcome = self.send_under_acceptance(id, &note, &[], None, None, None, false)?;
+        let outcome =
+            self.send_under_acceptance(id, &note, &[], None, None, None, false, Some(question_id))?;
         self.append(
             id,
             &StoredEvent::Answer {
@@ -1182,7 +1191,18 @@ impl Store {
                 delivery: "sent".into(),
                 at_ms: now_ms(),
             },
-        )?;
+        )
+        .map_err(DispatchError::delivery_unknown)?;
+        // The question's own durable answer now prevents replays. Only retire
+        // the receipt after syncing that proof, keeping incomplete answers
+        // protected even past the normal message receipt retention window.
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(self.events_path(id))
+            .and_then(|file| file.sync_all())
+            .map_err(|error| DispatchError::delivery_unknown(error.to_string()))?;
+        let _ = self.drop_receipt(id, &crate::chat_receipts::question_key(question_id));
         Ok(json!({ "delivery": "sent", "conversation": outcome.into_conversation() }))
     }
 
@@ -1236,7 +1256,7 @@ impl Store {
         // Keep finalization with the send. A hook or another device must not
         // park a new answer between launch and forgetting the delivered ones.
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
-        match self.send_under_acceptance(id, &note, &[], None, None, None, true) {
+        match self.send_under_acceptance(id, &note, &[], None, None, None, true, None) {
             Ok(SendOutcome::Started(chat)) => {
                 self.take_parked_answers(id);
                 Ok(json!({
@@ -2930,6 +2950,7 @@ impl Store {
             client_message_created_at_ms,
             expected_revision,
             follow_up,
+            None,
         )
     }
 
@@ -2945,6 +2966,7 @@ impl Store {
         client_message_created_at_ms: Option<i64>,
         expected_revision: Option<u64>,
         follow_up: bool,
+        question_id: Option<&str>,
     ) -> Result<SendOutcome, DispatchError> {
         crate::workspace_policy::require_current_access()?;
         let typed = text.trim();
@@ -2969,17 +2991,23 @@ impl Store {
         //
         // The device is the authenticated peer rather than anything in the
         // body, so one client cannot claim another's receipt and skip a send.
-        let receipt_key = match client_message_id {
-            Some(client_message_id) => {
-                if !crate::chat_receipts::valid_id(client_message_id) {
-                    return Err("that clientMessageId is not usable".into());
+        let receipt_key = if let Some(question_id) = question_id {
+            // One question can be answered from any device. Its acceptance
+            // belongs to the question, rather than to a particular peer.
+            Some(crate::chat_receipts::question_key(question_id))
+        } else {
+            match client_message_id {
+                Some(client_message_id) => {
+                    if !crate::chat_receipts::valid_id(client_message_id) {
+                        return Err("that clientMessageId is not usable".into());
+                    }
+                    Some(crate::chat_receipts::key(
+                        crate::request_context::remote_peer().as_deref(),
+                        client_message_id,
+                    ))
                 }
-                Some(crate::chat_receipts::key(
-                    crate::request_context::remote_peer().as_deref(),
-                    client_message_id,
-                ))
+                None => None,
             }
-            None => None,
         };
         let digest = crate::chat_receipts::digest(text, attachment_ids);
         if let Some(key) = &receipt_key {
@@ -6329,6 +6357,99 @@ mod tests {
             store.open_question("chat-test", &question).unwrap(),
             "Pick one?"
         );
+    }
+
+    #[test]
+    fn a_confirmed_question_answer_replays_its_receipt_before_parking_on_a_live_turn() {
+        for running in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let store = Arc::new(Store::at(root.path().join("chat")));
+            prepare_live_chat(&store, "chat-test");
+            let question = ask(&store, "chat-test", "Pick one?");
+            store.set_running("chat-test", running).unwrap();
+            let key = crate::chat_receipts::question_key(&question);
+            store
+                .write_receipt(
+                    "chat-test",
+                    &key,
+                    crate::chat_receipts::Receipt {
+                        state: crate::chat_receipts::ReceiptState::Accepted,
+                        digest: crate::chat_receipts::digest(
+                            &crate::chat_question::answer_note("Pick one?", "B"),
+                            &[],
+                        ),
+                        at_ms: now_ms() - crate::chat_receipts::RETENTION_MS * 2,
+                        event_at_ms: Some(1),
+                    },
+                )
+                .unwrap();
+            // The fixture has no workspace, so attempting a new launch would
+            // fail. Only a replay of the question's acceptance can succeed.
+            let delivery = store.answer_question("chat-test", &question, "B").unwrap();
+            assert_eq!(delivery["delivery"], "sent");
+            assert!(parked_note(&store, "chat-test").is_none());
+            let (events, _) = store.events("chat-test", 0).unwrap();
+            assert_eq!(
+                events.iter().filter(|row| row["kind"] == "answer").count(),
+                1
+            );
+            assert!(!events.iter().any(|row| row["kind"] == "user"));
+            assert!(store.open_question("chat-test", &question).is_err());
+            assert!(
+                crate::chat_receipts::Ledger::load(store.receipts_path("chat-test"), now_ms())
+                    .unwrap()
+                    .get(&key)
+                    .is_none(),
+                "a durable answer retires its receipt"
+            );
+        }
+    }
+
+    #[test]
+    fn an_uncertain_question_answer_cannot_launch_or_park_a_duplicate() {
+        for running in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let store = Arc::new(Store::at(root.path().join("chat")));
+            prepare_live_chat(&store, "chat-test");
+            let question = ask(&store, "chat-test", "Pick one?");
+            store.set_running("chat-test", running).unwrap();
+            let key = crate::chat_receipts::question_key(&question);
+            store
+                .write_receipt(
+                    "chat-test",
+                    &key,
+                    crate::chat_receipts::Receipt {
+                        state: crate::chat_receipts::ReceiptState::Pending,
+                        digest: crate::chat_receipts::digest(
+                            &crate::chat_question::answer_note("Pick one?", "B"),
+                            &[],
+                        ),
+                        at_ms: now_ms(),
+                        event_at_ms: None,
+                    },
+                )
+                .unwrap();
+            let error = store
+                .answer_question("chat-test", &question, "B")
+                .unwrap_err();
+            assert_eq!(error.code, crate::error::DELIVERY_UNKNOWN);
+            assert!(store.answer_question("chat-test", &question, "A").is_err());
+            assert!(parked_note(&store, "chat-test").is_none());
+            let (events, _) = store.events("chat-test", 0).unwrap();
+            assert!(
+                !events
+                    .iter()
+                    .any(|row| row["kind"] == "answer" || row["kind"] == "user")
+            );
+            assert_eq!(
+                crate::chat_receipts::Ledger::load(store.receipts_path("chat-test"), now_ms())
+                    .unwrap()
+                    .get(&key)
+                    .unwrap()
+                    .state,
+                crate::chat_receipts::ReceiptState::Pending
+            );
+        }
     }
 
     #[test]

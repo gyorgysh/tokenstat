@@ -28,17 +28,20 @@ enum ChatReadingPosition: Equatable {
                       anchorHeight: Double, viewportHeight: Double,
                       at date: Date = Date()) -> Self {
         if atEnd, pinned { return .latest }
-        guard viewportHeight > 0, let anchorID,
-              ChatReadingMark.isStable(eventID: anchorID) else { return .unknown }
+        guard viewportHeight > 0, let anchorID else { return .unknown }
+        // A folded header stands for its first archive row. Persist that
+        // row's existing identifier so older versions can read the mark too.
+        let eventID = anchorID.hasPrefix("g:") ? String(anchorID.dropFirst(2)) : anchorID
+        guard ChatReadingMark.isStable(eventID: eventID) else { return .unknown }
         if anchorTop < 0, anchorHeight > 0 {
             return .away(
-                ChatReadingMark(eventID: anchorID, offset: 0,
+                ChatReadingMark(eventID: eventID, offset: 0,
                                 updatedAt: date,
                                 within: min(max(-anchorTop / anchorHeight, 0), 1))
             )
         }
         return .away(
-            ChatReadingMark(eventID: anchorID,
+            ChatReadingMark(eventID: eventID,
                             offset: min(max(anchorTop / viewportHeight, 0), 1),
                             updatedAt: date)
         )

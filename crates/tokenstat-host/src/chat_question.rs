@@ -253,6 +253,26 @@ pub fn rule(asks_before_tools: bool, takes_notes: bool) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn block_limits_count_utf8_bytes_and_the_closing_newline() {
+        let prefix = r#"{"question":"Q","extra":""#;
+        let suffix = r#""}"#;
+        for extra in [0, 1] {
+            let body = format!(
+                "{prefix}{}{suffix}",
+                "x".repeat(BLOCK_MAX_BYTES - 1 - prefix.len() - suffix.len() + extra)
+            );
+            assert_eq!(
+                Scanner::default().scan(&block(&body)).len(),
+                usize::from(extra == 0)
+            );
+        }
+        let unicode = format!("{prefix}{}{suffix}", "é".repeat(BLOCK_MAX_BYTES / 2));
+        assert!(Scanner::default().scan(&block(&unicode)).is_empty());
+        let crlf = block(r#"{"question":"Q"}"#).replace('\n', "\r\n");
+        assert_eq!(Scanner::default().scan(&crlf).len(), 1);
+    }
+
     fn block(json: &str) -> String {
         format!("```{FENCE}\n{json}\n```\n")
     }

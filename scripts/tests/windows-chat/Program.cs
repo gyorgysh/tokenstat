@@ -314,6 +314,21 @@ Check(ChatDetailFold.Preview("\n\n## **Plan** it\nmore") == "Plan** it" && ChatD
     "previews drop markdown marks");
 Console.WriteLine("Windows chat detail: compact, standard and detailed folding, pinned rows, open groups and counts pass.");
 
+var loadedWork = new List<ChatPage.DisplayItem> { Ask("long-turn") };
+loadedWork.AddRange(Enumerable.Range(0, 300).Select(index => Tool($"step-{index}", "Read")));
+loadedWork.Add(Say("long-reply"));
+foreach (var level in new[] { ChatDetail.Compact, ChatDetail.Standard })
+{
+    var drawn = FoldRows(loadedWork, level);
+    Check(ChatPage.SliceStart(drawn.Count, 0) == 0 && ChatPage.SliceEnd(drawn.Count, 0) == drawn.Count,
+        "a loaded page folded into a few rows must allow fetching the older archive page");
+    var expanded = FoldRows(loadedWork, level, isOpen: _ => true);
+    Check(ChatPage.SliceStart(expanded.Count, 0) > 0, "expanded steps first reveal the hidden loaded rows");
+    var oldest = ChatPage.SliceClamp(int.MaxValue, expanded.Count);
+    Check(ChatPage.SliceStart(expanded.Count, oldest) == 0, "the oldest expanded window reaches the archive boundary");
+}
+Console.WriteLine("Windows folded history: collapsed and expanded windows reach earlier-page boundaries.");
+
 // Agent questions. The same stripping cases as ChatQuestionTests.swift.
 var questionFence = "```" + ChatQuestionText.Fence;
 var questionBlock = questionFence + "\n{\"question\":\"Which database?\"}\n```";
@@ -321,6 +336,20 @@ Check(ChatQuestionText.Strip("Plain reply.") == "Plain reply.", "text without a 
 Check(ChatQuestionText.Strip("Before:\n" + questionBlock + "\nGoing with A.") == "Before:\nGoing with A.", "a finished block leaves the prose around it");
 Check(ChatQuestionText.Strip("Before:\n" + questionFence + "\n{\"question\":\"Wh") == "Before:", "a streaming block is cut from its opening line");
 Check(ChatQuestionText.Strip(questionBlock) == "", "a reply that is only a question has no prose");
+Check(ChatQuestionText.Strip(questionBlock.Replace("\n", "\r\n")) == "", "CRLF fences match the host scanner");
+foreach (var padding in new[] { new string('x', 64 * 1024), new string('é', 32 * 1024) })
+{
+    var oversized = questionFence + "\n{\"question\":\"Q\",\"extra\":\"" + padding + "\"}\n```";
+    Check(ChatQuestionText.Strip(oversized) == oversized, "host-rejected blocks stay readable, bounded by UTF-8 bytes");
+}
+var questionPrefix = "{\"question\":\"Q\",\"extra\":\"";
+var questionSuffix = "\"}";
+foreach (var extra in new[] { 0, 1 })
+{
+    var body = questionPrefix + new string('x', 64 * 1024 - 1 - questionPrefix.Length - questionSuffix.Length + extra) + questionSuffix;
+    var edge = questionFence + "\n" + body + "\n```";
+    Check(ChatQuestionText.Strip(edge) == (extra == 0 ? "" : edge), "the body limit includes its closing newline");
+}
 Check(ChatQuestionText.Strip("Run:\n```sh\nls\n```") == "Run:\n```sh\nls\n```", "ordinary code blocks stay");
 foreach (var body in new[] { "{}", "broken JSON", "{\"question\":42}", "{\"question\":\" \"}" })
 {

@@ -21,8 +21,6 @@ namespace Tokenstat.Pages;
 /// </summary>
 internal sealed partial class ChatPage
 {
-    private const int SliceLength = 150;
-    private const int SliceStep = 100;
     private const int ToolSnippetLines = 60;
     private const int EditSnippetLines = 200;
     private const int SnippetColumnCap = 600;
@@ -153,7 +151,7 @@ internal sealed partial class ChatPage
         if (_historyLoading || _openId is not string id) return;
         var generation = _openGeneration;
         var historyGeneration = _historyGeneration;
-        var count = Coalesce(_events).Count;
+        var count = ChatDetailFold.Fold(Coalesce(_events), ChatDetailPreference.Level, _running, IsGroupOpen).Count;
         if (SliceStart(count, _sliceOlder) == 0 && _hasEarlier)
         {
             _historyLoading = true;
@@ -164,7 +162,7 @@ internal sealed partial class ChatPage
                     { ["id"] = id, ["cursor"] = _historyCursor, ["limit"] = 300, ["stablePositions"] = true });
                 if (_openId != id || generation != _openGeneration || historyGeneration != _historyGeneration || !IsLoaded) return;
                 ApplyHistoryPage(page, replace: false);
-                count = Coalesce(_events).Count;
+                count = ChatDetailFold.Fold(Coalesce(_events), ChatDetailPreference.Level, _running, IsGroupOpen).Count;
             }
             catch (Exception error)
             {
@@ -218,27 +216,6 @@ internal sealed partial class ChatPage
         var button = Buttons.Primary(title, ActionIcon.Latest, (_, _) => click());
         ToolTipService.SetToolTip(button, tip);
         return button;
-    }
-
-    private static int SliceClamp(int older, int count)
-    {
-        if (count <= SliceLength) return 0;
-        return Math.Min(Math.Max(0, older), count - SliceLength);
-    }
-
-    private static int SliceStart(int count, int older)
-    {
-        if (count <= 0) return 0;
-        if (count <= SliceLength) return 0;
-        var end = count - SliceClamp(older, count);
-        return end - SliceLength;
-    }
-
-    private static int SliceEnd(int count, int older)
-    {
-        if (count <= 0) return 0;
-        if (count <= SliceLength) return count;
-        return count - SliceClamp(older, count);
     }
 
     private FrameworkElement ShowEarlierButton(int hidden)

@@ -22,6 +22,18 @@ class ChatQuestionTest {
         assertEquals("Before:\nGoing with A.", stripQuestionBlocks("Before:\n$block\nGoing with A."))
         assertEquals("Before:", stripQuestionBlocks("Before:\n$fence\n{\"question\":\"Wh"))
         assertEquals("", stripQuestionBlocks(block))
+        assertEquals("", stripQuestionBlocks(block.replace("\n", "\r\n")))
+        for (padding in listOf("x".repeat(64 * 1024), "é".repeat(32 * 1024))) {
+            val oversized = "$fence\n{\"question\":\"Q\",\"extra\":\"$padding\"}\n```"
+            assertEquals(oversized, stripQuestionBlocks(oversized))
+        }
+        val prefix = "{\"question\":\"Q\",\"extra\":\""
+        val suffix = "\"}"
+        for (extra in listOf(0, 1)) {
+            val body = prefix + "x".repeat(64 * 1024 - 1 - prefix.length - suffix.length + extra) + suffix
+            val edge = "$fence\n$body\n```"
+            assertEquals(if (extra == 0) "" else edge, stripQuestionBlocks(edge))
+        }
         assertEquals("Run:\n```sh\nls\n```", stripQuestionBlocks("Run:\n```sh\nls\n```"))
         assertEquals("after", stripQuestionBlocks("  $fence\n{\"question\":\"Pick?\"}\n  ```\nafter"))
         for (body in listOf("{}", "broken JSON", "{\"question\":42}", "{\"question\":\" \"}")) {

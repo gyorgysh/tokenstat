@@ -150,6 +150,18 @@ struct ChatTimelineEvent {
             model: model, follow: follow) { _, point in deepPoint = point }
         assert(deepRestored == .restored && deepPoint == UnitPoint(x: 0.5, y: 0.5))
 
+        // Collapsed group headers name their first step. Restore that step
+        // rather than treating the drawn header as a missing archive event.
+        model.displayItems = [ChatModel.Row(id: "think-s1")]
+        let foldedMark = ChatReadingMark(eventID: "g:think-s1", offset: 0, updatedAt: Date())
+        let foldedRestored = await TranscriptReading.restore(foldedMark, reference: reference,
+            model: model, follow: follow) { id, _ in assert(id == "think-s1") }
+        assert(foldedRestored == .restored)
+        model.displayItems = [ChatModel.Row(id: "think-s1", lastSequence: 5)]
+        model.events = [.init(seq: 3, event: .init(kind: "thinking"))]
+        assert(ChatReadingAnchor.resolve("g:think-s3", items: model.displayItems, events: model.events) == "think-s1")
+        assert(ChatReadingAnchor.resolve("g:think-s9", items: model.displayItems, events: model.events) == nil)
+
         // Pages that never contain the row end at the start of the chat,
         // and the conversation opens at its latest turn instead of waiting.
         model.displayItems = [ChatModel.Row(id: "text-s9")]

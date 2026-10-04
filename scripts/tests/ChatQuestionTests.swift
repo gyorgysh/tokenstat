@@ -22,6 +22,19 @@ struct ChatQuestionTests {
         require(ChatQuestionText.stripping("Before:\n\(fence)\n{\"question\":\"Wh") == "Before:",
                 "a block still streaming is cut from its opening line")
         require(ChatQuestionText.stripping("\(block)") == "", "a reply that is only a question has no prose")
+        require(ChatQuestionText.stripping(block.replacingOccurrences(of: "\n", with: "\r\n")) == "",
+                "CRLF fences match the host scanner")
+        for padding in [String(repeating: "x", count: 64 * 1024), String(repeating: "é", count: 32 * 1024)] {
+            let oversized = "\(fence)\n{\"question\":\"Q\",\"extra\":\"\(padding)\"}\n```"
+            require(ChatQuestionText.stripping(oversized) == oversized, "host-rejected blocks stay readable, bounded by UTF-8 bytes")
+        }
+        let prefix = #"{"question":"Q","extra":""#
+        let suffix = #""}"#
+        for extra in [0, 1] {
+            let body = prefix + String(repeating: "x", count: 64 * 1024 - 1 - prefix.utf8.count - suffix.utf8.count + extra) + suffix
+            let edge = "\(fence)\n\(body)\n```"
+            require(ChatQuestionText.stripping(edge) == (extra == 0 ? "" : edge), "the body limit includes its closing newline")
+        }
         require(ChatQuestionText.stripping("Run:\n```sh\nls\n```") == "Run:\n```sh\nls\n```",
                 "ordinary code blocks stay")
         require(ChatQuestionText.stripping("  \(fence)\n{\"question\":\"Pick?\"}\n  ```\nafter") == "after", "indented fences count")

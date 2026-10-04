@@ -1525,7 +1525,7 @@ fun ChatSection(
             }
             // What the list draws. `transcript` stays every row, for the
             // seat line and anything else that must see a folded step.
-            val shownRows = remember(transcript, detail, groupsOpen, toggledGroups) {
+            val shownRows = remember(transcript, detail, groupsOpen, toggledGroups, openChat?.bol("running")) {
                 foldTranscript(transcript, detail, running = openChat?.bol("running") ?: true) { id ->
                     groupsOpen != (id in toggledGroups)
                 }

@@ -24,6 +24,8 @@ internal sealed record ChatQuestionItem(
 internal static class ChatQuestionText
 {
     public const string Fence = "tokenstat-question";
+    // Match the host scanner, including the newline before the closing fence.
+    private const int BlockMaxBytes = 64 * 1024;
 
     /// <summary>
     /// The reply without its question blocks, which the card shows instead. A
@@ -52,7 +54,9 @@ internal static class ChatQuestionText
                     var valid = false;
                     try
                     {
-                        var value = System.Text.Json.Nodes.JsonNode.Parse(string.Join("\n", block.Skip(1).SkipLast(1)));
+                        var body = string.Join("\n", block.Skip(1).SkipLast(1));
+                        var value = System.Text.Encoding.UTF8.GetByteCount(body) < BlockMaxBytes
+                            ? System.Text.Json.Nodes.JsonNode.Parse(body) : null;
                         valid = value is System.Text.Json.Nodes.JsonObject && value["question"] is { } question
                             && question.GetValueKind() == System.Text.Json.JsonValueKind.String
                             && !string.IsNullOrWhiteSpace(question.GetValue<string>());

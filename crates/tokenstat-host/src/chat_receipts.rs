@@ -91,8 +91,11 @@ impl Ledger {
         };
         // Unresolved launches never become permission to replay merely because
         // time passed. Accepted records keep the entire advertised window.
-        entries.retain(|_, receipt| {
-            receipt.state != ReceiptState::Accepted
+        entries.retain(|key, receipt| {
+            // A question has no client-created-at cutoff. Keep its proof so
+            // a missing answer row cannot invite a second launch months later.
+            key.starts_with("question:")
+                || receipt.state != ReceiptState::Accepted
                 || now_ms.saturating_sub(receipt.at_ms) < RETENTION_MS + CLOCK_SKEW_MS
         });
         Ok(Self { path, entries })
@@ -144,6 +147,12 @@ impl Ledger {
             .map_err(|e| e.to_string())?;
         Ok(())
     }
+}
+
+/// A host-owned acceptance, shared by everyone answering the same question.
+/// The separate namespace cannot collide with a device's message identifier.
+pub(crate) fn question_key(id: &str) -> String {
+    format!("question:{id}")
 }
 
 fn private_options() -> OpenOptions {

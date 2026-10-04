@@ -23,6 +23,8 @@ data class ChatQuestion(
 )
 
 const val QUESTION_FENCE = "tokenstat-question"
+// Match the host scanner, including the newline before the closing fence.
+private const val QUESTION_BLOCK_MAX_BYTES = 64 * 1024
 
 /// The reply without its question blocks, which the card shows instead. A
 /// block still streaming is cut from its opening line, so half a JSON object
@@ -42,7 +44,9 @@ fun stripQuestionBlocks(text: String, streaming: Boolean = true): String {
         if (inside) {
             block.add(line)
             if (trimmed == "```") {
-                val value = runCatching { Json.parseToJsonElement(block.drop(1).dropLast(1).joinToString("\n")) as? JsonObject }.getOrNull()
+                val body = block.drop(1).dropLast(1).joinToString("\n")
+                val value = if (body.length < QUESTION_BLOCK_MAX_BYTES && body.toByteArray(Charsets.UTF_8).size < QUESTION_BLOCK_MAX_BYTES)
+                    runCatching { Json.parseToJsonElement(body) as? JsonObject }.getOrNull() else null
                 val question = value?.get("question") as? JsonPrimitive
                 if (question?.isString != true || question.content.isBlank()) kept.addAll(block)
                 block.clear()

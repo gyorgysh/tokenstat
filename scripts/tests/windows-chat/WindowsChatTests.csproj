@@ -13,6 +13,7 @@
     <Compile Include="../../../apps/windows/Navigation/ChatPreviewStore.cs" Link="ChatPreviewStore.cs" />
     <Compile Include="../../../apps/windows/Pages/SeatStep.cs" Link="SeatStep.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatPage.Items.cs" Link="ChatPage.Items.cs" />
+    <Compile Include="../../../apps/windows/Pages/ChatPage.Slice.cs" Link="ChatPage.Slice.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatDetailFold.cs" Link="ChatDetailFold.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatQuestion.cs" Link="ChatQuestion.cs" />
   </ItemGroup>

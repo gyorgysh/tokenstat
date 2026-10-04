@@ -2519,9 +2519,9 @@ struct RootView: View {
 
     private func sidebarSectionMenu() -> some View {
         ToolbarMenuButton(help: L10n.text("common.sidebar.section_options"), diameter: 20, glyphSize: 10) {
-            Button(L10n.text("common.sidebar.move_servers_above_projects")) { moveSidebarSection("servers", before: "projects") }
+            Button(L10n.text("common.sidebar.move_servers_above_projects"), .move) { moveSidebarSection("servers", before: "projects") }
                 .disabled(sidebarSectionOrder.first == "servers")
-            Button(L10n.text("common.sidebar.move_projects_above_servers")) { moveSidebarSection("projects", before: "servers") }
+            Button(L10n.text("common.sidebar.move_projects_above_servers"), .move) { moveSidebarSection("projects", before: "servers") }
                 .disabled(sidebarSectionOrder.first == "projects")
         }
     }

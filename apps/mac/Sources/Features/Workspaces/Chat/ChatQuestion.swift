@@ -39,16 +39,19 @@ struct ChatQuestionDelivery: Decodable, Sendable {
 /// The question blocks inside reply text, which the card shows instead.
 enum ChatQuestionText {
     static let fence = "tokenstat-question"
+    // Match the host scanner. Rejected blocks must remain readable as text.
+    private static let blockMaxBytes = 64 * 1024
 
     /// The reply without its question blocks. A block still streaming is cut
     /// from its opening line, so half a JSON object never flashes on screen.
     static func stripping(_ text: String, streaming: Bool = true) -> String {
         guard text.contains("```\(fence)") else { return text }
-        var kept: [Substring] = []
+        var kept: [String] = []
         var inside = false
-        var block: [Substring] = []
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+        var block: [String] = []
+        // Character splitting treats CRLF as one character, missing its LF.
+        for line in text.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             if !inside, trimmed == "```\(fence)" {
                 inside = true
                 block = [line]
@@ -58,7 +61,8 @@ enum ChatQuestionText {
                 block.append(line)
                 if trimmed == "```" {
                     let body = block.dropFirst().dropLast().joined(separator: "\n")
-                    let value = try? JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any]
+                    let value = body.utf8.count < blockMaxBytes
+                        ? try? JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any] : nil
                     let question = value?["question"] as? String
                     if question?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
                         kept.append(contentsOf: block)

@@ -6,6 +6,10 @@ import Foundation
 /// archive event still belongs to that same readable message.
 enum ChatReadingAnchor {
     static func resolve(_ eventID: String, items: [ChatDisplayItem], events: [ChatTimelineEvent]) -> String? {
+        // A collapsed header is named after its first member. Reading marks
+        // name drawn rows, while restoration searches the unfolded archive.
+        // Resolve the member too when an older page changed its text start.
+        let eventID = eventID.hasPrefix("g:") ? String(eventID.dropFirst(2)) : eventID
         if items.contains(where: { $0.id == eventID }) { return eventID }
         for (prefix, kind) in [("text-s", "text"), ("think-s", "thinking")] where eventID.hasPrefix(prefix) {
             guard let position = UInt64(eventID.dropFirst(prefix.count)),
