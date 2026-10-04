@@ -11,17 +11,19 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one. Do not reconstruct release notes from commits
 at the end.
 
-## [Unreleased]
+## [1.1.1] - Unreleased
 
 ### Added
 
 - A guided New pull request flow on Apple, Windows and Android: choose a
   branch, select and review files to commit, publish the branch, then write
-  a title and description. Draft is the default; matching open pull requests
-  are reused when retrying.
+  a title and description. Draft is the default, and matching open pull
+  requests are reused when retrying.
 - Chat sign-in guidance for installed coding agents. Open the agent's
   terminal on the chat's computer, follow browser or code instructions,
-  and check sign-in without losing the chat draft.
+  and check sign-in without losing the chat draft. On Mac, iPhone and iPad,
+  a Codex sign-in opens its page in your browser and copies the one-time
+  code for you.
 - Chat detail levels on Apple, Windows and Android. Compact, the default,
   folds an agent's thinking and tool steps between visible replies, Standard
   folds thinking and runs of reads, and Detailed shows every step with its
@@ -39,7 +41,6 @@ at the end.
   web link, shows the full URL, and can remember your browser choice.
 - Claude authentication failures still offer the guided sign-in terminal
   when a CLI status check cannot confirm the agent's login.
-
 - Retained Mac screens keep finite dimensions during startup and resizing,
   avoiding invalid view geometry that could crash native controls.
 

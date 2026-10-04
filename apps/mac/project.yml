@@ -37,7 +37,7 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.1.0"
+    MARKETING_VERSION: "1.1.1"
     # The build number, and it counts releases: one higher on every tagged
     # version, never reused, never reset by a marketing version change. It sat
     # at "2" through fourteen releases, which the App Store will not take (a
@@ -224,7 +224,8 @@ settings:
     # 125 adds list-row chat deletion and fills the native iOS diff viewport.
     # 125 was uploaded as 1.1.0. 126 is the October 3 release, including the
     # final chat, project and remote access fixes.
-    CURRENT_PROJECT_VERSION: "126"
+    # 127 is 1.1.1.
+    CURRENT_PROJECT_VERSION: "127"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
