@@ -2,6 +2,7 @@
   <!-- SPDX-License-Identifier: LicenseRef-tokenstat-source-available -->
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../../apps/windows/Navigation/SidebarPreferences.cs" Link="SidebarPreferences.cs" />
     <Compile Include="../../../apps/windows/Pages/TerminalPaneSelection.cs" Link="TerminalPaneSelection.cs" />
     <Compile Include="../../../apps/windows/Pages/WorkspaceSshTabs.cs" Link="WorkspaceSshTabs.cs" />
     <Compile Include="../../../apps/windows/Pages/SshDisplayName.cs" Link="SshDisplayName.cs" />

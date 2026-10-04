@@ -72,7 +72,7 @@ public sealed partial class MainWindow : Window
     /// Folders whose sidebar chat list is showing ten instead of five, like
     /// the Mac expanded chat histories.
     /// </summary>
-    private readonly HashSet<string> _liveChatExpanded = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _liveChatExpanded = SidebarPreferences.Shared.ExpandedIDs("history:");
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _sidebarPoll;
     private int _sidebarTick;
     private bool _sidebarRefreshing;
@@ -93,7 +93,33 @@ public sealed partial class MainWindow : Window
     private bool _showUpdateChecking;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _updateCheckingDelay;
 
-    private readonly HashSet<string> _compactExpanded = new(StringComparer.Ordinal);
+    private int _sidebarRestoreDepth;
+
+    private void RestoreSidebarLayout(Action action)
+    {
+        _sidebarRestoreDepth++;
+        try { action(); }
+        finally { _sidebarRestoreDepth--; }
+    }
+
+    private void TrackSidebarExpansion(NavigationViewItem row)
+    {
+        var window = new WeakReference<MainWindow>(this);
+        row.RegisterPropertyChangedCallback(NavigationViewItem.IsExpandedProperty, (owner, _) =>
+        {
+            // Native compaction and hierarchy rebuilds are temporary UI state.
+            // Leaves can share tags with groups, so track only group owners.
+            if (window.TryGetTarget(out var shell) && shell._sidebarRestoreDepth == 0 && shell._nav.IsPaneOpen
+                && owner is NavigationViewItem group && group.MenuItems.Count > 0 && group.Tag is string tag)
+                shell.DispatcherQueue.TryEnqueue(() =>
+                {
+                    // WinUI can collapse a row before forwarding the pane's
+                    // closed state. Wait until that native transition finishes.
+                    if (shell._sidebarRestoreDepth == 0 && shell._nav.IsPaneOpen && ReferenceEquals(shell.FindNavItem(tag), group))
+                        SidebarPreferences.Shared.RememberExpansion("row:" + tag, group.IsExpanded);
+                });
+        });
+    }
 
     private void PaneStateChanged()
     {
@@ -104,20 +130,12 @@ public sealed partial class MainWindow : Window
 
     private void ApplyCompactExpansion()
     {
-        if (!_nav.IsPaneOpen)
+        RestoreSidebarLayout(() =>
         {
             foreach (var row in NavItems(_nav.MenuItems))
-            {
-                if (row.IsExpanded && row.Tag is string tag) _compactExpanded.Add(tag);
-                if (row.Tag is string) row.IsExpanded = false;
-            }
-        }
-        else
-        {
-            foreach (var row in NavItems(_nav.MenuItems))
-                if (row.Tag is string tag && _compactExpanded.Contains(tag)) row.IsExpanded = true;
-            _compactExpanded.Clear();
-        }
+                if (row.MenuItems.Count > 0 && row.Tag is string tag)
+                    row.IsExpanded = _nav.IsPaneOpen && SidebarPreferences.Shared.IsExpanded("row:" + tag, true);
+        });
         SyncPaneChrome();
     }
 
@@ -240,6 +258,10 @@ public sealed partial class MainWindow : Window
             Icon = new SymbolIcon { Symbol = Symbol.Add },
         });
         _nav.MenuItems.Add(_sshGroup);
+        TrackSidebarExpansion(_sshGroup);
+        UpdateServersHeader();
+        UpdateProjectsHeader();
+        ApplySidebarSectionLayout();
         var searchShortcut = new Microsoft.UI.Xaml.Input.KeyboardAccelerator
         {
             Key = Windows.System.VirtualKey.K,
@@ -593,12 +615,14 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// Local folders and every reachable peer's, each opening onto its running
     /// terminals and chats (the sections are tabs on the project page). The
-    /// Add project row stays under the folders, followed by live SSH servers.
+    /// Add project row stays under the folders. The servers block follows
+    /// the saved section order even while no servers are connected.
     /// </summary>
-    private void RebuildFolderItems()
+    private void RebuildFolderItems() => RestoreSidebarLayout(RebuildFolderItemsCore);
+
+    private void RebuildFolderItemsCore()
     {
         var selectedTag = (_nav.SelectedItem as NavigationViewItem)?.Tag as string;
-        var expanded = NavigationExpansion.Capture(NavItems(_nav.MenuItems));
         var keep = new List<object>();
         foreach (var item in _nav.MenuItems)
         {
@@ -636,8 +660,9 @@ public sealed partial class MainWindow : Window
                 Tag = "machine:" + peer.Key,
                 Icon = new SymbolIcon { Symbol = Symbol.Globe },
                 SelectsOnInvoked = false,
-                IsExpanded = _nav.IsPaneOpen,
+                IsExpanded = _nav.IsPaneOpen && SidebarPreferences.Shared.IsExpanded("row:machine:" + peer.Key, true),
             };
+            TrackSidebarExpansion(machine);
             ToolTipService.SetToolTip(machine, peer.First().MachineLabel);
             foreach (var folder in peer)
                 machine.MenuItems.Add(FolderParent(folder.Id, folder.Name, remote: true, folder.Path, folder.Git));
@@ -659,14 +684,15 @@ public sealed partial class MainWindow : Window
         }
         _nav.MenuItems.Add(_sshGroup);
         UpdateProjectsHeader();
+        ApplySidebarSectionLayout();
         // Populate children before restoring expansion: native rows without
         // children cannot retain an expanded state while they are mounted.
         RebuildSidebarLive();
         foreach (var item in NavItems(_nav.MenuItems))
         {
-            if (item.MenuItems.Count > 0 && item.Tag is string tag && expanded.TryGetValue(tag, out var wasExpanded))
+            if (item.MenuItems.Count > 0 && item.Tag is string tag)
             {
-                item.IsExpanded = wasExpanded;
+                item.IsExpanded = _nav.IsPaneOpen && SidebarPreferences.Shared.IsExpanded("row:" + tag, true);
             }
         }
         if (selectedTag is not null
@@ -686,8 +712,9 @@ public sealed partial class MainWindow : Window
             Content = FolderLabel(name, git),
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Tag = "ws:" + id + ":Launcher",
-            IsExpanded = _nav.IsPaneOpen,
+            IsExpanded = _nav.IsPaneOpen && SidebarPreferences.Shared.IsExpanded("row:ws:" + id + ":Launcher", true),
         };
+        TrackSidebarExpansion(parent);
         if (!string.IsNullOrEmpty(path))
         {
             ToolTipService.SetToolTip(parent, path);
@@ -733,7 +760,12 @@ public sealed partial class MainWindow : Window
             });
         if (RemoteWorkspaces.TrySplit(id, out var peer, out _))
             ContextMenus.Add(menu, L10n.Text("windows.mainwindow_xaml.disconnect_from_this_computer.4ce30719"), () => RemoteWorkspaces.Disconnect(peer));
-        ContextMenus.Add(menu, L10n.Text("windows.mainwindow_xaml.expand_collapse"), () => parent.IsExpanded = !parent.IsExpanded);
+        ContextMenus.Add(menu, L10n.Text("windows.mainwindow_xaml.expand_collapse"), () =>
+        {
+            var expanded = !parent.IsExpanded;
+            SidebarPreferences.Shared.RememberExpansion("row:ws:" + id + ":Launcher", expanded);
+            parent.IsExpanded = expanded;
+        });
         ContextMenus.AddAsync(menu, L10n.Text("windows.mainwindow_xaml.remove_from_tokenstat.195e6064"), async () =>
         {
             var confirm = new ContentDialog { Title = L10n.Text("windows.mainwindow_xaml.remove_this_folder.5937b581"), Content = L10n.Text("windows.mainwindow_xaml.the_folder_and_its_files_stay_on_disk.c089e1af"), PrimaryButtonText = L10n.Text("common.remove"), CloseButtonText = L10n.Text("windows.mainwindow_xaml.keep_it.fdce5da2"), DefaultButton = ContentDialogButton.Close };
@@ -767,18 +799,97 @@ public sealed partial class MainWindow : Window
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.Children.Add(new TextBlock { Text = L10n.Text("common.projects").ToUpperInvariant(),
-            FontSize = 11, Opacity = 0.55, VerticalAlignment = VerticalAlignment.Center });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var expanded = SidebarPreferences.Shared.IsExpanded("section:projects", true);
+        var title = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS,
+            Children = { new FontIcon { Glyph = expanded ? "\uE70D" : "\uE76C", FontSize = 9 },
+                new TextBlock { Text = L10n.Text("common.projects").ToUpperInvariant(), FontSize = 11 } } };
+        var toggle = new Button { Content = title, Background = null, BorderThickness = new Thickness(0),
+            Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left, Opacity = 0.55 };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toggle, expanded
+            ? L10n.Text("common.sidebar.collapse_projects") : L10n.Text("common.sidebar.expand_projects"));
+        toggle.Click += (_, _) =>
+        {
+            SidebarPreferences.Shared.RememberExpansion("section:projects", !expanded);
+            UpdateProjectsHeader();
+            ApplySidebarSectionLayout();
+        };
+        header.Children.Add(toggle);
         var count = new TextBlock { Text = (_localFolders.Count + RemoteWorkspaces.CachedFolders().Count()).ToString(),
             FontSize = 11, Opacity = 0.45, VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(count, 1);
         header.Children.Add(count);
+        var options = SidebarSectionMenu();
+        header.ContextFlyout = options;
+        var more = ActionIconGlyph.MoreButton(L10n.Text("common.sidebar.section_options"), options);
+        more.Width = more.Height = 22;
+        Grid.SetColumn(more, 2);
+        header.Children.Add(more);
         var add = Buttons.ToolbarIcon(ActionIcon.Create, L10n.Text("common.add_project"), async (_, _) => await AddWorkspaceAsync());
         add.Width = add.Height = 22;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(add, "sidebar.addProject");
-        Grid.SetColumn(add, 2);
+        Grid.SetColumn(add, 3);
         header.Children.Add(add);
         _workspacesHeader.Content = header;
+    }
+
+    private MenuFlyout SidebarSectionMenu()
+    {
+        var menu = new MenuFlyout();
+        ContextMenus.Add(menu, L10n.Text("common.sidebar.move_servers_above_projects"),
+            () => MoveSidebarSection("servers", "projects"), () => SidebarPreferences.Shared.SectionOrder[0] != "servers");
+        ContextMenus.Add(menu, L10n.Text("common.sidebar.move_projects_above_servers"),
+            () => MoveSidebarSection("projects", "servers"), () => SidebarPreferences.Shared.SectionOrder[0] != "projects");
+        return menu;
+    }
+
+    private void UpdateServersHeader()
+    {
+        var header = new Grid { ColumnSpacing = Theme.SpaceS };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(new TextBlock { Text = L10n.Text("windows.serverlauncher.servers").ToUpperInvariant(),
+            FontSize = 11, Opacity = 0.55, VerticalAlignment = VerticalAlignment.Center });
+        var menu = SidebarSectionMenu();
+        header.ContextFlyout = menu;
+        var more = ActionIconGlyph.MoreButton(L10n.Text("common.sidebar.section_options"), menu);
+        more.Width = more.Height = 22;
+        Grid.SetColumn(more, 1);
+        header.Children.Add(more);
+        _sshGroup.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        _sshGroup.Content = header;
+    }
+
+    private void MoveSidebarSection(string section, string before)
+    {
+        SidebarPreferences.Shared.Move(section, before);
+        ApplySidebarSectionLayout();
+    }
+
+    private void ApplySidebarSectionLayout()
+    {
+        RestoreSidebarLayout(() =>
+        {
+            var suppressed = _suppressNav;
+            var selected = _nav.SelectedItem;
+            _suppressNav = true;
+            try
+            {
+                _nav.MenuItems.Remove(_sshGroup);
+                if (SidebarPreferences.Shared.SectionOrder[0] == "servers")
+                    _nav.MenuItems.Insert(_nav.MenuItems.IndexOf(_workspacesHeader), _sshGroup);
+                else _nav.MenuItems.Add(_sshGroup);
+                _sshGroup.IsExpanded = _nav.IsPaneOpen && SidebarPreferences.Shared.IsExpanded("row:ssh:" + SSHSection.Hosts, true);
+                var expanded = SidebarPreferences.Shared.IsExpanded("section:projects", true);
+                foreach (var item in _nav.MenuItems.OfType<NavigationViewItem>())
+                    if (item.Tag is string tag && (tag.StartsWith("ws:", StringComparison.Ordinal)
+                        || tag.StartsWith("machine:", StringComparison.Ordinal) || tag is "workspaces:add" or "workspaces:empty"))
+                        item.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+                _nav.SelectedItem = selected;
+            }
+            finally { _suppressNav = suppressed; }
+        });
     }
 
     private static UIElement FolderLabel(string name, JsonNode? git)
@@ -1192,6 +1303,7 @@ public sealed partial class MainWindow : Window
         {
             _liveChatExpanded.Add(folder);
         }
+        SidebarPreferences.Shared.RememberExpansion("history:" + folder, _liveChatExpanded.Contains(folder));
         RebuildSidebarLive();
         // An expander changes the list, not the screen: the selection goes
         // back where it was and the content stays put.
@@ -1744,9 +1856,13 @@ public sealed partial class MainWindow : Window
                             catch (Exception ex) { await Chrome.ShowDialog(owner, new ContentDialog { Title = L10n.Text("windows.mainwindow_xaml.could_not_close_session.f56b373d"), Content = ex.Message, CloseButtonText = L10n.Text("common.close") }); }
                         });
                     }
-                    NavigationRows.Reconcile(sshGroup.MenuItems, wanted, "sshterm:");
-                    if (sshGroup.Visibility == Visibility.Collapsed && wanted.Count > 0) sshGroup.IsExpanded = _nav.IsPaneOpen;
-                    sshGroup.Visibility = wanted.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+                    RestoreSidebarLayout(() =>
+                    {
+                        NavigationRows.Reconcile(sshGroup.MenuItems, wanted, "sshterm:");
+                        if (sshGroup.Visibility == Visibility.Collapsed && wanted.Count > 0)
+                            sshGroup.IsExpanded = _nav.IsPaneOpen && SidebarPreferences.Shared.IsExpanded("row:ssh:" + SSHSection.Hosts, true);
+                        sshGroup.Visibility = wanted.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+                    });
                 }
             }
             catch { /* Keep reachable session rows on a transient host failure. */ }
@@ -1803,7 +1919,9 @@ public sealed partial class MainWindow : Window
     /// and count badges on the section rows. Section rows keep their tags and
     /// order; only the live rows come and go.
     /// </summary>
-    private void RebuildSidebarLive()
+    private void RebuildSidebarLive() => RestoreSidebarLayout(RebuildSidebarLiveCore);
+
+    private void RebuildSidebarLiveCore()
     {
         var selectedTag = (_nav.SelectedItem as NavigationViewItem)?.Tag as string;
         var sessionsByFolder = new Dictionary<string, List<JsonNode>>(StringComparer.Ordinal);
@@ -1928,7 +2046,9 @@ public sealed partial class MainWindow : Window
             // Existing populated folders keep the user's disclosure choice.
             if (!hadChildren && parent.MenuItems.Count > 0 && _nav.IsPaneOpen)
             {
-                SidebarChrome.ExpandNewHistory(parent, hadChildren, _nav.IsPaneOpen);
+                if (parent.Tag is string tag && SidebarPreferences.Shared.IsExpanded("row:" + tag, true))
+                    SidebarChrome.ExpandNewHistory(parent, hadChildren, _nav.IsPaneOpen);
+                else parent.IsExpanded = false;
                 Program.LogStartup($"Sidebar project expanded; children={parent.MenuItems.Count}; expanded={parent.IsExpanded}");
             }
         }

@@ -73,5 +73,10 @@
   "common.account_plan_label": "{0}, {1} plan",
   "common.local_provider_saved_refresh": "Port saved. Refresh to check the server again.",
   "common.projects.first_title": "Add your first project",
-  "common.projects.first_message": "Choose a folder to start chats, run agents, and keep your work together."
+  "common.projects.first_message": "Choose a folder to start chats, run agents, and keep your work together.",
+  "common.sidebar.move_servers_above_projects": "Move Servers above Projects",
+  "common.sidebar.move_projects_above_servers": "Move Projects above Servers",
+  "common.sidebar.section_options": "Sidebar section options",
+  "common.sidebar.collapse_projects": "Collapse Projects",
+  "common.sidebar.expand_projects": "Expand Projects"
 }

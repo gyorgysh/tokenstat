@@ -9,6 +9,7 @@ Directory.CreateDirectory(directory);
 try
 {
     TerminalPaneSelectionTests.Run(directory);
+    SidebarPreferencesTests.Run(directory);
     await TerminalSessionTests.RunAsync();
     var path = Path.Combine(directory, "widths.json");
     var widths = new ShellWidths(path);

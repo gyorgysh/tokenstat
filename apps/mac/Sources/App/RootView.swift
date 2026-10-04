@@ -176,15 +176,18 @@ struct RootView: View {
     @State private var workspacePendingChatRemoval: WorkspaceFolder?
     /// The session a right-click asked to close, held until it is confirmed.
     @State private var sessionPendingClose: TerminalSession?
-    /// Folders whose sections are showing. Collapsed is the default: a
-    /// sidebar of six folders each listing every section is a wall, and the
-    /// question it should answer first is which folder, not which section.
+    /// Restore each folder's disclosure when it arrives, including peers
+    /// that temporarily disappear. New folders keep the expanded default.
     @State private var expandedWorkspaces: Set<String> = []
     @State private var knownSidebarProjects: Set<String> = []
+    @State private var sidebarSectionOrder = SidebarPreferences.shared.sectionOrder
+    @State private var expandedSidebarSections = Set(SidebarPreferences.defaultOrder.filter {
+        SidebarPreferences.shared.isExpanded("section:" + $0, default: true)
+    })
     /// Chat transcripts are children of Chat, not a second global picker in
     /// the title bar. Keep the longer list opt-in so a busy workspace does
     /// not turn the sidebar into a transcript index.
-    @State private var expandedChatHistories: Set<String> = []
+    @State private var expandedChatHistories = SidebarPreferences.shared.expandedIDs("history:")
     /// The section each folder was last left on, so returning to a folder
     /// returns to what you were doing in it.
     @State private var lastSection: [String: WorkspaceSection] = [:]
@@ -196,7 +199,7 @@ struct RootView: View {
     @State private var savedFolder: WorkFolderCacheSettings.Destination?
     #if os(macOS)
     /// Servers whose session rows are showing.
-    @State private var expandedSSHHosts: Set<String> = []
+    @State private var expandedSSHHosts = SidebarPreferences.shared.expandedIDs("server:")
     /// The server whose sidebar menu asked to close every shell. Kept on the
     /// sidebar rather than on an individual row so the confirmation survives
     /// that row collapsing or disappearing while it is in front.
@@ -247,14 +250,18 @@ struct RootView: View {
             // no `onChange(of: route)` will ever clear.
             .onChange(of: workspaces.folders.map(\.id), initial: true) { _, ids in
                 let incoming = Set(ids)
-                expandedWorkspaces.formUnion(incoming.subtracting(knownSidebarProjects))
+                for id in incoming.subtracting(knownSidebarProjects) {
+                    if SidebarPreferences.shared.isExpanded("project:" + id, default: true) {
+                        expandedWorkspaces.insert(id)
+                    }
+                }
                 expandedWorkspaces.formIntersection(incoming)
                 knownSidebarProjects = incoming
                 guard let id = route.workspaceID, !ids.contains(id) else { return }
                 lastSection[id] = nil
                 expandedWorkspaces.remove(id)
                 if let next = workspaces.selectedID, ids.contains(next) {
-                    selectWorkspace(next)
+                    selectWorkspace(next, revealInSidebar: false)
                 } else {
                     navigate(to: .global(.home))
                 }
@@ -2007,9 +2014,9 @@ struct RootView: View {
         HStack(spacing: 0) {
             Button {
                 if isExpanded {
-                    expandedSSHHosts.remove(host.id)
+                    setServerExpanded(host.id, false)
                 } else {
-                    expandedSSHHosts.insert(host.id)
+                    setServerExpanded(host.id, true)
                 }
             } label: {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
@@ -2040,9 +2047,9 @@ struct RootView: View {
             ThemeRule()
             Button(isExpanded ? L10n.text("common.collapse") : L10n.text("common.expand"), .collapse) {
                 if isExpanded {
-                    expandedSSHHosts.remove(host.id)
+                    setServerExpanded(host.id, false)
                 } else {
-                    expandedSSHHosts.insert(host.id)
+                    setServerExpanded(host.id, true)
                 }
             }
         }
@@ -2083,10 +2090,10 @@ struct RootView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        projectsSection
-                        #if os(macOS)
-                        liveServersSection
-                        #endif
+                        ForEach(sidebarSectionOrder, id: \.self) { section in
+                            if section == "projects" { projectsSection }
+                            else if section == "servers" { liveServersSection }
+                        }
                     }
                     .padding(.bottom, Theme.Space.m)
                 }
@@ -2196,7 +2203,7 @@ struct RootView: View {
             workspaces.requestAdd()
             return
         }
-        expandedWorkspaces.insert(folder.id)
+        setProjectExpanded(folder.id, true)
         openSection(.chat, in: folder.id) { showingChatOverview = false }
         Task {
             for _ in 0..<60 {
@@ -2218,8 +2225,9 @@ struct RootView: View {
         SidebarGroupHeader(
             title: L10n.text("common.projects"),
             count: workspaces.folders.count,
-            isExpanded: nil
-        ) {} trailing: {
+            isExpanded: expandedSidebarSections.contains("projects")
+        ) { toggleSidebarSection("projects") } trailing: {
+            sidebarSectionMenu()
             #if os(macOS)
             Button {
                 workspaces.requestAdd()
@@ -2238,55 +2246,57 @@ struct RootView: View {
             #endif
         }
 
-        if workspaces.folders.isEmpty {
-            FirstProjectPrompt(compact: true) { workspaces.requestAdd() }
-        } else {
-            ForEach(workspaces.folders) { folder in
-                projectRow(folder)
+        if expandedSidebarSections.contains("projects") {
+            if workspaces.folders.isEmpty {
+                FirstProjectPrompt(compact: true) { workspaces.requestAdd() }
+            } else {
+                ForEach(workspaces.folders) { folder in
+                    projectRow(folder)
+                }
+                #if os(macOS)
+                if workspaceDropBeforeID == WorkspaceDrag.end {
+                    workspaceInsertionLine
+                }
+                #endif
             }
             #if os(macOS)
-            if workspaceDropBeforeID == WorkspaceDrag.end {
-                workspaceInsertionLine
+            // A row, always there, under whatever folders exist.
+            //
+            // The centre pane has a prominent Add Project button, but it
+            // is only reachable with no folders at all: the first folder
+            // added selects itself and the empty state is never seen again.
+            // That left one 9pt `+` in a section header as the only way to
+            // add a second folder, which is not somewhere anyone looks.
+            Button {
+                workspaces.requestAdd()
+            } label: {
+                HStack(spacing: Theme.Space.xs) {
+                    Image(systemName: "plus.circle")
+                        .font(Theme.font(11, weight: .semibold))
+                    Text(L10n.text("apple.rootview.add_project.43079d4a"))
+                        .font(Theme.callout)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.vertical, Theme.Space.xs)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
             }
+            .buttonStyle(.plain)
+            .padding(.top, workspaces.folders.isEmpty ? 0 : Theme.Space.xs)
+            .modifier(WorkspaceReorder(id: WorkspaceDrag.end, canDrag: false, enabled: workspaces.folders.count > 1) {
+                workspaces.moveWorkspace($0, before: nil)
+                workspaceDropBeforeID = nil
+            } onTargeted: { on in
+                if on {
+                    workspaceDropBeforeID = WorkspaceDrag.end
+                } else if workspaceDropBeforeID == WorkspaceDrag.end {
+                    workspaceDropBeforeID = nil
+                }
+            })
             #endif
         }
-        #if os(macOS)
-        // A row, always there, under whatever folders exist.
-        //
-        // The centre pane has a prominent Add Project button, but it
-        // is only reachable with no folders at all: the first folder
-        // added selects itself and the empty state is never seen again.
-        // That left one 9pt `+` in a section header as the only way to
-        // add a second folder, which is not somewhere anyone looks.
-        Button {
-            workspaces.requestAdd()
-        } label: {
-            HStack(spacing: Theme.Space.xs) {
-                Image(systemName: "plus.circle")
-                    .font(Theme.font(11, weight: .semibold))
-                Text(L10n.text("apple.rootview.add_project.43079d4a"))
-                    .font(Theme.callout)
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.vertical, Theme.Space.xs)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .padding(.top, workspaces.folders.isEmpty ? 0 : Theme.Space.xs)
-        .modifier(WorkspaceReorder(id: WorkspaceDrag.end, canDrag: false, enabled: workspaces.folders.count > 1) {
-            workspaces.moveWorkspace($0, before: nil)
-            workspaceDropBeforeID = nil
-        } onTargeted: { on in
-            if on {
-                workspaceDropBeforeID = WorkspaceDrag.end
-            } else if workspaceDropBeforeID == WorkspaceDrag.end {
-                workspaceDropBeforeID = nil
-            }
-        })
-        #endif
     }
 
     /// One project: its row, and when open, what lives in it.
@@ -2325,9 +2335,9 @@ struct RootView: View {
         HStack(spacing: 0) {
             Button {
                 if isExpanded {
-                    expandedWorkspaces.remove(folder.id)
+                    setProjectExpanded(folder.id, false)
                 } else {
-                    expandedWorkspaces.insert(folder.id)
+                    setProjectExpanded(folder.id, true)
                 }
             } label: {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
@@ -2483,11 +2493,69 @@ struct RootView: View {
     private var liveServersSection: some View {
         let hosts = sshLiveHosts
         if !hosts.isEmpty {
-            SidebarGroupHeader(title: L10n.text("apple.rootview.servers.68d7beb6"), count: hosts.count, isExpanded: nil) {}
-            ForEach(hosts) { host in
-                sshLiveHostRow(host)
+            SidebarGroupHeader(title: L10n.text("apple.rootview.servers.68d7beb6"), count: hosts.count,
+                               isExpanded: expandedSidebarSections.contains("servers")) {
+                toggleSidebarSection("servers")
+            } trailing: {
+                sidebarSectionMenu()
+            }
+            if expandedSidebarSections.contains("servers") {
+                ForEach(hosts) { host in
+                    sshLiveHostRow(host)
+                }
             }
         }
+    }
+
+    private func toggleSidebarSection(_ section: String) {
+        setSidebarSectionExpanded(section, !expandedSidebarSections.contains(section))
+    }
+
+    private func setSidebarSectionExpanded(_ section: String, _ expanded: Bool) {
+        if expanded { expandedSidebarSections.insert(section) }
+        else { expandedSidebarSections.remove(section) }
+        SidebarPreferences.shared.rememberExpansion("section:" + section, expanded: expanded)
+    }
+
+    private func sidebarSectionMenu() -> some View {
+        Menu {
+            Button(L10n.text("common.sidebar.move_servers_above_projects")) { moveSidebarSection("servers", before: "projects") }
+                .disabled(sidebarSectionOrder.first == "servers")
+            Button(L10n.text("common.sidebar.move_projects_above_servers")) { moveSidebarSection("projects", before: "servers") }
+                .disabled(sidebarSectionOrder.first == "projects")
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(Theme.font(10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 20, height: 20)
+                .contentShape(.rect)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(L10n.text("common.sidebar.section_options"))
+        .accessibilityLabel(L10n.text("common.sidebar.section_options"))
+    }
+
+    private func moveSidebarSection(_ section: String, before other: String) {
+        SidebarPreferences.shared.move(section, before: other)
+        sidebarSectionOrder = SidebarPreferences.shared.sectionOrder
+    }
+
+    private func setProjectExpanded(_ id: String, _ expanded: Bool) {
+        if expanded { expandedWorkspaces.insert(id) } else { expandedWorkspaces.remove(id) }
+        if expanded, !expandedSidebarSections.contains("projects") { setSidebarSectionExpanded("projects", true) }
+        SidebarPreferences.shared.rememberExpansion("project:" + id, expanded: expanded)
+    }
+
+    private func setHistoryExpanded(_ id: String, _ expanded: Bool) {
+        if expanded { expandedChatHistories.insert(id) } else { expandedChatHistories.remove(id) }
+        SidebarPreferences.shared.rememberExpansion("history:" + id, expanded: expanded)
+    }
+
+    private func setServerExpanded(_ id: String, _ expanded: Bool) {
+        if expanded { expandedSSHHosts.insert(id) } else { expandedSSHHosts.remove(id) }
+        SidebarPreferences.shared.rememberExpansion("server:" + id, expanded: expanded)
     }
     #endif
 
@@ -3161,8 +3229,8 @@ struct RootView: View {
                         let copied = try await chat.fork(conversation, in: folder.id)
                         if route == previousRoute {
                             chat.reveal(id: copied.id, in: folder.id)
-                            expandedWorkspaces.insert(folder.id)
-                            expandedChatHistories.insert(folder.id)
+                            setProjectExpanded(folder.id, true)
+                            setHistoryExpanded(folder.id, true)
                             openSection(.chat, in: folder.id)
                         }
                     },
@@ -3205,9 +3273,9 @@ struct RootView: View {
                     // of the archive belongs to See all chats.
                     Button(expanded ? L10n.text("apple.rootview.show_less.94ea9b1d") : L10n.text("apple.rootview.show_0_more.b91c3640", "\(min(conversations.count, ChatHistoryWindow.inlineLimit) - window.count)")) {
                         if expanded {
-                            expandedChatHistories.remove(folder.id)
+                            setHistoryExpanded(folder.id, false)
                         } else {
-                            expandedChatHistories.insert(folder.id)
+                            setHistoryExpanded(folder.id, true)
                         }
                     }
                     .buttonStyle(.plain)
@@ -3239,7 +3307,7 @@ struct RootView: View {
                   let index = conversations.firstIndex(where: { $0.id == selectedID }),
                   index >= ChatHistoryWindow.collapsedLimit
             else { return }
-            expandedChatHistories.insert(folder.id)
+            setHistoryExpanded(folder.id, true)
         }
     }
 
@@ -3306,6 +3374,7 @@ struct RootView: View {
     private func openSection(
         _ section: WorkspaceSection,
         in folderID: String,
+        revealInSidebar: Bool = true,
         then update: (() -> Void)? = nil
     ) {
         navigate(to: .workspace(id: folderID, section: section)) {
@@ -3314,7 +3383,7 @@ struct RootView: View {
             #endif
             workspaces.selectedID = folderID
             lastSection[folderID] = section
-            expandedWorkspaces.insert(folderID)
+            if revealInSidebar { setProjectExpanded(folderID, true) }
             #if os(macOS)
             switch section {
             case .sessions: workspaces.showTerminal(in: folderID)
@@ -3425,8 +3494,8 @@ struct RootView: View {
                 localHostIdentity: WorkSessionContext.shared.localHostIdentity
               ), let item = reference.itemID else { return }
         chat.reveal(id: item, in: folderID)
-        expandedWorkspaces.insert(folderID)
-        expandedChatHistories.insert(folderID)
+        setProjectExpanded(folderID, true)
+        setHistoryExpanded(folderID, true)
         openSection(.chat, in: folderID)
     }
 
@@ -3507,13 +3576,13 @@ struct RootView: View {
         case .conversation:
             guard let item = pin.reference.itemID, !item.isEmpty else { return }
             chat.reveal(id: item, in: folderID)
-            expandedWorkspaces.insert(folderID)
-            expandedChatHistories.insert(folderID)
+            setProjectExpanded(folderID, true)
+            setHistoryExpanded(folderID, true)
             openSection(.chat, in: folderID)
         case .terminal:
             #if os(macOS)
             guard let session = terminalForPin(pin) else { return }
-            expandedWorkspaces.insert(folderID)
+            setProjectExpanded(folderID, true)
             openSection(.sessions, in: folderID) { terminals.select(session) }
             #endif
         case .commit, .savedDiff:
@@ -3529,11 +3598,11 @@ struct RootView: View {
     /// through `openSection(.sessions)` used to call `showTerminal` first, so
     /// a second click on the same folder while Sessions was already the route
     /// could leave the terminal in front and only light the Sessions row.
-    private func selectWorkspace(_ id: String) {
+    private func selectWorkspace(_ id: String, revealInSidebar: Bool = true) {
         navigate(to: .workspace(id: id, section: .sessions)) {
             workspaces.selectedID = id
             lastSection[id] = .sessions
-            expandedWorkspaces.insert(id)
+            if revealInSidebar { setProjectExpanded(id, true) }
             #if os(macOS)
             workspaces.showLauncher(in: id)
             #endif
@@ -3623,7 +3692,9 @@ struct RootView: View {
                let section = WorkspaceSection(rawValue: name) {
                 Logger(subsystem: "ai.tokenstat.tokenstat", category: "chatload")
                     .error("restoring section=\(name) folder=\(folderID)")
-                openSection(section, in: folderID)
+                // Restoring the location must not unfold a project the user
+                // deliberately left collapsed while its content was open.
+                openSection(section, in: folderID, revealInSidebar: false)
                 return
             }
             try? await Task.sleep(for: .milliseconds(60))
@@ -3751,8 +3822,8 @@ struct RootView: View {
             return true
         }
         chat.reveal(id: conversationID, in: folderID)
-        expandedWorkspaces.insert(folderID)
-        expandedChatHistories.insert(folderID)
+        setProjectExpanded(folderID, true)
+        setHistoryExpanded(folderID, true)
         openSection(.chat, in: folderID) {
             Task {
                 guard chat.folderID == folderID,
