@@ -15,6 +15,9 @@ struct ClientChatView: View {
     let workspaceID: String
     let folderName: String
     var hostName: String = ""
+    /// The folder, so a turn's changes can be opened for review from the
+    /// conversation. Nil leaves Review off.
+    var folder: WorkspaceFolder? = nil
     /// Launcher entry: skip the list and land in the conversation worth
     /// returning to, creating the first one when this folder has none.
     var openConversationOnAppear = false
@@ -80,6 +83,7 @@ struct ClientChatView: View {
                     chatID: thread.id,
                     folderName: folderName,
                     hostName: hostName,
+                    folder: folder,
                     isActive: opened != nil,
                     onBack: { retainedThread = opened; self.opened = nil },
                     onFork: { copied in
@@ -316,6 +320,12 @@ struct ClientChatView: View {
                         .font(ClientType.label.weight(.medium))
                         .foregroundStyle(.primary)
                         .lineLimit(2)
+                    if let pull = chat.pull {
+                        Image(systemName: pull.symbol)
+                            .font(ClientType.caption.weight(.medium))
+                            .foregroundStyle(pull.tint)
+                            .accessibilityLabel(L10n.text("apple.branchpull.chip", "\(pull.number)", pull.stateLabel))
+                    }
                     // Words waiting in this thread. The mark reads the draft
                     // store itself, so this list is not rebuilt every time
                     // somebody pauses typing in one of them.
@@ -441,6 +451,7 @@ struct ClientChatThread: View {
     let chatID: String
     let folderName: String
     let hostName: String
+    var folder: WorkspaceFolder? = nil
     /// How to leave, when this is shown in place of the chat list rather than
     /// pushed on top of it. `PullDetailView` takes the same closure for the
     /// same reason.
@@ -488,6 +499,11 @@ struct ClientChatThread: View {
     @State private var dropNotice: String?
     @State private var dropNoticeGeneration = 0
     @State private var previewFile: ChatPreviewedFile?
+    /// The folder's changes, opened from a turn's card or the changes pill.
+    @State private var reviewingChanges = false
+    /// The folder's live git state, for the changes pill and the chip.
+    @State private var folderGit: GitStatus?
+    @State private var branchPull: BranchPull?
     /// Same strip as the list: reopening onto a stale transcript says what
     /// is happening until the explicit poll below answers.
     @State private var refreshing = false
@@ -495,6 +511,37 @@ struct ClientChatThread: View {
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var sizeClass
+
+    /// The folder's uncommitted work and the branch's pull request, above
+    /// the composer, as on the Mac.
+    @ViewBuilder
+    private var changesRow: some View {
+        let changed = folderGit.flatMap { $0.isRepo && !$0.files.isEmpty ? $0 : nil }
+        if changed != nil || branchPull != nil {
+            HStack(spacing: Theme.Space.s) {
+                if let changed {
+                    ChatChangesPill(git: changed) { reviewingChanges = true }
+                }
+                Spacer(minLength: 0)
+                if let branchPull {
+                    BranchPullChip(pull: branchPull)
+                }
+            }
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.bottom, Theme.Space.xs)
+        }
+    }
+
+    private func loadFolderState() async {
+        guard let folder, let peer = model.peer, model.savedCopy == nil else { return }
+        let workspace = model.folderID ?? folder.id
+        folderGit = (try? await GitCommitTarget(peer: peer, workspaceID: workspace).status())?.git
+        guard folderGit?.isRepo == true else {
+            branchPull = nil
+            return
+        }
+        branchPull = (try? await Bridge.branchPull(workspaceID: workspace, peer: peer))?.pull
+    }
 
     private var chat: ChatConversation? {
         model.chats.first { $0.id == chatID } ?? model.selected.flatMap { $0.id == chatID ? $0 : nil }
@@ -715,6 +762,25 @@ struct ClientChatThread: View {
             }
         }
         .sheet(isPresented: $showingHandoff) { WorkHandoffSheet(chat: model) }
+        .sheet(isPresented: $reviewingChanges, onDismiss: { Task { await loadFolderState() } }) {
+            if let folder, let peer = model.peer {
+                NavigationStack {
+                    ClientWorkspaceChangesView(peer: peer, workspaceID: model.folderID ?? folder.id,
+                                               folder: folder, hostName: hostName)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button(L10n.text("common.done")) { reviewingChanges = false }
+                            }
+                        }
+                }
+            }
+        }
+        // Asked again when a turn ends, since the agent may have changed
+        // files or opened the pull request.
+        .task(id: "\(model.busy)|\(isActive)|\(model.folderID ?? "")") {
+            guard isActive, !model.busy else { return }
+            await loadFolderState()
+        }
         .sheet(isPresented: $showingSetup) {
             setupSheet
         }
@@ -856,6 +922,9 @@ struct ClientChatThread: View {
                                        recoveryFailureID: model.signInFailureID)
                         .padding(.horizontal, Theme.Space.s)
                 }
+                if model.savedCopy == nil, folder != nil {
+                    changesRow
+                }
                 ClientChatComposer(
                     model: model,
                     chat: chat,
@@ -968,7 +1037,8 @@ struct ClientChatThread: View {
                                         Task { await model.answerQuestion(question, answer: text) }
                                     },
                                     answeringQuestion: model.answeringQuestions.contains(item.questionID ?? ""),
-                                    canAnswerQuestions: model.savedCopy == nil && !model.isShowingCachedTranscript
+                                    canAnswerQuestions: model.savedCopy == nil && !model.isShowingCachedTranscript,
+                                    reviewChanges: folder != nil && model.savedCopy == nil ? { _ in reviewingChanges = true } : nil
                                 )
                                 .equatable()
                             }

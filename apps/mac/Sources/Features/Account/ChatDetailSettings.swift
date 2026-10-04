@@ -20,12 +20,13 @@ final class ChatDetailPreference {
         level = UserDefaults.standard.string(forKey: Self.key).flatMap(ChatDetail.init(rawValue:)) ?? Self.defaultLevel
     }
 
-    /// Every device starts at Compact: the question and the answers, with the
-    /// steps between them one tap away. A choice somebody made is kept.
-    static let defaultLevel: ChatDetail = .compact
+    /// Every device starts at Minimal: each step one quiet line, the way
+    /// most editors show an agent's work. A choice somebody made is kept.
+    static let defaultLevel: ChatDetail = .minimal
 
     static func label(_ level: ChatDetail) -> String {
         switch level {
+        case .minimal: L10n.text("apple.chatdetail.minimal")
         case .compact: L10n.text("apple.chatdetail.compact")
         case .standard: L10n.text("apple.chatdetail.standard")
         case .detailed: L10n.text("apple.chatdetail.detailed")
@@ -34,6 +35,7 @@ final class ChatDetailPreference {
 
     static func explanation(_ level: ChatDetail) -> String {
         switch level {
+        case .minimal: L10n.text("apple.chatdetail.minimal_explanation")
         case .compact: L10n.text("apple.chatdetail.compact_explanation")
         case .standard: L10n.text("apple.chatdetail.standard_explanation")
         case .detailed: L10n.text("apple.chatdetail.detailed_explanation")

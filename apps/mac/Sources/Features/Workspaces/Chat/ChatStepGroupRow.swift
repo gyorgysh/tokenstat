@@ -25,6 +25,90 @@ struct ChatStepGroupRow: View {
     #endif
 
     var body: some View {
+        if group.minimal {
+            minimalLine
+        } else {
+            standardRow
+        }
+    }
+
+    /// Minimal: the verb, what it acted on and the lines it changed, in one
+    /// quiet line. The spinner stands in front while the step runs.
+    private var minimalLine: some View {
+        Button(action: toggle) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if group.running, animatesRunning {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                }
+                Text(title)
+                    .font(Self.titleFont)
+                    .foregroundStyle(group.running ? Theme.accent : .secondary)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+                if let meta = minimalSubject, !meta.isEmpty {
+                    Text(meta)
+                        .font(Self.titleFont.weight(.regular))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                if group.added + group.removed > 0 {
+                    DiffStat(added: Int(group.added), removed: Int(group.removed), font: Self.titleFont.weight(.regular))
+                        .fixedSize()
+                }
+                Spacer(minLength: 0)
+                if group.open {
+                    Image(systemName: "chevron.down")
+                        .font(Theme.font(9, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.vertical, 3)
+            .padding(.horizontal, Theme.Space.s)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            #if !os(macOS)
+            .frame(minHeight: 36)
+            #endif
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibility)
+        .accessibilityHint(group.open ? L10n.text("apple.chatdetail.hide_steps") : L10n.text("apple.chatdetail.show_steps"))
+        .accessibilityAddTraits(.isButton)
+    }
+
+    /// The file or command after the verb, or the counts for a run of
+    /// several reads and searches.
+    private var minimalSubject: String? {
+        switch group.style {
+        case .step, .explored:
+            if group.memberIDs.count == 1, let subject = group.subject {
+                return Self.shortSubject(verb: group.verb, subject)
+            }
+            return summary
+        case .thought:
+            return group.preview
+        case .work:
+            return summary
+        }
+    }
+
+    /// A path becomes its file name. A command keeps its first line.
+    static func shortSubject(verb: String?, _ subject: String) -> String {
+        let line = subject.split(whereSeparator: \.isNewline).first.map(String.init) ?? subject
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        switch verb {
+        case "Read", "Edit", "NotebookEdit", "Write", "Diff":
+            let name = (trimmed as NSString).lastPathComponent
+            return name.isEmpty ? trimmed : name
+        default:
+            return String(trimmed.prefix(160))
+        }
+    }
+
+    private var standardRow: some View {
         Button(action: toggle) {
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 header
@@ -112,6 +196,7 @@ struct ChatStepGroupRow: View {
         case .work: "list.bullet"
         case .explored: "magnifyingglass"
         case .thought: "brain"
+        case .step: "chevron.right.2"
         }
     }
 
@@ -129,6 +214,8 @@ struct ChatStepGroupRow: View {
             return group.running ? L10n.text("apple.chatdetail.exploring") : L10n.text("apple.chatdetail.explored")
         case .thought:
             return L10n.text("apple.chatdetail.thought")
+        case .step:
+            return SeatStep.word(verb: group.verb, running: group.running)
         }
     }
 
@@ -148,6 +235,8 @@ struct ChatStepGroupRow: View {
             return parts.joined(separator: ", ")
         case .thought:
             return group.preview
+        case .step:
+            return group.subject.map { Self.shortSubject(verb: group.verb, $0) }
         }
     }
 

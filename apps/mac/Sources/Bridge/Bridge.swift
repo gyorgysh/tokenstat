@@ -2080,6 +2080,29 @@ extension Bridge {
         )
     }
 
+    /// The pull request for a workspace's branch, or the branch it is on.
+    /// Nil from a paired computer too old to answer, which shows no badge.
+    static func branchPull(
+        workspaceID: String,
+        peer: String? = nil,
+        branch: String? = nil,
+        refresh: Bool = false
+    ) async throws -> BranchPullAnswer? {
+        var params: [String: Any] = ["workspaceId": workspaceID, "refresh": refresh]
+        if let branch { params["branch"] = branch }
+        if let peer {
+            guard await RemoteHostFeature.branchPulls.isSupported(peer: peer) else { return nil }
+            return try await onPeer(peer, "pulls.branch", params, as: BranchPullAnswer.self)
+        }
+        if let target = remoteWorkspace(workspaceID) {
+            guard await RemoteHostFeature.branchPulls.isSupported(peer: target.peer) else { return nil }
+            var remoteParams = params
+            remoteParams["workspaceId"] = target.workspace
+            return try await onPeer(target.peer, "pulls.branch", remoteParams, as: BranchPullAnswer.self)
+        }
+        return try await background("pulls.branch", params, as: BranchPullAnswer.self)
+    }
+
     static func pullList(
         workspaceID: String,
         peer: String? = nil,

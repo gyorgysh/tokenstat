@@ -42,6 +42,9 @@ struct ChatEventRow: View {
     var answeringQuestion = false
     /// False for a saved copy, which cannot send anything.
     var canAnswerQuestions = true
+    /// Opens the folder's changes beside the chat, at one file or all of
+    /// them. Nil where there is no live folder to open.
+    var reviewChanges: ((String?) -> Void)? = nil
     #if os(macOS)
     /// Whole-card hover for the copy action. Scoping this to the header
     /// saved nothing measurable once segment init was cached and the pin
@@ -197,6 +200,8 @@ struct ChatEventRow: View {
             ChatQuestionCard(question: question, canAnswer: canAnswerQuestions, isSending: answeringQuestion) { text in
                 answerQuestion(question, text)
             }
+        case let .changes(changes):
+            ChatTurnChangesCard(changes: changes, review: reviewChanges)
         case let .attachment(attachment):
             // Stable identity across attachment polls: the revision prop
             // still redraws the row through Equatable when bytes arrive, but
@@ -759,6 +764,7 @@ extension ChatEventRow: Equatable {
             && lhs.compactTools == rhs.compactTools
             && lhs.answeringQuestion == rhs.answeringQuestion
             && lhs.canAnswerQuestions == rhs.canAnswerQuestions
+            && (lhs.reviewChanges == nil) == (rhs.reviewChanges == nil)
         else { return false }
         if case .attachment = lhs.item.kind {
             return lhs.attachmentIsLoading == rhs.attachmentIsLoading

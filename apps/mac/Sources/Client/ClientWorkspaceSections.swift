@@ -166,7 +166,7 @@ struct ClientWorkspaceDetailView: View {
             // which is why adding the case alone left the phone without it.
             NavigationLink {
                 RemoteHostFeatureGate(feature: .chat, peer: peer, hostName: hostName) {
-                    ClientChatView(peer: peer, workspaceID: workspaceID, folderName: current.name, hostName: hostName)
+                    ClientChatView(peer: peer, workspaceID: workspaceID, folderName: current.name, hostName: hostName, folder: current)
                 }
                 .rememberWorkspace(peer: peer, folder: folder, section: .chat)
             } label: {
@@ -639,10 +639,16 @@ struct ClientWorkspaceChangesView: View {
                 HStack(spacing: Theme.Space.m) {
                     Text(current.git?.branch ?? L10n.text("apple.clientworkspacesections.current_branch.7c5b2da1"))
                         .font(ClientType.caption).foregroundStyle(.secondary)
+                        .lineLimit(1)
                     Spacer(minLength: 0)
-                    GitPushControl(target: session.target, folderName: current.name, hostName: hostName,
-                                   outgoing: current.git?.ahead ?? 0, onPushed: { await load() })
-                }.padding(.horizontal, Theme.Space.m).padding(.bottom, Theme.Space.s)
+                }.padding(.horizontal, Theme.Space.m)
+                // Bring commits in, send them out, and the pull request they
+                // belong to, side by side like the Mac's Changes footer.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Theme.Space.s) { syncControls(current) }
+                    VStack(alignment: .leading, spacing: Theme.Space.s) { syncControls(current) }
+                }
+                .padding(.horizontal, Theme.Space.m).padding(.bottom, Theme.Space.s)
             }.background(Theme.background)
         }
         .fullScreenCover(isPresented: $showingComposer) {
@@ -689,6 +695,16 @@ struct ClientWorkspaceChangesView: View {
             if ready && loaded { session.reconcileAvailablePaths(Set(files.map(\.path))) }
         }
         .onChange(of: session.draft) { _, _ in Task { await session.persist() } }
+    }
+
+    @ViewBuilder
+    private func syncControls(_ current: WorkspaceFolder) -> some View {
+        GitPullControl(target: session.target, folderName: current.name, hostName: hostName,
+                       incoming: current.git?.behind ?? 0, onPulled: { await load() })
+        GitPushControl(target: session.target, folderName: current.name, hostName: hostName,
+                       outgoing: current.git?.ahead ?? 0, onPushed: { await load() })
+        GitBranchPullControl(workspaceID: workspaceID, peer: peer, branch: current.git?.branch,
+                             folderName: current.name, hostName: hostName)
     }
 
     private func load() async {

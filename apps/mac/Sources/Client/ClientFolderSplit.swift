@@ -278,7 +278,7 @@ struct ClientWorkspaceSectionDetail: View {
             ClientWorkspaceSessionsView(peer: peer, hostName: hostName, folder: folder)
         case .chat:
             RemoteHostFeatureGate(feature: .chat, peer: peer, hostName: hostName) {
-                ClientChatView(peer: peer, workspaceID: workspaceID, folderName: folderNow.name, hostName: hostName)
+                ClientChatView(peer: peer, workspaceID: workspaceID, folderName: folderNow.name, hostName: hostName, folder: folderNow)
             }
         case .changes:
             ClientWorkspaceChangesView(

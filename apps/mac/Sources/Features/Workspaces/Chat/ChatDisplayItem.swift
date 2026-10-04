@@ -221,5 +221,33 @@ struct ChatDisplayItem: Identifiable, Equatable {
         case group(ChatStepGroup)
         /// A question the agent asked, with the answer once there is one.
         case question(ChatQuestion)
+        /// The files a finished turn edited. Added by the fold, after the
+        /// turn's last row, at every detail level.
+        case changes(ChatTurnChanges)
     }
+}
+
+/// What one turn changed, file by file, from its edit rows.
+///
+/// Counts are summed over the turn's edits to a file, so a file edited
+/// twice shows both. That is what the agent did, which is what this card
+/// is about. The working tree's own totals live in the Changes panel.
+struct ChatTurnChanges: Equatable, Sendable {
+    struct File: Equatable, Sendable, Identifiable {
+        let path: String
+        var added: UInt32
+        var removed: UInt32
+        var id: String { path }
+
+        var fileName: String {
+            let name = (path as NSString).lastPathComponent
+            return name.isEmpty ? path : name
+        }
+    }
+
+    let id: String
+    var files: [File]
+
+    var added: UInt32 { files.reduce(0) { $0 + $1.added } }
+    var removed: UInt32 { files.reduce(0) { $0 + $1.removed } }
 }

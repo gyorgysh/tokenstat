@@ -199,6 +199,20 @@ final class WorkspacesModel {
     /// Kept when the browser temporarily occupies the inspector pane.
     var chatInspectorShowsSettings = true
 
+    /// A file the Changes tab should open its diff for and scroll to, asked
+    /// for from a chat's list of what a turn changed. The generation makes a
+    /// second press on the same file count.
+    struct ChangeFocus: Equatable {
+        let folderID: String
+        let path: String
+        let generation: Int
+    }
+    private(set) var changeFocus: ChangeFocus?
+
+    func focusChange(_ path: String, in folderID: String) {
+        changeFocus = ChangeFocus(folderID: folderID, path: path, generation: (changeFocus?.generation ?? 0) + 1)
+    }
+
     /// Label for an inspector tab, with the count that is the reason to look at
     /// it.
     ///
@@ -1424,6 +1438,13 @@ final class WorkspacesModel {
 
     func pushCompleted(_ folder: WorkspaceFolder) async {
         report(folder.id, .push, GitOutcome(ok: true, message: L10n.text("apple.workspacesmodel.pushed_the_reviewed_commit.6edb2bd0")))
+        await refresh()
+        await loadHistory(for: folder.id)
+    }
+
+    /// After a pull sheet fetched or pulled. The sheet says what happened,
+    /// so no banner here: only the folder's numbers and history move.
+    func pullRefreshed(_ folder: WorkspaceFolder) async {
         await refresh()
         await loadHistory(for: folder.id)
     }

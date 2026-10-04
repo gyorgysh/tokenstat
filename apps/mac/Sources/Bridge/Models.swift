@@ -2803,6 +2803,11 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     /// A note the host will hand to the next tool step. Injected on `chat.list`
     /// only, so a restart cannot send words the person no longer sees.
     var pendingSteer: String?
+    /// The branch the conversation's last turn started or ended on, and
+    /// the pull request the host last saw for it. Both absent on a host
+    /// older than protocol 30.
+    var branch: String?
+    var pull: BranchPull?
 
     /// A saved page has no live setup or permissions. These inert values are
     /// replaced by the host's record before the reader can return to live work.
@@ -2830,6 +2835,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         case model, effort, systemPrompt, mode, autonomy, resumeToken
         case allowedTools, allowedShellPrefixes, budgetSeconds
         case createdAtMs, updatedAtMs, lastMessageAtMs, lastMessageAuthor, running, sendRevision, pendingSteer
+        case branch, pull
     }
 
     init(from decoder: Decoder) throws {
@@ -2855,6 +2861,10 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         lastMessageAuthor = try c.decodeIfPresent(String.self, forKey: .lastMessageAuthor)
         running = try c.decodeIfPresent(Bool.self, forKey: .running) ?? false
         pendingSteer = try c.decodeIfPresent(String.self, forKey: .pendingSteer)
+        branch = try c.decodeIfPresent(String.self, forKey: .branch)
+        // Decoration: a pull request shape this client cannot read must not
+        // cost it the conversation.
+        pull = try? c.decodeIfPresent(BranchPull.self, forKey: .pull)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -2879,6 +2889,8 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         try c.encodeIfPresent(lastMessageAuthor, forKey: .lastMessageAuthor)
         try c.encode(running, forKey: .running)
         try c.encodeIfPresent(pendingSteer, forKey: .pendingSteer)
+        try c.encodeIfPresent(branch, forKey: .branch)
+        try c.encodeIfPresent(pull, forKey: .pull)
     }
 }
 

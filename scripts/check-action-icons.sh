@@ -55,6 +55,12 @@ ALLOWED = [
     ("Features/Workspaces/WorkspaceInspector.swift", "Button(action: action) {"),
     ("Features/Workspaces/WorkspacesView.swift", 'Button(all ? "Clear all"'),
     ("Features/Workspaces/WorkspacesView.swift", "Button(action: onOpen)"),
+    # A file a turn changed. The row is the file: its type glyph, name and
+    # line counts, and pressing it opens that file's changes.
+    ("Features/Workspaces/Chat/ChatTurnChangesCard.swift", "Button { review?(file.path) } label:"),
+    # The changes pill and the pull request chip are whole-surface labels: a
+    # diff stat, and a state glyph with the pull request's number.
+    ("Features/Workspaces/GitPullView.swift", "Button(action: review) {"),
     # The branch chip/card and each branch are whole-surface controls. Their
     # labels already carry the branch/check glyph; another action glyph would
     # duplicate the mark instead of clarifying the action.

@@ -172,6 +172,9 @@ struct ChatView: View {
     /// Refresh the folder after a checkout, so the chip and everything else
     /// reading git agree about where the folder now is.
     var onBranchChanged: (() async -> Void)? = nil
+    /// Opens the folder's changes beside the chat, at one file or all of
+    /// them. Nil where this pane has no place to open them.
+    var onReviewChanges: ((String?) -> Void)? = nil
     @Binding var showingOverview: Bool
     /// Whether this pane is the one in front.
     ///
@@ -221,6 +224,8 @@ struct ChatView: View {
     /// without leaving the conversation.
     @State private var pins = PinnedWorkStore.shared
     @State private var showingHandoff = false
+    /// The pull request for the folder's branch, from `pulls.branch`.
+    @State private var branchPull: BranchPull?
     @State private var dropNotice: String?
     @State private var dropNoticeGeneration = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -353,6 +358,9 @@ struct ChatView: View {
                             .padding(.bottom, Theme.Space.s)
                             .frame(maxWidth: .infinity)
                     }
+                    if model.savedCopy == nil {
+                        changesRow
+                    }
                     ChatComposer(
                         model: model,
                         chat: chat,
@@ -448,6 +456,12 @@ struct ChatView: View {
         }
         #endif
         .sheet(isPresented: $showingHandoff) { WorkHandoffSheet(chat: model) }
+        // Asked again when the branch moves and when a turn ends, since an
+        // agent may have just opened the pull request.
+        .task(id: "\(workspaceID)|\(git?.branch ?? "")|\(model.busy)|\(isActive)") {
+            guard isActive, git?.isRepo == true, !model.busy else { return }
+            branchPull = (try? await Bridge.branchPull(workspaceID: workspaceID))?.pull
+        }
         .onChange(of: isActive) { _, active in
             if !active {
                 showingHandoff = false
@@ -625,7 +639,8 @@ struct ChatView: View {
                                         Task { await model.answerQuestion(question, answer: text) }
                                     },
                                     answeringQuestion: model.answeringQuestions.contains(item.questionID ?? ""),
-                                    canAnswerQuestions: model.savedCopy == nil && !model.isShowingCachedTranscript
+                                    canAnswerQuestions: model.savedCopy == nil && !model.isShowingCachedTranscript,
+                                    reviewChanges: model.savedCopy == nil ? onReviewChanges : nil
                                 )
                                 .equatable()
                             }
@@ -1160,6 +1175,29 @@ struct ChatView: View {
         }
     }
 
+    /// The folder's uncommitted work and the branch's pull request, just
+    /// above the composer. Nothing at all when there is neither.
+    @ViewBuilder
+    private var changesRow: some View {
+        let changed = git.flatMap { $0.isRepo && !$0.files.isEmpty ? $0 : nil }
+        if changed != nil || branchPull != nil {
+            HStack(spacing: Theme.Space.s) {
+                if let changed {
+                    ChatChangesPill(git: changed) { onReviewChanges?(nil) }
+                        .disabled(onReviewChanges == nil)
+                }
+                Spacer(minLength: 0)
+                if let branchPull {
+                    BranchPullChip(pull: branchPull)
+                }
+            }
+            .frame(maxWidth: ReadingRoom.laneWidth)
+            .padding(.horizontal, Theme.Space.l)
+            .padding(.bottom, Theme.Space.xs)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
     private func pendingApproval(_ item: ChatDisplayItem) -> Bool {
         if case let .approval(approval) = item.kind {
             return model.approvalIsPending(approval)
@@ -1354,7 +1392,7 @@ private struct ChatPaneOpening: View {
 private extension ChatDisplayItem {
     var prefersWideReadingRoom: Bool {
         switch kind {
-        case .tool, .edit, .group, .question, .attachment, .approval, .handoff, .turnSeparator, .usage:
+        case .tool, .edit, .group, .question, .attachment, .approval, .handoff, .turnSeparator, .usage, .changes:
             true
         case .user, .assistant, .thinking, .failed:
             false
@@ -1367,7 +1405,7 @@ private extension ChatDisplayItem {
             .trailing
         case .assistant, .thinking, .failed:
             .leading
-        case .tool, .edit, .group, .question, .attachment, .approval, .handoff, .turnSeparator, .usage:
+        case .tool, .edit, .group, .question, .attachment, .approval, .handoff, .turnSeparator, .usage, .changes:
             .center
         }
     }

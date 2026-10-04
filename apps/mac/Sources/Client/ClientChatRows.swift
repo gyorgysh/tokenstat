@@ -40,6 +40,9 @@ struct ClientChatEventRow: View {
     var answeringQuestion = false
     /// False for a saved copy, which cannot send anything.
     var canAnswerQuestions = true
+    /// Opens the folder's changes beside the chat, at one file or all of
+    /// them. Nil where there is no live folder to open.
+    var reviewChanges: ((String?) -> Void)? = nil
 
     var body: some View {
         content
@@ -144,6 +147,8 @@ struct ClientChatEventRow: View {
             ChatQuestionCard(question: question, canAnswer: canAnswerQuestions, isSending: answeringQuestion) { text in
                 answerQuestion(question, text)
             }
+        case let .changes(changes):
+            ChatTurnChangesCard(changes: changes, review: reviewChanges)
         case let .attachment(attachment):
             // Same as the Mac: stable identity across polls. The revision
             // still redraws through Equatable; recreating collapsed the row.
@@ -490,6 +495,7 @@ extension ClientChatEventRow: Equatable {
             && lhs.compactTools == rhs.compactTools
             && lhs.answeringQuestion == rhs.answeringQuestion
             && lhs.canAnswerQuestions == rhs.canAnswerQuestions
+            && (lhs.reviewChanges == nil) == (rhs.reviewChanges == nil)
         else { return false }
         if case .attachment = lhs.item.kind {
             return lhs.attachmentIsLoading == rhs.attachmentIsLoading

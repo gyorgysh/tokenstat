@@ -318,7 +318,8 @@ struct ClientFolderPush: Hashable {
                 peer: peerKey,
                 workspaceID: ClientRemote.rawWorkspaceID(of: folder) ?? folder.id,
                 folderName: folder.name,
-                hostName: hostName
+                hostName: hostName,
+                folder: folder
             )
         case .sessions:
             ClientWorkspaceSessionsView(peer: peerKey, hostName: hostName, folder: folder)

@@ -1243,6 +1243,23 @@ struct RootView: View {
     /// Where "docked" puts the pane is the window's business rather than the
     /// user's: a column where there is room, a float that stays where there is
     /// not.
+    /// Open the Changes tab beside the chat, at one file when a chat's list
+    /// of what a turn changed asked for it. Review, commit, push and the
+    /// pull request all live there.
+    private func revealChanges(in folderID: String, path: String?) {
+        guard route.hasInspector else { return }
+        browserWorkspaceID = nil
+        terminalWorkspaceID = nil
+        workspaces.chatInspectorShowsSettings = false
+        workspaces.inspectorTab = .changes
+        if let path { workspaces.focusChange(path, in: folderID) }
+        isInspectorPresented = true
+        if !inspectorFits {
+            isOverlayVisible = true
+            overlayHeldByPress = true
+        }
+    }
+
     private func toggleRightSidebar() {
         guard route.hasInspector else { return }
         if showsWorkspaceCompanion {
@@ -2701,6 +2718,7 @@ struct RootView: View {
                     workspaceName: folder?.name,
                     git: folder?.git,
                     onBranchChanged: { await workspaces.refresh() },
+                    onReviewChanges: { revealChanges(in: id, path: $0) },
                     showingOverview: $showingChatOverview,
                     isActive: showsChat
                 )
@@ -4744,6 +4762,15 @@ private struct ChatSidebarConversationRow: View {
                             .font(Theme.fit(13, weight: isSelected ? .medium : .regular))
                             .foregroundStyle(isSelected ? Color.primary : Theme.controlGlyph)
                             .lineLimit(1)
+                        // The pull request this chat's branch belongs to, in
+                        // its state's colour. Read from the host's cache.
+                        if let pull = conversation.pull {
+                            Image(systemName: pull.symbol)
+                                .font(Theme.fit(11, weight: .medium))
+                                .foregroundStyle(pull.tint)
+                                .help(L10n.text("apple.branchpull.help", pull.stateLabel, "\(pull.number)", pull.title))
+                                .accessibilityLabel(L10n.text("apple.branchpull.chip", "\(pull.number)", pull.stateLabel))
+                        }
                         Spacer(minLength: 0)
                         ChatDraftMark(reference: draft)
                     }

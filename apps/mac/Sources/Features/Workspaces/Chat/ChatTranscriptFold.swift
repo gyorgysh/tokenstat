@@ -10,6 +10,10 @@ import Foundation
 /// waiting on, a failure, a handoff and an attachment. The levels differ only
 /// in how the steps in between are drawn.
 enum ChatDetail: String, CaseIterable, Sendable {
+    /// One quiet line per step: "Edited vault.rs +6 −2", "Ran cargo test",
+    /// "Explored 4 files, 2 searches". No cards and no output until a line
+    /// is opened. What most editors show.
+    case minimal
     /// One line per stretch of work: "Worked 3m · 14 steps · 2 files".
     case compact
     /// Thinking and runs of reads and searches fold to one line each.
@@ -35,6 +39,8 @@ struct ChatStepGroup: Equatable, Sendable {
         case explored
         /// A block of reasoning, in Compact or Standard.
         case thought
+        /// Minimal: one command or edit, as a single line.
+        case step
     }
 
     var style: Style
@@ -76,6 +82,12 @@ struct ChatStepGroup: Equatable, Sendable {
     var cost: Double?
     /// The first line of a folded thought.
     var preview: String?
+    /// Drawn as Minimal draws it: a plain line with no icon or chevron.
+    var minimal = false
+    /// The one step a single-member group stands for: its tool name, and
+    /// the file or command it acted on.
+    var verb: String?
+    var subject: String?
 }
 
 /// Folds coalesced transcript rows into what a detail level shows.
@@ -101,14 +113,72 @@ enum ChatTranscriptFold {
         running: Bool,
         isOpen: (String) -> Bool
     ) -> [ChatDisplayItem] {
+        let folded: [ChatDisplayItem]
         switch detail {
         case .detailed:
-            return items
+            folded = items
         case .standard:
-            return standard(items, running: running, isOpen: isOpen)
+            folded = standard(items, running: running, isOpen: isOpen)
         case .compact:
-            return compact(items, running: running, isOpen: isOpen)
+            folded = compact(items, running: running, isOpen: isOpen)
+        case .minimal:
+            folded = minimal(items, running: running, isOpen: isOpen)
         }
+        return withTurnChanges(folded, raw: items, running: running)
+    }
+
+    // MARK: Files changed
+
+    /// A turn's edits, one row per file, after the turn has finished.
+    ///
+    /// Read from the raw rows, since a closed group hides its edits from the
+    /// folded list. Turns are counted the same way in both lists: user rows
+    /// are never folded, so the n-th one starts the same turn in each.
+    static func withTurnChanges(_ folded: [ChatDisplayItem], raw: [ChatDisplayItem], running: Bool) -> [ChatDisplayItem] {
+        var changes: [Int: ChatTurnChanges] = [:]
+        var turn = 0
+        var building: [String: Int] = [:]
+        var current = ChatTurnChanges(id: "", files: [])
+        func close() {
+            if !current.files.isEmpty { changes[turn] = current }
+            current = ChatTurnChanges(id: "", files: [])
+            building = [:]
+        }
+        for item in raw {
+            switch item.kind {
+            case .user:
+                close()
+                turn += 1
+            case let .edit(state) where !state.failed && !state.running:
+                if current.files.isEmpty { current = ChatTurnChanges(id: "changes:\(item.id)", files: []) }
+                if let index = building[state.path] {
+                    current.files[index].added += state.added
+                    current.files[index].removed += state.removed
+                } else {
+                    building[state.path] = current.files.count
+                    current.files.append(.init(path: state.path, added: state.added, removed: state.removed))
+                }
+            default:
+                continue
+            }
+        }
+        close()
+        guard !changes.isEmpty else { return folded }
+        var out: [ChatDisplayItem] = []
+        out.reserveCapacity(folded.count + changes.count)
+        turn = 0
+        for item in folded {
+            if case .user = item.kind {
+                if let finished = changes[turn] { out.append(ChatDisplayItem(id: finished.id, kind: .changes(finished))) }
+                turn += 1
+            }
+            out.append(item)
+        }
+        // The turn still running gets its card when it ends.
+        if !running, let finished = changes[turn] {
+            out.append(ChatDisplayItem(id: finished.id, kind: .changes(finished)))
+        }
+        return out
     }
 
     /// The group header standing for `id`, when `id` is one of a closed
@@ -163,6 +233,61 @@ enum ChatTranscriptFold {
                     group.preview = preview(of: text)
                     emit(group, members: [item], into: &out, isOpen: isOpen)
                 }
+            default:
+                flushRun(trailing: false)
+                out.append(item)
+            }
+        }
+        flushRun(trailing: true)
+        return out
+    }
+
+    // MARK: Minimal
+
+    /// Every step is one line. Runs of reads and searches still read as
+    /// one, even a run of one, because "Explored ChatModel.swift" says what
+    /// a lone Read row says in less room.
+    private static func minimal(
+        _ items: [ChatDisplayItem],
+        running: Bool,
+        isOpen: (String) -> Bool
+    ) -> [ChatDisplayItem] {
+        var out: [ChatDisplayItem] = []
+        out.reserveCapacity(items.count)
+        var run: [ChatDisplayItem] = []
+
+        func line(_ style: ChatStepGroup.Style, _ members: [ChatDisplayItem], running: Bool) {
+            var group = make(style, members, running: running)
+            group.minimal = true
+            emit(group, members: members, into: &out, isOpen: isOpen)
+        }
+
+        func flushRun(trailing: Bool) {
+            defer { run = [] }
+            guard !run.isEmpty else { return }
+            line(.explored, run, running: running && trailing)
+        }
+
+        for (index, item) in items.enumerated() {
+            switch item.kind {
+            case let .tool(state) where !state.failed && isExploration(state.verb):
+                run.append(item)
+            case let .thinking(text):
+                flushRun(trailing: false)
+                if running, index == items.count - 1 {
+                    out.append(item)
+                } else {
+                    var group = make(.thought, [item], running: false)
+                    group.preview = preview(of: text)
+                    group.minimal = true
+                    emit(group, members: [item], into: &out, isOpen: isOpen)
+                }
+            case let .tool(state) where !state.failed:
+                flushRun(trailing: false)
+                line(.step, [item], running: state.running)
+            case let .edit(state) where !state.failed:
+                flushRun(trailing: false)
+                line(.step, [item], running: state.running)
             default:
                 flushRun(trailing: false)
                 out.append(item)
@@ -321,6 +446,18 @@ enum ChatTranscriptFold {
             }
         }
         group.files = paths.count
+        if members.count == 1 {
+            switch members[0].kind {
+            case let .tool(state):
+                group.verb = state.verb
+                group.subject = state.target
+            case let .edit(state):
+                group.verb = "Edit"
+                group.subject = state.path
+            default:
+                break
+            }
+        }
         // A step still running is running whatever came after it. A group
         // with nothing running is live only while it is the turn's last.
         group.running = anyRunning || running

@@ -258,11 +258,16 @@ struct WorkspaceChangesView: View {
                 )
             } else if let git = folder.git, git.isRepo, !git.files.isEmpty {
                 // Only show the scroll list when there is real content.
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Theme.Space.m) {
-                        content(folder)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: Theme.Space.m) {
+                            content(folder)
+                        }
+                        .padding(Theme.Space.m)
                     }
-                    .padding(Theme.Space.m)
+                    .onChange(of: model.changeFocus, initial: true) { _, focus in
+                        reveal(focus, in: folder, git: git, proxy: proxy)
+                    }
                 }
             } else {
                 // All other states (clean tree, not a git repo) are centred.
@@ -425,6 +430,7 @@ struct WorkspaceChangesView: View {
                         },
                         onOpen: { Task { await model.openFile(file.path, in: folder.id) } }
                     )
+                    .id(key)
                     if expandedDiffs.contains(key) {
                         if let diff = model.diff(for: file.path, in: folder.id) {
                             let preview = diff.clipped(toLines: 200)
@@ -456,6 +462,23 @@ struct WorkspaceChangesView: View {
 
     private func diffKey(_ file: FileChange, in folder: WorkspaceFolder) -> String {
         "\(folder.id):\(file.path)"
+    }
+
+    /// Open and show the file a chat asked for. An agent names files by
+    /// absolute path and git by path inside the repository, so the match is
+    /// on the end of the path.
+    private func reveal(_ focus: WorkspacesModel.ChangeFocus?, in folder: WorkspaceFolder, git: GitStatus, proxy: ScrollViewProxy) {
+        guard let focus, focus.folderID == folder.id else { return }
+        let wanted = focus.path
+        guard let file = git.files.first(where: {
+            wanted == $0.path || wanted.hasSuffix("/" + $0.path)
+        }) else { return }
+        let key = diffKey(file, in: folder)
+        expandedDiffs.insert(key)
+        Task { await model.loadDiff(file.path, in: folder.id) }
+        withAnimation(.easeOut(duration: 0.2)) {
+            proxy.scrollTo(key, anchor: .top)
+        }
     }
 }
 
@@ -610,6 +633,8 @@ private struct CommitBox: View {
                         .disabled(savedCommitSession?.loaded != true || savedCommitSession?.working == true || savedCommitSession?.draft.submitted != nil)
                     hairline
                     actions
+                    hairline
+                    syncRow
                     if !commitBackends.isEmpty {
                         hairline
                         autoCommitRow
@@ -622,7 +647,7 @@ private struct CommitBox: View {
                 )
             } else if folder.git?.isRepo == true {
                 VStack(spacing: 0) {
-                    pushOnly
+                    syncRow
                 }
                 .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(
@@ -674,9 +699,6 @@ private struct CommitBox: View {
 
     private var actions: some View {
         HStack(spacing: Theme.Space.s) {
-            if folder.git?.isRepo == true {
-                pushControl
-            }
             Button {
                 Task { commitSession = await model.prepareCommit(folder) }
             } label: {
@@ -689,8 +711,24 @@ private struct CommitBox: View {
         .padding(Theme.Space.s)
     }
 
-    private var pushOnly: some View {
-        pushControl.frame(maxWidth: .infinity).padding(Theme.Space.s)
+    /// Bring commits in, send them out, and the pull request they belong
+    /// to. One row, so the whole round trip is in one place.
+    private var syncRow: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.s) { syncControls }
+            VStack(alignment: .leading, spacing: Theme.Space.s) { syncControls }
+        }
+        .padding(Theme.Space.s)
+    }
+
+    @ViewBuilder
+    private var syncControls: some View {
+        GitPullControl(target: Bridge.reviewedGitTarget(id: folder.id), folderName: folder.name,
+                       hostName: "", incoming: folder.git?.behind ?? 0,
+                       onPulled: { await model.pullRefreshed(folder) })
+        pushControl
+        GitBranchPullControl(workspaceID: folder.id, peer: nil, branch: folder.git?.branch,
+                             folderName: folder.name, hostName: "")
     }
 
     private var pushControl: some View {
