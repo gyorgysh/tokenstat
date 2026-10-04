@@ -2518,23 +2518,12 @@ struct RootView: View {
     }
 
     private func sidebarSectionMenu() -> some View {
-        Menu {
+        ToolbarMenuButton(help: L10n.text("common.sidebar.section_options"), diameter: 20, glyphSize: 10) {
             Button(L10n.text("common.sidebar.move_servers_above_projects")) { moveSidebarSection("servers", before: "projects") }
                 .disabled(sidebarSectionOrder.first == "servers")
             Button(L10n.text("common.sidebar.move_projects_above_servers")) { moveSidebarSection("projects", before: "servers") }
                 .disabled(sidebarSectionOrder.first == "projects")
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(Theme.font(10, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 20, height: 20)
-                .contentShape(.rect)
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help(L10n.text("common.sidebar.section_options"))
-        .accessibilityLabel(L10n.text("common.sidebar.section_options"))
     }
 
     private func moveSidebarSection(_ section: String, before other: String) {

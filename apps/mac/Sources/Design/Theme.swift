@@ -1411,6 +1411,8 @@ struct ToolbarIconButton: View {
 struct ToolbarMenuButton<Content: View>: View {
     var systemImage: String = "ellipsis"
     var help: String = L10n.text("apple.theme.more.d47d7cb0")
+    var diameter: CGFloat = ToolbarIconButton.diameter
+    var glyphSize: CGFloat = 14
     @ViewBuilder var content: () -> Content
 
     @State private var isHovering = false
@@ -1420,13 +1422,13 @@ struct ToolbarMenuButton<Content: View>: View {
             content()
         } label: {
             Image(systemName: systemImage)
-                .font(.system(size: 14, weight: .regular))
+                .font(.system(size: glyphSize, weight: .regular))
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .tint(Theme.controlGlyph)
+        .tint(isHovering ? Theme.controlGlyphHover : Theme.controlGlyph)
         .fixedSize()
-        .frame(width: ToolbarIconButton.diameter, height: ToolbarIconButton.diameter)
+        .frame(width: diameter, height: diameter)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(isHovering ? Theme.rowHighlight : .clear)

@@ -272,19 +272,9 @@ internal static class ActionIconGlyph
     /// </summary>
     public static Button MoreButton(string help, MenuFlyout menu)
     {
-        var button = new Button
-        {
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
-            BorderThickness = new Thickness(0),
-            CornerRadius = new CornerRadius(8),
-            Width = 30, Height = 30, MinWidth = 0, MinHeight = 0,
-            Padding = new Thickness(0),
-            Content = new Viewbox { Width = 14, Height = 14, Child = new SymbolIcon(FluentSymbol.More) },
-            Flyout = menu,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, help);
-        ToolTipService.SetToolTip(button, help);
+        var button = Buttons.ToolbarIcon(ActionIcon.More, help, (_, _) => { });
+        button.Flyout = menu;
+        button.VerticalAlignment = VerticalAlignment.Center;
         return button;
     }
 
