@@ -683,6 +683,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             }
             _opening = false;
             PaintConversation();
+            CheckSelectedSignIn();
             StartPoll();
             ProbeSteerIfNeeded(fromBusyLoop: false);
         }
@@ -2162,6 +2163,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             // Preserve the current note, which may have changed while awaiting.
             _openChat = ChatSteerOverlay.MergeRecord(updated, _openChat);
             ChatLaunchChoice.Save(_openChat);
+            if (patch.ContainsKey("backend")) CheckSelectedSignIn();
         }
         catch (Exception ex)
         {
@@ -2281,6 +2283,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 new JsonObject { ["refresh"] = true });
             _backends = AsArray(backends);
             PaintConversation();
+            CheckSelectedSignIn();
         }
         catch (Exception ex)
         {
@@ -2309,38 +2312,35 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _backends = AsArray(backends.Result);
         // Before the sign-in probe, which can take seconds to answer.
         _personas = AsArray(personas.Result, "personas");
+        CheckSelectedSignIn();
+    }
+
+    private void CheckSelectedSignIn()
+    {
         var selectedBackend = Backend(Format.Text(_openChat, "backend"));
         if (selectedBackend is not null && Format.Flag(selectedBackend, "canCheckSignIn") && Format.Text(selectedBackend, "id") is "claude" or "claude_code" or "codex")
         {
             // In the background. The CLI can take seconds to answer, and the
             // chat, its menus and its personas are ready without it.
-            _ = CheckSignInAsync(selectedBackend, generation);
+            _ = CheckSignInAsync(selectedBackend, _openGeneration);
         }
     }
 
-    private bool _checkingSignIn;
+    private readonly ChatSignInChecks _signInChecks = new();
 
     /// <summary>
-    /// Ask the agent's own CLI whether it is signed in, one probe at a time,
+    /// Ask the agent's own CLI whether it is signed in, once per open backend,
     /// and repaint only when the answer changes what the chat shows.
     /// </summary>
     private async Task CheckSignInAsync(JsonNode backend, int generation)
     {
-        if (_checkingSignIn) return;
-        _checkingSignIn = true;
         try
         {
-            var status = await CallChatAsync("launcher.checkSignIn", new JsonObject { ["id"] = Format.Text(backend, "launcherId") });
-            if (generation != _openGeneration) return;
-            var readiness = Format.Text(status, "readiness", "unknown");
-            var verified = Format.Flag(status, "checked");
-            if (Format.Text(backend, "readiness") == readiness && Format.Flag(backend, "signInVerified") == verified) return;
-            backend["readiness"] = readiness;
-            backend["signInVerified"] = verified;
-            PaintConversation();
+            if (await _signInChecks.CheckAsync(backend, generation,
+                id => CallChatAsync("launcher.checkSignIn", new JsonObject { ["id"] = id }),
+                () => _openGeneration, Backend)) PaintConversation();
         }
         catch { /* Older hosts retain their file-based, three-valued answer. */ }
-        finally { _checkingSignIn = false; }
     }
 
     private JsonNode? FindChat(string id)

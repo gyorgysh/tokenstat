@@ -334,3 +334,47 @@ Check(askedQuestion.Answer is null && (askedQuestion with { Answer = "B" }).Answ
 var questionRow = FoldRows([Ask("u1"), new ChatPage.DisplayItem { Id = "question-q1", Kind = ChatPage.ItemKind.Question, Question = askedQuestion }], ChatDetail.Compact);
 Check(questionRow.Any(row => row.Id == "question-q1"), "a question is never folded");
 Console.WriteLine("Windows chat questions: stripping, answers and folding pass.");
+
+var signInChecks = new ChatSignInChecks();
+var openGeneration = 1;
+var catalogBackend = Json("""{"id":"claude","launcherId":"claude_code","readiness":"unknown"}""");
+var originalBackend = catalogBackend;
+var firstStatus = new TaskCompletionSource<JsonNode>();
+var calls = 0;
+Task<JsonNode> CheckSignIn(string launcher)
+{
+    Check(launcher == "claude_code", "the backend's launcher owns the probe");
+    calls++;
+    return firstStatus.Task;
+}
+JsonNode? CurrentBackend(string id) => id == "claude" ? catalogBackend : null;
+var firstProbe = signInChecks.CheckAsync(originalBackend, 1, CheckSignIn, () => openGeneration, CurrentBackend);
+Check(!await signInChecks.CheckAsync(originalBackend, 1, CheckSignIn, () => openGeneration, CurrentBackend)
+    && calls == 1, "duplicate reads share an in-flight check");
+catalogBackend = originalBackend.DeepClone();
+firstStatus.SetResult(Json("""{"readiness":"needsSignIn","checked":true}"""));
+Check(await firstProbe && catalogBackend["signInVerified"]!.GetValue<bool>()
+    && catalogBackend["readiness"]!.GetValue<string>() == "needsSignIn", "a refresh cannot discard the CLI's answer");
+Check(originalBackend["readiness"]!.GetValue<string>() == "unknown", "a detached catalog row is not updated");
+
+var staleStatus = new TaskCompletionSource<JsonNode>();
+var staleProbe = signInChecks.CheckAsync(catalogBackend, 1, _ => staleStatus.Task, () => openGeneration, CurrentBackend);
+openGeneration = 2;
+catalogBackend = originalBackend.DeepClone();
+var nextProbe = signInChecks.CheckAsync(catalogBackend, 2,
+    _ => Task.FromResult(Json("""{"readiness":"signedIn","checked":true}""")), () => openGeneration, CurrentBackend);
+Check(await nextProbe, "an older conversation's probe cannot suppress the newly opened chat's check");
+staleStatus.SetResult(Json("""{"readiness":"needsSignIn","checked":true}"""));
+Check(!await staleProbe && catalogBackend["readiness"]!.GetValue<string>() == "signedIn",
+    "a previous conversation's late answer cannot overwrite the current chat");
+try
+{
+    await signInChecks.CheckAsync(catalogBackend, 2, _ => Task.FromException<JsonNode>(new Exception("offline")),
+        () => openGeneration, CurrentBackend);
+    throw new Exception("the failed check should propagate");
+}
+catch (Exception ex) when (ex.Message == "offline") { }
+Check(await signInChecks.CheckAsync(catalogBackend, 2,
+    _ => Task.FromResult(Json("""{"readiness":"unknown","checked":false}""")), () => openGeneration, CurrentBackend),
+    "a failed probe releases its reservation for another attempt");
+Console.WriteLine("Windows sign-in: refreshed catalogs, navigation, shared probes and failed-check retries pass.");

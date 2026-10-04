@@ -95,6 +95,7 @@ struct ChatAgentSetupCard: View {
                                   checking: checking, continuing: continuing,
                                   supported: backend.signInFlow?.supported == true,
                                   error: model.backendRefreshError,
+                                  removeMessage: removeSavedMessage,
                                   signIn: { showingSignIn = true },
                                   check: { Task { _ = await check(explicit: true) } },
                                   continueMessage: {
@@ -115,6 +116,12 @@ struct ChatAgentSetupCard: View {
         .sheet(isPresented: $showingSignIn) {
             AgentSignInSheet(backend: backend, peer: model.peer) { await check(explicit: true) }
         }
+    }
+
+    private var removeSavedMessage: (() -> Void)? {
+        guard let item = model.signInQueuedMessage else { return nil }
+        let owner = model.currentReference
+        return { model.removeQueued(item, owner: owner) }
     }
 
     private func check(explicit: Bool = false) async -> AgentSignInCheckOutcome {
@@ -155,6 +162,7 @@ struct AgentSignInPrompt: View {
     var continuing = false
     var supported = true
     var error: String? = nil
+    var removeMessage: (() -> Void)? = nil
     var signIn: () -> Void = {}
     var check: () -> Void = {}
     var continueMessage: () -> Void = {}
@@ -207,6 +215,10 @@ struct AgentSignInPrompt: View {
         if !ready {
             Button(checking ? L10n.text("apple.agentsetup.checking") : L10n.text("apple.agentsetup.check_again"), .refresh, action: check)
                 .buttonStyle(SecondaryButtonStyle(comfortable: true)).disabled(checking)
+        }
+        if let removeMessage {
+            Button(L10n.text("common.remove"), .delete, action: removeMessage)
+                .buttonStyle(SecondaryButtonStyle(comfortable: true)).disabled(continuing)
         }
     }
 }

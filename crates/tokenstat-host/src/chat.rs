@@ -410,6 +410,8 @@ struct ParkedAnswer {
     /// The words the answer added to the note, so a replaced or restored
     /// note can be checked for whether it still carries them.
     note: String,
+    /// A dropped answer stays journaled until its withdrawal is written.
+    withdrawn: bool,
 }
 
 /// Answers riding parked notes in this process, by conversation.
@@ -671,7 +673,9 @@ impl Store {
             suppress_follow_up: Mutex::new(HashSet::new()),
             parked_answers: Mutex::new(ParkedAnswers::default()),
         };
-        store.withdraw_orphaned_answers();
+        if recovery.is_some() {
+            store.withdraw_orphaned_answers();
+        }
         for (id, backend) in interrupted {
             store.record_events(
                 &id,
@@ -1130,6 +1134,7 @@ impl Store {
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         let note = {
             crate::workspace_policy::require_current_access()?;
+            self.withdraw_pending_answers(id);
             let question = self.open_question(id, question_id)?;
             let note = crate::chat_question::answer_note(&question, answer);
             if self.turn_is_live(id)? {
@@ -1228,7 +1233,10 @@ impl Store {
         let Some(note) = self.claim_idle_steer(id)? else {
             return Ok(json!({ "delivered": false }));
         };
-        match self.send_inner(id, &note, &[], None, None, None, true) {
+        // Keep finalization with the send. A hook or another device must not
+        // park a new answer between launch and forgetting the delivered ones.
+        let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        match self.send_under_acceptance(id, &note, &[], None, None, None, true) {
             Ok(SendOutcome::Started(chat)) => {
                 self.take_parked_answers(id);
                 Ok(json!({
@@ -1241,7 +1249,7 @@ impl Store {
                 Ok(json!({ "delivered": false }))
             }
             Err(error) => {
-                self.restore_steer_if_idle(id, &note, &error);
+                self.restore_steer_under_acceptance(id, &note, &error);
                 if error.code == crate::error::DELIVERY_UNKNOWN {
                     // It may well have launched. Reopening the question then
                     // would invite the same answer twice.
@@ -1304,6 +1312,7 @@ impl Store {
             .push(ParkedAnswer {
                 question_id: question_id.to_string(),
                 note,
+                withdrawn: false,
             });
         self.persist_parked_answers(&mut parked);
     }
@@ -1314,9 +1323,14 @@ impl Store {
             .parked_answers
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        let Some(taken) = parked.by_chat.remove(id) else {
+        let Some(answers) = parked.by_chat.remove(id) else {
             return Vec::new();
         };
+        let (pending, taken): (Vec<_>, Vec<_>) =
+            answers.into_iter().partition(|answer| answer.withdrawn);
+        if !pending.is_empty() {
+            parked.by_chat.insert(id.to_string(), pending);
+        }
         self.persist_parked_answers(&mut parked);
         taken
     }
@@ -1332,13 +1346,12 @@ impl Store {
             .by_chat
             .get(id)
             .filter(|answers| !answers.is_empty())?;
-        Some(
-            answers
-                .iter()
-                .map(|answer| answer.note.as_str())
-                .collect::<Vec<_>>()
-                .join("\n\n"),
-        )
+        let notes: Vec<_> = answers
+            .iter()
+            .filter(|answer| !answer.withdrawn)
+            .map(|answer| answer.note.as_str())
+            .collect();
+        (!notes.is_empty()).then(|| notes.join("\n\n"))
     }
 
     /// Reopen every parked answer whose words are no longer in the parked
@@ -1352,33 +1365,73 @@ impl Store {
             .unwrap_or_else(PoisonError::into_inner)
             .get(id)
             .cloned();
-        let dropped = {
+        {
             let mut parked = self
                 .parked_answers
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
-            let Some(answers) = parked.by_chat.remove(id) else {
+            let Some(answers) = parked.by_chat.get_mut(id) else {
                 return;
             };
-            let (kept, dropped): (Vec<_>, Vec<_>) = answers.into_iter().partition(|answer| {
-                note.as_deref()
+            for answer in answers.iter_mut() {
+                if !note
+                    .as_deref()
                     .is_some_and(|note| note.contains(&answer.note))
-            });
-            if !kept.is_empty() {
-                parked.by_chat.insert(id.to_string(), kept);
+                {
+                    answer.withdrawn = true;
+                }
             }
             self.persist_parked_answers(&mut parked);
-            dropped
-        };
-        for answer in dropped {
-            let _ = self.append(
-                id,
-                &StoredEvent::AnswerWithdrawn {
-                    question_id: answer.question_id,
-                    at_ms: now_ms(),
-                },
-            );
         }
+        self.withdraw_pending_answers(id);
+    }
+
+    /// Called under conversation acceptance (or the startup recovery gate).
+    /// Failed appends keep their journal entry for another attempt.
+    fn withdraw_pending_answers(&self, id: &str) {
+        let dropped: Vec<_> = {
+            let parked = self
+                .parked_answers
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            parked
+                .by_chat
+                .get(id)
+                .into_iter()
+                .flatten()
+                .filter(|answer| answer.withdrawn)
+                .map(|answer| answer.question_id.clone())
+                .collect()
+        };
+        if dropped.is_empty() {
+            return;
+        }
+        let mut recorded = HashSet::new();
+        for question_id in dropped {
+            if self
+                .append(
+                    id,
+                    &StoredEvent::AnswerWithdrawn {
+                        question_id: question_id.clone(),
+                        at_ms: now_ms(),
+                    },
+                )
+                .is_ok()
+            {
+                recorded.insert(question_id);
+            }
+        }
+        let mut parked = self
+            .parked_answers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(answers) = parked.by_chat.get_mut(id) {
+            answers.retain(|answer| !answer.withdrawn || !recorded.contains(&answer.question_id));
+            if answers.is_empty() {
+                parked.by_chat.remove(id);
+            }
+        }
+        self.persist_parked_answers(&mut parked);
     }
 
     /// Mirror this process's parked answers, by question id, to its own file.
@@ -1420,7 +1473,7 @@ impl Store {
             })
             .collect();
         if let Ok(body) = serde_json::to_vec(&ids) {
-            let _ = fs::write(path, body);
+            let _ = replace_chat_file(path, &body);
         }
     }
 
@@ -1442,28 +1495,46 @@ impl Store {
             let Ok(Some(lease)) = crate::chat_receipts::OwnerLease::try_acquire(&lock) else {
                 continue;
             };
-            let parked: HashMap<String, Vec<String>> = fs::read(&path)
+            let Some(parked): Option<HashMap<String, Vec<String>>> = fs::read(&path)
                 .ok()
                 .and_then(|body| serde_json::from_slice(&body).ok())
-                .unwrap_or_default();
+            else {
+                continue;
+            };
+            let mut remaining: HashMap<String, Vec<String>> = HashMap::new();
             for (id, questions) in parked {
                 // A removed conversation has nothing left to reopen.
                 if self.get(&id).is_err() {
                     continue;
                 }
                 for question_id in questions {
-                    let _ = self.append(
-                        &id,
-                        &StoredEvent::AnswerWithdrawn {
-                            question_id,
-                            at_ms: now_ms(),
-                        },
-                    );
+                    if self
+                        .append(
+                            &id,
+                            &StoredEvent::AnswerWithdrawn {
+                                question_id: question_id.clone(),
+                                at_ms: now_ms(),
+                            },
+                        )
+                        .is_err()
+                    {
+                        remaining.entry(id.clone()).or_default().push(question_id);
+                    }
                 }
             }
-            let _ = fs::remove_file(&path);
+            let recovered = if remaining.is_empty() {
+                fs::remove_file(&path).is_ok()
+            } else {
+                if let Ok(body) = serde_json::to_vec(&remaining) {
+                    let _ = replace_chat_file(&path, &body);
+                }
+                false
+            };
             drop(lease);
-            let _ = fs::remove_file(&lock);
+            // A journal awaiting another attempt keeps the same lock inode.
+            if recovered {
+                let _ = fs::remove_file(&lock);
+            }
         }
     }
 
@@ -1522,15 +1593,20 @@ impl Store {
     /// Put a note back when the send that was supposed to carry it did not
     /// start, and the turn is still idle. A newer note, a Stop, or a turn
     /// that started in between wins, and this copy is dropped.
+    #[cfg(test)]
     fn restore_steer_if_idle(&self, id: &str, note: &str, error: &DispatchError) {
+        let Ok(_acceptance) = crate::chat_receipts::Operation::conversation(&self.root, id) else {
+            return;
+        };
+        self.restore_steer_under_acceptance(id, note, error);
+    }
+
+    fn restore_steer_under_acceptance(&self, id: &str, note: &str, error: &DispatchError) {
         // The process can finish before this retry decision runs. An idle
         // conversation does not prove a failed acknowledgement never launched.
         if error.code == crate::error::DELIVERY_UNKNOWN {
             return;
         }
-        let Ok(_acceptance) = crate::chat_receipts::Operation::conversation(&self.root, id) else {
-            return;
-        };
         let suppressed = self
             .suppress_follow_up
             .lock()
@@ -6047,6 +6123,103 @@ mod tests {
             withdrawn(&reader, "chat-test", "question-1"),
             1,
             "only once"
+        );
+    }
+
+    #[test]
+    fn a_failed_withdrawal_survives_until_the_transcript_can_be_written() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        prepare_live_chat(&store, "chat-test");
+        let question = ask(&store, "chat-test", "Which database?");
+        store.answer_question("chat-test", &question, "B").unwrap();
+        let path = store.events_path("chat-test");
+        let saved = path.with_extension("saved");
+        fs::rename(&path, &saved).unwrap();
+        fs::create_dir(&path).unwrap();
+
+        store.steer_clear("chat-test").unwrap();
+        assert!(parked_note(&store, "chat-test").is_none());
+        fs::remove_dir(&path).unwrap();
+        fs::rename(&saved, &path).unwrap();
+        store.steer_clear("chat-test").unwrap();
+        assert_eq!(withdrawn(&store, "chat-test", &question), 1);
+        assert!(store.open_question("chat-test", &question).is_ok());
+    }
+
+    #[test]
+    fn orphan_recovery_keeps_the_questions_it_could_not_reopen() {
+        let root = tempfile::tempdir().unwrap();
+        let reader = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&reader, "chat-test");
+        conversation_for_receipts(&reader, "ready-chat");
+        let owner = Store::at(root.path().join("chat"));
+        owner.park_answer("chat-test", "question-1", "note".into());
+        owner.park_answer("ready-chat", "question-2", "another note".into());
+        drop(owner);
+        let path = reader.events_path("chat-test");
+        fs::create_dir_all(&path).unwrap();
+        reader.withdraw_orphaned_answers();
+        assert_eq!(withdrawn(&reader, "ready-chat", "question-2"), 1);
+        fs::remove_dir(&path).unwrap();
+        reader.withdraw_orphaned_answers();
+        assert_eq!(withdrawn(&reader, "chat-test", "question-1"), 1);
+        assert_eq!(
+            withdrawn(&reader, "ready-chat", "question-2"),
+            1,
+            "a partially recovered journal cannot repeat successful withdrawals"
+        );
+        reader.withdraw_orphaned_answers();
+        assert_eq!(withdrawn(&reader, "chat-test", "question-1"), 1);
+    }
+
+    #[test]
+    fn steer_delivery_finalizes_answers_before_releasing_acceptance() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        conversation_for_receipts(&store, "chat-test");
+        store
+            .steers
+            .lock()
+            .unwrap()
+            .insert("chat-test".into(), "note".into());
+        store
+            .suppress_follow_up
+            .lock()
+            .unwrap()
+            .insert("chat-test".into());
+        // Pause finalization after the send has consumed Stop's marker.
+        let parked = store.parked_answers.lock().unwrap();
+        let delivering = Arc::clone(&store);
+        let delivery = std::thread::spawn(move || delivering.steer_deliver("chat-test"));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while store
+            .suppress_follow_up
+            .lock()
+            .unwrap()
+            .contains("chat-test")
+        {
+            assert!(
+                Instant::now() < deadline,
+                "the send did not reach finalization"
+            );
+            std::thread::yield_now();
+        }
+        let root = store.root.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let next = std::thread::spawn(move || {
+            let _acceptance =
+                crate::chat_receipts::Operation::conversation(&root, "chat-test").unwrap();
+            tx.send(()).unwrap();
+        });
+        let held = rx.recv_timeout(Duration::from_millis(100)).is_err();
+        drop(parked);
+        assert_eq!(delivery.join().unwrap().unwrap()["delivered"], false);
+        rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        next.join().unwrap();
+        assert!(
+            held,
+            "another answer was accepted before delivery bookkeeping finished"
         );
     }
 

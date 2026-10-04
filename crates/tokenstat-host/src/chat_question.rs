@@ -138,6 +138,11 @@ fn next_block<'a>(text: &'a str, from: &mut usize) -> Option<(&'a str, usize)> {
             }
             return None;
         };
+        if close.0 - body_start > BLOCK_MAX_BYTES {
+            search = at + 3;
+            *from = search;
+            continue;
+        }
         return Some((&text[body_start..close.0], close.1));
     }
 }
@@ -319,6 +324,18 @@ mod tests {
         assert!(scanner.scan(&runaway).is_empty());
         let later = format!("{runaway}{}", block(r#"{"question":"Later?"}"#));
         let found = scanner.scan(&later);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].question, "Later?");
+    }
+
+    #[test]
+    fn an_oversized_block_and_a_later_question_in_one_chunk_are_independent() {
+        let text = format!(
+            "```{FENCE}\n{}\n{}",
+            "y".repeat(BLOCK_MAX_BYTES + 1),
+            block(r#"{"question":"Later?"}"#)
+        );
+        let found = Scanner::default().scan(&text);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].question, "Later?");
     }
