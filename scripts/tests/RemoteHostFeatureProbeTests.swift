@@ -62,6 +62,12 @@ struct RemoteHostFeatureProbeTests {
         Bridge.version = 25
         let localForkSupport = await RemoteHostFeature.chatFork.isSupported(peer: nil)
         check(localForkSupport, "the bundled local host does not need a peer probe")
+        Bridge.version = 27
+        let oldPullSupport = await RemoteHostFeature.pullCreation.isSupported(peer: "peer")
+        check(!oldPullSupport, "an older host cannot receive pulls.create")
+        Bridge.version = 28
+        let newPullSupport = await RemoteHostFeature.pullCreation.isSupported(peer: "peer")
+        check(newPullSupport, "the first PR-creation host is accepted")
         Bridge.version = 99
         // The first run asks.
         do {

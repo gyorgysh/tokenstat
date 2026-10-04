@@ -373,6 +373,27 @@ enum StoredEvent {
         brief: String,
         at_ms: i64,
     },
+    /// A question the agent asked in its reply, found while it streamed.
+    /// See `chat_question`. The block stays in the reply text too.
+    Question {
+        id: String,
+        question: String,
+        options: Vec<String>,
+        multiple: bool,
+        default: Option<String>,
+        blocking: bool,
+        backend: String,
+        at_ms: i64,
+    },
+    /// The person's answer, and how it was sent on: `note` rode a running
+    /// turn, `queued` waits for the turn to end, `sent` started a turn.
+    Answer {
+        #[serde(rename = "questionId")]
+        question_id: String,
+        text: String,
+        delivery: String,
+        at_ms: i64,
+    },
 }
 
 /// What an incoming backend is told, and whether the person is told about it.
@@ -1042,6 +1063,105 @@ impl Store {
             .unwrap_or_else(PoisonError::into_inner)
             .remove(id);
         Ok(())
+    }
+
+    /// Answer one question the agent asked. See `chat_question`.
+    ///
+    /// A running turn gets the answer the way it would get a steer note: on
+    /// its next step where the backend reads notes mid-turn, otherwise as the
+    /// next message once it ends, which the client sends like any parked note.
+    /// An idle conversation gets it as a message now. Either way the answer is
+    /// recorded against its question, so every device shows it as answered.
+    pub fn answer_question(
+        self: &Arc<Self>,
+        id: &str,
+        question_id: &str,
+        text: &str,
+    ) -> Result<Value, DispatchError> {
+        validate_record_id(id)?;
+        let answer = text.trim();
+        if answer.is_empty() {
+            return Err("Pick one of the choices or write an answer.".into());
+        }
+        if answer.chars().count() > crate::chat_question::ANSWER_MAX_CHARS {
+            return Err("That answer is too long for one note. Send it as its own message.".into());
+        }
+        let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        let note = {
+            crate::workspace_policy::require_current_access()?;
+            let question = self.open_question(id, question_id)?;
+            let note = crate::chat_question::answer_note(&question, answer);
+            if self.turn_is_live(id)? {
+                let chat = self.get(id)?;
+                let takes_notes = note_backend(&chat.backend)
+                    && (chat.backend == "muse" || chat.autonomy == "standard");
+                let delivery = if takes_notes { "note" } else { "queued" };
+                self.append(
+                    id,
+                    &StoredEvent::Answer {
+                        question_id: question_id.into(),
+                        text: answer.into(),
+                        delivery: delivery.into(),
+                        at_ms: now_ms(),
+                    },
+                )?;
+                // Beside a note the person already parked, never instead of it.
+                {
+                    let mut steers = self.steers.lock().unwrap_or_else(PoisonError::into_inner);
+                    let merged = match steers.get(id) {
+                        Some(existing) => format!("{existing}\n\n{note}"),
+                        None => note,
+                    };
+                    steers.insert(id.to_string(), merged);
+                }
+                self.suppress_follow_up
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(id);
+                return Ok(json!({ "delivery": delivery }));
+            }
+            note
+        };
+        // Sent first and recorded after: a send that did not start leaves the
+        // question open, so the person can try again.
+        // Keep acceptance through launch and recording the answer. Otherwise
+        // a second device can accept the same question between those steps.
+        let outcome = self.send_under_acceptance(id, &note, &[], None, None, None, false)?;
+        self.append(
+            id,
+            &StoredEvent::Answer {
+                question_id: question_id.into(),
+                text: answer.into(),
+                delivery: "sent".into(),
+                at_ms: now_ms(),
+            },
+        )?;
+        Ok(json!({ "delivery": "sent", "conversation": outcome.into_conversation() }))
+    }
+
+    /// The text of a question in this conversation that nobody has answered.
+    fn open_question(&self, id: &str, question_id: &str) -> Result<String, String> {
+        let (events, _) = self.events(id, 0)?;
+        let mut asked = None;
+        for event in &events {
+            match event.get("kind").and_then(Value::as_str) {
+                Some("question")
+                    if event.get("id").and_then(Value::as_str) == Some(question_id) =>
+                {
+                    asked = event
+                        .get("question")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                }
+                Some("answer")
+                    if event.get("questionId").and_then(Value::as_str) == Some(question_id) =>
+                {
+                    return Err("This question already has an answer.".into());
+                }
+                _ => {}
+            }
+        }
+        asked.ok_or_else(|| "That question is no longer in this conversation.".into())
     }
 
     /// Drop a parked note so it cannot ride the next step or start a turn.
@@ -2491,6 +2611,30 @@ impl Store {
     ) -> Result<SendOutcome, DispatchError> {
         validate_record_id(id)?;
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        self.send_under_acceptance(
+            id,
+            text,
+            attachment_ids,
+            client_message_id,
+            client_message_created_at_ms,
+            expected_revision,
+            follow_up,
+        )
+    }
+
+    /// The caller holds the conversation acceptance lock through any related
+    /// timeline writes, such as marking a question answered.
+    #[allow(clippy::too_many_arguments)]
+    fn send_under_acceptance(
+        self: &Arc<Self>,
+        id: &str,
+        text: &str,
+        attachment_ids: &[String],
+        client_message_id: Option<&str>,
+        client_message_created_at_ms: Option<i64>,
+        expected_revision: Option<u64>,
+        follow_up: bool,
+    ) -> Result<SendOutcome, DispatchError> {
         crate::workspace_policy::require_current_access()?;
         let typed = text.trim();
         if typed.is_empty() && attachment_ids.is_empty() {
@@ -2614,7 +2758,7 @@ impl Store {
                     .then_some(chat.resume_token.as_deref())
                     .flatten()
             });
-        let composed = crate::chat_turn::compose(crate::chat_turn::Inputs {
+        let mut composed = crate::chat_turn::compose(crate::chat_turn::Inputs {
             prompt,
             persona_name: &self.persona_name(&chat),
             persona_brief: &chat.system_prompt,
@@ -2622,6 +2766,14 @@ impl Store {
             output_dir: &response_output_dir,
             backend: &chat.backend,
         });
+        // How to ask the person something, for this kind of turn: a turn that
+        // does not ask before tools must never wait, and one whose agent can
+        // take a note mid-turn can be answered without stopping.
+        let takes_notes = chat.autonomy == "standard" && note_backend(&chat.backend);
+        composed.append_standing(&crate::chat_question::rule(
+            chat.autonomy == "standard",
+            takes_notes,
+        ));
         // Two separate things ride the same channel this turn. The standing
         // rules repeat for as long as they are unchanged; the handover is sent
         // exactly once, to the agent that has just been handed a conversation
@@ -3111,6 +3263,7 @@ impl Store {
         let reader = format!("chat:{id}");
         let mut offset = 0;
         let mut assistant_text = String::new();
+        let mut questions = crate::chat_question::Scanner::default();
         let deadline = self.get(id).ok().and_then(|chat| {
             (chat.budget_seconds > 0)
                 .then(|| Instant::now() + Duration::from_secs(chat.budget_seconds))
@@ -3123,6 +3276,9 @@ impl Store {
                     let events = parser.push_events(&chunk.bytes);
                     collect_agent_text(&events, &mut assistant_text);
                     self.record_events(id, backend, events);
+                    // Mid-turn, so the card is in front of the person while
+                    // an answer can still reach this turn.
+                    self.record_questions(id, backend, questions.scan(&assistant_text));
                 }
             }
             if !manager.info(pty).map(|info| info.alive).unwrap_or(false) {
@@ -3145,6 +3301,7 @@ impl Store {
         let events = parser.finish_events();
         collect_agent_text(&events, &mut assistant_text);
         self.record_events(id, backend, events);
+        self.record_questions(id, backend, questions.finish(&assistant_text));
         self.record_response_attachments(id, backend, &assistant_text, response_output_dir);
         let exit = manager.info(pty).ok().and_then(|info| info.exit_code);
         let stopped = self
@@ -3224,6 +3381,29 @@ impl Store {
                     event,
                     at_ms: now_ms(),
                     backend: backend.into(),
+                },
+            );
+        }
+    }
+
+    fn record_questions(
+        &self,
+        id: &str,
+        backend: &str,
+        found: Vec<crate::chat_question::Question>,
+    ) {
+        for question in found {
+            let _ = self.append(
+                id,
+                &StoredEvent::Question {
+                    id: mint_record_id("question"),
+                    question: question.question,
+                    options: question.options,
+                    multiple: question.multiple,
+                    default: question.default,
+                    blocking: question.blocking,
+                    backend: backend.into(),
+                    at_ms: now_ms(),
                 },
             );
         }
@@ -4322,7 +4502,12 @@ fn last_message_in(path: &Path) -> Option<(i64, &'static str)> {
         match event {
             StoredEvent::User { at_ms, .. } => Some((at_ms, "user")),
             StoredEvent::Agent { at_ms, .. } => Some((at_ms, "agent")),
-            StoredEvent::Approval { .. } | StoredEvent::Handoff { .. } => None,
+            // A question rides an agent reply and an answer rides a message,
+            // and each of those is counted where it is recorded.
+            StoredEvent::Approval { .. }
+            | StoredEvent::Handoff { .. }
+            | StoredEvent::Question { .. }
+            | StoredEvent::Answer { .. } => None,
         }
     })
 }
@@ -4376,6 +4561,8 @@ pub fn backends(force: bool) -> Vec<Value> {
                         .is_some_and(|s| !s.is_empty())
                 );
                 backend["readiness"] = profile["readiness"].clone();
+                backend["signIn"] = profile["signIn"].clone();
+                backend["canCheckSignIn"] = profile["canCheckSignIn"].clone();
             }
             // Chat advertises the live list where enumeration works and the
             // curated list where it cannot (Claude's aliases, Muse's Spark
@@ -5464,6 +5651,156 @@ mod tests {
                 Ok(())
             })
             .unwrap();
+    }
+
+    fn ask(store: &Store, id: &str, question: &str) -> String {
+        store.record_questions(
+            id,
+            "claude",
+            crate::chat_question::Scanner::default().finish(&format!(
+                "```{}\n{{\"question\":\"{question}\",\"options\":[\"A\",\"B\"],\"default\":\"A\"}}\n```",
+                crate::chat_question::FENCE
+            )),
+        );
+        let (events, _) = store.events(id, 0).unwrap();
+        events
+            .iter()
+            .rev()
+            .find(|event| event["kind"] == "question")
+            .and_then(|event| event["id"].as_str())
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn an_answer_to_a_running_turn_rides_its_next_step_once() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        prepare_live_chat(&store, "chat-test");
+        retune_chat(&store, "chat-test", "claude", "standard");
+        let question = ask(&store, "chat-test", "Which database?");
+        let (events, _) = store.events("chat-test", 0).unwrap();
+        let recorded = events
+            .iter()
+            .find(|event| event["kind"] == "question")
+            .unwrap();
+        assert_eq!(recorded["options"], json!(["A", "B"]));
+        assert_eq!(recorded["default"], "A");
+        assert_eq!(recorded["blocking"], false);
+
+        store.steer("chat-test", "also check the tests").unwrap();
+        let answer = store
+            .answer_question("chat-test", &question, "  B  ")
+            .unwrap();
+        assert_eq!(answer["delivery"], "note");
+        let parked = parked_note(&store, "chat-test").unwrap();
+        assert!(
+            parked.starts_with("also check the tests\n\n"),
+            "a parked note stays: {parked}"
+        );
+        assert!(parked.ends_with("Answer to your question \"Which database?\": B"));
+        let (events, _) = store.events("chat-test", 0).unwrap();
+        let recorded = events
+            .iter()
+            .find(|event| event["kind"] == "answer")
+            .unwrap();
+        assert_eq!(recorded["questionId"], question.as_str());
+        assert_eq!(recorded["text"], "B");
+
+        let again = store
+            .answer_question("chat-test", &question, "A")
+            .unwrap_err();
+        assert!(again.to_string().contains("already has an answer"));
+    }
+
+    #[test]
+    fn an_answer_to_a_turn_that_cannot_take_notes_waits_for_it_to_end() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        prepare_live_chat(&store, "chat-test");
+        retune_chat(&store, "chat-test", "claude", "bypass");
+        let question = ask(&store, "chat-test", "Ship it?");
+        let answer = store
+            .answer_question("chat-test", &question, "yes")
+            .unwrap();
+        assert_eq!(answer["delivery"], "queued");
+        assert!(parked_note(&store, "chat-test").unwrap().contains("yes"));
+    }
+
+    #[test]
+    fn an_answer_needs_words_and_a_question_that_is_still_there() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        prepare_live_chat(&store, "chat-test");
+        let question = ask(&store, "chat-test", "Name?");
+        assert!(
+            store
+                .answer_question("chat-test", &question, "   ")
+                .is_err()
+        );
+        let long = "x".repeat(crate::chat_question::ANSWER_MAX_CHARS + 1);
+        assert!(
+            store
+                .answer_question("chat-test", &question, &long)
+                .is_err()
+        );
+        let missing = store
+            .answer_question("chat-test", "question-gone", "hi")
+            .unwrap_err();
+        assert!(
+            missing
+                .to_string()
+                .contains("no longer in this conversation")
+        );
+        assert!(
+            parked_note(&store, "chat-test").is_none(),
+            "a refused answer parks nothing"
+        );
+    }
+
+    #[test]
+    fn simultaneous_answers_accept_only_one_note() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        prepare_live_chat(&store, "chat-test");
+        retune_chat(&store, "chat-test", "claude", "standard");
+        let question = ask(&store, "chat-test", "Pick one?");
+        let barrier = std::sync::Barrier::new(2);
+        let results = std::thread::scope(|scope| {
+            let first = scope.spawn(|| {
+                barrier.wait();
+                store.answer_question("chat-test", &question, "A")
+            });
+            let second = scope.spawn(|| {
+                barrier.wait();
+                store.answer_question("chat-test", &question, "B")
+            });
+            [first.join().unwrap(), second.join().unwrap()]
+        });
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        let (events, _) = store.events("chat-test", 0).unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event["kind"] == "answer")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn an_idle_answer_that_cannot_launch_leaves_the_question_open() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        prepare_live_chat(&store, "chat-test");
+        let question = ask(&store, "chat-test", "Pick one?");
+        store.set_running("chat-test", false).unwrap();
+        // The fixture's workspace does not exist, so no CLI is started.
+        assert!(store.answer_question("chat-test", &question, "B").is_err());
+        assert_eq!(
+            store.open_question("chat-test", &question).unwrap(),
+            "Pick one?"
+        );
     }
 
     #[test]

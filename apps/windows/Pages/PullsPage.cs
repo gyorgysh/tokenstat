@@ -231,6 +231,11 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
                     _root.Children[0] = Header(
                         Format.Text(availability, "repo", L10n.Text("windows.pullspage.pull_requests.d9e3f260")));
                     _root.Children.Add(ConnectionLine(availability));
+                    _root.Children.Add(ActionIconGlyph.PrimaryButton(L10n.Text("windows.pullcreate.new"), ActionIcon.Create, async (_, _) =>
+                    {
+                        await WorkspacePullCreate.ShowAsync(this, _workspaceId, _folderName, CallPullsAsync);
+                        await LoadAsync(true);
+                    }));
                     _root.Children.Add(FilterBar());
                     rows = Motion.SkeletonCard();
                     _root.Children.Add(rows);

@@ -107,6 +107,7 @@ struct AccountView: View {
                     }
                     LaunchSettings()
                     ChatCacheSettings()
+                    ChatDetailSettings()
                     #if os(macOS)
                     ChatBrowserSettings()
                     #endif
@@ -251,6 +252,7 @@ struct AccountView: View {
         notificationsCard
         LaunchSettings()
         ChatCacheSettings()
+        ChatDetailSettings()
         #if os(macOS)
         ChatBrowserSettings()
         #endif

@@ -161,6 +161,7 @@ private struct ChatConversationOverview: View {
 
 struct ChatView: View {
     @Bindable var model: ChatModel
+    @State private var detail = ChatDetailPreference.shared
     let workspaceID: String
     var workspaceName: String? = nil
     /// The folder's git state, when it has one. Chat is not drawn inside the
@@ -344,6 +345,13 @@ struct ChatView: View {
                         .padding(.bottom, Theme.Space.s)
                         .frame(maxWidth: .infinity)
                     }
+                    if let backend = model.backend(for: chat.backend), model.savedCopy == nil {
+                        ChatAgentSetupCard(model: model, backend: backend, running: model.busy)
+                            .frame(maxWidth: ReadingRoom.laneWidth)
+                            .padding(.horizontal, Theme.Space.l)
+                            .padding(.bottom, Theme.Space.s)
+                            .frame(maxWidth: .infinity)
+                    }
                     ChatComposer(
                         model: model,
                         chat: chat,
@@ -494,6 +502,10 @@ struct ChatView: View {
                   let target = model.adjacentConversation(step) else { return }
             Task { await model.select(target) }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .chatStepGroupsToggleRequested)) { _ in
+            guard isActive, !showingOverview else { return }
+            model.setAllGroups(open: !model.anyGroupOpen)
+        }
         .onDisappear {
             UserPresence.shared.chatSurface(showing: nil)
         }
@@ -598,7 +610,14 @@ struct ChatView: View {
                             },
                             faceSeed: model.faceSeed,
                             isLive: !model.isShowingCachedTranscript && model.busy && item.id == model.transcriptItems.last?.id,
-                            animatesRunning: !model.isShowingCachedTranscript && item.id == spinning
+                            animatesRunning: !model.isShowingCachedTranscript && item.id == spinning,
+                            expandsOutput: detail.level == .detailed,
+                            toggleGroup: { model.toggleGroup($0) },
+                            answerQuestion: { question, text in
+                                Task { await model.answerQuestion(question, answer: text) }
+                            },
+                            answeringQuestion: model.answeringQuestions.contains(item.questionID ?? ""),
+                            canAnswerQuestions: model.savedCopy == nil && !model.isShowingCachedTranscript
                         )
                         .equatable()
                         .frame(
@@ -1088,6 +1107,8 @@ struct ChatView: View {
         // The end always exists. Anything else may sit outside the built
         // slice: slide to it first, or the scroll lands nowhere.
         if id != TranscriptFollow.bottomID {
+            // A target folded into a step group opens it first.
+            model.revealRow(id)
             applySlice(TranscriptSlice.revealing(id, in: model.transcriptItems))
         } else {
             showNewest()
@@ -1141,6 +1162,13 @@ struct ChatView: View {
         // An attached image is content on its own: text is only mandatory
         // when there is nothing attached.
         guard !text.isEmpty || !model.attachments.isEmpty, !model.sending else { return }
+        // Only the CLI's own answer stops a send. A stored token past its
+        // expiry is routine (the CLI renews it), and an agent signed in with
+        // an environment key has no login file at all.
+        if let backend = model.backend(for: chat.backend), backend.signInVerified, ["needsSignIn", "expired"].contains(backend.readiness ?? "") {
+            model.backendRefreshError = L10n.text("apple.agentsetup.draft_kept", backend.label)
+            return
+        }
         // Enqueue first: a full queue reports an error and returns nil, and
         // the words must survive that path rather than being wiped.
         if sendNow {
@@ -1314,7 +1342,7 @@ private struct ChatPaneOpening: View {
 private extension ChatDisplayItem {
     var prefersWideReadingRoom: Bool {
         switch kind {
-        case .tool, .edit, .attachment, .approval, .handoff, .turnSeparator, .usage:
+        case .tool, .edit, .group, .question, .attachment, .approval, .handoff, .turnSeparator, .usage:
             true
         case .user, .assistant, .thinking, .failed:
             false
@@ -1327,7 +1355,7 @@ private extension ChatDisplayItem {
             .trailing
         case .assistant, .thinking, .failed:
             .leading
-        case .tool, .edit, .attachment, .approval, .handoff, .turnSeparator, .usage:
+        case .tool, .edit, .group, .question, .attachment, .approval, .handoff, .turnSeparator, .usage:
             .center
         }
     }

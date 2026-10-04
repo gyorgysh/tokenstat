@@ -16,6 +16,12 @@ import SwiftUI
     /// answers with nothing further.
     var earlierPages: [[Row]] = []
     var fetches = 0
+    /// Rows asked to be opened out of a folded step group.
+    var revealed: [String] = []
+    func revealRow(_ id: String) -> String {
+        revealed.append(id)
+        return id
+    }
     func loadEarlier() async {
         fetches += 1
         guard !earlierPages.isEmpty else {
@@ -64,6 +70,8 @@ struct ChatTimelineEvent {
             model: model, follow: follow) { _, _ in placements += 1 }
         assert(restored == .restored && placements == 4 && follow.stops == 1)
         assert(!follow.settling)
+        // Every placement first opens the row's step group, if it has one.
+        assert(model.revealed == Array(repeating: "text-s1", count: 4))
 
         // Navigation during the first placement cannot move the next chat or
         // end the next chat's own settling task, even when row IDs repeat.

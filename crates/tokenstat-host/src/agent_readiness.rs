@@ -141,12 +141,11 @@ pub(crate) struct SignIn {
 }
 
 const SIGN_INS: &[SignIn] = &[
-    // Running `claude` with no arguments is the documented first-launch login.
-    // When the browser cannot reach the CLI's local callback, which is every
-    // remote server, it shows a code to paste back into the terminal.
+    // The dedicated login command also works when renewing an existing login.
+    // The CLI owns browser authorization and any code pasted back into its PTY.
     SignIn {
         id: "claude_code",
-        args: &[],
+        args: &["auth", "login"],
         kind: "browserCode",
     },
     // Codex's own answer for a machine with no browser. It prints a URL and a

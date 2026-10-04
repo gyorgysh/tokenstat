@@ -13,6 +13,105 @@ use super::{
     graphql_endpoint, response_text, rest_base,
 };
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedPull {
+    pub number: u32,
+    pub url: String,
+    pub existing: bool,
+}
+
+pub fn default_branch(repo: &Repo) -> Result<String, ForgeError> {
+    with_credential(repo, |credential| {
+        let value = rest(
+            repo,
+            credential,
+            Method::GET,
+            &format!("/repos/{}/{}", repo.owner, repo.repo),
+            Value::Null,
+        )?;
+        value["default_branch"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                ForgeError::Api("GitHub did not return the default branch".into()).into()
+            })
+    })
+}
+
+/// Create from an already published branch. Check for an open PR first so a
+/// retry after a lost response returns the original instead of posting twice.
+pub fn create(
+    repo: &Repo,
+    head: &str,
+    base: &str,
+    title: &str,
+    body: &str,
+    draft: bool,
+) -> Result<CreatedPull, ForgeError> {
+    let title = required_body(title, "a pull request title")?;
+    if head.is_empty() || base.is_empty() || head == base {
+        return Err(ForgeError::Api(
+            "Choose different source and target branches".into(),
+        ));
+    }
+    with_credential(repo, |credential| {
+        let mut url = reqwest::Url::parse(&format!(
+            "{}/repos/{}/{}/pulls",
+            rest_base(repo),
+            repo.owner,
+            repo.repo
+        ))
+        .map_err(|error| ForgeError::Api(error.to_string()))?;
+        url.query_pairs_mut()
+            .append_pair("state", "open")
+            .append_pair("head", &format!("{}:{head}", repo.owner))
+            .append_pair("base", base);
+        let response = auth::http_client()?
+            .get(url)
+            .header("accept", "application/vnd.github+json")
+            .header("x-github-api-version", "2022-11-28")
+            .bearer_auth(credential.bearer())
+            .send()
+            .map_err(ForgeError::from)?;
+        let matches: Value =
+            serde_json::from_str(&response_text(response)?).map_err(ForgeError::from)?;
+        let rows = matches.as_array().ok_or_else(|| ForgeError::Api("GitHub did not confirm whether this branch already has a pull request. Check the list before retrying.".into()))?;
+        if let Some(pull) = rows.first() {
+            return created_pull(pull, true).map_err(Into::into);
+        }
+        let pull = rest(
+            repo,
+            credential,
+            Method::POST,
+            &format!("/repos/{}/{}/pulls", repo.owner, repo.repo),
+            json!({"head": head, "base": base, "title": title, "body": body, "draft": draft}),
+        )?;
+        created_pull(&pull, false).map_err(Into::into)
+    })
+}
+
+fn created_pull(value: &Value, existing: bool) -> Result<CreatedPull, ForgeError> {
+    let number = value["number"]
+        .as_u64()
+        .and_then(|n| u32::try_from(n).ok())
+        .filter(|n| *n > 0);
+    let url = value["html_url"]
+        .as_str()
+        .filter(|s| s.starts_with("https://"));
+    match (number, url) {
+        (Some(number), Some(url)) => Ok(CreatedPull {
+            number,
+            url: url.into(),
+            existing,
+        }),
+        _ => Err(ForgeError::Api(
+            "GitHub did not confirm the pull request. Check the list before retrying.".into(),
+        )),
+    }
+}
+
 /// Add one issue comment to the pull request's conversation.
 pub fn comment(repo: &Repo, number: u32, body: &str) -> Result<(), ForgeError> {
     let body = required_body(body, "a comment")?;
@@ -208,6 +307,43 @@ fn graphql_success(raw: &str) -> Result<(), HttpFailure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn creating_a_pull_rejects_invalid_inputs_before_using_credentials() {
+        let repo = Repo {
+            host: "example.invalid".into(),
+            owner: "test".into(),
+            repo: "repo".into(),
+        };
+        assert!(
+            create(&repo, "main", "main", "Title", "", true)
+                .unwrap_err()
+                .to_string()
+                .contains("different")
+        );
+        assert!(
+            create(&repo, "feature", "main", "  ", "", true)
+                .unwrap_err()
+                .to_string()
+                .contains("empty")
+        );
+        assert!(create(&repo, "", "main", "Title", "", true).is_err());
+    }
+
+    #[test]
+    fn a_creation_or_retry_needs_a_confirmed_pull_link() {
+        let value = json!({"number": 42, "html_url": "https://github.com/test/repo/pull/42"});
+        assert!(!created_pull(&value, false).unwrap().existing);
+        assert!(created_pull(&value, true).unwrap().existing);
+        assert!(created_pull(&json!({"number": 42}), false).is_err());
+        assert!(
+            created_pull(
+                &json!({"number": 0, "html_url": "https://github.com/test/repo/pull/0"}),
+                false
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn bodies_are_trimmed_and_empty_messages_are_refused() {

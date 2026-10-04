@@ -216,3 +216,114 @@ Note(null, null, null, "nothing to remember says nothing");
 Check(!SeatStep.IsShell("push"), "push is not a command");
 Check(SeatStep.IsShell("Run-Task"), "run as its own word is a command");
 Console.WriteLine("Windows seat steps: file, command, site and mood words pass.");
+
+// Chat detail levels. The same cases as scripts/tests/ChatTranscriptFoldTests.swift
+// and the Android ChatTranscriptDetailTest, so the three clients fold alike.
+static ChatPage.DisplayItem Row(string id, ChatPage.ItemKind kind, string verb = "", bool running = false,
+    bool failed = false, string path = "", long added = 0, long removed = 0, double cost = 0, string text = "",
+    long started = 0, long ended = 0) =>
+    new() { Id = id, Kind = kind, Verb = verb, Target = "t-" + id, Running = running, Failed = failed, Path = path,
+        Added = added, Removed = removed, Cost = cost, Text = text, StartedAt = started, EndedAt = ended };
+static ChatPage.DisplayItem Ask(string id) => Row(id, ChatPage.ItemKind.User, text: "q");
+static ChatPage.DisplayItem Say(string id) => Row(id, ChatPage.ItemKind.Assistant, text: "a");
+static ChatPage.DisplayItem Think(string id) => Row(id, ChatPage.ItemKind.Thinking, text: "## Plan\nread it");
+static ChatPage.DisplayItem Tool(string id, string verb, bool running = false, bool failed = false, long started = 0, long ended = 0) =>
+    Row(id, ChatPage.ItemKind.Tool, verb, running, failed, started: started, ended: ended);
+static ChatPage.DisplayItem EditRow(string id, string path, long added = 0, long removed = 0, bool failed = false) =>
+    Row(id, ChatPage.ItemKind.Edit, failed: failed, path: path, added: added, removed: removed);
+static List<ChatPage.DisplayItem> FoldRows(List<ChatPage.DisplayItem> rows, ChatDetail detail, bool running = false,
+    Func<string, bool>? isOpen = null) => ChatDetailFold.Fold(rows, detail, running, isOpen ?? (_ => false));
+static string Ids(List<ChatPage.DisplayItem> rows) => string.Join(",", rows.Select(row => row.Id));
+static ChatStepGroup? GroupOf(List<ChatPage.DisplayItem> rows, string id) => rows.FirstOrDefault(row => row.Id == id).Group;
+
+var detailRows = new List<ChatPage.DisplayItem> { Ask("u1"), Think("k1"), Tool("t1", "Read"), Tool("t2", "Read"), Say("a1") };
+Check(ReferenceEquals(FoldRows(detailRows, ChatDetail.Detailed), detailRows), "Detailed changes nothing");
+
+var turns = new List<ChatPage.DisplayItem>
+{
+    Ask("u1"), Think("k1"), Say("a0"), Tool("t1", "Bash"), EditRow("e1", "a.cs"), Say("a1"),
+    Row("x1", ChatPage.ItemKind.Usage, cost: 0.25), Ask("u2"), Tool("t2", "Read"), Say("a2"),
+};
+var compact = FoldRows(turns, ChatDetail.Compact);
+Check(Ids(compact) == "u1,g:k1,a1,u2,g:t2,a2", "Compact is question, work line, answer: " + Ids(compact));
+var work = GroupOf(compact, "g:k1")!;
+Check(work.Style == ChatStepGroupStyle.Work && string.Join(",", work.MemberIds) == "k1,a0,t1,e1", "in-between prose folds with the work");
+Check(work.Steps == 2 && work.Cost == 0.25 && GroupOf(compact, "g:t2")!.Cost is null, "steps and spend ride on the work line");
+
+var mustSee = new List<ChatPage.DisplayItem>
+{
+    Ask("u1"), Tool("t1", "Bash"), Row("p1", ChatPage.ItemKind.Approval), Tool("t2", "Bash"),
+    Tool("t3", "Bash", failed: true), EditRow("e1", "a", failed: true), Row("f1", ChatPage.ItemKind.Attachment),
+    Row("x1", ChatPage.ItemKind.Failed),
+};
+foreach (var level in Enum.GetValues<ChatDetail>())
+{
+    var shown = FoldRows(mustSee, level);
+    foreach (var must in new[] { "u1", "p1", "t3", "e1", "f1", "x1" })
+    {
+        Check(shown.Any(row => row.Id == must) && ChatDetailFold.Owner(must, shown) is null, $"{level} never folds {must}");
+    }
+}
+Check(Ids(FoldRows(mustSee, ChatDetail.Compact)) == "u1,g:t1,p1,g:t2,t3,e1,f1,x1", "an approval splits the work where it happened");
+Check(Ids(FoldRows([Ask("u1"), Say("a1"), Row("x1", ChatPage.ItemKind.Usage, cost: 0.5)], ChatDetail.Compact)) == "u1,a1,x1",
+    "nothing to fold keeps the usage row");
+
+var live = FoldRows([Ask("u1"), Think("k1"), Tool("t1", "Read", running: true)], ChatDetail.Compact, running: true);
+var liveGroup = GroupOf(live, "g:k1")!;
+Check(liveGroup.Running && liveGroup.LiveVerb == "Read" && liveGroup.LiveTarget == "t-t1", "a live work line names its step");
+var settled = FoldRows([Ask("u1"), Think("k1"), Tool("t1", "Read"), Say("a1")], ChatDetail.Compact, running: true);
+Check(!GroupOf(settled, "g:k1")!.Running, "work before the answer is not running once its steps end");
+
+var standard = FoldRows(
+    [Ask("u1"), Think("k1"), Tool("t1", "Read"), Tool("t2", "Grep"), Tool("t3", "WebFetch"), Tool("t4", "Bash"), EditRow("e1", "a"), Say("a1")],
+    ChatDetail.Standard);
+Check(Ids(standard) == "u1,g:k1,g:t1,t4,e1,a1", "Standard folds thought and reads: " + Ids(standard));
+var explored = GroupOf(standard, "g:t1")!;
+Check(explored.Style == ChatStepGroupStyle.Explored && explored.Reads == 1 && explored.Searches == 1 && explored.Pages == 1,
+    "explored counts by kind");
+Check(GroupOf(standard, "g:k1")!.Preview == "Plan", "a thought previews its first line");
+Check(Ids(FoldRows([Ask("u1"), Tool("t1", "Read"), Tool("t2", "Bash"), Tool("t3", "Read"), Tool("t4", "Glob"),
+    Tool("t5", "Read", failed: true), Tool("t6", "Read")], ChatDetail.Standard)) == "u1,t1,t2,g:t3,t5,t6",
+    "lone reads stay rows, other rows break runs");
+Check(Ids(FoldRows([Ask("u1"), Think("k1")], ChatDetail.Standard, running: true)) == "u1,k1", "reasoning still arriving stays open");
+
+var opened = FoldRows([Ask("u1"), Think("k1"), Tool("t1", "Bash"), Say("a1")], ChatDetail.Compact, isOpen: id => id == "g:k1");
+Check(Ids(opened) == "u1,g:k1,k1,t1,a1" && GroupOf(opened, "g:k1")!.Open, "an open group lists its steps after it");
+Check(opened[2].GroupId == "g:k1" && opened[3].GroupId == "g:k1" && opened[0].GroupId == "" && opened[4].GroupId == "",
+    "steps name their group, top-level rows none");
+Check(ChatDetailFold.Owner("t1", opened) is null && ChatDetailFold.Owner("t1", FoldRows([Ask("u1"), Think("k1"), Tool("t1", "Bash"), Say("a1")], ChatDetail.Compact)) == "g:k1",
+    "a closed group owns its steps, an open one does not");
+
+var growing = new List<ChatPage.DisplayItem> { Ask("u1"), Think("k1"), Tool("t1", "Bash", running: true) };
+var before = Ids(FoldRows(growing, ChatDetail.Compact, running: true));
+growing.Add(Tool("t2", "Bash", running: true));
+Check(before == Ids(FoldRows(growing, ChatDetail.Compact, running: true)) && before == "u1,g:k1", "a growing turn keeps its line");
+
+var counted = GroupOf(FoldRows([Ask("u1"), Tool("t1", "Bash", started: 1_000, ended: 4_000), EditRow("e1", "a.cs", 3, 1),
+    EditRow("e2", "a.cs", 2), EditRow("e3", "b.cs", 1, 4), Tool("t2", "Bash", started: 5_000, ended: 9_000), Say("a1")], ChatDetail.Compact), "g:t1")!;
+Check(counted.Steps == 5 && counted.Files == 2 && counted.Added == 6 && counted.Removed == 5
+    && counted.StartedAt == 1_000 && counted.EndedAt == 9_000, "counts match their members");
+Check(ChatDetailFold.Preview("\n\n## **Plan** it\nmore") == "Plan** it" && ChatDetailFold.Preview("\n  \n") is null,
+    "previews drop markdown marks");
+Console.WriteLine("Windows chat detail: compact, standard and detailed folding, pinned rows, open groups and counts pass.");
+
+// Agent questions. The same stripping cases as ChatQuestionTests.swift.
+var questionFence = "```" + ChatQuestionText.Fence;
+var questionBlock = questionFence + "\n{\"question\":\"Which database?\"}\n```";
+Check(ChatQuestionText.Strip("Plain reply.") == "Plain reply.", "text without a block is untouched");
+Check(ChatQuestionText.Strip("Before:\n" + questionBlock + "\nGoing with A.") == "Before:\nGoing with A.", "a finished block leaves the prose around it");
+Check(ChatQuestionText.Strip("Before:\n" + questionFence + "\n{\"question\":\"Wh") == "Before:", "a streaming block is cut from its opening line");
+Check(ChatQuestionText.Strip(questionBlock) == "", "a reply that is only a question has no prose");
+Check(ChatQuestionText.Strip("Run:\n```sh\nls\n```") == "Run:\n```sh\nls\n```", "ordinary code blocks stay");
+foreach (var body in new[] { "{}", "broken JSON", "{\"question\":42}", "{\"question\":\" \"}" })
+{
+    var invalid = questionFence + "\n" + body + "\n```";
+    Check(ChatQuestionText.Strip(invalid) == invalid, "a malformed question stays readable");
+}
+var unfinishedQuestion = questionFence + "\n{\"question\":\"Wh";
+Check(ChatQuestionText.Strip(unfinishedQuestion, streaming: false) == unfinishedQuestion, "an interrupted reply stays readable");
+var askedQuestion = new ChatQuestionItem("q1", "Q", ["A"], false, "A", false);
+Check(askedQuestion.Answer is null && (askedQuestion with { Answer = "B" }).Answer == "B", "an answer lands on its question");
+var questionRow = FoldRows([Ask("u1"), new ChatPage.DisplayItem { Id = "question-q1", Kind = ChatPage.ItemKind.Question, Question = askedQuestion }], ChatDetail.Compact);
+Check(questionRow.Any(row => row.Id == "question-q1"), "a question is never folded");
+Console.WriteLine("Windows chat questions: stripping, answers and folding pass.");

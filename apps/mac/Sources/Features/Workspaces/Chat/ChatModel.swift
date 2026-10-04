@@ -819,7 +819,58 @@ final class ChatModel {
     }
 
     var isShowingCachedTranscript: Bool { openingConversation && !recentMessagePreview.isEmpty }
-    var transcriptItems: [ChatDisplayItem] { isShowingCachedTranscript ? recentMessagePreview : displayItems }
+    /// The rows a transcript draws: the conversation folded to the chosen
+    /// detail level. `displayItems` stays every row, for anything that has
+    /// to see a step whether or not it is folded away.
+    var transcriptItems: [ChatDisplayItem] {
+        let detail = ChatDetailPreference.shared.level
+        // Read before the cache check, so Observation sees both every time.
+        let open = groupsOpen
+        let toggled = toggledGroups
+        if isShowingCachedTranscript {
+            // A preview is one window of rows, briefly, while a chat opens.
+            return ChatTranscriptFold.fold(recentMessagePreview, detail: detail, running: false) { open != toggled.contains($0) }
+        }
+        let pending = outgoing
+        let rows = coalescedItems
+        let key = FoldKey(display: displayKey, detail: detail, open: open, toggled: toggled)
+        if key != foldKey {
+            foldCache = ChatTranscriptFold.fold(rows, detail: detail, running: selected?.running == true) {
+                open != toggled.contains($0)
+            }
+            foldKey = key
+        }
+        return pending.isEmpty ? foldCache : foldCache + pending
+    }
+
+    /// Every group starts open (Expand all) or closed. A group in
+    /// `toggledGroups` is the other way, because a person opened or closed it.
+    private(set) var groupsOpen = false
+    private(set) var toggledGroups: Set<String> = []
+
+    func toggleGroup(_ id: String) {
+        if toggledGroups.contains(id) { toggledGroups.remove(id) } else { toggledGroups.insert(id) }
+    }
+
+    func setAllGroups(open: Bool) {
+        groupsOpen = open
+        toggledGroups = []
+    }
+
+    /// Whether Expand all is in force or a group was opened by hand. Read
+    /// from the two flags rather than the rows, so the menus that ask do not
+    /// redraw on every streamed token.
+    var anyGroupOpen: Bool { groupsOpen || !toggledGroups.isEmpty }
+
+    /// The row to scroll to for `id`. A step folded into a closed group
+    /// opens that group, so a search hit or a kept reading place lands on
+    /// the step itself rather than on a line that hides it.
+    @discardableResult
+    func revealRow(_ id: String) -> String {
+        guard let owner = ChatTranscriptFold.owner(of: id, in: transcriptItems) else { return id }
+        toggleGroup(owner)
+        return id
+    }
 
     private func rememberRecentMessages() {
         guard savedCopy == nil, let reference = currentReference,
@@ -1529,6 +1580,24 @@ final class ChatModel {
         } catch {
             guard context == loadGeneration else { return }
             backendRefreshError = L10n.text("apple.chatmodel.can_t_check_agents_on_this_computer_reconn.49c16d28")
+        }
+    }
+
+    func checkSignIn(_ backend: ChatBackend) async {
+        guard let id = backend.launcherID, backend.installed != false, savedCopy == nil else { return }
+        guard backend.canCheckSignIn else { await reloadBackends(); return }
+        let context = loadGeneration
+        let owner = peer
+        do {
+            let status = try await Bridge.agentSetupCheck(peer: owner, id: id)
+            guard context == loadGeneration, peer == owner,
+                  let index = backends.firstIndex(where: { $0.id == backend.id }) else { return }
+            backends[index].readiness = status.readiness
+            backends[index].signInVerified = status.checked == true
+            backendRefreshError = nil
+        } catch {
+            guard context == loadGeneration else { return }
+            backendRefreshError = error.localizedDescription
         }
     }
 
@@ -2339,6 +2408,31 @@ final class ChatModel {
         usageThrough = page?.events.compactMap(\.seq).max() ?? events.compactMap(\.seq).max()
     }
 
+    /// Questions whose answer is on its way to the host, so a card does not
+    /// offer the same choice twice while it waits.
+    private(set) var answeringQuestions: Set<String> = []
+
+    /// Answer one of the agent's questions. The answer is recorded on the
+    /// host and reaches every device from there, so nothing is kept here.
+    func answerQuestion(_ question: ChatQuestion, answer: String) async {
+        let answer = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !answer.isEmpty, savedCopy == nil, let id = selected?.id,
+              !answeringQuestions.contains(question.id) else { return }
+        let reference = currentReference
+        let asked = peer
+        answeringQuestions.insert(question.id)
+        defer { answeringQuestions.remove(question.id) }
+        do {
+            _ = try await Bridge.answerChatQuestion(id: id, questionID: question.id, text: answer, peer: asked)
+            guard currentReference == reference, peer == asked else { return }
+            await poll()
+        } catch {
+            guard currentReference == reference, peer == asked else { return }
+            let message = hostMessage(error)
+            if self.error != message { self.error = message }
+        }
+    }
+
     func poll() async {
         guard !Task.isCancelled, !openingConversation, savedCopy == nil, let selected else { return }
         let generation = selectionGeneration
@@ -2913,6 +3007,14 @@ final class ChatModel {
     /// records into rows that many times per frame is what made a long chat
     /// impossible to scroll.
     var displayItems: [ChatDisplayItem] {
+        let pending = outgoing
+        let coalesced = coalescedItems
+        if pending.isEmpty { return coalesced }
+        return coalesced + pending
+    }
+
+    /// `displayItems` without the prompts still being sent.
+    private var coalescedItems: [ChatDisplayItem] {
         // Reading `events` here is also what tells Observation that a view
         // depends on it, so the cheap path must still touch it.
         let key = DisplayKey(
@@ -2923,17 +3025,11 @@ final class ChatModel {
             backend: selected?.backend,
             running: selected?.running == true
         )
-        let pending = outgoing
-        let coalesced: [ChatDisplayItem]
-        if key == displayKey {
-            coalesced = displayCache
-        } else {
+        if key != displayKey {
             displayCache = ChatDisplayItem.coalesce(events, defaultBackend: key.backend, running: key.running)
             displayKey = key
-            coalesced = displayCache
         }
-        if pending.isEmpty { return coalesced }
-        return coalesced + pending
+        return displayCache
     }
 
     /// Parse the prose in the rows now, off the main thread.
@@ -2974,6 +3070,18 @@ final class ChatModel {
 
     @ObservationIgnored private var displayCache: [ChatDisplayItem] = []
     @ObservationIgnored private var displayKey: DisplayKey?
+
+    /// The folded rows, held for the same reason as `displayCache`: a
+    /// transcript asks for them several times per draw.
+    private struct FoldKey: Equatable {
+        var display: DisplayKey?
+        var detail: ChatDetail
+        var open: Bool
+        var toggled: Set<String>
+    }
+
+    @ObservationIgnored private var foldCache: [ChatDisplayItem] = []
+    @ObservationIgnored private var foldKey: FoldKey?
 
     /// Show the prompt in the transcript the moment Send is pressed.
     @discardableResult
@@ -3638,218 +3746,7 @@ final class ChatModel {
     }
 }
 
-struct ChatToolState: Equatable {
-    var callId: String
-    var verb: String
-    var target: String
-    var running: Bool
-    var failed: Bool
-    var detail: String?
-    var startedAtMs: Int64
-    var endedAtMs: Int64?
-    /// Display lines, split once at construction. `snippet` used to split
-    /// the whole detail on every read, and a row reads it half a dozen
-    /// times per draw: Codex shell outputs reach megabytes, so one live
-    /// row cost several full multi-megabyte splits per poll.
-    var snippet: [String]
-
-    var duration: String? {
-        ChatClock.duration(from: startedAtMs, to: endedAtMs)
-    }
-
-    static func isFileEditVerb(_ verb: String) -> Bool {
-        verb == "Edit" || verb == "NotebookEdit"
-    }
-
-    /// Display lines for one detail string, split once. See `snippet`.
-    static func makeSnippet(verb: String, detail: String?) -> [String] {
-        guard let detail, !detail.isEmpty else { return [] }
-        let lines = detail.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        // An edit's red/green lines must reach the row unprefixed: a blanket
-        // "| " is what made every Tool row read as grey output and broke the
-        // Show edit label. This covers both the old/new rendering ("- old")
-        // and unified patches ("-hello", "@@" hunks stay grey). Other verbs
-        // keep the output marker on every line, so a shell trace like
-        // "+ set -x" never poses as a diff.
-        // Codex often exposes a unified patch through a command_execution
-        // item. Treat Diff like a native edit so +/- lines remain visible and
-        // receive the same semantic coloring as Edit/NotebookEdit cards.
-        let diffVerbs = ["Edit", "NotebookEdit", "Diff"]
-        let isDiff = diffVerbs.contains(verb)
-        var out = lines.prefix(Self.snippetLineCap).map { line in
-            let shown = Self.clip(line)
-            if isDiff, Self.isDiffLine(shown) {
-                return shown
-            }
-            return "| \(shown)"
-        }
-        if lines.count > Self.snippetLineCap {
-            out.append(L10n.text("apple.chatmodel.0_more.8bfcca49", "\(lines.count - Self.snippetLineCap)"))
-        }
-        return Array(out)
-    }
-
-    /// A unified or old/new diff body line. File headers ("--- a/…",
-    /// "+++ b/…") are not changes and stay grey.
-    static func isDiffLine(_ line: String) -> Bool {
-        guard let first = line.first else { return false }
-        guard first == "+" || first == "-" else { return false }
-        return !(line.hasPrefix("+++ ") || line.hasPrefix("--- "))
-    }
-
-    /// Cut one line down to what a row can draw.
-    ///
-    /// The line cap alone bounds the wrong half. A line is whatever sits
-    /// between two newlines, and a tool that answers in JSON answers in one
-    /// line however many kilobytes it is: a web search result arrives as a
-    /// single forty-kilobyte string. Handing that to one `Text` in a stack
-    /// that grows to fit means laying out forty thousand characters, with
-    /// wrapping, on every measuring pass the lazy stack makes.
-    ///
-    /// That is the hang. It is per row and not per transcript, which is why
-    /// it survived every bound put on the number of rows: thirty-seven rows
-    /// took a second and a half, and a dozen took a third of one.
-    ///
-    /// The full text stays in `detail`, so copy still yields everything.
-    static func clip(_ line: String) -> String {
-        guard line.count > Self.snippetColumnCap else { return line }
-        return String(line.prefix(Self.snippetColumnCap)) + "…"
-    }
-
-    /// A 500-line stdout must not become 500 rows. The full text stays in
-    /// `detail` for copy; the row only ever draws this many.
-    private static let snippetLineCap = 60
-    /// And how much of one line is drawn.
-    ///
-    /// Roughly four wrapped lines of the row's monospace face in a full-width
-    /// reading lane, so ordinary output, long shell commands and minified
-    /// source all still read as themselves. What it stops is the single line
-    /// that is really a document.
-    private static let snippetColumnCap = 600
-}
-
-/// A file the agent changed. One card, not a tool row plus a second copy.
-struct ChatEditState: Equatable {
-    var path: String
-    var added: UInt32
-    var removed: UInt32
-    var patch: String
-    /// 1-based count of this path since the last user message. 2 means this
-    /// file was already edited earlier in the same turn.
-    var revision: Int
-    var running: Bool
-    var failed: Bool
-    var startedAtMs: Int64
-    var endedAtMs: Int64?
-
-    var duration: String? {
-        ChatClock.duration(from: startedAtMs, to: endedAtMs)
-    }
-
-    var fileName: String {
-        let name = URL(fileURLWithPath: path).lastPathComponent
-        return name.isEmpty ? path : name
-    }
-
-    /// Last two folders of the parent path, enough to tell two same-named
-    /// files apart without drawing the whole absolute path as the title.
-    var location: String {
-        let folder = (path as NSString).deletingLastPathComponent
-        let last = (folder as NSString).lastPathComponent
-        let grand = ((folder as NSString).deletingLastPathComponent as NSString).lastPathComponent
-        if last.isEmpty || last == "/" { return "" }
-        if grand.isEmpty || grand == "/" { return last }
-        return "\(grand)/\(last)"
-    }
-
-    /// Nil on the first change of a file in a turn. Later ones name themselves.
-    var changeLabel: String? {
-        guard revision >= 2 else { return nil }
-        return L10n.text("apple.chatmodel.0_change.d4ef778c", "\(ChatClock.ordinal(revision))")
-    }
-
-    mutating func applyPatch(added: UInt32, removed: UInt32, patch: String) {
-        if added > 0 { self.added = added }
-        if removed > 0 { self.removed = removed }
-        if !patch.isEmpty { self.patch = patch }
-        recountIfNeeded()
-    }
-
-    mutating func applyDetail(_ detail: String?) {
-        guard patch.isEmpty, let detail, !detail.isEmpty else { return }
-        patch = detail
-        recountIfNeeded()
-    }
-
-    mutating func recountIfNeeded() {
-        guard added == 0, removed == 0, !patch.isEmpty else { return }
-        var plus: UInt32 = 0
-        var minus: UInt32 = 0
-        for line in patch.split(separator: "\n", omittingEmptySubsequences: false) {
-            let shown = String(line)
-            guard ChatToolState.isDiffLine(shown), let first = shown.first else { continue }
-            if first == "+" { plus += 1 }
-            if first == "-" { minus += 1 }
-        }
-        added = plus
-        removed = minus
-    }
-}
-
-enum ChatClock {
-    static func duration(from startedAtMs: Int64, to endedAtMs: Int64?) -> String? {
-        guard let endedAtMs else { return nil }
-        let (elapsed, overflow) = endedAtMs.subtractingReportingOverflow(startedAtMs)
-        guard !overflow else { return nil }
-        let ms = max(0, elapsed)
-        if ms < 1000 { return "\(ms)ms" }
-        let seconds = Double(ms) / 1000
-        if seconds < 10 {
-            return String(format: "%.1fs", seconds)
-        }
-        return "\(Int(seconds.rounded()))s"
-    }
-
-    static func ordinal(_ value: Int) -> String {
-        let mod100 = value % 100
-        let mod10 = value % 10
-        if (11...13).contains(mod100) { return "\(value)th" }
-        switch mod10 {
-        case 1: return "\(value)st"
-        case 2: return "\(value)nd"
-        case 3: return "\(value)rd"
-        default: return "\(value)th"
-        }
-    }
-}
-
-/// A message waiting for the current turn to finish.
-/// Equatable so a transcript can skip the rows that did not move. A chat
-/// redraws whenever anything about it changes, and without this every visible
-/// row rebuilds itself because one of them grew by a word.
-struct ChatDisplayItem: Identifiable, Equatable {
-    let id: String
-    let kind: Kind
-    /// Inclusive end of a coalesced text/thinking block in the loaded archive.
-    /// Lets a mark from a partial page resolve after earlier deltas arrive.
-    var lastSequence: UInt64? = nil
-
-    enum Kind: Equatable {
-        case user(String)
-        case assistant(String, backend: String?)
-        case turnSeparator(String)
-        /// A conversation changing hands, with the summary the incoming agent
-        /// was given so the person can read exactly what it was told.
-        case handoff(to: String, brief: String)
-        case thinking(String)
-        case tool(ChatToolState)
-        case edit(ChatEditState)
-        case attachment(ChatAttachment)
-        case approval(ChatApproval)
-        case usage(input: UInt64, output: UInt64, cost: Double?)
-        case failed(String)
-    }
-
+extension ChatDisplayItem {
     /// A name for a row that survives an older page arriving in front of it.
     ///
     /// The record's place in the archive when the host reports one, which is
@@ -3877,6 +3774,7 @@ struct ChatDisplayItem: Identifiable, Equatable {
         // call id (or none and the same path twice). Row ids feed ForEach.
         var editStarts: [String: Int] = [:]
         var approvalIndex: [String: Int] = [:]
+        var questionIndex: [String: Int] = [:]
         var text = ""
         var textID = ""
         var textBackend: String?
@@ -3888,7 +3786,8 @@ struct ChatDisplayItem: Identifiable, Equatable {
         var editRevisions: [String: Int] = [:]
 
         func flushText() {
-            let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            // The question block is drawn as its own card below the reply.
+            let body = ChatQuestionText.stripping(text, streaming: running).trimmingCharacters(in: .whitespacesAndNewlines)
             if !body.isEmpty {
                 items.append(
                     ChatDisplayItem(
@@ -4045,6 +3944,34 @@ struct ChatDisplayItem: Identifiable, Equatable {
                 } else {
                     approvalIndex[rowID] = items.count
                     items.append(ChatDisplayItem(id: rowID, kind: .approval(approval)))
+                }
+                continue
+            }
+            if event.kind == "question", let questionID = event.recordID, let asked = event.question {
+                flushText()
+                flushThinking()
+                questionIndex[questionID] = items.count
+                items.append(ChatDisplayItem(
+                    id: "question-\(questionID)",
+                    kind: .question(ChatQuestion(
+                        id: questionID,
+                        question: asked,
+                        options: event.options ?? [],
+                        multiple: event.multiple ?? false,
+                        defaultAnswer: event.defaultAnswer,
+                        blocking: event.blocking ?? (event.defaultAnswer == nil)
+                    ))
+                ))
+                continue
+            }
+            if event.kind == "answer" {
+                // Lands on its question's card. An answer whose question is
+                // on an older page than this one waits for that page.
+                if let questionID = event.questionID, let at = questionIndex[questionID],
+                   case var .question(question) = items[at].kind {
+                    question.answer = event.text ?? ""
+                    question.delivery = event.delivery
+                    items[at] = ChatDisplayItem(id: items[at].id, kind: .question(question))
                 }
                 continue
             }

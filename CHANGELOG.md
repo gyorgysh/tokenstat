@@ -13,6 +13,29 @@ at the end.
 
 ## [Unreleased]
 
+### Added
+
+- A guided New pull request flow on Apple, Windows and Android: choose a
+  branch, select and review files to commit, publish the branch, then write
+  a title and description. Draft is the default; matching open pull requests
+  are reused when retrying.
+- Chat sign-in guidance for installed coding agents. Open the agent's
+  terminal on the chat's computer, follow browser or code instructions,
+  and check sign-in without losing the chat draft.
+- Chat detail levels on Apple, Windows and Android. Compact folds an agent's
+  work into one line between your question and its answer, Standard folds
+  thinking and runs of reads, and Detailed shows every step with its output
+  open. Approvals, failures and handoffs always show.
+- Agents can ask you a question in the chat, with choices to tap or an
+  answer of your own. In a chat that runs without asking first, the agent
+  never stops for it: it says what it is going with and keeps working, and
+  your answer reaches it on its next step or as the next message.
+
+### Fixed
+
+- Retained Mac screens keep finite dimensions during startup and resizing,
+  avoiding invalid view geometry that could crash native controls.
+
 ## [1.1.0] - 2026-10-03
 
 A simpler desktop. Machine-wide places move to an icon rail, the sidebar

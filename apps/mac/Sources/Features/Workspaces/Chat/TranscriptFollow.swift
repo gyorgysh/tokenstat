@@ -68,6 +68,9 @@ enum TranscriptFollow {
                 return SeatStep.phrase(verb: state.verb, target: state.target)
             case let .edit(state) where state.running:
                 return SeatStep.phrase(verb: L10n.text("common.edit"), target: state.path)
+            case let .group(group) where group.running && group.liveVerb != nil:
+                // Folded away, still the step the seat should name.
+                return SeatStep.phrase(verb: group.liveVerb, target: group.liveTarget)
             default:
                 continue
             }
@@ -95,6 +98,9 @@ enum TranscriptFollow {
             switch item.kind {
             case let .tool(state): return state.running
             case let .edit(state): return state.running
+            // A closed group spins for the steps it hides. An open one
+            // leaves it to the running step below it.
+            case let .group(group): return group.running && !group.open
             default: return false
             }
         }?.id

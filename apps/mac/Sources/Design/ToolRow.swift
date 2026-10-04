@@ -27,6 +27,9 @@ struct ToolRow: View {
     /// see `TranscriptFollow.spinningRow`, which is where the count of
     /// animating platform views in a transcript is held at one.
     var animatesRunning: Bool = true
+    /// The chat's Detailed level: open every finished output, not only a
+    /// small diff. A hand toggle still wins.
+    var expandsOutput: Bool = false
     @State private var showSnippet = false
     /// Set once the person toggles the snippet by hand. Auto-expand must
     /// not overrule it: lazy rows re-run `onAppear` scrolling back, and a
@@ -68,8 +71,14 @@ struct ToolRow: View {
     private func autoExpand() {
         // A two-line change reads better open. A hundred-line one stays
         // shut behind its stat until asked.
-        if !snippetToggled, hasDiff, !running, snippet.count <= Self.autoExpandLines {
+        guard !snippetToggled, !running else { return }
+        if expandsOutput, !snippet.isEmpty {
             showSnippet = true
+        } else if hasDiff, snippet.count <= Self.autoExpandLines {
+            showSnippet = true
+        } else if !expandsOutput {
+            // Detailed was switched off: what it opened closes again.
+            showSnippet = false
         }
     }
 
@@ -183,6 +192,7 @@ struct ToolRow: View {
         }
         .onChange(of: snippet.count) { _, _ in autoExpand() }
         .onChange(of: running) { _, _ in autoExpand() }
+        .onChange(of: expandsOutput) { _, _ in autoExpand() }
         .padding(Theme.Space.s)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))

@@ -697,6 +697,12 @@ pub fn chat_agent_command(
             _ => {}
         }
     }
+    // Claude's own question tool needs somebody at a terminal, and a print
+    // turn has nobody there. Chat asks through `chat_question` instead, the
+    // same way on every backend, so the agent is not offered a dead end.
+    if backend == "claude" {
+        extra.extend(["--disallowedTools".into(), "AskUserQuestion".into()]);
+    }
     if plan {
         match backend {
             "claude" => extra.extend(["--permission-mode".into(), "plan".into()]),
@@ -3054,6 +3060,62 @@ mod tests {
             bypassed_plan.iter().any(|arg| arg == "--always-approve"),
             "Bypass under plan still has to let non-edit tools run: {bypassed_plan:?}"
         );
+    }
+
+    #[test]
+    fn a_claude_chat_cannot_reach_for_its_own_question_tool() {
+        for (bypass, mode, resume) in [
+            (false, "execute", None),
+            (true, "execute", Some("s1")),
+            (false, "plan", None),
+        ] {
+            let argv = chat_agent_command(
+                "claude",
+                "inspect this",
+                None,
+                None,
+                DEFAULT_BUDGET_SECONDS,
+                ChatLaunch {
+                    resume,
+                    bypass,
+                    mode,
+                    hook_helper: None,
+                    system_append: Some("standing"),
+                    agy_customization_dir: None,
+                    grok_allow_rules: &[],
+                    attachments: &[],
+                },
+            )
+            .unwrap();
+            let at = argv
+                .iter()
+                .position(|arg| arg == "--disallowedTools")
+                .unwrap();
+            assert_eq!(argv[at + 1], "AskUserQuestion");
+            // The flag takes a list. Whatever follows must be another flag,
+            // or the prompt would be read as one more tool name.
+            assert!(argv[at + 2].starts_with('-'), "{argv:?}");
+            assert!(at < argv.iter().position(|arg| arg == "-p").unwrap());
+        }
+        let codex = chat_agent_command(
+            "codex",
+            "inspect this",
+            None,
+            None,
+            DEFAULT_BUDGET_SECONDS,
+            ChatLaunch {
+                resume: None,
+                bypass: false,
+                mode: "execute",
+                hook_helper: None,
+                system_append: None,
+                agy_customization_dir: None,
+                grok_allow_rules: &[],
+                attachments: &[],
+            },
+        )
+        .unwrap();
+        assert!(!codex.iter().any(|arg| arg == "--disallowedTools"));
     }
 
     #[test]

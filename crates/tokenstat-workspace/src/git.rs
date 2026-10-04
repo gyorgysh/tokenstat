@@ -17,6 +17,37 @@ use std::process::Command;
 
 use serde::Serialize;
 
+/// Read on the explicit PR preparation action. Never pushes or fetches refs.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullBranch {
+    pub branch: String,
+    pub head: String,
+    pub published: bool,
+}
+
+pub fn pull_branch(dir: &Path) -> Result<PullBranch, String> {
+    let branch = git(dir, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .ok_or("Choose a branch first. HEAD is detached.")?
+        .trim()
+        .to_string();
+    let head = git(dir, &["rev-parse", "--verify", "HEAD^{commit}"])
+        .ok_or("Make a commit before creating a pull request.")?
+        .trim()
+        .to_string();
+    let reference = format!("refs/heads/{branch}");
+    let remote = remote_reference(dir, &reference)
+        .ok_or("Could not check origin. Check your connection and Git sign-in on this computer, then check again.")?;
+    let published = remote
+        .lines()
+        .any(|line| line.split_once('\t') == Some((head.as_str(), reference.as_str())));
+    Ok(PullBranch {
+        branch,
+        head,
+        published,
+    })
+}
+
 /// What happened to one file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -906,13 +937,20 @@ fn git(dir: &Path, args: &[&str]) -> Option<String> {
 /// failure. `diff --no-index` exits 1 to say "these differ", which is exactly
 /// what it was asked.
 fn git_allowing(dir: &Path, args: &[&str], codes: &[i32]) -> Option<String> {
+    let out = git_command(dir, args).output().ok()?;
+    codes
+        .contains(&out.status.code().unwrap_or(-1))
+        .then(|| String::from_utf8_lossy_owned(out.stdout))
+}
+
+fn git_command(dir: &Path, args: &[&str]) -> Command {
     let mut command = Command::new("git");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let out = command
+    command
         .arg("-C")
         .arg(dir)
         // A repository with a pager or an alias configured must not change what
@@ -940,12 +978,63 @@ fn git_allowing(dir: &Path, args: &[&str], codes: &[i32]) -> Option<String> {
         // above ASCII. Names holding a quote, a backslash or a control still
         // arrive C-quoted, which is what that function is for.
         .args(["-c", "core.quotePath=false"])
-        .args(args)
-        .output()
-        .ok()?;
-    codes
-        .contains(&out.status.code().unwrap_or(-1))
-        .then(|| String::from_utf8_lossy_owned(out.stdout))
+        .args(args);
+    command
+}
+
+/// A disconnected origin must not leave the PR sheet waiting indefinitely or
+/// open an unattended credential prompt. Only a single remote ref is read.
+fn remote_reference(dir: &Path, reference: &str) -> Option<String> {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+    let mut command = git_command(dir, &["ls-remote", "--refs", "origin", reference]);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        // Git asks on the terminal itself when no helper answers, and a host
+        // started from a shell has one. Fail instead, like the helpers do.
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never")
+        .env("SSH_ASKPASS_REQUIRE", "never");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command.spawn().ok()?;
+    let stdout = child.stdout.take()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stdout.take(64 * 1024).read_to_end(&mut bytes);
+        let _ = tx.send(bytes);
+    });
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return None;
+                }
+                return rx
+                    .recv_timeout(Duration::from_millis(200))
+                    .ok()
+                    .map(String::from_utf8_lossy_owned);
+            }
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
+            _ => {
+                #[cfg(unix)]
+                unsafe {
+                    libc::kill(-(child.id() as i32), libc::SIGKILL);
+                }
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
 }
 
 /// Decode git's C-style path quoting.
@@ -1179,6 +1268,53 @@ fn apply_numstat(raw: &str, status: &mut GitStatus) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pull_creation_requires_the_current_commit_on_origin() {
+        let dir = tempfile::tempdir().unwrap();
+        let origin = tempfile::tempdir().unwrap();
+        let run = |path: &Path, args: &[&str]| {
+            let out = Command::new("git")
+                .arg("-C")
+                .arg(path)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        run(origin.path(), &["init", "--bare"]);
+        run(dir.path(), &["init", "-b", "feature"]);
+        run(dir.path(), &["config", "user.name", "Test"]);
+        run(
+            dir.path(),
+            &["config", "user.email", "test@example.invalid"],
+        );
+        run(
+            dir.path(),
+            &["remote", "add", "origin", origin.path().to_str().unwrap()],
+        );
+        run(dir.path(), &["commit", "--allow-empty", "-m", "first"]);
+        let unpublished = pull_branch(dir.path()).unwrap();
+        assert!(!unpublished.published);
+        run(dir.path(), &["push", "origin", "HEAD"]);
+        assert!(pull_branch(dir.path()).unwrap().published);
+        std::fs::write(dir.path().join("pending.txt"), "unsent writing").unwrap();
+        assert!(pull_branch(dir.path()).unwrap().published);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("pending.txt")).unwrap(),
+            "unsent writing"
+        );
+        run(dir.path(), &["commit", "--allow-empty", "-m", "second"]);
+        let newer = pull_branch(dir.path()).unwrap();
+        assert_ne!(newer.head, unpublished.head);
+        assert!(!newer.published);
+        run(dir.path(), &["checkout", "--detach"]);
+        assert!(pull_branch(dir.path()).unwrap_err().contains("detached"));
+    }
 
     #[test]
     fn parses_common_remote_urls_without_carrying_credentials() {

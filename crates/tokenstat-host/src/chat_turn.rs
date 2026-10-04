@@ -115,6 +115,23 @@ pub struct Composed {
     pub standing_fingerprint: String,
 }
 
+impl Composed {
+    /// Add one more standing rule that depends on the turn rather than the
+    /// persona, such as how to ask a question in this kind of turn. The
+    /// fingerprint follows, so a change of rule is sent again.
+    pub fn append_standing(&mut self, rule: &str) {
+        let rule = rule.trim();
+        if rule.is_empty() {
+            return;
+        }
+        if !self.standing_text.is_empty() {
+            self.standing_text.push_str("\n\n");
+        }
+        self.standing_text.push_str(rule);
+        self.standing_fingerprint = fingerprint(&self.standing_text);
+    }
+}
+
 /// Split one turn into its channels.
 pub fn compose(inputs: Inputs<'_>) -> Composed {
     let standing_text = standing_text(inputs.persona_name, inputs.persona_brief, inputs.output_dir);

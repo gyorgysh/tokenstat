@@ -31,6 +31,16 @@ struct ChatEventRow: View {
     /// rest of a set of running tools say "Running" in words. See
     /// `TranscriptFollow.spinningRow`.
     var animatesRunning = true
+    /// The chat's Detailed level: tool output and diffs start open.
+    var expandsOutput = false
+    /// Opens or folds a step group, by the group's row id.
+    var toggleGroup: (String) -> Void = { _ in }
+    /// Answers one of the agent's questions.
+    var answerQuestion: (ChatQuestion, String) -> Void = { _, _ in }
+    /// This row's question is on its way to the host.
+    var answeringQuestion = false
+    /// False for a saved copy, which cannot send anything.
+    var canAnswerQuestions = true
     #if os(macOS)
     /// Whole-card hover for the copy action. Scoping this to the header
     /// saved nothing measurable once segment init was cached and the pin
@@ -51,6 +61,12 @@ struct ChatEventRow: View {
     }
 
     var body: some View {
+        content
+            .modifier(ChatGroupStepInset(nested: item.groupID != nil))
+    }
+
+    @ViewBuilder
+    private var content: some View {
         switch item.kind {
         case let .user(text):
             #if os(macOS)
@@ -168,10 +184,17 @@ struct ChatEventRow: View {
                 time: state.duration,
                 running: state.running,
                 failed: state.failed,
-                animatesRunning: animatesRunning
+                animatesRunning: animatesRunning,
+                expandsOutput: expandsOutput
             )
         case let .edit(state):
-            ChatFileEditRow(state: state, animatesRunning: animatesRunning)
+            ChatFileEditRow(state: state, animatesRunning: animatesRunning, expandsOutput: expandsOutput)
+        case let .group(group):
+            ChatStepGroupRow(group: group, animatesRunning: animatesRunning) { toggleGroup(item.id) }
+        case let .question(question):
+            ChatQuestionCard(question: question, canAnswer: canAnswerQuestions, isSending: answeringQuestion) { text in
+                answerQuestion(question, text)
+            }
         case let .attachment(attachment):
             // Stable identity across attachment polls: the revision prop
             // still redraws the row through Equatable when bytes arrive, but
@@ -725,6 +748,9 @@ extension ChatEventRow: Equatable {
             && lhs.faceSeed == rhs.faceSeed
             && lhs.isLive == rhs.isLive
             && lhs.animatesRunning == rhs.animatesRunning
+            && lhs.expandsOutput == rhs.expandsOutput
+            && lhs.answeringQuestion == rhs.answeringQuestion
+            && lhs.canAnswerQuestions == rhs.canAnswerQuestions
         else { return false }
         if case .attachment = lhs.item.kind {
             return lhs.attachmentIsLoading == rhs.attachmentIsLoading

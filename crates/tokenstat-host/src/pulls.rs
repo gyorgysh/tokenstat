@@ -24,6 +24,11 @@ struct Params {
     cursor: Option<String>,
     body: String,
     branch: String,
+    base: String,
+    title: String,
+    expected_head: String,
+    expected_repository: String,
+    draft: bool,
     verdict: Option<tokenstat_sync::forge::Verdict>,
     merge_method: Option<tokenstat_sync::forge::MergeMethod>,
     refresh: bool,
@@ -283,6 +288,8 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
             Ok(json!({"stored": true}))
         }
         "pulls.list" => list(&p),
+        "pulls.prepareCreate" => prepare_create(&p),
+        "pulls.create" => create(&p),
         "pulls.view" => view(&p),
         "pulls.timeline" => timeline(&p),
         "pulls.diff" => diff(&p),
@@ -307,6 +314,69 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
         "pulls.checkout" => checkout(&p),
         other => Err(format!("unknown pull-request method: {other}")),
     }
+}
+
+fn prepare_create(p: &Params) -> Result<Value, String> {
+    let repo = repo_for(&p.workspace_id, "pulls.prepareCreate")?;
+    let workspace = crate::workspaces::folder(&p.workspace_id)?;
+    let base = tokenstat_sync::forge::default_branch(&repo).map_err(|e| e.to_string())?;
+    let status = tokenstat_workspace::git::status(&workspace.path);
+    // A Git credential problem is actionable at the push step, and must not
+    // hide the pending files or prevent creating a feature branch.
+    let (branch, problem) = match tokenstat_workspace::git::pull_branch(&workspace.path) {
+        Ok(branch) => (
+            serde_json::to_value(branch).map_err(|e| e.to_string())?,
+            None,
+        ),
+        Err(problem) => (
+            json!({"branch": status.branch, "head": "", "published": false}),
+            Some(problem),
+        ),
+    };
+    Ok(
+        json!({"branch": branch["branch"], "head": branch["head"], "published": branch["published"], "repository": repository_key(&repo),
+        "defaultBase": base, "files": status.files, "problem": problem}),
+    )
+}
+
+fn create(p: &Params) -> Result<Value, String> {
+    if p.title.trim().is_empty()
+        || p.branch.is_empty()
+        || p.base.is_empty()
+        || p.branch == p.base
+        || p.expected_head.is_empty()
+    {
+        return Err("Add a title and choose different source and target branches before creating the pull request.".into());
+    }
+    let repo = repo_for(&p.workspace_id, "pulls.create")?;
+    if p.expected_repository != repository_key(&repo) {
+        return Err("The GitHub repository changed. Check the branch again before creating the pull request.".into());
+    }
+    let workspace = crate::workspaces::folder(&p.workspace_id)?;
+    let branch = tokenstat_workspace::git::pull_branch(&workspace.path)?;
+    validate_published_branch(p, &branch)?;
+    let result =
+        tokenstat_sync::forge::create(&repo, &p.branch, &p.base, &p.title, &p.body, p.draft)
+            .map_err(|e| e.to_string())?;
+    invalidate_workspace(&p.workspace_id);
+    serde_json::to_value(result).map_err(|e| e.to_string())
+}
+
+fn validate_published_branch(
+    p: &Params,
+    branch: &tokenstat_workspace::git::PullBranch,
+) -> Result<(), String> {
+    if branch.branch != p.branch || branch.head != p.expected_head {
+        return Err("The branch or commit changed. Check the branch again before creating the pull request.".into());
+    }
+    if !branch.published {
+        return Err("Push the current commit to origin before creating the pull request. Your local work is still here.".into());
+    }
+    Ok(())
+}
+
+fn repository_key(repo: &tokenstat_sync::forge::Repo) -> String {
+    format!("{}/{}/{}", repo.host, repo.owner, repo.repo)
 }
 
 fn repo_for(workspace_id: &str, method: &str) -> Result<tokenstat_sync::forge::Repo, String> {
@@ -502,5 +572,40 @@ mod tests {
     fn defaults_to_github_without_rewriting_enterprise_hosts() {
         assert_eq!(host_or_default(""), "github.com");
         assert_eq!(host_or_default("git.example.com"), "git.example.com");
+    }
+
+    #[test]
+    fn create_refuses_changed_or_unpublished_commits_before_the_forge_write() {
+        let params = Params {
+            branch: "feature".into(),
+            expected_head: "reviewed-commit".into(),
+            ..Default::default()
+        };
+        let mut branch = tokenstat_workspace::git::PullBranch {
+            branch: "feature".into(),
+            head: "reviewed-commit".into(),
+            published: true,
+        };
+        assert!(validate_published_branch(&params, &branch).is_ok());
+        branch.head = "newer-commit".into();
+        assert!(
+            validate_published_branch(&params, &branch)
+                .unwrap_err()
+                .contains("changed")
+        );
+        branch.head = params.expected_head.clone();
+        branch.branch = "another-branch".into();
+        assert!(
+            validate_published_branch(&params, &branch)
+                .unwrap_err()
+                .contains("changed")
+        );
+        branch.branch = params.branch.clone();
+        branch.published = false;
+        assert!(
+            validate_published_branch(&params, &branch)
+                .unwrap_err()
+                .contains("Push")
+        );
     }
 }

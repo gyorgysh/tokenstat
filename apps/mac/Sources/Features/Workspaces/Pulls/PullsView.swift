@@ -47,6 +47,7 @@ struct PullsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var model = PullsModel()
     @State private var selectedPull: PullSummary?
+    @State private var creatingPull = false
 
     private var canConnectHere: Bool { connectionHostName == nil }
 
@@ -124,10 +125,19 @@ struct PullsView: View {
                 Task { await model.loadList(workspaceID: workspaceID, peer: peer) }
             }
             .sheet(isPresented: loginPresented) { loginSheet }
-            .onChange(of: workspaceID) { _, _ in selectedPull = nil }
-            .onChange(of: peer) { _, _ in selectedPull = nil }
+            .sheet(isPresented: $creatingPull) {
+                PullCreateView(workspaceID: workspaceID, peer: peer,
+                               folderName: workspaceName ?? model.availability?.repositoryName ?? "",
+                               hostName: connectionHostName ?? "") {
+                    await model.loadList(workspaceID: workspaceID, peer: peer, refresh: true)
+                }
+                .id("\(workspaceID):\(peer ?? "local")")
+            }
+            .onChange(of: workspaceID) { _, _ in selectedPull = nil; creatingPull = false }
+            .onChange(of: peer) { _, _ in selectedPull = nil; creatingPull = false }
             .onChange(of: WorkSessionContext.shared.scope) { _, _ in
                 selectedPull = nil
+                creatingPull = false
                 model = PullsModel()
                 Task { if isActive { await model.load(workspaceID: workspaceID, peer: peer) } }
             }
@@ -196,6 +206,10 @@ struct PullsView: View {
                     .lineLimit(1)
                 #endif
                 Spacer()
+                if model.availability?.state == "ready" {
+                    Button(L10n.text("apple.pullcreate.new"), .create) { creatingPull = true }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                }
                 if model.isLoading && model.availability == nil {
                     ProgressView().controlSize(.small)
                 }

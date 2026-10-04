@@ -101,6 +101,9 @@ extension Notification.Name {
     static let searchWorkRequested = Notification.Name("ai.tokenstat.searchWorkRequested")
     /// Previous or next conversation from the View menu. The object is -1 or 1.
     static let chatStepRequested = Notification.Name("ai.tokenstat.chatStepRequested")
+    /// View menu / ⌥⌘E: open every step group in the chat in front, or
+    /// fold them all again if any is open.
+    static let chatStepGroupsToggleRequested = Notification.Name("ai.tokenstat.chatStepGroupsToggleRequested")
     /// View menu / ⌥⌘B: toggle the trailing inspector. RootView acts.
     static let toggleRightSidebar = Notification.Name("ai.tokenstat.toggleRightSidebar")
     #endif
@@ -318,6 +321,13 @@ struct TokenstatApp: App {
                     NotificationCenter.default.post(name: .chatStepRequested, object: 1)
                 }
                 .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+                Section {
+                    ChatDetailMenuPicker()
+                    Button(L10n.text("apple.chatdetail.toggle_steps")) {
+                        NotificationCenter.default.post(name: .chatStepGroupsToggleRequested, object: nil)
+                    }
+                    .keyboardShortcut("e", modifiers: [.command, .option])
+                }
             }
             // Note: help strings on the toolbar marks also carry ⌘B / ⌥⌘B so
             // the hover tooltip teaches the shortcut without opening the menu.

@@ -14,6 +14,9 @@ struct ChatFileEditRow: View {
     /// `TranscriptFollow.spinningRow`: one animating platform view per
     /// transcript, whatever the timeline says is still running.
     var animatesRunning: Bool = true
+    /// The chat's Detailed level: open every finished diff, not only a
+    /// small one. A hand toggle still wins.
+    var expandsOutput: Bool = false
     #if os(macOS)
     private static let nameFont = Theme.callout.weight(.semibold)
     private static let metaFont = Theme.mono(11)
@@ -79,6 +82,7 @@ struct ChatFileEditRow: View {
             autoExpand()
         }
         .onChange(of: state.running) { _, _ in autoExpand() }
+        .onChange(of: expandsOutput) { _, _ in autoExpand() }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibility)
     }
@@ -198,9 +202,12 @@ struct ChatFileEditRow: View {
     private func autoExpand() {
         guard !toggled, !state.running, !state.patch.isEmpty else { return }
         let lines = state.patch.split(separator: "\n", omittingEmptySubsequences: false).count
-        if lines > 0, lines <= Self.autoExpandLines {
+        if expandsOutput || (lines > 0 && lines <= Self.autoExpandLines) {
             if shownText == nil { parse() }
             expanded = true
+        } else {
+            // Detailed was switched off: what it opened closes again.
+            expanded = false
         }
     }
 }

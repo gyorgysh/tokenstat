@@ -40,6 +40,7 @@ struct ChatInspector: View {
                             folderCard
                             allowlist(chat)
                             ChatCostMeter(totals: model.turnUsage)
+                            ChatDetailSettings(model: model)
                             Button(L10n.text("apple.chatinspector.delete_chat.93291d9c"), .delete, role: .destructive) {
                                 guard let owner = model.currentReference else { return }
                                 deletionTarget = DeletionTarget(chat: chat, owner: owner)

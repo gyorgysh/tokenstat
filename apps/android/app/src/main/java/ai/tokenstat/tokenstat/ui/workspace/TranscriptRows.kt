@@ -16,6 +16,12 @@ import ai.tokenstat.tokenstat.ui.theme.Space
 import ai.tokenstat.tokenstat.ui.theme.cardRadius
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +32,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -89,9 +96,40 @@ internal fun TranscriptItemRow(
     chatId: String,
     hostLabel: String,
     defaultAgentName: String,
+    /// The Detailed level: tool output and diffs start open.
+    expandsOutput: Boolean = false,
+    /// Opens or folds a step group, by the group's row id.
+    onToggleGroup: (String) -> Unit = {},
+    canAnswerQuestions: Boolean = true,
 ) {
     val scope = rememberCoroutineScope()
     when (item) {
+        is ChatDisplayItem.Group -> StepGroupRow(group = item.group, onClick = { onToggleGroup(item.id) })
+        is ChatDisplayItem.GroupStep -> {
+            // Inset under its open header, with a rule down the left so the
+            // steps read as belonging to the line above them.
+            val rule = LocalTsColors.current.border
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .drawBehind {
+                        drawLine(rule, Offset(13.dp.toPx(), 0f), Offset(13.dp.toPx(), size.height), 1.dp.toPx())
+                    }
+                    .padding(start = 20.dp),
+            ) {
+                TranscriptItemRow(
+                    item = item.item,
+                    model = model,
+                    peer = peer,
+                    chatId = chatId,
+                    hostLabel = hostLabel,
+                    defaultAgentName = defaultAgentName,
+                    expandsOutput = expandsOutput,
+                    onToggleGroup = onToggleGroup,
+                    canAnswerQuestions = canAnswerQuestions,
+                )
+            }
+        }
         is ChatDisplayItem.User -> {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Spacer(Modifier.width(36.dp))
@@ -136,8 +174,8 @@ internal fun TranscriptItemRow(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        is ChatDisplayItem.Tool -> TranscriptToolRow(state = item.state)
-        is ChatDisplayItem.Edit -> TranscriptEditCard(state = item.state)
+        is ChatDisplayItem.Tool -> TranscriptToolRow(state = item.state, expandsOutput = expandsOutput)
+        is ChatDisplayItem.Edit -> TranscriptEditCard(state = item.state, expandsOutput = expandsOutput)
         is ChatDisplayItem.Attachment -> AttachmentRow(
             item = item,
             model = model,
@@ -145,6 +183,26 @@ internal fun TranscriptItemRow(
             chatId = chatId,
             hostLabel = hostLabel,
         )
+        is ChatDisplayItem.Question -> {
+            var sending by remember(item.question.id) { mutableStateOf(false) }
+            var error by remember(item.question.id) { mutableStateOf<String?>(null) }
+            QuestionCard(item.question, sending, error, canAnswer = canAnswerQuestions) { answer ->
+                if (sending || !canAnswerQuestions) return@QuestionCard
+                sending = true
+                scope.launch {
+                    runCatching {
+                        model.workspaceSection(peer, "chat.answerQuestion", buildJsonObject {
+                            put("id", chatId)
+                            put("questionId", item.question.id)
+                            put("text", answer)
+                        })
+                    }.onSuccess { error = null }.onFailure { error = it.message }
+                    // The answer comes back on the next poll of the transcript,
+                    // and the card turns answered then on every device.
+                    sending = false
+                }
+            }
+        }
         is ChatDisplayItem.Approval -> ApprovalCard(
             approval = item.raw,
             onResolve = { choice ->
@@ -275,7 +333,7 @@ private fun HandoffRow(to: String, brief: String) {
 /// A tool call on a transcript: verb, target, optional snippet, and how it
 /// ended. Ported from Design/ToolRow.swift.
 @Composable
-private fun TranscriptToolRow(state: ChatToolState) {
+private fun TranscriptToolRow(state: ChatToolState, expandsOutput: Boolean = false) {
     val colors = LocalTsColors.current
     var showSnippet by remember { mutableStateOf(false) }
     var snippetToggled by remember { mutableStateOf(false) }
@@ -287,9 +345,14 @@ private fun TranscriptToolRow(state: ChatToolState) {
 
     // Few-line edits open on their own; anything bigger stays a stat with
     // the full diff one tap away. Never overrules a hand toggle.
-    LaunchedEffect(state.snippet, state.running) {
-        if (!snippetToggled && hasDiff && !state.running && state.snippet.size <= 10) {
-            showSnippet = true
+    // Detailed opens every finished output, and closes what it opened when
+    // it is switched off.
+    LaunchedEffect(state.snippet, state.running, expandsOutput) {
+        if (snippetToggled || state.running) return@LaunchedEffect
+        showSnippet = when {
+            expandsOutput && state.snippet.isNotEmpty() -> true
+            hasDiff && state.snippet.size <= 10 -> true
+            else -> if (expandsOutput) showSnippet else false
         }
     }
 
@@ -460,15 +523,15 @@ private fun toolGlyph(verb: String): ImageVector {
 /// One file the agent changed, named after the file rather than after the
 /// tool. Ported from ChatFileEditRow.swift.
 @Composable
-private fun TranscriptEditCard(state: ChatEditState) {
+private fun TranscriptEditCard(state: ChatEditState, expandsOutput: Boolean = false) {
     val colors = LocalTsColors.current
     var expanded by remember { mutableStateOf(false) }
     var toggled by remember { mutableStateOf(false) }
 
-    LaunchedEffect(state.patch, state.running) {
+    LaunchedEffect(state.patch, state.running, expandsOutput) {
         if (!toggled && !state.running && state.patch.isNotEmpty()) {
             val lines = state.patch.split("\n").size
-            if (lines in 1..10) expanded = true
+            expanded = expandsOutput || lines in 1..10
         }
     }
 
@@ -929,3 +992,105 @@ private fun AnnotatedString.Builder.parseInline(
     }
 }
 
+/// One line standing in for folded steps. Port of ChatStepGroupRow.swift:
+/// the whole line is the control, and tapping it shows or hides the steps.
+@Composable
+private fun StepGroupRow(group: ChatStepGroup, onClick: () -> Unit) {
+    val colors = LocalTsColors.current
+    val title = when (group.style) {
+        ChatStepGroup.Style.Work -> when {
+            group.running && group.liveVerb != null -> ChatSeat.phrase(group.liveVerb, group.liveTarget)
+            group.running -> L10n.text("common.working")
+            else -> stepGroupDuration(group)?.let { L10n.text("android.chatdetail.worked_for", it) }
+                ?: L10n.text("android.chatdetail.worked")
+        }
+        ChatStepGroup.Style.Explored ->
+            if (group.running) L10n.text("android.chatdetail.exploring") else L10n.text("android.chatdetail.explored")
+        ChatStepGroup.Style.Thought -> L10n.text("android.chatdetail.thought")
+    }
+    val summary = stepGroupSummary(group)
+    val glyph = when (group.style) {
+        ChatStepGroup.Style.Work -> Icons.AutoMirrored.Filled.List
+        ChatStepGroup.Style.Explored -> Icons.Default.Search
+        ChatStepGroup.Style.Thought -> Icons.Default.Lightbulb
+    }
+    val tint = if (group.running) colors.accent else colors.textSecondary
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .clip(RoundedCornerShape(cardRadius))
+            .clickable(
+                onClickLabel = if (group.open) L10n.text("android.chatdetail.hide_steps") else L10n.text("android.chatdetail.show_steps"),
+                onClick = onClick,
+            )
+            .padding(horizontal = Space.s, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.s),
+    ) {
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            null,
+            tint = colors.textSecondary,
+            modifier = Modifier.size(16.dp).rotate(if (group.open) 90f else 0f),
+        )
+        Box(Modifier.size(16.dp), contentAlignment = Alignment.Center) {
+            if (group.running) {
+                CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp, color = tint)
+            } else {
+                Icon(glyph, null, tint = tint, modifier = Modifier.size(14.dp))
+            }
+        }
+        Text(
+            title,
+            style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium),
+            color = if (group.running) colors.accent else colors.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            summary.orEmpty(),
+            style = TsType.mono(11),
+            color = colors.textSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (group.added + group.removed > 0) {
+            DiffStat(added = group.added, removed = group.removed)
+        }
+        val cost = group.cost
+        if (cost != null && cost > 0) {
+            Text("$" + "%.2f".format(cost), style = TsType.mono(11), color = colors.accent, maxLines = 1)
+        }
+    }
+}
+
+/// The counts after the title: steps and files for work, what was looked at
+/// for a run of reads, the first line for a thought.
+private fun stepGroupSummary(group: ChatStepGroup): String? = when (group.style) {
+    ChatStepGroup.Style.Work -> buildList {
+        add(if (group.steps == 1) L10n.text("android.chatdetail.steps.one", "1") else L10n.text("android.chatdetail.steps.other", "${group.steps}"))
+        if (group.files > 0) add(if (group.files == 1) L10n.text("android.chatdetail.files_edited.one", "1") else L10n.text("android.chatdetail.files_edited.other", "${group.files}"))
+    }.joinToString(" · ")
+    ChatStepGroup.Style.Explored -> buildList {
+        if (group.reads > 0) add(if (group.reads == 1) L10n.text("android.chatdetail.files.one", "1") else L10n.text("android.chatdetail.files.other", "${group.reads}"))
+        if (group.searches > 0) add(if (group.searches == 1) L10n.text("android.chatdetail.searches.one", "1") else L10n.text("android.chatdetail.searches.other", "${group.searches}"))
+        if (group.pages > 0) add(if (group.pages == 1) L10n.text("android.chatdetail.pages.one", "1") else L10n.text("android.chatdetail.pages.other", "${group.pages}"))
+    }.joinToString(", ")
+    ChatStepGroup.Style.Thought -> group.preview
+}
+
+/// "10s", "3m", "1h 5m", floored, the way the Apple client's turn timer reads.
+private fun stepGroupDuration(group: ChatStepGroup): String? {
+    val start = group.startedAtMs ?: return null
+    val end = group.endedAtMs ?: return null
+    if (group.running || end <= start) return null
+    val seconds = (end - start) / 1000
+    if (seconds < 60) return L10n.text("android.chatdetail.duration_s", "$seconds")
+    val minutes = seconds / 60
+    if (minutes < 60) return L10n.text("android.chatdetail.duration_m", "$minutes")
+    val rest = minutes % 60
+    return if (rest == 0L) L10n.text("android.chatdetail.duration_h", "${minutes / 60}")
+    else L10n.text("android.chatdetail.duration_h_m", "${minutes / 60}", "$rest")
+}

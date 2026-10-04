@@ -627,6 +627,8 @@ struct ChatParams {
     preview: Option<String>,
     shell_prefix: Option<String>,
     request_id: Option<String>,
+    /// `chat.answerQuestion`: which of the agent's questions this answers.
+    question_id: Option<String>,
     turn_token: Option<String>,
     wait_ms: Option<u64>,
     call_id: Option<String>,
@@ -2143,6 +2145,12 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             Ok(json!({ "cleared": true }))
         }
         "chat.steerDeliver" => store.steer_deliver(&p.id.ok_or("chat.steerDeliver needs id")?),
+        "chat.answerQuestion" => store.answer_question(
+            &p.id.ok_or("chat.answerQuestion needs id")?,
+            &p.question_id
+                .ok_or("chat.answerQuestion needs questionId")?,
+            &p.text.ok_or("chat.answerQuestion needs text")?,
+        ),
         "chat.events" => serde_json::to_value(store.tail_events_positions(
             &p.id.ok_or("chat.events needs id")?,
             p.offset.unwrap_or(0),
@@ -3957,6 +3965,14 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
         // machine that owns it through `remote.call`, so the launcher always
         // means the machine the session would actually run on.
         "launcher.catalog" => Ok(crate::launcher::catalog()),
+        "launcher.checkSignIn" => {
+            #[derive(Deserialize)]
+            struct Params {
+                id: String,
+            }
+            let p: Params = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            crate::launcher::check_sign_in(&p.id)
+        }
 
         // Run a catalog profile's official installer on this machine. The id
         // names a command hardcoded in the catalog, never one supplied by the

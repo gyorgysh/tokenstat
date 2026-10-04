@@ -512,6 +512,7 @@ pub(crate) fn catalog() -> Value {
                 "installed": installed,
                 "hidden": hidden.contains(profile.id),
                 "installCommand": profile.installer(),
+                "canCheckSignIn": profile.id != "shell" && profile.open_url.is_none(),
             });
             // Installed is not ready. A tool with no login answers prompts
             // with somebody else's auth error, and a grid that cannot say so
@@ -521,6 +522,13 @@ pub(crate) fn catalog() -> Value {
             {
                 for (key, answer) in state {
                     value[key] = answer.clone();
+                }
+                // Every installed CLI can be opened for its own first-run
+                // setup. Only verified flows promise browser/code steps.
+                if profile.open_url.is_none()
+                    && crate::agent_readiness::sign_in(profile.id).is_none()
+                {
+                    value["signIn"] = json!({"supported": true, "kind": "terminal"});
                 }
             }
             if profile.id == "shell" {
@@ -550,6 +558,123 @@ pub(crate) fn catalog() -> Value {
     Value::Array(available)
 }
 
+/// Ask the CLI itself on an explicit setup/status check. Catalog reads stay
+/// cheap and file-based; this check covers keychains and configured providers.
+pub(crate) fn check_sign_in(id: &str) -> Result<Value, String> {
+    let profile = PROFILES
+        .iter()
+        .find(|profile| profile.id == id)
+        .ok_or_else(|| format!("no such agent: {id}"))?;
+    let command = resolve_profile(profile, &search_path(), Path::new(&user_home()));
+    let Some(command) = command else {
+        return Ok(crate::agent_readiness::describe(id, false));
+    };
+    let args: &[&str] = match id {
+        "claude_code" => &["auth", "status"],
+        "codex" => &["login", "status"],
+        _ => return Ok(crate::agent_readiness::describe(id, true)),
+    };
+    let mut result = crate::agent_readiness::describe(id, true);
+    // Older CLI versions may lack a status command. A timeout or an unknown
+    // response proves neither signed-in nor signed-out.
+    let state = probe_sign_in(&command, args, id).unwrap_or_else(|| {
+        // An older CLI or a Windows npm shim may not support this process
+        // probe. Keep positive saved-login evidence; inconclusive failures
+        // must not block a working environment/provider credential.
+        if result["readiness"] == "signedIn" {
+            "signedIn"
+        } else {
+            "unknown"
+        }
+    });
+    result["readiness"] = json!(state);
+    result["checked"] = json!(state != "unknown");
+    result["signedIn"] = match state {
+        "signedIn" => json!(true),
+        "needsSignIn" => json!(false),
+        _ => Value::Null,
+    };
+    Ok(result)
+}
+
+fn probe_sign_in(command: &str, args: &[&str], id: &str) -> Option<&'static str> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    let mut cmd = Command::new(command);
+    cmd.args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(env) = tokenstat_pty::login_env_ready() {
+        cmd.env("PATH", &env.path);
+        for (key, value) in &env.vars {
+            cmd.env(key, value);
+        }
+    }
+    #[cfg(unix)]
+    cmd.process_group(0);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let mut child = cmd.spawn().ok()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let stdout = child.stdout.take()?;
+    let stderr = child.stderr.take()?;
+    for mut pipe in [Box::new(stdout) as Box<dyn Read + Send>, Box::new(stderr)] {
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = pipe.by_ref().take(64 * 1024).read_to_end(&mut bytes);
+            let _ = tx.send(bytes);
+        });
+    }
+    drop(tx);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if child.try_wait().ok()?.is_some() {
+            break;
+        }
+        if Instant::now() >= deadline {
+            #[cfg(unix)]
+            unsafe {
+                libc::kill(-(child.id() as i32), libc::SIGKILL);
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let parts = [
+        rx.recv_timeout(Duration::from_millis(200)).ok()?,
+        rx.recv_timeout(Duration::from_millis(200)).ok()?,
+    ];
+    status_readiness(id, &parts)
+}
+
+fn status_readiness(id: &str, parts: &[Vec<u8>]) -> Option<&'static str> {
+    if id == "claude_code" {
+        return parts.iter().find_map(|part| {
+            serde_json::from_slice::<Value>(part).ok()?["loggedIn"]
+                .as_bool()
+                .map(|yes| if yes { "signedIn" } else { "needsSignIn" })
+        });
+    }
+    for part in parts {
+        let text = String::from_utf8_lossy(part).to_ascii_lowercase();
+        if text.trim() == "not logged in" {
+            return Some("needsSignIn");
+        }
+        if text.trim().starts_with("logged in using ") {
+            return Some("signedIn");
+        }
+    }
+    None
+}
+
 /// Start one agent's own sign-in, in a terminal in the person's home.
 ///
 /// The command is the catalog's, the arguments are `agent_readiness`'s, and
@@ -565,12 +690,12 @@ pub(crate) fn sign_in(id: &str, rows: u16, cols: u16, dark: Option<bool>) -> Res
     let Some(profile) = PROFILES.iter().find(|profile| profile.id == id) else {
         return Err(format!("no such agent: {id}"));
     };
-    let Some(flow) = crate::agent_readiness::sign_in(id) else {
-        return Err(format!(
-            "{} has no sign-in that works in a terminal on this machine",
-            profile.name
-        ));
-    };
+    if profile.id == "shell" || profile.open_url.is_some() {
+        return Err(
+            "This profile has no sign-in. Choose an installed command-line agent to set up.".into(),
+        );
+    }
+    let args = crate::agent_readiness::sign_in(id).map_or(&[][..], |flow| flow.args);
     let path = search_path();
     let home = user_home();
     let command = if absolute_command(profile.command) && is_executable(Path::new(profile.command))
@@ -583,7 +708,7 @@ pub(crate) fn sign_in(id: &str, rows: u16, cols: u16, dark: Option<bool>) -> Res
     let info = tokenstat_pty::manager()
         .spawn(&tokenstat_pty::Spawn {
             command,
-            args: flow.args.iter().map(|arg| (*arg).to_string()).collect(),
+            args: args.iter().map(|arg| (*arg).to_string()).collect(),
             cwd: PathBuf::from(&home),
             workspace_id: None,
             hidden: false,
@@ -1283,6 +1408,30 @@ fn nvm_bin_paths(home: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn login_checks_require_an_explicit_cli_answer() {
+        let classify = |id, text: &str| super::status_readiness(id, &[text.as_bytes().to_vec()]);
+        assert_eq!(
+            classify("claude_code", r#"{"loggedIn":false,"email":"private"}"#),
+            Some("needsSignIn")
+        );
+        assert_eq!(
+            classify("claude_code", r#"{"loggedIn":true}"#),
+            Some("signedIn")
+        );
+        assert_eq!(classify("claude_code", r#"{"loggedIn":"true"}"#), None);
+        assert_eq!(classify("codex", "Not logged in\n"), Some("needsSignIn"));
+        assert_eq!(
+            classify("codex", "Logged in using ChatGPT\n"),
+            Some("signedIn")
+        );
+        assert_eq!(
+            classify("codex", "Network error: could not check login"),
+            None
+        );
+        assert_eq!(classify("codex", "unknown command status"), None);
+    }
+
     /// A client picks a row. It never supplies a command, an argument or a
     /// path, so `launcher.signIn` cannot become a way to run something.
     #[test]

@@ -12,6 +12,8 @@ import SwiftUI
 enum RemoteHostFeature: Hashable {
     case chat
     case pulls
+    case pullCreation
+    case chatQuestions
     case modelRefresh
     case folderPicker
     case cloneRepository
@@ -38,7 +40,8 @@ enum RemoteHostFeature: Hashable {
     var title: String {
         switch self {
         case .chat: L10n.text("apple.clientremotefeaturegate.chat.460b3a7d")
-        case .pulls: L10n.text("apple.clientremotefeaturegate.pull_requests.d9e3f260")
+        case .pulls, .pullCreation: L10n.text("apple.clientremotefeaturegate.pull_requests.d9e3f260")
+        case .chatQuestions: L10n.text("apple.clientremotefeaturegate.chat.460b3a7d")
         case .modelRefresh: L10n.text("apple.clientremotefeaturegate.model_list_refresh.7113bd00")
         case .folderPicker: L10n.text("apple.clientremotefeaturegate.choosing_a_folder.5e3303d0")
         case .cloneRepository: L10n.text("apple.clientremotefeaturegate.cloning_a_repository.6ad75b22")
@@ -93,6 +96,8 @@ enum RemoteHostFeature: Hashable {
         case .worktrees: 24
         case .chat: 4
         case .pulls: 3
+        case .pullCreation: 28
+        case .chatQuestions: 29
         case .modelRefresh: 6
         case .folderPicker: 7
         case .cloneRepository: 7
@@ -123,7 +128,8 @@ enum RemoteHostFeature: Hashable {
     var symbol: String {
         switch self {
         case .chat: "bubble.left.and.bubble.right.fill"
-        case .pulls: "arrow.triangle.merge"
+        case .pulls, .pullCreation: "arrow.triangle.merge"
+        case .chatQuestions: "questionmark.bubble"
         case .modelRefresh: "arrow.clockwise"
         case .folderPicker: "folder.badge.plus"
         case .cloneRepository: "arrow.down.doc"

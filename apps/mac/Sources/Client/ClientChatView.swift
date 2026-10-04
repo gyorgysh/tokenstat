@@ -437,6 +437,7 @@ private struct ClientReconnectBanner: View {
 /// One conversation: setup, transcript, glass composer.
 struct ClientChatThread: View {
     @Bindable var model: ChatModel
+    @State private var detail = ChatDetailPreference.shared
     let chatID: String
     let folderName: String
     let hostName: String
@@ -850,6 +851,10 @@ struct ClientChatThread: View {
                     )
                     .padding(.horizontal, Theme.Space.s)
                 }
+                if let backend = model.backend(for: chat.backend), model.savedCopy == nil {
+                    ChatAgentSetupCard(model: model, backend: backend, running: model.busy)
+                        .padding(.horizontal, Theme.Space.s)
+                }
                 ClientChatComposer(
                     model: model,
                     chat: chat,
@@ -948,7 +953,14 @@ struct ClientChatThread: View {
                             openAttachment: open(_:data:),
                             faceSeed: model.faceSeed,
                             isLive: !model.isShowingCachedTranscript && model.busy && item.id == model.transcriptItems.last?.id,
-                            animatesRunning: !model.isShowingCachedTranscript && item.id == spinning
+                            animatesRunning: !model.isShowingCachedTranscript && item.id == spinning,
+                            expandsOutput: detail.level == .detailed,
+                            toggleGroup: { model.toggleGroup($0) },
+                            answerQuestion: { question, text in
+                                Task { await model.answerQuestion(question, answer: text) }
+                            },
+                            answeringQuestion: model.answeringQuestions.contains(item.questionID ?? ""),
+                            canAnswerQuestions: model.savedCopy == nil && !model.isShowingCachedTranscript
                         )
                         .equatable()
                         // No geometry readers mid-fling: each one reports per
@@ -1440,6 +1452,8 @@ struct ClientChatThread: View {
         // The end always exists. Anything else may sit outside the built
         // slice: slide to it first, or the scroll lands nowhere.
         if id != TranscriptFollow.bottomID {
+            // A target folded into a step group opens it first.
+            model.revealRow(id)
             applySlice(TranscriptSlice.revealing(id, in: model.transcriptItems))
         } else {
             showNewest()
@@ -1463,6 +1477,11 @@ struct ClientChatThread: View {
         // An attached image is content on its own: text is only mandatory
         // when there is nothing attached.
         guard !text.isEmpty || !model.attachments.isEmpty, !model.sending else { return }
+        if let backend = model.backend(for: chat.backend), backend.signInVerified,
+           ["needsSignIn", "expired"].contains(backend.readiness ?? "") {
+            model.backendRefreshError = L10n.text("apple.agentsetup.draft_kept", backend.label)
+            return
+        }
         // Enqueue first: a full queue reports an error and returns nil, and
         // the words must survive that path rather than being wiped.
         if sendNow {

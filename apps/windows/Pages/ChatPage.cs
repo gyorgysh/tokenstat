@@ -714,6 +714,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var chrome = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         chrome.Children.Add(ActionIconGlyph.Button(L10n.Text("common.chats"), ActionIcon.Back, async (_, _) => await ShowListAsync()));
         chrome.Children.Add(ActionIconGlyph.Button(L10n.Text("common.delete"), ActionIcon.Delete, async (_, _) => await ConfirmDeleteAsync()));
+        chrome.Children.Add(DetailButton());
         _root.Children.Add(chrome);
 
         if (_titleBox.FocusState == FocusState.Unfocused)
@@ -1035,8 +1036,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             enabled: enabled);
     }
 
-    private string ItemContentKey(DisplayItem item) => item.Kind switch
+    private string ItemContentKey(DisplayItem item) => item.GroupId + "|" + (item.Kind switch
     {
+        ItemKind.Group => $"{item.Id}|{StepGroupKey(item.Group)}",
+        ItemKind.Question => $"{item.Id}|{item.Question?.Answer}|{item.Question?.Delivery}|{_answering.Contains(item.Question?.Id ?? "")}",
         ItemKind.User => $"{item.Id}|{item.Text}",
         ItemKind.Assistant => $"{item.Id}|{item.Text}",
         ItemKind.Thinking => $"{item.Id}|{item.Text}",
@@ -1047,7 +1050,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         ItemKind.Usage => $"{item.Id}|{item.Input}|{item.Output}|{item.Cost}",
         ItemKind.Failed => $"{item.Id}|{item.Text}",
         _ => item.Id,
-    };
+    });
 
     private void RebuildTranscript(bool full = false)
     {
@@ -1055,7 +1058,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             _transcript.Children.Clear();
         }
-        var items = Coalesce(_events);
+        // `raw` is every row, for the seat line, which must see a running
+        // step whether or not it is folded away. `items` is what is drawn.
+        var raw = Coalesce(_events);
+        var items = ChatDetailFold.Fold(raw, ChatDetailPreference.Level, _running, IsGroupOpen);
         _sliceOlder = SliceClamp(_sliceOlder, items.Count);
         var start = SliceStart(items.Count, _sliceOlder);
         var end = SliceEnd(items.Count, _sliceOlder);
@@ -1114,8 +1120,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (Busy())
         {
             var workingIdx = prefix + visible;
-            var mood = LiveMood(items);
-            var words = mood == PersonaMood.Working ? WorkingWords(items) : mood.Label();
+            var mood = LiveMood(raw);
+            var words = mood == PersonaMood.Working ? WorkingWords(raw) : mood.Label();
             // The words are part of the key, so thinking turning into reading
             // a file rebuilds the row instead of leaving the old sentence.
             var workingKey = "__working__:" + words;
@@ -1163,8 +1169,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         ItemKind.Attachment => AttachmentRow(item),
         ItemKind.Usage => UsageLine(item),
         ItemKind.Failed => FailedRow(item),
+        ItemKind.Group when item.Group is { } group => StepGroupRow(item.Id, group),
+        ItemKind.Question when item.Question is { } question => QuestionCard(question),
         _ => new Border(),
         };
+        if (!string.IsNullOrEmpty(item.GroupId)) view = GroupStepInset(view);
         if (view is FrameworkElement element && !string.IsNullOrEmpty(item.Text))
         {
             var title = item.Kind == ItemKind.Assistant ? L10n.Text("windows.chatpage.copy_response.f0f755af") : item.Kind == ItemKind.Thinking ? L10n.Text("windows.chatpage.copy_reasoning.5d2976d8") : L10n.Text("common.copy");
@@ -1574,6 +1583,50 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         };
     }
 
+    private UIElement AgentSetupNotice(JsonNode backend)
+    {
+        var body = new StackPanel { Spacing = Theme.SpaceS };
+        body.Children.Add(new TextBlock { Text = L10n.Text("windows.agentsetup.check_setup", Format.Text(backend, "label")), TextWrapping = TextWrapping.Wrap });
+        body.Children.Add(new TextBlock { Text = RemoteWorkspaces.IsRemote(_workspaceId)
+            ? L10n.Text("windows.agentsetup.remote") : L10n.Text("windows.agentsetup.local"), TextWrapping = TextWrapping.Wrap });
+        if (AgentSignInDialog.Supported(backend))
+        {
+            var signIn = ActionIconGlyph.Button(L10n.Text("windows.agentsetup.open_terminal"), ActionIcon.SignIn, async (_, _) => await OpenAgentSignInAsync(backend));
+            signIn.IsEnabled = !Busy();
+            body.Children.Add(signIn);
+        }
+        else body.Children.Add(new TextBlock { Text = L10n.Text("windows.agentsetup.legacy", Format.Text(backend, "label")), TextWrapping = TextWrapping.Wrap });
+        var check = ActionIconGlyph.Button(L10n.Text("windows.agentsetup.check_again"), ActionIcon.Refresh, async (_, _) =>
+        {
+            var chat = _openId;
+            var generation = _openGeneration;
+            try
+            {
+                var readiness = await AgentSignInDialog.CheckAsync(backend, CallChatAsync);
+                if (chat == _openId && generation == _openGeneration) backend["readiness"] = readiness;
+            }
+            catch (Exception ex) { if (chat == _openId && generation == _openGeneration) Banner(ex.Message); }
+            if (chat == _openId && generation == _openGeneration) PaintConversation();
+        });
+        check.IsEnabled = !Busy();
+        body.Children.Add(check);
+        return Chrome.Card(L10n.Text("windows.agentsetup.setup_title", Format.Text(backend, "label")), body);
+    }
+
+    private async Task OpenAgentSignInAsync(JsonNode backend)
+    {
+        if (Busy()) return;
+        var chat = _openId;
+        var generation = _openGeneration;
+        try
+        {
+            var readiness = await AgentSignInDialog.ShowAsync(this, _workspaceId, backend, CallChatAsync);
+            if (chat == _openId && generation == _openGeneration && readiness is not null) backend["readiness"] = readiness;
+        }
+        catch (Exception ex) { if (chat == _openId && generation == _openGeneration) Banner(ex.Message); }
+        if (chat == _openId && generation == _openGeneration) PaintConversation();
+    }
+
     private UIElement Composer()
     {
         var well = _composerWell = new StackPanel { Spacing = Theme.SpaceS };
@@ -1590,6 +1643,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (steerNote.Length > 0) well.Children.Add(SteerNoteBanner(steerNote));
         well.Children.Add(PendingMessages());
         if (OpenBackendMissing()) well.Children.Add(MissingAgentNotice());
+        var setupBackend = Backend(Format.Text(_openChat, "backend"));
+        if (setupBackend is not null && Installed(setupBackend) && Format.Text(setupBackend, "id") != "sh"
+            // Only a state with a next step. Agents whose login nothing can
+            // read are always "unknown", and a notice on all of them is noise.
+            && Format.Text(setupBackend, "readiness") is "needsSignIn" or "expired") well.Children.Add(AgentSetupNotice(setupBackend));
         well.Children.Add(_draft);
         RebuildAttachStrip();
         well.Children.Add(_attachStrip);
@@ -1778,6 +1836,16 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         }
         search.TextChanged += (_, _) => RenderChoices();
         RenderChoices();
+        if (backend is not null && Installed(backend) && AgentSignInDialog.Supported(backend))
+        {
+            var signIn = ActionIconGlyph.Button(L10n.Text("windows.agentsetup.open_terminal"), ActionIcon.SignIn, async (_, _) =>
+            {
+                flyout.Hide();
+                await OpenAgentSignInAsync(backend);
+            });
+            signIn.IsEnabled = !locked;
+            panel.Children.Add(signIn);
+        }
         flyout.Content = new Border { Background = Theme.PanelBrush, Child = panel };
         flyout.Opened += (_, _) => search.Focus(FocusState.Programmatic);
 
@@ -1972,6 +2040,15 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (_opening) return;
         if (_openId is not string chat || _sending || _queueing) return;
         if (OpenBackendMissing()) return;
+        var backend = Backend(Format.Text(_openChat, "backend"));
+        // Only the CLI's own answer stops a send. A stored token past its
+        // expiry is routine (the CLI renews it), and an agent signed in with an
+        // environment key has no login file at all.
+        if (Format.Flag(backend, "signInVerified") && Format.Text(backend, "readiness") is "needsSignIn" or "expired")
+        {
+            Banner(L10n.Text("windows.agentsetup.draft_kept", Format.Text(backend, "label")));
+            return;
+        }
         var generation = _openGeneration;
         bool Current() => OpenChatIs(chat) && generation == _openGeneration;
         var text = _draft.Text.Trim();
@@ -2230,6 +2307,20 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (generation != _openGeneration) return;
         _chats = _steerOverlay.Apply(AsArray(chats.Result), request, _chats);
         _backends = AsArray(backends.Result);
+        var selectedBackend = Backend(Format.Text(_openChat, "backend"));
+        if (selectedBackend is not null && Format.Flag(selectedBackend, "canCheckSignIn") && Format.Text(selectedBackend, "id") is "claude" or "claude_code" or "codex")
+        {
+            try
+            {
+                var status = await CallChatAsync("launcher.checkSignIn", new JsonObject { ["id"] = Format.Text(selectedBackend, "launcherId") });
+                if (generation == _openGeneration)
+                {
+                    selectedBackend["readiness"] = Format.Text(status, "readiness", "unknown");
+                    selectedBackend["signInVerified"] = Format.Flag(status, "checked");
+                }
+            }
+            catch { /* Older hosts retain their file-based, three-valued answer. */ }
+        }
         _personas = AsArray(personas.Result, "personas");
     }
 
@@ -2321,6 +2412,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     {
         var items = new List<DisplayItem>();
         var tools = new Dictionary<string, int>();
+        var questions = new Dictionary<string, int>();
         var text = "";
         var textId = "";
         var thinking = "";
@@ -2328,7 +2420,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
         void FlushText()
         {
-            var body = text.Trim();
+            // The question block is drawn as its own card below the reply.
+            var body = ChatQuestionText.Strip(text, streaming: _running).Trim();
             if (body.Length > 0)
             {
                 items.Add(new DisplayItem { Id = textId, Kind = ItemKind.Assistant, Text = body });
@@ -2362,6 +2455,42 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     Kind = ItemKind.User,
                     Text = Format.Text(row, "text"),
                 });
+                continue;
+            }
+            if (kind == "question")
+            {
+                var questionId = Format.Text(row, "id");
+                var asked = Format.Text(row, "question");
+                if (questionId.Length > 0 && asked.Length > 0)
+                {
+                    FlushText();
+                    FlushThinking();
+                    var fallback = row["default"] is null ? null : Format.Text(row, "default");
+                    var options = (row["options"] as JsonArray)?
+                        .Select(option => option?.GetValueKind() == System.Text.Json.JsonValueKind.String ? option.GetValue<string>() : null)
+                        .OfType<string>().ToList() ?? [];
+                    questions[questionId] = items.Count;
+                    items.Add(new DisplayItem
+                    {
+                        Id = "question-" + questionId,
+                        Kind = ItemKind.Question,
+                        Question = new ChatQuestionItem(questionId, asked, options, Format.Flag(row, "multiple"),
+                            string.IsNullOrEmpty(fallback) ? null : fallback,
+                            row["blocking"] is null ? string.IsNullOrEmpty(fallback) : Format.Flag(row, "blocking")),
+                    });
+                }
+                continue;
+            }
+            if (kind == "answer")
+            {
+                // Lands on its question's card. One whose question is on an
+                // older page waits for that page.
+                if (questions.TryGetValue(Format.Text(row, "questionId"), out var at) && items[at].Question is { } asked)
+                {
+                    var card = items[at];
+                    card.Question = asked with { Answer = Format.Text(row, "text"), Delivery = Format.Text(row, "delivery") };
+                    items[at] = card;
+                }
                 continue;
             }
             if (kind == "approval" || row["approval"] is not null)
@@ -2434,6 +2563,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                         tool.Detail = Format.Text(ev, "detail");
                         var ended = Format.Long(row, "atMs");
                         tool.Duration = Duration(tool.StartedAt, ended);
+                        tool.EndedAt = ended;
                         items[index] = tool;
                     }
                     break;
@@ -2615,51 +2745,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             return;
         }
         _root.Children.Insert(1, Chrome.Banner(text, Theme.Danger, Symbol.Important));
-    }
-
-    private enum ItemKind
-    {
-        User, Assistant, Thinking, Tool, Edit, Approval, Attachment, Usage, Failed,
-    }
-
-    private struct DisplayItem
-    {
-        public string Id;
-        public ItemKind Kind;
-        public string Text;
-        public string Verb;
-        public string Target;
-        public bool Running;
-        public bool Failed;
-        public string Detail;
-        public string Duration;
-        public string Path;
-        public long Added;
-        public long Removed;
-        public string Patch;
-        public JsonNode? Approval;
-        public bool Pending;
-        public string Name;
-        public string MediaType;
-        public long Size;
-        public long Input;
-        public long Output;
-        public double Cost;
-        public long StartedAt;
-
-        public DisplayItem()
-        {
-            Id = "";
-            Text = "";
-            Verb = "";
-            Target = "";
-            Detail = "";
-            Duration = "";
-            Path = "";
-            Patch = "";
-            Name = "";
-            MediaType = "";
-        }
     }
 
     private readonly record struct StagedFile(string Id, string Name);

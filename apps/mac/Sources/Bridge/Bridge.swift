@@ -1329,6 +1329,13 @@ extension Bridge {
     }
 
     /// Park a short note on the next tool step. The turn keeps going.
+    /// Answer one question the agent asked. The host decides how it travels:
+    /// on the running turn's next step, after that turn, or as a new turn.
+    static func answerChatQuestion(id: String, questionID: String, text: String, peer: String? = nil) async throws -> ChatQuestionDelivery {
+        try await chatInvoke(peer: peer, "chat.answerQuestion",
+                             ["id": id, "questionId": questionID, "text": text], as: ChatQuestionDelivery.self)
+    }
+
     static func steerChat(id: String, text: String, peer: String? = nil) async throws {
         _ = try await chatInvoke(peer: peer, "chat.steer", ["id": id, "text": text], as: Ack.self)
     }
@@ -2160,6 +2167,15 @@ extension Bridge {
 
     // These methods are deliberately separate from refreshable reads. Every
     // call site is one labelled button press in PullDetailView.
+    static func preparePullCreation(workspaceID: String, peer: String?) async throws -> PullCreateContext {
+        try await pullRead(workspaceID: workspaceID, peer: peer, method: "pulls.prepareCreate", values: [:], as: PullCreateContext.self)
+    }
+
+    static func createPull(workspaceID: String, peer: String?, context: PullCreateContext, draft: PullCreateDraft) async throws -> CreatedPull {
+        try await pullRead(workspaceID: workspaceID, peer: peer, method: "pulls.create",
+                           values: ["branch": context.branch ?? "", "expectedHead": context.head, "expectedRepository": context.repository, "base": draft.base.trimmingCharacters(in: .whitespacesAndNewlines),
+                                    "title": draft.title, "body": draft.body, "draft": draft.isDraft], as: CreatedPull.self)
+    }
     static func pullComment(workspaceID: String, peer: String?, number: UInt32, body: String) async throws {
         _ = try await pullRead(
             workspaceID: workspaceID, peer: peer, method: "pulls.comment",
@@ -2543,6 +2559,17 @@ extension Bridge {
     /// login shell of its own to find the PATH.
     static func launcherCatalog() async throws -> [RemoteLaunchProfile] {
         try await background("launcher.catalog", as: [RemoteLaunchProfile].self)
+    }
+
+    static func agentSetupCheck(peer: String?, id: String) async throws -> AgentSetupStatus {
+        if let peer { return try await onPeer(peer, "launcher.checkSignIn", ["id": id], as: AgentSetupStatus.self) }
+        return try await background("launcher.checkSignIn", ["id": id], as: AgentSetupStatus.self)
+    }
+
+    static func agentSetupSignIn(peer: String?, id: String, dark: Bool) async throws -> PtySessionInfo {
+        let params: [String: Any] = ["id": id, "rows": 24, "cols": 100, "dark": dark]
+        if let peer { return try await onPeer(peer, "launcher.signIn", params, as: PtySessionInfo.self) }
+        return try await background("launcher.signIn", params, as: PtySessionInfo.self)
     }
 
     /// Run a profile's official installer on this machine, then the caller

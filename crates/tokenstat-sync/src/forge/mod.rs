@@ -16,7 +16,9 @@ pub use model::{
     Availability, CheckState, ForgeConnection, MergeMethod, PullActor, PullCheck, PullDetail,
     PullFile, PullReview, PullSummary, Repo, Scope, State, TimelineEvent, TimelinePage, Verdict,
 };
-pub use write::{close, comment, merge, ready, reopen, review};
+pub use write::{
+    CreatedPull, close, comment, create, default_branch, merge, ready, reopen, review,
+};
 
 /// Public OAuth client identifier for tokenstat's GitHub App.
 ///

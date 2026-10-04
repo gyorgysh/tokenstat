@@ -568,6 +568,7 @@ struct ChatAgentPanel: View {
 
     @State private var showingSetup = false
     @State private var installing: String?
+    @State private var signInBackend: ChatBackend?
     @State private var setupError: String?
     @State private var canRefresh = false
     @State private var updating = false
@@ -652,10 +653,19 @@ struct ChatAgentPanel: View {
                                 install(backend)
                             }
                             .disabled(installing != nil || locked)
+                        } else if backend.signInFlow?.supported == true {
+                            Button(L10n.text("apple.agentsetup.open_terminal"), .signIn) { signInBackend = backend }
+                                .disabled(installing != nil || locked)
                         }
                     }
                 }
             }.padding(Theme.Space.s)
+        }
+        .sheet(item: $signInBackend) { backend in
+            AgentSignInSheet(backend: backend, peer: model.peer) { await model.checkSignIn(backend) }
+        }
+        .onChange(of: signInBackend?.id) { _, id in
+            if id == nil { Task { await model.reloadBackends() } }
         }
     }
 

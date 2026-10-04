@@ -11,14 +11,17 @@ import kotlinx.serialization.json.longOrNull
 /// `expectedProtocolVersion` and `RemoteHostFeature` minimums, plus the
 /// `insights.snapshot` (proto 5) shape the Mac uses.
 object HostContracts {
-    const val PROTOCOL_VERSION = "26"
+    const val PROTOCOL_VERSION = "29"
     const val WORKTREES_MIN_PROTOCOL = 24
     const val CHAT_MIN_PROTOCOL = 4
     const val CHAT_FORK_MIN_PROTOCOL = 26
     const val CHAT_REMOVE_ALL_MIN_PROTOCOL = 26
     fun supportsChatFork(protocol: Long?): Boolean = protocol != null && protocol >= CHAT_FORK_MIN_PROTOCOL
+    fun supportsPullCreation(protocol: Long?): Boolean = protocol != null && protocol >= PULL_CREATION_MIN_PROTOCOL
     fun supportsChatRemoveAll(protocol: Long?): Boolean = protocol != null && protocol >= CHAT_REMOVE_ALL_MIN_PROTOCOL
     const val PULLS_MIN_PROTOCOL = 3
+    const val PULL_CREATION_MIN_PROTOCOL = 28
+    const val CHAT_QUESTIONS_MIN_PROTOCOL = 29
 
     fun protocolOf(status: kotlinx.serialization.json.JsonObject?): Long? =
         status?.get("protocol")?.jsonPrimitive?.longOrNull

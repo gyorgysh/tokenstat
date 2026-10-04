@@ -53,6 +53,15 @@ struct ClientChatMenu: View {
                     Button(L10n.text("apple.clientchatview.continue_on_another_device.b5836f9a"), .device, action: onHandoff)
                 }
             }
+            Section {
+                ChatDetailMenuPicker()
+                Button(
+                    model.anyGroupOpen ? L10n.text("apple.chatdetail.collapse_steps") : L10n.text("apple.chatdetail.expand_steps"),
+                    model.anyGroupOpen ? .collapse : .preview
+                ) {
+                    model.setAllGroups(open: !model.anyGroupOpen)
+                }
+            }
             if onDelete != nil {
                 Divider()
                 Button(L10n.text("apple.clientchatview.delete_chat.93291d9c"), .delete, role: .destructive) {

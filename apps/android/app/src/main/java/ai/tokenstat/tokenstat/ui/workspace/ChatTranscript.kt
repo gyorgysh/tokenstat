@@ -3,7 +3,10 @@ package ai.tokenstat.tokenstat.ui.workspace
 
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
@@ -47,6 +50,17 @@ sealed interface ChatDisplayItem {
     ) : ChatDisplayItem
 
     data class Failed(override val id: String, val text: String) : ChatDisplayItem
+
+    /// Steps folded into one line by the chat's detail level. See
+    /// `foldTranscript`.
+    data class Group(override val id: String, val group: ChatStepGroup) : ChatDisplayItem
+
+    /// A question the agent asked, with the answer once there is one.
+    data class Question(override val id: String, val question: ChatQuestion) : ChatDisplayItem
+
+    /// One of an open group's steps, drawn below its header. Keeps the
+    /// step's own id, so the list keys it the same as when it is unfolded.
+    data class GroupStep(override val id: String, val groupId: String, val item: ChatDisplayItem) : ChatDisplayItem
 }
 
 /// A tool call on a transcript. Ported from ChatModel.swift `ChatToolState`.
@@ -224,6 +238,7 @@ fun coalesceTranscript(
     val toolStarts = mutableMapOf<String, Int>()
     val editStarts = mutableMapOf<String, Int>()
     val approvalIndex = mutableMapOf<String, Int>()
+    val questionIndex = mutableMapOf<String, Int>()
     val editRevisions = mutableMapOf<String, Int>()
     var text = StringBuilder()
     var textID = ""
@@ -243,7 +258,8 @@ fun coalesceTranscript(
             ?: inner?.safeLong("atMs") ?: inner?.safeLong("at_ms")
 
     fun flushText() {
-        val body = text.toString().trim()
+        // The question block is drawn as its own card below the reply.
+        val body = stripQuestionBlocks(text.toString(), streaming = running).trim()
         if (body.isNotEmpty()) {
             items.add(ChatDisplayItem.Assistant(textID, body, textBackend ?: defaultBackend))
         }
@@ -379,6 +395,40 @@ fun coalesceTranscript(
             )
             // The separator would say the same thing twice, less well.
             if (to.isNotEmpty()) lastBackend = to
+            continue
+        }
+        if (kind == "question") {
+            val questionId = ev.str("id")
+            val asked = ev.str("question")
+            if (questionId != null && asked != null) {
+                flushText()
+                flushThinking()
+                val fallback = ev.str("default")
+                questionIndex[questionId] = items.size
+                items.add(
+                    ChatDisplayItem.Question(
+                        "question-$questionId",
+                        ChatQuestion(
+                            id = questionId,
+                            question = asked,
+                            options = (ev["options"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty(),
+                            multiple = ev.safeBool("multiple") ?: false,
+                            defaultAnswer = fallback,
+                            blocking = ev.safeBool("blocking") ?: (fallback == null),
+                        ),
+                    ),
+                )
+            }
+            continue
+        }
+        if (kind == "answer") {
+            // Lands on its question's card. One whose question is on an
+            // older page waits for that page.
+            val at = ev.str("questionId")?.let { questionIndex[it] }
+            val row = at?.let { items.getOrNull(it) } as? ChatDisplayItem.Question
+            if (at != null && row != null) {
+                items[at] = row.copy(question = row.question.copy(answer = ev.str("text") ?: "", delivery = ev.str("delivery")))
+            }
             continue
         }
         val approval = ev["approval"] as? JsonObject

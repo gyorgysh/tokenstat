@@ -3,11 +3,16 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <!-- The row model's display-only fields are never set by these tests. -->
+    <NoWarn>$(NoWarn);CS0649</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../../apps/windows/Pages/ChatHistoryBuffer.cs" Link="ChatHistoryBuffer.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatSteerOverlay.cs" Link="ChatSteerOverlay.cs" />
     <Compile Include="../../../apps/windows/Navigation/ChatPreviewStore.cs" Link="ChatPreviewStore.cs" />
     <Compile Include="../../../apps/windows/Pages/SeatStep.cs" Link="SeatStep.cs" />
+    <Compile Include="../../../apps/windows/Pages/ChatPage.Items.cs" Link="ChatPage.Items.cs" />
+    <Compile Include="../../../apps/windows/Pages/ChatDetailFold.cs" Link="ChatDetailFold.cs" />
+    <Compile Include="../../../apps/windows/Pages/ChatQuestion.cs" Link="ChatQuestion.cs" />
   </ItemGroup>
 </Project>

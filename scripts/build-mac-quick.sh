@@ -34,7 +34,6 @@ unset CARGO_TARGET_DIR
 
 ARCH="${TOKENSTAT_MAC_ARCH:-arm64}"
 PROJECT="$ROOT/apps/mac/Tokenstat.xcodeproj"
-PROJECT_YML="$ROOT/apps/mac/project.yml"
 FFI="$ROOT/apps/mac/Vendor/TokenstatFFI.xcframework"
 DERIVED="$ROOT/target/xcode-debug"
 APP="$DERIVED/Build/Products/Debug/Tokenstat.app"
@@ -82,14 +81,14 @@ if [ "$refresh_rust" -eq 1 ]; then
     "$ROOT/scripts/build-ffi-xcframework.sh" macos
 fi
 
-if [ ! -d "$PROJECT" ] || [ "$PROJECT_YML" -nt "$PROJECT/project.pbxproj" ]; then
-    command -v xcodegen > /dev/null || {
-        echo "xcodegen is required: brew install xcodegen" >&2
-        exit 1
-    }
-    echo "Generating the Xcode project"
-    (cd "$ROOT/apps/mac" && xcodegen > /dev/null)
-fi
+# Source globs are expanded when XcodeGen runs. New Swift files must enter
+# the project even when project.yml itself has not changed.
+command -v xcodegen > /dev/null || {
+    echo "xcodegen is required: brew install xcodegen" >&2
+    exit 1
+}
+echo "Generating the Xcode project"
+(cd "$ROOT/apps/mac" && xcodegen > /dev/null)
 
 echo "Building Debug Tokenstat ($ARCH)"
 mkdir -p "$DERIVED"

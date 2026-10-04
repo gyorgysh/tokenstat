@@ -104,7 +104,9 @@ enum TranscriptReading {
                 fetched += 1
                 continue
             }
-            place(rowID, point)
+            // A kept row may be folded into a step group. Open it, so the
+            // reader lands on the row itself.
+            place(model.revealRow(rowID), point)
             placements += 1
             if placements > corrections { break }
         }

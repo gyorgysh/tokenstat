@@ -311,6 +311,13 @@ fun ChatAgentSheet(
                         style = TsType.callout.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
                         color = colors.textPrimary,
                     )
+                    current?.let { backend ->
+                        AgentSetupCard(model, peer, hostLabel, backend, locked || updating, showWhenReady = true) { readiness, verified ->
+                            onBackends(backends.map {
+                                if (it.str("id") == backend.str("id")) JsonObject(it + ("readiness" to JsonPrimitive(readiness)) + ("signInVerified" to JsonPrimitive(verified))) else it
+                            })
+                        }
+                    }
                     backends.filter { it.str("id") != "sh" }.forEach { backend ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {

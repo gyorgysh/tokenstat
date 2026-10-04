@@ -62,6 +62,7 @@ pub mod chat;
 pub mod chat_brain;
 #[cfg(feature = "local-host")]
 pub mod chat_gate;
+pub mod chat_question;
 #[cfg(feature = "local-host")]
 pub mod chat_receipts;
 #[cfg(feature = "local-host")]
@@ -225,4 +226,6 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 25 adds `chat.steer`, `chat.steerClear` and `chat.steerDeliver`,
 /// so a short note can ride the next tool step while a turn is still running.
 /// Version 26 adds independent saved-transcript copies with `chat.fork`.
-pub const PROTOCOL_VERSION: &str = "27";
+/// Version 28 adds guided agent setup checks and published-branch PR creation.
+/// Version 29 adds agent questions in chat, answered with `chat.answerQuestion`.
+pub const PROTOCOL_VERSION: &str = "29";

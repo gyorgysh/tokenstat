@@ -102,52 +102,6 @@ extension View {
     }
 }
 
-private struct RetainedPaneLayout: Layout {
-    var isActive: Bool
-    struct Cache { var size: CGSize? }
-
-    func makeCache(subviews: Subviews) -> Cache { Cache() }
-
-    func updateCache(_ cache: inout Cache, subviews: Subviews) {
-        // A hidden pane's last size must survive parent updates. Layout's
-        // default recreates the cache and would measure the hidden tree again
-        // at each foreground resize. Active panes refresh in sizeThatFits.
-        if subviews.isEmpty { cache.size = nil }
-    }
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
-        guard let pane = subviews.first else { return .zero }
-        // A pane fills what it is offered. With both sides offered the answer
-        // is the offer, so measuring the pane first only threw its whole
-        // subtree's layout away. That was half the main thread while a
-        // persona animated, since every frame lays the window out again.
-        if let width = proposal.width, let height = proposal.height {
-            let offered = CGSize(width: width, height: height)
-            if isActive || cache.size == nil { cache.size = offered }
-            return offered
-        }
-        if isActive || cache.size == nil {
-            cache.size = pane.sizeThatFits(proposal)
-        }
-        return proposal.replacingUnspecifiedDimensions(by: cache.size ?? .zero)
-    }
-
-    // A pane is a whole screen and aligns by its frame. The default asks every
-    // subview for its guides, which measures the pane a second time.
-    func explicitAlignment(of guide: HorizontalAlignment, in bounds: CGRect, proposal: ProposedViewSize,
-                           subviews: Subviews, cache: inout Cache) -> CGFloat? { nil }
-
-    func explicitAlignment(of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize,
-                           subviews: Subviews, cache: inout Cache) -> CGFloat? { nil }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
-        guard let pane = subviews.first else { return }
-        let size = isActive ? bounds.size : (cache.size ?? bounds.size)
-        if isActive { cache.size = size }
-        pane.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(size))
-    }
-}
-
 @available(macOS 26, *)
 private struct SidebarGlassSurface: View {
     /// Settle the native glass against either bright or dark backgrounds.

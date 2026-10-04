@@ -29,8 +29,24 @@ struct ClientChatEventRow: View {
     /// Whether this row may run the transcript's spinner. See
     /// `TranscriptFollow.spinningRow`.
     var animatesRunning = true
+    /// The chat's Detailed level: tool output and diffs start open.
+    var expandsOutput = false
+    /// Opens or folds a step group, by the group's row id.
+    var toggleGroup: (String) -> Void = { _ in }
+    /// Answers one of the agent's questions.
+    var answerQuestion: (ChatQuestion, String) -> Void = { _, _ in }
+    /// This row's question is on its way to the host.
+    var answeringQuestion = false
+    /// False for a saved copy, which cannot send anything.
+    var canAnswerQuestions = true
 
     var body: some View {
+        content
+            .modifier(ChatGroupStepInset(nested: item.groupID != nil))
+    }
+
+    @ViewBuilder
+    private var content: some View {
         switch item.kind {
         case let .user(text):
             HStack(alignment: .top, spacing: Theme.Space.s) {
@@ -115,10 +131,17 @@ struct ClientChatEventRow: View {
                 time: state.duration,
                 running: state.running,
                 failed: state.failed,
-                animatesRunning: animatesRunning
+                animatesRunning: animatesRunning,
+                expandsOutput: expandsOutput
             )
         case let .edit(state):
-            ChatFileEditRow(state: state, animatesRunning: animatesRunning)
+            ChatFileEditRow(state: state, animatesRunning: animatesRunning, expandsOutput: expandsOutput)
+        case let .group(group):
+            ChatStepGroupRow(group: group, animatesRunning: animatesRunning) { toggleGroup(item.id) }
+        case let .question(question):
+            ChatQuestionCard(question: question, canAnswer: canAnswerQuestions, isSending: answeringQuestion) { text in
+                answerQuestion(question, text)
+            }
         case let .attachment(attachment):
             // Same as the Mac: stable identity across polls. The revision
             // still redraws through Equatable; recreating collapsed the row.
@@ -456,6 +479,9 @@ extension ClientChatEventRow: Equatable {
             && lhs.faceSeed == rhs.faceSeed
             && lhs.isLive == rhs.isLive
             && lhs.animatesRunning == rhs.animatesRunning
+            && lhs.expandsOutput == rhs.expandsOutput
+            && lhs.answeringQuestion == rhs.answeringQuestion
+            && lhs.canAnswerQuestions == rhs.canAnswerQuestions
         else { return false }
         if case .attachment = lhs.item.kind {
             return lhs.attachmentIsLoading == rhs.attachmentIsLoading

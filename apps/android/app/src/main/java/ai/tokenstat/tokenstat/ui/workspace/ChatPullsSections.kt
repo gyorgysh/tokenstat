@@ -73,6 +73,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -247,6 +248,14 @@ fun ChatSection(
     var autoScrolling by remember(projectOwner, openId) { mutableStateOf(false) }
     val context = LocalContext.current
     val homeStores = remember(context) { HomeStores(context) }
+    // How much of the agent's work shows between a question and its answer.
+    // One level for every chat on this device. Which groups are open is the
+    // open conversation's own, and starts folded each time it opens.
+    val detailStore = remember(context) { ChatDetailStore(context) }
+    var detail by remember(detailStore) { mutableStateOf(detailStore.level()) }
+    var detailMenu by remember { mutableStateOf(false) }
+    var groupsOpen by remember(projectOwner, openId) { mutableStateOf(false) }
+    var toggledGroups by remember(projectOwner, openId) { mutableStateOf(emptySet<String>()) }
     val pinIdentity = HomeStores.pinIdentity(client.account)
     /// How the last conversation was set up, which is what a new one opens
     /// with. See `LaunchDefaults`.
@@ -1020,6 +1029,14 @@ fun ChatSection(
     suspend fun send(text: String) {
         val id = openId ?: return
         if (!ownsProject()) return
+        val selectedBackend = backends.firstOrNull { it.str("id") == chats.firstOrNull { chat -> chat.str("id") == id }?.str("backend") }
+        // Only the CLI's own answer stops a send. A stored token past its
+        // expiry is routine (the CLI renews it), and an agent signed in with
+        // an environment key has no login file at all.
+        if (selectedBackend?.bol("signInVerified") == true && selectedBackend.str("readiness") in listOf("needsSignIn", "expired")) {
+            error = L10n.text("android.agentsetup.draft_kept", selectedBackend?.str("label") ?: "")
+            return
+        }
         val sentOwner = projectOwner?.conversation(id) ?: return
         val sentDraft = model.chatComposers.capture(sentOwner)
         val sent = sentDraft.snapshot
@@ -1422,6 +1439,37 @@ fun ChatSection(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                Box {
+                    IconButton(onClick = { detailMenu = true }) {
+                        Icon(
+                            ActionIcon.Visibility.vector,
+                            L10n.text("android.chatdetail.title"),
+                            tint = LocalTsColors.current.accent,
+                        )
+                    }
+                    DropdownMenu(expanded = detailMenu, onDismissRequest = { detailMenu = false }) {
+                        ChatDetail.entries.forEach { level ->
+                            ChatAgentMenuItem(chatDetailLabel(level), detail == level) {
+                                detail = level
+                                detailStore.setLevel(level)
+                                detailMenu = false
+                            }
+                        }
+                        if (detail != ChatDetail.Detailed) {
+                            HorizontalDivider()
+                            val anyOpen = groupsOpen || toggledGroups.isNotEmpty()
+                            DropdownMenuItem(
+                                text = { Text(if (anyOpen) L10n.text("android.chatdetail.collapse_steps") else L10n.text("android.chatdetail.expand_steps")) },
+                                leadingIcon = { Icon(if (anyOpen) ActionIcon.Collapse.vector else ActionIcon.Preview.vector, null) },
+                                onClick = {
+                                    groupsOpen = !anyOpen
+                                    toggledGroups = emptySet()
+                                    detailMenu = false
+                                },
+                            )
+                        }
+                    }
+                }
                 IconButton(onClick = { showingSetup = true }) {
                     Icon(
                         ActionIcon.Settings.vector,
@@ -1474,6 +1522,13 @@ fun ChatSection(
                     defaultBackend = openChat?.str("backend"),
                     running = openChat?.bol("running") ?: true,
                 )
+            }
+            // What the list draws. `transcript` stays every row, for the
+            // seat line and anything else that must see a folded step.
+            val shownRows = remember(transcript, detail, groupsOpen, toggledGroups) {
+                foldTranscript(transcript, detail, running = openChat?.bol("running") ?: true) { id ->
+                    groupsOpen != (id in toggledGroups)
+                }
             }
             // Fills, rather than wrapping: the composer below is docked to
             // the bottom edge the way every chat app docks it, instead of
@@ -1553,7 +1608,7 @@ fun ChatSection(
                                     onClick = { openId?.let { id -> scope.launch { loadEarlier(id) } } })
                             }
                         }
-                        items(transcript, key = { it.id }) { item ->
+                        items(shownRows, key = { it.id }) { item ->
                             TranscriptItemRow(
                                 item = item,
                                 model = model,
@@ -1561,6 +1616,11 @@ fun ChatSection(
                                 chatId = openId ?: "",
                                 hostLabel = hostLabel,
                                 defaultAgentName = openChat?.str("backend")?.let { harnessName(it) } ?: L10n.text("android.chatpullssections.agent.11b39c93"),
+                                expandsOutput = detail == ChatDetail.Detailed,
+                                canAnswerQuestions = !offline,
+                                onToggleGroup = { id ->
+                                    toggledGroups = if (id in toggledGroups) toggledGroups - id else toggledGroups + id
+                                },
                             )
                         }
                         // The turn in progress, with the conversation's own
@@ -1680,6 +1740,18 @@ fun ChatSection(
                     }
                 },
             )
+            if (!offline) {
+                val selectedBackend = backends.firstOrNull { it.str("id") == chats.firstOrNull { chat -> chat.str("id") == openId }?.str("backend") }
+                selectedBackend?.let { backend ->
+                    key(projectOwner, backend.str("id")) {
+                        AgentSetupCard(model, peer, hostLabel, backend, sending || runningTurn) { readiness, verified ->
+                            if (ownsProject()) backends = backends.map {
+                                if (it.str("id") == backend.str("id")) JsonObject(it + ("readiness" to JsonPrimitive(readiness)) + ("signInVerified" to JsonPrimitive(verified))) else it
+                            }
+                        }
+                    }
+                }
+            }
             ChatComposer(
                 chat = chats.firstOrNull { it.str("id") == openId },
                 draft = draft,
@@ -1947,6 +2019,12 @@ private fun ChatStatPanels(chats: List<JsonObject>) {
             }
         }
     }
+}
+
+private fun chatDetailLabel(level: ChatDetail): String = when (level) {
+    ChatDetail.Compact -> L10n.text("android.chatdetail.compact")
+    ChatDetail.Standard -> L10n.text("android.chatdetail.standard")
+    ChatDetail.Detailed -> L10n.text("android.chatdetail.detailed")
 }
 
 @Composable
@@ -2440,6 +2518,7 @@ fun PullsSection(
     var scopeName by remember { mutableStateOf("all") }
     var stateName by remember { mutableStateOf("open") }
     var openNumber by remember { mutableStateOf<Long?>(null) }
+    var creatingPull by remember(peer, workspace) { mutableStateOf(false) }
 
     suspend fun load() {
         loading = true
@@ -2458,6 +2537,8 @@ fun PullsSection(
         loading = false
     }
     LaunchedEffect(workspace, scopeName, stateName) { load() }
+    if (creatingPull) PullCreateDialog(model, peer, workspace, protocol, folderName, hostLabel,
+        onDismiss = { creatingPull = false }, onCreated = { scope.launch { load() } })
     val opened = openNumber
     if (opened != null) {
         PullDetailPage(
@@ -2481,6 +2562,9 @@ fun PullsSection(
             return
         }
         val available = availability
+        if (available?.str("state") == "ready") {
+            TsSecondaryButton(label = L10n.text("android.pullcreate.new"), icon = ActionIcon.Create.vector, small = true, onClick = { creatingPull = true })
+        }
         if (available != null && (available.str("state") ?: "") != "ready") {
             Column(
                 Modifier

@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
 using Tokenstat.Design;
@@ -30,6 +31,13 @@ internal sealed partial class ChatPage
     private const double WorkingSeatHeight = 34;
 
     private readonly Dictionary<string, bool> _expandedCards = [];
+    /// <summary>
+    /// Every step group starts open (Expand all) or closed. A group in
+    /// <see cref="_toggledGroups"/> is the other way, because somebody opened
+    /// or closed it by hand.
+    /// </summary>
+    private bool _groupsOpen;
+    private readonly HashSet<string> _toggledGroups = [];
     private readonly Border _followPillHost = new()
     {
         HorizontalAlignment = HorizontalAlignment.Center,
@@ -53,6 +61,10 @@ internal sealed partial class ChatPage
         _history.Reset();
         _historyLoading = false;
         _expandedCards.Clear();
+        _questionWriting.Clear();
+        _questionPicks.Clear();
+        _groupsOpen = false;
+        _toggledGroups.Clear();
         _sliceOlder = 0;
         _followEnd = true;
         _followPaused = false;
@@ -244,7 +256,401 @@ internal sealed partial class ChatPage
     private bool CardExpanded(DisplayItem item)
     {
         if (_expandedCards.TryGetValue(item.Id, out var user)) return user;
+        // Detailed opens every finished output, not only a small diff.
+        if (ChatDetailPreference.Level == ChatDetail.Detailed && !item.Running
+            && (item.Kind == ItemKind.Tool ? !string.IsNullOrEmpty(item.Detail)
+                : item.Kind == ItemKind.Edit && !string.IsNullOrEmpty(item.Patch)))
+        {
+            return true;
+        }
         return ShouldAutoExpand(item);
+    }
+
+    /// <summary>Questions whose answer is on its way to the host.</summary>
+    private readonly HashSet<string> _answering = [];
+    private readonly Dictionary<string, string> _questionWriting = [];
+    private readonly Dictionary<string, List<string>> _questionPicks = [];
+
+    /// <summary>
+    /// A question the agent asked, drawn where it asked it, like the Mac's
+    /// ChatQuestionCard. Choices answer in one click, a multiple-choice
+    /// question collects its picks first, and the field takes an answer of
+    /// the person's own. Once answered it says what was sent, nothing more.
+    /// </summary>
+    private UIElement QuestionCard(ChatQuestionItem question)
+    {
+        var body = new StackPanel { Spacing = Theme.SpaceS };
+        body.Children.Add(new TextBlock
+        {
+            Text = L10n.Text("windows.chatquestion.title"),
+            FontSize = 12,
+            FontWeight = FontWeights.Medium,
+            Foreground = Theme.AccentBrush,
+        });
+        body.Children.Add(new TextBlock
+        {
+            Text = question.Question,
+            FontSize = 14,
+            FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+        });
+        if (question.Answer is { } answered)
+        {
+            body.Children.Add(new TextBlock { Text = L10n.Text("windows.chatquestion.answered", answered), FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
+            var delivery = question.Delivery switch
+            {
+                "note" => L10n.Text("windows.chatquestion.delivery_note"),
+                "queued" => L10n.Text("windows.chatquestion.delivery_queued"),
+                "sent" => L10n.Text("windows.chatquestion.delivery_sent"),
+                _ => null,
+            };
+            if (delivery is not null) body.Children.Add(new TextBlock { Text = delivery, FontSize = 12, Opacity = 0.7 });
+            return QuestionFrame(body, answered: true);
+        }
+        body.Children.Add(new TextBlock
+        {
+            Text = !question.Blocking && question.DefaultAnswer is { } fallback
+                ? L10n.Text("windows.chatquestion.going_with", fallback)
+                : L10n.Text("windows.chatquestion.waiting"),
+            FontSize = 12,
+            Opacity = 0.7,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        var sending = _answering.Contains(question.Id);
+        if (!_questionPicks.TryGetValue(question.Id, out var picked))
+            _questionPicks[question.Id] = picked = [];
+        if (question.Options.Count > 0)
+        {
+            var chips = new WrapPanel { Spacing = Theme.SpaceS };
+            Button? sendPicked = null;
+            foreach (var option in question.Options)
+            {
+                var chip = new ToggleButton
+                {
+                    Content = option,
+                    IsChecked = picked.Contains(option),
+                    IsEnabled = !sending,
+                    CornerRadius = new CornerRadius(14),
+                    Padding = new Thickness(12, 4, 12, 4),
+                };
+                if (question.Multiple)
+                {
+                    chip.Checked += (_, _) => { if (!picked.Contains(option)) picked.Add(option); if (sendPicked is not null) sendPicked.IsEnabled = !sending; };
+                    chip.Unchecked += (_, _) => { picked.Remove(option); if (sendPicked is not null) sendPicked.IsEnabled = picked.Count > 0; };
+                }
+                else
+                {
+                    chip.Click += async (_, _) => await AnswerQuestionAsync(question, option);
+                }
+                chips.Children.Add(chip);
+            }
+            body.Children.Add(chips);
+            if (question.Multiple)
+            {
+                sendPicked = Buttons.Primary(L10n.Text("windows.chatquestion.send_choices"), ActionIcon.Send,
+                    async (_, _) => await AnswerQuestionAsync(question, string.Join(", ", picked)), small: true);
+                sendPicked.IsEnabled = !sending && picked.Count > 0;
+                body.Children.Add(sendPicked);
+            }
+        }
+        var row = new Grid { ColumnSpacing = Theme.SpaceS };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var field = new TextBox { PlaceholderText = L10n.Text("windows.chatquestion.own_answer"), IsEnabled = !sending,
+            Text = _questionWriting.GetValueOrDefault(question.Id, "") };
+        var send = Buttons.Secondary(L10n.Text("windows.chatquestion.send"), ActionIcon.Send,
+            async (_, _) => await AnswerQuestionAsync(question, field.Text), small: true);
+        send.IsEnabled = !sending && field.Text.Trim().Length > 0;
+        field.TextChanged += (_, _) => {
+            _questionWriting[question.Id] = field.Text;
+            send.IsEnabled = !sending && field.Text.Trim().Length > 0;
+        };
+        field.KeyDown += async (_, args) =>
+        {
+            if (args.Key != Windows.System.VirtualKey.Enter || field.Text.Trim().Length == 0) return;
+            args.Handled = true;
+            await AnswerQuestionAsync(question, field.Text);
+        };
+        row.Children.Add(field);
+        Grid.SetColumn(send, 1);
+        row.Children.Add(send);
+        body.Children.Add(row);
+        return QuestionFrame(body, answered: false);
+    }
+
+    private static Border QuestionFrame(UIElement body, bool answered) => new()
+    {
+        Background = Theme.Brush(static () => WithAlpha(Theme.AccentSoft, 0.5)),
+        BorderBrush = answered
+            ? Theme.Brush(static () => WithAlpha(Theme.Accent, 0.2))
+            : Theme.Brush(static () => WithAlpha(Theme.Accent, 0.45)),
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(14),
+        Padding = new Thickness(Theme.SpaceM),
+        Child = body,
+    };
+
+    /// <summary>
+    /// Send one answer. The host records it and the card turns answered on the
+    /// next read of the transcript, on every device at once.
+    /// </summary>
+    private async Task AnswerQuestionAsync(ChatQuestionItem question, string answer)
+    {
+        answer = answer.Trim();
+        var chat = _openId;
+        if (answer.Length == 0 || chat is null || !_answering.Add(question.Id)) return;
+        var generation = _openGeneration;
+        RebuildTranscript();
+        try
+        {
+            var result = await CallChatAsync("chat.answerQuestion", new JsonObject
+            {
+                ["id"] = chat,
+                ["questionId"] = question.Id,
+                ["text"] = answer,
+            });
+            // An answer to an idle chat started a turn. Follow it the way a
+            // sent message is followed; the other deliveries ride the poll.
+            if (generation == _openGeneration && _openId == chat && result["conversation"] is JsonObject updated)
+            {
+                _openChat = ChatSteerOverlay.MergeRecord(updated, _openChat);
+                _running = true;
+                _started = true;
+                PaintConversation();
+                StartPoll();
+            }
+        }
+        catch (Exception ex)
+        {
+            if (generation == _openGeneration) Banner(ex.Message);
+        }
+        finally
+        {
+            _answering.Remove(question.Id);
+            if (generation == _openGeneration) RebuildTranscript();
+        }
+    }
+
+    private bool IsGroupOpen(string id) => _groupsOpen != _toggledGroups.Contains(id);
+
+    private void ToggleGroup(string id)
+    {
+        if (!_toggledGroups.Remove(id)) _toggledGroups.Add(id);
+        RebuildTranscript();
+    }
+
+    private void SetAllGroups(bool open)
+    {
+        _groupsOpen = open;
+        _toggledGroups.Clear();
+        RebuildTranscript();
+    }
+
+    private bool AnyGroupOpen() => _groupsOpen || _toggledGroups.Count > 0;
+
+    /// <summary>
+    /// The detail level, and Expand or Collapse all, in one menu beside the
+    /// conversation's other actions.
+    /// </summary>
+    private Button DetailButton()
+    {
+        var button = ActionIconGlyph.Button(L10n.Text("windows.chatdetail.title"), ActionIcon.Visibility, (_, _) => { });
+        var menu = new MenuFlyout();
+        menu.Opening += (_, _) =>
+        {
+            menu.Items.Clear();
+            foreach (var (level, label) in new[]
+            {
+                (ChatDetail.Compact, L10n.Text("windows.chatdetail.compact")),
+                (ChatDetail.Standard, L10n.Text("windows.chatdetail.standard")),
+                (ChatDetail.Detailed, L10n.Text("windows.chatdetail.detailed")),
+            })
+            {
+                var choice = new RadioMenuFlyoutItem
+                {
+                    Text = label,
+                    GroupName = "chat-detail",
+                    IsChecked = ChatDetailPreference.Level == level,
+                };
+                choice.Click += (_, _) =>
+                {
+                    ChatDetailPreference.Level = level;
+                    RebuildTranscript(full: true);
+                };
+                menu.Items.Add(choice);
+            }
+            if (ChatDetailPreference.Level == ChatDetail.Detailed) return;
+            menu.Items.Add(new MenuFlyoutSeparator());
+            var open = AnyGroupOpen();
+            var all = new MenuFlyoutItem
+            {
+                Text = open ? L10n.Text("windows.chatdetail.collapse_steps") : L10n.Text("windows.chatdetail.expand_steps"),
+            };
+            all.Click += (_, _) => SetAllGroups(!open);
+            menu.Items.Add(all);
+        };
+        button.Flyout = menu;
+        return button;
+    }
+
+    /// <summary>What a group row shows, so it is rebuilt only when that changes.</summary>
+    private static string StepGroupKey(ChatStepGroup? group) => group is null ? ""
+        : $"{group.Style}|{group.Open}|{group.Steps}|{group.Files}|{group.Added}|{group.Removed}|{group.Reads}|{group.Searches}|{group.Pages}|{group.Running}|{group.LiveVerb}|{group.LiveTarget}|{group.StartedAt}|{group.EndedAt}|{group.Cost}|{group.Preview}";
+
+    /// <summary>
+    /// One line standing in for folded steps, like the Mac's ChatStepGroupRow.
+    /// The whole line is the control: it shows or hides the steps below it.
+    /// </summary>
+    private UIElement StepGroupRow(string id, ChatStepGroup group)
+    {
+        var tint = group.Running ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph);
+        var row = new Grid { ColumnSpacing = Theme.SpaceS };
+        for (var column = 0; column < 6; column++)
+        {
+            row.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = column == 3 ? new GridLength(1, GridUnitType.Star) : GridLength.Auto,
+            });
+        }
+
+        var chevron = new FontIcon
+        {
+            Glyph = group.Open ? "\uE70D" : "\uE76C",
+            FontSize = 10,
+            Opacity = 0.7,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        row.Children.Add(chevron);
+
+        FrameworkElement mark = group.Running
+            ? new ProgressRing { Width = 12, Height = 12, IsActive = true, VerticalAlignment = VerticalAlignment.Center }
+            : IconMark(group.Style switch
+            {
+                ChatStepGroupStyle.Explored => ActionIcon.Search,
+                ChatStepGroupStyle.Thought => ActionIcon.Plan,
+                _ => ActionIcon.History,
+            }, tint);
+        Grid.SetColumn(mark, 1);
+        row.Children.Add(mark);
+
+        var title = new TextBlock
+        {
+            Text = StepGroupTitle(group),
+            FontSize = 13,
+            FontWeight = FontWeights.Medium,
+            Foreground = group.Running ? Theme.AccentBrush : null,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        Grid.SetColumn(title, 2);
+        row.Children.Add(title);
+
+        var summary = new TextBlock
+        {
+            Text = StepGroupSummary(group),
+            FontFamily = Fonts.Mono,
+            FontSize = 11,
+            Opacity = 0.7,
+            TextWrapping = TextWrapping.NoWrap,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(summary, 3);
+        row.Children.Add(summary);
+
+        if (group.Added + group.Removed > 0)
+        {
+            var stat = DiffStat(group.Added, group.Removed);
+            Grid.SetColumn(stat, 4);
+            row.Children.Add(stat);
+        }
+        if (group.Cost is > 0 and var cost)
+        {
+            var spend = new TextBlock
+            {
+                Text = "$" + cost.ToString("0.00##", System.Globalization.CultureInfo.InvariantCulture),
+                FontFamily = Fonts.Mono,
+                FontSize = 11,
+                Foreground = Theme.AccentBrush,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(spend, 5);
+            row.Children.Add(spend);
+        }
+
+        var button = new Button
+        {
+            Content = row,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(Theme.SpaceS, 6, Theme.SpaceS, 6),
+            CornerRadius = new CornerRadius(Theme.CardRadius),
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, title.Text + ", " + summary.Text);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(button,
+            group.Open ? L10n.Text("windows.chatdetail.hide_steps") : L10n.Text("windows.chatdetail.show_steps"));
+        button.Click += (_, _) => ToggleGroup(id);
+        return button;
+    }
+
+    /// <summary>
+    /// A step under its open group: inset, with a rule down the left so it
+    /// reads as belonging to the line above it.
+    /// </summary>
+    private static UIElement GroupStepInset(UIElement view) => new Border
+    {
+        BorderBrush = Theme.BorderBrush,
+        BorderThickness = new Thickness(1, 0, 0, 0),
+        Margin = new Thickness(13, 0, 0, 0),
+        Padding = new Thickness(Theme.SpaceS, 0, 0, 0),
+        Child = view,
+    };
+
+    private static string StepGroupTitle(ChatStepGroup group) => group.Style switch
+    {
+        ChatStepGroupStyle.Work when group.Running && group.LiveVerb is not null => SeatStep.Phrase(group.LiveVerb, group.LiveTarget ?? ""),
+        ChatStepGroupStyle.Work when group.Running => L10n.Text("common.working"),
+        ChatStepGroupStyle.Work => StepGroupDuration(group) is { } took
+            ? L10n.Text("windows.chatdetail.worked_for", took)
+            : L10n.Text("windows.chatdetail.worked"),
+        ChatStepGroupStyle.Explored => group.Running ? L10n.Text("windows.chatdetail.exploring") : L10n.Text("windows.chatdetail.explored"),
+        _ => L10n.Text("windows.chatdetail.thought"),
+    };
+
+    private static string StepGroupSummary(ChatStepGroup group)
+    {
+        var parts = new List<string>();
+        switch (group.Style)
+        {
+            case ChatStepGroupStyle.Work:
+                parts.Add(group.Steps == 1 ? L10n.Text("windows.chatdetail.steps.one", "1") : L10n.Text("windows.chatdetail.steps.other", $"{group.Steps}"));
+                if (group.Files > 0) parts.Add(group.Files == 1 ? L10n.Text("windows.chatdetail.files_edited.one", "1") : L10n.Text("windows.chatdetail.files_edited.other", $"{group.Files}"));
+                return string.Join(" · ", parts);
+            case ChatStepGroupStyle.Explored:
+                if (group.Reads > 0) parts.Add(group.Reads == 1 ? L10n.Text("windows.chatdetail.files.one", "1") : L10n.Text("windows.chatdetail.files.other", $"{group.Reads}"));
+                if (group.Searches > 0) parts.Add(group.Searches == 1 ? L10n.Text("windows.chatdetail.searches.one", "1") : L10n.Text("windows.chatdetail.searches.other", $"{group.Searches}"));
+                if (group.Pages > 0) parts.Add(group.Pages == 1 ? L10n.Text("windows.chatdetail.pages.one", "1") : L10n.Text("windows.chatdetail.pages.other", $"{group.Pages}"));
+                return string.Join(", ", parts);
+            default:
+                return group.Preview ?? "";
+        }
+    }
+
+    /// <summary>"10s", "3m", "1h 5m", floored, like the Mac's turn timer.</summary>
+    private static string? StepGroupDuration(ChatStepGroup group)
+    {
+        if (group.Running || group.StartedAt is not { } start || group.EndedAt is not { } end || end <= start) return null;
+        var seconds = (end - start) / 1000;
+        if (seconds < 60) return L10n.Text("windows.chatdetail.duration_s", $"{seconds}");
+        var minutes = seconds / 60;
+        if (minutes < 60) return L10n.Text("windows.chatdetail.duration_m", $"{minutes}");
+        var rest = minutes % 60;
+        return rest == 0
+            ? L10n.Text("windows.chatdetail.duration_h", $"{minutes / 60}")
+            : L10n.Text("windows.chatdetail.duration_h_m", $"{minutes / 60}", $"{rest}");
     }
 
     private static bool ShouldAutoExpand(DisplayItem item)

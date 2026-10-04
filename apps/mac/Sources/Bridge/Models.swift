@@ -2940,12 +2940,29 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
     var launcherID: String? = nil
     var canInstall: Bool = false
     var readiness: String? = nil
+    var signIn: AgentSignIn? = nil
+    var canCheckSignIn: Bool = false
+    /// Whether `readiness` is the CLI's own answer to `launcher.checkSignIn`
+    /// rather than the catalog's reading of its files. Local to this client,
+    /// never encoded: a reload of the list is file evidence again.
+    var signInVerified: Bool = false
     var gateTier: String
+
+    /// Older hosts already support these two terminal flows, but do not yet
+    /// include sign-in metadata in chat.backends.
+    var signInFlow: AgentSignIn? {
+        if let signIn { return signIn }
+        switch launcherID {
+        case "claude_code": return AgentSignIn(supported: true, kind: "browserCode")
+        case "codex": return AgentSignIn(supported: true, kind: "deviceCode")
+        default: return nil
+        }
+    }
 
     enum CodingKeys: String, CodingKey {
         case id, label, name, command, models, efforts, gateTier, modelListStatus, installed
         case launcherID = "launcherId"
-        case canInstall, readiness
+        case canInstall, readiness, signIn, canCheckSignIn
     }
 
     init(from decoder: Decoder) throws {
@@ -2955,6 +2972,8 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
         launcherID = try c.decodeIfPresent(String.self, forKey: .launcherID)
         canInstall = try c.decodeIfPresent(Bool.self, forKey: .canInstall) ?? false
         readiness = try c.decodeIfPresent(String.self, forKey: .readiness)
+        signIn = try c.decodeIfPresent(AgentSignIn.self, forKey: .signIn)
+        canCheckSignIn = try c.decodeIfPresent(Bool.self, forKey: .canCheckSignIn) ?? false
         id = try c.decode(String.self, forKey: .id)
         label = try c.decodeIfPresent(String.self, forKey: .label)
             ?? c.decodeIfPresent(String.self, forKey: .name)
@@ -2978,6 +2997,8 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
         try c.encodeIfPresent(launcherID, forKey: .launcherID)
         try c.encode(canInstall, forKey: .canInstall)
         try c.encodeIfPresent(readiness, forKey: .readiness)
+        try c.encodeIfPresent(signIn, forKey: .signIn)
+        try c.encode(canCheckSignIn, forKey: .canCheckSignIn)
     }
 }
 
@@ -3176,6 +3197,10 @@ private struct FailableChatEvent: Decodable {
 struct ChatTimelineEvent: Codable, Sendable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case kind, text, seq, atMs, backend, event, approval, to, brief
+        case recordID = "id"
+        case question, options, multiple, blocking, delivery
+        case defaultAnswer = "default"
+        case questionID = "questionId"
         /// The spelling the archive itself holds. A host new enough writes
         /// both; one that is not writes only this. Read, never written.
         case atMsLegacy = "at_ms"
@@ -3199,6 +3224,17 @@ struct ChatTimelineEvent: Codable, Sendable, Identifiable {
     /// text tokenstat put in front of somebody's agent on their behalf.
     var to: String?
     var brief: String?
+    /// Question only: the agent's question, its choices, and what it goes
+    /// with if nobody answers. `recordID` names the question.
+    var recordID: String?
+    var question: String?
+    var options: [String]?
+    var multiple: Bool?
+    var defaultAnswer: String?
+    var blocking: Bool?
+    /// Answer only: which question, and how the answer was sent on.
+    var questionID: String?
+    var delivery: String?
     var id: String {
         "\(kind)-\(atMs ?? 0)-\(text ?? event?.delta ?? event?.verb ?? event?.status ?? approval?.id ?? to ?? "event")"
     }
@@ -3215,6 +3251,14 @@ struct ChatTimelineEvent: Codable, Sendable, Identifiable {
         approval = try c.decodeIfPresent(ChatApproval.self, forKey: .approval)
         to = try c.decodeIfPresent(String.self, forKey: .to)
         brief = try c.decodeIfPresent(String.self, forKey: .brief)
+        recordID = try c.decodeIfPresent(String.self, forKey: .recordID)
+        question = try c.decodeIfPresent(String.self, forKey: .question)
+        options = try c.decodeIfPresent([String].self, forKey: .options)
+        multiple = try c.decodeIfPresent(Bool.self, forKey: .multiple)
+        defaultAnswer = try c.decodeIfPresent(String.self, forKey: .defaultAnswer)
+        blocking = try c.decodeIfPresent(Bool.self, forKey: .blocking)
+        questionID = try c.decodeIfPresent(String.self, forKey: .questionID)
+        delivery = try c.decodeIfPresent(String.self, forKey: .delivery)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -3228,6 +3272,14 @@ struct ChatTimelineEvent: Codable, Sendable, Identifiable {
         try c.encodeIfPresent(approval, forKey: .approval)
         try c.encodeIfPresent(to, forKey: .to)
         try c.encodeIfPresent(brief, forKey: .brief)
+        try c.encodeIfPresent(recordID, forKey: .recordID)
+        try c.encodeIfPresent(question, forKey: .question)
+        try c.encodeIfPresent(options, forKey: .options)
+        try c.encodeIfPresent(multiple, forKey: .multiple)
+        try c.encodeIfPresent(defaultAnswer, forKey: .defaultAnswer)
+        try c.encodeIfPresent(blocking, forKey: .blocking)
+        try c.encodeIfPresent(questionID, forKey: .questionID)
+        try c.encodeIfPresent(delivery, forKey: .delivery)
     }
 }
 
