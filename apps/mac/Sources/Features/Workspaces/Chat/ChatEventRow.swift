@@ -299,7 +299,7 @@ func diffColoredText(_ patch: String, lineLimit: Int) -> (text: AttributedString
         total += 1
         guard shown < lineLimit else { continue }
         shown += 1
-        var line = AttributedString(String(raw) + "\n")
+        var line = AttributedString(ChatToolState.clip(String(raw)) + "\n")
         line.foregroundColor =
             (raw.hasPrefix("+") && !raw.hasPrefix("+++")) ? Theme.diffAdded
             : (raw.hasPrefix("-") && !raw.hasPrefix("---")) ? Theme.diffRemoved

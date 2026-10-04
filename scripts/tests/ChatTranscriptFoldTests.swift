@@ -341,5 +341,10 @@ struct ChatTranscriptFoldTests {
         guard case let .changes(second)? = finished.last?.kind else { return require(false, "the last turn's card") }
         require(second.files.map(\.path) == ["/w/c.swift"], "a running edit is not a change yet")
         require(ids(fold([user("u1"), say("a1")], .minimal)) == ["u1", "a1"], "no edits, no card")
+        let large = fold([user("u"), edit("e1", "file", added: .max, removed: .max),
+                          edit("e2", "file", added: .max, removed: .max)], .compact)
+        guard case let .changes(totals)? = large.last?.kind else { fatalError("missing totals") }
+        require(totals.added == UInt64(UInt32.max) * 2 && totals.removed == totals.added,
+                "large edits must not overflow per-file or turn counters")
     }
 }

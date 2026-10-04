@@ -56,6 +56,11 @@ struct BranchPull: Codable, Sendable, Hashable {
     let draft: Bool
     let baseRef: String
 
+    var webURL: URL? {
+        guard let value = URL(string: url), value.scheme?.lowercased() == "https", value.host != nil else { return nil }
+        return value
+    }
+
     var symbol: String {
         if draft, state == "open" { return "pencil.line" }
         switch state {

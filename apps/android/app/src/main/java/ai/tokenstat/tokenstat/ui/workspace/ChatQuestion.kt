@@ -34,13 +34,16 @@ fun stripQuestionBlocks(text: String, streaming: Boolean = true): String {
     val kept = mutableListOf<String>()
     var inside = false
     val block = mutableListOf<String>()
-    for (line in text.split("\n")) {
+    var bodyBytes = 0L
+    val lines = text.split("\n")
+    for ((index, line) in lines.withIndex()) {
         val trimmed = line.trim()
         // The host reads the info string trimmed, so "``` tokenstat-question"
         // is a question there too and must not show as raw JSON here.
         if (!inside && trimmed.startsWith("```") && trimmed.substring(3).trim() == QUESTION_FENCE) {
             inside = true
             block.add(line)
+            bodyBytes = 0
             continue
         }
         if (inside) {
@@ -53,6 +56,13 @@ fun stripQuestionBlocks(text: String, streaming: Boolean = true): String {
                 if (question?.isString != true || question.content.isBlank()) kept.addAll(block)
                 block.clear()
                 inside = false
+            } else {
+                bodyBytes += line.toByteArray(Charsets.UTF_8).size + if (index < lines.lastIndex) 1 else 0
+                if (bodyBytes > QUESTION_BLOCK_MAX_BYTES) {
+                    kept.addAll(block)
+                    block.clear()
+                    inside = false
+                }
             }
             continue
         }

@@ -34,8 +34,13 @@ struct DiffDocumentRow: Identifiable, Sendable {
                     } else {
                         for line in hunk.lines {
                             guard !Task.isCancelled else { return 0 }
-                            let characters = line.text.count
-                            count += max(1, characters / chunkSize + (characters % chunkSize == 0 ? 0 : 1))
+                            if line.text.isEmpty { count += 1; continue }
+                            var start = line.text.startIndex
+                            while start < line.text.endIndex {
+                                guard !Task.isCancelled else { return 0 }
+                                start = end(of: line.text, from: start, limit: chunkSize)
+                                count += 1
+                            }
                         }
                     }
                 }
@@ -74,12 +79,16 @@ struct DiffDocumentRow: Identifiable, Sendable {
                         if chunkSize == .max || line.text.isEmpty {
                             rows.append(Self(id: lineKey, content: .line(line)))
                         } else {
-                            var start = line.text.startIndex
+                            // A grapheme can itself contain megabytes of
+                            // combining marks. Scalar boundaries keep layout
+                            // bounded while preserving every Unicode scalar.
+                            let scalars = line.text.unicodeScalars
+                            var start = scalars.startIndex
                             var part = 0
-                            while start < line.text.endIndex {
+                            while start < scalars.endIndex {
                                 guard !Task.isCancelled else { return [] }
                                 guard rows.count < rowLimit else { return rows }
-                                let end = line.text.index(start, offsetBy: chunkSize, limitedBy: line.text.endIndex) ?? line.text.endIndex
+                                let end = end(of: line.text, from: start, limit: chunkSize)
                                 var piece = line
                                 piece.text = String(line.text[start..<end])
                                 rows.append(Self(id: part == 0 ? lineKey : "\(lineKey):wrap:\(part)",
@@ -94,5 +103,21 @@ struct DiffDocumentRow: Identifiable, Sendable {
             }
         }
         return rows
+    }
+
+    /// Preserve ordinary graphemes at a wrap boundary, using at most one
+    /// bounded lookahead. A pathological grapheme is split on scalar
+    /// boundaries so it cannot turn into a multi-megabyte layout item.
+    private static func end(of text: String, from start: String.Index, limit: Int) -> String.Index {
+        let scalars = text.unicodeScalars
+        let end = scalars.index(start, offsetBy: limit, limitedBy: scalars.endIndex) ?? scalars.endIndex
+        guard end < scalars.endIndex, scalars[end].value >= 128 else { return end }
+        let lookahead = scalars.index(after: end)
+        let candidate = String(scalars[start..<lookahead])
+        guard let last = candidate.last else { return end }
+        let lastUnits = last.unicodeScalars.count
+        let units = candidate.unicodeScalars.count
+        guard lastUnits > 1, lastUnits < units else { return end }
+        return scalars.index(start, offsetBy: units - lastUnits)
     }
 }

@@ -262,7 +262,8 @@ fun ChangesSection(
         )
         // Bring commits in, send them out, and the pull request they belong
         // to, side by side like the Apple Changes footer.
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s),
+            verticalArrangement = Arrangement.spacedBy(Space.xs)) {
             PullButton(
                 model = model,
                 peer = peer,

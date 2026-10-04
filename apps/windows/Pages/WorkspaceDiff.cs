@@ -25,7 +25,6 @@ internal static class WorkspaceDiff
     public const int ReviewMaxFiles = 20;
     public const int ReviewLinesPerFile = 60;
     private const int MaxLines = 2000;
-    private const int FullRenderLimit = 20000;
 
     private enum LineKind
     {
@@ -59,7 +58,7 @@ internal static class WorkspaceDiff
             var total = 0;
             foreach (var hunk in Hunks)
             {
-                total += hunk.Lines.Count;
+                total += 1 + hunk.Lines.Sum(line => DiffTextChunks.Count(line.Text));
             }
             return total;
         }
@@ -69,32 +68,26 @@ internal static class WorkspaceDiff
         UIElement owner, string title, JsonNode? diffNode, bool showAll = false)
     {
         var file = Parse(diffNode);
-        var total = file.TotalLines();
-        var capped = showAll || total <= MaxLines;
         var stack = new StackPanel { Spacing = Theme.SpaceS, MinWidth = 560 };
-        stack.Children.Add(RenderFile(file, capped ? total : MaxLines));
-        if (!capped)
+        var page = 0;
+        void RenderPage()
         {
-            if (total <= FullRenderLimit)
+            stack.Children.Clear();
+            stack.Children.Add(RenderFile(file, MaxLines, out var cut, out _, skipRows: page * MaxLines));
+            var navigation = new FlowPanel { Spacing = Theme.SpaceS };
+            if (page > 0)
             {
-                var show = new Button
-                {
-                    Content = new TextBlock { Text = L10n.Text("windows.workspacediff.show_all_0_lines.8c1a7690", $"{total}") },
-                    HorizontalAlignment = HorizontalAlignment.Left,
-                };
-                show.Click += (_, _) =>
-                {
-                    stack.Children.Clear();
-                    stack.Children.Add(RenderFile(file, total));
-                };
-                stack.Children.Add(show);
+                navigation.Children.Add(Buttons.Secondary(L10n.Text("windows.workspacediff.previous_page"), ActionIcon.Back,
+                    (_, _) => { page--; RenderPage(); }, small: true));
             }
-            else
+            if (cut > 0)
             {
-                stack.Children.Add(Note(
-                    L10n.Text("windows.workspacediff.showing_the_first_0_of_1_lines_the_rest_is.ff25aced", $"{MaxLines}", $"{total}")));
+                navigation.Children.Add(Buttons.Secondary(L10n.Text("windows.workspacediff.next_page"), ActionIcon.Reveal,
+                    (_, _) => { page++; RenderPage(); }, small: true));
             }
+            stack.Children.Add(navigation);
         }
+        RenderPage();
         if (WorkspaceTabsPage.Find(owner) is { } workbench)
         {
             stack.MinWidth = 0;
@@ -112,6 +105,17 @@ internal static class WorkspaceDiff
             CloseButtonText = L10n.Text("common.close"),
         };
         await Chrome.ShowDialog(owner, dialog);
+    }
+
+    /// <summary>A bounded diff in the Changes inspector, with the full review one press away.</summary>
+    public static UIElement PreviewFile(UIElement owner, string path, JsonNode? diff)
+    {
+        var file = Parse(diff);
+        var stack = new StackPanel { Spacing = Theme.SpaceS };
+        stack.Children.Add(RenderFile(file, ReviewLinesPerFile));
+        stack.Children.Add(Buttons.Secondary(L10n.Text("windows.workspacepage.diff.7ecf4628"), ActionIcon.Compare,
+            async (_, _) => await ShowFileDiffAsync(owner, path, diff), small: true));
+        return stack;
     }
 
     /// <summary>
@@ -326,12 +330,7 @@ internal static class WorkspaceDiff
             Content = new TextBlock { Text = L10n.Text("windows.workspacediff.full_diff.79eeb065") },
             HorizontalAlignment = HorizontalAlignment.Left,
         };
-        full.Click += (_, _) =>
-        {
-            card.Children.Clear();
-            var parsed = Parse(diffNode);
-            card.Children.Add(RenderFile(parsed, Math.Min(parsed.TotalLines(), FullRenderLimit)));
-        };
+        full.Click += async (_, _) => await ShowFileDiffAsync(owner, file.Path, diffNode);
         card.Children.Add(full);
         return Chrome.Card(file.Path, card);
     }
@@ -339,7 +338,7 @@ internal static class WorkspaceDiff
     private static UIElement RenderFile(File file, int maxLines) =>
         RenderFile(file, maxLines, out _, out _);
 
-    private static UIElement RenderFile(File file, int maxLines, out int cut, out int total)
+    private static UIElement RenderFile(File file, int maxLines, out int cut, out int total, int skipRows = 0)
     {
         total = file.TotalLines();
         if (file.Binary)
@@ -363,27 +362,43 @@ internal static class WorkspaceDiff
             {
                 break;
             }
-            rows.Children.Add(new Border
+            if (skipRows > 0) skipRows--;
+            else
+            {
+                remaining--;
+                rows.Children.Add(new Border
             {
                 Background = Theme.PanelBrush,
                 Padding = new Thickness(Theme.SpaceS, 6, Theme.SpaceS, 6),
                 Child = new TextBlock
                 {
-                    Text = hunk.Header,
+                    Text = hunk.Header.Length > DiffTextChunks.MaxUnits ? hunk.Header[..DiffTextChunks.MaxUnits] : hunk.Header,
                     FontFamily = Fonts.Mono,
                     FontSize = 11,
                     Foreground = Theme.Brush(static () => Theme.ControlGlyph),
                 },
-            });
+                });
+            }
+            cut--;
             foreach (var line in hunk.Lines)
             {
                 if (remaining <= 0)
                 {
                     break;
                 }
-                remaining--;
-                cut--;
-                rows.Children.Add(RenderLine(line));
+                var continuation = false;
+                foreach (var text in DiffTextChunks.Split(line.Text))
+                {
+                    if (skipRows > 0) skipRows--;
+                    else
+                    {
+                        if (remaining <= 0) break;
+                        remaining--;
+                        rows.Children.Add(RenderLine(line, text, continuation));
+                    }
+                    cut--;
+                    continuation = true;
+                }
             }
         }
         return new ScrollViewer
@@ -394,7 +409,7 @@ internal static class WorkspaceDiff
         };
     }
 
-    private static UIElement RenderLine(Line line)
+    private static UIElement RenderLine(Line line, string piece, bool continuation)
     {
         var row = new Grid();
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(44) });
@@ -408,13 +423,13 @@ internal static class WorkspaceDiff
             LineKind.Removed => Theme.DiffRemoved,
             _ => Theme.DefaultText,
         };
-        row.Children.Add(Gutter(line.OldNumber));
-        var right = Gutter(line.NewNumber);
+        row.Children.Add(Gutter(continuation ? null : line.OldNumber));
+        var right = Gutter(continuation ? null : line.NewNumber);
         Grid.SetColumn(right, 1);
         row.Children.Add(right);
         var marker = new TextBlock
         {
-            Text = line.Kind switch
+            Text = continuation ? "↪" : line.Kind switch
             {
                 LineKind.Added => "+",
                 LineKind.Removed => "−",
@@ -430,7 +445,7 @@ internal static class WorkspaceDiff
         row.Children.Add(marker);
         var text = new TextBlock
         {
-            Text = line.Text.Length == 0 ? " " : line.Text,
+            Text = piece.Length == 0 ? " " : piece,
             FontFamily = Fonts.Mono,
             FontSize = 12,
             Foreground = Theme.Brush(Tint),

@@ -29,7 +29,7 @@ class ChatTranscriptDetailTest {
         end: Long? = null,
     ) = ChatDisplayItem.Tool(id, ChatToolState(id, verb, "t-$id", running, failed, null, start, end, emptyList()))
 
-    private fun edit(id: String, path: String, added: Int = 0, removed: Int = 0, failed: Boolean = false, running: Boolean = false) =
+    private fun edit(id: String, path: String, added: Long = 0, removed: Long = 0, failed: Boolean = false, running: Boolean = false) =
         ChatDisplayItem.Edit(id, ChatEditState(path, added, removed, "", 1, running, failed, 0, null))
 
     private fun ids(rows: List<ChatDisplayItem>) = rows.map { it.id }
@@ -43,6 +43,22 @@ class ChatTranscriptDetailTest {
         running: Boolean = false,
         isOpen: (String) -> Boolean = { false },
     ) = foldTranscript(rows, detail, running, isOpen)
+
+    @Test
+    fun largeEditsRetainTheirTotalsAcrossEveryDetailLevel() {
+        val count = 4_294_967_295L
+        val rows = listOf(user("u1"), edit("e1", "a.kt", count, count), edit("e2", "a.kt", count, count), say("a1"))
+        for (detail in ChatDetail.entries) {
+            val output = fold(rows, detail)
+            val changes = output.last() as ChatDisplayItem.Changes
+            assertEquals(count * 2, changes.added)
+            assertEquals(count * 2, changes.removed)
+            assertEquals(count * 2, changes.files.single().added)
+            if (detail == ChatDetail.Compact) {
+                assertEquals(count * 2, group(output, "g:e1")!!.added)
+            }
+        }
+    }
 
     @Test
     fun detailedIsTheIdentity() {
@@ -205,8 +221,8 @@ class ChatTranscriptDetailTest {
         val work = group(fold(rows, ChatDetail.Compact), "g:t1")!!
         assertEquals(5, work.steps)
         assertEquals(2, work.files)
-        assertEquals(6, work.added)
-        assertEquals(5, work.removed)
+        assertEquals(6L, work.added)
+        assertEquals(5L, work.removed)
         assertEquals(1_000L, work.startedAtMs)
         assertEquals(9_000L, work.endedAtMs)
     }
@@ -233,7 +249,7 @@ class ChatTranscriptDetailTest {
         val edited = group(out, "g:e1")!!
         assertEquals("Edit", edited.verb)
         assertEquals("src/a.kt", edited.subject)
-        assertEquals(6, edited.added)
+        assertEquals(6L, edited.added)
         assertEquals(ChatStepGroup.Style.Explored, group(out, "g:t4")!!.style)
         assertNull(stepGroupOwner("t5", out))
         assertEquals("a.kt", shortStepSubject("Edit", "src/a.kt"))
@@ -251,9 +267,9 @@ class ChatTranscriptDetailTest {
         assertEquals(listOf("changes:e1"), ids(live).filter { it.startsWith("changes:") })
         val first = live.first { it.id == "changes:e1" } as ChatDisplayItem.Changes
         assertEquals(listOf("/w/a.kt", "/w/b.kt"), first.files.map { it.path })
-        assertEquals(5, first.files[0].added)
-        assertEquals(6, first.added)
-        assertEquals(5, first.removed)
+        assertEquals(5L, first.files[0].added)
+        assertEquals(6L, first.added)
+        assertEquals(5L, first.removed)
         val finished = fold(rows, ChatDetail.Compact, running = false)
         assertEquals(listOf("/w/c.kt"), (finished.last() as ChatDisplayItem.Changes).files.map { it.path })
     }

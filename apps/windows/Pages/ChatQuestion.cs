@@ -37,8 +37,11 @@ internal static class ChatQuestionText
         var kept = new List<string>();
         var inside = false;
         var block = new List<string>();
-        foreach (var line in text.Split('\n'))
+        long bodyBytes = 0;
+        var lines = text.Split('\n');
+        for (var index = 0; index < lines.Length; index++)
         {
+            var line = lines[index];
             var trimmed = line.Trim();
             // The host reads the info string trimmed, so "``` tokenstat-question"
             // is a question there too and must not show as raw JSON here.
@@ -46,6 +49,7 @@ internal static class ChatQuestionText
             {
                 inside = true;
                 block = [line];
+                bodyBytes = 0;
                 continue;
             }
             if (inside)
@@ -67,6 +71,16 @@ internal static class ChatQuestionText
                     if (!valid) kept.AddRange(block);
                     block.Clear();
                     inside = false;
+                }
+                else
+                {
+                    bodyBytes += System.Text.Encoding.UTF8.GetByteCount(line) + (index < lines.Length - 1 ? 1 : 0);
+                    if (bodyBytes > BlockMaxBytes)
+                    {
+                        kept.AddRange(block);
+                        block.Clear();
+                        inside = false;
+                    }
                 }
                 continue;
             }

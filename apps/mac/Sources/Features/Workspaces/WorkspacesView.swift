@@ -260,7 +260,7 @@ struct WorkspaceChangesView: View {
                 // Only show the scroll list when there is real content.
                 ScrollViewReader { proxy in
                     ScrollView {
-                        VStack(alignment: .leading, spacing: Theme.Space.m) {
+                        LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
                             content(folder)
                         }
                         .padding(Theme.Space.m)
@@ -373,11 +373,6 @@ struct WorkspaceChangesView: View {
             Menu {
             Button(L10n.text("apple.workspacesview.expand_all.a3e586be"), .more) {
                 expandedDiffs.formUnion(git.files.map { diffKey($0, in: folder) })
-                Task {
-                    for file in git.files {
-                        await model.loadDiff(file.path, in: folder.id)
-                    }
-                }
             }
             .buttonStyle(.borderless)
             Button(L10n.text("apple.workspacesview.collapse_all.25f7b372"), .collapse) {
@@ -401,19 +396,14 @@ struct WorkspaceChangesView: View {
     @ViewBuilder
     private func changeSection(_ title: String, files: [FileChange], in folder: WorkspaceFolder) -> some View {
         if !files.isEmpty {
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                HStack {
-                    Text(title.uppercased())
-                        .font(Theme.sectionHeader)
-                        .foregroundStyle(.tertiary)
-                    Text("\(files.count)")
-                        .font(Theme.caption2)
-                        .foregroundStyle(.tertiary)
-                    Spacer()
-                }
-                .padding(.top, Theme.Space.s)
-                ForEach(files) { file in
-                    let key = diffKey(file, in: folder)
+            HStack {
+                Text(title.uppercased()).font(Theme.sectionHeader).foregroundStyle(.tertiary)
+                Text("\(files.count)").font(Theme.caption2).foregroundStyle(.tertiary)
+                Spacer()
+            }.padding(.top, Theme.Space.s)
+            ForEach(files) { file in
+                let key = diffKey(file, in: folder)
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
                     ChangeRow(
                         file: file,
                         isStaged: model.isStaged(file.path, in: folder.id),
@@ -421,41 +411,33 @@ struct WorkspaceChangesView: View {
                         isExpanded: expandedDiffs.contains(key),
                         onToggle: { model.toggleStaged(file.path, in: folder.id) },
                         onToggleDiff: {
-                            if expandedDiffs.contains(key) {
-                                expandedDiffs.remove(key)
-                            } else {
-                                expandedDiffs.insert(key)
-                                Task { await model.loadDiff(file.path, in: folder.id) }
-                            }
+                            if expandedDiffs.contains(key) { expandedDiffs.remove(key) }
+                            else { expandedDiffs.insert(key) }
                         },
                         onOpen: { Task { await model.openFile(file.path, in: folder.id) } }
                     )
-                    .id(key)
                     if expandedDiffs.contains(key) {
-                        if let diff = model.diff(for: file.path, in: folder.id) {
-                            let preview = diff.clipped(toLines: 200)
-                            ScrollView([.vertical, .horizontal]) {
-                                // A bounded eager stack keeps the horizontal extent stable
-                                // as rows enter and leave this nested viewport.
-                                DiffBody(diff: preview.diff, lazy: false)
-                                    .fixedSize(horizontal: true, vertical: false)
+                        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                            if let error = model.diffError(for: file.path, in: folder.id) {
+                                Text(error).font(Theme.callout).foregroundStyle(Theme.danger)
+                                Button(L10n.text("common.retry"), .refresh) {
+                                    Task { await model.loadDiff(file.path, in: folder.id) }
+                                }.buttonStyle(SecondaryButtonStyle(small: true))
+                            } else if let diff = model.diff(for: file.path, in: folder.id) {
+                                InlineDiffView(diff: diff) { model.reviewWorkingTree(in: folder.id) }
+                            } else {
+                                ProgressView().controlSize(.small)
                             }
-                            .frame(maxHeight: 260)
-                                .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
-                                .padding(.leading, Theme.Space.l)
-                            if preview.cut > 0 {
-                                Button(L10n.text("apple.workspacesview.review_full_diff_0_more_lines.071f50d8", "\(preview.cut)"), .preview) {
-                                    model.reviewWorkingTree(in: folder.id)
-                                }
-                                .buttonStyle(SecondaryButtonStyle(small: true))
-                                .padding(.leading, Theme.Space.l)
-                            }
-                        } else {
-                            ProgressView().controlSize(.small).padding(.leading, Theme.Space.l)
                         }
+                        .padding(.leading, Theme.Space.l)
+                        .onAppear { model.retainDiffPreview(file.path, in: folder.id) }
+                        .task(id: "\(key)|\(model.diffRefreshRevisions[folder.id] ?? 0)") {
+                            await model.loadDiff(file.path, in: folder.id)
+                        }
+                        .onDisappear { model.releaseDiffPreview(file.path, in: folder.id) }
                     }
                 }
+                .id(key)
             }
         }
     }
@@ -469,13 +451,10 @@ struct WorkspaceChangesView: View {
     /// on the end of the path.
     private func reveal(_ focus: WorkspacesModel.ChangeFocus?, in folder: WorkspaceFolder, git: GitStatus, proxy: ScrollViewProxy) {
         guard let focus, focus.folderID == folder.id else { return }
-        let wanted = focus.path
-        guard let file = git.files.first(where: {
-            wanted == $0.path || wanted.hasSuffix("/" + $0.path)
-        }) else { return }
+        guard let path = ChangePathMatch.path(focus.path, in: git.files.map(\.path)),
+              let file = git.files.first(where: { $0.path == path }) else { return }
         let key = diffKey(file, in: folder)
         expandedDiffs.insert(key)
-        Task { await model.loadDiff(file.path, in: folder.id) }
         withAnimation(.easeOut(duration: 0.2)) {
             proxy.scrollTo(key, anchor: .top)
         }

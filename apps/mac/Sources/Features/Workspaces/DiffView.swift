@@ -72,21 +72,39 @@ struct DiffBody: View {
     /// costs nothing to build in full.
     var lazy = true
 
+    @State private var rows: [DiffDocumentRow] = []
+    @State private var total = 0
+    @State private var extraRows = 0
+    @State private var displayedRevision: UUID?
+
     var body: some View {
         stack {
-            ForEach(diff.hunks) { hunk in
-                Text(hunk.header)
-                    .font(Theme.mono(11))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .padding(.horizontal, Theme.Space.m)
-                    .padding(.vertical, 4)
-                    .frame(minWidth: minWidth, alignment: .leading)
-                    .background(Theme.panel)
-                ForEach(hunk.lines) { line in
-                    DiffRow(line: line, minWidth: minWidth)
-                }
+            ForEach(rows) { row in DiffDocumentRowView(row: row, width: minWidth) }
+            if total > rows.count {
+                Button(L10n.text("apple.clientdiffdocumentview.show_more_lines"), .reveal) { extraRows += lazy ? 2_000 : 200 }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+                    .padding(Theme.Space.s)
             }
+        }
+        .task(id: "\(diff.renderRevision)|\(lazy)|\(extraRows)") {
+            if displayedRevision != diff.renderRevision {
+                displayedRevision = diff.renderRevision
+                extraRows = 0
+                rows = []
+                total = 0
+            }
+            let input = diff
+            let limit = (lazy ? 2_000 : 200) + extraRows
+            let task = Task.detached(priority: .userInitiated) {
+                (DiffDocumentRow.make([input], fileHeaders: false, rowLimit: limit,
+                                      maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit),
+                 DiffDocumentRow.count([input], fileHeaders: false,
+                                       maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit))
+            }
+            let result = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+            guard !Task.isCancelled else { return }
+            rows = result.0
+            total = result.1
         }
     }
 
@@ -110,11 +128,12 @@ struct DiffRow: View {
     /// At least the pane's width, so the tint behind a short line still spans
     /// the pane instead of stopping at the last character.
     let minWidth: CGFloat
+    var continuation = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            gutter(line.oldLine)
-            gutter(line.newLine)
+            gutter(continuation ? nil : line.oldLine)
+            gutter(continuation ? nil : line.newLine)
             Text(marker)
                 .font(Theme.mono(11))
                 .foregroundStyle(line.kind.tint)
@@ -133,6 +152,7 @@ struct DiffRow: View {
     }
 
     private var marker: String {
+        if continuation { return "↪" }
         switch line.kind {
         case .added: return "+"
         case .removed: return "−"
@@ -153,6 +173,46 @@ struct DiffRow: View {
         case .added: return .green.opacity(0.12)
         case .removed: return .red.opacity(0.12)
         case .context: return .clear
+        }
+    }
+}
+
+/// A preview has both a row budget and a text budget. Two minified lines
+/// must not hand megabytes to an eager Text layout in the inspector.
+struct InlineDiffView: View {
+    let diff: FileDiff
+    let onReview: () -> Void
+    @State private var rows: [DiffDocumentRow] = []
+    @State private var total = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            ScrollView([.vertical, .horizontal]) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(rows) { row in DiffDocumentRowView(row: row, width: 0) }
+                }
+                .fixedSize(horizontal: true, vertical: false)
+            }
+            .frame(maxHeight: 260)
+            .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+            if total > rows.count {
+                Button(L10n.text("apple.workspacesview.review_full_diff_0_more_lines.071f50d8", "\(total - rows.count)"), .preview, action: onReview)
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+            }
+        }
+        .task(id: diff.renderRevision) {
+            rows = []
+            total = 0
+            let input = diff
+            let task = Task.detached(priority: .userInitiated) {
+                (DiffDocumentRow.make([input], fileHeaders: false, rowLimit: 60, maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit),
+                 DiffDocumentRow.count([input], fileHeaders: false, maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit))
+            }
+            let result = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+            guard !Task.isCancelled else { return }
+            rows = result.0
+            total = result.1
         }
     }
 }

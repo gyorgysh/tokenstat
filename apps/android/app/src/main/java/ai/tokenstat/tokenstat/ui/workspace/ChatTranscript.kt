@@ -65,13 +65,13 @@ sealed interface ChatDisplayItem {
     /// The files a finished turn edited. Added by the fold after the turn's
     /// last row, at every detail level. Port of `ChatTurnChanges`.
     data class Changes(override val id: String, val files: List<ChangedFile>) : ChatDisplayItem {
-        val added: Int get() = files.sumOf { it.added }
-        val removed: Int get() = files.sumOf { it.removed }
+        val added: Long get() = files.sumOf { it.added }
+        val removed: Long get() = files.sumOf { it.removed }
     }
 }
 
 /// One file a turn changed. Counts are summed over the turn's edits to it.
-data class ChangedFile(val path: String, val added: Int, val removed: Int) {
+data class ChangedFile(val path: String, val added: Long, val removed: Long) {
     val fileName: String get() = path.substringAfterLast('/').ifEmpty { path }
 }
 
@@ -139,8 +139,8 @@ data class ChatToolState(
 /// Ported from ChatModel.swift `ChatEditState`.
 data class ChatEditState(
     val path: String,
-    val added: Int,
-    val removed: Int,
+    val added: Long,
+    val removed: Long,
     val patch: String,
     /// 1-based count of this path since the last user message.
     val revision: Int,
@@ -168,7 +168,7 @@ data class ChatEditState(
     /// Nil on the first change of a file in a turn. Later ones name themselves.
     val changeLabel: String? get() = if (revision >= 2) L10n.text("android.chattranscript.0_change.d4ef778c", "${ChatClock.ordinal(revision)}") else null
 
-    fun applyPatch(added: Int, removed: Int, patch: String): ChatEditState {
+    fun applyPatch(added: Long, removed: Long, patch: String): ChatEditState {
         return copy(
             added = if (added > 0) added else this.added,
             removed = if (removed > 0) removed else this.removed,
@@ -182,9 +182,9 @@ data class ChatEditState(
     }
 
     fun recountIfNeeded(): ChatEditState {
-        if (!(added == 0 && removed == 0 && patch.isNotEmpty())) return this
-        var plus = 0
-        var minus = 0
+        if (!(added == 0L && removed == 0L && patch.isNotEmpty())) return this
+        var plus = 0L
+        var minus = 0L
         for (line in patch.split("\n")) {
             if (!ChatToolState.isDiffLine(line)) continue
             if (line.firstOrNull() == '+') plus += 1
@@ -225,14 +225,6 @@ private fun JsonObject.safeDouble(key: String): Double? =
 
 private fun JsonObject.safeBool(key: String): Boolean? =
     (this[key] as? JsonPrimitive)?.booleanOrNull
-
-private fun JsonObject.safeInt(vararg keys: String): Int {
-    for (key in keys) {
-        val v = (this[key] as? JsonPrimitive)?.longOrNull
-        if (v != null) return v.coerceIn(0, Int.MAX_VALUE.toLong()).toInt()
-    }
-    return 0
-}
 
 /// Fold raw timeline events into display items. A faithful port of
 /// ChatModel.swift `ChatDisplayItem.coalesce`, reading the same JSON the
@@ -636,8 +628,8 @@ fun coalesceTranscript(
                 flushThinking()
                 val callId = inner.str("callId") ?: inner.str("call_id") ?: ""
                 val path = inner.str("path") ?: L10n.text("android.chattranscript.file.50009ce1")
-                val added = inner.safeInt("added")
-                val removed = inner.safeInt("removed")
+                val added = (inner.safeLong("added") ?: 0L).coerceIn(0L, 4_294_967_295L)
+                val removed = (inner.safeLong("removed") ?: 0L).coerceIn(0L, 4_294_967_295L)
                 val patch = inner.str("patch") ?: ""
                 val index = matchingEditIndex(callId, path)
                 if (index != null && index in items.indices) {

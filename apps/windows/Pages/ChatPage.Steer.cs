@@ -208,6 +208,9 @@ internal sealed partial class ChatPage
             RebuildTranscript();
             RefreshCost();
         }
+        if (transcriptChanged || wasBusy != Busy())
+            _ = RefreshWorkspaceGitAsync(refreshPull: wasBusy && !Busy());
+        else RenderGitStrip();
         if (!Busy()) _steerProbedWhileBusy = false;
         else ProbeSteerIfNeeded(fromBusyLoop: true);
     }

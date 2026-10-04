@@ -135,7 +135,7 @@ fn for_branch_once(
         .map_err(ForgeError::from)?;
     let reset = rate_limit_reset(&response);
     let text = response_text(response)?;
-    query::decode_branch(&text, reset, &repo.owner).map_err(HttpFailure::from)
+    query::decode_branch(&text, reset, &repo.owner, &repo.repo).map_err(HttpFailure::from)
 }
 
 /// Read the pull request's summary, people, files, reviews and check runs.

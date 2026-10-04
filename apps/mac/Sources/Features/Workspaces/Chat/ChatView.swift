@@ -459,8 +459,11 @@ struct ChatView: View {
         // Asked again when the branch moves and when a turn ends, since an
         // agent may have just opened the pull request.
         .task(id: "\(workspaceID)|\(git?.branch ?? "")|\(model.busy)|\(isActive)") {
+            branchPull = nil
             guard isActive, git?.isRepo == true, !model.busy else { return }
-            branchPull = (try? await Bridge.branchPull(workspaceID: workspaceID))?.pull
+            let answer = try? await Bridge.branchPull(workspaceID: workspaceID, branch: git?.branch, refresh: true)
+            guard !Task.isCancelled else { return }
+            branchPull = answer?.pull
         }
         .onChange(of: isActive) { _, active in
             if !active {
@@ -1179,23 +1182,12 @@ struct ChatView: View {
     /// above the composer. Nothing at all when there is neither.
     @ViewBuilder
     private var changesRow: some View {
-        let changed = git.flatMap { $0.isRepo && !$0.files.isEmpty ? $0 : nil }
-        if changed != nil || branchPull != nil {
-            HStack(spacing: Theme.Space.s) {
-                if let changed {
-                    ChatChangesPill(git: changed) { onReviewChanges?(nil) }
-                        .disabled(onReviewChanges == nil)
-                }
-                Spacer(minLength: 0)
-                if let branchPull {
-                    BranchPullChip(pull: branchPull)
-                }
-            }
+        ChatGitStatusStrip(git: git, pull: branchPull,
+                           review: onReviewChanges.map { callback in { callback(nil) } })
             .frame(maxWidth: ReadingRoom.laneWidth)
             .padding(.horizontal, Theme.Space.l)
             .padding(.bottom, Theme.Space.xs)
             .frame(maxWidth: .infinity)
-        }
     }
 
     private func pendingApproval(_ item: ChatDisplayItem) -> Bool {

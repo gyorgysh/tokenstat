@@ -227,6 +227,17 @@ pub fn pull(dir: &Path, reviewed: &Review) -> Result<Outcome, String> {
     let Some(target) = reviewed.upstream_head.as_deref() else {
         return Err("The upstream branch is gone. There is nothing to pull.".into());
     };
+    // A review crosses the client boundary. Only a full object id can bind
+    // the commit shown, never a movable ref or a git command option.
+    if !matches!(target.len(), 40 | 64)
+        || !target
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(
+            "The reviewed commit is invalid. Review the branch again before pulling.".into(),
+        );
+    }
     let branch = text(dir, &["symbolic-ref", "-q", "HEAD"])
         .map_err(|_| "HEAD is detached now. Review the branch again.".to_string())?;
     let head = text(dir, &["rev-parse", "--verify", "HEAD^{commit}"])?;
@@ -259,6 +270,7 @@ pub fn pull(dir: &Path, reviewed: &Review) -> Result<Outcome, String> {
             "--no-autostash",
             "--no-edit",
             "--quiet",
+            "--",
             target,
         ],
     )
@@ -379,6 +391,21 @@ mod tests {
         let before = text(dir, &["rev-parse", "HEAD"]).unwrap();
         assert!(pull(dir, &reviewed).is_err());
         assert_eq!(text(dir, &["rev-parse", "HEAD"]).unwrap(), before);
+    }
+
+    #[test]
+    fn movable_refs_and_options_cannot_replace_the_reviewed_commit() {
+        let f = fixture();
+        let dir = f.local.path();
+        push_from_other(&f, "theirs");
+        let mut reviewed = review(dir).unwrap();
+        let head = reviewed.head.clone();
+        for target in ["origin/main", "HEAD", "--no-ff", "--autostash", "a123"] {
+            reviewed.upstream_head = Some(target.into());
+            assert!(pull(dir, &reviewed).unwrap_err().contains("invalid"));
+            assert_eq!(text(dir, &["rev-parse", "HEAD"]).unwrap(), head);
+            assert!(!dir.join("theirs").exists());
+        }
     }
 
     #[test]

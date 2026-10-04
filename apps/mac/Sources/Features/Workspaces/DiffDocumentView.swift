@@ -9,6 +9,9 @@ struct DiffDocumentView<Header: View>: View {
     @ViewBuilder var header: () -> Header
     @State private var rows: [DiffDocumentRow] = []
     @State private var loaded = false
+    @State private var rowLimit = 2_000
+    @State private var totalRows = 0
+    @State private var displayedRevisions: [UUID] = []
 
     var body: some View {
         GeometryReader { geometry in
@@ -21,6 +24,11 @@ struct DiffDocumentView<Header: View>: View {
                             ForEach(rows) { row in
                                 DiffDocumentRowView(row: row, width: geometry.size.width)
                             }
+                        }
+                        if totalRows > rows.count {
+                            Button(L10n.text("apple.clientdiffdocumentview.show_more_lines"), .reveal) { rowLimit += 2_000 }
+                                .buttonStyle(SecondaryButtonStyle(comfortable: true))
+                                .padding(Theme.Space.m)
                         }
                     }
                     .frame(minWidth: geometry.size.width, alignment: .topLeading)
@@ -35,48 +43,60 @@ struct DiffDocumentView<Header: View>: View {
                 .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
             }
         }
-        .task(id: Request(diffs: diffs, fileHeaders: fileHeaders)) {
+        .task(id: Request(revisions: diffs.map(\.renderRevision), rowLimit: rowLimit, fileHeaders: fileHeaders)) {
             // Mount the scroll view with its complete row set so its first
             // visible range is computed against the real document, rather
             // than a loading indicator that will be replaced asynchronously.
-            loaded = false
+            let revisions = diffs.map(\.renderRevision)
+            if displayedRevisions != revisions {
+                loaded = false
+                rows = []
+                rowLimit = 2_000
+                displayedRevisions = revisions
+            }
             let input = diffs
             let headers = fileHeaders
+            let limit = rowLimit
             let task = Task.detached(priority: .userInitiated) {
-                DiffDocumentRow.make(input, fileHeaders: headers)
+                (DiffDocumentRow.make(input, fileHeaders: headers, rowLimit: limit,
+                                      maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit),
+                 DiffDocumentRow.count(input, fileHeaders: headers,
+                                       maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit))
             }
             let result = await withTaskCancellationHandler {
                 await task.value
             } onCancel: { task.cancel() }
             guard !Task.isCancelled else { return }
-            rows = result
+            rows = result.0
+            totalRows = result.1
             loaded = true
         }
     }
 
     private struct Request: Hashable {
-        let diffs: [FileDiff]
+        let revisions: [UUID]
+        let rowLimit: Int
         let fileHeaders: Bool
     }
 }
 
-private struct DiffDocumentRowView: View {
+struct DiffDocumentRowView: View {
     let row: DiffDocumentRow
     let width: CGFloat
 
     var body: some View {
         switch row.content {
         case let .line(line):
-            DiffRow(line: line, minWidth: width)
+            DiffRow(line: line, minWidth: width, continuation: row.continuation)
         case let .file(path):
-            Label(path, systemImage: "doc.text")
+            Label(String(path.unicodeScalars.prefix(DiffDocumentRow.wrappedLineCharacterLimit)), systemImage: "doc.text")
                 .font(Theme.mono(12))
                 .lineLimit(1)
                 .padding(.horizontal, Theme.Space.m)
                 .frame(minWidth: width, minHeight: 32, alignment: .leading)
                 .background(Theme.sidebar)
         case let .hunk(header):
-            Text(header)
+            Text(String(header.unicodeScalars.prefix(DiffDocumentRow.wrappedLineCharacterLimit)))
                 .font(Theme.mono(11))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)

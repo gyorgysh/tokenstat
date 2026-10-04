@@ -35,8 +35,8 @@ data class ChatStepGroup(
     /// Tool calls and edits. Thinking and in-between text are not steps.
     val steps: Int = 0,
     val files: Int = 0,
-    val added: Int = 0,
-    val removed: Int = 0,
+    val added: Long = 0,
+    val removed: Long = 0,
     val reads: Int = 0,
     val searches: Int = 0,
     val pages: Int = 0,
@@ -340,8 +340,8 @@ private fun makeGroup(style: ChatStepGroup.Style, members: List<ChatDisplayItem>
     var reads = 0
     var searches = 0
     var pages = 0
-    var added = 0
-    var removed = 0
+    var added = 0L
+    var removed = 0L
     val paths = HashSet<String>()
     var anyRunning = false
     var liveVerb: String? = null

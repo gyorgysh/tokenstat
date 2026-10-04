@@ -19,6 +19,8 @@ internal sealed partial class ChatPage
         Group,
         /// <summary>A question the agent asked, with the answer once there is one.</summary>
         Question,
+        /// <summary>The files a finished turn edited, added by the fold.</summary>
+        Changes,
     }
 
     internal struct DisplayItem
@@ -55,6 +57,8 @@ internal sealed partial class ChatPage
         public ChatStepGroup? Group;
         /// <summary>The question, on a <see cref="ItemKind.Question"/> row.</summary>
         public ChatQuestionItem? Question;
+        /// <summary>The files, on a <see cref="ItemKind.Changes"/> row.</summary>
+        public IReadOnlyList<ChangedFile>? Changes;
 
         public DisplayItem()
         {

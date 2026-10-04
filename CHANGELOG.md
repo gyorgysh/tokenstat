@@ -25,11 +25,20 @@ at the end.
   failure offers the same guided sign-in even when the CLI cannot report its
   login status. On Mac, iPhone and iPad, a Codex sign-in opens its page in
   your browser and copies the one-time code for you.
-- Chat detail levels on Apple, Windows and Android. Compact, the default,
-  folds an agent's thinking and tool steps between visible replies, Standard
-  folds thinking and runs of reads, and Detailed shows every step with its
-  output open. Every reply, including progress updates between tool calls,
-  shows at every level, as do approvals, failures and handoffs.
+- Four chat detail levels on Apple, Windows and Android. Minimal, the default,
+  shows one quiet line per step. Compact folds thinking and tool steps between
+  visible replies, Standard folds thinking and runs of reads, and Detailed
+  shows every step with its output open. Every reply, including progress
+  updates between tool calls, shows at every level, as do approvals, failures
+  and handoffs. Existing detail choices are remembered.
+- Finished chat turns list the files they changed and their added and removed
+  lines. Review opens the project's Changes, where files can be read,
+  committed, pushed and turned into a pull request. Desktop chats open Changes
+  beside the conversation. Chat lists show the last known pull request state.
+- Pull beside Push in Changes on every client. Review fetches the branch's
+  upstream, then Pull brings in exactly the reviewed commits, fast-forward
+  only. Uncommitted work and branches that need a merge are left for you to
+  resolve. The same panel offers Create PR or the branch's existing request.
 - Agents can ask you a question in the chat, with choices to tap or an
   answer of your own. In a chat that runs without asking first, the agent
   never stops for it: it says what it is going with and keeps working, and
@@ -39,6 +48,12 @@ at the end.
 
 ### Fixed
 
+- Large single-line JSON changes render in bounded pieces on desktop, with
+  access to the complete diff. Inspector previews refresh after file saves,
+  release their source when closed, and offer Retry when a diff cannot load.
+- Chat edit totals handle large changes without overflowing. Oversized question
+  blocks stay readable and cannot hide a later question. Pull request badges
+  follow branch and repository changes, and Git controls fit narrow panes.
 - opencode no longer suggests signing in. Its free models work without an
   account.
 - Chat links have visible accent underlines. The Mac asks where to open a

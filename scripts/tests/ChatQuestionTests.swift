@@ -43,6 +43,10 @@ struct ChatQuestionTests {
             require(ChatQuestionText.stripping(invalid) == invalid, "a malformed question stays readable")
         }
         let unfinished = "\(fence)\n{\"question\":\"Wh"
+        let abandoned = "\(fence)\n" + String(repeating: "x", count: 64 * 1024 + 1)
+        require(ChatQuestionText.stripping(abandoned) == abandoned, "an oversized unclosed block remains readable")
+        require(ChatQuestionText.stripping(abandoned + "\n" + block) == abandoned,
+                "an abandoned block must not hide a later valid question")
         require(ChatQuestionText.stripping(unfinished, streaming: false) == unfinished, "an interrupted reply stays readable")
 
         let question = ChatQuestion(id: "q1", question: "Q", options: [], multiple: false,

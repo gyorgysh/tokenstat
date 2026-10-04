@@ -97,7 +97,7 @@ struct ChatStepGroupRow: View {
 
     /// A path becomes its file name. A command keeps its first line.
     static func shortSubject(verb: String?, _ subject: String) -> String {
-        let line = subject.split(whereSeparator: \.isNewline).first.map(String.init) ?? subject
+        let line = String(subject.prefix(while: { !$0.isNewline }))
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         switch verb {
         case "Read", "Edit", "NotebookEdit", "Write", "Diff":

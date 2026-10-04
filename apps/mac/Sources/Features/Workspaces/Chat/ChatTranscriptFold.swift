@@ -54,8 +54,8 @@ struct ChatStepGroup: Equatable, Sendable {
     var steps = 0
     /// Distinct files edited, and the lines those edits added and removed.
     var files = 0
-    var added: UInt32 = 0
-    var removed: UInt32 = 0
+    var added: UInt64 = 0
+    var removed: UInt64 = 0
     var reads = 0
     var searches = 0
     var pages = 0
@@ -152,11 +152,11 @@ enum ChatTranscriptFold {
             case let .edit(state) where !state.failed && !state.running:
                 if current.files.isEmpty { current = ChatTurnChanges(id: "changes:\(item.id)", files: []) }
                 if let index = building[state.path] {
-                    current.files[index].added += state.added
-                    current.files[index].removed += state.removed
+                    current.files[index].added += UInt64(state.added)
+                    current.files[index].removed += UInt64(state.removed)
                 } else {
                     building[state.path] = current.files.count
-                    current.files.append(.init(path: state.path, added: state.added, removed: state.removed))
+                    current.files.append(.init(path: state.path, added: UInt64(state.added), removed: UInt64(state.removed)))
                 }
             default:
                 continue
@@ -433,8 +433,8 @@ enum ChatTranscriptFold {
                 group.steps += 1
                 activity(member, verb: "Edit", target: state.path, running: state.running)
                 paths.insert(state.path)
-                group.added += state.added
-                group.removed += state.removed
+                group.added += UInt64(state.added)
+                group.removed += UInt64(state.removed)
                 span(state.startedAtMs, state.endedAtMs)
                 if state.running {
                     anyRunning = true

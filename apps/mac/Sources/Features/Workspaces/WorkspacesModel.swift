@@ -291,6 +291,10 @@ final class WorkspacesModel {
     /// conversation list still counts itself, and wins when both are present.
     private(set) var summaries: [String: WorkspaceSummary] = [:]
     private(set) var diffs: [String: FileDiff] = [:]
+    private(set) var diffErrors: [String: String] = [:]
+    /// A file save can change text without changing its added/removed counts.
+    /// Mounted previews and reviews use this to re-read that same change set.
+    private(set) var diffRefreshRevisions: [String: UInt64] = [:]
     /// One document per open file, keyed the same way as the diffs.
     ///
     /// This replaced a pair of dictionaries holding the text and the dirty
@@ -372,7 +376,11 @@ final class WorkspacesModel {
         switch surface {
         case let .file(path):
             let key = Self.treeKey(workspaceID, path)
-            diffs[key] = nil
+            if diffPreviewUsers[key, default: 0] == 0 {
+                pendingDiffLoads[key] = nil
+                diffs[key] = nil
+                diffErrors[key] = nil
+            }
             documents[key] = nil
         case let .commit(commit):
             commits[Self.treeKey(workspaceID, commit)] = nil
@@ -746,6 +754,27 @@ final class WorkspacesModel {
 
     private var nextDiffLoad: UInt64 = 0
     private var pendingDiffLoads: [String: UInt64] = [:]
+    @ObservationIgnored private var diffPreviewUsers: [String: Int] = [:]
+
+    func retainDiffPreview(_ path: String, in workspaceID: String) {
+        diffPreviewUsers[Self.treeKey(workspaceID, path), default: 0] += 1
+    }
+
+    func diffError(for path: String, in workspaceID: String) -> String? {
+        diffErrors[Self.treeKey(workspaceID, path)]
+    }
+
+    /// Inspector previews are temporary. Closing one must release its large
+    /// parsed source unless an open file document still needs it.
+    func releaseDiffPreview(_ path: String, in workspaceID: String) {
+        let key = Self.treeKey(workspaceID, path)
+        let users = max(0, diffPreviewUsers[key, default: 0] - 1)
+        diffPreviewUsers[key] = users == 0 ? nil : users
+        guard users == 0, !openFiles(in: workspaceID).contains(path) else { return }
+        pendingDiffLoads[key] = nil
+        diffs[key] = nil
+        diffErrors[key] = nil
+    }
 
     @discardableResult
     func loadDiff(_ path: String, in workspaceID: String) async -> Bool {
@@ -759,12 +788,16 @@ final class WorkspacesModel {
         do {
             let diff = try await Bridge.workspaceDiff(id: workspaceID, path: path)
             guard !Task.isCancelled, pendingDiffLoads[key] == request else { return false }
-            diffs[key] = diff
+            // A watcher for another file may re-read this one unchanged.
+            // Keep its render identity and reading place in that case.
+            if diffs[key] != diff { diffs[key] = diff }
+            diffErrors[key] = nil
             documents[key]?.applyDiff(diff)
             errorMessage = nil
             return true
         } catch {
             guard !Task.isCancelled, pendingDiffLoads[key] == request else { return false }
+            diffErrors[key] = error.localizedDescription
             errorMessage = error.localizedDescription
             return false
         }
@@ -1285,6 +1318,7 @@ final class WorkspacesModel {
         }
         publishFolders()
         let changed = Set(ids)
+        for id in ids { diffRefreshRevisions[id, default: 0] &+= 1 }
         for id in history.keys where changed.contains(id) {
             await loadHistory(for: id)
         }
@@ -1300,6 +1334,7 @@ final class WorkspacesModel {
     /// is not something a file save should cause.
     func refresh() async {
         await loadLocal()
+        for folder in localFolders { diffRefreshRevisions[folder.id, default: 0] &+= 1 }
         // Only histories somebody has already opened. Loading one nobody asked
         // for would put a `git log` behind every file save.
         for id in history.keys {

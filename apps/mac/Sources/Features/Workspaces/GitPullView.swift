@@ -26,7 +26,10 @@ struct GitPullControl: View {
             }
         }
         .task(id: target) {
-            supported = await target.supportsReviewedPull()
+            supported = false
+            let value = await target.supportsReviewedPull()
+            guard !Task.isCancelled else { return }
+            supported = value
         }
         .sheet(isPresented: $presenting) {
             GitPullSheet(service: target, folderName: folderName, hostName: hostName, onPulled: onPulled)
@@ -180,13 +183,17 @@ struct GitBranchPullControl: View {
     let hostName: String
     @State private var answer: BranchPullAnswer?
     @State private var creating = false
+    @State private var loadOwner: String?
+    @State private var loadRevision = 0
     @Environment(\.openURL) private var openURL
+
+    private var requestKey: String { "\(peer ?? "")|\(workspaceID)|\(branch ?? "")" }
 
     var body: some View {
         Group {
             if let pull = answer?.pull {
                 Button(L10n.text("apple.branchpull.number", "\(pull.number)"), .external) {
-                    if let url = URL(string: pull.url) { openURL(url) }
+                    if let url = pull.webURL { openURL(url) }
                 }
                 .buttonStyle(SecondaryButtonStyle(comfortable: true))
                 .help(L10n.text("apple.branchpull.help", pull.stateLabel, "\(pull.number)", pull.title))
@@ -196,7 +203,10 @@ struct GitBranchPullControl: View {
                     .help(L10n.text("apple.branchpull.create_help"))
             }
         }
-        .task(id: "\(workspaceID)|\(branch ?? "")") { await load(refresh: false) }
+        .task(id: requestKey) {
+            loadOwner = requestKey
+            await load(refresh: false)
+        }
         .sheet(isPresented: $creating) {
             PullCreateView(workspaceID: workspaceID, peer: peer, folderName: folderName, hostName: hostName) {
                 await load(refresh: true)
@@ -205,7 +215,39 @@ struct GitBranchPullControl: View {
     }
 
     private func load(refresh: Bool) async {
-        answer = try? await Bridge.branchPull(workspaceID: workspaceID, peer: peer, refresh: refresh)
+        guard loadOwner == requestKey else { return }
+        loadRevision &+= 1
+        let revision = loadRevision
+        answer = nil
+        let loaded = try? await Bridge.branchPull(workspaceID: workspaceID, peer: peer, branch: branch, refresh: refresh)
+        guard !Task.isCancelled, loadOwner == requestKey, revision == loadRevision else { return }
+        answer = loaded
+    }
+}
+
+/// Composer controls fit narrow panes and accessibility text sizes too.
+struct ChatGitStatusStrip: View {
+    let git: GitStatus?
+    let pull: BranchPull?
+    var review: (() -> Void)?
+
+    private var changed: GitStatus? { git.flatMap { $0.isRepo && !$0.files.isEmpty ? $0 : nil } }
+
+    var body: some View {
+        if changed != nil || pull != nil {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Theme.Space.s) { pills; Spacer(minLength: 0) }
+                VStack(alignment: .leading, spacing: Theme.Space.xs) { pills }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder private var pills: some View {
+        if let changed {
+            ChatChangesPill(git: changed) { review?() }.disabled(review == nil)
+        }
+        if let pull { BranchPullChip(pull: pull) }
     }
 }
 
@@ -223,7 +265,7 @@ struct BranchPullChip: View {
 
     var body: some View {
         Button {
-            if let url = URL(string: pull.url) { openURL(url) }
+            if let url = pull.webURL { openURL(url) }
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: pull.symbol)

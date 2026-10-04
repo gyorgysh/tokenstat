@@ -79,6 +79,13 @@ struct BranchEntry {
     pull: Option<tokenstat_sync::forge::BranchPull>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct BranchKey {
+    workspace_id: String,
+    branch: String,
+    repo: tokenstat_sync::forge::Repo,
+}
+
 /// How long `pulls.branch` reuses an answer before asking the forge again.
 const BRANCH_TTL: Duration = Duration::from_secs(60);
 /// How long a chat list keeps showing what was last learned. Chat lists
@@ -86,22 +93,55 @@ const BRANCH_TTL: Duration = Duration::from_secs(60);
 /// few minutes old beats none.
 const BRANCH_SHOWN: Duration = Duration::from_secs(15 * 60);
 
-fn branch_cache() -> &'static Mutex<HashMap<(String, String), BranchEntry>> {
-    static CACHE: OnceLock<Mutex<HashMap<(String, String), BranchEntry>>> = OnceLock::new();
+fn branch_cache() -> &'static Mutex<HashMap<BranchKey, BranchEntry>> {
+    static CACHE: OnceLock<Mutex<HashMap<BranchKey, BranchEntry>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn forget_branch(workspace_id: &str, branch: &str) {
+    branch_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .retain(|key, _| key.workspace_id != workspace_id || key.branch != branch);
+}
+
+fn cached_for_repository(key: &BranchKey) -> Option<BranchEntry> {
+    let mut cache = branch_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    // A failed query against a new remote must not leave the old remote's
+    // badge in chat lists. Learning the repository is enough to retire it.
+    cache.retain(|cached, entry| {
+        entry.at.elapsed() < BRANCH_SHOWN
+            && (cached.workspace_id != key.workspace_id
+                || cached.branch != key.branch
+                || cached.repo == key.repo)
+    });
+    cache
+        .get(key)
+        .filter(|entry| entry.at.elapsed() < BRANCH_TTL)
+        .cloned()
 }
 
 fn remember_branch(
     workspace_id: &str,
     branch: &str,
+    repo: &tokenstat_sync::forge::Repo,
     pull: Option<tokenstat_sync::forge::BranchPull>,
 ) {
     let mut cache = branch_cache()
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
-    cache.retain(|_, entry| entry.at.elapsed() < BRANCH_SHOWN);
+    cache.retain(|key, entry| {
+        entry.at.elapsed() < BRANCH_SHOWN
+            && !(key.workspace_id == workspace_id && key.branch == branch)
+    });
     cache.insert(
-        (workspace_id.to_string(), branch.to_string()),
+        BranchKey {
+            workspace_id: workspace_id.to_string(),
+            branch: branch.to_string(),
+            repo: repo.clone(),
+        },
         BranchEntry {
             at: Instant::now(),
             pull,
@@ -118,9 +158,13 @@ pub(crate) fn cached_branch_pull(
     branch_cache()
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .get(&(workspace_id.to_string(), branch.to_string()))
-        .filter(|entry| entry.at.elapsed() < BRANCH_SHOWN)
-        .and_then(|entry| entry.pull.clone())
+        .iter()
+        .find(|(key, entry)| {
+            key.workspace_id == workspace_id
+                && key.branch == branch
+                && entry.at.elapsed() < BRANCH_SHOWN
+        })
+        .and_then(|(_, entry)| entry.pull.clone())
 }
 
 fn clear_list_cache() {
@@ -235,7 +279,7 @@ fn invalidate_workspace(workspace_id: &str) {
     branch_cache()
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .retain(|(workspace, _), _| workspace != workspace_id);
+        .retain(|key, _| key.workspace_id != workspace_id);
     list_cache()
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
@@ -396,26 +440,28 @@ fn branch(p: &Params) -> Result<Value, String> {
         named.to_string()
     };
     let Some(remote) = tokenstat_workspace::git::remote(&workspace.path) else {
+        forget_branch(&p.workspace_id, &branch);
         return Ok(json!({"branch": branch, "pull": null, "connected": false}));
     };
-    let key = (p.workspace_id.clone(), branch.clone());
-    if !p.refresh {
-        let hit = branch_cache()
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(&key)
-            .filter(|entry| entry.at.elapsed() < BRANCH_TTL)
-            .cloned();
-        if let Some(hit) = hit {
-            return Ok(json!({"branch": branch, "pull": hit.pull, "connected": true}));
-        }
+    let repo = forge_repo(remote);
+    let key = BranchKey {
+        workspace_id: p.workspace_id.clone(),
+        branch: branch.clone(),
+        repo: repo.clone(),
+    };
+    let hit = cached_for_repository(&key);
+    if !p.refresh
+        && let Some(hit) = hit
+    {
+        return Ok(json!({"branch": branch, "pull": hit.pull, "connected": true}));
     }
-    match tokenstat_sync::forge::for_branch(&forge_repo(remote), &branch) {
+    match tokenstat_sync::forge::for_branch(&repo, &branch) {
         Ok(pull) => {
-            remember_branch(&p.workspace_id, &branch, pull.clone());
+            remember_branch(&p.workspace_id, &branch, &repo, pull.clone());
             Ok(json!({"branch": branch, "pull": pull, "connected": true}))
         }
         Err(tokenstat_sync::forge::ForgeError::NotSignedIn) => {
+            forget_branch(&p.workspace_id, &branch);
             Ok(json!({"branch": branch, "pull": null, "connected": false}))
         }
         Err(error) => Err(error.to_string()),
@@ -472,6 +518,7 @@ fn create(p: &Params) -> Result<Value, String> {
         remember_branch(
             &p.workspace_id,
             &p.branch,
+            &repo,
             Some(tokenstat_sync::forge::BranchPull {
                 number: result.number,
                 title: p.title.trim().to_string(),
@@ -690,6 +737,45 @@ fn local_credentials_only() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn branch_cache_binds_the_repository_and_supersedes_old_badges() {
+        let workspace = "branch-cache-repository-test";
+        let repo = tokenstat_sync::forge::Repo {
+            host: "github.com".into(),
+            owner: "owner".into(),
+            repo: "first".into(),
+        };
+        let changed = tokenstat_sync::forge::Repo {
+            repo: "second".into(),
+            ..repo.clone()
+        };
+        remember_branch(
+            workspace,
+            "feature",
+            &repo,
+            Some(tokenstat_sync::forge::BranchPull {
+                number: 1,
+                title: "First".into(),
+                url: "https://github.com/owner/first/pull/1".into(),
+                state: "open".into(),
+                draft: false,
+                base_ref: "main".into(),
+            }),
+        );
+        let changed_key = BranchKey {
+            workspace_id: workspace.into(),
+            branch: "feature".into(),
+            repo: changed.clone(),
+        };
+        assert!(!branch_cache().lock().unwrap().contains_key(&changed_key));
+        assert_eq!(cached_branch_pull(workspace, "feature").unwrap().number, 1);
+        assert!(cached_for_repository(&changed_key).is_none());
+        assert!(cached_branch_pull(workspace, "feature").is_none());
+        remember_branch(workspace, "feature", &changed, None);
+        assert!(cached_branch_pull(workspace, "feature").is_none());
+        invalidate_workspace(workspace);
+    }
 
     #[test]
     fn defaults_to_github_without_rewriting_enterprise_hosts() {

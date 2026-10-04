@@ -111,6 +111,12 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     }
     private JsonNode? _openChat;
 
+    /// <summary>
+    /// A turn's changes card asked for the folder's changes. The workspace
+    /// tabs answer it by opening the Changes inspector beside the chat.
+    /// </summary>
+    public event Action<string?>? ReviewChangesRequested;
+
     /// <param name="chatId">One conversation to reveal on load, from a deep
     /// link. The list loads first and the thread opens on top of it, like
     /// the Mac opening the named conversation in its folder chat.</param>
@@ -650,6 +656,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _openChat = null;
         _approvals = new JsonArray();
         _openId = id;
+        ResetWorkspaceGit();
         RenderInspector();
         _offset = 0;
         _events = new JsonArray();
@@ -683,6 +690,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             }
             _opening = false;
             PaintConversation();
+            _ = RefreshWorkspaceGitAsync();
             CheckSelectedSignIn();
             StartPoll();
             ProbeSteerIfNeeded(fromBusyLoop: false);
@@ -711,6 +719,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         Detach(_composerActions);
         Detach(_titleBox);
         Detach(_costHost);
+        Detach(_gitStrip);
         _root.Children.Clear();
         var chrome = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         chrome.Children.Add(ActionIconGlyph.Button(L10n.Text("common.chats"), ActionIcon.Back, async (_, _) => await ShowListAsync()));
@@ -1050,6 +1059,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         ItemKind.Attachment => $"{item.Id}|{item.Name}|{item.MediaType}|{item.Size}",
         ItemKind.Usage => $"{item.Id}|{item.Input}|{item.Output}|{item.Cost}",
         ItemKind.Failed => $"{item.Id}|{item.Text}",
+        ItemKind.Changes => $"{item.Id}|{string.Join(",", item.Changes?.Select(file => $"{file.Path}:{file.Added}:{file.Removed}") ?? Enumerable.Empty<string>())}|{_expandedCards.GetValueOrDefault(item.Id)}",
         _ => item.Id,
     });
 
@@ -1172,6 +1182,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         ItemKind.Failed => FailedRow(item),
         ItemKind.Group when item.Group is { } group => StepGroupRow(item.Id, group),
         ItemKind.Question when item.Question is { } question => QuestionCard(question),
+        ItemKind.Changes when item.Changes is { } files => ChangesCard(item.Id, files),
         _ => new Border(),
         };
         if (!string.IsNullOrEmpty(item.GroupId)) view = GroupStepInset(view);
@@ -1631,6 +1642,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private UIElement Composer()
     {
         var well = _composerWell = new StackPanel { Spacing = Theme.SpaceS };
+        RenderGitStrip();
+        well.Children.Add(_gitStrip);
         if (_setupExpanded)
         {
             _setupScroll.Content = SetupCard();

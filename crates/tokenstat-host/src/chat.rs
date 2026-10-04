@@ -3362,9 +3362,7 @@ impl Store {
         let branch = tokenstat_workspace::git::current_branch(&workspace.path);
         self.edit_conversation(id, |current| {
             current.send_revision = next_send_revision(current.send_revision)?;
-            if branch.is_some() {
-                current.branch = branch;
-            }
+            current.branch = branch;
             Ok(())
         })?;
         let accepted_at = now_ms();
@@ -3988,11 +3986,11 @@ impl Store {
             .get(id)
             .ok()
             .and_then(|chat| crate::workspaces::folder(&chat.workspace_id).ok())
-            .and_then(|workspace| tokenstat_workspace::git::current_branch(&workspace.path));
+            .map(|workspace| tokenstat_workspace::git::current_branch(&workspace.path));
         self.edit_conversation(id, |chat| {
             chat.running = false;
             chat.updated_at_ms = now_ms();
-            if branch.is_some() {
+            if let Some(branch) = branch {
                 chat.branch = branch;
             }
             Ok(chat.clone())

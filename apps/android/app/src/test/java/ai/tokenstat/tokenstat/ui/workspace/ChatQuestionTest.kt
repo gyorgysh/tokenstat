@@ -41,6 +41,9 @@ class ChatQuestionTest {
             assertEquals(invalid, stripQuestionBlocks(invalid))
         }
         val unfinished = "$fence\n{\"question\":\"Wh"
+        val abandoned = "$fence\n" + "x".repeat(64 * 1024 + 1)
+        assertEquals(abandoned, stripQuestionBlocks(abandoned))
+        assertEquals(abandoned, stripQuestionBlocks("$abandoned\n$block"))
         assertEquals(unfinished, stripQuestionBlocks(unfinished, streaming = false))
     }
 

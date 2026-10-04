@@ -429,7 +429,7 @@ private fun TranscriptToolRow(state: ChatToolState, expandsOutput: Boolean = fal
                 Spacer(Modifier.weight(1f))
             }
             if (hasDiff && !state.running) {
-                DiffStat(added = added, removed = removed)
+                DiffStat(added = added.toLong(), removed = removed.toLong())
             }
             if (state.running && !ChatSeat.speaks(state.verb)) {
                 Text(L10n.text("common.running"), style = TsType.mono(10), color = colors.accent, maxLines = 1)
@@ -507,7 +507,7 @@ private fun snippetColor(
 }
 
 @Composable
-private fun DiffStat(added: Int, removed: Int) {
+private fun DiffStat(added: Long, removed: Long) {
     val colors = LocalTsColors.current
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("+$added", style = TsType.mono(11, FontWeight.Medium), color = colors.diffAdded, maxLines = 1)
@@ -591,7 +591,7 @@ private fun TranscriptEditCard(state: ChatEditState, expandsOutput: Boolean = fa
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                if (state.added + state.removed > 0 && !state.running) {
+                if ((state.added > 0 || state.removed > 0) && !state.running) {
                     DiffStat(added = state.added, removed = state.removed)
                 }
                 if (state.running) {
@@ -1067,7 +1067,7 @@ private fun StepGroupRow(group: ChatStepGroup, onClick: () -> Unit) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        if (group.added + group.removed > 0) {
+        if (group.added > 0 || group.removed > 0) {
             DiffStat(added = group.added, removed = group.removed)
         }
         val cost = group.cost
@@ -1149,7 +1149,7 @@ private fun MinimalStepLine(group: ChatStepGroup, onClick: () -> Unit) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false),
         )
-        if (group.added + group.removed > 0) {
+        if (group.added > 0 || group.removed > 0) {
             DiffStat(added = group.added, removed = group.removed)
         }
         Spacer(Modifier.weight(1f))

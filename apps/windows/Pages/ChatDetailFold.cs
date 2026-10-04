@@ -12,6 +12,8 @@ namespace Tokenstat.Pages;
 /// </summary>
 internal enum ChatDetail
 {
+    /// <summary>One quiet line per step, the way most editors show it.</summary>
+    Minimal,
     /// <summary>One line per stretch of work.</summary>
     Compact,
     /// <summary>Thinking and runs of reads and searches fold to one line each.</summary>
@@ -20,7 +22,21 @@ internal enum ChatDetail
     Detailed,
 }
 
-internal enum ChatStepGroupStyle { Work, Explored, Thought }
+internal enum ChatStepGroupStyle { Work, Explored, Thought, Step }
+
+/// <summary>One file a turn changed. Counts are summed over the turn's edits to it.</summary>
+internal sealed record ChangedFile(string Path, long Added, long Removed)
+{
+    public string FileName
+    {
+        get
+        {
+            var slash = Math.Max(Path.LastIndexOf('/'), Path.LastIndexOf('\\'));
+            var name = slash >= 0 ? Path[(slash + 1)..] : Path;
+            return name.Length == 0 ? Path : name;
+        }
+    }
+}
 
 /// <summary>One folded line standing in for several rows. Port of <c>ChatStepGroup</c>.</summary>
 internal sealed record ChatStepGroup
@@ -48,6 +64,11 @@ internal sealed record ChatStepGroup
     public double? Cost { get; init; }
     /// <summary>The first line of a folded thought.</summary>
     public string? Preview { get; init; }
+    /// <summary>Drawn as Minimal draws it: a plain line, no icon or chevron.</summary>
+    public bool Minimal { get; init; }
+    /// <summary>The one step a single-member group stands for.</summary>
+    public string? Verb { get; init; }
+    public string? Subject { get; init; }
 }
 
 /// <summary>
@@ -66,12 +87,149 @@ internal static class ChatDetailFold
         List<ChatPage.DisplayItem> items,
         ChatDetail detail,
         bool running,
-        Func<string, bool> isOpen) => detail switch
+        Func<string, bool> isOpen)
     {
-        ChatDetail.Compact => Compact(items, running, isOpen),
-        ChatDetail.Standard => Standard(items, running, isOpen),
-        _ => items,
-    };
+        var folded = detail switch
+        {
+            ChatDetail.Compact => Compact(items, running, isOpen),
+            ChatDetail.Standard => Standard(items, running, isOpen),
+            ChatDetail.Minimal => Minimal(items, running, isOpen),
+            _ => items,
+        };
+        return WithTurnChanges(folded, items, running);
+    }
+
+    /// <summary>
+    /// A turn's edits, one row per file, after the turn has finished. Read
+    /// from the raw rows, since a closed group hides its edits. User rows are
+    /// never folded, so the n-th one starts the same turn in both lists.
+    /// </summary>
+    public static List<ChatPage.DisplayItem> WithTurnChanges(
+        List<ChatPage.DisplayItem> folded, List<ChatPage.DisplayItem> raw, bool running)
+    {
+        var changes = new Dictionary<int, ChatPage.DisplayItem>();
+        var turn = 0;
+        var id = "";
+        var files = new List<ChangedFile>();
+        var index = new Dictionary<string, int>();
+        void Close()
+        {
+            if (files.Count > 0)
+            {
+                changes[turn] = new ChatPage.DisplayItem { Id = id, Kind = ChatPage.ItemKind.Changes, Changes = [.. files] };
+            }
+            files.Clear();
+            index.Clear();
+        }
+        foreach (var item in raw)
+        {
+            if (item.Kind == ChatPage.ItemKind.User)
+            {
+                Close();
+                turn++;
+            }
+            else if (item.Kind == ChatPage.ItemKind.Edit && !item.Failed && !item.Running)
+            {
+                if (files.Count == 0) id = "changes:" + item.Id;
+                if (index.TryGetValue(item.Path, out var at))
+                {
+                    var prior = files[at];
+                    files[at] = prior with { Added = prior.Added + item.Added, Removed = prior.Removed + item.Removed };
+                }
+                else
+                {
+                    index[item.Path] = files.Count;
+                    files.Add(new ChangedFile(item.Path, item.Added, item.Removed));
+                }
+            }
+        }
+        Close();
+        if (changes.Count == 0) return folded;
+        var output = new List<ChatPage.DisplayItem>(folded.Count + changes.Count);
+        turn = 0;
+        foreach (var item in folded)
+        {
+            if (item.Kind == ChatPage.ItemKind.User)
+            {
+                if (changes.TryGetValue(turn, out var finished)) output.Add(finished);
+                turn++;
+            }
+            output.Add(item);
+        }
+        // The turn still running gets its card when it ends.
+        if (!running && changes.TryGetValue(turn, out var last)) output.Add(last);
+        return output;
+    }
+
+    /// <summary>
+    /// Every step is one line. Runs of reads and searches still read as one,
+    /// even a run of one. Port of <c>ChatTranscriptFold.minimal</c>.
+    /// </summary>
+    private static List<ChatPage.DisplayItem> Minimal(
+        List<ChatPage.DisplayItem> items, bool running, Func<string, bool> isOpen)
+    {
+        var output = new List<ChatPage.DisplayItem>(items.Count);
+        var run = new List<ChatPage.DisplayItem>();
+
+        void Line(ChatStepGroupStyle style, List<ChatPage.DisplayItem> members, bool live) =>
+            Emit(Make(style, members, live) with { Minimal = true }, members, output, isOpen);
+
+        void FlushRun(bool trailing)
+        {
+            if (run.Count > 0) Line(ChatStepGroupStyle.Explored, [.. run], running && trailing);
+            run.Clear();
+        }
+
+        for (var position = 0; position < items.Count; position++)
+        {
+            var item = items[position];
+            if (item.Kind == ChatPage.ItemKind.Tool && !item.Failed && IsExploration(item.Verb))
+            {
+                run.Add(item);
+            }
+            else if (item.Kind == ChatPage.ItemKind.Thinking)
+            {
+                FlushRun(false);
+                if (running && position == items.Count - 1)
+                {
+                    output.Add(item);
+                }
+                else
+                {
+                    var group = Make(ChatStepGroupStyle.Thought, [item], false) with { Preview = Preview(item.Text), Minimal = true };
+                    Emit(group, [item], output, isOpen);
+                }
+            }
+            else if ((item.Kind == ChatPage.ItemKind.Tool || item.Kind == ChatPage.ItemKind.Edit) && !item.Failed)
+            {
+                FlushRun(false);
+                Line(ChatStepGroupStyle.Step, [item], item.Running);
+            }
+            else
+            {
+                FlushRun(false);
+                output.Add(item);
+            }
+        }
+        FlushRun(true);
+        return output;
+    }
+
+    /// <summary>A path becomes its file name. A command keeps its first line.</summary>
+    public static string ShortSubject(string? verb, string subject)
+    {
+        var newline = subject.IndexOf('\n');
+        var line = (newline < 0 ? subject : subject[..newline]).Trim();
+        switch (verb)
+        {
+            case "Read" or "Edit" or "NotebookEdit" or "Write" or "Diff":
+                var slash = Math.Max(line.LastIndexOf('/'), line.LastIndexOf('\\'));
+                var name = slash >= 0 ? line[(slash + 1)..] : line;
+                return name.Length == 0 ? line : name;
+            default:
+                return line.Length > 160 ? line[..160] : line;
+        }
+    }
 
     /// <summary>
     /// The group header standing for <paramref name="id"/>, when it is one of
@@ -284,8 +442,13 @@ internal static class ChatDetailFold
                 }
             }
         }
+        var single = members.Count == 1 ? members[0] : (ChatPage.DisplayItem?)null;
         return new ChatStepGroup
         {
+            Verb = single is { Kind: ChatPage.ItemKind.Tool } tool ? tool.Verb
+                : single is { Kind: ChatPage.ItemKind.Edit } ? "Edit" : null,
+            Subject = single is { Kind: ChatPage.ItemKind.Tool } command ? command.Target
+                : single is { Kind: ChatPage.ItemKind.Edit } edit ? edit.Path : null,
             Style = style,
             MemberIds = members.Select(member => member.Id).ToList(),
             Steps = steps,

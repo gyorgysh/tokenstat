@@ -255,8 +255,11 @@ internal static class SidebarLive
             Text = ms is null ? "" : RelativeShort(ms.Value),
             FontSize = 10, Opacity = 0.55, VerticalAlignment = VerticalAlignment.Center,
         };
-        Grid.SetColumn(age, 2);
-        panel.Children.Add(age);
+        var trailing = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
+        if (chat["pull"] is JsonObject pull) trailing.Children.Add(WorkspaceBranchPull.Badge(pull));
+        trailing.Children.Add(age);
+        Grid.SetColumn(trailing, 2);
+        panel.Children.Add(trailing);
 
         var row = new NavigationViewItem
         {

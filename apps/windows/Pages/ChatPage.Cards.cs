@@ -440,6 +440,7 @@ internal sealed partial class ChatPage
             menu.Items.Clear();
             foreach (var (level, label) in new[]
             {
+                (ChatDetail.Minimal, L10n.Text("windows.chatdetail.minimal")),
                 (ChatDetail.Compact, L10n.Text("windows.chatdetail.compact")),
                 (ChatDetail.Standard, L10n.Text("windows.chatdetail.standard")),
                 (ChatDetail.Detailed, L10n.Text("windows.chatdetail.detailed")),
@@ -474,7 +475,147 @@ internal sealed partial class ChatPage
 
     /// <summary>What a group row shows, so it is rebuilt only when that changes.</summary>
     private static string StepGroupKey(ChatStepGroup? group) => group is null ? ""
-        : $"{group.Style}|{group.Open}|{group.Steps}|{group.Files}|{group.Added}|{group.Removed}|{group.Reads}|{group.Searches}|{group.Pages}|{group.Running}|{group.LiveVerb}|{group.LiveTarget}|{group.StartedAt}|{group.EndedAt}|{group.Cost}|{group.Preview}";
+        : $"{group.Style}|{group.Open}|{group.Steps}|{group.Files}|{group.Added}|{group.Removed}|{group.Reads}|{group.Searches}|{group.Pages}|{group.Running}|{group.LiveVerb}|{group.LiveTarget}|{group.StartedAt}|{group.EndedAt}|{group.Cost}|{group.Preview}|{group.Minimal}|{group.Verb}|{group.Subject}";
+
+    /// <summary>
+    /// Minimal: the verb, what it acted on and the lines it changed, in one
+    /// quiet line. Port of ChatStepGroupRow.swift <c>minimalLine</c>.
+    /// </summary>
+    private UIElement MinimalStepLine(string id, ChatStepGroup group)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        if (group.Running)
+        {
+            row.Children.Add(new ProgressRing { Width = 12, Height = 12, IsActive = true, VerticalAlignment = VerticalAlignment.Center });
+        }
+        var title = new TextBlock
+        {
+            Text = group.Style switch
+            {
+                ChatStepGroupStyle.Step => SeatStep.Word(group.Verb, group.Running),
+                ChatStepGroupStyle.Explored => group.Running ? L10n.Text("windows.chatdetail.exploring") : L10n.Text("windows.chatdetail.explored"),
+                ChatStepGroupStyle.Thought => L10n.Text("windows.chatdetail.thought"),
+                _ => L10n.Text("windows.chatdetail.worked"),
+            },
+            FontSize = 13,
+            FontWeight = FontWeights.Medium,
+            Opacity = group.Running ? 1 : 0.75,
+            Foreground = group.Running ? Theme.AccentBrush : null,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        row.Children.Add(title);
+        var subject = group.Style == ChatStepGroupStyle.Thought
+            ? group.Preview ?? ""
+            : group.MemberIds.Count == 1 && group.Subject is { } single
+                ? ChatDetailFold.ShortSubject(group.Verb, single)
+                : StepGroupSummary(group);
+        var detail = new TextBlock
+        {
+            Text = subject,
+            FontSize = 13,
+            Opacity = 0.5,
+            MaxWidth = 520,
+            TextWrapping = TextWrapping.NoWrap,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        row.Children.Add(detail);
+        if (group.Added + group.Removed > 0) row.Children.Add(DiffStat(group.Added, group.Removed));
+        var button = new Button
+        {
+            Content = row,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(Theme.SpaceS, 3, Theme.SpaceS, 3),
+            CornerRadius = new CornerRadius(Theme.CardRadius),
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, title.Text + ", " + detail.Text);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(button,
+            group.Open ? L10n.Text("windows.chatdetail.hide_steps") : L10n.Text("windows.chatdetail.show_steps"));
+        button.Click += (_, _) => ToggleGroup(id);
+        return button;
+    }
+
+    /// <summary>
+    /// The files a finished turn changed, under its last reply. Port of
+    /// ChatTurnChangesCard.swift: the first four files, the rest one press
+    /// away, and Review opens the folder's Changes beside the chat.
+    /// </summary>
+    private UIElement ChangesCard(string id, IReadOnlyList<ChangedFile> files)
+    {
+        const int shownFiles = 4;
+        var showingAll = _expandedCards.TryGetValue(id, out var all) && all;
+        var stack = new StackPanel { Spacing = 2 };
+        var header = new Grid { ColumnSpacing = Theme.SpaceS };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(new TextBlock
+        {
+            Text = files.Count == 1 ? L10n.Text("windows.chatchanges.files_changed.one", "1") : L10n.Text("windows.chatchanges.files_changed.other", $"{files.Count}"),
+            FontSize = 13,
+            FontWeight = FontWeights.Medium,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        var total = DiffStat(files.Sum(file => file.Added), files.Sum(file => file.Removed));
+        Grid.SetColumn(total, 1);
+        header.Children.Add(total);
+        var review = Buttons.Secondary(L10n.Text("windows.chatchanges.review"), ActionIcon.Preview,
+            (_, _) => ReviewChangesRequested?.Invoke(null), small: true);
+        Grid.SetColumn(review, 3);
+        header.Children.Add(review);
+        stack.Children.Add(header);
+        foreach (var file in showingAll ? files : files.Take(shownFiles))
+        {
+            var line = new Grid { ColumnSpacing = Theme.SpaceS, Padding = new Thickness(0, 3, 0, 3) };
+            line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var name = new TextBlock
+            {
+                Text = file.FileName,
+                FontSize = 13,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            ToolTipService.SetToolTip(name, file.Path);
+            line.Children.Add(name);
+            var stat = DiffStat(file.Added, file.Removed);
+            Grid.SetColumn(stat, 1);
+            line.Children.Add(stat);
+            var fileButton = new Button
+            {
+                Content = line,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(0),
+            };
+            ToolTipService.SetToolTip(fileButton, file.Path);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(fileButton, file.Path);
+            fileButton.Click += (_, _) => ReviewChangesRequested?.Invoke(file.Path);
+            stack.Children.Add(fileButton);
+        }
+        if (files.Count > shownFiles)
+        {
+            stack.Children.Add(Buttons.Secondary(
+                showingAll ? L10n.Text("windows.chatchanges.show_less") : L10n.Text("windows.chatchanges.show_more", $"{files.Count - shownFiles}"),
+                showingAll ? ActionIcon.Collapse : ActionIcon.More,
+                (_, _) => ToggleCard(id, !showingAll), small: true));
+        }
+        return new Border
+        {
+            Background = Theme.PanelBrush,
+            BorderBrush = Theme.BorderBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(Theme.CardRadius),
+            Padding = new Thickness(Theme.SpaceM),
+            Child = stack,
+        };
+    }
 
     /// <summary>
     /// One line standing in for folded steps, like the Mac's ChatStepGroupRow.
@@ -482,6 +623,7 @@ internal sealed partial class ChatPage
     /// </summary>
     private UIElement StepGroupRow(string id, ChatStepGroup group)
     {
+        if (group.Minimal) return MinimalStepLine(id, group);
         var tint = group.Running ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph);
         var row = new Grid { ColumnSpacing = Theme.SpaceS };
         for (var column = 0; column < 6; column++)
@@ -595,6 +737,7 @@ internal sealed partial class ChatPage
             ? L10n.Text("windows.chatdetail.worked_for", took)
             : L10n.Text("windows.chatdetail.worked"),
         ChatStepGroupStyle.Explored => group.Running ? L10n.Text("windows.chatdetail.exploring") : L10n.Text("windows.chatdetail.explored"),
+        ChatStepGroupStyle.Step => SeatStep.Word(group.Verb, group.Running),
         _ => L10n.Text("windows.chatdetail.thought"),
     };
 
@@ -612,6 +755,8 @@ internal sealed partial class ChatPage
                 if (group.Searches > 0) parts.Add(group.Searches == 1 ? L10n.Text("windows.chatdetail.searches.one", "1") : L10n.Text("windows.chatdetail.searches.other", $"{group.Searches}"));
                 if (group.Pages > 0) parts.Add(group.Pages == 1 ? L10n.Text("windows.chatdetail.pages.one", "1") : L10n.Text("windows.chatdetail.pages.other", $"{group.Pages}"));
                 return string.Join(", ", parts);
+            case ChatStepGroupStyle.Step:
+                return group.Subject is { } subject ? ChatDetailFold.ShortSubject(group.Verb, subject) : "";
             default:
                 return group.Preview ?? "";
         }

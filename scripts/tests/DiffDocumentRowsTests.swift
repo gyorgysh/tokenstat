@@ -80,6 +80,17 @@ struct FileDiff: Sendable { let path: String; let hunks: [DiffHunk]; let binary:
         precondition(wrappedPage.map(\.id) == Array(wrappedNext.prefix(60)).map(\.id))
         precondition(Set(wrappedNext.map(\.id)).count == wrappedNext.count)
         precondition(DiffDocumentRow.count([hugeLine], fileHeaders: false, maxLineCharacters: 256) == 1_564)
+        let marks = "e" + String(repeating: "\u{301}", count: 100_000)
+        let hostile = FileDiff(path: "combining", hunks: [DiffHunk(header: "@@", lines: [DiffLine(text: marks)])], binary: false, untracked: false)
+        let bounded = DiffDocumentRow.make([hostile], fileHeaders: false, maxLineCharacters: 256)
+        var scalarText = ""
+        for row in bounded.dropFirst() {
+            guard case let .line(piece) = row.content else { fatalError("expected scalar text") }
+            precondition(piece.text.utf8.count <= 256 * 4, "one grapheme cannot escape the text budget")
+            scalarText += piece.text
+        }
+        precondition(scalarText == marks)
+        precondition(bounded.count == DiffDocumentRow.count([hostile], fileHeaders: false, maxLineCharacters: 256))
         print("Wrapped Unicode/source counters, bounded minified lines and stable expansion passed")
         print("Bounded 400,000-line document pages and stable expansion passed (\(pageStart.duration(to: .now)))")
         print("Diff document: 200,000 lines, unique IDs, ordering, binary/empty files passed (\(start.duration(to: .now)))")

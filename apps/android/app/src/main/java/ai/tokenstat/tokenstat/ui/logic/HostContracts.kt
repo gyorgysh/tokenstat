@@ -26,7 +26,7 @@ object HostContracts {
     /// Version 29 records the agent's questions and takes their answers. An
     /// older host never records one, so this guards the answer, not the card.
     fun supportsChatQuestions(protocol: Long?): Boolean =
-        protocol == null || protocol >= CHAT_QUESTIONS_MIN_PROTOCOL
+        protocol != null && protocol >= CHAT_QUESTIONS_MIN_PROTOCOL
 
     /// Version 30 adds the reviewed fast-forward pull and `pulls.branch`,
     /// and conversations carry their branch with its pull request.

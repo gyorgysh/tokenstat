@@ -49,8 +49,10 @@ enum ChatQuestionText {
         var kept: [String] = []
         var inside = false
         var block: [String] = []
+        var bodyBytes = 0
         // Character splitting treats CRLF as one character, missing its LF.
-        for line in text.components(separatedBy: "\n") {
+        let lines = text.components(separatedBy: "\n")
+        for (index, line) in lines.enumerated() {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             // The host reads the info string trimmed, so "``` tokenstat-question"
             // is a question there too and must not show as raw JSON here.
@@ -58,6 +60,7 @@ enum ChatQuestionText {
                trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces) == fence {
                 inside = true
                 block = [line]
+                bodyBytes = 0
                 continue
             }
             if inside {
@@ -72,6 +75,13 @@ enum ChatQuestionText {
                     }
                     block = []
                     inside = false
+                } else {
+                    bodyBytes += line.utf8.count + (index < lines.count - 1 ? 1 : 0)
+                    if bodyBytes > blockMaxBytes {
+                        kept.append(contentsOf: block)
+                        block = []
+                        inside = false
+                    }
                 }
                 continue
             }

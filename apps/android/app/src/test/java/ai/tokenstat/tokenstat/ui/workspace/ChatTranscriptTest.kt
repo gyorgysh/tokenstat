@@ -48,6 +48,23 @@ class ChatTranscriptTest {
         }
 
     @Test
+    fun unsignedEditCountsSurviveTheHostTimeline() {
+        val count = 4_294_967_295L
+        val event = buildJsonObject {
+            put("kind", "agent")
+            putJsonObject("event") {
+                put("kind", "edit")
+                put("path", "large.json")
+                put("added", count)
+                put("removed", count)
+            }
+        }
+        val edit = (coalesceTranscript(listOf(event), running = false).single() as ChatDisplayItem.Edit).state
+        assertEquals(count, edit.added)
+        assertEquals(count, edit.removed)
+    }
+
+    @Test
     fun textDeltasCoalesceIntoOneAssistantItem() {
         val items = coalesceTranscript(
             listOf(textEvent("Hello "), textEvent("there")),
@@ -90,8 +107,8 @@ class ChatTranscriptTest {
         assertEquals("src/a.ts", edit.path)
         assertEquals("a.ts", edit.fileName)
         assertEquals("src", edit.location)
-        assertEquals(1, edit.added)
-        assertEquals(1, edit.removed)
+        assertEquals(1L, edit.added)
+        assertEquals(1L, edit.removed)
         assertFalse(edit.running)
     }
 

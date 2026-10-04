@@ -96,8 +96,30 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
         if (section == WorkspaceSection.Files) _inspectorTab = "Files";
         if (section == WorkspaceSection.Sessions) section = WorkspaceSection.Launcher;
         OpenSurface("section:" + section, section.Label(),
-            () => section == WorkspaceSection.Files ? _editor : _create(section),
+            () => section == WorkspaceSection.Files ? _editor : Created(section),
             section != WorkspaceSection.Launcher);
+    }
+
+    /// <summary>A section's page, with a chat's Review wired to the Changes inspector.</summary>
+    private Page Created(WorkspaceSection section)
+    {
+        var page = _create(section);
+        if (page is ChatPage chat) chat.ReviewChangesRequested += ShowChangesInspector;
+        return page;
+    }
+
+    /// <summary>
+    /// Open Changes beside the chat, where a turn's files can be read,
+    /// committed, pushed and pulled. A companion pane steps aside for it.
+    /// </summary>
+    public void ShowChangesInspector(string? path = null)
+    {
+        _companion = null;
+        _inspectorTab = "Changes";
+        RefreshChrome();
+        DetailsRequested?.Invoke();
+        if (_inspectorPages.GetValueOrDefault("Changes") is WorkspacePage changes)
+            changes.RevealChangedFile(path);
     }
 
     public void OpenTerminal(string? sessionId)

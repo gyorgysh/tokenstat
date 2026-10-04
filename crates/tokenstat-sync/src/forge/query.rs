@@ -43,6 +43,7 @@ query BranchPull($owner: String!, $repo: String!, $branch: String!) {
       nodes {
         number title url state isDraft baseRefName
         headRepositoryOwner { login }
+        headRepository { name }
       }
     }
   }
@@ -335,6 +336,7 @@ pub(super) fn decode_branch(
     raw: &str,
     rate_limit_reset: Option<u64>,
     owner: &str,
+    repo: &str,
 ) -> Result<Option<BranchPull>, ForgeError> {
     let body = graphql_body(raw, rate_limit_reset)?;
     let rows: Vec<BranchPull> = array(&body["data"]["repository"]["pullRequests"]["nodes"])
@@ -343,6 +345,9 @@ pub(super) fn decode_branch(
             node["headRepositoryOwner"]["login"]
                 .as_str()
                 .is_some_and(|login| login.eq_ignore_ascii_case(owner))
+                && node["headRepository"]["name"]
+                    .as_str()
+                    .is_some_and(|name| name.eq_ignore_ascii_case(repo))
         })
         .filter_map(|node| {
             let number = integer(&node["number"]);
@@ -725,22 +730,26 @@ mod tests {
     #[test]
     fn a_branch_prefers_its_open_pull_and_ignores_forks() {
         let raw = r#"{"data":{"repository":{"pullRequests":{"nodes":[
-            {"number":9,"title":"Fork","url":"https://github.com/x/y/pull/9","state":"OPEN","isDraft":false,"baseRefName":"main","headRepositoryOwner":{"login":"someone"}},
-            {"number":7,"title":"Old","url":"https://github.com/pueev/t/pull/7","state":"MERGED","isDraft":false,"baseRefName":"main","headRepositoryOwner":{"login":"pueev"}},
-            {"number":8,"title":"Now","url":"https://github.com/pueev/t/pull/8","state":"OPEN","isDraft":true,"baseRefName":"main","headRepositoryOwner":{"login":"Pueev"}}
+            {"number":10,"title":"Same-owner fork","url":"https://github.com/pueev/t/pull/10","state":"OPEN","headRepositoryOwner":{"login":"pueev"},"headRepository":{"name":"another"}},
+            {"number":9,"title":"Fork","url":"https://github.com/x/y/pull/9","state":"OPEN","isDraft":false,"baseRefName":"main","headRepositoryOwner":{"login":"someone"},"headRepository":{"name":"y"}},
+            {"number":7,"title":"Old","url":"https://github.com/pueev/t/pull/7","state":"MERGED","isDraft":false,"baseRefName":"main","headRepositoryOwner":{"login":"pueev"},"headRepository":{"name":"t"}},
+            {"number":8,"title":"Now","url":"https://github.com/pueev/t/pull/8","state":"OPEN","isDraft":true,"baseRefName":"main","headRepositoryOwner":{"login":"Pueev"},"headRepository":{"name":"t"}}
         ]}}}}"#;
-        let pull = decode_branch(raw, None, "pueev").unwrap().unwrap();
+        let pull = decode_branch(raw, None, "pueev", "t").unwrap().unwrap();
         assert_eq!(pull.number, 8);
         assert!(pull.draft);
         let merged = r#"{"data":{"repository":{"pullRequests":{"nodes":[
-            {"number":7,"title":"Old","url":"https://github.com/pueev/t/pull/7","state":"MERGED","isDraft":false,"baseRefName":"main","headRepositoryOwner":{"login":"pueev"}}
+            {"number":7,"title":"Old","url":"https://github.com/pueev/t/pull/7","state":"MERGED","isDraft":false,"baseRefName":"main","headRepositoryOwner":{"login":"pueev"},"headRepository":{"name":"t"}}
         ]}}}}"#;
         assert_eq!(
-            decode_branch(merged, None, "pueev").unwrap().unwrap().state,
+            decode_branch(merged, None, "pueev", "t")
+                .unwrap()
+                .unwrap()
+                .state,
             "merged"
         );
         let none = r#"{"data":{"repository":{"pullRequests":{"nodes":[]}}}}"#;
-        assert!(decode_branch(none, None, "pueev").unwrap().is_none());
+        assert!(decode_branch(none, None, "pueev", "t").unwrap().is_none());
     }
 
     #[test]

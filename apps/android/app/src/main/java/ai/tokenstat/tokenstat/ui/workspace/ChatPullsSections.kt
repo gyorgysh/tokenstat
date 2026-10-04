@@ -1753,6 +1753,9 @@ fun ChatSection(
                     }
                 }
             }
+            ChatGitStrip(model, peer, workspace, openChat, protocol, projectOwner, offline, sending || runningTurn) {
+                onOpenSection("Changes")
+            }
             ChatComposer(
                 chat = chats.firstOrNull { it.str("id") == openId },
                 draft = draft,
@@ -2077,6 +2080,7 @@ private fun ChatRow(chat: JsonObject) {
                 }
             }
         }
+        (chat["pull"] as? JsonObject)?.let { BranchPullBadge(it) }
         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = colors.controlGlyph)
     }
 }

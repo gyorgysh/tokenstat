@@ -825,6 +825,7 @@ fun WorkspaceChatRow(chat: JsonObject, folderName: String, onOpen: () -> Unit) {
                 }
             }
         }
+        (chat["pull"] as? JsonObject)?.let { BranchPullBadge(it) }
         Icon(ActionIcon.Disclosure.vector, null, tint = colors.textTertiary, modifier = Modifier.size(12.dp))
     }
 }

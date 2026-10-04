@@ -21,10 +21,11 @@ struct WorkingTreeReviewView: View {
     private struct ReviewKey: Equatable {
         let folderID: String
         let files: [FileChange]
+        let revision: UInt64
     }
 
     private var reviewKey: ReviewKey {
-        ReviewKey(folderID: folder.id, files: files)
+        ReviewKey(folderID: folder.id, files: files, revision: model.diffRefreshRevisions[folder.id] ?? 0)
     }
 
     var body: some View {
@@ -100,6 +101,10 @@ struct WorkingTreeReviewView: View {
         error = nil
         let paths = files.map(\.path)
         let folderID = folder.id
+        // Keep these reads alive if an inspector preview disappears while
+        // the review is loading. The review owns its snapshots afterwards.
+        for path in paths { model.retainDiffPreview(path, in: folderID) }
+        defer { for path in paths { model.releaseDiffPreview(path, in: folderID) } }
         let failures = await withTaskGroup(of: Bool.self, returning: Int.self) { group in
             var next = 0
             var failures = 0

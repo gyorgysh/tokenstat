@@ -38,6 +38,14 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
     private DispatcherQueueTimer? _sessionsPoll;
     private bool _sessionsLoading;
     private bool _showingLauncherCatalog;
+    private string? _reviewPath;
+
+    /// <summary>A chat's file row opens the current diff beside the conversation.</summary>
+    public void RevealChangedFile(string? path)
+    {
+        _reviewPath = path;
+        if (IsLoaded) _ = LoadAsync();
+    }
 
     public WorkspacePage(string id, WorkspaceSection section)
     {
@@ -351,7 +359,10 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         {
             // The branch switch and push dialogs route through the peer, so
             // a folder on another machine gets the same bar as a local one.
-            _root.Children.Add(BranchBar(branch, upstream, ahead, behind, folderName));
+            var bar = BranchBar(branch, upstream, ahead, behind, folderName, null);
+            _root.Children.Add(bar);
+            // A forge timeout must not hold the file list or diff preview.
+            _ = DecorateBranchBarAsync(bar, branch, upstream, ahead, behind, folderName);
         }
 
         var session = WorkspaceCommitSession.For(_id);
@@ -378,6 +389,18 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             ? L10n.Text("windows.workspacepage.a_clean_tree.dde03840")
             : L10n.Text("windows.workspacepage.0_changed_1_2_selected_for_the_next_commit.32bf5b80", $"{available.Count}", $"{(available.Count == 1 ? L10n.Text("windows.workspacepage.file.3b9c358f") : L10n.Text("windows.workspacepage.files.3d7db37d"))}", $"{session.SelectedCount}");
         RenderInspector();
+
+        if (_reviewPath is string wanted)
+        {
+            wanted = wanted.Replace('\\', '/');
+            var file = reviewFiles.OrderByDescending(file => file.Path.Length).FirstOrDefault(file =>
+                wanted == file.Path.Replace('\\', '/') || wanted.EndsWith("/" + file.Path.Replace('\\', '/'), StringComparison.Ordinal));
+            if (!string.IsNullOrEmpty(file.Path))
+            {
+                var diff = await LoadOneDiffAsync(file.Path);
+                _root.Children.Add(Chrome.Card(file.Path, WorkspaceDiff.PreviewFile(this, file.Path, diff)));
+            }
+        }
 
         var selectionRow = new FlowPanel { Spacing = Theme.SpaceS };
         selectionRow.Children.Add(new TextBlock
@@ -531,6 +554,14 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         }
     }
 
+    private async Task DecorateBranchBarAsync(UIElement bar, string branch, string upstream, long ahead, long behind, string folderName)
+    {
+        var pull = await WorkspaceBranchPull.LoadAsync(_id, branch);
+        var index = _root.Children.IndexOf(bar);
+        if (IsLoaded && index >= 0 && pull is not null)
+            _root.Children[index] = BranchBar(branch, upstream, ahead, behind, folderName, pull);
+    }
+
     private async Task ShowDiffAsync(string filePath)
     {
         JsonNode? diff;
@@ -557,7 +588,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             new JsonObject { ["id"] = _id, ["path"] = path });
     }
 
-    private UIElement BranchBar(string current, string upstream, long ahead, long behind, string folderName)
+    private UIElement BranchBar(string current, string upstream, long ahead, long behind, string folderName, JsonNode? pull)
     {
         var label = WorkspaceGit.ShortBranch(current);
         if (ahead > 0)
@@ -581,11 +612,18 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             ToolTipService.SetToolTip(switchButton, L10n.Text("windows.workspacepage.tracking_0.2e7aa60a", $"{upstream}"));
         }
         row.Children.Add(switchButton);
+        row.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.gitpull.pull"), ActionIcon.Download, async (_, _) =>
+        {
+            await WorkspacePullDialog.ShowAsync(this, _id, folderName);
+            await LoadAsync();
+        }));
         row.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.workspacepage.push.731ce7ed"), ActionIcon.Upload, async (_, _) =>
         {
             await WorkspacePushDialog.ShowAsync(this, _id, folderName);
             await LoadAsync();
         }));
+        if (WorkspaceBranchPull.Control(this, _id, folderName, pull, LoadAsync) is Button request)
+            row.Children.Add(request);
         return new Border
         {
             Background = Theme.AccentSoftBrush,

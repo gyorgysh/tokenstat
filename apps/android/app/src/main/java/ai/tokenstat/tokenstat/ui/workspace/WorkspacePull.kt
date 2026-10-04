@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -29,6 +30,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -36,6 +40,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -211,16 +217,20 @@ fun BranchPullButton(
 ) {
     if (!HostContracts.supportsReviewedPull(protocol)) return
     val uri = LocalUriHandler.current
-    var answer by remember(peer, workspace) { mutableStateOf<JsonObject?>(null) }
+    var answer by remember(peer, workspace, branch) { mutableStateOf<JsonObject?>(null) }
     var creating by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     suspend fun load(refresh: Boolean) {
-        answer = runCatching {
+        answer = null
+        val loaded = runCatching {
             model.workspaceSection(peer, "pulls.branch", buildJsonObject {
                 put("workspaceId", workspace)
+                put("branch", branch.orEmpty())
                 put("refresh", refresh)
             }) as? JsonObject
         }.getOrNull()
+        currentCoroutineContext().ensureActive()
+        answer = loaded
     }
     LaunchedEffect(peer, workspace, branch) { load(refresh = false) }
     val pull = answer?.get("pull") as? JsonObject
@@ -243,5 +253,75 @@ fun BranchPullButton(
         PullCreateDialog(model, peer, workspace, protocol, folderName, hostLabel,
             onDismiss = { creating = false },
             onCreated = { scope.launch { load(refresh = true) } })
+    }
+}
+
+/// A cached state mark on a conversation row. Drawing it never asks the forge.
+@Composable
+fun BranchPullBadge(pull: JsonObject) {
+    val colors = LocalTsColors.current
+    val state = branchPullState(pull)
+    val tint = when (pull.str("state")) {
+        "merged" -> colors.secondary
+        "closed" -> colors.danger
+        else -> if (pull.bol("draft")) colors.stateIdle else colors.accent
+    }
+    Icon(ActionIcon.Merge.vector,
+        L10n.text("android.branchpull.help", state, pull.str("number").orEmpty(), pull.str("title").orEmpty()),
+        tint = tint, modifier = Modifier.size(14.dp))
+}
+
+private fun branchPullState(pull: JsonObject): String = when (pull.str("state")) {
+    "merged" -> L10n.text("android.branchpull.merged")
+    "closed" -> L10n.text("android.branchpull.closed")
+    else -> if (pull.bol("draft")) L10n.text("android.branchpull.draft") else L10n.text("android.branchpull.open")
+}
+
+/// The project's current changes and pull request, above the composer.
+@Composable
+fun ChatGitStrip(model: AppViewModel, peer: String, workspace: String, chat: JsonObject?,
+    protocol: Long?, owner: Any?, offline: Boolean, running: Boolean, onReview: () -> Unit) {
+    var git by remember(owner, chat?.str("id")) { mutableStateOf<JsonObject?>(null) }
+    var pull by remember(owner, chat?.str("id")) { mutableStateOf<JsonObject?>(null) }
+    var wasRunning by remember(owner, chat?.str("id")) { mutableStateOf(false) }
+    val uri = LocalUriHandler.current
+    LaunchedEffect(owner, chat?.str("id"), peer, workspace, chat?.str("branch"), running, offline, protocol) {
+        val finished = wasRunning && !running
+        wasRunning = running
+        git = null
+        pull = null
+        if (offline) return@LaunchedEffect
+        val status = runCatching {
+            model.workspaceSection(peer, "workspace.status", buildJsonObject { put("id", workspace) }) as? JsonObject
+        }.getOrNull()
+        currentCoroutineContext().ensureActive()
+        git = status?.get("git") as? JsonObject
+        val branch = git?.str("branch") ?: return@LaunchedEffect
+        if (running || !HostContracts.supportsReviewedPull(protocol)) return@LaunchedEffect
+        val answer = runCatching {
+            model.workspaceSection(peer, "pulls.branch", buildJsonObject {
+                put("workspaceId", workspace)
+                put("branch", branch)
+                put("refresh", finished)
+            }) as? JsonObject
+        }.getOrNull()
+        currentCoroutineContext().ensureActive()
+        pull = answer?.get("pull") as? JsonObject
+    }
+    val files = git?.get("files") as? kotlinx.serialization.json.JsonArray
+    if (files.isNullOrEmpty() && pull == null) return
+    androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+        if (!files.isNullOrEmpty()) {
+            TsSecondaryButton(label = if (files.size == 1) L10n.text("android.chatchanges.files_changed.one", "1")
+                else L10n.text("android.chatchanges.files_changed.other", "${files.size}"),
+                icon = ActionIcon.Preview.vector, small = true, onClick = onReview)
+        }
+        pull?.let { request ->
+            TsSecondaryButton(label = L10n.text("android.branchpull.chip", request.str("number").orEmpty(), branchPullState(request)),
+                icon = ActionIcon.Merge.vector, small = true, onClick = {
+                    request.str("url")?.takeIf { it.startsWith("https://") }?.let { runCatching { uri.openUri(it) } }
+                })
+        }
     }
 }

@@ -76,8 +76,13 @@ struct ChatToolState: Equatable {
     ///
     /// The full text stays in `detail`, so copy still yields everything.
     static func clip(_ line: String) -> String {
-        guard line.count > Self.snippetColumnCap else { return line }
-        return String(line.prefix(Self.snippetColumnCap)) + "…"
+        // A hostile grapheme may contain thousands of combining marks.
+        // Bound scalars before the usual display-column clipping.
+        let scalars = line.unicodeScalars.prefix(Self.snippetColumnCap * 4 + 1)
+        let bounded = String(String.UnicodeScalarView(scalars.prefix(Self.snippetColumnCap * 4)))
+        let prefix = bounded.prefix(Self.snippetColumnCap + 1)
+        if scalars.count <= Self.snippetColumnCap * 4 && prefix.count <= Self.snippetColumnCap { return bounded }
+        return String(prefix.prefix(Self.snippetColumnCap)) + "…"
     }
 
     /// A 500-line stdout must not become 500 rows. The full text stays in
@@ -235,8 +240,8 @@ struct ChatDisplayItem: Identifiable, Equatable {
 struct ChatTurnChanges: Equatable, Sendable {
     struct File: Equatable, Sendable, Identifiable {
         let path: String
-        var added: UInt32
-        var removed: UInt32
+        var added: UInt64
+        var removed: UInt64
         var id: String { path }
 
         var fileName: String {
@@ -248,6 +253,6 @@ struct ChatTurnChanges: Equatable, Sendable {
     let id: String
     var files: [File]
 
-    var added: UInt32 { files.reduce(0) { $0 + $1.added } }
-    var removed: UInt32 { files.reduce(0) { $0 + $1.removed } }
+    var added: UInt64 { files.reduce(0) { $0 + $1.added } }
+    var removed: UInt64 { files.reduce(0) { $0 + $1.removed } }
 }

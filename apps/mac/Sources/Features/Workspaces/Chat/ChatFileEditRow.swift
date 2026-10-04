@@ -58,6 +58,8 @@ struct ChatFileEditRow: View {
                         .truncationMode(.middle)
                 }
                 if expanded, let shownText {
+                    Button(L10n.text("common.copy"), .copy) { ChatClipboard.copy(state.patch) }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
                     Text(shownText)
                         .font(Self.bodyFont)
                         .textSelection(.enabled)
@@ -116,7 +118,7 @@ struct ChatFileEditRow: View {
 
             Spacer(minLength: 0)
 
-            if state.added + state.removed > 0, !state.running {
+            if (state.added > 0 || state.removed > 0), !state.running {
                 DiffStat(added: Int(state.added), removed: Int(state.removed), font: Self.diffFont)
             }
             if state.running {
@@ -194,7 +196,7 @@ struct ChatFileEditRow: View {
     private var accessibility: String {
         var parts = [state.fileName]
         if let label = state.changeLabel { parts.append(label) }
-        if state.added + state.removed > 0 {
+        if (state.added > 0 || state.removed > 0) {
             parts.append(L10n.text("apple.chatfileeditrow.0_added_1_removed.b84e338d", "\(state.added)", "\(state.removed)"))
         }
         if state.running { parts.append("editing") }

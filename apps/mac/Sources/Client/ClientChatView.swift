@@ -516,31 +516,29 @@ struct ClientChatThread: View {
     /// the composer, as on the Mac.
     @ViewBuilder
     private var changesRow: some View {
-        let changed = folderGit.flatMap { $0.isRepo && !$0.files.isEmpty ? $0 : nil }
-        if changed != nil || branchPull != nil {
-            HStack(spacing: Theme.Space.s) {
-                if let changed {
-                    ChatChangesPill(git: changed) { reviewingChanges = true }
-                }
-                Spacer(minLength: 0)
-                if let branchPull {
-                    BranchPullChip(pull: branchPull)
-                }
-            }
+        ChatGitStatusStrip(git: folderGit, pull: branchPull, review: { reviewingChanges = true })
             .padding(.horizontal, Theme.Space.m)
             .padding(.bottom, Theme.Space.xs)
-        }
     }
 
     private func loadFolderState() async {
+        folderGit = nil
+        branchPull = nil
         guard let folder, let peer = model.peer, model.savedCopy == nil else { return }
         let workspace = model.folderID ?? folder.id
-        folderGit = (try? await GitCommitTarget(peer: peer, workspaceID: workspace).status())?.git
+        let owner = model.currentReference
+        let status = try? await GitCommitTarget(peer: peer, workspaceID: workspace).status()
+        guard !Task.isCancelled, owner == model.currentReference, model.peer == peer,
+              model.savedCopy == nil else { return }
+        folderGit = status?.git
         guard folderGit?.isRepo == true else {
             branchPull = nil
             return
         }
-        branchPull = (try? await Bridge.branchPull(workspaceID: workspace, peer: peer))?.pull
+        let answer = try? await Bridge.branchPull(workspaceID: workspace, peer: peer, branch: folderGit?.branch, refresh: true)
+        guard !Task.isCancelled, owner == model.currentReference, model.peer == peer,
+              model.savedCopy == nil else { return }
+        branchPull = answer?.pull
     }
 
     private var chat: ChatConversation? {

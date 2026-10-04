@@ -6,7 +6,7 @@ namespace Tokenstat.Pages;
 
 /// <summary>
 /// The chosen transcript detail level, one for every chat on this computer,
-/// like the Mac's <c>chat.detail</c> default. Compact until somebody picks.
+/// like the Mac's <c>chat.detail</c> default. Minimal until somebody picks.
 ///
 /// A plain file, not LocalSettings: this app is unpackaged, and
 /// ApplicationData.Current throws there.
@@ -53,6 +53,6 @@ internal static class ChatDetailPreference
         {
             // A damaged file only costs the remembered level.
         }
-        return ChatDetail.Compact;
+        return ChatDetail.Minimal;
     }
 }

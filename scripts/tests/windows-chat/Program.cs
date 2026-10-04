@@ -245,7 +245,7 @@ var turns = new List<ChatPage.DisplayItem>
     Row("x1", ChatPage.ItemKind.Usage, cost: 0.25), Ask("u2"), Tool("t2", "Read"), Say("a2"),
 };
 var compact = FoldRows(turns, ChatDetail.Compact);
-Check(Ids(compact) == "u1,g:k1,a0,g:t1,a1,u2,g:t2,a2", "Compact keeps replies between work groups: " + Ids(compact));
+Check(Ids(compact) == "u1,g:k1,a0,g:t1,a1,changes:e1,u2,g:t2,a2", "Compact keeps replies between work groups: " + Ids(compact));
 Check(GroupOf(compact, "g:k1")!.Style == ChatStepGroupStyle.Thought, "reasoning alone is a thought line");
 var work = GroupOf(compact, "g:t1")!;
 Check(work.Style == ChatStepGroupStyle.Work && string.Join(",", work.MemberIds) == "t1,e1", "only tool activity folds with the work");
@@ -286,7 +286,7 @@ Check(!GroupOf(settled, "g:k1")!.Running, "work before the answer is not running
 var standard = FoldRows(
     [Ask("u1"), Think("k1"), Tool("t1", "Read"), Tool("t2", "Grep"), Tool("t3", "WebFetch"), Tool("t4", "Bash"), EditRow("e1", "a"), Say("a1")],
     ChatDetail.Standard);
-Check(Ids(standard) == "u1,g:k1,g:t1,t4,e1,a1", "Standard folds thought and reads: " + Ids(standard));
+Check(Ids(standard) == "u1,g:k1,g:t1,t4,e1,a1,changes:e1", "Standard folds thought and reads: " + Ids(standard));
 var explored = GroupOf(standard, "g:t1")!;
 Check(explored.Style == ChatStepGroupStyle.Explored && explored.Reads == 1 && explored.Searches == 1 && explored.Pages == 1,
     "explored counts by kind");
@@ -314,7 +314,30 @@ Check(counted.Steps == 5 && counted.Files == 2 && counted.Added == 6 && counted.
     && counted.StartedAt == 1_000 && counted.EndedAt == 9_000, "counts match their members");
 Check(ChatDetailFold.Preview("\n\n## **Plan** it\nmore") == "Plan** it" && ChatDetailFold.Preview("\n  \n") is null,
     "previews drop markdown marks");
-Console.WriteLine("Windows chat detail: compact, standard and detailed folding, pinned rows, open groups and counts pass.");
+var minimal = FoldRows([Ask("u1"), Think("k1"), Tool("t1", "Read"), Tool("t2", "Grep"), Tool("t3", "Bash"),
+    EditRow("e1", "src/a.cs", 6, 2), Tool("t4", "Read"), Say("a1"), Tool("t5", "Bash", failed: true)], ChatDetail.Minimal);
+Check(Ids(minimal) == "u1,g:k1,g:t1,g:t3,g:e1,g:t4,a1,t5,changes:e1", "Minimal is a line per step: " + Ids(minimal));
+Check(new[] { "g:k1", "g:t1", "g:t3", "g:e1", "g:t4" }.All(id => GroupOf(minimal, id)!.Minimal), "every Minimal line is plain");
+Check(GroupOf(minimal, "g:t3")! is { Style: ChatStepGroupStyle.Step, Verb: "Bash" }, "a command is its own line");
+Check(GroupOf(minimal, "g:e1")! is { Style: ChatStepGroupStyle.Step, Verb: "Edit", Subject: "src/a.cs", Added: 6, Removed: 2 },
+    "an edit names its file and lines");
+Check(GroupOf(minimal, "g:t4")!.Style == ChatStepGroupStyle.Explored, "a lone read folds too");
+Check(ChatDetailFold.ShortSubject("Edit", "src/a.cs") == "a.cs" && ChatDetailFold.ShortSubject("Bash", "cargo test\nmore") == "cargo test",
+    "a path becomes its name and a command its first line");
+
+var changed = new List<ChatPage.DisplayItem>
+{
+    Ask("u1"), EditRow("e1", "/w/a.cs", 3, 1), EditRow("e2", "/w/a.cs", 2), EditRow("e3", "/w/b.cs", 1, 4),
+    EditRow("ef", "/w/c.cs", failed: true), Say("a1"), Ask("u2"), EditRow("e4", "/w/c.cs", 1), Say("a2"),
+};
+var liveChanges = FoldRows(changed, ChatDetail.Compact, running: true);
+Check(string.Join(",", liveChanges.Where(row => row.Kind == ChatPage.ItemKind.Changes).Select(row => row.Id)) == "changes:e1",
+    "the live turn has no card yet");
+var firstTurn = liveChanges.First(row => row.Id == "changes:e1").Changes!;
+Check(string.Join(",", firstTurn.Select(file => file.Path)) == "/w/a.cs,/w/b.cs" && firstTurn[0].Added == 5 && firstTurn[0].Removed == 1,
+    "one row per file, summed, failures left out");
+Check(FoldRows(changed, ChatDetail.Compact).Last().Changes is { Count: 1 }, "a finished turn gets its card");
+Console.WriteLine("Windows chat detail: minimal, compact, standard and detailed folding, turn changes, pinned rows, open groups and counts pass.");
 
 var loadedWork = new List<ChatPage.DisplayItem> { Ask("long-turn") };
 loadedWork.AddRange(Enumerable.Range(0, 300).Select(index => Tool($"step-{index}", "Read")));
@@ -409,3 +432,18 @@ Check(await signInChecks.CheckAsync(catalogBackend, 2,
     _ => Task.FromResult(Json("""{"readiness":"unknown","checked":false}""")), () => openGeneration, CurrentBackend),
     "a failed probe releases its reservation for another attempt");
 Console.WriteLine("Windows sign-in: refreshed catalogs, navigation, shared probes and failed-check retries pass.");
+
+var longDiff = new string('x', 4_900_000) + "👩🏽‍💻e\u0301界";
+var pieces = DiffTextChunks.Split(longDiff).ToArray();
+Check(pieces.All(piece => piece.Length <= DiffTextChunks.MaxUnits), "a minified diff must bound every layout item");
+Check(string.Concat(pieces) == longDiff, "chunking must preserve the full UTF-16 source");
+Check(DiffTextChunks.Count(longDiff) == pieces.Length, "navigation counts must match chunks");
+var pairAtBoundary = new string('x', 255) + "😀tail";
+var pairPieces = DiffTextChunks.Split(pairAtBoundary).ToArray();
+Check(pairPieces[0].Length == 255 && pairPieces[1].StartsWith("😀"), "a page may not split a surrogate pair");
+Check(DiffTextChunks.Split("").Count() == 1 && DiffTextChunks.Count("") == 1, "empty source lines keep one row");
+var abandonedQuestion = "```tokenstat-question\n" + new string('x', 64 * 1024 + 1);
+Check(ChatQuestionText.Strip(abandonedQuestion) == abandonedQuestion, "an oversized open fence stays readable");
+Check(ChatQuestionText.Strip(abandonedQuestion + "\n```tokenstat-question\n{\"question\":\"Later\"}\n```") == abandonedQuestion,
+    "an abandoned block cannot hide a later question");
+Console.WriteLine("Windows diff text: multi-megabyte layout bounds, lossless source and Unicode boundaries pass.");
