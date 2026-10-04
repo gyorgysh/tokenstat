@@ -1172,16 +1172,10 @@ struct ChatView: View {
         // An attached image is content on its own: text is only mandatory
         // when there is nothing attached.
         guard !text.isEmpty || !model.attachments.isEmpty, !model.sending else { return }
-        // Only the CLI's own answer stops a send. A stored token past its
-        // expiry is routine (the CLI renews it), and an agent signed in with
-        // an environment key has no login file at all.
-        if let backend = model.backend(for: chat.backend), backend.signInVerified, ["needsSignIn", "expired"].contains(backend.readiness ?? "") {
-            guard model.signInQueuedMessage == nil else {
-                model.backendRefreshError = L10n.text("apple.agentsetup.finish_saved")
-                return
-            }
-            guard model.enqueue(text, awaitingSignIn: true) != nil else { return }
-            model.clearDraft()
+        switch model.holdForSignIn(text, backend: chat.backend) {
+        case .notNeeded: break
+        case .refused: return
+        case .held:
             showNewest()
             follow.jump()
             followPulse += 1

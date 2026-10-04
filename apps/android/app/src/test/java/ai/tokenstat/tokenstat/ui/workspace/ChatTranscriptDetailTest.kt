@@ -90,6 +90,11 @@ class ChatTranscriptDetailTest {
     @Test
     fun compactKeepsUsageWhenThereIsNoWork() {
         assertEquals(listOf("u1", "a1", "x1"), ids(fold(listOf(user("u1"), say("a1"), usage("x1", 0.5)), ChatDetail.Compact)))
+        // Nothing spent, because a plan covers it, keeps the token counts.
+        assertEquals(
+            listOf("u1", "g:t1", "a1", "x1"),
+            ids(fold(listOf(user("u1"), tool("t1", "Read"), say("a1"), usage("x1", 0.0)), ChatDetail.Compact)),
+        )
     }
 
     @Test

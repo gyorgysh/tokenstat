@@ -23,6 +23,11 @@ object HostContracts {
     const val PULL_CREATION_MIN_PROTOCOL = 28
     const val CHAT_QUESTIONS_MIN_PROTOCOL = 29
 
+    /// Version 29 records the agent's questions and takes their answers. An
+    /// older host never records one, so this guards the answer, not the card.
+    fun supportsChatQuestions(protocol: Long?): Boolean =
+        protocol == null || protocol >= CHAT_QUESTIONS_MIN_PROTOCOL
+
     fun protocolOf(status: kotlinx.serialization.json.JsonObject?): Long? =
         status?.get("protocol")?.jsonPrimitive?.longOrNull
             ?: status?.get("protocolVersion")?.jsonPrimitive?.longOrNull

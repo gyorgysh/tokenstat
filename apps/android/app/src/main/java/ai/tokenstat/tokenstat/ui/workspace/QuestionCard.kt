@@ -115,7 +115,8 @@ internal fun QuestionCard(question: ChatQuestion, sending: Boolean, error: Strin
                     icon = ActionIcon.Send.vector,
                     small = true,
                     enabled = picked.isNotEmpty() && !sending,
-                    onClick = { onAnswer(picked.joinToString(", ")) },
+                    // Quoted, so a comma inside a choice cannot read as two.
+                    onClick = { onAnswer(picked.joinToString(", ") { "“$it”" }) },
                 )
             }
         }

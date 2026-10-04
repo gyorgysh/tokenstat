@@ -233,12 +233,11 @@ enum ChatTranscriptFold {
         flush(trailing: true)
 
         // The spend rides on the turn's last work line. A turn with no work
-        // to fold keeps its usage rows, or the figure would just vanish.
-        if let lastHeader, case var .group(group) = out[lastHeader].kind {
-            if cost > 0 {
-                group.cost = cost
-                out[lastHeader] = ChatDisplayItem(id: out[lastHeader].id, kind: .group(group))
-            }
+        // to fold, or nothing spent because a plan covers it, keeps its usage
+        // rows, or its token counts would just vanish.
+        if let lastHeader, cost > 0, case var .group(group) = out[lastHeader].kind {
+            group.cost = cost
+            out[lastHeader] = ChatDisplayItem(id: out[lastHeader].id, kind: .group(group))
         } else {
             out.append(contentsOf: usage)
         }

@@ -83,7 +83,7 @@ struct ChatAgentSetupCard: View {
 
     private var ready: Bool {
         confirmed && readyFor == recoveryFailureID
-            && !(backend.signInVerified && ["needsSignIn", "expired"].contains(backend.readiness ?? ""))
+            && !model.needsSignIn(backend.id)
     }
 
     var body: some View {

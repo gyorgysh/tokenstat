@@ -590,6 +590,14 @@ fn note_backend(backend: &str) -> bool {
     matches!(backend, "claude" | "codex") || (backend == "muse" && cfg!(unix))
 }
 
+/// Whether a turn of this chat reads a parked note on its next step. Muse
+/// takes one on every model step. The others only stop at a step when they
+/// ask before tools. Steering, answering and the standing question rule all
+/// ask this one place, so they cannot disagree about it.
+fn takes_notes_mid_turn(chat: &Conversation) -> bool {
+    note_backend(&chat.backend) && (chat.backend == "muse" || chat.autonomy == "standard")
+}
+
 /// A Windows bypass turn keeps the tool's own home, where it was signed in,
 /// rather than relocate at all. Hooked turns use the private home everywhere:
 /// its credential link carries the sign-in along.
@@ -1079,7 +1087,7 @@ impl Store {
         if !note_backend(&chat.backend) {
             return Err("This agent cannot take a note mid-turn.".into());
         }
-        if chat.backend != "muse" && chat.autonomy != "standard" {
+        if !takes_notes_mid_turn(&chat) {
             return Err(
                 "This chat is not asking before tools, so a note cannot ride the next step.".into(),
             );
@@ -1132,24 +1140,35 @@ impl Store {
             return Err("That answer is too long for one note. Send it as its own message.".into());
         }
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
+        let mut answer = answer.to_string();
         let note = {
             crate::workspace_policy::require_current_access()?;
             self.withdraw_pending_answers(id);
             let question = self.open_question(id, question_id)?;
-            let note = crate::chat_question::answer_note(&question, answer);
             // An earlier idle answer may already have launched even though its
             // answer row could not be written. Replay its shared receipt before
             // deciding to park a note on that very same running turn.
             let ledger = crate::chat_receipts::Ledger::load(self.receipts_path(id), now_ms())
                 .map_err(DispatchError::delivery_unknown)?;
-            let replay = ledger
-                .get(&crate::chat_receipts::question_key(question_id))
-                .is_some();
+            let receipt = ledger.get(&crate::chat_receipts::question_key(question_id));
+            // The agent already has that earlier answer, whatever is typed now.
+            // Record what it was given, or the card could only ever be closed
+            // by retyping those exact words.
+            if let Some(sent) =
+                receipt.and_then(|receipt| self.delivered_answer(id, &question, receipt))
+            {
+                answer = sent;
+            }
+            let replay = receipt.is_some();
+            let answer = answer.as_str();
+            let note = crate::chat_question::answer_note(&question, answer);
             if !replay && self.turn_is_live(id)? {
                 let chat = self.get(id)?;
-                let takes_notes = note_backend(&chat.backend)
-                    && (chat.backend == "muse" || chat.autonomy == "standard");
-                let delivery = if takes_notes { "note" } else { "queued" };
+                let delivery = if takes_notes_mid_turn(&chat) {
+                    "note"
+                } else {
+                    "queued"
+                };
                 self.append(
                     id,
                     &StoredEvent::Answer {
@@ -1187,7 +1206,7 @@ impl Store {
             id,
             &StoredEvent::Answer {
                 question_id: question_id.into(),
-                text: answer.into(),
+                text: answer,
                 delivery: "sent".into(),
                 at_ms: now_ms(),
             },
@@ -1204,6 +1223,28 @@ impl Store {
             .map_err(|error| DispatchError::delivery_unknown(error.to_string()))?;
         let _ = self.drop_receipt(id, &crate::chat_receipts::question_key(question_id));
         Ok(json!({ "delivery": "sent", "conversation": outcome.into_conversation() }))
+    }
+
+    /// The answer an accepted idle launch already gave the agent, read back
+    /// from the message it put on the timeline. None when the receipt is not
+    /// settled or that row is not there to read.
+    fn delivered_answer(
+        &self,
+        id: &str,
+        question: &str,
+        receipt: &crate::chat_receipts::Receipt,
+    ) -> Option<String> {
+        if receipt.state != crate::chat_receipts::ReceiptState::Accepted {
+            return None;
+        }
+        let at_ms = receipt.event_at_ms?;
+        let prefix = crate::chat_question::answer_note(question, "");
+        let (events, _) = self.events(id, 0).ok()?;
+        events
+            .iter()
+            .filter(|row| row["kind"] == "user" && record_at_ms(row) == Some(at_ms))
+            .find_map(|row| row["text"].as_str()?.strip_prefix(&prefix))
+            .map(str::to_owned)
     }
 
     /// The text of a question in this conversation that nobody has answered.
@@ -3108,10 +3149,9 @@ impl Store {
         // How to ask the person something, for this kind of turn: a turn that
         // does not ask before tools must never wait, and one whose agent can
         // take a note mid-turn can be answered without stopping.
-        let takes_notes = chat.autonomy == "standard" && note_backend(&chat.backend);
         composed.append_standing(&crate::chat_question::rule(
             chat.autonomy == "standard",
-            takes_notes,
+            takes_notes_mid_turn(&chat),
         ));
         // Two separate things ride the same channel this turn. The standing
         // rules repeat for as long as they are unchanged; the handover is sent
@@ -4474,22 +4514,18 @@ fn safe_file_name(name: &str) -> String {
 /// Append the turn's reply text, and say how many bytes were dropped from the
 /// front, so anything holding an offset into the text can move it along.
 ///
-/// A tool call, an edit or a thought between two runs of text ends a line.
-/// The agent wrote them as separate blocks, and joined back to back a fence
-/// that closed one block or opened the next would sit mid-line, where the
-/// question scanner rightly refuses to see a fence.
+/// Any other event between two runs of text ends a line: a tool call, an
+/// edit, a thought, a usage report or an attachment. The agent wrote them as
+/// separate blocks, every client draws them as separate rows, and joined back
+/// to back a fence that closed one block or opened the next would sit
+/// mid-line, where the question scanner rightly refuses to see a fence. A
+/// client would still strip that block from the reply, and the question
+/// would be lost from both places.
 fn collect_agent_text(events: &[Event], text: &mut String) -> usize {
     for event in events {
         match event {
             Event::Text { delta } => text.push_str(delta),
-            Event::ToolStart { .. }
-            | Event::ToolEnd { .. }
-            | Event::Edit { .. }
-            | Event::Thinking { .. }
-                if !text.is_empty() && !text.ends_with('\n') =>
-            {
-                text.push('\n');
-            }
+            _ if !text.is_empty() && !text.ends_with('\n') => text.push('\n'),
             _ => {}
         }
     }
@@ -6281,6 +6317,29 @@ mod tests {
         found.extend(scanner.finish(&reply));
         assert_eq!(found.len(), 1, "{reply:?}");
         assert_eq!(found[0].question, "Which database?");
+
+        // Clients draw a usage report as its own row, so a block right after
+        // one opens its own line here too.
+        let mut reply = String::new();
+        let usage = Event::Usage {
+            input: 1,
+            output: 1,
+            cache_read: 0,
+            cache_write: 0,
+            cost_usd: None,
+        };
+        collect_agent_text(
+            &[
+                text("Step one done."),
+                usage,
+                text(&format!("```{fence}\n{{\"question\":\"Next?\"}}\n```\n")),
+            ],
+            &mut reply,
+        );
+        assert_eq!(
+            crate::chat_question::Scanner::default().scan(&reply).len(),
+            1
+        );
     }
 
     #[test]
@@ -6403,6 +6462,50 @@ mod tests {
                 "a durable answer retires its receipt"
             );
         }
+    }
+
+    #[test]
+    fn a_confirmed_question_answer_records_what_reached_the_agent_whatever_is_typed_now() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        prepare_live_chat(&store, "chat-test");
+        let question = ask(&store, "chat-test", "Pick one?");
+        store.set_running("chat-test", false).unwrap();
+        // The launch's message is on the timeline, its answer row is not.
+        let note = crate::chat_question::answer_note("Pick one?", "B");
+        let user_at = now_ms();
+        store
+            .append(
+                "chat-test",
+                &StoredEvent::User {
+                    text: note.clone(),
+                    at_ms: user_at,
+                },
+            )
+            .unwrap();
+        let key = crate::chat_receipts::question_key(&question);
+        store
+            .write_receipt(
+                "chat-test",
+                &key,
+                crate::chat_receipts::Receipt {
+                    state: crate::chat_receipts::ReceiptState::Accepted,
+                    digest: crate::chat_receipts::digest(&note, &[]),
+                    at_ms: user_at,
+                    event_at_ms: Some(user_at),
+                },
+            )
+            .unwrap();
+        let delivery = store.answer_question("chat-test", &question, "A").unwrap();
+        assert_eq!(delivery["delivery"], "sent");
+        let (events, _) = store.events("chat-test", 0).unwrap();
+        let answers: Vec<_> = events
+            .iter()
+            .filter(|row| row["kind"] == "answer")
+            .collect();
+        assert_eq!(answers.len(), 1);
+        assert_eq!(answers[0]["text"], "B");
+        assert!(store.open_question("chat-test", &question).is_err());
     }
 
     #[test]

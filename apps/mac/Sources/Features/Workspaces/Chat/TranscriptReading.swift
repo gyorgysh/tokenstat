@@ -105,8 +105,9 @@ enum TranscriptReading {
                 continue
             }
             // A kept row may be folded into a step group. Open it, so the
-            // reader lands on the row itself.
-            place(model.revealRow(rowID), point)
+            // reader lands on the row itself, unless the mark was the closed
+            // group's own header.
+            place(model.readingRow(rowID), point)
             placements += 1
             if placements > corrections { break }
         }

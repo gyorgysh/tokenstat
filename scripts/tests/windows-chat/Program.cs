@@ -274,6 +274,8 @@ foreach (var level in Enum.GetValues<ChatDetail>())
 Check(Ids(FoldRows(mustSee, ChatDetail.Compact)) == "u1,g:t1,p1,g:t2,t3,e1,f1,x1", "an approval splits the work where it happened");
 Check(Ids(FoldRows([Ask("u1"), Say("a1"), Row("x1", ChatPage.ItemKind.Usage, cost: 0.5)], ChatDetail.Compact)) == "u1,a1,x1",
     "nothing to fold keeps the usage row");
+Check(Ids(FoldRows([Ask("u1"), Tool("t1", "Read"), Say("a1"), Row("x1", ChatPage.ItemKind.Usage, cost: 0)], ChatDetail.Compact)) == "u1,g:t1,a1,x1",
+    "nothing spent keeps the token counts");
 
 var live = FoldRows([Ask("u1"), Think("k1"), Tool("t1", "Read", running: true)], ChatDetail.Compact, running: true);
 var liveGroup = GroupOf(live, "g:k1")!;

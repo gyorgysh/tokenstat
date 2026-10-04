@@ -85,7 +85,8 @@ struct ChatQuestionCard: View {
             }
             if question.multiple {
                 Button(L10n.text("apple.chatquestion.send_choices"), .send) {
-                    answer(picked.joined(separator: ", "))
+                    // Quoted, so a comma inside a choice cannot read as two.
+                    answer(picked.map { "“\($0)”" }.joined(separator: ", "))
                 }
                 .buttonStyle(AccentButtonStyle(small: true))
                 .disabled(picked.isEmpty || isSending)

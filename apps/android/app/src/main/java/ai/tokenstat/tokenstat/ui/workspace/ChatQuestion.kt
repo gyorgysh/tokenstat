@@ -30,13 +30,15 @@ private const val QUESTION_BLOCK_MAX_BYTES = 64 * 1024
 /// block still streaming is cut from its opening line, so half a JSON object
 /// never flashes on screen.
 fun stripQuestionBlocks(text: String, streaming: Boolean = true): String {
-    if (!text.contains("```$QUESTION_FENCE")) return text
+    if (!text.contains(QUESTION_FENCE)) return text
     val kept = mutableListOf<String>()
     var inside = false
     val block = mutableListOf<String>()
     for (line in text.split("\n")) {
         val trimmed = line.trim()
-        if (!inside && trimmed == "```$QUESTION_FENCE") {
+        // The host reads the info string trimmed, so "``` tokenstat-question"
+        // is a question there too and must not show as raw JSON here.
+        if (!inside && trimmed.startsWith("```") && trimmed.substring(3).trim() == QUESTION_FENCE) {
             inside = true
             block.add(line)
             continue

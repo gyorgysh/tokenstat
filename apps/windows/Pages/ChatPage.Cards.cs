@@ -326,7 +326,8 @@ internal sealed partial class ChatPage
             if (question.Multiple)
             {
                 sendPicked = Buttons.Primary(L10n.Text("windows.chatquestion.send_choices"), ActionIcon.Send,
-                    async (_, _) => await AnswerQuestionAsync(question, string.Join(", ", picked)), small: true);
+                    // Quoted, so a comma inside a choice cannot read as two.
+                    async (_, _) => await AnswerQuestionAsync(question, string.Join(", ", picked.Select(choice => $"“{choice}”"))), small: true);
                 sendPicked.IsEnabled = !sending && picked.Count > 0;
                 body.Children.Add(sendPicked);
             }

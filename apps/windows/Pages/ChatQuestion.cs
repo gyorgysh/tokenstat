@@ -33,14 +33,16 @@ internal static class ChatQuestionText
     /// </summary>
     public static string Strip(string text, bool streaming = true)
     {
-        if (!text.Contains("```" + Fence, StringComparison.Ordinal)) return text;
+        if (!text.Contains(Fence, StringComparison.Ordinal)) return text;
         var kept = new List<string>();
         var inside = false;
         var block = new List<string>();
         foreach (var line in text.Split('\n'))
         {
             var trimmed = line.Trim();
-            if (!inside && trimmed == "```" + Fence)
+            // The host reads the info string trimmed, so "``` tokenstat-question"
+            // is a question there too and must not show as raw JSON here.
+            if (!inside && trimmed.StartsWith("```", StringComparison.Ordinal) && trimmed[3..].Trim() == Fence)
             {
                 inside = true;
                 block = [line];

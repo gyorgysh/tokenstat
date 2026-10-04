@@ -18,7 +18,7 @@ import SwiftUI
     var fetches = 0
     /// Rows asked to be opened out of a folded step group.
     var revealed: [String] = []
-    func revealRow(_ id: String) -> String {
+    func readingRow(_ id: String) -> String {
         revealed.append(id)
         return id
     }

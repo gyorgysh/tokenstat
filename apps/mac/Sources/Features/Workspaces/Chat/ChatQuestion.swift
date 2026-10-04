@@ -45,14 +45,17 @@ enum ChatQuestionText {
     /// The reply without its question blocks. A block still streaming is cut
     /// from its opening line, so half a JSON object never flashes on screen.
     static func stripping(_ text: String, streaming: Bool = true) -> String {
-        guard text.contains("```\(fence)") else { return text }
+        guard text.contains(fence) else { return text }
         var kept: [String] = []
         var inside = false
         var block: [String] = []
         // Character splitting treats CRLF as one character, missing its LF.
         for line in text.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !inside, trimmed == "```\(fence)" {
+            // The host reads the info string trimmed, so "``` tokenstat-question"
+            // is a question there too and must not show as raw JSON here.
+            if !inside, trimmed.hasPrefix("```"),
+               trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces) == fence {
                 inside = true
                 block = [line]
                 continue

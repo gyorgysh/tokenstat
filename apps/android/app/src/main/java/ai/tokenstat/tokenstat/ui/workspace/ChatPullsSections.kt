@@ -1617,7 +1617,7 @@ fun ChatSection(
                                 hostLabel = hostLabel,
                                 defaultAgentName = openChat?.str("backend")?.let { harnessName(it) } ?: L10n.text("android.chatpullssections.agent.11b39c93"),
                                 expandsOutput = detail == ChatDetail.Detailed,
-                                canAnswerQuestions = !offline,
+                                canAnswerQuestions = !offline && HostContracts.supportsChatQuestions(protocol),
                                 onToggleGroup = { id ->
                                     toggledGroups = if (id in toggledGroups) toggledGroups - id else toggledGroups + id
                                 },

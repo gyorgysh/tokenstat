@@ -206,15 +206,13 @@ internal static class ChatDetailFold
         Flush(true);
 
         // The spend rides on the turn's last work line. A turn with no work to
-        // fold keeps its usage rows, or the figure would just vanish.
-        if (lastHeader >= 0 && output[lastHeader].Group is { } group)
+        // fold, or nothing spent because a plan covers it, keeps its usage
+        // rows, or its token counts would just vanish.
+        if (lastHeader >= 0 && cost > 0 && output[lastHeader].Group is { } group)
         {
-            if (cost > 0)
-            {
-                var header = output[lastHeader];
-                header.Group = group with { Cost = cost };
-                output[lastHeader] = header;
-            }
+            var header = output[lastHeader];
+            header.Group = group with { Cost = cost };
+            output[lastHeader] = header;
         }
         else
         {

@@ -1328,14 +1328,19 @@ extension Bridge {
         _ = try await chatInvoke(peer: peer, "chat.stop", ["id": id], as: Ack.self)
     }
 
-    /// Park a short note on the next tool step. The turn keeps going.
     /// Answer one question the agent asked. The host decides how it travels:
     /// on the running turn's next step, after that turn, or as a new turn.
     static func answerChatQuestion(id: String, questionID: String, text: String, peer: String? = nil) async throws -> ChatQuestionDelivery {
-        try await chatInvoke(peer: peer, "chat.answerQuestion",
+        guard await RemoteHostFeature.chatQuestions.isSupported(peer: peer) else {
+            throw NSError(domain: "Chat", code: 29, userInfo: [
+                NSLocalizedDescriptionKey: L10n.text("apple.bridge.update_the_project_s_computer_to_answer_ques.f838b73b")
+            ])
+        }
+        return try await chatInvoke(peer: peer, "chat.answerQuestion",
                              ["id": id, "questionId": questionID, "text": text], as: ChatQuestionDelivery.self)
     }
 
+    /// Park a short note on the next tool step. The turn keeps going.
     static func steerChat(id: String, text: String, peer: String? = nil) async throws {
         _ = try await chatInvoke(peer: peer, "chat.steer", ["id": id, "text": text], as: Ack.self)
     }

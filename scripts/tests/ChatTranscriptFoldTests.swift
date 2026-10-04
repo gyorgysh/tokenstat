@@ -120,6 +120,8 @@ struct ChatTranscriptFoldTests {
     static func compactKeepsUsageWhenThereIsNoWork() {
         let out = fold([user("u1"), say("a1"), usage("x1", 0.5)], .compact)
         require(ids(out) == ["u1", "a1", "x1"], "nothing to fold keeps the usage row: \(ids(out))")
+        let plan = fold([user("u1"), tool("t1", "Read"), say("a1"), usage("x1", 0)], .compact)
+        require(ids(plan) == ["u1", "g:t1", "a1", "x1"], "nothing spent keeps the token counts: \(ids(plan))")
     }
 
     static func compactKeepsEveryReplyVisible() {

@@ -521,6 +521,7 @@
   "apple.bridge.the_previous_preview_connection_could_not.c878d33d": "The previous preview connection could not be closed. Try again.",
   "apple.bridge.the_saved_message_time_could_not_be_read_y.79fe7261": "The saved message time could not be read. Your pending copy stays here.",
   "apple.bridge.this_file_is_too_large_to_attach_0_mb_file.f594c26b": "This file is too large to attach ({0} MB). Files must be under 25 MB.",
+  "apple.bridge.update_the_project_s_computer_to_answer_ques.f838b73b": "Update the project's computer to answer questions.",
   "apple.bridge.update_the_project_s_computer_to_delete_al.91053fe4": "Update the project's computer to delete all chats.",
   "apple.bridge.update_the_project_s_computer_to_fork_chat.4d57279f": "Update the project's computer to fork chats.",
   "apple.browserview.0_is_not_a_local_development_server_it_wil.6277a9a2": "{0} is not a local development server. It will load inside the app's browser.",

@@ -200,10 +200,11 @@ private fun foldCompactTurn(
     flush(trailing = true)
 
     // The spend rides on the turn's last work line. A turn with no work to
-    // fold keeps its usage rows, or the figure would just vanish.
+    // fold, or nothing spent because a plan covers it, keeps its usage rows,
+    // or its token counts would just vanish.
     val header = out.getOrNull(lastHeader) as? ChatDisplayItem.Group
-    if (lastHeader >= 0 && header != null) {
-        if (cost > 0) out[lastHeader] = header.copy(group = header.group.copy(cost = cost))
+    if (lastHeader >= 0 && header != null && cost > 0) {
+        out[lastHeader] = header.copy(group = header.group.copy(cost = cost))
     } else {
         out.addAll(usage)
     }

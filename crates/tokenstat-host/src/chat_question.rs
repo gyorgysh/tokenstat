@@ -39,8 +39,18 @@ const MAX_OPTIONS: usize = 8;
 /// Far more than a question's own caps can fill, even with every option
 /// written at length and escaped. Past this an unclosed block is given up.
 const BLOCK_MAX_BYTES: usize = 64 * 1024;
-/// An answer is one note on the agent's next step, the same size as a steer.
-pub const ANSWER_MAX_CHARS: usize = 1_500;
+/// An answer is one note on the agent's next step, the same size as a steer,
+/// or longer when that is what every choice of a multiple-choice question
+/// takes, each quoted and joined with ", ". Picking them all must never be
+/// refused.
+pub const ANSWER_MAX_CHARS: usize = {
+    let every_choice = MAX_OPTIONS * (OPTION_MAX_CHARS + 4);
+    if every_choice > 1_500 {
+        every_choice
+    } else {
+        1_500
+    }
+};
 
 /// One question, as recorded in the timeline.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

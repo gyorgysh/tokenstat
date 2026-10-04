@@ -656,10 +656,14 @@ fn run_probe(command: &str, args: &[&str]) -> Option<[Vec<u8>; 2]> {
             break;
         }
         if Instant::now() >= deadline {
+            // The whole tree, so a shim's child cannot keep the pipes open
+            // and strand both reader threads.
             #[cfg(unix)]
             unsafe {
                 libc::kill(-(child.id() as i32), libc::SIGKILL);
             }
+            #[cfg(windows)]
+            tokenstat_pty::kill_windows_process_tree(child.id());
             let _ = child.kill();
             let _ = child.wait();
             return None;

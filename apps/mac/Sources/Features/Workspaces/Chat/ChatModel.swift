@@ -123,13 +123,37 @@ final class ChatModel {
         return "\(selected.id):\(gate)"
     }
 
+    /// Whether this agent's own CLI said it is signed out. Only that stops a
+    /// send: a stored token past its expiry is routine (the CLI renews it),
+    /// and an agent signed in with an environment key has no login file.
+    func needsSignIn(_ backendID: String) -> Bool {
+        guard let backend = backend(for: backendID), backend.signInVerified else { return false }
+        return ["needsSignIn", "expired"].contains(backend.readiness ?? "")
+    }
+
+    enum SignInHold { case notNeeded, held, refused }
+
+    /// Keep a send for after sign-in, when the agent needs one. The Mac and
+    /// the phone both submit through here, so they hold the same sends.
+    /// Only one message waits: a second is refused and its words stay in the
+    /// draft, which is cleared only once the first is safely queued.
+    func holdForSignIn(_ text: String, backend backendID: String) -> SignInHold {
+        guard needsSignIn(backendID) else { return .notNeeded }
+        guard signInQueuedMessage == nil else {
+            backendRefreshError = L10n.text("apple.agentsetup.finish_saved")
+            return .refused
+        }
+        guard enqueue(text, awaitingSignIn: true) != nil else { return .refused }
+        clearDraft()
+        return .held
+    }
+
     /// Explicit Continue reuses durable delivery and receipts, keeping any new
     /// composer draft untouched. A stale card cannot send into a different chat.
     func continueAfterSignIn(gateID: String?, owner: WorkReference?) async {
         guard let owner, owner == currentReference, ownsQueue, savedCopy == nil,
               gateID == signInGateRowID, !busy, !sending, unconfirmedSend == nil, heldSubmission == nil, let selected else { return }
-        if let backend = backend(for: selected.backend), backend.signInVerified,
-           ["needsSignIn", "expired"].contains(backend.readiness ?? "") { return }
+        if needsSignIn(selected.backend) { return }
         do {
             let candidate: ChatQueuedMessage
             if let held = signInQueuedMessage {
@@ -935,6 +959,15 @@ final class ChatModel {
         return id
     }
 
+    /// Where a kept reading place lands. A mark taken on a closed group's
+    /// header is saved as that group's first step, so it comes back to the
+    /// header rather than opening a group the person left closed.
+    func readingRow(_ id: String) -> String {
+        let header = ChatTranscriptFold.groupID(firstMember: id)
+        if ChatTranscriptFold.owner(of: id, in: transcriptItems) == header { return header }
+        return revealRow(id)
+    }
+
     private func rememberRecentMessages() {
         guard savedCopy == nil, let reference = currentReference,
               reference.scope == WorkSessionContext.shared.scope,
@@ -1353,6 +1386,10 @@ final class ChatModel {
         #endif
         selected = chat
         contextRevision = savedPage?.sendRevision
+        // Group ids are archive positions, which repeat from one chat to the
+        // next. A group opened here must not open its namesake elsewhere.
+        groupsOpen = false
+        toggledGroups = []
         if let chat, let folderID {
             rememberLastSelected(chatID: chat.id, folderID: folderID)
         }
@@ -1649,7 +1686,9 @@ final class ChatModel {
     @discardableResult
     func checkSignIn(_ backend: ChatBackend) async -> AgentSetupStatus? {
         guard let id = backend.launcherID, backend.installed != false, savedCopy == nil else { return nil }
-        guard backend.canCheckSignIn else { await reloadBackends(); return nil }
+        // An older host only has its file evidence. Rereading the list for it
+        // must not re-enumerate every agent's models on each chat open.
+        guard backend.canCheckSignIn else { await reloadBackends(refreshModels: false); return nil }
         let context = loadGeneration
         let owner = peer
         do {

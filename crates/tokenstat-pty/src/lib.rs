@@ -1093,8 +1093,10 @@ impl Manager {
     }
 }
 
+/// Kill a process and everything it started. An npm shim is cmd.exe with
+/// node beneath it, and killing only the shim leaves node holding the pipes.
 #[cfg(windows)]
-fn kill_windows_process_tree(pid: u32) {
+pub fn kill_windows_process_tree(pid: u32) {
     use std::os::windows::process::CommandExt;
     use std::process::{Command, Stdio};
     let Some(root) = std::env::var_os("SystemRoot") else {
