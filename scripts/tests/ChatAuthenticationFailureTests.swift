@@ -19,6 +19,32 @@ struct ChatAuthenticationFailureTests {
             "The command output mentions Claude Code is not signed in", backend: "claude"))
         precondition(!ChatAuthenticationFailure.needsSignIn(
             "Claude Code is not signed in on this computer.", backend: "codex"))
+        let cursorRaw = "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable."
+        let cursorNormalized = "Cursor is not signed in on this machine. Open a terminal and run cursor-agent login."
+        for backend in ["cursor", "cursor_agent"] {
+            precondition(ChatAuthenticationFailure.needsSignIn(cursorRaw, backend: backend),
+                         "Existing Cursor failures must offer recovery after upgrading")
+            precondition(ChatAuthenticationFailure.needsSignIn(cursorNormalized, backend: backend))
+            precondition(ChatAuthenticationFailure.needsSignIn(
+                "Error: Authentication required. Run 'cursor-agent login', pass --api-key/--auth-token, or set CURSOR_API_KEY/CURSOR_AUTH_TOKEN.", backend: backend))
+            precondition(ChatAuthenticationFailure.needsSignIn(
+                "  Authentication required. Please run 'cursor agent login' first, or set CURSOR_API_KEY environment variable.\n", backend: backend))
+            for unrelated in [
+                "GitHub is not signed in. Run gh auth login.",
+                "Error: Authentication required. Please run 'gh auth login' first.",
+                "Error: Authentication required. Run 'agent login' first.",
+                "Error: Authentication required. Set CURSOR_API_KEY environment variable.",
+                "The command output mentions \(cursorRaw)",
+                "Claude Code is not signed in on this computer.",
+            ] {
+                precondition(!ChatAuthenticationFailure.needsSignIn(unrelated, backend: backend),
+                             "Only Cursor's own login refusal qualifies: \(unrelated)")
+            }
+        }
+        for backend in ["claude", "codex", "muse", "cursor "] {
+            precondition(!ChatAuthenticationFailure.needsSignIn(cursorRaw, backend: backend))
+            precondition(!ChatAuthenticationFailure.needsSignIn(cursorNormalized, backend: backend))
+        }
         let refused = ChatDisplayItem(id: "refused", kind: .failed("Claude Code is not signed in on this computer."))
         let prompt = ChatDisplayItem(id: "prompt", kind: .user("hello"))
         precondition(ChatAuthenticationFailure.latestFailureID(in: [prompt, refused], backend: "claude") == "refused")
@@ -44,6 +70,25 @@ struct ChatAuthenticationFailureTests {
         precondition(ChatAuthenticationFailure.latestRecovery(in: turn + [prompt], backend: "claude") == nil)
         precondition(ChatAuthenticationFailure.latestRecovery(in: [refused], backend: "claude") == nil,
                      "Without the original prompt a partial page must not offer a guessed retry")
+        let cursorFailed = ChatDisplayItem(id: "cursor-failed", kind: .failed(cursorRaw))
+        let cursorRecovery = ChatAuthenticationFailure.latestRecovery(in: [prompt, file, cursorFailed], backend: "cursor")!
+        precondition(cursorRecovery.failureID == "cursor-failed" && cursorRecovery.text == "hello")
+        precondition(cursorRecovery.attachments.map(\.id) == ["input"])
+        precondition(ChatAuthenticationFailure.latestRecovery(in: [prompt, file, cursorFailed], backend: "claude") == nil)
+        precondition(ChatAuthenticationFailure.latestRecovery(in: [cursorFailed], backend: "cursor") == nil)
+        let cursorReply = ChatDisplayItem(id: "cursor-reply", kind: .assistant(cursorRaw, backend: "cursor"))
+        precondition(ChatAuthenticationFailure.latestRecovery(in: [prompt, cursorReply], backend: "cursor") == nil,
+                     "Quoted CLI text in assistant prose is not a failed turn")
+        let tool = ChatDisplayItem(id: "tool-login-error", kind: .tool(ChatToolState(
+            callId: "call", verb: "Shell", target: "agent login", running: false, failed: true,
+            detail: cursorRaw, startedAtMs: 0, endedAtMs: 1, snippet: [cursorRaw])))
+        precondition(ChatAuthenticationFailure.latestRecovery(in: [prompt, tool], backend: "cursor") == nil,
+                     "A nested tool's login error must not retry the whole prompt")
+        precondition(ChatAuthenticationFailure.latestRecovery(in: [prompt, cursorFailed, prompt, reply], backend: "cursor") == nil,
+                     "A successful later turn retires the previous Cursor recovery")
+        let unrelatedFailure = ChatDisplayItem(id: "other-failure", kind: .failed("Network disconnected."))
+        precondition(ChatAuthenticationFailure.latestRecovery(in: [prompt, cursorFailed, prompt, unrelatedFailure], backend: "cursor") == nil,
+                     "A newer failed turn must not revive an earlier Cursor login refusal")
         print("ChatAuthenticationFailureTests passed")
     }
 }

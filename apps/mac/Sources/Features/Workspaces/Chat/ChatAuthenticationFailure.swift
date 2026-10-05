@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Only normalized agent refusals qualify; a tool's GitHub login error does not.
+/// Only an agent's own refusals qualify; a tool's GitHub login error does not.
 enum ChatAuthenticationFailure {
     struct Recovery {
         let failureID: String
@@ -30,9 +30,13 @@ enum ChatAuthenticationFailure {
     }
 
     /// Whether this chat, on this backend, can be offered sign-in recovery
-    /// for the failure. Only a Claude chat can: the guided terminal is Claude's.
+    /// for the failure. A refusal from another agent must not open this login.
     static func needsSignIn(_ text: String, backend: String) -> Bool {
-        ["claude", "claude_code"].contains(backend) && isClaudeSignInRefusal(text)
+        switch backend {
+        case "claude", "claude_code": return isClaudeSignInRefusal(text)
+        case "cursor", "cursor_agent": return isCursorSignInRefusal(text)
+        default: return false
+        }
     }
 
     /// Whether a failure row is Claude's normalized sign-in refusal. The host
@@ -42,6 +46,21 @@ enum ChatAuthenticationFailure {
         let lower = text.lowercased()
         return lower.hasPrefix("claude code is not signed in")
             || lower.hasPrefix("claude code's sign-in on this computer has expired")
+    }
+
+    /// Older hosts persisted Cursor's stderr unchanged. Require both its own
+    /// login command and environment key beside the CLI refusal, so an
+    /// unrelated tool's authentication error cannot offer Cursor sign-in.
+    private static func isCursorSignInRefusal(_ text: String) -> Bool {
+        var lower = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lower.hasPrefix("cursor is not signed in on this machine.") { return true }
+        if lower.hasPrefix("error:") {
+            lower = String(lower.dropFirst("error:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return lower.hasPrefix("authentication required.")
+            && lower.contains("cursor_api_key")
+            && ["'agent login'", "'cursor-agent login'", "'cursor agent login'"].contains(where: lower.contains)
     }
 
     /// Hide duplicate CLI refusal prose and empty counters only in turns with

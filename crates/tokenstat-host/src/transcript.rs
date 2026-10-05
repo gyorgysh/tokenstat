@@ -798,7 +798,11 @@ fn cursor_error_text(lower: &str) -> Option<String> {
                 .into(),
         );
     }
-    if lower.contains("unauthenticated") || lower.contains("unauthorized") {
+    if lower.contains("unauthenticated")
+        || lower.contains("unauthorized")
+        || (lower.starts_with("error: authentication required.")
+            && (lower.contains("'agent login'") || lower.contains("cursor_api_key")))
+    {
         return Some(
             "Cursor is not signed in on this machine. Open a terminal and run cursor-agent login."
                 .into(),
@@ -3105,6 +3109,40 @@ mod tests {
             )),
             "{events:?}"
         );
+    }
+
+    #[test]
+    fn cursor_cli_authentication_failure_names_sign_in_recovery() {
+        let normalized =
+            "Cursor is not signed in on this machine. Open a terminal and run cursor-agent login.";
+        let refused = "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable.";
+        for line in [
+            refused,
+            "Error: Unauthorized",
+            "RetriableError: [unauthenticated] Error",
+        ] {
+            let mut parser = Parser::new("cursor");
+            let events = parser.push_events(format!("{line}\n").as_bytes());
+            assert!(
+                matches!(events.first(), Some(Event::Failed { text }) if text == normalized),
+                "{events:?}"
+            );
+        }
+        // Another backend and a tool's own login are not Cursor refusals.
+        for (backend, line) in [
+            ("codex", refused),
+            (
+                "cursor",
+                "Error: Authentication required. Please run 'gh auth login' first.",
+            ),
+        ] {
+            let mut parser = Parser::new(backend);
+            let events = parser.push_events(format!("{line}\n").as_bytes());
+            assert!(
+                matches!(events.first(), Some(Event::Failed { text }) if text == line),
+                "{events:?}"
+            );
+        }
     }
 
     #[test]
