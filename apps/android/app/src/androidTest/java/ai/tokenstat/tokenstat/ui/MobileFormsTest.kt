@@ -18,6 +18,8 @@ import ai.tokenstat.tokenstat.ui.workspace.PullSheet
 import ai.tokenstat.tokenstat.ui.workspace.PushAction
 import ai.tokenstat.tokenstat.ui.workspace.PushSheet
 import android.graphics.Bitmap
+import android.os.ParcelFileDescriptor
+import android.text.InputType
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
@@ -48,8 +50,8 @@ import org.junit.runner.RunWith
 class MobileFormsTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
     private val calls = CopyOnWriteArrayList<Pair<String, JsonObject>>()
-    private val pullReview = obj("""{"state":"fastForward","incoming":2,"outgoing":0,"branch":"refs/heads/main","remote":"origin","remoteRef":"refs/heads/main","head":"abc","remoteHead":"def"}""")
-    private val pushReview = obj("""{"branch":"refs/heads/main","remote":"origin","remoteRef":"refs/heads/main","head":"abc","remoteHead":"def","outgoing":2,"setUpstream":false}""")
+    private val pullReview = obj("""{"state":"fastForward","incoming":2,"outgoing":0,"branch":"refs/heads/main","remote":"origin","remoteRef":"refs/heads/main","head":"abc","upstreamHead":"def"}""")
+    private val pushReview = obj("""{"branch":"refs/heads/main","remote":"origin","remoteRef":"refs/heads/main","head":"abc","endpointDigest":"opaque-destination-digest","remoteHead":"def","outgoing":2,"setUpstream":false}""")
     private fun obj(json: String) = Json.parseToJsonElement(json).jsonObject
     private fun text(key: String, vararg args: Any) = L10n.text(key, *args)
     private fun setContent(colors: TsColors = DarkColors, content: @Composable () -> Unit) {
@@ -237,6 +239,65 @@ class MobileFormsTest {
         assertEquals(listOf("workspace.pushReceipt", "workspace.pushReview"), calls.map { it.first })
     }
 
+    @Test fun recoveredPushRetriesOnlyTheSavedOperationAndReview() {
+        setContent {
+            PushSheet(request = { method, params ->
+                calls += method to params
+                when (method) {
+                    "workspace.pushReceipt", "workspace.pushRecover" -> buildJsonObject {
+                        put("operationId", "saved-operation")
+                        put("review", pushReview)
+                        put("state", if (method == "workspace.pushReceipt") "started" else "unknown")
+                        put("retryAllowed", method == "workspace.pushRecover")
+                    }
+                    "workspace.pushReviewed" -> buildJsonObject {
+                        put("operationId", params.getValue("operationId"))
+                        put("review", params.getValue("review"))
+                        put("state", "succeeded")
+                    }
+                    else -> error("Recovery must not prepare a different push")
+                }
+            }, "qa-folder", "Project", "Computer", true, "saved-operation", {}, {}, {})
+        }
+        assertTrue(calls.isEmpty())
+        compose.onNodeWithText(text("android.workspacecommit.check_outcome.9200a2fd")).performClick()
+        assertEquals(listOf("workspace.pushReceipt", "workspace.pushRecover"), calls.map { it.first })
+        compose.onNodeWithText(text("android.workspacecommit.retry_same_push.d4ab8f02")).performClick()
+        assertEquals("workspace.pushReviewed", calls.last().first)
+        assertEquals("saved-operation", calls.last().second["operationId"]?.jsonPrimitive?.content)
+        assertEquals(pushReview, calls.last().second["review"])
+        assertEquals(true, calls.last().second["retry"]?.jsonPrimitive?.boolean)
+    }
+
+    @Test fun recoveryRejectsReceiptsForAnotherOperationOrReview() {
+        var stage = 0
+        var cleared = false
+        setContent {
+            PushSheet(request = { method, params ->
+                calls += method to params
+                buildJsonObject {
+                    put("operationId", if (stage == 0) "another-operation" else "saved-operation")
+                    put("review", if (stage == 1 && method == "workspace.pushRecover")
+                        JsonObject(pushReview + ("head" to JsonPrimitive("another-head"))) else pushReview)
+                    put("state", if (method == "workspace.pushReceipt") "started" else "succeeded")
+                }
+            }, "qa-folder", "Project", "Computer", true, "saved-operation", { cleared = it == null }, {}, {})
+        }
+        val check = compose.onNodeWithText(text("android.workspacecommit.check_outcome.9200a2fd"))
+        check.performClick()
+        assertEquals(listOf("workspace.pushReceipt"), calls.map { it.first })
+        assertFalse(cleared)
+        compose.onNodeWithText(text("android.workspacecommit.retry_same_push.d4ab8f02")).assertDoesNotExist()
+        compose.runOnIdle { stage = 1 }
+        check.performClick()
+        assertFalse(cleared)
+        compose.onNodeWithText(text("android.workspacecommit.retry_same_push.d4ab8f02")).assertDoesNotExist()
+        compose.runOnIdle { stage = 2 }
+        check.performClick()
+        assertTrue(cleared)
+        assertTrue(calls.none { it.first == "workspace.pushReviewed" })
+    }
+
     @Test fun vaultManagementCoversTheAppAndOpensTheFullScreenUnlockForm() {
         setContent {
             var unlock by remember { mutableStateOf(false) }
@@ -291,6 +352,20 @@ class MobileFormsTest {
         assertEquals("example recovery words" to "A-strong-password-123!", reset)
     }
 
+    @Test fun recoveryKeyboardDoesNotAutocorrectTheSecret() {
+        setContent { VaultPasswordDialog(true, false, null, {}, {}, {}, { _, _ -> }, {}) }
+        compose.onNodeWithText(text("android.tokenstatapp.i_forgot_the_password.c3aabb38")).performClick()
+        compose.onNodeWithTag("vault-recovery").performClick().performTextInput("example recovery words")
+        awaitKeyboardActions()
+        val dump = ParcelFileDescriptor.AutoCloseInputStream(
+            InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("dumpsys input_method")
+        ).bufferedReader().use { it.readText() }
+        val inputType = Regex("inputType=0x([0-9a-fA-F]+)").find(dump)?.groupValues?.get(1)?.toInt(16)
+            ?: error("The keyboard has no active input type")
+        assertEquals(InputType.TYPE_TEXT_VARIATION_PASSWORD, inputType and InputType.TYPE_MASK_VARIATION)
+        assertEquals(0, inputType and InputType.TYPE_TEXT_FLAG_AUTO_CORRECT)
+    }
+
     @Test fun vaultCreateWorksInLightTheme() {
         var created: String? = null
         setContent(LightColors) { VaultPasswordDialog(false, false, null, {}, { created = it }, {}, { _, _ -> }, {}) }
@@ -325,6 +400,49 @@ class MobileFormsTest {
         compose.onNodeWithText(text("android.workspacecommit.update_this_computer_s_tokenstat_to_review.8147f2b4")).assertIsDisplayed()
         assertTrue(calls.isEmpty())
         assertFullScreen("push-upgrade-dark")
+    }
+
+    @Test fun savedPushWaitsForHostUpgradeWithoutLosingItsIdentity() {
+        val supported = mutableStateOf(false)
+        var cleared = false
+        setContent {
+            PushSheet(request = { method, params ->
+                calls += method to params
+                buildJsonObject {
+                    put("operationId", params.getValue("operationId"))
+                    put("review", pushReview)
+                    put("state", "succeeded")
+                    put("message", "The saved push succeeded.")
+                }
+            }, "qa-folder", "Project", "Computer", supported.value, "saved-operation", { cleared = it == null }, {}, {})
+        }
+        compose.onNodeWithText(text("android.workspacecommit.update_this_computer_s_tokenstat_to_review.8147f2b4")).assertIsDisplayed()
+        compose.onNodeWithText(text("android.workspacecommit.check_outcome.9200a2fd")).assertDoesNotExist()
+        assertTrue(calls.isEmpty())
+        assertFalse(cleared)
+        compose.runOnIdle { supported.value = true }
+        compose.onNodeWithText(text("android.workspacecommit.update_this_computer_s_tokenstat_to_review.8147f2b4")).assertDoesNotExist()
+        assertTrue(calls.isEmpty())
+        compose.onNodeWithText(text("android.workspacecommit.check_outcome.9200a2fd")).performClick()
+        assertEquals(listOf("workspace.pushReceipt"), calls.map { it.first })
+        assertEquals("saved-operation", calls.single().second["operationId"]?.jsonPrimitive?.content)
+        compose.onNodeWithText("The saved push succeeded.").assertIsDisplayed()
+        assertTrue(cleared)
+    }
+
+    @Test fun unmatchedSshSearchOffersClearInsteadOfAnEmptyLibrary() {
+        var added = false
+        setContent {
+            var query by remember { mutableStateOf("missing") }
+            if (query.isNotBlank()) SshLibraryEmptyState(0, "Hosts", { added = true }, query = query, onClearSearch = { query = "" })
+            else Text("Saved host")
+        }
+        compose.onNodeWithText(text("android.sshlibrary.no_matches")).assertIsDisplayed()
+        compose.onNodeWithText(text("android.tokenstatapp.no_0_yet.91be7356", "hosts")).assertDoesNotExist()
+        compose.onNodeWithText(text("android.tokenstatapp.add_0.882c2180", "host")).assertDoesNotExist()
+        compose.onNodeWithText(text("android.sshlibrary.clear_search")).performClick()
+        compose.onNodeWithText("Saved host").assertIsDisplayed()
+        assertFalse(added)
     }
 
     @Test fun emptySshLibraryStaysDirectlyBelowItsControls() {

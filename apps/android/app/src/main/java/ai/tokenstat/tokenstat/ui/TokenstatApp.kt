@@ -2445,6 +2445,8 @@ private fun AndroidSSHScreenForAccount(
                 tab = tab,
                 tabName = tabs[tab],
                 modifier = Modifier.weight(1f),
+                query = query,
+                onClearSearch = { query = "" },
                 onAdd = {
                     if (tab == 0) addHost = true
                     else if (tab == 2) addSnippet = true

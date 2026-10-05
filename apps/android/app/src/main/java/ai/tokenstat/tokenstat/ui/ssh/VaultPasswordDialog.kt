@@ -86,6 +86,11 @@ internal fun VaultPasswordDialog(
             onValueChange = { recovery = it },
             label = { Text(L10n.text("android.tokenstatapp.recovery_code.5bda8302")) },
             minLines = 2,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Password,
+                autoCorrectEnabled = false,
+                imeAction = ImeAction.Next,
+            ),
             enabled = !working,
             modifier = Modifier.fillMaxWidth().testTag("vault-recovery"),
         )

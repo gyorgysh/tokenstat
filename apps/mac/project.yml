@@ -232,7 +232,8 @@ settings:
     # 131 was uploaded as 1.2.0. 132 accompanies the Android host capability
     # lookup fix. No Apple upload is part of this build update.
     # 133 carries Android full-screen Git/vault forms and SSH empty states.
-    CURRENT_PROJECT_VERSION: "133"
+    # 134 carries the Android Git/vault review fixes.
+    CURRENT_PROJECT_VERSION: "134"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,

@@ -376,13 +376,17 @@ internal fun PushSheet(
     var error by remember { mutableStateOf<String?>(null) }
 
     suspend fun prepare() {
-        if (working || operationId != null) return
+        if (working) return
+        if (!supportsReviewedPush) {
+            error = L10n.text("android.workspacecommit.update_this_computer_s_tokenstat_to_review.8147f2b4")
+            return
+        }
+        if (operationId != null) {
+            error = null
+            return
+        }
         working = true
         try {
-            if (!supportsReviewedPush) {
-                error = L10n.text("android.workspacecommit.update_this_computer_s_tokenstat_to_review.8147f2b4")
-                return
-            }
             runCatching {
                 gitFormRequest(request, "workspace.pushReview", buildJsonObject { put("id", workspace) }).gitFormObject()
             }.onSuccess { review = it; outcome = null; error = null }
@@ -396,7 +400,7 @@ internal fun PushSheet(
     }
 
     suspend fun send(retry: Boolean) {
-        if (working || (operationId != null && !retry)) return
+        if (working || !supportsReviewedPush || (retry && !canRetry) || (operationId != null && !retry)) return
         val frozen = review ?: return
         val opId = operationId ?: run {
             val fresh = java.util.UUID.randomUUID().toString()
@@ -440,7 +444,8 @@ internal fun PushSheet(
 
     suspend fun checkOutcome() {
         val opId = operationId ?: return
-        if (working) return
+        if (working || !supportsReviewedPush) return
+        canRetry = false
         working = true
         try {
             val params = buildJsonObject { put("id", workspace); put("operationId", opId) }
@@ -491,7 +496,7 @@ internal fun PushSheet(
         }
     }
 
-    LaunchedEffect(Unit) { prepare() }
+    LaunchedEffect(supportsReviewedPush) { prepare() }
 
     val shown = review ?: outcome?.get("review") as? JsonObject
     val outcomeState = outcome?.str("state")
@@ -502,7 +507,9 @@ internal fun PushSheet(
         subtitle = listOfNotNull(folderName.takeIf { it.isNotBlank() }, hostLabel.takeIf { it.isNotBlank() }).joinToString(" · "),
         onDismiss = onDismiss,
         footer = {
-            if (submitted) {
+            if (!supportsReviewedPush) {
+                TsAccentButton(label = L10n.text("common.done"), icon = ActionIcon.Done.vector, modifier = Modifier.fillMaxWidth(), onClick = onDismiss)
+            } else if (submitted) {
                 if (canRetry) {
                     TsSecondaryButton(
                         label = L10n.text("android.workspacecommit.retry_same_push.d4ab8f02"),
