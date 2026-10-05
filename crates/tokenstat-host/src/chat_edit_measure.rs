@@ -619,6 +619,58 @@ mod tests {
     }
 
     #[test]
+    fn clean_crlf_files_use_the_checkout_form_of_the_index() {
+        for autocrlf in [true, false] {
+            let dir = repository();
+            if autocrlf {
+                git(dir.path(), &["config", "core.autocrlf", "true"]);
+            } else {
+                git(dir.path(), &["config", "core.autocrlf", "false"]);
+                std::fs::write(dir.path().join(".gitattributes"), "*.txt text eol=crlf\n").unwrap();
+            }
+            let file = dir.path().join("file.txt");
+            std::fs::write(&file, "one\r\ntwo\r\nthree\r\n").unwrap();
+            git(dir.path(), &["add", "."]);
+            let mut measure = EditMeasure::start(dir.path());
+            std::fs::write(&file, "one\r\nTWO\r\nthree\r\n").unwrap();
+            assert_eq!(
+                edit_counts(&measure.observe(vec![start("e", &file), end("e")])),
+                vec![(1, 1)],
+                "only the edited line, not every CRLF line"
+            );
+        }
+    }
+
+    #[test]
+    fn checkout_conversions_stay_bounded_and_do_not_run_external_filters() {
+        let dir = repository();
+        git(dir.path(), &["config", "core.autocrlf", "true"]);
+        let file = dir.path().join("file.txt");
+        std::fs::write(&file, "a\r\nb\r\n").unwrap();
+        git(dir.path(), &["add", "."]);
+        let index = tokenstat_workspace::git::IndexSnapshot::read(dir.path()).unwrap();
+        let file = canonical(&file);
+        assert_eq!(index.text(&file, 6).as_deref(), Some("a\r\nb\r\n"));
+        assert_eq!(
+            index.text(&file, 4),
+            None,
+            "converted output exceeds its cap"
+        );
+
+        std::fs::write(dir.path().join(".gitattributes"), "*.txt filter=external\n").unwrap();
+        git(
+            dir.path(),
+            &[
+                "config",
+                "filter.external.smudge",
+                "echo unexpected > filter-ran",
+            ],
+        );
+        assert_eq!(index.text(&file, 1024), None);
+        assert!(!dir.path().join("filter-ran").exists());
+    }
+
+    #[test]
     fn deleting_the_parent_directory_still_counts_the_old_file() {
         let dir = repository();
         let folder = dir.path().join("src");

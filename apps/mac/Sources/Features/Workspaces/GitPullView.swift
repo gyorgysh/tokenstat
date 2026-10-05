@@ -24,6 +24,7 @@ struct GitPullControl: View {
             RemoteHostFeatureGate(feature: .reviewedPull, peer: target.peer, hostName: hostName) {
                 GitPullSheet(service: target, folderName: folderName, hostName: hostName, onPulled: onPulled)
             }
+            .modalFrame(width: 520, height: 380)
         }
     }
 }

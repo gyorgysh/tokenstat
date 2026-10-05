@@ -434,11 +434,11 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             {
                 var diff = await LoadOneDiffAsync(file.Path);
                 _root.Children.Add(Chrome.Card(file.Path, WorkspaceDiff.PreviewFile(this, file.Path, diff)));
+                // Consume only a file that was found and loaded. Git status can
+                // lag the chat's edit; a queued reload must pin this card again.
+                if (!_reloadRequested && _reviewPath == reviewPath) _reviewPath = null;
             }
         }
-        // Loading the diff above yields too. Keep its request when a reload
-        // was queued during that read, since the reload will clear this card.
-        if (!_reloadRequested && _reviewPath == reviewPath) _reviewPath = null;
 
         var selectionRow = new FlowPanel { Spacing = Theme.SpaceS };
         selectionRow.Children.Add(new TextBlock

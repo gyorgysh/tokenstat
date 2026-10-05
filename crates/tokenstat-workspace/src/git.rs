@@ -13,8 +13,9 @@
 //! somewhere else, not in a status call that runs on a timer.
 
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use serde::Serialize;
 
@@ -741,12 +742,17 @@ pub fn indexed_text(file: &Path, max_bytes: usize) -> Option<String> {
     // `:./name` is the index entry for this name relative to `-C`, so the
     // repository root never has to be worked out.
     let blob = git(dir, &["rev-parse", "--verify", &format!(":./{name}")])?;
-    blob_text(dir, blob.trim(), max_bytes)
+    blob_text(dir, blob.trim(), max_bytes, None)
 }
 
 /// Read an immutable blob only after checking its size. Capturing stdout
 /// first would allocate even a multi-gigabyte tracked file before refusing it.
-fn blob_text(dir: &Path, blob: &str, max_bytes: usize) -> Option<String> {
+fn blob_text(
+    dir: &Path,
+    blob: &str,
+    max_bytes: usize,
+    checkout_path: Option<&str>,
+) -> Option<String> {
     let size = git(dir, &["cat-file", "-s", blob])?
         .trim()
         .parse::<u64>()
@@ -754,13 +760,39 @@ fn blob_text(dir: &Path, blob: &str, max_bytes: usize) -> Option<String> {
     if size > max_bytes as u64 {
         return None;
     }
-    let out = git_command(dir, &["cat-file", "blob", blob])
-        .output()
+    let path_arg;
+    let args = if let Some(path) = checkout_path {
+        // Built-in checkout conversions include CRLF and working-tree encoding.
+        // Never run a repository's external smudge filter for a line count.
+        let attr = git(dir, &["check-attr", "-z", "filter", "--", path])?;
+        if !matches!(attr.split('\0').nth(2), Some("unspecified" | "unset")) {
+            return None;
+        }
+        path_arg = format!("--path={path}");
+        vec!["cat-file", "--filters", &path_arg, blob]
+    } else {
+        vec!["cat-file", "blob", blob]
+    };
+    let mut child = git_command(dir, &args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
         .ok()?;
-    if !out.status.success() || out.stdout.len() > max_bytes || out.stdout.contains(&0) {
+    let mut bytes = Vec::new();
+    let read = child
+        .stdout
+        .take()?
+        .take(max_bytes.saturating_add(1) as u64)
+        .read_to_end(&mut bytes);
+    if read.is_err() || bytes.len() > max_bytes {
+        let _ = child.kill();
+        let _ = child.wait();
         return None;
     }
-    String::from_utf8(out.stdout).ok()
+    if !child.wait().ok()?.success() || bytes.contains(&0) {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
 }
 
 /// Files in the work tree around `dir` that differ from the index, or are
@@ -862,9 +894,18 @@ impl IndexSnapshot {
             .is_some_and(|out| out.status.code() == Some(1))
     }
 
-    /// None means an unreadable baseline, rather than an absent file.
+    /// The captured blob in its checkout form, including Git's line-ending
+    /// conversion. None means an unreadable baseline, rather than an absent file.
     pub fn text(&self, file: &Path, max_bytes: usize) -> Option<String> {
-        blob_text(&self.root, self.blobs.get(file)?.as_deref()?, max_bytes)
+        let path = file.strip_prefix(&self.root).ok()?.to_str()?.to_owned();
+        #[cfg(windows)]
+        let path = path.replace('\\', "/");
+        blob_text(
+            &self.root,
+            self.blobs.get(file)?.as_deref()?,
+            max_bytes,
+            Some(&path),
+        )
     }
 }
 
