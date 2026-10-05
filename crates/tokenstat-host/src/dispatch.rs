@@ -680,6 +680,7 @@ impl ChatParams {
             model: self.model,
             effort: self.effort,
             fast_mode: self.fast_mode,
+            expected_revision: self.expected_revision,
             mode: self.mode,
             autonomy: self.autonomy,
             allowed_tools: self.allowed_tools,

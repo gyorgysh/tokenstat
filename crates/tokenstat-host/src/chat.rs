@@ -347,6 +347,7 @@ pub struct Update {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub fast_mode: Option<bool>,
+    pub expected_revision: Option<u64>,
     pub mode: Option<String>,
     pub autonomy: Option<String>,
     pub allowed_tools: Option<Vec<String>>,
@@ -481,6 +482,7 @@ pub struct Store {
     root: PathBuf,
     conversations: Mutex<Vec<Conversation>>,
     active: Mutex<HashMap<String, String>>,
+    live_speed: Mutex<HashMap<String, (String, Arc<crate::chat_live::Launch>)>>,
     /// Conversations whose live process the person explicitly stopped.
     /// Memory-only and consumed by drain: a persisted `running` bit after a
     /// daemon restart is stale state, not evidence that somebody pressed Stop.
@@ -629,6 +631,7 @@ impl Store {
             root,
             conversations: Mutex::new(Vec::new()),
             active: Mutex::new(HashMap::new()),
+            live_speed: Mutex::new(HashMap::new()),
             killed: Mutex::new(HashSet::new()),
             personas: Mutex::new(PersonaIndex::default()),
             approvals: Mutex::new(Vec::new()),
@@ -685,6 +688,7 @@ impl Store {
             root,
             conversations: Mutex::new(conversations),
             active: Mutex::new(HashMap::new()),
+            live_speed: Mutex::new(HashMap::new()),
             killed: Mutex::new(HashSet::new()),
             personas: Mutex::new(personas),
             approvals: Mutex::new(Vec::new()),
@@ -2160,12 +2164,15 @@ impl Store {
         validate_record_id(id)?;
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
-        self.edit_conversation(id, |chat| {
+        let mut switched_pty = None;
+        let result = self.edit_conversation(id, |chat| {
+            if changes.expected_revision.is_some_and(|revision| revision != chat.send_revision) {
+                return Err("This conversation changed before its setup was saved. Review the latest settings and try again.".into());
+            }
             if chat.running
                 && (changes.backend.is_some()
                     || changes.model.is_some()
                     || changes.effort.is_some()
-                    || changes.fast_mode.is_some()
                     || changes.mode.is_some()
                     || changes.autonomy.is_some())
             {
@@ -2203,6 +2210,12 @@ impl Store {
                             .into(),
                     );
                 }
+                if chat.running && fast != chat.fast_mode {
+                    let live = self.live_speed.lock().unwrap_or_else(PoisonError::into_inner)
+                        .get(id).cloned().ok_or("This CLI cannot change speed during a turn. Finish or stop the turn first.")?;
+                    live.1.apply(&live.0, fast)?;
+                    switched_pty = Some(live.0);
+                }
                 chat.fast_mode = fast;
             }
             if let Some(mode) = changes.mode {
@@ -2234,7 +2247,15 @@ impl Store {
             chat.send_revision = next_send_revision(chat.send_revision)?;
             chat.updated_at_ms = now_ms();
             Ok(chat.clone())
-        })
+        });
+        if result.is_err()
+            && let Some(pty) = switched_pty
+        {
+            // A runtime change whose saved record failed must not continue
+            // using a paid setting that none of the clients can see.
+            let _ = tokenstat_pty::manager().kill(&pty);
+        }
+        result
     }
 
     pub fn remove(&self, id: &str) -> Result<bool, String> {
@@ -3383,6 +3404,9 @@ impl Store {
             &mut argv,
             &response_output_dir,
         )?;
+        let live_speed =
+            crate::chat_live::Launch::prepare(&chat.backend, &argv, &safe_join(&self.root, id)?)?
+                .map(Arc::new);
         // Written before anything is started, so a host that dies between the
         // spawn and its answer leaves a record to reconcile against rather
         // than a message the next attempt would run a second time.
@@ -3412,10 +3436,11 @@ impl Store {
         // this snapshot in the drainer races the agent's first patch.
         let measure = (chat.backend == "codex")
             .then(|| crate::chat_edit_measure::EditMeasure::start(Path::new(&workspace.path)));
+        let spawn_argv = live_speed.as_ref().map_or(&argv, |live| &live.argv);
         let info = match tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
-                command: crate::launcher::spawn_command(&argv[0]),
-                args: argv[1..].to_vec(),
+                command: crate::launcher::spawn_command(&spawn_argv[0]),
+                args: spawn_argv[1..].to_vec(),
                 cwd: workspace.path,
                 workspace_id: Some(chat.workspace_id.clone()),
                 hidden: true,
@@ -3446,6 +3471,12 @@ impl Store {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(id.into(), info.id.clone());
+        if let Some(live) = live_speed {
+            self.live_speed
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(id.into(), (info.id.clone(), live));
+        }
         let recorded = (|| -> Result<Conversation, String> {
             let running = self.set_running(id, true)?;
             // Only once the process exists. A spawn that failed delivered nothing,
@@ -3557,6 +3588,17 @@ impl Store {
                 &response_output_dir,
                 measure,
             );
+            let mut controls = store
+                .live_speed
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if controls
+                .get(&chat_id)
+                .is_some_and(|(pty, _)| pty == &info.id)
+            {
+                controls.remove(&chat_id);
+            }
+            drop(controls);
             drop(prompt_file);
             let _ = store.finish_turn(
                 &chat_id,
@@ -5029,6 +5071,7 @@ pub fn backends(force: bool) -> Vec<Value> {
             let id = backend["id"].as_str().unwrap_or("").to_string();
             if let Some(models) = crate::chat_fast::models(&id) {
                 backend["fastModeModels"] = json!(models);
+                backend["fastModeLive"] = json!(crate::chat_live::supported(&id));
             }
             if let Some(profile) = catalog.as_array().and_then(|profiles| {
                 profiles
@@ -7621,6 +7664,54 @@ mod tests {
         assert_eq!(
             store.event_page(&fork.id, None, 1).unwrap().usage.unwrap(),
             expected
+        );
+    }
+
+    #[test]
+    fn stale_speed_update_cannot_enable_priority_after_a_backend_switch() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "fast-stale");
+        let original = store.get("fast-stale").unwrap();
+        let current = store
+            .update(
+                "fast-stale",
+                Update {
+                    backend: Some("codex".into()),
+                    ..Update::default()
+                },
+            )
+            .unwrap();
+        let error = store
+            .update(
+                "fast-stale",
+                Update {
+                    title: Some("Must not be saved".into()),
+                    fast_mode: Some(true),
+                    expected_revision: Some(original.send_revision),
+                    ..Update::default()
+                },
+            )
+            .unwrap_err();
+        assert!(error.contains("conversation changed"));
+        let saved = Store::load_at(root.path().join("chat"))
+            .get("fast-stale")
+            .unwrap();
+        assert!(!saved.fast_mode);
+        assert_eq!(saved.title, current.title);
+        assert_eq!(saved.send_revision, current.send_revision);
+        assert!(
+            store
+                .update(
+                    "fast-stale",
+                    Update {
+                        fast_mode: Some(true),
+                        expected_revision: Some(current.send_revision),
+                        ..Update::default()
+                    }
+                )
+                .unwrap()
+                .fast_mode
         );
     }
 

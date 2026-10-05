@@ -36,7 +36,9 @@ enum ShellMetrics {
     static let inspectorRange: ClosedRange<Double> = 300...640
     static let inspectorDefault: Double = 400
 
-    /// Floating translucent chrome starts on macOS 26. Below that it keeps the
+    /// Floating chrome starts on macOS 26. Its geometry stays the same when
+    /// transparency is disabled, including during a full-screen transition.
+    /// Below that it keeps the
     /// flat sidebar colour it has always had: the `.bar` material flashed white
     /// when the columns re-laid out, and a flat colour cannot.
     static var usesGlass: Bool {
@@ -72,11 +74,11 @@ extension View {
     /// backdrop through.
     /// Reduce Transparency uses an opaque theme surface.
     @ViewBuilder
-    func leftChromeSurface() -> some View {
+    func leftChromeSurface(isFullScreen: Bool = false) -> some View {
         if #available(macOS 26, *) {
             self
                 .background {
-                    SidebarGlassSurface()
+                    SidebarGlassSurface(isFullScreen: isFullScreen)
                 }
                 .overlay {
                     SidebarPanelRim()
@@ -104,16 +106,14 @@ extension View {
 
 @available(macOS 26, *)
 private struct SidebarGlassSurface: View {
-    /// Settle the native glass against either bright or dark backgrounds.
-    /// The remaining 20% admits the blurred backdrop; AppKit still controls
-    /// the glass material's own transmission and edge highlights.
-    static let wash: Double = 0.80
-
+    let isFullScreen: Bool
+    @AppStorage(SidebarAppearancePreferences.enabledKey) private var enabled = true
+    @AppStorage(SidebarAppearancePreferences.washKey) private var wash = SidebarAppearancePreferences.defaultWash
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        if reduceTransparency {
+        if !enabled || isFullScreen || reduceTransparency || wash >= 1 {
             RoundedRectangle(cornerRadius: ShellMetrics.panelRadius, style: .continuous).fill(Theme.sidebar)
         } else {
             // Keep native glass's depth and edge while the backing softens
@@ -122,7 +122,8 @@ private struct SidebarGlassSurface: View {
             SidebarBackdrop()
                 .overlay {
                     RoundedRectangle(cornerRadius: ShellMetrics.panelRadius, style: .continuous)
-                        .fill((colorScheme == .dark ? Color.black : Color.white).opacity(Self.wash))
+                        .fill((colorScheme == .dark ? Color.black : Color.white)
+                            .opacity(SidebarAppearancePreferences.normalized(wash)))
                 }
         }
     }
@@ -213,11 +214,13 @@ private struct SidebarPanelRim: View {
 /// column: the same glass as the docked panel, with a hairline and the flat
 /// colour where glass does not exist.
 struct FloatingSidebarSurface: ViewModifier {
+    var isFullScreen: Bool = false
+
     func body(content: Content) -> some View {
         if #available(macOS 26, *) {
             content
                 .background {
-                    SidebarGlassSurface()
+                    SidebarGlassSurface(isFullScreen: isFullScreen)
                 }
                 .overlay {
                     SidebarPanelRim()

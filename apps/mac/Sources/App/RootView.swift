@@ -849,7 +849,7 @@ struct RootView: View {
             }
         }
         .frame(maxHeight: .infinity)
-        .leftChromeSurface()
+        .leftChromeSurface(isFullScreen: isFullScreen)
         .padding(.trailing, ShellMetrics.panelInset)
         .background(alignment: .trailing) {
             Theme.background.frame(width: ShellMetrics.panelInset)
@@ -1809,7 +1809,7 @@ struct RootView: View {
                 sidebar
                     .frame(width: currentSidebarWidth)
                     .frame(maxHeight: .infinity)
-                    .modifier(FloatingSidebarSurface())
+                    .modifier(FloatingSidebarSurface(isFullScreen: isFullScreen))
                     .shadow(color: Theme.shadow(0.20), radius: 12, x: 5, y: 0)
 
                 Color.clear

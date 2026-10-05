@@ -66,6 +66,8 @@ mod chat_edit_measure;
 mod chat_fast;
 #[cfg(feature = "local-host")]
 pub mod chat_gate;
+#[cfg(feature = "local-host")]
+pub mod chat_live;
 pub mod chat_question;
 #[cfg(feature = "local-host")]
 pub mod chat_receipts;

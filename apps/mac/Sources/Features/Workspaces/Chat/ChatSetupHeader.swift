@@ -248,11 +248,13 @@ struct ChatFastModeButton: View {
 
     private var backend: ChatBackend? { model.backend(for: chat.backend) }
     private var available: Bool { ChatFastMode.available(model: chat.model, models: backend?.fastModeModels) }
+    private var speedLocked: Bool { locked && !(chat.running && backend?.fastModeLive == true) }
     private var title: String { chat.fastMode ? L10n.text("common.chat.fast_mode_priority") : L10n.text("common.chat.fast_mode_default") }
     private var help: String {
         if !available { return L10n.text("common.chat.fast_mode_select_opus") }
         let tradeoff = chat.backend == "claude" ? L10n.text("common.chat.fast_mode_claude_help") : L10n.text("common.chat.fast_mode_codex_help")
-        return title + ". " + tradeoff
+        return title + ". " + tradeoff + " " + (backend?.fastModeLive == true
+            ? L10n.text("common.chat.fast_mode_live_help") : L10n.text("common.chat.fast_mode_next_turn_help"))
     }
 
     var body: some View {
@@ -276,7 +278,7 @@ struct ChatFastModeButton: View {
             .background(chat.fastMode ? Theme.accentSoft : .clear, in: RoundedRectangle(cornerRadius: 8))
             .contentShape(.rect)
             #if os(macOS)
-            .disabled(locked || saving || !available)
+            .disabled(speedLocked || saving || !available)
             #else
             .popover(isPresented: $showingOptions) {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -288,12 +290,12 @@ struct ChatFastModeButton: View {
                         save(false)
                         showingOptions = false
                     }
-                    .disabled(locked || saving)
+                    .disabled(speedLocked || saving)
                     ChoiceChip(title: L10n.text("common.chat.fast_mode_priority"), isSelected: chat.fastMode) {
                         save(true)
                         showingOptions = false
                     }
-                    .disabled(locked || saving || !available)
+                    .disabled(speedLocked || saving || !available)
                 }
                 .padding(Theme.Space.m)
                 .frame(width: 300, alignment: .leading)
@@ -310,13 +312,14 @@ struct ChatFastModeButton: View {
     }
 
     private func save(_ fast: Bool) {
-        guard !locked, !saving, fast != chat.fastMode, !fast || available else { return }
+        guard !speedLocked, !saving, fast != chat.fastMode, !fast || available else { return }
         let owner = model.currentReference
         saving = true
         Task {
             defer { saving = false }
             guard model.currentReference == owner, model.selected?.id == chat.id,
-                  model.savedCopy == nil, model.selected?.running == false else { return }
+                  model.selected?.sendRevision == chat.sendRevision,
+                  model.savedCopy == nil, !speedLocked else { return }
             await model.update(fastMode: fast)
         }
     }

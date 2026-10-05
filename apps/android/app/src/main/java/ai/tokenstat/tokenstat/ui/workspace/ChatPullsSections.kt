@@ -1818,6 +1818,7 @@ fun ChatSection(
                 onChange = { field, value ->
                     val id = openId ?: return@ChatComposer
                     val fastModeChange = field == "fastMode"
+                    val fastModeRevision = openChat?.get("sendRevision")
                     if (fastModeChange && fastModeSaveId != null) return@ChatComposer
                     if (fastModeChange) fastModeSaveId = id
                     scope.launch {
@@ -1826,6 +1827,7 @@ fun ChatSection(
                                 model.workspaceSection(peer, "chat.update", buildJsonObject {
                                     put("id", id)
                                     if (fastModeChange) put(field, value.toBooleanStrict()) else put(field, value)
+                                    if (fastModeChange && fastModeRevision != null) put("expectedRevision", fastModeRevision)
                                 })
                             }.onSuccess {
                                 setupError = null
@@ -2975,13 +2977,15 @@ private fun ChatComposer(
                         tint = if (sending) colors.textTertiary else colors.accent,
                     )
                 }
-                val fastModels = backends.firstOrNull { it.str("id") == chat?.str("backend") }?.get("fastModeModels") as? JsonArray
+                val speedBackend = backends.firstOrNull { it.str("id") == chat?.str("backend") }
+                val fastModels = speedBackend?.get("fastModeModels") as? JsonArray
                 if (fastModels != null && !offline) {
                     val fast = chatFastModeOn(chat)
                     val fastAvailable = chatFastModeAvailable(chat?.str("model"), fastModels)
                     val title = if (fast) L10n.text("common.chat.fast_mode_priority") else L10n.text("common.chat.fast_mode_default")
                     val help = if (!fastAvailable) L10n.text("common.chat.fast_mode_select_opus")
-                    else title + ". " + (if (chat?.str("backend") == "claude") L10n.text("common.chat.fast_mode_claude_help") else L10n.text("common.chat.fast_mode_codex_help"))
+                    else title + ". " + (if (chat?.str("backend") == "claude") L10n.text("common.chat.fast_mode_claude_help") else L10n.text("common.chat.fast_mode_codex_help")) +
+                        " " + (if (speedBackend?.bol("fastModeLive") == true) L10n.text("common.chat.fast_mode_live_help") else L10n.text("common.chat.fast_mode_next_turn_help"))
                     TooltipBox(
                         positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
                         tooltip = { PlainTooltip { Text(help) } },
@@ -2989,7 +2993,7 @@ private fun ChatComposer(
                     ) {
                         IconButton(
                             onClick = { onChange("fastMode", (!fast).toString()) },
-                            enabled = !locked && !fastModeSaving && fastAvailable,
+                            enabled = (!locked || (chat?.bol("running") == true && speedBackend?.bol("fastModeLive") == true)) && !fastModeSaving && fastAvailable,
                             modifier = Modifier.background(if (fast) colors.accentSoft else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(8.dp)),
                         ) {
                             Icon(ActionIcon.FastMode.vector, help, tint = if (fast) colors.accent else colors.textSecondary)

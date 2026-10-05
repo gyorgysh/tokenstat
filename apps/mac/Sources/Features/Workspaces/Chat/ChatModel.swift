@@ -1729,6 +1729,7 @@ final class ChatModel {
                 model: model,
                 effort: effort,
                 fastMode: fastMode,
+                expectedRevision: fastMode != nil ? selected.sendRevision : nil,
                 mode: mode,
                 autonomy: autonomy,
                 personaID: personaID,

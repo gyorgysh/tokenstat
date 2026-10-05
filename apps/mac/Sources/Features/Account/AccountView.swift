@@ -254,6 +254,7 @@ struct AccountView: View {
         ChatCacheSettings()
         ChatDetailSettings()
         #if os(macOS)
+        SidebarAppearanceSettings()
         ChatBrowserSettings()
         #endif
         SavedWorkSettings()

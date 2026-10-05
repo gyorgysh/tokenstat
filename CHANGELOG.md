@@ -17,7 +17,10 @@ at the end.
 
 - A lightning control beside chat attachments for Codex and supported Claude
   Opus models. Default/Priority is saved per conversation, with provider-specific
-  guidance about faster responses, usage limits and paid credits.
+  guidance about faster responses, usage limits and paid credits. Supported CLI
+  versions can apply a speed change to the next model request during a turn.
+- A Glass sidebar switch and opacity slider in Settings → This Mac. Full screen
+  and Reduce Transparency use an opaque sidebar.
 - A guided New pull request flow on Apple, Windows and Android: choose a
   branch, select and review files to commit, publish the branch, then write
   a title and description. Draft is the default, and matching open pull

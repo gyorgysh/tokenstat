@@ -85,5 +85,7 @@
   "common.chat.fast_mode_off": "Off",
   "common.chat.fast_mode_select_opus": "Select a supported Opus model to use fast mode. Faster responses use paid usage credits, even when your plan has usage remaining.",
   "common.chat.fast_mode_codex_help": "Faster responses where available. Uses subscription limits faster and costs more when billed by credits or API tokens. You may reach your usage limit sooner. Speed depends on the model and your account.",
-  "common.chat.fast_mode_claude_help": "Faster Opus responses where available. Uses paid usage credits, even when your plan has usage remaining, or higher API pricing. Availability depends on your account. Enabling it mid-conversation can cost more."
+  "common.chat.fast_mode_claude_help": "Faster Opus responses where available. Uses paid usage credits, even when your plan has usage remaining, or higher API pricing. Availability depends on your account. Enabling it mid-conversation can cost more.",
+  "common.chat.fast_mode_live_help": "You can switch while the agent works. The next model request uses the new speed; requests already in progress keep their current speed.",
+  "common.chat.fast_mode_next_turn_help": "This CLI version applies speed when the next turn starts. Update the CLI to switch during a turn."
 }

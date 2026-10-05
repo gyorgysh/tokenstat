@@ -35,7 +35,7 @@ fn main() -> ExitCode {
     #[cfg(windows)]
     let daemon_mode = !matches!(
         std::env::args().nth(1).as_deref(),
-        Some("hook" | "--help" | "-h" | "--version" | "-V")
+        Some("hook" | "chat-live" | "--help" | "-h" | "--version" | "-V")
     );
     #[cfg(windows)]
     if daemon_mode {
@@ -110,6 +110,10 @@ fn run() -> Result<(), String> {
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "chat-live" => {
+                let path = args.next().ok_or("chat-live needs a configuration path")?;
+                return tokenstat_host::chat_live::run(std::path::Path::new(&path));
+            }
             "hook" => {
                 let flavor = args.next().ok_or("hook needs a backend flavor")?;
                 let phase = args.next().ok_or("hook needs pre or post")?;

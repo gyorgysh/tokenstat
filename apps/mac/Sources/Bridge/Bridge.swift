@@ -1229,6 +1229,7 @@ extension Bridge {
         model: String? = nil,
         effort: String? = nil,
         fastMode: Bool? = nil,
+        expectedRevision: UInt64? = nil,
         mode: String? = nil,
         autonomy: String? = nil,
         personaID: String? = nil,
@@ -1243,6 +1244,7 @@ extension Bridge {
         if let model { params["model"] = model }
         if let effort { params["effort"] = effort }
         if let fastMode { params["fastMode"] = fastMode }
+        if let expectedRevision { params["expectedRevision"] = expectedRevision }
         if let mode { params["mode"] = mode }
         if let autonomy { params["autonomy"] = autonomy }
         if let personaID { params["personaId"] = personaID }

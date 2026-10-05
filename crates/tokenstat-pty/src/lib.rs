@@ -1351,6 +1351,21 @@ fn session_command(command: &str, args: &[String]) -> CommandBuilder {
     builder
 }
 
+/// A headless protocol child, retaining the same literal argv handling as a
+/// terminal launch (including npm shims on Windows). The caller owns its pipes.
+pub fn headless_command(command: &str, args: &[String]) -> std::process::Command {
+    let builder = session_command(command, args);
+    let argv = builder.get_argv();
+    let mut process = std::process::Command::new(&argv[0]);
+    process.args(&argv[1..]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        process.creation_flags(0x08000000);
+    }
+    process
+}
+
 #[cfg(unix)]
 fn resolve_shell(configured: Option<&str>) -> String {
     let mut candidates = Vec::new();
