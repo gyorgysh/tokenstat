@@ -66,7 +66,7 @@ fun AgentSetupCard(model: AppViewModel, peer: String, hostLabel: String, backend
         working = false
     }
     LaunchedEffect(peer, id) {
-        if (backend["canCheckSignIn"]?.jsonPrimitive?.booleanOrNull == true && backendId in listOf("claude", "claude_code", "codex")) check()
+        if (backend["canCheckSignIn"]?.jsonPrimitive?.booleanOrNull == true && backendId in listOf("claude", "claude_code", "codex", "cursor", "cursor_agent", "muse")) check()
     }
     if (backend["installed"]?.jsonPrimitive?.booleanOrNull == false || backendId == "sh") return
     // Above the composer only a state with a next step shows. Agents whose

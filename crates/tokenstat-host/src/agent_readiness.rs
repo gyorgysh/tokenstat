@@ -150,6 +150,21 @@ const SIGN_INS: &[SignIn] = &[
         args: &["login", "--device-auth"],
         kind: "deviceCode",
     },
+    // Cursor's CLI login is a link that the CLI then polls for, with no
+    // callback to this machine's loopback, so the browser can be on any
+    // device. It opens one itself when it can and prints the link either way.
+    SignIn {
+        id: "cursor_agent",
+        args: &["login"],
+        kind: "browserCode",
+    },
+    // Muse signs in to a Meta account with a device code: it prints a page
+    // and a code like `ABCD-EFGH`, then waits for the browser to approve it.
+    SignIn {
+        id: "muse",
+        args: &["login"],
+        kind: "deviceCode",
+    },
 ];
 
 pub(crate) fn sign_in(id: &str) -> Option<&'static SignIn> {
@@ -188,6 +203,15 @@ fn readiness_in(
     if !installed {
         return (Readiness::NotInstalled, None);
     }
+    // A catalog read never asks the keychain. That spawns `security`, which
+    // can wait behind an access prompt, so on a Mac this stays `unknown` until
+    // an explicit check (`describe_checked`) asks.
+    if id == "cursor_agent" {
+        return cursor_agent_readiness(home, now, env, &|| KeychainAnswer::Unreadable);
+    }
+    if id == "muse" {
+        return muse_readiness(home, env);
+    }
     let Some(store) = STORES.iter().find(|store| store.id == id) else {
         return (Readiness::Unknown, None);
     };
@@ -221,6 +245,151 @@ fn readiness_in(
         Some(expires) if expires <= now => (Readiness::Expired, Some(expires)),
         Some(expires) => (Readiness::SignedIn, Some(expires)),
         None => (Readiness::SignedIn, None),
+    }
+}
+
+/// What the macOS keychain holds for the Cursor CLI.
+enum KeychainAnswer {
+    /// The stored tokens, possibly none.
+    Found(Vec<String>),
+    /// The keychain could not be asked. Not evidence either way.
+    Unreadable,
+}
+
+/// Cursor's CLI keeps its login in the macOS keychain unless
+/// `AGENT_CLI_CREDENTIAL_STORE=file` says otherwise, and in an `auth.json`
+/// under its config directory everywhere else. Both hold JWTs whose expiry is
+/// in the clear, and only that number is taken.
+///
+/// The CLI's own `status` command is no help here: with every token expired it
+/// still printed "Login successful" while each run was refused with
+/// "Authentication required". A stored expiry is the better witness.
+fn cursor_agent_readiness(
+    home: &Path,
+    now: i64,
+    env: &dyn Fn(&str) -> Option<PathBuf>,
+    keychain: &dyn Fn() -> KeychainAnswer,
+) -> (Readiness, Option<i64>) {
+    // A key in the environment is a login with no file and no expiry.
+    if env("CURSOR_API_KEY").is_some_and(|key| !key.as_os_str().is_empty()) {
+        return (Readiness::SignedIn, None);
+    }
+    let file_store =
+        env("AGENT_CLI_CREDENTIAL_STORE").is_some_and(|kind| kind == Path::new("file"));
+    let tokens = if cfg!(target_os = "macos") && !file_store {
+        match keychain() {
+            KeychainAnswer::Found(tokens) => tokens,
+            KeychainAnswer::Unreadable => return (Readiness::Unknown, None),
+        }
+    } else {
+        let path = cursor_auth_file(home, env);
+        let raw = match read_store(&path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return (Readiness::NeedsSignIn, None);
+            }
+            Err(_) => return (Readiness::Unknown, None),
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+            return (Readiness::Unknown, None);
+        };
+        if value
+            .get("apiKey")
+            .and_then(Value::as_str)
+            .is_some_and(|key| !key.is_empty())
+        {
+            return (Readiness::SignedIn, None);
+        }
+        ["accessToken", "refreshToken"]
+            .iter()
+            .filter_map(|key| value.get(*key)?.as_str().map(str::to_string))
+            .filter(|token| !token.is_empty())
+            .collect()
+    };
+    if tokens.is_empty() {
+        return (Readiness::NeedsSignIn, None);
+    }
+    // The refresh token can renew the access token, so the login lasts as long
+    // as the later of the two.
+    let expires = tokens
+        .iter()
+        .filter_map(|token| tokenstat_sync::discover::jwt_expiry(token))
+        .max()
+        .map(|seconds| seconds.saturating_mul(1000));
+    match expires {
+        Some(expires) if expires <= now => (Readiness::Expired, Some(expires)),
+        Some(expires) => (Readiness::SignedIn, Some(expires)),
+        None => (Readiness::SignedIn, None),
+    }
+}
+
+/// Muse records which provider it is signed in to in `auth.json`, and keeps
+/// the token itself in the keychain. The record is the evidence: an entry for
+/// `meta`, the provider a chat turn starts with, is a login. The file holds no
+/// expiry, so none is reported.
+fn muse_readiness(home: &Path, env: &dyn Fn(&str) -> Option<PathBuf>) -> (Readiness, Option<i64>) {
+    if env("META_API_KEY").is_some_and(|key| !key.as_os_str().is_empty()) {
+        return (Readiness::SignedIn, None);
+    }
+    let config_home = env("XDG_CONFIG_HOME");
+    let Some(directory) =
+        crate::chat_gate::muse_config_directory(config_home.as_deref(), Some(home))
+    else {
+        return (Readiness::Unknown, None);
+    };
+    let raw = match read_store(&directory.join("auth.json")) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return (Readiness::NeedsSignIn, None);
+        }
+        Err(_) => return (Readiness::Unknown, None),
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+        return (Readiness::Unknown, None);
+    };
+    match value.pointer("/providers/meta").and_then(Value::as_object) {
+        Some(entry) if !entry.is_empty() => (Readiness::SignedIn, None),
+        _ => (Readiness::NeedsSignIn, None),
+    }
+}
+
+fn cursor_auth_file(home: &Path, env: &dyn Fn(&str) -> Option<PathBuf>) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        home.join(".cursor/auth.json")
+    } else if cfg!(windows) {
+        env("APPDATA")
+            .unwrap_or_else(|| home.join("AppData").join("Roaming"))
+            .join("Cursor")
+            .join("auth.json")
+    } else {
+        env("XDG_CONFIG_HOME")
+            .filter(|dir| !dir.as_os_str().is_empty())
+            .unwrap_or_else(|| home.join(".config"))
+            .join("cursor")
+            .join("auth.json")
+    }
+}
+
+/// Ask the login keychain for the CLI's two items, through the same lookup the
+/// limits read uses. A missing item is an answer. A keychain that cannot be
+/// asked is not.
+fn cursor_keychain() -> KeychainAnswer {
+    #[cfg(target_os = "macos")]
+    {
+        use tokenstat_sync::discover::{KeychainItem, keychain_item};
+        let mut tokens = Vec::new();
+        for service in ["cursor-access-token", "cursor-refresh-token"] {
+            match keychain_item(service, "cursor-user") {
+                KeychainItem::Found(token) => tokens.push(token),
+                KeychainItem::Missing => {}
+                KeychainItem::Unreadable => return KeychainAnswer::Unreadable,
+            }
+        }
+        KeychainAnswer::Found(tokens)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        KeychainAnswer::Unreadable
     }
 }
 
@@ -291,6 +460,22 @@ fn home_dir() -> Option<PathBuf> {
 /// states a screen actually needs.
 pub(crate) fn describe(id: &str, installed: bool) -> Value {
     let (state, expires) = readiness(id, installed);
+    wire(id, state, expires)
+}
+
+/// `describe` for an explicit sign-in check of an installed agent, which may
+/// also read evidence a catalog read must not wait on: the macOS keychain.
+pub(crate) fn describe_checked(id: &str) -> Value {
+    let (state, expires) = match home_dir() {
+        Some(home) if id == "cursor_agent" => {
+            cursor_agent_readiness(&home, now_ms(), &from_environment, &cursor_keychain)
+        }
+        _ => readiness(id, true),
+    };
+    wire(id, state, expires)
+}
+
+fn wire(id: &str, state: Readiness, expires: Option<i64>) -> Value {
     json!({
         "readiness": state.id(),
         "signedIn": match state {
@@ -373,13 +558,101 @@ mod tests {
     fn a_sign_in_flow_exists_only_where_a_terminal_is_enough() {
         assert!(sign_in("claude_code").is_some());
         assert!(sign_in("codex").is_some());
-        // No verified browserless flow. Offering one would end in a callback
-        // that lands on the server rather than on the person's own device.
+        // Cursor Agent's login polls rather than calling back, so it works
+        // from any browser. The editor's own `cursor` command has no such flow.
+        assert!(sign_in("cursor_agent").is_some());
+        assert_eq!(sign_in("muse").map(|flow| flow.kind), Some("deviceCode"));
         assert!(sign_in("cursor").is_none());
         assert_eq!(
             describe("cursor", true)["signIn"]["supported"],
             json!(false)
         );
+    }
+
+    fn cursor_jwt(exp: i64) -> String {
+        let claims = crate::base64::encode(json!({"exp": exp}).to_string().as_bytes());
+        let claims = claims
+            .trim_end_matches('=')
+            .replace('+', "-")
+            .replace('/', "_");
+        format!("header.{claims}.signature")
+    }
+
+    #[test]
+    fn cursor_agent_reads_the_later_expiry_and_never_the_status_command() {
+        let home = tempfile::tempdir().unwrap();
+        let now = 2_000_000_000_000;
+        let stale = cursor_jwt(1_900_000_000);
+        let live = cursor_jwt(2_100_000_000);
+        let keychain = |tokens: Vec<String>| move || KeychainAnswer::Found(tokens.clone());
+        let file_env =
+            |var: &str| (var == "AGENT_CLI_CREDENTIAL_STORE").then(|| PathBuf::from("file"));
+        let env: &dyn Fn(&str) -> Option<PathBuf> = if cfg!(target_os = "macos") {
+            &no_env
+        } else {
+            &file_env
+        };
+        let write = |tokens: &[&String]| {
+            let path = cursor_auth_file(home.path(), env);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let body = json!({"accessToken": tokens.first(), "refreshToken": tokens.get(1)});
+            std::fs::write(path, body.to_string()).unwrap();
+        };
+
+        write(&[&stale, &stale]);
+        let found = cursor_agent_readiness(home.path(), now, env, &keychain(vec![stale.clone()]));
+        assert_eq!(found, (Readiness::Expired, Some(1_900_000_000_000)));
+
+        write(&[&stale, &live]);
+        let found = cursor_agent_readiness(
+            home.path(),
+            now,
+            env,
+            &keychain(vec![stale.clone(), live.clone()]),
+        );
+        assert_eq!(found, (Readiness::SignedIn, Some(2_100_000_000_000)));
+
+        std::fs::remove_file(cursor_auth_file(home.path(), env)).unwrap();
+        let found = cursor_agent_readiness(home.path(), now, env, &keychain(Vec::new()));
+        assert_eq!(found.0, Readiness::NeedsSignIn);
+
+        let key = |var: &str| (var == "CURSOR_API_KEY").then(|| PathBuf::from("key"));
+        let found = cursor_agent_readiness(home.path(), now, &key, &keychain(Vec::new()));
+        assert_eq!(found, (Readiness::SignedIn, None));
+    }
+
+    #[test]
+    fn muse_is_signed_in_when_its_record_names_the_meta_provider() {
+        let home = tempfile::tempdir().unwrap();
+        assert_eq!(
+            muse_readiness(home.path(), &no_env).0,
+            Readiness::NeedsSignIn
+        );
+
+        let auth = home.path().join(".config/muse/auth.json");
+        std::fs::create_dir_all(auth.parent().unwrap()).unwrap();
+        std::fs::write(
+            &auth,
+            r#"{"schema_version":1,"providers":{"meta":{"mechanism":"oauth","storage":"keychain"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            muse_readiness(home.path(), &no_env),
+            (Readiness::SignedIn, None)
+        );
+
+        std::fs::write(&auth, r#"{"schema_version":1,"providers":{}}"#).unwrap();
+        assert_eq!(
+            muse_readiness(home.path(), &no_env).0,
+            Readiness::NeedsSignIn
+        );
+
+        std::fs::write(&auth, "{").unwrap();
+        assert_eq!(muse_readiness(home.path(), &no_env).0, Readiness::Unknown);
+
+        let key = |var: &str| (var == "META_API_KEY").then(|| PathBuf::from("key"));
+        std::fs::remove_file(&auth).unwrap();
+        assert_eq!(muse_readiness(home.path(), &key).0, Readiness::SignedIn);
     }
 
     #[test]

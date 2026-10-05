@@ -30,7 +30,7 @@ class SteerVersions {
 /// keeps that note when the host answer arrives a moment later.
 object ChatSteer {
     /// Host ids for the agents whose steps can carry a note.
-    private val noteBackends = setOf("claude", "codex", "muse")
+    private val noteBackends = setOf("claude", "codex", "cursor", "muse")
 
     /// A list requested after `since` was answered with the host's own copy.
     /// Only an older answer, already in flight, is painted over. Without this

@@ -2338,7 +2338,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private void CheckSelectedSignIn()
     {
         var selectedBackend = Backend(Format.Text(_openChat, "backend"));
-        if (selectedBackend is not null && Format.Flag(selectedBackend, "canCheckSignIn") && Format.Text(selectedBackend, "id") is "claude" or "claude_code" or "codex")
+        if (selectedBackend is not null && Format.Flag(selectedBackend, "canCheckSignIn") && Format.Text(selectedBackend, "id") is "claude" or "claude_code" or "codex" or "cursor" or "cursor_agent" or "muse")
         {
             // In the background. The CLI can take seconds to answer, and the
             // chat, its menus and its personas are ready without it.

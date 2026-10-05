@@ -249,6 +249,17 @@ fn decision_document(flavor: &str, decision: &Decision) -> String {
             }
         })
         .to_string(),
+        // Cursor has its own shape: `permission`, with the reason in both
+        // `user_message` and `agent_message`, since Cursor routes one to the
+        // person and the other to the model. Verified on the 2026.10 CLI: a
+        // deny left the file unwritten even with `--force`.
+        ("cursor", Decision::Allow) => json!({"permission": "allow"}).to_string(),
+        ("cursor", Decision::Deny(reason)) => json!({
+            "permission": "deny",
+            "user_message": reason,
+            "agent_message": reason,
+        })
+        .to_string(),
         // Grok, agy and codex read the Claude-compatible top-level form.
         // `permissionDecision` rides along too: grok documents it as the
         // canonical spelling and prefers it when both are present.
@@ -304,6 +315,9 @@ fn post_note_document(flavor: &str, note: &str) -> String {
             }
         })
         .to_string(),
+        // Cursor reads `additional_context` from both post events and adds it
+        // to what the model sees next.
+        "cursor" => json!({ "additional_context": context }).to_string(),
         _ => String::new(),
     }
 }
@@ -502,6 +516,7 @@ fn hook_report(
 }
 
 fn hook_result(flavor: &str, input: &Value) -> (String, bool, Option<String>) {
+    let present = |key: &str| input.get(key).filter(|value| !value.is_null());
     let call_id = input
         .get("tool_use_id")
         .or_else(|| input.get("toolUseId"))
@@ -519,14 +534,23 @@ fn hook_result(flavor: &str, input: &Value) -> (String, bool, Option<String>) {
         .get("success")
         .or_else(|| input.get("ok"))
         .and_then(Value::as_bool)
-        .unwrap_or_else(|| input.get("error").is_none());
-    let detail = input
-        .get("error")
-        .or_else(|| input.get("result"))
-        .or_else(|| input.get("output"))
+        // Cursor reports a refused or failed call as its own event, with an
+        // `error_message` rather than an `error`.
+        // A field sent as `null` is absent, so `"error_message": null` on a
+        // success neither fails the call nor hides the output after it.
+        .unwrap_or_else(|| {
+            present("error").is_none()
+                && present("error_message").is_none()
+                && input.get("hook_event_name").and_then(Value::as_str)
+                    != Some("postToolUseFailure")
+        });
+    let detail = present("error")
+        .or_else(|| present("error_message"))
+        .or_else(|| present("result"))
+        .or_else(|| present("output"))
+        .or_else(|| present("tool_output"))
         .and_then(|value| match value {
             Value::String(text) => Some(text.chars().take(360).collect()),
-            Value::Null => None,
             other => serde_json::to_string(other)
                 .ok()
                 .map(|text| text.chars().take(360).collect()),
@@ -868,6 +892,45 @@ mod tests {
         // for is a chance to be misread.
         let allowed = decision_document("claude", &Decision::Allow);
         assert_eq!(allowed, "{}");
+
+        // Cursor reads `permission`, and the reason rides in both message
+        // fields so the model sees it whichever one it reads.
+        let cursor: Value =
+            serde_json::from_str(&decision_document("cursor", &Decision::Deny("no".into())))
+                .unwrap();
+        assert_eq!(
+            cursor,
+            json!({"permission": "deny", "user_message": "no", "agent_message": "no"})
+        );
+        let cursor: Value =
+            serde_json::from_str(&decision_document("cursor", &Decision::Allow)).unwrap();
+        assert_eq!(cursor, json!({"permission": "allow"}));
+    }
+
+    #[test]
+    fn cursor_reports_a_refused_call_as_a_failure() {
+        let failed = json!({
+            "hook_event_name": "postToolUseFailure",
+            "tool_use_id": "call-1",
+            "tool_name": "Shell",
+            "error_message": "blocked",
+            "failure_type": "permission_denied",
+        });
+        let (call_id, ok, detail) = hook_result("cursor", &failed);
+        assert_eq!(call_id, "call-1");
+        assert!(!ok);
+        assert_eq!(detail.as_deref(), Some("blocked"));
+
+        let ran = json!({
+            "hook_event_name": "postToolUse",
+            "tool_use_id": "call-2",
+            "error_message": null,
+            "tool_output": "{\"output\":\"a.txt\\n\",\"exitCode\":0}",
+        });
+        let (call_id, ok, detail) = hook_result("cursor", &ran);
+        assert_eq!(call_id, "call-2");
+        assert!(ok);
+        assert!(detail.unwrap().contains("a.txt"));
     }
 
     /// A mid-turn note is extra context beside a step that already ran. It must
@@ -907,6 +970,13 @@ mod tests {
             .unwrap();
         assert!(muse_context.contains(note));
         assert!(muse_context.contains("Apply it now, then continue"));
+
+        let cursor: Value = serde_json::from_str(&post_note_document("cursor", note)).unwrap();
+        assert!(cursor.get("permission").is_none());
+        assert_eq!(
+            cursor["additional_context"],
+            claude["hookSpecificOutput"]["additionalContext"]
+        );
 
         assert!(post_note_document("grok", note).is_empty());
         assert!(post_note_document("agy", note).is_empty());

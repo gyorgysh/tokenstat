@@ -463,6 +463,9 @@ pub struct ChatLaunch<'a> {
     /// Agy discovers hooks from each supplied workspace. The private root goes
     /// first; the person's workspace remains last, preserving its normal cwd.
     pub agy_customization_dir: Option<&'a Path>,
+    /// A private Cursor plugin holding the gate's hooks, loaded with
+    /// `--plugin-dir` so nothing is written to `~/.cursor` or the workspace.
+    pub cursor_plugin_dir: Option<&'a Path>,
     /// Grok's documented rules are its Standard-mode contract. Unmatched calls
     /// fall through to `dontAsk`, which denies in a headless turn.
     pub grok_allow_rules: &'a [String],
@@ -499,6 +502,7 @@ pub fn persona_draft_command(
             hook_helper: None,
             system_append: None,
             agy_customization_dir: None,
+            cursor_plugin_dir: None,
             grok_allow_rules: &[],
             attachments: &[],
         },
@@ -606,7 +610,17 @@ pub fn chat_agent_command(
     // before anything spawns, so there is no path where the flag ships without
     // the gate behind it.
     let agy_gated = backend == "agy" && !plan && launch.hook_helper.is_some();
-    if (!launch.bypass || plan) && !agy_gated {
+    // Cursor is the same arrangement as agy, measured on the 2026.10 CLI.
+    // Without `--force` its own headless permission layer rejects every write
+    // after the hook allowed it, with an empty reason. With `--force` the
+    // hook's `deny` still blocks, and the hook is written `failClosed`, so a
+    // hook that crashes or times out blocks too. The flags stay only when the
+    // plugin is actually there.
+    let cursor_gated = backend == "cursor"
+        && !plan
+        && launch.hook_helper.is_some()
+        && launch.cursor_plugin_dir.is_some();
+    if (!launch.bypass || plan) && !agy_gated && !cursor_gated {
         match backend {
             "claude" | "agy" => argv.retain(|arg| arg != "--dangerously-skip-permissions"),
             "codex" => argv.retain(|arg| arg != "--dangerously-bypass-approvals-and-sandbox"),
@@ -735,6 +749,15 @@ pub fn chat_agent_command(
             .position(|arg| arg == "exec")
             .unwrap_or(argv.len());
         argv.splice(at + 1..at + 1, ["--dangerously-bypass-hook-trust".into()]);
+    }
+    if cursor_gated
+        && !launch.bypass
+        && let Some(directory) = launch.cursor_plugin_dir
+    {
+        insert_flags(
+            &mut argv,
+            ["--plugin-dir".into(), directory.display().to_string()],
+        );
     }
     if backend == "agy"
         && !launch.bypass
@@ -2899,6 +2922,7 @@ mod tests {
                     hook_helper: None,
                     system_append: Some("You explain Rust errors patiently."),
                     agy_customization_dir: None,
+                    cursor_plugin_dir: None,
                     grok_allow_rules: &[],
                     attachments: &[],
                 },
@@ -2936,6 +2960,55 @@ mod tests {
     /// has run. Without the flag a person is asked, answers Allow, and the
     /// tool is refused anyway. The hook is the gate; this asserts it is
     /// present whenever the flag is.
+    /// Cursor rejects every write in a headless turn without `--force`, after
+    /// the hook already allowed it. So a guarded turn keeps the flag, but only
+    /// beside the plugin that carries the gate, and never in plan mode.
+    #[test]
+    fn cursor_keeps_force_only_beside_its_gate_plugin() {
+        let plugin = std::path::PathBuf::from("/tmp/cursor-hook");
+        let launch = |helper: Option<&'static str>, dir: Option<&Path>, mode: &'static str| {
+            chat_agent_command(
+                "cursor",
+                "inspect this",
+                None,
+                None,
+                DEFAULT_BUDGET_SECONDS,
+                ChatLaunch {
+                    resume: None,
+                    bypass: false,
+                    mode,
+                    hook_helper: helper.map(Path::new),
+                    system_append: None,
+                    agy_customization_dir: None,
+                    cursor_plugin_dir: dir,
+                    grok_allow_rules: &[],
+                    attachments: &[],
+                },
+            )
+            .unwrap()
+        };
+        let has = |argv: &[String], flag: &str| argv.iter().any(|arg| arg == flag);
+
+        let guarded = launch(Some("/tmp/tokenstat-hostd"), Some(&plugin), "execute");
+        assert!(has(&guarded, "--force") && has(&guarded, "--trust"));
+        let at = guarded
+            .iter()
+            .position(|arg| arg == "--plugin-dir")
+            .expect("the gate plugin is loaded");
+        assert_eq!(guarded[at + 1], plugin.display().to_string());
+        let prompt_at = guarded.iter().position(|arg| arg == "--").unwrap();
+        assert!(at < prompt_at, "flags go before the prompt separator");
+
+        for ungated in [
+            launch(None, None, "execute"),
+            launch(Some("/tmp/tokenstat-hostd"), None, "execute"),
+            launch(Some("/tmp/tokenstat-hostd"), Some(&plugin), "plan"),
+        ] {
+            assert!(!has(&ungated, "--force"), "{ungated:?}");
+            assert!(!has(&ungated, "--plugin-dir"), "{ungated:?}");
+        }
+    }
+
     #[test]
     fn agy_keeps_its_own_gate_out_of_the_way_only_when_ours_is_installed() {
         let home = std::path::PathBuf::from("/tmp/agy-hook");
@@ -2953,6 +3026,7 @@ mod tests {
                     hook_helper: helper.map(Path::new),
                     system_append: None,
                     agy_customization_dir: Some(&home),
+                    cursor_plugin_dir: None,
                     grok_allow_rules: &[],
                     attachments: &[],
                 },
@@ -3017,6 +3091,7 @@ mod tests {
                     hook_helper: helper.map(Path::new),
                     system_append: None,
                     agy_customization_dir: None,
+                    cursor_plugin_dir: None,
                     grok_allow_rules: &[],
                     attachments: &[],
                 },
@@ -3082,6 +3157,7 @@ mod tests {
                     hook_helper: None,
                     system_append: Some("standing"),
                     agy_customization_dir: None,
+                    cursor_plugin_dir: None,
                     grok_allow_rules: &[],
                     attachments: &[],
                 },
@@ -3110,6 +3186,7 @@ mod tests {
                 hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
+                cursor_plugin_dir: None,
                 grok_allow_rules: &[],
                 attachments: &[],
             },
@@ -3133,6 +3210,7 @@ mod tests {
                 hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
+                cursor_plugin_dir: None,
                 grok_allow_rules: &[],
                 attachments: &[],
             },
@@ -3158,6 +3236,7 @@ mod tests {
                 )),
                 system_append: None,
                 agy_customization_dir: None,
+                cursor_plugin_dir: None,
                 grok_allow_rules: &[],
                 attachments: &[],
             },
@@ -3185,6 +3264,7 @@ mod tests {
                 hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
+                cursor_plugin_dir: None,
                 grok_allow_rules: &[],
                 attachments: &[],
             },
@@ -3208,6 +3288,7 @@ mod tests {
                 hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
+                cursor_plugin_dir: None,
                 grok_allow_rules: &[],
                 attachments: &[],
             },
@@ -3230,6 +3311,7 @@ mod tests {
                 hook_helper: Some(Path::new("/tmp/tokenstat-hostd")),
                 system_append: None,
                 agy_customization_dir: None,
+                cursor_plugin_dir: None,
                 grok_allow_rules: &[],
                 attachments: &[],
             },
@@ -3253,6 +3335,7 @@ mod tests {
                 hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
+                cursor_plugin_dir: None,
                 grok_allow_rules: &[],
                 attachments: &[],
             },
@@ -3277,6 +3360,7 @@ mod tests {
                 hook_helper: Some(Path::new("/tmp/tokenstat-hostd")),
                 system_append: None,
                 agy_customization_dir: Some(agy_home),
+                cursor_plugin_dir: None,
                 grok_allow_rules: &[],
                 attachments: &[],
             },
@@ -3301,6 +3385,7 @@ mod tests {
                 hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
+                cursor_plugin_dir: None,
                 grok_allow_rules: &rules,
                 attachments: &[],
             },
@@ -3340,6 +3425,7 @@ mod tests {
                 hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
+                cursor_plugin_dir: None,
                 grok_allow_rules: &[],
                 attachments: &[],
             },
@@ -3369,6 +3455,7 @@ mod tests {
                     hook_helper: None,
                     system_append: None,
                     agy_customization_dir: None,
+                    cursor_plugin_dir: None,
                     grok_allow_rules: &[],
                     attachments: &[],
                 },
@@ -3464,6 +3551,7 @@ mod tests {
                 hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
+                cursor_plugin_dir: None,
                 grok_allow_rules: &[],
                 attachments: &[],
             },
@@ -3492,6 +3580,7 @@ mod tests {
                 hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
+                cursor_plugin_dir: None,
                 grok_allow_rules: &[],
                 attachments: &[],
             },
@@ -3522,6 +3611,7 @@ mod tests {
                 hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
+                cursor_plugin_dir: None,
                 grok_allow_rules: &[],
                 attachments: &[],
             },
@@ -3549,6 +3639,7 @@ mod tests {
                     hook_helper: None,
                     system_append: None,
                     agy_customization_dir: None,
+                    cursor_plugin_dir: None,
                     grok_allow_rules: &[],
                     attachments: &[],
                 },
@@ -3623,6 +3714,7 @@ mod tests {
                     hook_helper: None,
                     system_append: None,
                     agy_customization_dir: None,
+                    cursor_plugin_dir: None,
                     grok_allow_rules: &[],
                     attachments: &[],
                 },
@@ -3658,6 +3750,7 @@ mod tests {
                 hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
+                cursor_plugin_dir: None,
                 grok_allow_rules: &[],
                 attachments: std::slice::from_ref(&attachment),
             },
@@ -3681,6 +3774,7 @@ mod tests {
                 hook_helper: None,
                 system_append: None,
                 agy_customization_dir: None,
+                cursor_plugin_dir: None,
                 grok_allow_rules: &[],
                 attachments: std::slice::from_ref(&attachment),
             },

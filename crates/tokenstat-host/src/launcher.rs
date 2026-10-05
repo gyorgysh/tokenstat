@@ -572,6 +572,12 @@ pub(crate) fn check_sign_in(id: &str) -> Result<Value, String> {
     let args: &[&str] = match id {
         "claude_code" => &["auth", "status"],
         "codex" => &["login", "status"],
+        // Its `status` reports a login whose tokens have all expired, so the
+        // stored expiry is the answer and it counts as checked.
+        "cursor_agent" => return Ok(crate::agent_readiness::describe_checked(id)),
+        // Muse has no status command. Its `auth.json` names the provider it
+        // signed in to, which is the same answer.
+        "muse" => return Ok(crate::agent_readiness::describe(id, true)),
         _ => {
             // File evidence only. A missing login file is not the CLI saying
             // it is signed out (an environment key has no file at all), so it
@@ -1520,7 +1526,7 @@ mod tests {
     /// would be offered for something the catalog cannot start.
     #[test]
     fn every_sign_in_flow_names_a_profile_in_the_catalog() {
-        for id in ["claude_code", "codex"] {
+        for id in ["claude_code", "codex", "cursor_agent", "muse"] {
             assert!(
                 PROFILES.iter().any(|profile| profile.id == id),
                 "{id} has a sign-in flow but no profile"

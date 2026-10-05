@@ -601,7 +601,7 @@ impl Drop for PendingMuseHome {
 /// builds. Elsewhere a note would never ride a step, so it is refused and
 /// the client queues the words instead.
 fn note_backend(backend: &str) -> bool {
-    matches!(backend, "claude" | "codex") || (backend == "muse" && cfg!(unix))
+    matches!(backend, "claude" | "codex" | "cursor") || (backend == "muse" && cfg!(unix))
 }
 
 /// Whether a turn of this chat reads a parked note on its next step. Muse
@@ -609,7 +609,15 @@ fn note_backend(backend: &str) -> bool {
 /// ask before tools. Steering, answering and the standing question rule all
 /// ask this one place, so they cannot disagree about it.
 fn takes_notes_mid_turn(chat: &Conversation) -> bool {
-    note_backend(&chat.backend) && (chat.backend == "muse" || chat.autonomy == "standard")
+    note_backend(&chat.backend)
+        && (chat.backend == "muse" || chat.autonomy == "standard")
+        && !cursor_plan(chat)
+}
+
+/// A Cursor plan turn runs without its gate plugin (see
+/// `automations::chat_agent_command`), so no post hook is there to carry a note.
+fn cursor_plan(chat: &Conversation) -> bool {
+    chat.backend == "cursor" && chat.mode == "plan"
 }
 
 /// A Windows bypass turn keeps the tool's own home, where it was signed in,
@@ -3242,6 +3250,12 @@ impl Store {
         let agy_customization_dir =
             (chat.backend == "agy" && chat.autonomy == "standard").then(|| self.agy_hook_home(id));
         let grok_allow_rules = grok_allow_rules(&chat);
+        // The command keeps Cursor's `--force` only beside this plugin. It is
+        // written below, with the other homes, and a failure there aborts the
+        // turn before anything spawns. A plan turn loads no plugin.
+        let cursor_hook_home =
+            (chat.backend == "cursor" && helper.is_some() && !cursor_plan(&chat))
+                .then(|| self.cursor_hook_home(id));
         let mut argv = crate::automations::chat_agent_command(
             &chat.backend,
             prompt,
@@ -3255,6 +3269,7 @@ impl Store {
                 hook_helper: helper.as_deref(),
                 system_append,
                 agy_customization_dir: agy_customization_dir.as_deref(),
+                cursor_plugin_dir: cursor_hook_home.as_deref(),
                 grok_allow_rules: &grok_allow_rules,
                 attachments: &attachments,
             },
@@ -3328,6 +3343,9 @@ impl Store {
         } else {
             None
         };
+        if let (Some(home), Some(helper)) = (&cursor_hook_home, &helper) {
+            crate::chat_gate::write_cursor_plugin(home, helper)?;
+        }
         let opencode_hook_home = if matches!(chat.backend.as_str(), "opencode" | "opencode2")
             && let Some(helper) = &helper
         {
@@ -3577,6 +3595,7 @@ impl Store {
         let turn_file = turn.as_ref().map(|(_, file)| file.clone());
         let codex_home = codex_home.clone();
         let agy_hook_home = agy_hook_home.clone();
+        let cursor_hook_home = cursor_hook_home.clone();
         let opencode_hook_home = opencode_hook_home.clone();
         let response_output_dir = response_output_dir.clone();
         std::thread::spawn(move || {
@@ -3618,6 +3637,9 @@ impl Store {
                         let _ = crate::chat_gate::clear_codex_hooks(&home);
                     }
                     if let Some(home) = agy_hook_home {
+                        let _ = fs::remove_dir_all(home);
+                    }
+                    if let Some(home) = cursor_hook_home {
                         let _ = fs::remove_dir_all(home);
                     }
                     if let Some(home) = opencode_hook_home {
@@ -4228,6 +4250,10 @@ impl Store {
 
     fn agy_hook_home(&self, id: &str) -> PathBuf {
         self.root.join(safe_file_name(id)).join("agy-hook")
+    }
+
+    fn cursor_hook_home(&self, id: &str) -> PathBuf {
+        self.root.join(safe_file_name(id)).join("cursor-hook")
     }
 
     /// Persistent for the life of the conversation, unlike the other homes.
@@ -5061,7 +5087,9 @@ pub fn backends(force: bool) -> Vec<Value> {
                     // protocol, so expose it as an explicit Bypass choice.
                     // Bypass invokes Muse's `--yolo` mode: no approvals and
                     // no workspace sandbox for that explicitly trusted run.
-                    json!(if matches!(id, "cursor" | "sh" | "muse") {
+                    // Cursor runs a private `--plugin-dir` holding the same
+                    // hook, so it asks too. See `chat_gate::write_cursor_plugin`.
+                    json!(if matches!(id, "sh" | "muse") {
                         "bypassOnly"
                     } else {
                         "full"
@@ -9755,7 +9783,7 @@ mod tests {
             .iter()
             .find(|backend| backend["id"] == "cursor")
             .expect("cursor");
-        assert_eq!(cursor["gateTier"], "bypassOnly");
+        assert_eq!(cursor["gateTier"], "full");
         let claude = rows
             .iter()
             .find(|backend| backend["id"] == "claude")

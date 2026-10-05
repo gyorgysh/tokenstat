@@ -78,7 +78,7 @@ internal sealed partial class ChatPage
         if (protocol < RemoteFeatureGate.SteerMinProtocol) return false;
         if (_attachments.Count > 0) return false;
         var backend = Format.Text(_openChat, "backend");
-        if (backend != "claude" && backend != "codex" && backend != "muse") return false;
+        if (backend is not ("claude" or "codex" or "cursor" or "muse")) return false;
         // This computer's own host has no muse hook home, so it refuses a muse note.
         if (backend == "muse") return SteerPeerKey().Length > 0;
         return Format.Text(_openChat, "autonomy", "standard") == "standard";
@@ -150,7 +150,7 @@ internal sealed partial class ChatPage
         if (sendNext || attachmentIds.Length > 0 || text.Length == 0 || !Busy()) return false;
         if (SteerUnsupported()) return false;
         var backend = Format.Text(_openChat, "backend");
-        if (backend != "claude" && backend != "codex" && backend != "muse") return false;
+        if (backend is not ("claude" or "codex" or "cursor" or "muse")) return false;
         if (backend != "muse" && Format.Text(_openChat, "autonomy", "standard") != "standard") return false;
 
         var protocol = await ReadProtocolAsync();

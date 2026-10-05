@@ -111,7 +111,7 @@ struct ChatAgentSetupCard: View {
             }
         }
         .task(id: "\(backend.id):\(model.peer ?? "local"):\(recoveryFailureID ?? "setup")") {
-            if ["claude", "claude_code", "codex"].contains(backend.id) { _ = await check() }
+            if ["claude", "claude_code", "codex", "cursor", "cursor_agent", "muse"].contains(backend.id) { _ = await check() }
         }
         .sheet(isPresented: $showingSignIn) {
             AgentSignInSheet(backend: backend, peer: model.peer) { await check(explicit: true) }

@@ -213,6 +213,56 @@ pub fn write_agy_home(home: &Path, helper: &Path) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+/// A private Cursor plugin holding the gate, for `cursor-agent --plugin-dir`.
+///
+/// Cursor reads user hooks from a fixed `~/.cursor/hooks.json` and project
+/// hooks from the workspace, and neither may carry tokenstat's gate. A plugin
+/// directory handed over on the command line is the one place it can live
+/// without touching either, and it is loaded in headless `-p` turns.
+///
+/// Cursor's own hook names and answer shape, not Claude's: `preToolUse` reads
+/// `permission`, and `postToolUse` hands `additional_context` to the model,
+/// which is how a parked note reaches the next step. `failClosed` on the pre
+/// hook makes a hook that crashes or overruns its timeout block the tool. A
+/// failed or refused call reports through `postToolUseFailure`, so the
+/// transcript records it like any other outcome.
+pub fn write_cursor_plugin(dir: &Path, helper: &Path) -> Result<(), String> {
+    let manifest = dir.join(".cursor-plugin");
+    let hooks = dir.join("hooks");
+    std::fs::create_dir_all(&manifest).map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(&hooks).map_err(|error| error.to_string())?;
+    std::fs::write(
+        manifest.join("plugin.json"),
+        json!({
+            "name": "tokenstat-gate",
+            "version": env!("CARGO_PKG_VERSION"),
+            "description": "Asks tokenstat before each tool call in this chat turn.",
+        })
+        .to_string(),
+    )
+    .map_err(|error| error.to_string())?;
+    let post = || {
+        json!([{
+            "command": hook_command(helper, "cursor", "post"),
+            "timeout": POST_TIMEOUT_SECONDS,
+        }])
+    };
+    let document = json!({
+        "version": 1,
+        "hooks": {
+            "preToolUse": [{
+                "command": hook_command(helper, "cursor", "pre"),
+                "timeout": GATE_TIMEOUT_SECONDS,
+                "failClosed": true,
+            }],
+            "postToolUse": post(),
+            "postToolUseFailure": post(),
+        }
+    });
+    std::fs::write(hooks.join("hooks.json"), document.to_string())
+        .map_err(|error| error.to_string())
+}
+
 /// A private `GROK_HOME` holding our hooks.
 ///
 /// **This one is persistent per conversation, unlike the others.** Grok keeps
@@ -612,6 +662,42 @@ mod tests {
             );
         }
         assert_eq!(muse_config_directory(None, None), None);
+    }
+
+    #[test]
+    fn the_cursor_plugin_fails_closed_and_carries_notes_back() {
+        let root = tempfile::tempdir().unwrap();
+        let helper = root.path().join("tokenstat-hostd");
+        write_cursor_plugin(&root.path().join("plugin"), &helper).unwrap();
+        let manifest: Value = serde_json::from_str(
+            &std::fs::read_to_string(root.path().join("plugin/.cursor-plugin/plugin.json"))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest["name"], "tokenstat-gate");
+        let hooks: Value = serde_json::from_str(
+            &std::fs::read_to_string(root.path().join("plugin/hooks/hooks.json")).unwrap(),
+        )
+        .unwrap();
+        let pre = &hooks["hooks"]["preToolUse"][0];
+        assert_eq!(pre["failClosed"], true);
+        assert_eq!(pre["timeout"], GATE_TIMEOUT_SECONDS);
+        assert!(
+            pre["command"]
+                .as_str()
+                .unwrap()
+                .ends_with("hook cursor pre")
+        );
+        for event in ["postToolUse", "postToolUseFailure"] {
+            let post = &hooks["hooks"][event][0];
+            assert!(
+                post["command"]
+                    .as_str()
+                    .unwrap()
+                    .ends_with("hook cursor post")
+            );
+            assert_eq!(post["timeout"], POST_TIMEOUT_SECONDS);
+        }
     }
 
     #[test]
