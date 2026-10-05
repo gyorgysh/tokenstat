@@ -432,7 +432,7 @@ struct WorkspaceChangesView: View {
                         .padding(.leading, Theme.Space.l)
                         .onAppear { model.retainDiffPreview(file.path, in: folder.id) }
                         .task(id: "\(key)|\(model.diffRefreshRevisions[folder.id] ?? 0)") {
-                            await model.loadDiff(file.path, in: folder.id)
+                            await model.loadPreviewDiff(file.path, in: folder.id)
                         }
                         .onDisappear { model.releaseDiffPreview(file.path, in: folder.id) }
                     }
@@ -451,6 +451,7 @@ struct WorkspaceChangesView: View {
     /// on the end of the path.
     private func reveal(_ focus: WorkspacesModel.ChangeFocus?, in folder: WorkspaceFolder, git: GitStatus, proxy: ScrollViewProxy) {
         guard let focus, focus.folderID == folder.id else { return }
+        model.consumeChangeFocus(focus)
         guard let path = ChangePathMatch.path(focus.path, in: git.files.map(\.path)),
               let file = git.files.first(where: { $0.path == path }) else { return }
         let key = diffKey(file, in: folder)

@@ -91,6 +91,7 @@ private fun PullSheet(
     var review by remember { mutableStateOf<JsonObject?>(null) }
     var outcome by remember { mutableStateOf<JsonObject?>(null) }
     var working by remember { mutableStateOf(false) }
+    var pulling by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     suspend fun check() {
@@ -115,6 +116,7 @@ private fun PullSheet(
 
     suspend fun pull(reviewed: JsonObject) {
         working = true
+        pulling = true
         error = null
         try {
             runCatching {
@@ -126,10 +128,14 @@ private fun PullSheet(
                 outcome = it
                 onPulled()
             }.onFailure {
+                // A refused pull would refuse again with the same review.
+                // Drop it so the dialog offers Check again, not the same Pull.
+                review = null
                 error = TunnelCopy.display(it.message ?: L10n.text("android.gitpull.failed"), hostLabel)
             }
         } finally {
             working = false
+            pulling = false
         }
     }
 
@@ -173,7 +179,7 @@ private fun PullSheet(
             outcome?.str("message")?.let { Banner(it, if (pulled) BannerSeverity.SUCCESS else BannerSeverity.DANGER) }
             error?.let { Banner(it, BannerSeverity.DANGER) }
             if (working) {
-                Text(if (review == null) L10n.text("android.gitpull.checking") else L10n.text("android.gitpull.pulling"), style = TextStyle(fontSize = 14.sp), color = colors.textSecondary)
+                Text(if (pulling) L10n.text("android.gitpull.pulling") else L10n.text("android.gitpull.checking"), style = TextStyle(fontSize = 14.sp), color = colors.textSecondary)
             }
             Text(L10n.text("android.gitpull.help"), style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {

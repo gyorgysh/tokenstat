@@ -729,15 +729,6 @@ fn parse_tags(decorations: &str) -> Vec<String> {
         .collect()
 }
 
-/// Read git state, or `is_repo: false` for anything that is not a work tree.
-///
-/// Never fails for "this is not a repository": a plain folder is a legitimate
-/// workspace, it just has no branch. Errors are reserved for git being absent
-/// or refusing to run.
-///
-/// One `git status` is enough to decide "is this a repo": a separate
-/// `rev-parse` was a full process spawn for every folder on every list, and
-/// the status command already fails cleanly outside a work tree.
 /// The checked-out branch's short name. None when HEAD is detached or the
 /// folder is not a repository. One cheap read, for callers that need only
 /// the name and not a whole status.
@@ -747,6 +738,15 @@ pub fn current_branch(dir: &Path) -> Option<String> {
         .filter(|name| !name.is_empty())
 }
 
+/// Read git state, or `is_repo: false` for anything that is not a work tree.
+///
+/// Never fails for "this is not a repository": a plain folder is a legitimate
+/// workspace, it just has no branch. Errors are reserved for git being absent
+/// or refusing to run.
+///
+/// One `git status` is enough to decide "is this a repo": a separate
+/// `rev-parse` was a full process spawn for every folder on every list, and
+/// the status command already fails cleanly outside a work tree.
 pub fn status(dir: &Path) -> GitStatus {
     let raw = match git(
         dir,

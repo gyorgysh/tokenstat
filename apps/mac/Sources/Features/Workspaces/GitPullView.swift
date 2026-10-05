@@ -47,6 +47,7 @@ struct GitPullSheet: View {
     @State private var outcome: GitPullOutcome?
     @State private var error: String?
     @State private var working = false
+    @State private var pulling = false
 
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -81,7 +82,7 @@ struct GitPullSheet: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if working {
-                        ProgressView(outcome == nil && review == nil ? L10n.text("apple.gitpull.checking") : L10n.text("apple.gitpull.pulling"))
+                        ProgressView(pulling ? L10n.text("apple.gitpull.pulling") : L10n.text("apple.gitpull.checking"))
                             .font(Theme.callout)
                     }
                     Text(L10n.text("apple.gitpull.help"))
@@ -149,12 +150,17 @@ struct GitPullSheet: View {
 
     private func pull(_ reviewed: GitPullReview) async {
         working = true
-        defer { working = false }
+        pulling = true
+        defer { working = false; pulling = false }
         error = nil
         do {
             outcome = try await service.pull(reviewed)
             await onPulled()
         } catch {
+            // A refused pull (the branch moved, HEAD detached) would refuse
+            // again with the same review. Drop it so the sheet offers Check
+            // again instead of the same Pull.
+            review = nil
             self.error = error.localizedDescription
         }
     }

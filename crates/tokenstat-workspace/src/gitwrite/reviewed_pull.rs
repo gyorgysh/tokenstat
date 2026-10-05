@@ -120,6 +120,16 @@ pub fn review(dir: &Path) -> Result<Review, String> {
         return Err("The upstream must be a branch.".into());
     }
     text(dir, &["check-ref-format", &remote_ref])?;
+    // A branch can follow a remote by URL rather than by name. That has no
+    // remote-tracking ref to fetch into, so say so before reaching for it.
+    text(
+        dir,
+        &["check-ref-format", &tracking_ref(&remote, &remote_ref)],
+    )
+    .map_err(|_| {
+        "This branch follows a remote address, not a named remote. Pull it from a terminal."
+            .to_string()
+    })?;
     // Exit code 2 is "no such ref", whatever language git speaks.
     let listed = command(
         dir,
@@ -452,6 +462,16 @@ mod tests {
         text(dir, &["switch", "-q", "-c", "feature"]).unwrap();
         let error = review(dir).unwrap_err();
         assert!(error.contains("no upstream"), "{error}");
+    }
+
+    #[test]
+    fn a_remote_named_by_address_is_refused_in_words() {
+        let f = fixture();
+        let dir = f.local.path();
+        let url = text(dir, &["config", "--get", "remote.origin.url"]).unwrap();
+        text(dir, &["config", "branch.main.remote", &url]).unwrap();
+        let error = review(dir).unwrap_err();
+        assert!(error.contains("remote address"), "{error}");
     }
 
     #[test]

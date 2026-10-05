@@ -3559,6 +3559,7 @@ impl Store {
 
     pub fn stop(&self, id: &str) -> Result<(), String> {
         validate_record_id(id)?;
+        let branch = self.folder_branch(id);
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
         let pty = self
@@ -3612,7 +3613,7 @@ impl Store {
                     .remove(id);
                 // Best effort: the guard is already gone, so a failed write is
                 // healable through the no-session path below on a retry.
-                let _ = self.set_running(id, false);
+                let _ = self.stop_running(id, branch);
             }
         } else {
             if crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?.is_none() {
@@ -3637,7 +3638,7 @@ impl Store {
                     backend: chat.backend,
                 },
             )?;
-            self.set_running(id, false)?;
+            self.stop_running(id, branch)?;
         }
         Ok(())
     }
@@ -3735,6 +3736,7 @@ impl Store {
         // conversation is doing now. A newer turn owning the conversation
         // must not keep a dead turn's token or file alive.
         retire_credentials();
+        let branch = self.folder_branch(id);
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         // Hands off only when a newer turn owns the conversation. An unowned
         // one is still this drainer's to retire: its cleanup must run even
@@ -3749,7 +3751,7 @@ impl Store {
             return Ok(());
         }
         cleanup();
-        let status = self.stop_running(id);
+        let status = self.stop_running(id, branch);
         // The guard goes even when that write fails, or every later send is
         // refused as already responding while Stop reports success without
         // changing anything. A newer turn cannot have appeared in between:
@@ -3979,14 +3981,24 @@ impl Store {
         })
     }
 
-    /// The turn is over: clear the running bit, and note the branch the
-    /// agent left the folder on, which may be one it just created.
-    fn stop_running(&self, id: &str) -> Result<Conversation, String> {
-        let branch = self
-            .get(id)
+    /// The branch the conversation's folder is on now, or `None` when the
+    /// folder cannot be found. It spawns git, so callers read it before
+    /// taking the acceptance lock: a slow or network-mounted folder must not
+    /// hold up answers and steers to the conversation while git runs.
+    fn folder_branch(&self, id: &str) -> Option<Option<String>> {
+        self.get(id)
             .ok()
             .and_then(|chat| crate::workspaces::folder(&chat.workspace_id).ok())
-            .map(|workspace| tokenstat_workspace::git::current_branch(&workspace.path));
+            .map(|workspace| tokenstat_workspace::git::current_branch(&workspace.path))
+    }
+
+    /// The turn is over: clear the running bit, and note the branch the
+    /// agent left the folder on, which may be one it just created.
+    fn stop_running(
+        &self,
+        id: &str,
+        branch: Option<Option<String>>,
+    ) -> Result<Conversation, String> {
         self.edit_conversation(id, |chat| {
             chat.running = false;
             chat.updated_at_ms = now_ms();

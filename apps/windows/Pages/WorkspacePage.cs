@@ -39,8 +39,14 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
     private bool _sessionsLoading;
     private bool _showingLauncherCatalog;
     private string? _reviewPath;
+    private bool _loading;
+    private bool _reloadRequested;
 
-    /// <summary>A chat's file row opens the current diff beside the conversation.</summary>
+    /// <summary>
+    /// A chat's file row opens the current diff beside the conversation. The
+    /// card is pinned by the next load only, so a later push, pull or refresh
+    /// does not fetch that diff again or keep it at the top.
+    /// </summary>
     public void RevealChangedFile(string? path)
     {
         _reviewPath = path;
@@ -125,7 +131,35 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         }
     }
 
+    /// <summary>
+    /// Loads build straight into <c>_root</c> across awaits, so two at once
+    /// would interleave their rows. A request during a load runs once that
+    /// load ends instead.
+    /// </summary>
     private async Task LoadAsync()
+    {
+        if (_loading)
+        {
+            _reloadRequested = true;
+            return;
+        }
+        _loading = true;
+        try
+        {
+            do
+            {
+                _reloadRequested = false;
+                await LoadOnceAsync();
+            }
+            while (_reloadRequested);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task LoadOnceAsync()
     {
         _root.Children.Clear();
         _summary = "";
@@ -390,7 +424,11 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             : L10n.Text("windows.workspacepage.0_changed_1_2_selected_for_the_next_commit.32bf5b80", $"{available.Count}", $"{(available.Count == 1 ? L10n.Text("windows.workspacepage.file.3b9c358f") : L10n.Text("windows.workspacepage.files.3d7db37d"))}", $"{session.SelectedCount}");
         RenderInspector();
 
-        if (_reviewPath is string wanted)
+        var reviewPath = _reviewPath;
+        // A reload already queued behind this one would wipe the card, so it
+        // keeps the path to pin again.
+        if (!_reloadRequested) _reviewPath = null;
+        if (reviewPath is string wanted)
         {
             wanted = wanted.Replace('\\', '/');
             var file = reviewFiles.OrderByDescending(file => file.Path.Length).FirstOrDefault(file =>

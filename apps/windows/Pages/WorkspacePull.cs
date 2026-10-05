@@ -106,6 +106,9 @@ internal static class WorkspacePullDialog
             }
             catch (Exception ex)
             {
+                // A refused pull would refuse again with the same review.
+                // Drop it so the dialog offers Check again, not the same Pull.
+                review = null;
                 error = ex.Message;
             }
         }

@@ -75,36 +75,71 @@ struct DiffBody: View {
     @State private var rows: [DiffDocumentRow] = []
     @State private var total = 0
     @State private var extraRows = 0
+    /// The snapshot and row limit `rows` were built from. Rows stay on screen
+    /// until a newer snapshot's rows replace them, so a refresh never drops
+    /// the body to zero height.
     @State private var displayedRevision: UUID?
+    @State private var builtLimit = 0
+
+    init(diff: FileDiff, minWidth: CGFloat = 0, lazy: Bool = true) {
+        self.diff = diff
+        self.minWidth = minWidth
+        self.lazy = lazy
+        let page = lazy ? 2_000 : 200
+        if let first = DiffRowCache.first(for: diff, limit: page) {
+            _rows = State(initialValue: first.rows)
+            _total = State(initialValue: first.total)
+            _displayedRevision = State(initialValue: diff.renderRevision)
+            _builtLimit = State(initialValue: page)
+        }
+    }
+
+    private var page: Int { lazy ? 2_000 : 200 }
 
     var body: some View {
         stack {
             ForEach(rows) { row in DiffDocumentRowView(row: row, width: minWidth) }
             if total > rows.count {
-                Button(L10n.text("apple.clientdiffdocumentview.show_more_lines"), .reveal) { extraRows += lazy ? 2_000 : 200 }
+                Button(L10n.text("apple.clientdiffdocumentview.show_more_lines"), .reveal) { extraRows += page }
                     .buttonStyle(SecondaryButtonStyle(small: true))
                     .padding(Theme.Space.s)
             }
         }
         .task(id: "\(diff.renderRevision)|\(lazy)|\(extraRows)") {
-            if displayedRevision != diff.renderRevision {
-                displayedRevision = diff.renderRevision
-                extraRows = 0
-                rows = []
-                total = 0
+            let revision = diff.renderRevision
+            let current = displayedRevision == revision
+            // A new snapshot starts again from the first page.
+            let limit = page + (current ? extraRows : 0)
+            if current, builtLimit >= limit { return }
+            if !current, let first = DiffRowCache.first(for: diff, limit: limit) {
+                show(first, revision: revision, limit: limit)
+                return
             }
             let input = diff
-            let limit = (lazy ? 2_000 : 200) + extraRows
+            // "Show more" cannot change how many rows there are in all.
+            let knownTotal = current ? total : nil
             let task = Task.detached(priority: .userInitiated) {
-                (DiffDocumentRow.make([input], fileHeaders: false, rowLimit: limit,
-                                      maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit),
-                 DiffDocumentRow.count([input], fileHeaders: false,
-                                       maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit))
+                DiffRowCache.Entry(
+                    rows: DiffDocumentRow.make([input], fileHeaders: false, rowLimit: limit,
+                                               maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit),
+                    total: knownTotal ?? DiffDocumentRow.count([input], fileHeaders: false,
+                                                               maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit))
             }
-            let result = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+            let built = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
             guard !Task.isCancelled else { return }
-            rows = result.0
-            total = result.1
+            DiffRowCache.store(built, for: input, limit: limit)
+            show(built, revision: revision, limit: limit)
+        }
+    }
+
+    private func show(_ entry: DiffRowCache.Entry, revision: UUID, limit: Int) {
+        rows = entry.rows
+        total = entry.total
+        builtLimit = limit
+        if displayedRevision != revision {
+            displayedRevision = revision
+            // Restarts the task, which then finds this page already built.
+            extraRows = 0
         }
     }
 
@@ -184,6 +219,19 @@ struct InlineDiffView: View {
     let onReview: () -> Void
     @State private var rows: [DiffDocumentRow] = []
     @State private var total = 0
+    @State private var displayedRevision: UUID?
+
+    private static let limit = 60
+
+    init(diff: FileDiff, onReview: @escaping () -> Void) {
+        self.diff = diff
+        self.onReview = onReview
+        if let first = DiffRowCache.first(for: diff, limit: Self.limit) {
+            _rows = State(initialValue: first.rows)
+            _total = State(initialValue: first.total)
+            _displayedRevision = State(initialValue: diff.renderRevision)
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
@@ -202,17 +250,28 @@ struct InlineDiffView: View {
             }
         }
         .task(id: diff.renderRevision) {
-            rows = []
-            total = 0
+            let revision = diff.renderRevision
+            guard displayedRevision != revision else { return }
             let input = diff
-            let task = Task.detached(priority: .userInitiated) {
-                (DiffDocumentRow.make([input], fileHeaders: false, rowLimit: 60, maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit),
-                 DiffDocumentRow.count([input], fileHeaders: false, maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit))
+            let built: DiffRowCache.Entry
+            if let first = DiffRowCache.first(for: input, limit: Self.limit) {
+                built = first
+            } else {
+                let task = Task.detached(priority: .userInitiated) {
+                    DiffRowCache.Entry(
+                        rows: DiffDocumentRow.make([input], fileHeaders: false, rowLimit: Self.limit,
+                                                   maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit),
+                        total: DiffDocumentRow.count([input], fileHeaders: false,
+                                                     maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit))
+                }
+                built = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+                guard !Task.isCancelled else { return }
+                DiffRowCache.store(built, for: input, limit: Self.limit)
             }
-            let result = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
-            guard !Task.isCancelled else { return }
-            rows = result.0
-            total = result.1
+            // The previous snapshot's rows stay until these replace them.
+            rows = built.rows
+            total = built.total
+            displayedRevision = revision
         }
     }
 }

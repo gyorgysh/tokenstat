@@ -121,3 +121,62 @@ struct DiffDocumentRow: Identifiable, Sendable {
         return scalars.index(start, offsetBy: units - lastUnits)
     }
 }
+
+/// Built rows for one diff snapshot at one row limit.
+///
+/// A view that finds its rows here as it is created draws at full height in
+/// its first frame. A transcript card that started empty and grew once its
+/// rows arrived moved the reading place, and a remounted card did it again.
+enum DiffRowCache {
+    struct Entry {
+        let rows: [DiffDocumentRow]
+        let total: Int
+    }
+
+    private final class Held {
+        let entry: Entry
+        init(_ entry: Entry) { self.entry = entry }
+    }
+
+    private static let cache: NSCache<NSString, Held> = {
+        let cache = NSCache<NSString, Held>()
+        cache.countLimit = 64
+        return cache
+    }()
+
+    /// Rows a view can draw on its first frame: from the cache, or built
+    /// here when the diff is small enough to cost nothing. Nil for a large
+    /// diff, which is built off the main actor and `store`d instead.
+    static func first(for diff: FileDiff, limit: Int) -> Entry? {
+        if let held = cache.object(forKey: key(diff, limit)) { return held.entry }
+        guard isSmall(diff) else { return nil }
+        let entry = Entry(
+            rows: DiffDocumentRow.make([diff], fileHeaders: false, rowLimit: limit,
+                                       maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit),
+            total: DiffDocumentRow.count([diff], fileHeaders: false,
+                                         maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit))
+        store(entry, for: diff, limit: limit)
+        return entry
+    }
+
+    static func store(_ entry: Entry, for diff: FileDiff, limit: Int) {
+        cache.setObject(Held(entry), forKey: key(diff, limit))
+    }
+
+    private static func key(_ diff: FileDiff, _ limit: Int) -> NSString {
+        "\(diff.renderRevision)|\(limit)" as NSString
+    }
+
+    /// A few hundred short lines build in well under a frame.
+    private static func isSmall(_ diff: FileDiff) -> Bool {
+        var lines = 0
+        var bytes = 0
+        for hunk in diff.hunks {
+            lines += hunk.lines.count
+            guard lines <= 300 else { return false }
+            for line in hunk.lines { bytes += line.text.utf8.count }
+            guard bytes <= 32_768 else { return false }
+        }
+        return true
+    }
+}

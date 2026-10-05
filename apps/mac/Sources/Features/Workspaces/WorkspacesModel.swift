@@ -208,9 +208,17 @@ final class WorkspacesModel {
         let generation: Int
     }
     private(set) var changeFocus: ChangeFocus?
+    @ObservationIgnored private var changeFocusGeneration = 0
 
     func focusChange(_ path: String, in folderID: String) {
-        changeFocus = ChangeFocus(folderID: folderID, path: path, generation: (changeFocus?.generation ?? 0) + 1)
+        changeFocusGeneration += 1
+        changeFocus = ChangeFocus(folderID: folderID, path: path, generation: changeFocusGeneration)
+    }
+
+    /// The Changes list took the request. Clearing it keeps a later return
+    /// to that list from expanding and scrolling to the same file again.
+    func consumeChangeFocus(_ focus: ChangeFocus) {
+        if changeFocus == focus { changeFocus = nil }
     }
 
     /// Label for an inspector tab, with the count that is the reason to look at
@@ -755,9 +763,19 @@ final class WorkspacesModel {
     private var nextDiffLoad: UInt64 = 0
     private var pendingDiffLoads: [String: UInt64] = [:]
     @ObservationIgnored private var diffPreviewUsers: [String: Int] = [:]
+    /// The refresh revision each held diff was read at.
+    @ObservationIgnored private var diffReadRevisions: [String: UInt64] = [:]
+    /// Released previews still held, oldest first. The Changes list is lazy,
+    /// so a preview is released whenever it scrolls off screen, and scrolling
+    /// back must not ask git again for a file that did not change. The cap
+    /// still bounds what "Expand all" over a large change set keeps.
+    @ObservationIgnored private var parkedPreviews: [(key: String, workspaceID: String, path: String)] = []
+    private static let parkedPreviewLimit = 12
 
     func retainDiffPreview(_ path: String, in workspaceID: String) {
-        diffPreviewUsers[Self.treeKey(workspaceID, path), default: 0] += 1
+        let key = Self.treeKey(workspaceID, path)
+        diffPreviewUsers[key, default: 0] += 1
+        parkedPreviews.removeAll { $0.key == key }
     }
 
     func diffError(for path: String, in workspaceID: String) -> String? {
@@ -771,9 +789,25 @@ final class WorkspacesModel {
         let users = max(0, diffPreviewUsers[key, default: 0] - 1)
         diffPreviewUsers[key] = users == 0 ? nil : users
         guard users == 0, !openFiles(in: workspaceID).contains(path) else { return }
-        pendingDiffLoads[key] = nil
-        diffs[key] = nil
-        diffErrors[key] = nil
+        parkedPreviews.removeAll { $0.key == key }
+        parkedPreviews.append((key, workspaceID, path))
+        while parkedPreviews.count > Self.parkedPreviewLimit {
+            let oldest = parkedPreviews.removeFirst()
+            guard diffPreviewUsers[oldest.key] == nil,
+                  !openFiles(in: oldest.workspaceID).contains(oldest.path) else { continue }
+            pendingDiffLoads[oldest.key] = nil
+            diffs[oldest.key] = nil
+            diffErrors[oldest.key] = nil
+            diffReadRevisions[oldest.key] = nil
+        }
+    }
+
+    /// A preview coming back on screen keeps the diff it already holds when
+    /// the working tree has not been refreshed since it was read.
+    func loadPreviewDiff(_ path: String, in workspaceID: String) async {
+        let key = Self.treeKey(workspaceID, path)
+        if diffs[key] != nil, diffReadRevisions[key] == (diffRefreshRevisions[workspaceID] ?? 0) { return }
+        await loadDiff(path, in: workspaceID)
     }
 
     @discardableResult
@@ -781,6 +815,9 @@ final class WorkspacesModel {
         let key = Self.treeKey(workspaceID, path)
         nextDiffLoad &+= 1
         let request = nextDiffLoad
+        // Taken before the read, so a refresh that lands during it leaves
+        // this diff marked as older than the tree.
+        let revision = diffRefreshRevisions[workspaceID] ?? 0
         pendingDiffLoads[key] = request
         defer {
             if pendingDiffLoads[key] == request { pendingDiffLoads[key] = nil }
@@ -791,6 +828,7 @@ final class WorkspacesModel {
             // A watcher for another file may re-read this one unchanged.
             // Keep its render identity and reading place in that case.
             if diffs[key] != diff { diffs[key] = diff }
+            diffReadRevisions[key] = revision
             diffErrors[key] = nil
             documents[key]?.applyDiff(diff)
             errorMessage = nil

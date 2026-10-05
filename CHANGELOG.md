@@ -51,9 +51,6 @@ at the end.
 - Large single-line JSON changes render in bounded pieces on desktop, with
   access to the complete diff. Inspector previews refresh after file saves,
   release their source when closed, and offer Retry when a diff cannot load.
-- Chat edit totals handle large changes without overflowing. Oversized question
-  blocks stay readable and cannot hide a later question. Pull request badges
-  follow branch and repository changes, and Git controls fit narrow panes.
 - opencode no longer suggests signing in. Its free models work without an
   account.
 - Chat links have visible accent underlines. The Mac asks where to open a

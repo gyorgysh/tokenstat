@@ -1231,18 +1231,6 @@ struct RootView: View {
         }
     }
 
-    /// Toggle the trailing inspector. Same action as ⌥⌘B and the toolbar mark.
-    ///
-    /// The button means docked or not docked, and nothing else. It is not a
-    /// show/hide for whatever happens to be on screen: pressing it while a peek
-    /// is open docks that peek, which is what somebody who has just hovered
-    /// their way to the pane and reached for the button wants. Pressing it
-    /// again undocks, and the pane goes back to appearing under the pointer and
-    /// leaving with it.
-    ///
-    /// Where "docked" puts the pane is the window's business rather than the
-    /// user's: a column where there is room, a float that stays where there is
-    /// not.
     /// Open the Changes tab beside the chat, at one file when a chat's list
     /// of what a turn changed asked for it. Review, commit, push and the
     /// pull request all live there.
@@ -1260,6 +1248,18 @@ struct RootView: View {
         }
     }
 
+    /// Toggle the trailing inspector. Same action as ⌥⌘B and the toolbar mark.
+    ///
+    /// The button means docked or not docked, and nothing else. It is not a
+    /// show/hide for whatever happens to be on screen: pressing it while a peek
+    /// is open docks that peek, which is what somebody who has just hovered
+    /// their way to the pane and reached for the button wants. Pressing it
+    /// again undocks, and the pane goes back to appearing under the pointer and
+    /// leaving with it.
+    ///
+    /// Where "docked" puts the pane is the window's business rather than the
+    /// user's: a column where there is room, a float that stays where there is
+    /// not.
     private func toggleRightSidebar() {
         guard route.hasInspector else { return }
         if showsWorkspaceCompanion {
