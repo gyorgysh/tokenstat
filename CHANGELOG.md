@@ -25,8 +25,10 @@ at the end.
   failure offers the same guided sign-in even when the CLI cannot report its
   login status. On Mac, iPhone and iPad, a Codex sign-in opens its page in
   your browser and copies the one-time code for you.
-- Four chat detail levels on Apple, Windows and Android. Minimal, the default,
-  shows one quiet line per step. Compact folds thinking and tool steps between
+- Four chat detail levels on Apple, Windows and Android. Compact, the default,
+  shows one quiet line per step, with the lines each edit added and removed,
+  Codex edits included. Opening a line shows the step's output or diff
+  without a card around it. Minimal folds thinking and tool steps between
   visible replies, Standard folds thinking and runs of reads, and Detailed
   shows every step with its output open. Every reply, including progress
   updates between tool calls, shows at every level, as do approvals, failures

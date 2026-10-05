@@ -3,7 +3,7 @@
 import SwiftUI
 
 /// A header standing in for folded transcript steps, with a few recent
-/// actions visible while Compact work runs. Tapping anywhere shows the
+/// actions visible while Minimal work runs. Tapping anywhere shows the
 /// steps below it as rows of their own, and tapping again folds them away.
 ///
 /// Shared by the Mac and the phone. The whole line is the control: it is
@@ -25,16 +25,16 @@ struct ChatStepGroupRow: View {
     #endif
 
     var body: some View {
-        if group.minimal {
-            minimalLine
+        if group.plain {
+            plainLine
         } else {
             standardRow
         }
     }
 
-    /// Minimal: the verb, what it acted on and the lines it changed, in one
+    /// Compact: the verb, what it acted on and the lines it changed, in one
     /// quiet line. The spinner stands in front while the step runs.
-    private var minimalLine: some View {
+    private var plainLine: some View {
         Button(action: toggle) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 if group.running, animatesRunning {
@@ -47,7 +47,7 @@ struct ChatStepGroupRow: View {
                     .foregroundStyle(group.running ? Theme.accent : .secondary)
                     .lineLimit(1)
                     .layoutPriority(1)
-                if let meta = minimalSubject, !meta.isEmpty {
+                if let meta = plainSubject, !meta.isEmpty {
                     Text(meta)
                         .font(Self.titleFont.weight(.regular))
                         .foregroundStyle(.tertiary)
@@ -81,7 +81,7 @@ struct ChatStepGroupRow: View {
 
     /// The file or command after the verb, or the counts for a run of
     /// several reads and searches.
-    private var minimalSubject: String? {
+    private var plainSubject: String? {
         switch group.style {
         case .step, .explored:
             if group.memberIDs.count == 1, let subject = group.subject {

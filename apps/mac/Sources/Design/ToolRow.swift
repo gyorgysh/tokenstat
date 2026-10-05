@@ -30,7 +30,8 @@ struct ToolRow: View {
     /// The chat's Detailed level: open every finished output, not only a
     /// small diff. A hand toggle still wins.
     var expandsOutput: Bool = false
-    /// A single activity line when inspecting steps in Compact chat mode.
+    /// A single activity line, for steps opened under a Minimal or
+    /// Compact chat line.
     var compact: Bool = false
     @State private var showSnippet = false
     /// Set once the person toggles the snippet by hand. Auto-expand must
@@ -93,7 +94,7 @@ struct ToolRow: View {
     private var preview: String? {
         guard !hasDiff else { return nil }
         for line in snippet {
-            let text = displaySnippet(line).trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = Self.displaySnippet(line).trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty, text != "…" { return String(text.prefix(160)) }
         }
         return nil
@@ -176,9 +177,9 @@ struct ToolRow: View {
             if showSnippet && !snippet.isEmpty && !running {
                 VStack(alignment: .leading, spacing: 1) {
                     ForEach(Array(snippet.enumerated()), id: \.offset) { _, line in
-                        Text(displaySnippet(line))
+                        Text(Self.displaySnippet(line))
                             .font(Theme.mono(11))
-                            .foregroundStyle(snippetColor(line))
+                            .foregroundStyle(Self.snippetColor(line))
                     }
                 }
                 .textSelection(.enabled)
@@ -266,13 +267,14 @@ struct ToolRow: View {
     private var showLabel: String { hasDiff ? L10n.text("apple.toolrow.show_edit.8da806e1") : snippetIsOutput ? L10n.text("apple.toolrow.show_output.9dbbb249") : L10n.text("apple.toolrow.show_edit.8da806e1") }
     private var hideLabel: String { hasDiff ? L10n.text("apple.toolrow.hide_edit.e9dbd4f5") : snippetIsOutput ? L10n.text("apple.toolrow.hide_output.64876c47") : L10n.text("apple.toolrow.hide_edit.e9dbd4f5") }
 
-    private func displaySnippet(_ line: String) -> String {
+    /// A snippet line as drawn: output loses its "| " marker.
+    static func displaySnippet(_ line: String) -> String {
         if line.hasPrefix("| ") { return String(line.dropFirst(2)) }
         if line == "| …" { return "…" }
         return line
     }
 
-    private func snippetColor(_ line: String) -> Color {
+    static func snippetColor(_ line: String) -> Color {
         if Self.isDiffLine(line, added: true) { return Theme.diffAdded }
         if Self.isDiffLine(line, added: false) { return Theme.diffRemoved }
         return .secondary
@@ -284,6 +286,9 @@ struct ToolRow: View {
 /// A path of varying width used to sit them after the name, so a short
 /// target left them mid-row and a long one shoved them against the
 /// button. `fixedSize` keeps the pair off the path's leftover space.
+///
+/// A side with nothing in it is left out, so a new file reads "+22" rather
+/// than "+22 −0".
 struct DiffStat: View {
     var added: Int
     var removed: Int
@@ -291,10 +296,14 @@ struct DiffStat: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Text("+\(added)")
-                .foregroundStyle(Theme.diffAdded)
-            Text("−\(removed)")
-                .foregroundStyle(Theme.diffRemoved)
+            if added > 0 || removed == 0 {
+                Text("+\(added)")
+                    .foregroundStyle(Theme.diffAdded)
+            }
+            if removed > 0 {
+                Text("−\(removed)")
+                    .foregroundStyle(Theme.diffRemoved)
+            }
         }
         .font(font)
         .monospacedDigit()

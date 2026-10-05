@@ -9,12 +9,15 @@ import Foundation
 /// person has to see: what they asked, every reply, an approval the agent is
 /// waiting on, a failure, a handoff and an attachment. The levels differ only
 /// in how the steps in between are drawn.
+///
+/// Stored under `ChatDetailPreference.key`. Minimal and Compact swapped
+/// names once, and a choice stored before that is moved across there.
 enum ChatDetail: String, CaseIterable, Sendable {
-    /// One quiet line per step: "Edited vault.rs +6 −2", "Ran cargo test",
-    /// "Explored 4 files, 2 searches". No cards and no output until a line
-    /// is opened. What most editors show.
-    case minimal
     /// One line per stretch of work: "Worked 3m · 14 steps · 2 files".
+    case minimal
+    /// One quiet line per step: "Edited vault.rs +6 −2", "Ran cargo test",
+    /// "Explored 4 files, 2 searches". No cards, and an opened line shows
+    /// what the step produced without a card around it either.
     case compact
     /// Thinking and runs of reads and searches fold to one line each.
     /// Commands and edits keep their own rows.
@@ -33,13 +36,13 @@ struct ChatStepGroup: Equatable, Sendable {
     }
 
     enum Style: Equatable, Sendable {
-        /// Compact: a stretch of tool activity between visible replies.
+        /// Minimal: a stretch of tool activity between visible replies.
         case work
         /// Standard: consecutive reads, searches and page fetches.
         case explored
-        /// A block of reasoning, in Compact or Standard.
+        /// A block of reasoning, at any level that folds.
         case thought
-        /// Minimal: one command or edit, as a single line.
+        /// Compact: one command or edit, as a single line.
         case step
     }
 
@@ -68,7 +71,7 @@ struct ChatStepGroup: Equatable, Sendable {
     /// A few recent actions, with running calls kept ahead of finished ones
     /// when choosing what fits. Output stays in the expandable member rows.
     var recentActivity: [Activity] = []
-    /// Keep Compact informative while work runs, and return to one line
+    /// Keep Minimal informative while work runs, and return to one line
     /// afterwards. Opening the group already shows these calls in full.
     var activityPreview: [Activity] {
         style == .work && running && !open ? recentActivity : []
@@ -77,13 +80,13 @@ struct ChatStepGroup: Equatable, Sendable {
     /// recorded them.
     var startedAtMs: Int64?
     var endedAtMs: Int64?
-    /// Reported spend for the turn this group belongs to, in Compact, where
+    /// Reported spend for the turn this group belongs to, in Minimal, where
     /// the usage row itself is not drawn.
     var cost: Double?
     /// The first line of a folded thought.
     var preview: String?
-    /// Drawn as Minimal draws it: a plain line with no icon or chevron.
-    var minimal = false
+    /// Drawn as Compact draws it: a plain line with no icon or chevron.
+    var plain = false
     /// The one step a single-member group stands for: its tool name, and
     /// the file or command it acted on.
     var verb: String?
@@ -119,10 +122,10 @@ enum ChatTranscriptFold {
             folded = items
         case .standard:
             folded = standard(items, running: running, isOpen: isOpen)
-        case .compact:
-            folded = compact(items, running: running, isOpen: isOpen)
         case .minimal:
-            folded = minimal(items, running: running, isOpen: isOpen)
+            folded = minimalFold(items, running: running, isOpen: isOpen)
+        case .compact:
+            folded = compactFold(items, running: running, isOpen: isOpen)
         }
         return withTurnChanges(folded, raw: items, running: running)
     }
@@ -242,12 +245,12 @@ enum ChatTranscriptFold {
         return out
     }
 
-    // MARK: Minimal
+    // MARK: Compact
 
     /// Every step is one line. Runs of reads and searches still read as
     /// one, even a run of one, because "Explored ChatModel.swift" says what
     /// a lone Read row says in less room.
-    private static func minimal(
+    private static func compactFold(
         _ items: [ChatDisplayItem],
         running: Bool,
         isOpen: (String) -> Bool
@@ -258,7 +261,7 @@ enum ChatTranscriptFold {
 
         func line(_ style: ChatStepGroup.Style, _ members: [ChatDisplayItem], running: Bool) {
             var group = make(style, members, running: running)
-            group.minimal = true
+            group.plain = true
             emit(group, members: members, into: &out, isOpen: isOpen)
         }
 
@@ -279,7 +282,7 @@ enum ChatTranscriptFold {
                 } else {
                     var group = make(.thought, [item], running: false)
                     group.preview = preview(of: text)
-                    group.minimal = true
+                    group.plain = true
                     emit(group, members: [item], into: &out, isOpen: isOpen)
                 }
             case let .tool(state) where !state.failed:
@@ -297,9 +300,9 @@ enum ChatTranscriptFold {
         return out
     }
 
-    // MARK: Compact
+    // MARK: Minimal
 
-    private static func compact(
+    private static func minimalFold(
         _ items: [ChatDisplayItem],
         running: Bool,
         isOpen: (String) -> Bool
@@ -311,12 +314,12 @@ enum ChatTranscriptFold {
         if starts.first != 0 { starts.insert(0, at: 0) }
         for (n, start) in starts.enumerated() where start < items.count {
             let end = n + 1 < starts.count ? starts[n + 1] : items.count
-            compactTurn(items[start..<end], live: running && end == items.count, isOpen: isOpen, into: &out)
+            minimalTurn(items[start..<end], live: running && end == items.count, isOpen: isOpen, into: &out)
         }
         return out
     }
 
-    private static func compactTurn(
+    private static func minimalTurn(
         _ turn: ArraySlice<ChatDisplayItem>,
         live: Bool,
         isOpen: (String) -> Bool,
@@ -384,6 +387,7 @@ enum ChatTranscriptFold {
         for member in members {
             var row = member
             row.groupID = id
+            if group.plain { row.plainStep = members.count == 1 ? .detail : .line }
             out.append(row)
         }
     }

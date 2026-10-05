@@ -9,10 +9,10 @@ import android.content.Context
 /// Every level keeps what a person has to see: the question, every reply, an
 /// approval the agent is waiting on, a failure, a handoff and an attachment.
 enum class ChatDetail(val key: String) {
-    /// One quiet line per step: "Edited vault.rs +6 −2", "Ran cargo test".
-    /// What most editors show.
-    Minimal("minimal"),
     /// One line per stretch of work: "Worked 3m · 14 steps · 2 files".
+    Minimal("minimal"),
+    /// One quiet line per step: "Edited vault.rs +6 −2", "Ran cargo test".
+    /// An opened line shows what the step produced, without a card.
     Compact("compact"),
     /// Thinking and runs of reads and searches fold to one line each.
     Standard("standard"),
@@ -46,12 +46,12 @@ data class ChatStepGroup(
     val liveTarget: String? = null,
     val startedAtMs: Long? = null,
     val endedAtMs: Long? = null,
-    /// The turn's reported spend, in Compact, where its usage row is not drawn.
+    /// The turn's reported spend, in Minimal, where its usage row is not drawn.
     val cost: Double? = null,
     /// The first line of a folded thought.
     val preview: String? = null,
-    /// Drawn as Minimal draws it: a plain line, no icon or chevron.
-    val minimal: Boolean = false,
+    /// Drawn as Compact draws it: a plain line, no icon or chevron.
+    val plain: Boolean = false,
     /// The one step a single-member group stands for: its tool name and
     /// the file or command it acted on.
     val verb: String? = null,
@@ -60,17 +60,45 @@ data class ChatStepGroup(
     enum class Style { Work, Explored, Thought, Step }
 }
 
+/// How a step under an open Compact line is drawn. Port of
+/// `ChatDisplayItem.PlainStep`.
+enum class PlainStep {
+    /// A lone step: only what it produced, no card and no second header.
+    Detail,
+    /// One of a run: a plain line of its own, so each names its file.
+    Line,
+}
+
 /// The detail level, kept on this device the way the Apple client keeps it
-/// in UserDefaults. Every device starts at Minimal until somebody picks.
+/// in UserDefaults. Every device starts at Compact until somebody picks.
 class ChatDetailStore(context: Context) {
     private val prefs = context.getSharedPreferences("tokenstat.chat.v1", Context.MODE_PRIVATE)
 
-    fun level(): ChatDetail =
-        ChatDetail.fromKey(prefs.getString("detail", null)) ?: ChatDetail.Minimal
+    fun level(): ChatDetail {
+        ChatDetail.fromKey(prefs.getString(KEY, null))?.let { return it }
+        val moved = prefs.getString(PREVIOUS_KEY, null)?.let(::renamedDetail) ?: return ChatDetail.Compact
+        setLevel(moved)
+        return moved
+    }
 
     fun setLevel(level: ChatDetail) {
-        prefs.edit().putString("detail", level.key).apply()
+        prefs.edit().putString(KEY, level.key).apply()
     }
+
+    private companion object {
+        const val KEY = "detailLevel"
+        /// Where the level lived while "minimal" meant a line per step and
+        /// "compact" a line per stretch of work. Those two names swapped.
+        const val PREVIOUS_KEY = "detail"
+    }
+}
+
+/// A choice stored under the previous key, by what it did rather than what
+/// it was called, so nobody's transcript changes under them.
+fun renamedDetail(key: String): ChatDetail? = when (key) {
+    "minimal" -> ChatDetail.Compact
+    "compact" -> ChatDetail.Minimal
+    else -> ChatDetail.fromKey(key)
 }
 
 private val readVerbs = setOf("Read")
@@ -96,8 +124,8 @@ fun foldTranscript(
     val folded = when (detail) {
         ChatDetail.Detailed -> items
         ChatDetail.Standard -> foldStandard(items, running, isOpen)
-        ChatDetail.Compact -> foldCompact(items, running, isOpen)
         ChatDetail.Minimal -> foldMinimal(items, running, isOpen)
+        ChatDetail.Compact -> foldCompact(items, running, isOpen)
     }
     return withTurnChanges(folded, items, running)
 }
@@ -153,8 +181,8 @@ fun withTurnChanges(
 }
 
 /// Every step is one line. Runs of reads and searches still read as one,
-/// even a run of one. Port of `ChatTranscriptFold.minimal`.
-private fun foldMinimal(
+/// even a run of one. Port of `ChatTranscriptFold.compactFold`.
+private fun foldCompact(
     items: List<ChatDisplayItem>,
     running: Boolean,
     isOpen: (String) -> Boolean,
@@ -163,7 +191,7 @@ private fun foldMinimal(
     val run = ArrayList<ChatDisplayItem>()
 
     fun line(style: ChatStepGroup.Style, members: List<ChatDisplayItem>, live: Boolean) {
-        emitGroup(makeGroup(style, members, live).copy(minimal = true), members, out, isOpen)
+        emitGroup(makeGroup(style, members, live).copy(plain = true), members, out, isOpen)
     }
 
     fun flushRun(trailing: Boolean) {
@@ -180,7 +208,7 @@ private fun foldMinimal(
                     out.add(item)
                 } else {
                     val group = makeGroup(ChatStepGroup.Style.Thought, listOf(item), false)
-                        .copy(preview = thoughtPreview(item.text), minimal = true)
+                        .copy(preview = thoughtPreview(item.text), plain = true)
                     emitGroup(group, listOf(item), out, isOpen)
                 }
             }
@@ -250,7 +278,7 @@ private fun foldStandard(
     return out
 }
 
-private fun foldCompact(
+private fun foldMinimal(
     items: List<ChatDisplayItem>,
     running: Boolean,
     isOpen: (String) -> Boolean,
@@ -263,12 +291,12 @@ private fun foldCompact(
     starts.forEachIndexed { n, start ->
         if (start >= items.size) return@forEachIndexed
         val end = if (n + 1 < starts.size) starts[n + 1] else items.size
-        foldCompactTurn(items.subList(start, end), running && end == items.size, isOpen, out)
+        foldMinimalTurn(items.subList(start, end), running && end == items.size, isOpen, out)
     }
     return out
 }
 
-private fun foldCompactTurn(
+private fun foldMinimalTurn(
     turn: List<ChatDisplayItem>,
     live: Boolean,
     isOpen: (String) -> Boolean,
@@ -332,7 +360,15 @@ private fun emitGroup(
     val id = stepGroupId(members.first().id)
     val open = isOpen(id)
     out.add(ChatDisplayItem.Group(id, group.copy(open = open)))
-    if (open) members.forEach { out.add(ChatDisplayItem.GroupStep(it.id, id, it)) }
+    if (!open) return
+    // A Compact line already names its step, so a lone step drops its card
+    // and shows what it produced. A run keeps a plain line per step.
+    val plain = when {
+        !group.plain -> null
+        members.size == 1 -> PlainStep.Detail
+        else -> PlainStep.Line
+    }
+    members.forEach { out.add(ChatDisplayItem.GroupStep(it.id, id, it, plain)) }
 }
 
 private fun makeGroup(style: ChatStepGroup.Style, members: List<ChatDisplayItem>, running: Boolean): ChatStepGroup {

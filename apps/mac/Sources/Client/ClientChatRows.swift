@@ -127,6 +127,10 @@ struct ClientChatEventRow: View {
             .contextMenu {
                 Button(L10n.text("apple.clientchatrows.copy_reasoning.5d2976d8")) { ChatClipboard.copy(text) }
             }
+        case let .tool(state) where item.plainStep == .detail:
+            ChatStepDetail(step: .tool(state))
+        case let .edit(state) where item.plainStep == .detail:
+            ChatStepDetail(step: .edit(state))
         case let .tool(state):
             ToolRow(
                 verb: state.verb,
@@ -137,10 +141,10 @@ struct ClientChatEventRow: View {
                 failed: state.failed,
                 animatesRunning: animatesRunning,
                 expandsOutput: expandsOutput,
-                compact: compactTools
+                compact: compactTools || item.plainStep == .line
             )
         case let .edit(state):
-            ChatFileEditRow(state: state, animatesRunning: animatesRunning, expandsOutput: expandsOutput, compact: compactTools)
+            ChatFileEditRow(state: state, animatesRunning: animatesRunning, expandsOutput: expandsOutput, compact: compactTools || item.plainStep == .line)
         case let .group(group):
             ChatStepGroupRow(group: group, animatesRunning: animatesRunning) { toggleGroup(item.id) }
         case let .question(question):

@@ -294,6 +294,8 @@
   "android.chatdetail.compact": "Compact",
   "android.chatdetail.standard": "Standard",
   "android.chatdetail.detailed": "Detailed",
+  "android.chatstepdetail.no_output": "No output.",
+  "android.chatstepdetail.no_diff": "No changes to show.",
   "android.chatdetail.show_steps": "Show steps",
   "android.chatdetail.hide_steps": "Hide steps",
   "android.chatdetail.expand_steps": "Expand all steps",

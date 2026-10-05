@@ -10,19 +10,40 @@ import SwiftUI
 @MainActor @Observable
 final class ChatDetailPreference {
     static let shared = ChatDetailPreference()
-    static let key = "chat.detail"
+    static let key = "chat.detailLevel"
+    /// Where the level lived while "minimal" meant a line per step and
+    /// "compact" a line per stretch of work. Those two names swapped.
+    static let previousKey = "chat.detail"
 
     var level: ChatDetail {
         didSet { UserDefaults.standard.set(level.rawValue, forKey: Self.key) }
     }
 
     private init() {
-        level = UserDefaults.standard.string(forKey: Self.key).flatMap(ChatDetail.init(rawValue:)) ?? Self.defaultLevel
+        let defaults = UserDefaults.standard
+        if let stored = defaults.string(forKey: Self.key).flatMap(ChatDetail.init(rawValue:)) {
+            level = stored
+        } else if let previous = defaults.string(forKey: Self.previousKey).flatMap(Self.renamed) {
+            level = previous
+            defaults.set(previous.rawValue, forKey: Self.key)
+        } else {
+            level = Self.defaultLevel
+        }
     }
 
-    /// Every device starts at Minimal: each step one quiet line, the way
+    /// A choice stored under `previousKey`, by what it did rather than what
+    /// it was called, so nobody's transcript changes under them.
+    static func renamed(_ raw: String) -> ChatDetail? {
+        switch raw {
+        case "minimal": .compact
+        case "compact": .minimal
+        default: ChatDetail(rawValue: raw)
+        }
+    }
+
+    /// Every device starts at Compact: each step one quiet line, the way
     /// most editors show an agent's work. A choice somebody made is kept.
-    static let defaultLevel: ChatDetail = .minimal
+    static let defaultLevel: ChatDetail = .compact
 
     static func label(_ level: ChatDetail) -> String {
         switch level {

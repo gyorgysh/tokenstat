@@ -3661,12 +3661,25 @@ impl Store {
             (chat.budget_seconds > 0)
                 .then(|| Instant::now() + Duration::from_secs(chat.budget_seconds))
         });
+        // Codex names the files it edits but not the lines, so they are
+        // measured here. See `chat_edit_measure`.
+        let mut measure = (backend == "codex")
+            .then(|| self.get(id).ok())
+            .flatten()
+            .and_then(|chat| crate::workspaces::folder(&chat.workspace_id).ok())
+            .map(|workspace| {
+                crate::chat_edit_measure::EditMeasure::start(Path::new(&workspace.path))
+            });
+        let mut measured = |events: Vec<Event>| match measure.as_mut() {
+            Some(measure) => measure.observe(events),
+            None => events,
+        };
         loop {
             if let Ok(chunk) = manager.read_for_stream(pty, &reader, offset) {
                 offset = chunk.next_offset;
                 if !chunk.bytes.is_empty() {
                     let _ = append_raw(raw_path, &chunk.bytes);
-                    let events = parser.push_events(&chunk.bytes);
+                    let events = measured(parser.push_events(&chunk.bytes));
                     questions.shift(collect_agent_text(&events, &mut assistant_text));
                     self.record_events(id, backend, events);
                     // Mid-turn, so the card is in front of the person while
@@ -3687,11 +3700,11 @@ impl Store {
             && !chunk.bytes.is_empty()
         {
             let _ = append_raw(raw_path, &chunk.bytes);
-            let events = parser.push_events(&chunk.bytes);
+            let events = measured(parser.push_events(&chunk.bytes));
             questions.shift(collect_agent_text(&events, &mut assistant_text));
             self.record_events(id, backend, events);
         }
-        let events = parser.finish_events();
+        let events = measured(parser.finish_events());
         questions.shift(collect_agent_text(&events, &mut assistant_text));
         self.record_events(id, backend, events);
         self.record_questions(id, backend, questions.finish(&assistant_text));

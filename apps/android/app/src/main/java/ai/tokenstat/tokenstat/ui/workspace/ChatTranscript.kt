@@ -60,7 +60,13 @@ sealed interface ChatDisplayItem {
 
     /// One of an open group's steps, drawn below its header. Keeps the
     /// step's own id, so the list keys it the same as when it is unfolded.
-    data class GroupStep(override val id: String, val groupId: String, val item: ChatDisplayItem) : ChatDisplayItem
+    data class GroupStep(
+        override val id: String,
+        val groupId: String,
+        val item: ChatDisplayItem,
+        /// How a step under an open Compact line is drawn. Null elsewhere.
+        val plain: PlainStep? = null,
+    ) : ChatDisplayItem
 
     /// The files a finished turn edited. Added by the fold after the turn's
     /// last row, at every detail level. Port of `ChatTurnChanges`.

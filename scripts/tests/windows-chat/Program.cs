@@ -244,15 +244,15 @@ var turns = new List<ChatPage.DisplayItem>
     Ask("u1"), Think("k1"), Say("a0"), Tool("t1", "Bash"), EditRow("e1", "a.cs"), Say("a1"),
     Row("x1", ChatPage.ItemKind.Usage, cost: 0.25), Ask("u2"), Tool("t2", "Read"), Say("a2"),
 };
-var compact = FoldRows(turns, ChatDetail.Compact);
-Check(Ids(compact) == "u1,g:k1,a0,g:t1,a1,changes:e1,u2,g:t2,a2", "Compact keeps replies between work groups: " + Ids(compact));
-Check(GroupOf(compact, "g:k1")!.Style == ChatStepGroupStyle.Thought, "reasoning alone is a thought line");
-var work = GroupOf(compact, "g:t1")!;
+var stretches = FoldRows(turns, ChatDetail.Minimal);
+Check(Ids(stretches) == "u1,g:k1,a0,g:t1,a1,changes:e1,u2,g:t2,a2", "Minimal keeps replies between work groups: " + Ids(stretches));
+Check(GroupOf(stretches, "g:k1")!.Style == ChatStepGroupStyle.Thought, "reasoning alone is a thought line");
+var work = GroupOf(stretches, "g:t1")!;
 Check(work.Style == ChatStepGroupStyle.Work && string.Join(",", work.MemberIds) == "t1,e1", "only tool activity folds with the work");
-Check(work.Steps == 2 && work.Cost == 0.25 && GroupOf(compact, "g:t2")!.Cost is null, "steps and spend ride on the work line");
+Check(work.Steps == 2 && work.Cost == 0.25 && GroupOf(stretches, "g:t2")!.Cost is null, "steps and spend ride on the work line");
 foreach (var running in new[] { false, true })
 {
-    var replies = FoldRows([Ask("u1"), Say("a0"), Tool("t1", "Read"), Say("a1"), Tool("t2", "Bash", running: true), Say("a2")], ChatDetail.Compact, running: running);
+    var replies = FoldRows([Ask("u1"), Say("a0"), Tool("t1", "Read"), Say("a1"), Tool("t2", "Bash", running: true), Say("a2")], ChatDetail.Minimal, running: running);
     Check(Ids(replies) == "u1,a0,g:t1,a1,g:t2,a2", "all replies remain in order");
     Check(new[] { "a0", "a1", "a2" }.All(id => ChatDetailFold.Owner(id, replies) is null), "replies are never folded members");
 }
@@ -271,16 +271,16 @@ foreach (var level in Enum.GetValues<ChatDetail>())
         Check(shown.Any(row => row.Id == must) && ChatDetailFold.Owner(must, shown) is null, $"{level} never folds {must}");
     }
 }
-Check(Ids(FoldRows(mustSee, ChatDetail.Compact)) == "u1,g:t1,p1,g:t2,t3,e1,f1,x1", "an approval splits the work where it happened");
-Check(Ids(FoldRows([Ask("u1"), Say("a1"), Row("x1", ChatPage.ItemKind.Usage, cost: 0.5)], ChatDetail.Compact)) == "u1,a1,x1",
+Check(Ids(FoldRows(mustSee, ChatDetail.Minimal)) == "u1,g:t1,p1,g:t2,t3,e1,f1,x1", "an approval splits the work where it happened");
+Check(Ids(FoldRows([Ask("u1"), Say("a1"), Row("x1", ChatPage.ItemKind.Usage, cost: 0.5)], ChatDetail.Minimal)) == "u1,a1,x1",
     "nothing to fold keeps the usage row");
-Check(Ids(FoldRows([Ask("u1"), Tool("t1", "Read"), Say("a1"), Row("x1", ChatPage.ItemKind.Usage, cost: 0)], ChatDetail.Compact)) == "u1,g:t1,a1,x1",
+Check(Ids(FoldRows([Ask("u1"), Tool("t1", "Read"), Say("a1"), Row("x1", ChatPage.ItemKind.Usage, cost: 0)], ChatDetail.Minimal)) == "u1,g:t1,a1,x1",
     "nothing spent keeps the token counts");
 
-var live = FoldRows([Ask("u1"), Think("k1"), Tool("t1", "Read", running: true)], ChatDetail.Compact, running: true);
+var live = FoldRows([Ask("u1"), Think("k1"), Tool("t1", "Read", running: true)], ChatDetail.Minimal, running: true);
 var liveGroup = GroupOf(live, "g:k1")!;
 Check(liveGroup.Running && liveGroup.LiveVerb == "Read" && liveGroup.LiveTarget == "t-t1", "a live work line names its step");
-var settled = FoldRows([Ask("u1"), Think("k1"), Tool("t1", "Read"), Say("a1")], ChatDetail.Compact, running: true);
+var settled = FoldRows([Ask("u1"), Think("k1"), Tool("t1", "Read"), Say("a1")], ChatDetail.Minimal, running: true);
 Check(!GroupOf(settled, "g:k1")!.Running, "work before the answer is not running once its steps end");
 
 var standard = FoldRows(
@@ -296,53 +296,62 @@ Check(Ids(FoldRows([Ask("u1"), Tool("t1", "Read"), Tool("t2", "Bash"), Tool("t3"
     "lone reads stay rows, other rows break runs");
 Check(Ids(FoldRows([Ask("u1"), Think("k1")], ChatDetail.Standard, running: true)) == "u1,k1", "reasoning still arriving stays open");
 
-var opened = FoldRows([Ask("u1"), Think("k1"), Tool("t1", "Bash"), Say("a1")], ChatDetail.Compact, isOpen: id => id == "g:k1");
+var opened = FoldRows([Ask("u1"), Think("k1"), Tool("t1", "Bash"), Say("a1")], ChatDetail.Minimal, isOpen: id => id == "g:k1");
 Check(Ids(opened) == "u1,g:k1,k1,t1,a1" && GroupOf(opened, "g:k1")!.Open, "an open group lists its steps after it");
 Check(opened[2].GroupId == "g:k1" && opened[3].GroupId == "g:k1" && opened[0].GroupId == "" && opened[4].GroupId == "",
     "steps name their group, top-level rows none");
-Check(ChatDetailFold.Owner("t1", opened) is null && ChatDetailFold.Owner("t1", FoldRows([Ask("u1"), Think("k1"), Tool("t1", "Bash"), Say("a1")], ChatDetail.Compact)) == "g:k1",
+Check(ChatDetailFold.Owner("t1", opened) is null && ChatDetailFold.Owner("t1", FoldRows([Ask("u1"), Think("k1"), Tool("t1", "Bash"), Say("a1")], ChatDetail.Minimal)) == "g:k1",
     "a closed group owns its steps, an open one does not");
 
 var growing = new List<ChatPage.DisplayItem> { Ask("u1"), Think("k1"), Tool("t1", "Bash", running: true) };
-var before = Ids(FoldRows(growing, ChatDetail.Compact, running: true));
+var before = Ids(FoldRows(growing, ChatDetail.Minimal, running: true));
 growing.Add(Tool("t2", "Bash", running: true));
-Check(before == Ids(FoldRows(growing, ChatDetail.Compact, running: true)) && before == "u1,g:k1", "a growing turn keeps its line");
+Check(before == Ids(FoldRows(growing, ChatDetail.Minimal, running: true)) && before == "u1,g:k1", "a growing turn keeps its line");
 
 var counted = GroupOf(FoldRows([Ask("u1"), Tool("t1", "Bash", started: 1_000, ended: 4_000), EditRow("e1", "a.cs", 3, 1),
-    EditRow("e2", "a.cs", 2), EditRow("e3", "b.cs", 1, 4), Tool("t2", "Bash", started: 5_000, ended: 9_000), Say("a1")], ChatDetail.Compact), "g:t1")!;
+    EditRow("e2", "a.cs", 2), EditRow("e3", "b.cs", 1, 4), Tool("t2", "Bash", started: 5_000, ended: 9_000), Say("a1")], ChatDetail.Minimal), "g:t1")!;
 Check(counted.Steps == 5 && counted.Files == 2 && counted.Added == 6 && counted.Removed == 5
     && counted.StartedAt == 1_000 && counted.EndedAt == 9_000, "counts match their members");
 Check(ChatDetailFold.Preview("\n\n## **Plan** it\nmore") == "Plan** it" && ChatDetailFold.Preview("\n  \n") is null,
     "previews drop markdown marks");
-var minimal = FoldRows([Ask("u1"), Think("k1"), Tool("t1", "Read"), Tool("t2", "Grep"), Tool("t3", "Bash"),
-    EditRow("e1", "src/a.cs", 6, 2), Tool("t4", "Read"), Say("a1"), Tool("t5", "Bash", failed: true)], ChatDetail.Minimal);
-Check(Ids(minimal) == "u1,g:k1,g:t1,g:t3,g:e1,g:t4,a1,t5,changes:e1", "Minimal is a line per step: " + Ids(minimal));
-Check(new[] { "g:k1", "g:t1", "g:t3", "g:e1", "g:t4" }.All(id => GroupOf(minimal, id)!.Minimal), "every Minimal line is plain");
-Check(GroupOf(minimal, "g:t3")! is { Style: ChatStepGroupStyle.Step, Verb: "Bash" }, "a command is its own line");
-Check(GroupOf(minimal, "g:e1")! is { Style: ChatStepGroupStyle.Step, Verb: "Edit", Subject: "src/a.cs", Added: 6, Removed: 2 },
+var perStep = FoldRows([Ask("u1"), Think("k1"), Tool("t1", "Read"), Tool("t2", "Grep"), Tool("t3", "Bash"),
+    EditRow("e1", "src/a.cs", 6, 2), Tool("t4", "Read"), Say("a1"), Tool("t5", "Bash", failed: true)], ChatDetail.Compact);
+Check(Ids(perStep) == "u1,g:k1,g:t1,g:t3,g:e1,g:t4,a1,t5,changes:e1", "Compact is a line per step: " + Ids(perStep));
+Check(new[] { "g:k1", "g:t1", "g:t3", "g:e1", "g:t4" }.All(id => GroupOf(perStep, id)!.Plain), "every Compact line is plain");
+Check(GroupOf(perStep, "g:t3")! is { Style: ChatStepGroupStyle.Step, Verb: "Bash" }, "a command is its own line");
+Check(GroupOf(perStep, "g:e1")! is { Style: ChatStepGroupStyle.Step, Verb: "Edit", Subject: "src/a.cs", Added: 6, Removed: 2 },
     "an edit names its file and lines");
-Check(GroupOf(minimal, "g:t4")!.Style == ChatStepGroupStyle.Explored, "a lone read folds too");
+Check(GroupOf(perStep, "g:t4")!.Style == ChatStepGroupStyle.Explored, "a lone read folds too");
 Check(ChatDetailFold.ShortSubject("Edit", "src/a.cs") == "a.cs" && ChatDetailFold.ShortSubject("Bash", "cargo test\nmore") == "cargo test",
     "a path becomes its name and a command its first line");
+var openStep = FoldRows([Ask("u1"), EditRow("e1", "a.cs", 1), Say("a1")], ChatDetail.Compact, isOpen: id => id == "g:e1");
+Check(openStep.Single(row => row.GroupId == "g:e1").Plain == PlainStep.Detail, "a lone step shows what it produced, without a card");
+var openRun = FoldRows([Ask("u1"), Tool("t1", "Read"), Tool("t2", "Grep"), Say("a1")], ChatDetail.Compact, isOpen: id => id == "g:t1");
+Check(openRun.Where(row => row.GroupId == "g:t1").All(row => row.Plain == PlainStep.Line), "a run keeps a line per step");
+Check(FoldRows([Ask("u1"), Tool("t1", "Read"), Say("a1")], ChatDetail.Minimal, isOpen: _ => true).All(row => row.Plain == PlainStep.None),
+    "other levels keep their rows as they were");
+Check(ChatDetailPreference.Renamed("minimal") == ChatDetail.Compact && ChatDetailPreference.Renamed("compact\n") == ChatDetail.Minimal
+    && ChatDetailPreference.Renamed("detailed") == ChatDetail.Detailed && ChatDetailPreference.Renamed("x") is null,
+    "a stored choice keeps what it did across the rename");
 
 var changed = new List<ChatPage.DisplayItem>
 {
     Ask("u1"), EditRow("e1", "/w/a.cs", 3, 1), EditRow("e2", "/w/a.cs", 2), EditRow("e3", "/w/b.cs", 1, 4),
     EditRow("ef", "/w/c.cs", failed: true), Say("a1"), Ask("u2"), EditRow("e4", "/w/c.cs", 1), Say("a2"),
 };
-var liveChanges = FoldRows(changed, ChatDetail.Compact, running: true);
+var liveChanges = FoldRows(changed, ChatDetail.Minimal, running: true);
 Check(string.Join(",", liveChanges.Where(row => row.Kind == ChatPage.ItemKind.Changes).Select(row => row.Id)) == "changes:e1",
     "the live turn has no card yet");
 var firstTurn = liveChanges.First(row => row.Id == "changes:e1").Changes!;
 Check(string.Join(",", firstTurn.Select(file => file.Path)) == "/w/a.cs,/w/b.cs" && firstTurn[0].Added == 5 && firstTurn[0].Removed == 1,
     "one row per file, summed, failures left out");
-Check(FoldRows(changed, ChatDetail.Compact).Last().Changes is { Count: 1 }, "a finished turn gets its card");
+Check(FoldRows(changed, ChatDetail.Minimal).Last().Changes is { Count: 1 }, "a finished turn gets its card");
 Console.WriteLine("Windows chat detail: minimal, compact, standard and detailed folding, turn changes, pinned rows, open groups and counts pass.");
 
 var loadedWork = new List<ChatPage.DisplayItem> { Ask("long-turn") };
 loadedWork.AddRange(Enumerable.Range(0, 300).Select(index => Tool($"step-{index}", "Read")));
 loadedWork.Add(Say("long-reply"));
-foreach (var level in new[] { ChatDetail.Compact, ChatDetail.Standard })
+foreach (var level in new[] { ChatDetail.Minimal, ChatDetail.Standard })
 {
     var drawn = FoldRows(loadedWork, level);
     Check(ChatPage.SliceStart(drawn.Count, 0) == 0 && ChatPage.SliceEnd(drawn.Count, 0) == drawn.Count,
@@ -385,7 +394,7 @@ var unfinishedQuestion = questionFence + "\n{\"question\":\"Wh";
 Check(ChatQuestionText.Strip(unfinishedQuestion, streaming: false) == unfinishedQuestion, "an interrupted reply stays readable");
 var askedQuestion = new ChatQuestionItem("q1", "Q", ["A"], false, "A", false);
 Check(askedQuestion.Answer is null && (askedQuestion with { Answer = "B" }).Answer == "B", "an answer lands on its question");
-var questionRow = FoldRows([Ask("u1"), new ChatPage.DisplayItem { Id = "question-q1", Kind = ChatPage.ItemKind.Question, Question = askedQuestion }], ChatDetail.Compact);
+var questionRow = FoldRows([Ask("u1"), new ChatPage.DisplayItem { Id = "question-q1", Kind = ChatPage.ItemKind.Question, Question = askedQuestion }], ChatDetail.Minimal);
 Check(questionRow.Any(row => row.Id == "question-q1"), "a question is never folded");
 Console.WriteLine("Windows chat questions: stripping, answers and folding pass.");
 

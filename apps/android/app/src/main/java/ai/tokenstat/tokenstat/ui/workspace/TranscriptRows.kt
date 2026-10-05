@@ -107,8 +107,8 @@ internal fun TranscriptItemRow(
     val scope = rememberCoroutineScope()
     when (item) {
         is ChatDisplayItem.Group ->
-            if (item.group.minimal) {
-                MinimalStepLine(group = item.group, onClick = { onToggleGroup(item.id) })
+            if (item.group.plain) {
+                PlainStepLine(group = item.group, onClick = { onToggleGroup(item.id) })
             } else {
                 StepGroupRow(group = item.group, onClick = { onToggleGroup(item.id) })
             }
@@ -125,7 +125,10 @@ internal fun TranscriptItemRow(
                     }
                     .padding(start = 20.dp),
             ) {
-                TranscriptItemRow(
+                when (item.plain) {
+                    PlainStep.Detail -> PlainStepDetail(item.item)
+                    PlainStep.Line -> PlainStepRow(item.item)
+                    null -> TranscriptItemRow(
                     item = item.item,
                     model = model,
                     peer = peer,
@@ -137,6 +140,7 @@ internal fun TranscriptItemRow(
                     canAnswerQuestions = canAnswerQuestions,
                     onReviewChanges = onReviewChanges,
                 )
+                }
             }
         }
         is ChatDisplayItem.User -> {
@@ -506,12 +510,112 @@ private fun snippetColor(
     return secondary
 }
 
+/// A side with nothing in it is left out, so a new file reads "+22"
+/// rather than "+22 −0".
 @Composable
-private fun DiffStat(added: Long, removed: Long) {
+private fun DiffStat(added: Long, removed: Long, style: TextStyle = TsType.mono(11, FontWeight.Medium)) {
     val colors = LocalTsColors.current
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("+$added", style = TsType.mono(11, FontWeight.Medium), color = colors.diffAdded, maxLines = 1)
-        Text("−$removed", style = TsType.mono(11, FontWeight.Medium), color = colors.diffRemoved, maxLines = 1)
+        if (added > 0 || removed == 0L) Text("+$added", style = style, color = colors.diffAdded, maxLines = 1)
+        if (removed > 0) Text("−$removed", style = style, color = colors.diffRemoved, maxLines = 1)
+    }
+}
+
+/// What one step produced, below its open Compact line. The line above
+/// already says what the step was, so there is no card, no second header
+/// and no show button. Port of ChatStepDetail.swift.
+@Composable
+private fun PlainStepDetail(item: ChatDisplayItem) {
+    val colors = LocalTsColors.current
+    val subject: String
+    val lines: List<Pair<String, androidx.compose.ui.graphics.Color>>
+    val empty: String
+    when (item) {
+        is ChatDisplayItem.Tool -> {
+            subject = item.state.target
+            lines = item.state.snippet.map {
+                displaySnippet(it) to snippetColor(it, colors.textSecondary, colors.diffAdded, colors.diffRemoved)
+            }
+            empty = if (item.state.running) L10n.text("common.running") else L10n.text("android.chatstepdetail.no_output")
+        }
+        is ChatDisplayItem.Edit -> {
+            subject = item.state.path
+            val all = if (item.state.patch.isEmpty()) emptyList() else item.state.patch.split("\n")
+            lines = all.take(200).map { line ->
+                line to when {
+                    ChatToolState.isDiffLine(line) -> if (line.startsWith("+")) colors.diffAdded else colors.diffRemoved
+                    else -> colors.textSecondary
+                }
+            } + listOfNotNull(
+                (all.size - 200).takeIf { it > 0 }?.let {
+                    L10n.text("android.transcriptrows.0_more_lines.c352841d", "$it") to colors.textTertiary
+                },
+            )
+            empty = if (item.state.running) L10n.text("common.running") else L10n.text("android.chatstepdetail.no_diff")
+        }
+        else -> return
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Space.s, vertical = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(1.dp),
+    ) {
+        if (subject.isNotEmpty()) {
+            Text(subject, style = TsType.mono(11), color = colors.textTertiary, maxLines = 6, overflow = TextOverflow.Ellipsis)
+        }
+        if (lines.isEmpty()) {
+            Text(empty, style = TsType.mono(11), color = colors.textTertiary)
+        }
+        lines.forEach { (text, color) -> Text(text, style = TsType.mono(11), color = color) }
+    }
+}
+
+/// One step of a run under an open Compact line: the verb and what it
+/// acted on, with its output a tap away and no card around either.
+@Composable
+private fun PlainStepRow(item: ChatDisplayItem) {
+    val colors = LocalTsColors.current
+    var open by remember(item.id) { mutableStateOf(false) }
+    val (verb, subject, running) = when (item) {
+        is ChatDisplayItem.Tool -> Triple(item.state.verb, item.state.target, item.state.running)
+        is ChatDisplayItem.Edit -> Triple("Edit", item.state.path, item.state.running)
+        else -> return
+    }
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 36.dp)
+                .clip(RoundedCornerShape(cardRadius))
+                .clickable(
+                    onClickLabel = if (open) L10n.text("android.chatdetail.hide_steps") else L10n.text("android.chatdetail.show_steps"),
+                    onClick = { open = !open },
+                )
+                .padding(horizontal = Space.s, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                ChatSeat.word(verb, running),
+                style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium),
+                color = if (running) colors.accent else colors.textSecondary,
+                maxLines = 1,
+            )
+            Text(
+                shortStepSubject(verb, subject),
+                style = TextStyle(fontSize = 13.sp),
+                color = colors.textTertiary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            if (item is ChatDisplayItem.Edit && (item.state.added > 0 || item.state.removed > 0)) {
+                DiffStat(added = item.state.added, removed = item.state.removed, style = TextStyle(fontSize = 13.sp))
+            }
+            Spacer(Modifier.weight(1f))
+        }
+        if (open) PlainStepDetail(item)
     }
 }
 
@@ -1102,10 +1206,10 @@ internal fun shortStepSubject(verb: String?, subject: String): String {
     }
 }
 
-/// Minimal: the verb, what it acted on and the lines it changed, in one
-/// quiet line. Port of ChatStepGroupRow.swift `minimalLine`.
+/// Compact: the verb, what it acted on and the lines it changed, in one
+/// quiet line. Port of ChatStepGroupRow.swift `plainLine`.
 @Composable
-private fun MinimalStepLine(group: ChatStepGroup, onClick: () -> Unit) {
+private fun PlainStepLine(group: ChatStepGroup, onClick: () -> Unit) {
     val colors = LocalTsColors.current
     val title = when (group.style) {
         ChatStepGroup.Style.Step -> ChatSeat.word(group.verb, group.running)
@@ -1150,7 +1254,7 @@ private fun MinimalStepLine(group: ChatStepGroup, onClick: () -> Unit) {
             modifier = Modifier.weight(1f, fill = false),
         )
         if (group.added > 0 || group.removed > 0) {
-            DiffStat(added = group.added, removed = group.removed)
+            DiffStat(added = group.added, removed = group.removed, style = TextStyle(fontSize = 13.sp))
         }
         Spacer(Modifier.weight(1f))
     }

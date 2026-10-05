@@ -12,9 +12,12 @@ namespace Tokenstat.Pages;
 /// </summary>
 internal enum ChatDetail
 {
-    /// <summary>One quiet line per step, the way most editors show it.</summary>
-    Minimal,
     /// <summary>One line per stretch of work.</summary>
+    Minimal,
+    /// <summary>
+    /// One quiet line per step, the way most editors show it. An opened line
+    /// shows what the step produced, without a card.
+    /// </summary>
     Compact,
     /// <summary>Thinking and runs of reads and searches fold to one line each.</summary>
     Standard,
@@ -23,6 +26,20 @@ internal enum ChatDetail
 }
 
 internal enum ChatStepGroupStyle { Work, Explored, Thought, Step }
+
+/// <summary>
+/// How a step under an open Compact line is drawn. Port of
+/// <c>ChatDisplayItem.PlainStep</c>.
+/// </summary>
+internal enum PlainStep
+{
+    /// <summary>Any other row: drawn as itself.</summary>
+    None,
+    /// <summary>A lone step: only what it produced, no card and no second header.</summary>
+    Detail,
+    /// <summary>One of a run: a plain line of its own, so each names its file.</summary>
+    Line,
+}
 
 /// <summary>One file a turn changed. Counts are summed over the turn's edits to it.</summary>
 internal sealed record ChangedFile(string Path, long Added, long Removed)
@@ -60,12 +77,12 @@ internal sealed record ChatStepGroup
     public string? LiveTarget { get; init; }
     public long? StartedAt { get; init; }
     public long? EndedAt { get; init; }
-    /// <summary>The turn's reported spend, in Compact, where its usage row is not drawn.</summary>
+    /// <summary>The turn's reported spend, in Minimal, where its usage row is not drawn.</summary>
     public double? Cost { get; init; }
     /// <summary>The first line of a folded thought.</summary>
     public string? Preview { get; init; }
-    /// <summary>Drawn as Minimal draws it: a plain line, no icon or chevron.</summary>
-    public bool Minimal { get; init; }
+    /// <summary>Drawn as Compact draws it: a plain line, no icon or chevron.</summary>
+    public bool Plain { get; init; }
     /// <summary>The one step a single-member group stands for.</summary>
     public string? Verb { get; init; }
     public string? Subject { get; init; }
@@ -91,9 +108,9 @@ internal static class ChatDetailFold
     {
         var folded = detail switch
         {
-            ChatDetail.Compact => Compact(items, running, isOpen),
-            ChatDetail.Standard => Standard(items, running, isOpen),
             ChatDetail.Minimal => Minimal(items, running, isOpen),
+            ChatDetail.Standard => Standard(items, running, isOpen),
+            ChatDetail.Compact => Compact(items, running, isOpen),
             _ => items,
         };
         return WithTurnChanges(folded, items, running);
@@ -163,16 +180,16 @@ internal static class ChatDetailFold
 
     /// <summary>
     /// Every step is one line. Runs of reads and searches still read as one,
-    /// even a run of one. Port of <c>ChatTranscriptFold.minimal</c>.
+    /// even a run of one. Port of <c>ChatTranscriptFold.compactFold</c>.
     /// </summary>
-    private static List<ChatPage.DisplayItem> Minimal(
+    private static List<ChatPage.DisplayItem> Compact(
         List<ChatPage.DisplayItem> items, bool running, Func<string, bool> isOpen)
     {
         var output = new List<ChatPage.DisplayItem>(items.Count);
         var run = new List<ChatPage.DisplayItem>();
 
         void Line(ChatStepGroupStyle style, List<ChatPage.DisplayItem> members, bool live) =>
-            Emit(Make(style, members, live) with { Minimal = true }, members, output, isOpen);
+            Emit(Make(style, members, live) with { Plain = true }, members, output, isOpen);
 
         void FlushRun(bool trailing)
         {
@@ -196,7 +213,7 @@ internal static class ChatDetailFold
                 }
                 else
                 {
-                    var group = Make(ChatStepGroupStyle.Thought, [item], false) with { Preview = Preview(item.Text), Minimal = true };
+                    var group = Make(ChatStepGroupStyle.Thought, [item], false) with { Preview = Preview(item.Text), Plain = true };
                     Emit(group, [item], output, isOpen);
                 }
             }
@@ -299,7 +316,7 @@ internal static class ChatDetailFold
         return output;
     }
 
-    private static List<ChatPage.DisplayItem> Compact(
+    private static List<ChatPage.DisplayItem> Minimal(
         List<ChatPage.DisplayItem> items, bool running, Func<string, bool> isOpen)
     {
         var output = new List<ChatPage.DisplayItem>();
@@ -316,12 +333,12 @@ internal static class ChatDetailFold
             var start = starts[n];
             if (start >= items.Count) continue;
             var end = n + 1 < starts.Count ? starts[n + 1] : items.Count;
-            CompactTurn(items.GetRange(start, end - start), running && end == items.Count, isOpen, output);
+            MinimalTurn(items.GetRange(start, end - start), running && end == items.Count, isOpen, output);
         }
         return output;
     }
 
-    private static void CompactTurn(
+    private static void MinimalTurn(
         List<ChatPage.DisplayItem> turn, bool live, Func<string, bool> isOpen, List<ChatPage.DisplayItem> output)
     {
         var members = new List<ChatPage.DisplayItem>();
@@ -394,10 +411,14 @@ internal static class ChatDetailFold
             Group = group with { Open = open, Members = [.. members] },
         });
         if (!open) return;
+        // A Compact line already names its step, so a lone step drops its
+        // card and shows what it produced. A run keeps a plain line per step.
+        var plain = !group.Plain ? PlainStep.None : members.Count == 1 ? PlainStep.Detail : PlainStep.Line;
         foreach (var member in members)
         {
             var row = member;
             row.GroupId = id;
+            row.Plain = plain;
             output.Add(row);
         }
     }

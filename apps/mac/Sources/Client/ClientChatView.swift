@@ -1029,7 +1029,7 @@ struct ClientChatThread: View {
                                     isLive: !model.isShowingCachedTranscript && model.busy && item.id == model.transcriptItems.last?.id,
                                     animatesRunning: !model.isShowingCachedTranscript && item.id == spinning,
                                     expandsOutput: detail.level == .detailed,
-                                    compactTools: detail.level == .compact,
+                                    compactTools: detail.level == .minimal,
                                     toggleGroup: { model.toggleGroup($0) },
                                     answerQuestion: { question, text in
                                         Task { await model.answerQuestion(question, answer: text) }

@@ -59,14 +59,14 @@ struct ChatTranscriptFoldTests {
 
     static func main() {
         detailedIsTheIdentity()
-        compactFoldsWorkBetweenQuestionAndAnswer()
-        compactNeverFoldsWhatAPersonMustSee()
-        compactKeepsUsageWhenThereIsNoWork()
-        compactKeepsEveryReplyVisible()
-        compactLiveTurn()
-        compactActivitySurvivesBetweenCalls()
-        compactActivityKeepsRunningCallsVisible()
-        compactActivityIsBoundedAndDoesNotHideFailures()
+        minimalFoldsWorkBetweenQuestionAndAnswer()
+        minimalNeverFoldsWhatAPersonMustSee()
+        minimalKeepsUsageWhenThereIsNoWork()
+        minimalKeepsEveryReplyVisible()
+        minimalLiveTurn()
+        minimalActivitySurvivesBetweenCalls()
+        minimalActivityKeepsRunningCallsVisible()
+        minimalActivityIsBoundedAndDoesNotHideFailures()
         standardFoldsReadsAndThinking()
         standardKeepsALoneReadAndBreaksRuns()
         standardLeavesStreamingThoughtOpen()
@@ -75,8 +75,8 @@ struct ChatTranscriptFoldTests {
         ownerFindsClosedMembersOnly()
         countsMatchTheirMembers()
         previewDropsMarkdownMarks()
-        minimalMakesEveryStepOneLine()
-        minimalKeepsRunningStepsAndOpensToTheRow()
+        compactMakesEveryStepOneLine()
+        compactKeepsRunningStepsAndOpensToTheRow()
         turnChangesSumPerFileAndWaitForTheTurn()
         print("ChatTranscriptFoldTests passed")
     }
@@ -88,13 +88,13 @@ struct ChatTranscriptFoldTests {
         require(ids(fold(edited, .detailed)) == ids(edited) + ["changes:e1"], "apart from what the turn changed")
     }
 
-    static func compactFoldsWorkBetweenQuestionAndAnswer() {
+    static func minimalFoldsWorkBetweenQuestionAndAnswer() {
         let rows = [
             user("u1"), think("k1"), say("a0"), tool("t1", "Bash"), edit("e1", "a.swift"), say("a1"), usage("x1", 0.25),
             user("u2"), tool("t2", "Read"), say("a2"),
         ]
-        let out = fold(rows, .compact)
-        require(ids(out) == ["u1", "g:k1", "a0", "g:t1", "a1", "changes:e1", "u2", "g:t2", "a2"], "Compact keeps replies between work groups: \(ids(out))")
+        let out = fold(rows, .minimal)
+        require(ids(out) == ["u1", "g:k1", "a0", "g:t1", "a1", "changes:e1", "u2", "g:t2", "a2"], "Minimal keeps replies between work groups: \(ids(out))")
         require(group(out, "g:k1")?.style == .thought, "reasoning alone is a thought line")
         let first = group(out, "g:t1")
         require(first?.style == .work, "a work line")
@@ -104,7 +104,7 @@ struct ChatTranscriptFoldTests {
         require(group(out, "g:t2")?.cost == nil, "no usage, no figure")
     }
 
-    static func compactNeverFoldsWhatAPersonMustSee() {
+    static func minimalNeverFoldsWhatAPersonMustSee() {
         let rows = [
             user("u1"), tool("t1", "Bash"), approval("p1"), tool("t2", "Bash"),
             tool("t3", "Bash", failed: true), edit("e1", "a", failed: true), handoff("h1"),
@@ -117,23 +117,23 @@ struct ChatTranscriptFoldTests {
                 require(ChatTranscriptFold.owner(of: must, in: out) == nil, "\(detail) never folds \(must)")
             }
         }
-        let out = fold(rows, .compact)
+        let out = fold(rows, .minimal)
         require(ids(out) == ["u1", "g:t1", "p1", "g:t2", "t3", "e1", "h1", "f1", "x1"],
                 "an approval splits the work where it happened: \(ids(out))")
     }
 
-    static func compactKeepsUsageWhenThereIsNoWork() {
-        let out = fold([user("u1"), say("a1"), usage("x1", 0.5)], .compact)
+    static func minimalKeepsUsageWhenThereIsNoWork() {
+        let out = fold([user("u1"), say("a1"), usage("x1", 0.5)], .minimal)
         require(ids(out) == ["u1", "a1", "x1"], "nothing to fold keeps the usage row: \(ids(out))")
-        let plan = fold([user("u1"), tool("t1", "Read"), say("a1"), usage("x1", 0)], .compact)
+        let plan = fold([user("u1"), tool("t1", "Read"), say("a1"), usage("x1", 0)], .minimal)
         require(ids(plan) == ["u1", "g:t1", "a1", "x1"], "nothing spent keeps the token counts: \(ids(plan))")
     }
 
-    static func compactKeepsEveryReplyVisible() {
+    static func minimalKeepsEveryReplyVisible() {
         let rows = [user("u1"), say("a0"), tool("t1", "Read"), say("a1"),
                     tool("t2", "Bash", running: true), say("a2")]
         for running in [false, true] {
-            let out = fold(rows, .compact, running: running)
+            let out = fold(rows, .minimal, running: running)
             require(ids(out) == ["u1", "a0", "g:t1", "a1", "g:t2", "a2"], "all replies remain in order")
             for id in ["a0", "a1", "a2"] {
                 require(ChatTranscriptFold.owner(of: id, in: out) == nil, "a reply is never owned by a folded group")
@@ -141,58 +141,58 @@ struct ChatTranscriptFoldTests {
         }
     }
 
-    static func compactLiveTurn() {
+    static func minimalLiveTurn() {
         let rows = [user("u1"), think("k1"), tool("t1", "Read", running: true)]
-        let out = fold(rows, .compact, running: true)
+        let out = fold(rows, .minimal, running: true)
         let live = group(out, "g:k1")
         require(live?.running == true, "the trailing work line of a live turn is running")
         require(live?.liveVerb == "Read" && live?.liveTarget == "t-t1", "it names the running step")
 
-        let streaming = fold(rows + [say("a1")], .compact, running: true)
+        let streaming = fold(rows + [say("a1")], .minimal, running: true)
         require(ids(streaming) == ["u1", "g:k1", "a1"], "streaming prose stays visible")
         require(group(streaming, "g:k1")?.running == true, "a still-running step keeps the line running")
 
-        let settled = fold([user("u1"), think("k1"), tool("t1", "Read"), say("a1")], .compact, running: true)
+        let settled = fold([user("u1"), think("k1"), tool("t1", "Read"), say("a1")], .minimal, running: true)
         require(group(settled, "g:k1")?.running == false, "work before the answer is not running once its steps end")
     }
 
-    static func compactActivitySurvivesBetweenCalls() {
+    static func minimalActivitySurvivesBetweenCalls() {
         let rows = [user("u1"), think("k1"), tool("r1", "Read"), tool("w1", "Write"),
                     edit("e1", "src/App.swift"), tool("d1", "Diff", running: true)]
-        let active = group(fold(rows, .compact, running: true), "g:k1")!
+        let active = group(fold(rows, .minimal, running: true), "g:k1")!
         require(active.activityPreview.map(\.id) == ["w1", "e1", "d1"], "the latest actions remain visible in order")
         require(active.activityPreview.map(\.verb) == ["Write", "Edit", "Diff"], "writes, native edits and comparisons name their action")
         require(active.activityPreview.map(\.running) == [false, false, true], "only the active comparison uses present tense")
         require(active.activityPreview[1].target == "src/App.swift", "the edit identifies its file")
 
         let between = Array(rows.dropLast()) + [tool("d1", "Diff")]
-        let waiting = group(fold(between, .compact, running: true), "g:k1")!
+        let waiting = group(fold(between, .minimal, running: true), "g:k1")!
         require(waiting.liveVerb == nil, "no tool is still running between calls")
         require(waiting.activityPreview.map(\.id) == ["w1", "e1", "d1"], "finished actions still show while the agent continues")
         require(waiting.activityPreview.allSatisfy { !$0.running }, "finished calls never claim to be running")
-        require(group(fold(between, .compact), "g:k1")!.activityPreview.isEmpty, "a finished turn returns to a compact header")
-        require(group(fold(between + [say("a1")], .compact, running: true), "g:k1")!.activityPreview.isEmpty,
+        require(group(fold(between, .minimal), "g:k1")!.activityPreview.isEmpty, "a finished turn returns to a minimal header")
+        require(group(fold(between + [say("a1")], .minimal, running: true), "g:k1")!.activityPreview.isEmpty,
                 "a reply closes the preceding work preview")
-        let open = fold(rows, .compact, running: true, isOpen: allOpen)
+        let open = fold(rows, .minimal, running: true, isOpen: allOpen)
         require(group(open, "g:k1")!.activityPreview.isEmpty, "opening full steps removes the duplicate preview")
         require(open.contains { $0.id == "d1" && $0.groupID == "g:k1" }, "the active call is available as its full row")
     }
 
-    static func compactActivityKeepsRunningCallsVisible() {
+    static func minimalActivityKeepsRunningCallsVisible() {
         let rows = [user("u1"), tool("slow", "Shell", running: true),
                     tool("r1", "Read"), tool("r2", "Read"), tool("r3", "Read"), tool("r4", "Read")]
-        let preview = group(fold(rows, .compact, running: true), "g:slow")!.activityPreview
+        let preview = group(fold(rows, .minimal, running: true), "g:slow")!.activityPreview
         require(preview.map(\.id) == ["slow", "r3", "r4"], "recent completions cannot push the running call out of view")
         require(preview.first?.running == true, "the retained older call still says it is running")
         let concurrent = [user("u1")] + (1...5).map { tool("t\($0)", "Shell", running: true) }
-        require(group(fold(concurrent, .compact, running: true), "g:t1")!.activityPreview.map(\.id) == ["t3", "t4", "t5"],
+        require(group(fold(concurrent, .minimal, running: true), "g:t1")!.activityPreview.map(\.id) == ["t3", "t4", "t5"],
                 "many active calls show the newest three without growing the preview")
     }
 
-    static func compactActivityIsBoundedAndDoesNotHideFailures() {
+    static func minimalActivityIsBoundedAndDoesNotHideFailures() {
         let long = tool("long", "CustomTool", target: String(repeating: "x", count: 10_000) + "\nsecond line")
         let rows = [user("u1"), long, tool("bad", "Write", failed: true), edit("e1", "a.swift"), tool("blank", "")]
-        let out = fold(rows, .compact, running: true)
+        let out = fold(rows, .minimal, running: true)
         let first = group(out, "g:long")!
         require(first.recentActivity.first?.verb == "CustomTool", "an unknown tool keeps its real name")
         require(first.recentActivity.first?.target.count == 160, "long commands cannot produce a document-sized preview")
@@ -200,14 +200,14 @@ struct ChatTranscriptFoldTests {
         let last = group(out, "g:e1")!
         require(last.activityPreview.map(\.id) == ["e1", "blank"], "a failure divides the work history")
         require(last.activityPreview.last?.verb == "", "unnamed calls retain the generic work fallback")
-        let multiline = group(fold([tool("line", "Shell", target: "  swift test  \nmore code")], .compact, running: true), "g:line")!
+        let multiline = group(fold([tool("line", "Shell", target: "  swift test  \nmore code")], .minimal, running: true), "g:line")!
         require(multiline.activityPreview.first?.target == "swift test", "only the first command line is shown")
-        let blank = group(fold([tool("line", "Shell", target: "\nmore code")], .compact, running: true), "g:line")!
+        let blank = group(fold([tool("line", "Shell", target: "\nmore code")], .minimal, running: true), "g:line")!
         require(blank.activityPreview.first?.target == "", "a blank first line stays blank")
 
         let exploration = group(fold([tool("r1", "Read"), tool("r2", "Read")], .standard, running: true), "g:r1")!
         require(exploration.activityPreview.isEmpty, "Standard exploration stays a single header")
-        let thought = group(fold([user("u1"), think("k1")], .compact, running: true), "g:k1")!
+        let thought = group(fold([user("u1"), think("k1")], .minimal, running: true), "g:k1")!
         require(thought.activityPreview.isEmpty, "reasoning alone does not invent tool activity")
     }
 
@@ -237,25 +237,25 @@ struct ChatTranscriptFoldTests {
 
     static func openGroupsListTheirStepsAsRows() {
         let rows = [user("u1"), think("k1"), tool("t1", "Bash"), say("a1")]
-        let out = fold(rows, .compact, isOpen: { $0 == "g:k1" })
+        let out = fold(rows, .minimal, isOpen: { $0 == "g:k1" })
         require(ids(out) == ["u1", "g:k1", "k1", "t1", "a1"], "an open group lists its steps after it: \(ids(out))")
         require(group(out, "g:k1")?.open == true, "the header knows it is open")
         require(out[2].groupID == "g:k1" && out[3].groupID == "g:k1", "steps name their group")
         require(out[0].groupID == nil && out[4].groupID == nil, "top-level rows name none")
         require(ChatTranscriptFold.owner(of: "t1", in: out) == nil, "a step of an open group is drawn as itself")
-        let all = fold(rows, .compact, isOpen: allOpen)
+        let all = fold(rows, .minimal, isOpen: allOpen)
         require(ids(all) == ids(out), "open-all opens the same group")
     }
 
     static func groupIDsHoldWhileATurnGrows() {
         var rows = [user("u1"), think("k1"), tool("t1", "Bash", running: true)]
-        let before = ids(fold(rows, .compact, running: true))
+        let before = ids(fold(rows, .minimal, running: true))
         rows.append(tool("t2", "Bash", running: true))
-        let after = ids(fold(rows, .compact, running: true))
+        let after = ids(fold(rows, .minimal, running: true))
         require(before == after && after == ["u1", "g:k1"], "a growing turn keeps its line")
 
         let paged = [user("u0"), say("a0")] + rows
-        require(ids(fold(paged, .compact, running: true)).suffix(2) == ["u1", "g:k1"], "an older page above changes nothing")
+        require(ids(fold(paged, .minimal, running: true)).suffix(2) == ["u1", "g:k1"], "an older page above changes nothing")
     }
 
     static func ownerFindsClosedMembersOnly() {
@@ -265,7 +265,7 @@ struct ChatTranscriptFoldTests {
         require(ChatTranscriptFold.owner(of: "k1", in: standard) == "g:k1", "a folded thought")
         require(ChatTranscriptFold.owner(of: "a1", in: standard) == nil, "a top-level row has no owner")
         require(ChatTranscriptFold.owner(of: "missing", in: standard) == nil, "an unknown row has no owner")
-        require(ChatTranscriptFold.owner(of: "t2", in: fold(rows, .compact)) == "g:t1", "a step in a work line")
+        require(ChatTranscriptFold.owner(of: "t2", in: fold(rows, .minimal)) == "g:t1", "a step in a work line")
     }
 
     static func countsMatchTheirMembers() {
@@ -276,7 +276,7 @@ struct ChatTranscriptFoldTests {
                     edit("e3", "b.swift", added: 1, removed: 4),
                     tool("t2", "Bash", start: 5_000, end: 9_000),
                     say("a1")]
-        let work = group(fold(rows, .compact), "g:t1")
+        let work = group(fold(rows, .minimal), "g:t1")
         require(work?.steps == 5, "five steps")
         require(work?.files == 2, "two distinct files")
         require(work?.added == 6 && work?.removed == 5, "line totals add up")
@@ -289,15 +289,15 @@ struct ChatTranscriptFoldTests {
         require(ChatTranscriptFold.preview(of: "\n  \n") == nil, "nothing to say is nil")
     }
 
-    static func minimalMakesEveryStepOneLine() {
+    static func compactMakesEveryStepOneLine() {
         let rows = [user("u1"), think("k1"), tool("t1", "Read"), tool("t2", "Grep"), tool("t3", "Bash", target: "cargo test"),
                     edit("e1", "src/a.swift", added: 6, removed: 2), tool("t4", "Read", target: "/w/sync.js"), say("a1"),
                     tool("t5", "Bash", failed: true)]
-        let out = fold(rows, .minimal)
+        let out = fold(rows, .compact)
         require(ids(out) == ["u1", "g:k1", "g:t1", "g:t3", "g:e1", "g:t4", "a1", "t5", "changes:e1"],
-                "Minimal is a line per step: \(ids(out))")
+                "Compact is a line per step: \(ids(out))")
         for id in ["g:k1", "g:t1", "g:t3", "g:e1", "g:t4"] {
-            require(group(out, id)?.minimal == true, "\(id) is drawn as a plain line")
+            require(group(out, id)?.plain == true, "\(id) is drawn as a plain line")
         }
         let explored = group(out, "g:t1")!
         require(explored.style == .explored && explored.reads == 1 && explored.searches == 1, "reads and searches still read as one")
@@ -311,16 +311,21 @@ struct ChatTranscriptFoldTests {
         require(ChatTranscriptFold.owner(of: "t5", in: out) == nil, "a failed step is never folded")
     }
 
-    static func minimalKeepsRunningStepsAndOpensToTheRow() {
+    static func compactKeepsRunningStepsAndOpensToTheRow() {
         let rows = [user("u1"), tool("t1", "Bash", running: true)]
-        let out = fold(rows, .minimal, running: true)
+        let out = fold(rows, .compact, running: true)
         require(group(out, "g:t1")?.running == true, "a running command spins on its line")
-        let done = fold([user("u1"), tool("t1", "Bash"), say("a1")], .minimal, running: true)
+        let done = fold([user("u1"), tool("t1", "Bash"), say("a1")], .compact, running: true)
         require(group(done, "g:t1")?.running == false, "a finished one does not, even mid-turn")
-        let open = fold([user("u1"), edit("e1", "a.swift", added: 1)], .minimal, isOpen: { $0 == "g:e1" })
+        let open = fold([user("u1"), edit("e1", "a.swift", added: 1)], .compact, isOpen: { $0 == "g:e1" })
         require(ids(open) == ["u1", "g:e1", "e1", "changes:e1"], "opening a line shows the full row below it: \(ids(open))")
         require(open[2].groupID == "g:e1", "and the row names its line")
-        let reading = fold([user("u1"), think("k1")], .minimal, running: true)
+        require(open[2].plainStep == .detail, "a lone step shows what it produced, without a card")
+        let reads = fold([user("u1"), tool("t1", "Read"), tool("t2", "Grep"), say("a1")], .compact, isOpen: { $0 == "g:t1" })
+        require(reads.filter { $0.groupID == "g:t1" }.allSatisfy { $0.plainStep == .line }, "a run keeps a line per step")
+        let minimal = fold([user("u1"), tool("t1", "Read"), say("a1")], .minimal, isOpen: { _ in true })
+        require(minimal.allSatisfy { $0.plainStep == nil }, "other levels keep their rows as they were")
+        let reading = fold([user("u1"), think("k1")], .compact, running: true)
         require(ids(reading) == ["u1", "k1"], "reasoning still arriving stays open")
     }
 
@@ -328,7 +333,7 @@ struct ChatTranscriptFoldTests {
         let rows = [user("u1"), edit("e1", "/w/a.swift", added: 3, removed: 1), edit("e2", "/w/a.swift", added: 2),
                     edit("e3", "/w/b.swift", added: 1, removed: 4), edit("ef", "/w/c.swift", failed: true), say("a1"),
                     user("u2"), edit("e4", "/w/c.swift", added: 1), edit("er", "/w/d.swift", running: true), say("a2")]
-        let live = fold(rows, .compact, running: true)
+        let live = fold(rows, .minimal, running: true)
         require(ids(live).filter { $0.hasPrefix("changes:") } == ["changes:e1"], "the live turn has no card yet: \(ids(live))")
         require(ids(live).firstIndex(of: "changes:e1")! == ids(live).firstIndex(of: "u2")! - 1, "a card closes its turn")
         guard case let .changes(first)? = live.first(where: { $0.id == "changes:e1" })?.kind else {
@@ -337,12 +342,12 @@ struct ChatTranscriptFoldTests {
         require(first.files.map(\.path) == ["/w/a.swift", "/w/b.swift"], "one row per file, first touched first, failures left out")
         require(first.files[0].added == 5 && first.files[0].removed == 1, "a file edited twice shows both")
         require(first.added == 6 && first.removed == 5, "the card totals its files")
-        let finished = fold(rows, .compact, running: false)
+        let finished = fold(rows, .minimal, running: false)
         guard case let .changes(second)? = finished.last?.kind else { return require(false, "the last turn's card") }
         require(second.files.map(\.path) == ["/w/c.swift"], "a running edit is not a change yet")
-        require(ids(fold([user("u1"), say("a1")], .minimal)) == ["u1", "a1"], "no edits, no card")
+        require(ids(fold([user("u1"), say("a1")], .compact)) == ["u1", "a1"], "no edits, no card")
         let large = fold([user("u"), edit("e1", "file", added: .max, removed: .max),
-                          edit("e2", "file", added: .max, removed: .max)], .compact)
+                          edit("e2", "file", added: .max, removed: .max)], .minimal)
         guard case let .changes(totals)? = large.last?.kind else { fatalError("missing totals") }
         require(totals.added == UInt64(UInt32.max) * 2 && totals.removed == totals.added,
                 "large edits must not overflow per-file or turn counters")

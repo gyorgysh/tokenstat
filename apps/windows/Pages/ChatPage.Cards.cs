@@ -475,13 +475,13 @@ internal sealed partial class ChatPage
 
     /// <summary>What a group row shows, so it is rebuilt only when that changes.</summary>
     private static string StepGroupKey(ChatStepGroup? group) => group is null ? ""
-        : $"{group.Style}|{group.Open}|{group.Steps}|{group.Files}|{group.Added}|{group.Removed}|{group.Reads}|{group.Searches}|{group.Pages}|{group.Running}|{group.LiveVerb}|{group.LiveTarget}|{group.StartedAt}|{group.EndedAt}|{group.Cost}|{group.Preview}|{group.Minimal}|{group.Verb}|{group.Subject}";
+        : $"{group.Style}|{group.Open}|{group.Steps}|{group.Files}|{group.Added}|{group.Removed}|{group.Reads}|{group.Searches}|{group.Pages}|{group.Running}|{group.LiveVerb}|{group.LiveTarget}|{group.StartedAt}|{group.EndedAt}|{group.Cost}|{group.Preview}|{group.Plain}|{group.Verb}|{group.Subject}";
 
     /// <summary>
-    /// Minimal: the verb, what it acted on and the lines it changed, in one
-    /// quiet line. Port of ChatStepGroupRow.swift <c>minimalLine</c>.
+    /// Compact: the verb, what it acted on and the lines it changed, in one
+    /// quiet line. Port of ChatStepGroupRow.swift <c>plainLine</c>.
     /// </summary>
-    private UIElement MinimalStepLine(string id, ChatStepGroup group)
+    private UIElement PlainStepLine(string id, ChatStepGroup group)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         if (group.Running)
@@ -520,7 +520,7 @@ internal sealed partial class ChatPage
             VerticalAlignment = VerticalAlignment.Center,
         };
         row.Children.Add(detail);
-        if (group.Added + group.Removed > 0) row.Children.Add(DiffStat(group.Added, group.Removed));
+        if (group.Added + group.Removed > 0) row.Children.Add(DiffStat(group.Added, group.Removed, plain: true));
         var button = new Button
         {
             Content = row,
@@ -623,7 +623,7 @@ internal sealed partial class ChatPage
     /// </summary>
     private UIElement StepGroupRow(string id, ChatStepGroup group)
     {
-        if (group.Minimal) return MinimalStepLine(id, group);
+        if (group.Plain) return PlainStepLine(id, group);
         var tint = group.Running ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph);
         var row = new Grid { ColumnSpacing = Theme.SpaceS };
         for (var column = 0; column < 6; column++)
@@ -1125,7 +1125,12 @@ internal sealed partial class ChatPage
         };
     }
 
-    private static FrameworkElement DiffStat(long added, long removed)
+    /// <summary>
+    /// A side with nothing in it is left out, so a new file reads "+22"
+    /// rather than "+22 −0". <paramref name="plain"/> sets it in the line's
+    /// own type, for the quiet Compact lines.
+    /// </summary>
+    private static FrameworkElement DiffStat(long added, long removed, bool plain = false)
     {
         var row = new StackPanel
         {
@@ -1133,23 +1138,123 @@ internal sealed partial class ChatPage
             Spacing = 4,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        row.Children.Add(Fonts.Tabular(new TextBlock
+        TextBlock Figure(string text, Func<Color> colour)
         {
-            Text = "+" + added,
-            Foreground = Theme.Brush(static () => Theme.DiffAdded),
-            FontSize = 11,
-            FontWeight = FontWeights.Medium,
-            FontFamily = Fonts.Mono,
-        }));
-        row.Children.Add(Fonts.Tabular(new TextBlock
-        {
-            Text = "−" + removed,
-            Foreground = Theme.Brush(static () => Theme.DiffRemoved),
-            FontSize = 11,
-            FontWeight = FontWeights.Medium,
-            FontFamily = Fonts.Mono,
-        }));
+            var block = new TextBlock
+            {
+                Text = text,
+                Foreground = Theme.Brush(colour),
+                FontSize = plain ? 13 : 11,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            if (!plain)
+            {
+                block.FontWeight = FontWeights.Medium;
+                block.FontFamily = Fonts.Mono;
+            }
+            return block;
+        }
+        if (added > 0 || removed == 0) row.Children.Add(Fonts.Tabular(Figure("+" + added, static () => Theme.DiffAdded)));
+        if (removed > 0) row.Children.Add(Fonts.Tabular(Figure("−" + removed, static () => Theme.DiffRemoved)));
         return row;
+    }
+
+    /// <summary>
+    /// What one step produced, below its open Compact line. The line above
+    /// already says what the step was, so there is no card, no second header
+    /// and no show button. Port of ChatStepDetail.swift.
+    /// </summary>
+    private static UIElement PlainStepDetail(DisplayItem item)
+    {
+        var stack = new StackPanel { Spacing = 2, Padding = new Thickness(Theme.SpaceS, 2, Theme.SpaceS, 2) };
+        var subject = item.Kind == ItemKind.Edit ? item.Path : item.Target;
+        if (!string.IsNullOrEmpty(subject))
+        {
+            stack.Children.Add(new TextBlock
+            {
+                Text = subject,
+                FontFamily = Fonts.Mono,
+                FontSize = 11,
+                Opacity = 0.55,
+                MaxLines = 6,
+                TextWrapping = TextWrapping.Wrap,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                IsTextSelectionEnabled = true,
+            });
+        }
+        var lines = item.Kind == ItemKind.Edit
+            ? string.IsNullOrEmpty(item.Patch) ? [] : item.Patch.Replace("\r\n", "\n").Split('\n').ToList()
+            : SnippetLines(item.Verb, item.Detail);
+        if (lines.Count == 0)
+        {
+            stack.Children.Add(new TextBlock
+            {
+                Text = item.Running
+                    ? L10n.Text("common.running")
+                    : item.Kind == ItemKind.Edit ? L10n.Text("windows.chatstepdetail.no_diff") : L10n.Text("windows.chatstepdetail.no_output"),
+                FontFamily = Fonts.Mono,
+                FontSize = 11,
+                Opacity = 0.55,
+            });
+        }
+        else
+        {
+            var block = SnippetBlock(lines, item.Kind == ItemKind.Edit ? EditSnippetLines : ToolSnippetLines);
+            // The output without the box a card draws around it.
+            block.Background = null;
+            block.Padding = new Thickness(0);
+            stack.Children.Add(block);
+        }
+        return stack;
+    }
+
+    /// <summary>
+    /// One step of a run under an open Compact line: the verb and what it
+    /// acted on, with its output a click away and no card around either.
+    /// </summary>
+    private UIElement PlainStepRow(DisplayItem item)
+    {
+        var verb = item.Kind == ItemKind.Edit ? "Edit" : item.Verb;
+        var subject = item.Kind == ItemKind.Edit ? item.Path : item.Target;
+        var expanded = _expandedCards.TryGetValue(item.Id, out var open) && open;
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        row.Children.Add(new TextBlock
+        {
+            Text = SeatStep.Word(verb, item.Running),
+            FontSize = 13,
+            FontWeight = FontWeights.Medium,
+            Opacity = item.Running ? 1 : 0.75,
+            Foreground = item.Running ? Theme.AccentBrush : null,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        row.Children.Add(new TextBlock
+        {
+            Text = ChatDetailFold.ShortSubject(verb, subject),
+            FontSize = 13,
+            Opacity = 0.5,
+            MaxWidth = 520,
+            TextWrapping = TextWrapping.NoWrap,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        if (item.Kind == ItemKind.Edit && item.Added + item.Removed > 0)
+        {
+            row.Children.Add(DiffStat(item.Added, item.Removed, plain: true));
+        }
+        var button = new Button
+        {
+            Content = row,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(Theme.SpaceS, 3, Theme.SpaceS, 3),
+        };
+        button.Click += (_, _) => ToggleCard(item.Id, !expanded);
+        var stack = new StackPanel();
+        stack.Children.Add(button);
+        if (expanded) stack.Children.Add(PlainStepDetail(item));
+        return stack;
     }
 
     private static Border SnippetBlock(List<string> lines, int cap)

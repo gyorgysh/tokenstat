@@ -206,6 +206,16 @@ struct ChatDisplayItem: Identifiable, Equatable {
     /// group's steps shown below its header. Nil for every top-level row.
     /// See `ChatTranscriptFold`.
     var groupID: String? = nil
+    /// How a step under an open Compact line is drawn. Nil everywhere else.
+    var plainStep: PlainStep? = nil
+
+    /// A Compact line already says what its step was, so a lone step drops
+    /// its card and shows only what it produced. Several steps under one
+    /// line, a run of reads, keep a plain line each so each names its file.
+    enum PlainStep: Equatable {
+        case detail
+        case line
+    }
 
     enum Kind: Equatable {
         case user(String)

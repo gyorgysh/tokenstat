@@ -12,7 +12,7 @@
 //! `stash`. If a feature needs one, it belongs behind an explicit user action
 //! somewhere else, not in a status call that runs on a timer.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::Serialize;
@@ -729,6 +729,58 @@ fn parse_tags(decorations: &str) -> Vec<String> {
         .collect()
 }
 
+/// A file's text as the index holds it. `None` when it is not tracked, is
+/// not UTF-8 text, or is larger than `max_bytes`.
+///
+/// For measuring an edit an agent reported without its patch: a file that
+/// was clean when a turn began is in the index exactly as it was on disk.
+pub fn indexed_text(file: &Path, max_bytes: usize) -> Option<String> {
+    let dir = file.parent()?;
+    let name = file.file_name()?.to_str()?;
+    // `:./name` is the index entry for this name relative to `-C`, so the
+    // repository root never has to be worked out.
+    let out = git_command(dir, &["show", &format!(":./{name}")])
+        .output()
+        .ok()?;
+    if !out.status.success() || out.stdout.len() > max_bytes || out.stdout.contains(&0) {
+        return None;
+    }
+    String::from_utf8(out.stdout).ok()
+}
+
+/// Files in the work tree around `dir` that differ from the index, or are
+/// untracked, as absolute paths. An untracked directory is one entry and is
+/// not walked, the same choice `status` makes. Empty outside a repository.
+pub fn changed_files(dir: &Path) -> Vec<PathBuf> {
+    let Some(top) = git(dir, &["rev-parse", "--show-toplevel"]) else {
+        return Vec::new();
+    };
+    let top = PathBuf::from(top.trim_end_matches(['\n', '\r']));
+    let Some(raw) = git(
+        dir,
+        &["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+    ) else {
+        return Vec::new();
+    };
+    let mut files = Vec::new();
+    let mut entries = raw.split('\0');
+    while let Some(entry) = entries.next() {
+        let (Some(code), Some(path)) = (entry.get(..2), entry.get(3..)) else {
+            continue;
+        };
+        // A rename or copy carries its old name as the next entry.
+        if code.contains(['R', 'C']) {
+            entries.next();
+        }
+        // The second column is the work tree against the index. A file
+        // staged and untouched since is in the index as it is on disk.
+        if !code.ends_with(' ') && !path.is_empty() && !path.ends_with('/') {
+            files.push(top.join(path));
+        }
+    }
+    files
+}
+
 /// The checked-out branch's short name. None when HEAD is detached or the
 /// folder is not a repository. One cheap read, for callers that need only
 /// the name and not a whole status.
@@ -1323,6 +1375,54 @@ mod tests {
         assert!(!newer.published);
         run(dir.path(), &["checkout", "--detach"]);
         assert!(pull_branch(dir.path()).unwrap_err().contains("detached"));
+    }
+
+    #[test]
+    fn reads_the_index_copy_and_lists_changed_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = |args: &[&str]| {
+            let out = Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        run(&["init", "-b", "main"]);
+        std::fs::create_dir(dir.path().join("src")).unwrap();
+        let tracked = dir.path().join("src/a.txt");
+        std::fs::write(&tracked, "one\ntwo\n").unwrap();
+        std::fs::write(dir.path().join("clean.txt"), "same\n").unwrap();
+        run(&["add", "."]);
+        std::fs::write(&tracked, "one\nthree\n").unwrap();
+        std::fs::write(dir.path().join("new.txt"), "fresh\n").unwrap();
+
+        assert_eq!(indexed_text(&tracked, 1024).as_deref(), Some("one\ntwo\n"));
+        assert_eq!(indexed_text(&tracked, 4), None, "too large is not read");
+        assert_eq!(indexed_text(&dir.path().join("new.txt"), 1024), None);
+
+        let top = PathBuf::from(
+            String::from_utf8(
+                Command::new("git")
+                    .arg("-C")
+                    .arg(dir.path())
+                    .args(["rev-parse", "--show-toplevel"])
+                    .output()
+                    .unwrap()
+                    .stdout,
+            )
+            .unwrap()
+            .trim(),
+        );
+        let mut changed = changed_files(&dir.path().join("src"));
+        changed.sort();
+        assert_eq!(changed, vec![top.join("new.txt"), top.join("src/a.txt")]);
+        assert!(changed_files(tempfile::tempdir().unwrap().path()).is_empty());
     }
 
     #[test]

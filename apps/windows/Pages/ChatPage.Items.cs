@@ -53,6 +53,8 @@ internal sealed partial class ChatPage
         /// top-level row.
         /// </summary>
         public string GroupId;
+        /// <summary>How a step under an open Compact line is drawn.</summary>
+        public PlainStep Plain;
         /// <summary>The folded steps, on a <see cref="ItemKind.Group"/> row.</summary>
         public ChatStepGroup? Group;
         /// <summary>The question, on a <see cref="ItemKind.Question"/> row.</summary>

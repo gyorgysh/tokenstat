@@ -1046,7 +1046,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             enabled: enabled);
     }
 
-    private string ItemContentKey(DisplayItem item) => item.GroupId + "|" + (item.Kind switch
+    private string ItemContentKey(DisplayItem item) => item.GroupId + "|" + item.Plain + "|" + (item.Kind switch
     {
         ItemKind.Group => $"{item.Id}|{StepGroupKey(item.Group)}",
         ItemKind.Question => $"{item.Id}|{item.Question?.Answer}|{item.Question?.Delivery}|{_answering.Contains(item.Question?.Id ?? "")}",
@@ -1171,6 +1171,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     {
         UIElement view = item.Kind switch
         {
+        ItemKind.Tool or ItemKind.Edit when item.Plain == PlainStep.Detail => PlainStepDetail(item),
+        ItemKind.Tool or ItemKind.Edit when item.Plain == PlainStep.Line => PlainStepRow(item),
         ItemKind.User => UserBubble(item.Text),
         ItemKind.Assistant => AssistantBubble(item.Text),
         ItemKind.Thinking => ThinkingRow(item.Text),
@@ -2605,7 +2607,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 case "edit":
                     FlushText();
                     FlushThinking();
-                    items.Add(new DisplayItem
+                    var edit = new DisplayItem
                     {
                         Id = "edit-" + Format.Text(ev, "callId", items.Count.ToString()),
                         Kind = ItemKind.Edit,
@@ -2613,7 +2615,25 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                         Added = Format.Long(ev, "added"),
                         Removed = Format.Long(ev, "removed"),
                         Patch = Format.Text(ev, "patch"),
-                    });
+                    };
+                    // An edit announced as a tool call becomes that row, as on
+                    // the Mac, rather than a second row for one change.
+                    if (tools.TryGetValue(Format.Text(ev, "callId"), out var announced)
+                        && items[announced] is { Kind: ItemKind.Tool, Verb: "Edit" or "NotebookEdit" } call
+                        && (call.Target == edit.Path || string.IsNullOrEmpty(call.Target)))
+                    {
+                        edit.Id = call.Id;
+                        edit.Running = call.Running;
+                        edit.Failed = call.Failed;
+                        edit.StartedAt = call.StartedAt;
+                        edit.EndedAt = call.EndedAt;
+                        edit.Duration = call.Duration;
+                        items[announced] = edit;
+                    }
+                    else
+                    {
+                        items.Add(edit);
+                    }
                     break;
                 case "usage":
                     FlushText();
@@ -2673,7 +2693,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             if (index < 0 || index >= items.Count) continue;
             var tool = items[index];
-            if (tool.Kind != ItemKind.Tool || !tool.Running) continue;
+            // An edit merged into its call's row is still that call.
+            if (tool.Kind is not (ItemKind.Tool or ItemKind.Edit) || !tool.Running) continue;
             tool.Running = false;
             tool.Failed = failed;
             if (string.IsNullOrEmpty(tool.Detail) && !string.IsNullOrEmpty(detail))
@@ -2689,7 +2710,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (_running) return true;
         foreach (var item in Coalesce(_events))
         {
-            if (item.Kind == ItemKind.Tool && item.Running) return true;
+            if (item.Kind is (ItemKind.Tool or ItemKind.Edit) && item.Running) return true;
         }
         return false;
     }
