@@ -1231,21 +1231,15 @@ struct RootView: View {
         }
     }
 
-    /// Open the Changes tab beside the chat, at one file when a chat's list
-    /// of what a turn changed asked for it. Review, commit, push and the
-    /// pull request all live there.
+    /// Open the full working-tree review in the workspace's document strip.
+    /// A file pressed in the chat is placed first in that review.
     private func revealChanges(in folderID: String, path: String?) {
-        guard route.hasInspector else { return }
         browserWorkspaceID = nil
         terminalWorkspaceID = nil
-        workspaces.chatInspectorShowsSettings = false
-        workspaces.inspectorTab = .changes
-        if let path { workspaces.focusChange(path, in: folderID) }
-        isInspectorPresented = true
-        if !inspectorFits {
-            isOverlayVisible = true
-            overlayHeldByPress = true
+        openSection(.changes, in: folderID) {
+            if let path { workspaces.reviewWorkingTree(in: folderID, focusing: path) }
         }
+        Task { await workspaces.refresh() }
     }
 
     /// Toggle the trailing inspector. Same action as ⌥⌘B and the toolbar mark.

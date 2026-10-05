@@ -11,7 +11,11 @@ struct DiffDocumentView<Header: View>: View {
     @State private var loaded = false
     @State private var rowLimit = 2_000
     @State private var totalRows = 0
-    @State private var displayedRevisions: [UUID] = []
+    @State private var displayedRequest: Request?
+
+    private var request: Request {
+        Request(revisions: diffs.map(\.renderRevision), rowLimit: rowLimit, fileHeaders: fileHeaders)
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -43,20 +47,18 @@ struct DiffDocumentView<Header: View>: View {
                 .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
             }
         }
-        .task(id: Request(revisions: diffs.map(\.renderRevision), rowLimit: rowLimit, fileHeaders: fileHeaders)) {
+        .task(id: request) {
             // Mount the scroll view with its complete row set so its first
             // visible range is computed against the real document, rather
             // than a loading indicator that will be replaced asynchronously.
-            let revisions = diffs.map(\.renderRevision)
-            if displayedRevisions != revisions {
-                loaded = false
-                rows = []
-                rowLimit = 2_000
-                displayedRevisions = revisions
-            }
+            // Once mounted, keep the rows and scroll position while a newer
+            // snapshot builds. A file watcher refresh must not replace the
+            // document with a spinner or collapse its expanded pages.
+            let request = request
+            guard displayedRequest != request else { return }
             let input = diffs
-            let headers = fileHeaders
-            let limit = rowLimit
+            let headers = request.fileHeaders
+            let limit = request.rowLimit
             let task = Task.detached(priority: .userInitiated) {
                 (DiffDocumentRow.make(input, fileHeaders: headers, rowLimit: limit,
                                       maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit),
@@ -69,6 +71,7 @@ struct DiffDocumentView<Header: View>: View {
             guard !Task.isCancelled else { return }
             rows = result.0
             totalRows = result.1
+            displayedRequest = request
             loaded = true
         }
     }

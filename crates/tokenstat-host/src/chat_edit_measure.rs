@@ -12,13 +12,14 @@
 //!
 //! - a file already changed when the turn began, read then;
 //! - a file this turn already edited, as that edit left it;
-//! - otherwise the index copy, which for a file clean at the start of the
+//! - otherwise the captured index blob, which for a file clean at the start of the
 //!   turn is exactly what was on disk.
 //!
 //! The difference becomes the same `Edit` event every other agent sends
 //! itself. Everything here reads. Nothing writes to the folder or to git.
 
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -38,33 +39,50 @@ const PATCH_CAP: usize = 16 * 1024;
 const MAX_EDIT_DISTANCE: usize = 1500;
 const CONTEXT: usize = 3;
 
-/// What a file held: its text, or nothing because it did not exist.
+/// What a file held. An unknown baseline must never become an empty file.
 #[derive(Clone)]
 enum Contents {
     Absent,
     Text(String),
+    Unknown,
 }
 
-/// One turn's measuring. Built when the turn's output starts to be read.
+/// One turn's measuring. Built before the agent is launched.
 pub(crate) struct EditMeasure {
     known: HashMap<PathBuf, Contents>,
     root: PathBuf,
+    index: Option<tokenstat_workspace::git::IndexSnapshot>,
     /// Edits started and not yet ended: their call id and the files named.
     open: HashMap<String, Vec<String>>,
 }
 
 impl EditMeasure {
-    /// Reads every file already changed in `root`'s repository, so an edit
+    /// Reads bounded contents of files already changed in the repository, so an edit
     /// to one of them is measured from what it held, not from the index.
     pub(crate) fn start(root: &Path) -> Self {
-        let known = tokenstat_workspace::git::changed_files(root)
-            .into_iter()
-            .take(MAX_BASELINE_FILES)
-            .filter_map(|path| read(&path).map(|contents| (canonical(&path), contents)))
-            .collect();
+        let index = tokenstat_workspace::git::IndexSnapshot::read(root);
+        let known = index
+            .as_ref()
+            .map(|index| {
+                index
+                    .changed_files()
+                    .iter()
+                    .enumerate()
+                    .map(|(n, path)| {
+                        let contents = if n < MAX_BASELINE_FILES {
+                            read(path)
+                        } else {
+                            None
+                        };
+                        (canonical(path), contents.unwrap_or(Contents::Unknown))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         Self {
             known,
             root: root.to_path_buf(),
+            index,
             open: HashMap::new(),
         }
     }
@@ -104,18 +122,26 @@ impl EditMeasure {
             let path = self.resolve(reported);
             let before = match self.known.get(&path) {
                 Some(contents) => contents.clone(),
-                None => match tokenstat_workspace::git::indexed_text(&path, MAX_BYTES) {
-                    Some(text) => Contents::Text(text),
-                    // Not tracked, and not changed when the turn began: the
-                    // file is new in this turn.
-                    None => Contents::Absent,
+                None => match &self.index {
+                    Some(index) if index.contains(&path) => index
+                        .text(&path, MAX_BYTES)
+                        .map(Contents::Text)
+                        .unwrap_or(Contents::Unknown),
+                    // Not tracked or present at the start, inside the repo:
+                    // this file is new. Outside it the baseline is unknown.
+                    Some(index) if index.can_be_new(&path) => Contents::Absent,
+                    _ => Contents::Unknown,
                 },
             };
             let Some(after) = read(&path) else {
                 // Too large or not text now. What it held is unknown again.
-                self.known.remove(&path);
+                self.known.insert(path, Contents::Unknown);
                 continue;
             };
+            if matches!(before, Contents::Unknown) {
+                self.known.insert(path, after);
+                continue;
+            }
             let (added, removed, patch) = difference(text_of(&before), text_of(&after));
             self.known.insert(path, after);
             if added + removed > 0 {
@@ -149,8 +175,8 @@ fn canonical(path: &Path) -> PathBuf {
     if let Ok(real) = std::fs::canonicalize(path) {
         return real;
     }
-    match (path.parent().map(std::fs::canonicalize), path.file_name()) {
-        (Some(Ok(folder)), Some(name)) => folder.join(name),
+    match (path.parent(), path.file_name()) {
+        (Some(folder), Some(name)) => canonical(folder).join(name),
         _ => path.to_path_buf(),
     }
 }
@@ -179,8 +205,13 @@ fn read(path: &Path) -> Option<Contents> {
         }
         Err(_) => return None,
     }
-    let bytes = std::fs::read(path).ok()?;
-    if bytes.contains(&0) {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take((MAX_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() > MAX_BYTES || bytes.contains(&0) {
         return None;
     }
     String::from_utf8(bytes).ok().map(Contents::Text)
@@ -190,6 +221,7 @@ fn text_of(contents: &Contents) -> &str {
     match contents {
         Contents::Absent => "",
         Contents::Text(text) => text,
+        Contents::Unknown => unreachable!("unknown baselines are not diffed"),
     }
 }
 
@@ -203,8 +235,10 @@ enum Op {
 /// Lines added and removed between two texts, and a unified patch of them
 /// with a few lines of context, capped at `PATCH_CAP`.
 fn difference(old: &str, new: &str) -> (u32, u32, String) {
-    let a: Vec<&str> = old.lines().collect();
-    let b: Vec<&str> = new.lines().collect();
+    // Keep line endings: adding an EOF newline or changing CRLF is still
+    // a changed line in git, even when `str::lines` returns identical text.
+    let a: Vec<&str> = old.split_inclusive('\n').collect();
+    let b: Vec<&str> = new.split_inclusive('\n').collect();
     let ops = script(&a, &b);
     let added = ops.iter().filter(|op| **op == Op::Added).count();
     let removed = ops.iter().filter(|op| **op == Op::Removed).count();
@@ -353,10 +387,16 @@ fn patch(a: &[&str], b: &[&str], ops: &[Op]) -> String {
         ));
         for index in start..end {
             let (i, j) = at[index];
-            match ops[index] {
-                Op::Same => out.push_str(&format!(" {}\n", a[i])),
-                Op::Removed => out.push_str(&format!("-{}\n", a[i])),
-                Op::Added => out.push_str(&format!("+{}\n", b[j])),
+            let (marker, line) = match ops[index] {
+                Op::Same => (' ', a[i]),
+                Op::Removed => ('-', a[i]),
+                Op::Added => ('+', b[j]),
+            };
+            out.push(marker);
+            out.push_str(line.strip_suffix('\n').unwrap_or(line));
+            out.push('\n');
+            if !line.ends_with('\n') {
+                out.push_str("\\ No newline at end of file\n");
             }
         }
         if out.len() > PATCH_CAP {
@@ -391,6 +431,13 @@ mod tests {
         assert_eq!(counts("one\ntwo\n", ""), (0, 2));
         assert_eq!(counts("a\nb\nc\nd\n", "a\nc\nd\ne\n"), (1, 1));
         assert_eq!(counts("x\na\nb\n", "a\nb\ny\n"), (1, 1));
+        assert_eq!(counts("line", "line\n"), (1, 1));
+        assert_eq!(counts("line\r\n", "line\n"), (1, 1));
+        assert!(
+            difference("line", "line\n")
+                .2
+                .contains("-line\n\\ No newline at end of file\n+line")
+        );
     }
 
     #[test]
@@ -519,5 +566,121 @@ mod tests {
         };
         let out = measure.observe(vec![own, end("c1")]);
         assert_eq!(out.len(), 2);
+    }
+
+    fn repository() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        git(dir.path(), &["init", "-q"]);
+        dir
+    }
+
+    fn git(dir: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    #[test]
+    fn existing_files_in_untracked_directories_are_not_new_files() {
+        let dir = repository();
+        let folder = dir.path().join("untracked");
+        std::fs::create_dir(&folder).unwrap();
+        let file = folder.join("file.txt");
+        std::fs::write(&file, "mine\n").unwrap();
+        let mut measure = EditMeasure::start(dir.path());
+        std::fs::write(&file, "mine\nagent\n").unwrap();
+        assert_eq!(
+            edit_counts(&measure.observe(vec![start("e", &file), end("e")])),
+            vec![(1, 0)]
+        );
+    }
+
+    #[test]
+    fn staging_during_the_turn_does_not_replace_the_baseline() {
+        let dir = repository();
+        let file = dir.path().join("file.txt");
+        std::fs::write(&file, "old\n").unwrap();
+        git(dir.path(), &["add", "."]);
+        let mut measure = EditMeasure::start(dir.path());
+        std::fs::write(&file, "new\n").unwrap();
+        git(dir.path(), &["add", "."]);
+        assert_eq!(
+            edit_counts(&measure.observe(vec![start("e", &file), end("e")])),
+            vec![(1, 1)]
+        );
+    }
+
+    #[test]
+    fn deleting_the_parent_directory_still_counts_the_old_file() {
+        let dir = repository();
+        let folder = dir.path().join("src");
+        std::fs::create_dir(&folder).unwrap();
+        let file = folder.join("file.txt");
+        std::fs::write(&file, "old\n").unwrap();
+        git(dir.path(), &["add", "."]);
+        let mut measure = EditMeasure::start(dir.path());
+        std::fs::remove_dir_all(folder).unwrap();
+        assert_eq!(
+            edit_counts(&measure.observe(vec![start("e", &file), end("e")])),
+            vec![(0, 1)]
+        );
+    }
+
+    #[test]
+    fn unreadable_baselines_do_not_count_as_empty_files() {
+        let dir = repository();
+        let file = dir.path().join("binary.txt");
+        std::fs::write(&file, b"binary\0\n").unwrap();
+        git(dir.path(), &["add", "."]);
+        let mut measure = EditMeasure::start(dir.path());
+        std::fs::write(&file, "text\n").unwrap();
+        assert!(edit_counts(&measure.observe(vec![start("e1", &file), end("e1")])).is_empty());
+        // Once text is known, a later change can be counted from it.
+        std::fs::write(&file, "text\nmore\n").unwrap();
+        assert_eq!(
+            edit_counts(&measure.observe(vec![start("e2", &file), end("e2")])),
+            vec![(1, 0)]
+        );
+    }
+
+    #[test]
+    fn files_past_the_baseline_limit_are_unknown_not_new() {
+        let dir = repository();
+        for n in 0..=MAX_BASELINE_FILES {
+            std::fs::write(dir.path().join(format!("{n:04}.txt")), "mine\n").unwrap();
+        }
+        let mut measure = EditMeasure::start(dir.path());
+        let file = dir.path().join(format!("{MAX_BASELINE_FILES:04}.txt"));
+        std::fs::write(&file, "mine\nagent\n").unwrap();
+        assert!(edit_counts(&measure.observe(vec![start("e", &file), end("e")])).is_empty());
+    }
+
+    #[test]
+    fn without_a_repository_existing_content_is_not_an_addition() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("file.txt");
+        std::fs::write(&file, "mine\n").unwrap();
+        let mut measure = EditMeasure::start(dir.path());
+        std::fs::write(&file, "mine\nagent\n").unwrap();
+        assert!(edit_counts(&measure.observe(vec![start("e", &file), end("e")])).is_empty());
+    }
+
+    #[test]
+    fn ignored_existing_files_are_not_inferred_to_be_new() {
+        let dir = repository();
+        std::fs::write(dir.path().join(".gitignore"), "ignored.txt\n").unwrap();
+        let file = dir.path().join("ignored.txt");
+        std::fs::write(&file, "mine\n").unwrap();
+        let mut measure = EditMeasure::start(dir.path());
+        std::fs::write(&file, "mine\nagent\n").unwrap();
+        assert!(edit_counts(&measure.observe(vec![start("e", &file), end("e")])).is_empty());
     }
 }

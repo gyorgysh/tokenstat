@@ -3378,6 +3378,10 @@ impl Store {
                 },
             )?;
         }
+        // Capture the working tree before the process can edit it. Taking
+        // this snapshot in the drainer races the agent's first patch.
+        let measure = (chat.backend == "codex")
+            .then(|| crate::chat_edit_measure::EditMeasure::start(Path::new(&workspace.path)));
         let info = match tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
                 command: crate::launcher::spawn_command(&argv[0]),
@@ -3521,6 +3525,7 @@ impl Store {
                 &info.id,
                 &raw_path,
                 &response_output_dir,
+                measure,
             );
             drop(prompt_file);
             let _ = store.finish_turn(
@@ -3650,6 +3655,7 @@ impl Store {
         pty: &str,
         raw_path: &PathBuf,
         response_output_dir: &Path,
+        mut measure: Option<crate::chat_edit_measure::EditMeasure>,
     ) {
         let manager = tokenstat_pty::manager();
         let mut parser = Parser::new(backend);
@@ -3663,13 +3669,6 @@ impl Store {
         });
         // Codex names the files it edits but not the lines, so they are
         // measured here. See `chat_edit_measure`.
-        let mut measure = (backend == "codex")
-            .then(|| self.get(id).ok())
-            .flatten()
-            .and_then(|chat| crate::workspaces::folder(&chat.workspace_id).ok())
-            .map(|workspace| {
-                crate::chat_edit_measure::EditMeasure::start(Path::new(&workspace.path))
-            });
         let mut measured = |events: Vec<Event>| match measure.as_mut() {
             Some(measure) => measure.observe(events),
             None => events,

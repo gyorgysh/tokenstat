@@ -253,20 +253,21 @@ struct InlineDiffView: View {
             let revision = diff.renderRevision
             guard displayedRevision != revision else { return }
             let input = diff
+            let limit = Self.limit
             let built: DiffRowCache.Entry
-            if let first = DiffRowCache.first(for: input, limit: Self.limit) {
+            if let first = DiffRowCache.first(for: input, limit: limit) {
                 built = first
             } else {
                 let task = Task.detached(priority: .userInitiated) {
                     DiffRowCache.Entry(
-                        rows: DiffDocumentRow.make([input], fileHeaders: false, rowLimit: Self.limit,
+                        rows: DiffDocumentRow.make([input], fileHeaders: false, rowLimit: limit,
                                                    maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit),
                         total: DiffDocumentRow.count([input], fileHeaders: false,
                                                      maxLineCharacters: DiffDocumentRow.wrappedLineCharacterLimit))
                 }
                 built = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
                 guard !Task.isCancelled else { return }
-                DiffRowCache.store(built, for: input, limit: Self.limit)
+                DiffRowCache.store(built, for: input, limit: limit)
             }
             // The previous snapshot's rows stay until these replace them.
             rows = built.rows

@@ -16,6 +16,18 @@ struct WorkingTreeReviewView: View {
 
     private var files: [FileChange] { folder.git?.files ?? [] }
 
+    private var focus: WorkspacesModel.ChangeFocus? {
+        model.workingTreeReviewFocus.flatMap { $0.folderID == folder.id ? $0 : nil }
+    }
+
+    private var displayedDiffs: [FileDiff] {
+        guard let focus, let path = ChangePathMatch.path(focus.path, in: diffs.map(\.path)),
+              let index = diffs.firstIndex(where: { $0.path == path }) else { return diffs }
+        var ordered = diffs
+        ordered.insert(ordered.remove(at: index), at: 0)
+        return ordered
+    }
+
     /// Identity of the work to review: the folder and the change set. A save,
     /// an agent edit, or a commit changes it and reloads the diffs.
     private struct ReviewKey: Equatable {
@@ -49,11 +61,14 @@ struct WorkingTreeReviewView: View {
                     subtitle: L10n.text("apple.workingtreereviewview.the_working_tree_is_clean.84230b1f")
                 )
             } else {
-                DiffDocumentView(diffs: diffs) {
+                DiffDocumentView(diffs: displayedDiffs) {
                     if let error {
                         ErrorBanner(message: error) { Task { await load() } }
                     }
                 }
+                // A repeated press on the same file returns to its first
+                // hunk, while an ordinary file refresh keeps the tab mounted.
+                .id(focus?.generation)
             }
         }
         .background(Theme.background)
@@ -126,7 +141,12 @@ struct WorkingTreeReviewView: View {
             return failures
         }
         guard !Task.isCancelled, generation == loadGeneration else { return }
-        diffs = paths.compactMap { model.diff(for: $0, in: folderID) }
+        let refreshed = paths.compactMap { model.diff(for: $0, in: folderID) }
+        // The model's bounded preview cache can evict files after this
+        // review releases its reads. Re-decoding those files gives them new
+        // render identities even when their content is unchanged. Keep the
+        // review's own snapshots in that case, including their row identities.
+        if diffs != refreshed { diffs = refreshed }
         if failures > 0 {
             error = L10n.text("apple.workingtreereviewview.could_not_refresh_0_file_s_available_chang.89fdefb0", "\(failures)")
         }

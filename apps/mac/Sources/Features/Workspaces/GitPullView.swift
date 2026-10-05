@@ -12,27 +12,18 @@ struct GitPullControl: View {
     /// as the last fetch, which is why the sheet fetches again.
     let incoming: UInt32
     var onPulled: () async -> Void
-    @State private var supported = false
     @State private var presenting = false
 
     var body: some View {
-        Group {
-            if supported {
-                Button(incoming > 0 ? L10n.text("apple.gitpull.pull_count", "\(incoming)") : L10n.text("apple.gitpull.pull"), .download) {
-                    presenting = true
-                }
-                .buttonStyle(SecondaryButtonStyle(comfortable: true))
-                .help(L10n.text("apple.gitpull.help"))
-            }
+        Button(incoming > 0 ? L10n.text("apple.gitpull.pull_count", "\(incoming)") : L10n.text("apple.gitpull.pull"), .download) {
+            presenting = true
         }
-        .task(id: target) {
-            supported = false
-            let value = await target.supportsReviewedPull()
-            guard !Task.isCancelled else { return }
-            supported = value
-        }
+        .buttonStyle(SecondaryButtonStyle(comfortable: true))
+        .help(L10n.text("apple.gitpull.help"))
         .sheet(isPresented: $presenting) {
-            GitPullSheet(service: target, folderName: folderName, hostName: hostName, onPulled: onPulled)
+            RemoteHostFeatureGate(feature: .reviewedPull, peer: target.peer, hostName: hostName) {
+                GitPullSheet(service: target, folderName: folderName, hostName: hostName, onPulled: onPulled)
+            }
         }
     }
 }

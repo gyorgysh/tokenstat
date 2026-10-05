@@ -364,7 +364,7 @@ private fun emitGroup(
     // A Compact line already names its step, so a lone step drops its card
     // and shows what it produced. A run keeps a plain line per step.
     val plain = when {
-        !group.plain -> null
+        !group.plain || group.style == ChatStepGroup.Style.Thought -> null
         members.size == 1 -> PlainStep.Detail
         else -> PlainStep.Line
     }

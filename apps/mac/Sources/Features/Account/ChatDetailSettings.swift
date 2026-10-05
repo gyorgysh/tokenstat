@@ -97,13 +97,25 @@ struct ChatDetailSettings: View {
 
     private var rows: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Picker(L10n.text("apple.chatdetail.title"), selection: $preference.level) {
-                ForEach(ChatDetail.allCases, id: \.self) { level in
-                    Text(ChatDetailPreference.label(level)).tag(level)
-                }
+            Group {
+                #if os(macOS)
+                SegmentedCapsulePicker(
+                    options: ChatDetail.allCases.map {
+                        (value: $0, label: ChatDetailPreference.label($0), symbol: "")
+                    },
+                    selection: $preference.level
+                )
+                #else
+                SegmentedTabs(
+                    options: ChatDetail.allCases,
+                    selection: $preference.level,
+                    title: ChatDetailPreference.label,
+                    comfortable: true
+                )
+                #endif
             }
-            .labelsHidden()
-            .pickerStyle(.segmented)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(L10n.text("apple.chatdetail.title"))
             Text(ChatDetailPreference.explanation(preference.level))
                 #if os(macOS)
                 .font(Theme.caption)
@@ -119,7 +131,7 @@ struct ChatDetailSettings: View {
                 ) {
                     model.setAllGroups(open: !model.anyGroupOpen)
                 }
-                .buttonStyle(SecondaryButtonStyle(small: true))
+                .buttonStyle(AccentButtonStyle(small: true))
             }
         }
     }

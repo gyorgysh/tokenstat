@@ -425,9 +425,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         RenderInspector();
 
         var reviewPath = _reviewPath;
-        // A reload already queued behind this one would wipe the card, so it
-        // keeps the path to pin again.
-        if (!_reloadRequested) _reviewPath = null;
         if (reviewPath is string wanted)
         {
             wanted = wanted.Replace('\\', '/');
@@ -439,6 +436,9 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                 _root.Children.Add(Chrome.Card(file.Path, WorkspaceDiff.PreviewFile(this, file.Path, diff)));
             }
         }
+        // Loading the diff above yields too. Keep its request when a reload
+        // was queued during that read, since the reload will clear this card.
+        if (!_reloadRequested && _reviewPath == reviewPath) _reviewPath = null;
 
         var selectionRow = new FlowPanel { Spacing = Theme.SpaceS };
         selectionRow.Children.Add(new TextBlock

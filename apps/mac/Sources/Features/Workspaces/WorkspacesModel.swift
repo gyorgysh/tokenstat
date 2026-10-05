@@ -208,6 +208,8 @@ final class WorkspacesModel {
         let generation: Int
     }
     private(set) var changeFocus: ChangeFocus?
+    /// A chat file opened in the full review, separate from inspector focus.
+    private(set) var workingTreeReviewFocus: ChangeFocus?
     @ObservationIgnored private var changeFocusGeneration = 0
 
     func focusChange(_ path: String, in folderID: String) {
@@ -460,11 +462,18 @@ final class WorkspacesModel {
         }
     }
 
-    func reviewWorkingTree(in workspaceID: String) {
+    func reviewWorkingTree(in workspaceID: String, focusing path: String? = nil) {
+        if let path {
+            changeFocusGeneration += 1
+            workingTreeReviewFocus = ChangeFocus(folderID: workspaceID, path: path, generation: changeFocusGeneration)
+        } else if workingTreeReviewFocus?.folderID == workspaceID {
+            workingTreeReviewFocus = nil
+        }
         show(.changes, in: workspaceID)
     }
 
     func closeWorkingTreeReview(in workspaceID: String) {
+        if workingTreeReviewFocus?.folderID == workspaceID { workingTreeReviewFocus = nil }
         close(.changes, in: workspaceID)
     }
 

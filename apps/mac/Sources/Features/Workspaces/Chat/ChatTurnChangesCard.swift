@@ -6,8 +6,7 @@ import SwiftUI
 ///
 /// Shared by the Mac and the phone. The first few files are listed with
 /// what each one gained and lost, the rest are one tap away, and Review opens
-/// the folder's changes beside the chat, where they can be read, committed,
-/// pushed and turned into a pull request.
+/// the folder's full changes review, in a document tab on desktop.
 struct ChatTurnChangesCard: View {
     let changes: ChatTurnChanges
     /// Opens the folder's changes, at one file when a row was pressed. Nil

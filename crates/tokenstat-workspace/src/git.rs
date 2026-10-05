@@ -12,6 +12,7 @@
 //! `stash`. If a feature needs one, it belongs behind an explicit user action
 //! somewhere else, not in a status call that runs on a timer.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -739,7 +740,21 @@ pub fn indexed_text(file: &Path, max_bytes: usize) -> Option<String> {
     let name = file.file_name()?.to_str()?;
     // `:./name` is the index entry for this name relative to `-C`, so the
     // repository root never has to be worked out.
-    let out = git_command(dir, &["show", &format!(":./{name}")])
+    let blob = git(dir, &["rev-parse", "--verify", &format!(":./{name}")])?;
+    blob_text(dir, blob.trim(), max_bytes)
+}
+
+/// Read an immutable blob only after checking its size. Capturing stdout
+/// first would allocate even a multi-gigabyte tracked file before refusing it.
+fn blob_text(dir: &Path, blob: &str, max_bytes: usize) -> Option<String> {
+    let size = git(dir, &["cat-file", "-s", blob])?
+        .trim()
+        .parse::<u64>()
+        .ok()?;
+    if size > max_bytes as u64 {
+        return None;
+    }
+    let out = git_command(dir, &["cat-file", "blob", blob])
         .output()
         .ok()?;
     if !out.status.success() || out.stdout.len() > max_bytes || out.stdout.contains(&0) {
@@ -749,19 +764,21 @@ pub fn indexed_text(file: &Path, max_bytes: usize) -> Option<String> {
 }
 
 /// Files in the work tree around `dir` that differ from the index, or are
-/// untracked, as absolute paths. An untracked directory is one entry and is
-/// not walked, the same choice `status` makes. Empty outside a repository.
+/// untracked, as absolute paths, including files in untracked directories.
+/// Empty outside a repository.
 pub fn changed_files(dir: &Path) -> Vec<PathBuf> {
     let Some(top) = git(dir, &["rev-parse", "--show-toplevel"]) else {
         return Vec::new();
     };
     let top = PathBuf::from(top.trim_end_matches(['\n', '\r']));
-    let Some(raw) = git(
-        dir,
-        &["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
-    ) else {
-        return Vec::new();
-    };
+    changed_files_at(&top).unwrap_or_default()
+}
+
+fn changed_files_at(top: &Path) -> Option<Vec<PathBuf>> {
+    let raw = git(
+        top,
+        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    )?;
     let mut files = Vec::new();
     let mut entries = raw.split('\0');
     while let Some(entry) = entries.next() {
@@ -778,7 +795,77 @@ pub fn changed_files(dir: &Path) -> Vec<PathBuf> {
             files.push(top.join(path));
         }
     }
-    files
+    Some(files)
+}
+
+/// Index blob identities captured before an agent starts. Later staging or
+/// commits cannot change this turn's baseline, and a deleted parent folder
+/// does not prevent the old blob from being read.
+pub struct IndexSnapshot {
+    root: PathBuf,
+    blobs: HashMap<PathBuf, Option<String>>,
+    changed: Vec<PathBuf>,
+}
+
+impl IndexSnapshot {
+    pub fn read(dir: &Path) -> Option<Self> {
+        let top = git(dir, &["rev-parse", "--show-toplevel"])?;
+        // Match the spelling used by canonicalized edit paths, including
+        // Windows' extended-length prefix and ancestors reached by symlink.
+        let root = std::fs::canonicalize(top.trim_end_matches(['\n', '\r'])).ok()?;
+        let raw = git(&root, &["ls-files", "--stage", "-z"])?;
+        let mut blobs = HashMap::new();
+        for entry in raw.split('\0').filter(|entry| !entry.is_empty()) {
+            let (header, path) = entry.split_once('\t')?;
+            let mut fields = header.split_whitespace();
+            let mode = fields.next()?;
+            let blob = fields.next()?;
+            let stage = fields.next()?;
+            let text = stage == "0" && matches!(mode, "100644" | "100755");
+            blobs.insert(root.join(path), text.then(|| blob.to_string()));
+        }
+        let changed = changed_files_at(&root)?;
+        Some(Self {
+            root,
+            blobs,
+            changed,
+        })
+    }
+
+    pub fn changed_files(&self) -> &[PathBuf] {
+        &self.changed
+    }
+
+    pub fn contains(&self, file: &Path) -> bool {
+        self.blobs.contains_key(file)
+    }
+
+    /// Untracked files absent from status can only be inferred to be new
+    /// when they are inside this repository and not excluded by gitignore.
+    pub fn can_be_new(&self, file: &Path) -> bool {
+        file.starts_with(&self.root)
+            && git_command(
+                &self.root,
+                &[
+                    "check-ignore",
+                    "--quiet",
+                    "--no-index",
+                    "--",
+                    &file.to_string_lossy(),
+                ],
+            )
+            // check-ignore takes literal paths already and rejects the
+            // pathspec magic this helper enables for diff/status commands.
+            .env_remove("GIT_LITERAL_PATHSPECS")
+            .output()
+            .ok()
+            .is_some_and(|out| out.status.code() == Some(1))
+    }
+
+    /// None means an unreadable baseline, rather than an absent file.
+    pub fn text(&self, file: &Path, max_bytes: usize) -> Option<String> {
+        blob_text(&self.root, self.blobs.get(file)?.as_deref()?, max_bytes)
+    }
 }
 
 /// The checked-out branch's short name. None when HEAD is detached or the

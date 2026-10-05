@@ -268,6 +268,11 @@ struct WorkspaceChangesView: View {
                     .onChange(of: model.changeFocus, initial: true) { _, focus in
                         reveal(focus, in: folder, git: git, proxy: proxy)
                     }
+                    .onChange(of: git.files.map(\.path)) { _, _ in
+                        // The chat can name a just-edited file before the
+                        // working-tree refresh has added it to this list.
+                        reveal(model.changeFocus, in: folder, git: git, proxy: proxy)
+                    }
                 }
             } else {
                 // All other states (clean tree, not a git repo) are centred.
@@ -451,9 +456,9 @@ struct WorkspaceChangesView: View {
     /// on the end of the path.
     private func reveal(_ focus: WorkspacesModel.ChangeFocus?, in folder: WorkspaceFolder, git: GitStatus, proxy: ScrollViewProxy) {
         guard let focus, focus.folderID == folder.id else { return }
-        model.consumeChangeFocus(focus)
         guard let path = ChangePathMatch.path(focus.path, in: git.files.map(\.path)),
               let file = git.files.first(where: { $0.path == path }) else { return }
+        model.consumeChangeFocus(focus)
         let key = diffKey(file, in: folder)
         expandedDiffs.insert(key)
         withAnimation(.easeOut(duration: 0.2)) {
@@ -694,10 +699,10 @@ private struct CommitBox: View {
     /// Bring commits in, send them out, and the pull request they belong
     /// to. One row, so the whole round trip is in one place.
     private var syncRow: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: Theme.Space.s) { syncControls }
-            VStack(alignment: .leading, spacing: Theme.Space.s) { syncControls }
+        FlowLayout(spacing: Theme.Space.s, rowSpacing: Theme.Space.s) {
+            syncControls
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Theme.Space.s)
     }
 

@@ -1054,7 +1054,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         ItemKind.Assistant => $"{item.Id}|{item.Text}",
         ItemKind.Thinking => $"{item.Id}|{item.Text}",
         ItemKind.Tool => $"{item.Id}|{item.Verb}|{item.Target}|{item.Running}|{item.Failed}|{item.Duration}|{item.Detail}|{CardExpanded(item)}",
-        ItemKind.Edit => $"{item.Id}|{item.Path}|{item.Added}|{item.Removed}|{item.Patch}|{CardExpanded(item)}",
+        ItemKind.Edit => $"{item.Id}|{item.Path}|{item.Added}|{item.Removed}|{item.Patch}|{item.Running}|{item.Failed}|{item.Duration}|{CardExpanded(item)}",
         ItemKind.Approval => $"{item.Id}|{item.Pending}|{item.Approval?.ToJsonString()}",
         ItemKind.Attachment => $"{item.Id}|{item.Name}|{item.MediaType}|{item.Size}",
         ItemKind.Usage => $"{item.Id}|{item.Input}|{item.Output}|{item.Cost}",
@@ -2609,7 +2609,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     FlushThinking();
                     var edit = new DisplayItem
                     {
-                        Id = "edit-" + Format.Text(ev, "callId", items.Count.ToString()),
+                        // A single Codex call can report several files. The
+                        // event sequence keeps each row's identity distinct.
+                        Id = "edit-" + Format.Text(row, "seq", items.Count.ToString()),
                         Kind = ItemKind.Edit,
                         Path = Format.Text(ev, "path", L10n.Text("windows.chatpage.file.50009ce1")),
                         Added = Format.Long(ev, "added"),

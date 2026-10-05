@@ -185,6 +185,15 @@ class ChatTranscriptDetailTest {
     }
 
     @Test
+    fun openedCompactThoughtKeepsItsReasoningRenderer() {
+        val thought = think("k1", "The complete reasoning\nwith another line")
+        val out = fold(listOf(user("u1"), thought, say("a1")), ChatDetail.Compact) { true }
+        val step = out.filterIsInstance<ChatDisplayItem.GroupStep>().single()
+        assertEquals(thought, step.item)
+        assertNull(step.plain)
+    }
+
+    @Test
     fun groupIdsHoldWhileATurnGrows() {
         val rows = mutableListOf<ChatDisplayItem>(user("u1"), think("k1"), tool("t1", "Bash", running = true))
         val before = ids(fold(rows, ChatDetail.Minimal, running = true))
