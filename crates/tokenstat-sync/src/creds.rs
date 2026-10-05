@@ -110,6 +110,40 @@ pub fn token_with_source(vendor: Vendor) -> Result<Option<(String, TokenSource)>
     Ok(None)
 }
 
+/// A Cursor credential, or why there is none.
+#[derive(Debug, Clone)]
+pub enum CursorToken {
+    Token(String, TokenSource),
+    /// Every sign-in found has expired, at this epoch millisecond.
+    Lapsed(i64),
+    Missing,
+}
+
+/// [`token_with_source`] for Cursor, keeping what discovery learned when it
+/// found nothing usable. Discovery opens Cursor's state database and asks the
+/// keychain, so it runs once here rather than once for the token and again
+/// to explain its absence.
+pub fn cursor_token() -> Result<CursorToken, CredsError> {
+    if let Some(t) = env_token(Vendor::Cursor) {
+        return Ok(CursorToken::Token(t, TokenSource::Env));
+    }
+    let discovered = discover::cursor_sign_in();
+    if let discover::CursorSignIn::Live(t) = discovered {
+        return Ok(CursorToken::Token(t, TokenSource::Discovered));
+    }
+    let path = token_path(Vendor::Cursor)?;
+    if path.exists() {
+        let t = fs::read_to_string(&path)?.trim().to_string();
+        if !t.is_empty() {
+            return Ok(CursorToken::Token(t, TokenSource::Stored));
+        }
+    }
+    Ok(match discovered {
+        discover::CursorSignIn::Lapsed { expired_at_ms } => CursorToken::Lapsed(expired_at_ms),
+        _ => CursorToken::Missing,
+    })
+}
+
 pub fn has_token(vendor: Vendor) -> bool {
     token_for(vendor).ok().flatten().is_some()
 }

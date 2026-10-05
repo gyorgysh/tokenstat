@@ -1,7 +1,8 @@
 //! Cursor remote usage fetch.
 //!
-//! Preferred path: Bearer JWT from the Cursor app's macOS keychain
-//! (`cursor-access-token`), calling
+//! Preferred path: the newest unexpired Bearer JWT on this machine, from the
+//! Cursor app's own state database or the keychain item `cursor-agent login`
+//! writes (see `discover`), calling
 //! `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetFilteredUsageEvents`.
 //!
 //! Fallback: pasted `WorkosCursorSessionToken` against the dashboard CSV export.
@@ -15,12 +16,13 @@ use tokenstat_core::{
     BillingMode, Confidence, Counters, EventId, Extras, SourceId, Store, Timestamp, UsageEvent,
 };
 
-use crate::creds::{self, TokenSource, cache_is_fresh, cache_path, token_with_source};
+use crate::creds::{self, CursorToken, TokenSource, cache_is_fresh, cache_path};
 use crate::{FETCH_TTL, FetchReport, Vendor};
 
 const CSV_URL: &str = "https://cursor.com/api/dashboard/export-usage-events-csv?strategy=tokens";
 const PERIOD_USAGE_URL: &str =
     "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage";
+const PLAN_INFO_URL: &str = "https://api2.cursor.sh/aiserver.v1.DashboardService/GetPlanInfo";
 const EVENTS_URL: &str =
     "https://api2.cursor.sh/aiserver.v1.DashboardService/GetFilteredUsageEvents";
 
@@ -32,14 +34,25 @@ pub fn auth(token: &str) -> anyhow::Result<std::path::PathBuf> {
 
 /// Prefer a live keychain token; otherwise require a stored/pasted one.
 pub fn auth_auto() -> anyhow::Result<(std::path::PathBuf, TokenSource)> {
-    if crate::discover::local_token(Vendor::Cursor).is_some() {
+    let discovered = crate::discover::cursor_sign_in();
+    if let crate::discover::CursorSignIn::Live(_) = discovered {
         // Do not persist discovered tokens: they rotate in the keychain and a
         // stored copy would shadow the live one after expiry.
         let path = creds::session_path(Vendor::Cursor)?;
         return Ok((path, TokenSource::Discovered));
     }
+    if let crate::discover::CursorSignIn::Lapsed {
+        expired_at_ms: expired_ms,
+    } = discovered
+    {
+        anyhow::bail!(
+            "Cursor's sign-in on this machine expired on {}. Open the Cursor app, \
+             or run `cursor-agent login`, then try again.",
+            expiry_day(expired_ms)
+        );
+    }
     anyhow::bail!(
-        "no Cursor token in the OS keychain. Sign in to the Cursor app, \
+        "no Cursor sign-in found. Sign in to the Cursor app or run `cursor-agent login`, \
          or pass --token with a WorkosCursorSessionToken from cursor.com cookies."
     )
 }
@@ -51,11 +64,21 @@ pub fn logout() -> anyhow::Result<()> {
 
 /// Read Cursor's own subscription windows from its dashboard summary.
 pub fn limits() -> ProviderLimits {
-    let Some((token, _)) = token_with_source(Vendor::Cursor).ok().flatten() else {
-        return ProviderLimits::unavailable(
-            "cursor",
-            "No Cursor session was found, so its limits cannot be read.",
-        );
+    let token = match creds::cursor_token() {
+        Ok(CursorToken::Token(token, _)) => token,
+        Ok(CursorToken::Lapsed(expired_ms)) => {
+            return unavailable_limits(format!(
+                "Cursor's sign-in on this machine expired on {}. Open the Cursor app, \
+                 or run `cursor-agent login`, to read its limits again.",
+                expiry_day(expired_ms)
+            ));
+        }
+        Ok(CursorToken::Missing) | Err(_) => {
+            return ProviderLimits::unavailable(
+                "cursor",
+                "No Cursor session was found, so its limits cannot be read.",
+            );
+        }
     };
     let client = match reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
@@ -73,14 +96,8 @@ pub fn limits() -> ProviderLimits {
         .header("Content-Type", "application/json")
         .json(&serde_json::json!({}))
         .header("Referer", "https://cursor.com/settings");
-    if looks_like_jwt(&token) {
-        request = request.bearer_auth(&token);
-    } else {
-        request = request.header(
-            "Cookie",
-            format!("WorkosCursorSessionToken={}", token.trim()),
-        );
-    }
+    let bearer = looks_like_jwt(&token);
+    request = authorize(request, &token);
     let response = match request.send() {
         Ok(response) => response,
         Err(error) => return unavailable_limits(format!("Could not reach Cursor: {error}")),
@@ -90,7 +107,15 @@ pub fn limits() -> ProviderLimits {
         let note = if status == reqwest::StatusCode::UNAUTHORIZED
             || status == reqwest::StatusCode::FORBIDDEN
         {
-            "Cursor usage sync works with the local token, but its dashboard quota endpoint rejected it. A WorkosCursorSessionToken from cursor.com is required for limits.".to_string()
+            if bearer {
+                "Cursor rejected the sign-in found on this machine. Open the Cursor app, \
+                 or run `cursor-agent login`, to read its limits again."
+                    .to_string()
+            } else {
+                "Cursor rejected the saved session token. Run `tokenstat auth cursor` \
+                 after signing in to the Cursor app."
+                    .to_string()
+            }
         } else {
             format!("Cursor returned {status} for its usage endpoint.")
         };
@@ -153,14 +178,108 @@ pub fn limits() -> ProviderLimits {
     if windows.is_empty() {
         return unavailable_limits("Cursor reported no subscription usage windows.".to_string());
     }
+    // The usage answer does not name the plan. A second, smaller call does,
+    // and a failure there costs only the label, never the reading.
+    let plan = string_value(&body, &["plan", "membershipType", "planName", "planType"])
+        .or_else(|| cached_plan_name(&client, &token));
     ProviderLimits {
         source: "cursor".to_string(),
-        plan: string_value(&body, &["plan", "membershipType", "planName", "planType"]),
+        plan,
         windows,
         observed_at_ms,
         note: None,
         stale: false,
     }
+}
+
+fn authorize(
+    request: reqwest::blocking::RequestBuilder,
+    token: &str,
+) -> reqwest::blocking::RequestBuilder {
+    if looks_like_jwt(token) {
+        request.bearer_auth(token.trim())
+    } else {
+        request.header(
+            "Cookie",
+            format!("WorkosCursorSessionToken={}", token.trim()),
+        )
+    }
+}
+
+/// How long a plan name is trusted before it is asked for again. A plan
+/// changes when somebody upgrades, which is rare next to a limits refresh, and
+/// asking every time doubled the requests and the worst-case wait.
+const PLAN_TTL: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+
+/// The plan name, from a small file beside the usage cache when it is fresh
+/// and belongs to the same account, otherwise from Cursor.
+///
+/// The file holds the plan and a hash of the account id, never the token.
+fn cached_plan_name(client: &reqwest::blocking::Client, token: &str) -> Option<String> {
+    let account = account_key(token);
+    let path = cache_path(Vendor::Cursor, "plan.json").ok();
+    if let Some(path) = &path
+        && cache_is_fresh(path, PLAN_TTL)
+        && let Some(plan) = fs::read_to_string(path)
+            .ok()
+            .and_then(|text| cached_plan_for(&text, &account))
+    {
+        return Some(plan);
+    }
+    let plan = plan_name(client, token)?;
+    if let Some(path) = &path {
+        let record = serde_json::json!({ "account": account, "plan": plan }).to_string();
+        let _ = crate::snapshot::write_private_atomically(path, &record);
+    }
+    Some(plan)
+}
+
+fn cached_plan_for(text: &str, account: &str) -> Option<String> {
+    let record: serde_json::Value = serde_json::from_str(text).ok()?;
+    if record.get("account")?.as_str()? != account {
+        return None;
+    }
+    record.get("plan")?.as_str().map(str::to_string)
+}
+
+/// Which account a token signs in, as a hash: the JWT subject when there is
+/// one, the token itself otherwise.
+fn account_key(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let subject = crate::discover::jwt_subject(token).unwrap_or_else(|| token.trim().to_string());
+    Sha256::digest(subject.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// `planInfo.planName` from Cursor's plan endpoint, for example `Pro`.
+fn plan_name(client: &reqwest::blocking::Client, token: &str) -> Option<String> {
+    let request = client
+        .post(PLAN_INFO_URL)
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({}));
+    let response = authorize(request, token).send().ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = response.json().ok()?;
+    plan_name_from(&body)
+}
+
+fn plan_name_from(body: &serde_json::Value) -> Option<String> {
+    body.pointer("/planInfo/planName")?
+        .as_str()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+}
+
+/// A calendar day for a sentence, in UTC, since this only says roughly when.
+fn expiry_day(ms: i64) -> String {
+    jiff::Timestamp::from_millisecond(ms)
+        .map(|timestamp| timestamp.strftime("%Y-%m-%d").to_string())
+        .unwrap_or_else(|_| "an earlier date".to_string())
 }
 
 fn unavailable_limits(note: String) -> ProviderLimits {
@@ -248,17 +367,10 @@ pub fn fetch_into(
     tz: &jiff::tz::TimeZone,
     force: bool,
 ) -> anyhow::Result<FetchReport> {
-    let Some((token, source)) = token_with_source(Vendor::Cursor)? else {
-        return Ok(FetchReport {
-            vendor: "cursor",
-            skipped_no_token: true,
-            message: Some(
-                "no Cursor token. Sign in to the Cursor app (keychain), or: \
-                 tokenstat auth cursor --token <WorkosCursorSessionToken>"
-                    .into(),
-            ),
-            ..FetchReport::default()
-        });
+    let (token, source) = match creds::cursor_token()? {
+        CursorToken::Token(token, source) => (token, source),
+        CursorToken::Lapsed(expired_ms) => return Ok(no_token_report(Some(expired_ms))),
+        CursorToken::Missing => return Ok(no_token_report(None)),
     };
 
     let use_bearer = looks_like_jwt(&token);
@@ -303,6 +415,25 @@ pub fn fetch_into(
         skipped_no_token: false,
         message: Some(format!("auth via {src}")),
     })
+}
+
+/// A fetch that had no token to use, and the sentence that says why.
+fn no_token_report(lapsed_at_ms: Option<i64>) -> FetchReport {
+    let message = match lapsed_at_ms {
+        Some(expired_ms) => format!(
+            "Cursor's sign-in expired on {}. Open the Cursor app, or run `cursor-agent login`.",
+            expiry_day(expired_ms)
+        ),
+        None => "no Cursor token. Sign in to the Cursor app, run `cursor-agent login`, or: \
+                 tokenstat auth cursor --token <WorkosCursorSessionToken>"
+            .into(),
+    };
+    FetchReport {
+        vendor: "cursor",
+        skipped_no_token: true,
+        message: Some(message),
+        ..FetchReport::default()
+    }
 }
 
 fn looks_like_jwt(token: &str) -> bool {
@@ -745,6 +876,31 @@ Date,Model,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Toke
         assert_eq!(windows.len(), 2);
         assert_eq!(windows[0].resets_at_ms, Some(1_060_000));
         assert_eq!(string_value(&summary, &["plan"]), Some("Pro".to_string()));
+    }
+
+    #[test]
+    fn a_cached_plan_belongs_to_one_account() {
+        let token = "header.eyJzdWIiOiJ1c2VyLTEifQ.signature";
+        let account = account_key(token);
+        assert_eq!(account, account_key("other.eyJzdWIiOiJ1c2VyLTEifQ.sig"));
+        assert_ne!(
+            account,
+            account_key("header.eyJzdWIiOiJ1c2VyLTIifQ.signature")
+        );
+        let record = serde_json::json!({"account": account, "plan": "Pro"}).to_string();
+        assert_eq!(cached_plan_for(&record, &account), Some("Pro".to_string()));
+        assert_eq!(cached_plan_for(&record, "someone-else"), None);
+        assert!(!record.contains("signature"));
+    }
+
+    #[test]
+    fn reads_the_plan_name_from_plan_info() {
+        let body = serde_json::json!({
+            "planInfo": {"planName": "Pro", "price": "$20/mo"},
+            "nextUpgrade": {"name": "Pro+"}
+        });
+        assert_eq!(plan_name_from(&body), Some("Pro".to_string()));
+        assert_eq!(plan_name_from(&serde_json::json!({"planInfo": {}})), None);
     }
 
     #[test]
