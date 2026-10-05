@@ -2614,7 +2614,8 @@ final class ChatModel {
     }
 
     private var steerBackend: Bool {
-        ["claude", "codex", "cursor", "muse"].contains(selected?.backend ?? "")
+        if selected?.backend == "cursor", selected?.mode == "plan" { return false }
+        return ["claude", "codex", "cursor", "muse"].contains(selected?.backend ?? "")
     }
 
     /// Muse can take a note on any autonomy. The others only while they ask first.

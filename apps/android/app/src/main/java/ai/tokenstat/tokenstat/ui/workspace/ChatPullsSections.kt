@@ -962,6 +962,7 @@ fun ChatSection(
                 staged.isEmpty(),
                 chat?.str("backend"),
                 chat?.str("autonomy"),
+                chat?.str("mode"),
                 protocol,
                 steerUnsupported,
             )
@@ -1699,6 +1700,7 @@ fun ChatSection(
                 staged.isEmpty(),
                 openChat?.str("backend"),
                 openChat?.str("autonomy"),
+                openChat?.str("mode"),
                 protocol,
                 steerUnsupported,
             )

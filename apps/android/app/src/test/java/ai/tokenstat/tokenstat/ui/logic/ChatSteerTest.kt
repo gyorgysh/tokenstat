@@ -265,6 +265,16 @@ class ChatSteerTest {
     }
 
     @Test
+    fun `cursor plan turns queue because they have no note hook`() {
+        assertTrue(promise(backend = "cursor"))
+        assertTrue(attempt(backend = "cursor"))
+        assertFalse(promise(backend = "cursor", mode = "plan"))
+        assertFalse(attempt(backend = "cursor", mode = "plan"))
+        assertTrue(promise(backend = "claude", mode = "plan"))
+        assertTrue(attempt(backend = "codex", mode = "plan"))
+    }
+
+    @Test
     fun `a running turn or a parked note polls sooner`() {
         assertEquals(400L, ChatSteer.pollDelayMillis(running = true, noteParked = false))
         assertEquals(400L, ChatSteer.pollDelayMillis(running = false, noteParked = true))
@@ -276,9 +286,10 @@ class ChatSteerTest {
         stagedEmpty: Boolean = true,
         backend: String? = "claude",
         autonomy: String? = "standard",
+        mode: String? = "execute",
         protocol: Long? = 25L,
         unsupported: Boolean = false,
-    ) = ChatSteer.promisesNote(running, stagedEmpty, backend, autonomy, protocol, unsupported)
+    ) = ChatSteer.promisesNote(running, stagedEmpty, backend, autonomy, mode, protocol, unsupported)
 
     private fun attempt(
         running: Boolean = true,
@@ -286,7 +297,8 @@ class ChatSteerTest {
         stagedEmpty: Boolean = true,
         backend: String? = "claude",
         autonomy: String? = "standard",
+        mode: String? = "execute",
         protocol: Long? = 25L,
         unsupported: Boolean = false,
-    ) = ChatSteer.canAttempt(running, text, stagedEmpty, backend, autonomy, protocol, unsupported)
+    ) = ChatSteer.canAttempt(running, text, stagedEmpty, backend, autonomy, mode, protocol, unsupported)
 }

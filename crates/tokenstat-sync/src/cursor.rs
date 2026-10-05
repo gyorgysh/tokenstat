@@ -1,7 +1,7 @@
 //! Cursor remote usage fetch.
 //!
 //! Preferred path: the newest unexpired Bearer JWT on this machine, from the
-//! Cursor app's own state database or the keychain item `cursor-agent login`
+//! Cursor app's own state database or the credential store `cursor-agent login`
 //! writes (see `discover`), calling
 //! `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetFilteredUsageEvents`.
 //!

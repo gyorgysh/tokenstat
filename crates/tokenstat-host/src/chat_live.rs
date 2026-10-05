@@ -126,6 +126,14 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
 }
 
 impl Launch {
+    #[cfg(all(test, unix))]
+    pub(crate) fn test_mailbox(directory: tempfile::TempDir) -> Self {
+        Self {
+            directory,
+            argv: Vec::new(),
+        }
+    }
+
     pub(crate) fn prepare(
         backend: &str,
         argv: &[String],

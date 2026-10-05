@@ -10,12 +10,13 @@ internal fun chatFastModeAvailable(model: String?, models: JsonArray?): Boolean 
     if (models == null) return false
     if (models.isEmpty()) return true
     if (model == null) return false
+    val candidate = model.removeSuffix("[1m]")
     return models.any { item ->
         val prefix = (item as? JsonPrimitive)?.content ?: return@any false
-        if (model == prefix) return@any true
-        if (!model.startsWith(prefix)) return@any false
-        val suffix = model.substring(prefix.length)
-        suffix.startsWith('[') || (suffix.length == 9 && suffix[0] == '-' && suffix.drop(1).all { it in '0'..'9' })
+        if (candidate == prefix) return@any true
+        if (!candidate.startsWith(prefix)) return@any false
+        val suffix = candidate.substring(prefix.length)
+        suffix.length == 9 && suffix[0] == '-' && suffix.drop(1).all { it in '0'..'9' }
     }
 }
 

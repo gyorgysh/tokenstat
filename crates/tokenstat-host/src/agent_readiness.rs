@@ -21,6 +21,7 @@
 
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
+use tokenstat_sync::discover::cursor_auth_file;
 
 /// What the front end may say about an agent, and what it may offer next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,8 +174,24 @@ pub(crate) fn sign_in(id: &str) -> Option<&'static SignIn> {
 
 /// The readiness of one agent id, given whether the launcher found its command.
 pub(crate) fn readiness(id: &str, installed: bool) -> (Readiness, Option<i64>) {
-    match home_dir() {
-        Some(home) => readiness_in(id, installed, &home, now_ms(), &from_environment),
+    let uses_launch_environment = matches!(id, "cursor_agent" | "muse");
+    let home = if uses_launch_environment {
+        launch_home_dir()
+    } else {
+        home_dir()
+    };
+    match home {
+        Some(home) => readiness_in(
+            id,
+            installed,
+            &home,
+            now_ms(),
+            if uses_launch_environment {
+                &from_launch_environment
+            } else {
+                &from_environment
+            },
+        ),
         // No home to look in is not evidence either way.
         None if installed => (Readiness::Unknown, None),
         None => (Readiness::NotInstalled, None),
@@ -189,6 +206,30 @@ pub(crate) fn readiness(id: &str, installed: bool) -> (Readiness, Option<i64>) {
 /// machine running the tests happened to export `CLAUDE_CONFIG_DIR`.
 fn from_environment(var: &str) -> Option<PathBuf> {
     std::env::var_os(var).map(PathBuf::from)
+}
+
+/// Cursor and Muse run with the captured login shell's variables over the
+/// daemon's environment. Match that overlay without waiting on a catalog read.
+fn launch_environment(
+    var: &str,
+    login: Option<&tokenstat_pty::LoginEnv>,
+    process: &dyn Fn(&str) -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    login
+        .and_then(|login| login.vars.get(var))
+        .map(PathBuf::from)
+        .or_else(|| process(var))
+}
+
+fn from_launch_environment(var: &str) -> Option<PathBuf> {
+    let login = tokenstat_pty::login_env();
+    launch_environment(var, login.as_deref(), &from_environment)
+}
+
+fn launch_home_dir() -> Option<PathBuf> {
+    from_launch_environment("HOME")
+        .filter(|home| !home.as_os_str().is_empty())
+        .or_else(home_dir)
 }
 
 /// The same decision against a given home, clock and environment, so it can be
@@ -251,7 +292,11 @@ fn readiness_in(
 /// What the macOS keychain holds for the Cursor CLI.
 enum KeychainAnswer {
     /// The stored tokens, possibly none.
+    #[cfg(any(target_os = "macos", test))]
     Found(Vec<String>),
+    /// A stored API key can obtain fresh tokens after both JWTs expire.
+    #[cfg(target_os = "macos")]
+    ApiKey,
     /// The keychain could not be asked. Not evidence either way.
     Unreadable,
 }
@@ -271,14 +316,26 @@ fn cursor_agent_readiness(
     keychain: &dyn Fn() -> KeychainAnswer,
 ) -> (Readiness, Option<i64>) {
     // A key in the environment is a login with no file and no expiry.
-    if env("CURSOR_API_KEY").is_some_and(|key| !key.as_os_str().is_empty()) {
+    if ["CURSOR_API_KEY", "CURSOR_AUTH_TOKEN"]
+        .iter()
+        .any(|var| env(var).is_some_and(|key| !key.as_os_str().is_empty()))
+    {
         return (Readiness::SignedIn, None);
     }
-    let file_store =
-        env("AGENT_CLI_CREDENTIAL_STORE").is_some_and(|kind| kind == Path::new("file"));
-    let tokens = if cfg!(target_os = "macos") && !file_store {
+    let store = env("AGENT_CLI_CREDENTIAL_STORE");
+    // Memory mode ignores any saved login. A separate CLI sign-in process
+    // cannot leave credentials for a future turn, so file/keychain evidence
+    // cannot establish readiness here.
+    if store.as_deref() == Some(Path::new("memory")) {
+        return (Readiness::Unknown, None);
+    }
+    let file_store = store.as_deref() == Some(Path::new("file"));
+    let tokens: Vec<String> = if cfg!(target_os = "macos") && !file_store {
         match keychain() {
+            #[cfg(any(target_os = "macos", test))]
             KeychainAnswer::Found(tokens) => tokens,
+            #[cfg(target_os = "macos")]
+            KeychainAnswer::ApiKey => return (Readiness::SignedIn, None),
             KeychainAnswer::Unreadable => return (Readiness::Unknown, None),
         }
     } else {
@@ -353,30 +410,18 @@ fn muse_readiness(home: &Path, env: &dyn Fn(&str) -> Option<PathBuf>) -> (Readin
     }
 }
 
-fn cursor_auth_file(home: &Path, env: &dyn Fn(&str) -> Option<PathBuf>) -> PathBuf {
-    if cfg!(target_os = "macos") {
-        home.join(".cursor/auth.json")
-    } else if cfg!(windows) {
-        env("APPDATA")
-            .unwrap_or_else(|| home.join("AppData").join("Roaming"))
-            .join("Cursor")
-            .join("auth.json")
-    } else {
-        env("XDG_CONFIG_HOME")
-            .filter(|dir| !dir.as_os_str().is_empty())
-            .unwrap_or_else(|| home.join(".config"))
-            .join("cursor")
-            .join("auth.json")
-    }
-}
-
-/// Ask the login keychain for the CLI's two items, through the same lookup the
+/// Ask the login keychain for the CLI's login items, through the same lookup the
 /// limits read uses. A missing item is an answer. A keychain that cannot be
 /// asked is not.
 fn cursor_keychain() -> KeychainAnswer {
     #[cfg(target_os = "macos")]
     {
         use tokenstat_sync::discover::{KeychainItem, keychain_item};
+        match keychain_item("cursor-api-key", "cursor-user") {
+            KeychainItem::Found(key) if !key.is_empty() => return KeychainAnswer::ApiKey,
+            KeychainItem::Unreadable => return KeychainAnswer::Unreadable,
+            _ => {}
+        }
         let mut tokens = Vec::new();
         for service in ["cursor-access-token", "cursor-refresh-token"] {
             match keychain_item(service, "cursor-user") {
@@ -466,9 +511,9 @@ pub(crate) fn describe(id: &str, installed: bool) -> Value {
 /// `describe` for an explicit sign-in check of an installed agent, which may
 /// also read evidence a catalog read must not wait on: the macOS keychain.
 pub(crate) fn describe_checked(id: &str) -> Value {
-    let (state, expires) = match home_dir() {
+    let (state, expires) = match launch_home_dir() {
         Some(home) if id == "cursor_agent" => {
-            cursor_agent_readiness(&home, now_ms(), &from_environment, &cursor_keychain)
+            cursor_agent_readiness(&home, now_ms(), &from_launch_environment, &cursor_keychain)
         }
         _ => readiness(id, true),
     };
@@ -619,6 +664,72 @@ mod tests {
         let key = |var: &str| (var == "CURSOR_API_KEY").then(|| PathBuf::from("key"));
         let found = cursor_agent_readiness(home.path(), now, &key, &keychain(Vec::new()));
         assert_eq!(found, (Readiness::SignedIn, None));
+    }
+
+    #[test]
+    fn cursor_memory_store_ignores_saved_logins_and_accepts_environment_auth() {
+        let home = tempfile::tempdir().unwrap();
+        let memory =
+            |var: &str| (var == "AGENT_CLI_CREDENTIAL_STORE").then(|| PathBuf::from("memory"));
+        let auth = cursor_auth_file(home.path(), &memory);
+        std::fs::create_dir_all(auth.parent().unwrap()).unwrap();
+        std::fs::write(&auth, json!({"apiKey": "saved-key"}).to_string()).unwrap();
+        let no_keychain = || panic!("memory mode must not read the keychain");
+        assert_eq!(
+            cursor_agent_readiness(home.path(), 0, &memory, &no_keychain),
+            (Readiness::Unknown, None)
+        );
+        let auth_token = |var: &str| {
+            if var == "CURSOR_AUTH_TOKEN" {
+                Some(PathBuf::from("token-from-env"))
+            } else {
+                memory(var)
+            }
+        };
+        assert_eq!(
+            cursor_agent_readiness(home.path(), 0, &auth_token, &no_keychain),
+            (Readiness::SignedIn, None)
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn cursor_keychain_api_key_can_renew_expired_login_tokens() {
+        let home = tempfile::tempdir().unwrap();
+        assert_eq!(
+            cursor_agent_readiness(home.path(), i64::MAX, &no_env, &|| KeychainAnswer::ApiKey),
+            (Readiness::SignedIn, None)
+        );
+    }
+
+    #[test]
+    fn cursor_and_muse_readiness_uses_the_environment_their_turn_inherits() {
+        let process = |var: &str| match var {
+            "XDG_CONFIG_HOME" => Some(PathBuf::from("/daemon-config")),
+            "META_API_KEY" => Some(PathBuf::from("daemon-key")),
+            "AGENT_CLI_CREDENTIAL_STORE" => Some(PathBuf::from("file")),
+            _ => None,
+        };
+        let login = tokenstat_pty::LoginEnv {
+            path: String::new(),
+            vars: std::collections::HashMap::from([
+                ("XDG_CONFIG_HOME".into(), "/login-config".into()),
+                ("META_API_KEY".into(), String::new()),
+                ("HOME".into(), "/login-home".into()),
+            ]),
+        };
+        let env = |var: &str| launch_environment(var, Some(&login), &process);
+        assert_eq!(env("XDG_CONFIG_HOME"), Some(PathBuf::from("/login-config")));
+        assert_eq!(env("META_API_KEY"), Some(PathBuf::new()));
+        assert_eq!(env("HOME"), Some(PathBuf::from("/login-home")));
+        assert_eq!(
+            env("AGENT_CLI_CREDENTIAL_STORE"),
+            Some(PathBuf::from("file"))
+        );
+        assert_eq!(
+            launch_environment("META_API_KEY", None, &process),
+            process("META_API_KEY")
+        );
     }
 
     #[test]

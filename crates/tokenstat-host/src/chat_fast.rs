@@ -26,13 +26,15 @@ pub(crate) fn available(backend: &str, model: Option<&str>) -> bool {
         return true;
     }
     let Some(model) = model else { return false };
+    // Claude accepts the context suffix on full snapshot IDs as well as
+    // aliases. Strip it before checking the optional snapshot date.
+    let model = model.strip_suffix("[1m]").unwrap_or(model);
     models.iter().any(|prefix| {
         model == *prefix
             || model.strip_prefix(prefix).is_some_and(|suffix| {
-                suffix.starts_with('[')
-                    || suffix.strip_prefix('-').is_some_and(|date| {
-                        date.len() == 8 && date.bytes().all(|byte| byte.is_ascii_digit())
-                    })
+                suffix.strip_prefix('-').is_some_and(|date| {
+                    date.len() == 8 && date.bytes().all(|byte| byte.is_ascii_digit())
+                })
             })
     })
 }
@@ -88,8 +90,10 @@ mod tests {
             "opus",
             "opus[1m]",
             "claude-opus-5-5",
+            "claude-opus-5-5[1m]",
             "claude-opus-5",
             "claude-opus-4-8-20260525",
+            "claude-opus-4-8-20260525[1m]",
         ] {
             assert!(available("claude", Some(model)), "{model}");
         }
@@ -100,6 +104,9 @@ mod tests {
             Some("claude-opus-4-7"),
             Some("claude-opus-4-6"),
             Some("claude-opus-5-9"),
+            Some("claude-opus-5-9[1m]"),
+            Some("claude-opus-4-7-20260416[1m]"),
+            Some("opus[bogus]"),
         ] {
             assert!(!available("claude", model));
         }

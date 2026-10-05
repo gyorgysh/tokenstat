@@ -90,9 +90,10 @@ object ChatSteer {
         stagedEmpty: Boolean,
         backend: String?,
         autonomy: String?,
+        mode: String?,
         protocol: Long?,
         unsupported: Boolean,
-    ): Boolean = carriesNote(running, stagedEmpty, backend, autonomy, unsupported) &&
+    ): Boolean = carriesNote(running, stagedEmpty, backend, autonomy, mode, unsupported) &&
         protocol != null && protocol >= HostContracts.STEER_MIN_PROTOCOL
 
     /// True when the send should ask the host to park a note. A missing
@@ -103,11 +104,12 @@ object ChatSteer {
         stagedEmpty: Boolean,
         backend: String?,
         autonomy: String?,
+        mode: String?,
         protocol: Long?,
         unsupported: Boolean,
     ): Boolean {
         if (text.trim().isEmpty()) return false
-        if (!carriesNote(running, stagedEmpty, backend, autonomy, unsupported)) return false
+        if (!carriesNote(running, stagedEmpty, backend, autonomy, mode, unsupported)) return false
         if (protocol != null && protocol < HostContracts.STEER_MIN_PROTOCOL) return false
         return true
     }
@@ -137,13 +139,15 @@ object ChatSteer {
         stagedEmpty: Boolean,
         backend: String?,
         autonomy: String?,
+        mode: String?,
         unsupported: Boolean,
     ): Boolean {
         if (!running || !stagedEmpty || unsupported) return false
         if (backend !in noteBackends) return false
+        if (backend == "cursor" && mode == "plan") return false
         if (backend == "muse") return true
-        val mode = autonomy?.trim().orEmpty()
-        return mode.isEmpty() || mode == "standard"
+        val autonomyMode = autonomy?.trim().orEmpty()
+        return autonomyMode.isEmpty() || autonomyMode == "standard"
     }
 
     private fun idOf(row: JsonObject): String? {

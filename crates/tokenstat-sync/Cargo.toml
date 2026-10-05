@@ -28,3 +28,6 @@ zip = { workspace = true }
 sha2 = { workspace = true }
 getrandom = { workspace = true }
 atomicwrites = "0.4.4"
+
+[dev-dependencies]
+tempfile.workspace = true

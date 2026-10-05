@@ -5,6 +5,7 @@
 //! locally is how `tokenstat scan` can cover Cursor without a paste dance.
 
 use crate::Vendor;
+use std::path::{Path, PathBuf};
 
 /// Best-effort read of a session the vendor app already left on disk / in the
 /// OS keychain. Returns `None` when the platform has no known location or the
@@ -29,13 +30,14 @@ pub enum CursorSignIn {
     Missing,
 }
 
-/// Cursor keeps one sign-in in two places, and only one of them is current.
+/// Read the Cursor app's sign-in and the CLI's selected credential store.
 ///
 /// The app writes its live session into its own `state.vscdb` and renews it
 /// there. The keychain item is what `cursor-agent login` left behind, and it
 /// is not renewed by the app. It can sit expired for weeks while the app stays
 /// signed in, and reading only it made every quota read a 401 and left the
-/// plan panel on a stale reading. Read both and use the newest token that
+/// plan panel on a stale reading. The CLI uses a file on other platforms and
+/// when explicitly configured to on macOS. Use the newest token that
 /// has not expired. An expired one is never handed out as live, because it
 /// would shadow a session the person pasted with `tokenstat auth cursor`.
 pub fn cursor_sign_in() -> CursorSignIn {
@@ -65,9 +67,48 @@ fn cursor_access_token() -> Option<String> {
 fn cursor_candidates() -> Vec<String> {
     let mut candidates = Vec::new();
     candidates.extend(cursor_app_state_token());
+    let env = |key: &str| std::env::var_os(key).map(PathBuf::from);
+    if let Some(base) = directories::BaseDirs::new() {
+        candidates.extend(cursor_cli_file_token(base.home_dir(), &env));
+    }
     #[cfg(target_os = "macos")]
-    candidates.extend(keychain_password("cursor-access-token", "cursor-user"));
+    if !matches!(
+        env("AGENT_CLI_CREDENTIAL_STORE").as_deref(),
+        Some(kind) if kind == Path::new("file") || kind == Path::new("memory")
+    ) {
+        candidates.extend(keychain_password("cursor-access-token", "cursor-user"));
+    }
     candidates
+}
+
+/// The CLI's file credential store, matching its platform-specific location.
+pub fn cursor_auth_file(home: &Path, env: &dyn Fn(&str) -> Option<PathBuf>) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        home.join(".cursor/auth.json")
+    } else if cfg!(windows) {
+        env("APPDATA")
+            .filter(|dir| !dir.as_os_str().is_empty())
+            .unwrap_or_else(|| home.join("AppData").join("Roaming"))
+            .join("Cursor/auth.json")
+    } else {
+        env("XDG_CONFIG_HOME")
+            .filter(|dir| !dir.as_os_str().is_empty())
+            .unwrap_or_else(|| home.join(".config"))
+            .join("cursor/auth.json")
+    }
+}
+
+fn cursor_cli_file_token(home: &Path, env: &dyn Fn(&str) -> Option<PathBuf>) -> Option<String> {
+    let kind = env("AGENT_CLI_CREDENTIAL_STORE");
+    if kind.as_deref() == Some(Path::new("memory"))
+        || (cfg!(target_os = "macos") && kind.as_deref() != Some(Path::new("file")))
+    {
+        return None;
+    }
+    let raw = std::fs::read_to_string(cursor_auth_file(home, env)).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let token = value.get("accessToken")?.as_str()?.trim();
+    (!token.is_empty()).then(|| token.to_string())
 }
 
 /// The newest unexpired token. A token without a readable `exp` is kept as a
@@ -294,6 +335,42 @@ mod tests {
     fn reads_the_expiry_of_a_jwt() {
         assert_eq!(jwt_expiry(&jwt(1_790_136_811)), Some(1_790_136_811));
         assert_eq!(jwt_expiry("not-a-jwt"), None);
+    }
+
+    #[test]
+    fn cursor_file_login_is_discovered_and_expiry_checked() {
+        let home = tempfile::tempdir().unwrap();
+        let env = |key: &str| (key == "AGENT_CLI_CREDENTIAL_STORE").then(|| PathBuf::from("file"));
+        let path = cursor_auth_file(home.path(), &env);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let now = 1_000_000;
+        let live = jwt(now + 7_200);
+        std::fs::write(
+            &path,
+            serde_json::json!({"accessToken": live, "refreshToken": "not-an-access-token"})
+                .to_string(),
+        )
+        .unwrap();
+        let token = cursor_cli_file_token(home.path(), &env).unwrap();
+        assert_eq!(resolve_cursor(vec![token], now), CursorSignIn::Live(live));
+
+        let expired = jwt(now - 10);
+        std::fs::write(
+            &path,
+            serde_json::json!({"accessToken": expired}).to_string(),
+        )
+        .unwrap();
+        let token = cursor_cli_file_token(home.path(), &env).unwrap();
+        assert_eq!(
+            resolve_cursor(vec![token], now),
+            CursorSignIn::Lapsed {
+                expired_at_ms: (now - 10) * 1000
+            }
+        );
+
+        let memory =
+            |key: &str| (key == "AGENT_CLI_CREDENTIAL_STORE").then(|| PathBuf::from("memory"));
+        assert!(cursor_cli_file_token(home.path(), &memory).is_none());
     }
 
     #[test]

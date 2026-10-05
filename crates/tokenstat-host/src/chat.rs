@@ -2173,18 +2173,48 @@ impl Store {
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
         let mut switched_pty = None;
-        let result = self.edit_conversation(id, |chat| {
-            if changes.expected_revision.is_some_and(|revision| revision != chat.send_revision) {
-                return Err("This conversation changed before its setup was saved. Review the latest settings and try again.".into());
+        if let Some(fast) = changes.fast_mode {
+            // The per-conversation acceptance lock serializes setup changes,
+            // but the global index lock must stay available to the drainer
+            // while the CLI acknowledges a runtime control.
+            let selected = self.get(id)?;
+            let current = {
+                let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+                let index: Index = serde_json::from_slice(
+                    &fs::read(self.root.join("conversations.json"))
+                        .map_err(|error| error.to_string())?,
+                )
+                .map_err(|_| "conversation index could not be verified")?;
+                index
+                    .conversations
+                    .into_iter()
+                    .find(|chat| chat.id == id && chat.workspace_id == selected.workspace_id)
+                    .ok_or("this conversation is no longer in that workspace")?
+            };
+            validate_update_setup(&current, &changes)?;
+            if current.running && fast != current.fast_mode {
+                if fast && !crate::chat_fast::available(&current.backend, current.model.as_deref())
+                {
+                    return Err(
+                        "Select a supported Codex model or Claude Opus model to use fast mode."
+                            .into(),
+                    );
+                }
+                let live = self
+                    .live_speed
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get(id)
+                    .cloned()
+                    .ok_or("This CLI cannot change speed during a turn. Finish or stop the turn first.")?;
+                live.1.apply(&live.0, fast)?;
+                switched_pty = Some((live.0, current.send_revision));
             }
-            if chat.running
-                && (changes.backend.is_some()
-                    || changes.model.is_some()
-                    || changes.effort.is_some()
-                    || changes.mode.is_some()
-                    || changes.autonomy.is_some())
-            {
-                return Err("finish or stop this turn before changing its setup".into());
+        }
+        let result = self.edit_conversation(id, |chat| {
+            validate_update_setup(chat, &changes)?;
+            if switched_pty.as_ref().is_some_and(|(_, revision)| *revision != chat.send_revision) {
+                return Err("This conversation changed before its setup was saved. Review the latest settings and try again.".into());
             }
             if let Some(title) = changes.title.filter(|text| !text.trim().is_empty()) {
                 chat.title = title;
@@ -2217,12 +2247,6 @@ impl Store {
                         "Select a supported Codex model or Claude Opus model to use fast mode."
                             .into(),
                     );
-                }
-                if chat.running && fast != chat.fast_mode {
-                    let live = self.live_speed.lock().unwrap_or_else(PoisonError::into_inner)
-                        .get(id).cloned().ok_or("This CLI cannot change speed during a turn. Finish or stop the turn first.")?;
-                    live.1.apply(&live.0, fast)?;
-                    switched_pty = Some(live.0);
                 }
                 chat.fast_mode = fast;
             }
@@ -2257,7 +2281,7 @@ impl Store {
             Ok(chat.clone())
         });
         if result.is_err()
-            && let Some(pty) = switched_pty
+            && let Some((pty, _)) = switched_pty
         {
             // A runtime change whose saved record failed must not continue
             // using a paid setting that none of the clients can see.
@@ -5762,6 +5786,25 @@ fn parse_cursor(raw: &str, len: u64, first: u64) -> Option<u64> {
     Some(start)
 }
 
+fn validate_update_setup(chat: &Conversation, changes: &Update) -> Result<(), String> {
+    if changes
+        .expected_revision
+        .is_some_and(|revision| revision != chat.send_revision)
+    {
+        return Err("This conversation changed before its setup was saved. Review the latest settings and try again.".into());
+    }
+    if chat.running
+        && (changes.backend.is_some()
+            || changes.model.is_some()
+            || changes.effort.is_some()
+            || changes.mode.is_some()
+            || changes.autonomy.is_some())
+    {
+        return Err("finish or stop this turn before changing its setup".into());
+    }
+    Ok(())
+}
+
 fn next_send_revision(revision: u64) -> Result<u64, String> {
     revision
         .checked_add(1)
@@ -6716,6 +6759,39 @@ mod tests {
     }
 
     #[test]
+    fn cursor_notes_ride_execute_turns_but_plan_turns_queue() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        prepare_live_chat(&store, "chat-test");
+        retune_chat(&store, "chat-test", "cursor", "standard");
+        store
+            .edit_conversation("chat-test", |chat| {
+                chat.mode = "execute".into();
+                Ok(())
+            })
+            .unwrap();
+        store.steer("chat-test", "inspect the right file").unwrap();
+        let cursor = store.register_turn_token("chat-test", "cursor").unwrap();
+        assert_eq!(
+            store.take_steer_for_token(&cursor).unwrap().as_deref(),
+            Some("inspect the right file")
+        );
+        store
+            .edit_conversation("chat-test", |chat| {
+                chat.mode = "plan".into();
+                Ok(())
+            })
+            .unwrap();
+        let chat = store.get("chat-test").unwrap();
+        assert!(!takes_notes_mid_turn(&chat));
+        let error = store
+            .steer("chat-test", "a queued plan message")
+            .unwrap_err();
+        assert!(error.contains("not asking before tools"), "{error}");
+        assert!(parked_note(&store, "chat-test").is_none());
+    }
+
+    #[test]
     fn steer_parks_one_note_and_a_later_note_replaces_it() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
@@ -6847,7 +6923,7 @@ mod tests {
 
     #[test]
     fn steer_consumption_persists_one_user_message_for_each_supported_backend() {
-        for backend in ["claude", "codex", "muse"] {
+        for backend in ["claude", "codex", "cursor", "muse"] {
             if !note_backend(backend) {
                 continue;
             }
@@ -6856,6 +6932,12 @@ mod tests {
             let store = Store::at(path.clone());
             prepare_live_chat(&store, "chat-test");
             retune_chat(&store, "chat-test", backend, "standard");
+            store
+                .edit_conversation("chat-test", |chat| {
+                    chat.mode = "execute".into();
+                    Ok(())
+                })
+                .unwrap();
             let rich = "## Result\n\n**Kept** `code`\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n```swift\nlet value = 1\n```";
             store.record_events(
                 "chat-test",
@@ -7693,6 +7775,110 @@ mod tests {
             store.event_page(&fork.id, None, 1).unwrap().usage.unwrap(),
             expected
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_live_speed_acknowledgement_does_not_block_transcript_updates() {
+        for change_revision in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let store = Arc::new(Store::at(root.path().join("chat")));
+            conversation_for_receipts(&store, "fast-live");
+            store
+                .update(
+                    "fast-live",
+                    Update {
+                        backend: Some("codex".into()),
+                        ..Update::default()
+                    },
+                )
+                .unwrap();
+            let chat = store.set_running("fast-live", true).unwrap();
+            let mailbox = tempfile::tempdir().unwrap();
+            let directory = mailbox.path().to_path_buf();
+            fs::write(directory.join("ready.json"), "true").unwrap();
+            let manager = tokenstat_pty::manager();
+            let process = manager
+                .spawn(&tokenstat_pty::Spawn {
+                    command: "/bin/sleep".into(),
+                    args: vec!["30".into()],
+                    cwd: root.path().into(),
+                    workspace_id: None,
+                    hidden: true,
+                    rows: 24,
+                    cols: 80,
+                    no_color: true,
+                    dark: None,
+                    environment: Vec::new(),
+                })
+                .unwrap();
+            store.live_speed.lock().unwrap().insert(
+                chat.id.clone(),
+                (
+                    process.id.clone(),
+                    Arc::new(crate::chat_live::Launch::test_mailbox(mailbox)),
+                ),
+            );
+            let responder_store = Arc::clone(&store);
+            let responder = std::thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                let request = loop {
+                    if let Some(request) = fs::read_dir(&directory).unwrap().find_map(|entry| {
+                        let entry = entry.unwrap();
+                        let name = entry.file_name().to_string_lossy().into_owned();
+                        (name.starts_with("request-") && name.ends_with(".json"))
+                            .then(|| entry.path())
+                    }) {
+                        break request;
+                    }
+                    assert!(Instant::now() < deadline, "speed request was never sent");
+                    std::thread::sleep(Duration::from_millis(10));
+                };
+                // The drainer can publish the session while the provider is
+                // acknowledging speed. This acquires both index locks.
+                responder_store
+                    .set_resume("fast-live", "codex", "session-from-drainer")
+                    .unwrap();
+                if change_revision {
+                    responder_store
+                        .edit_conversation("fast-live", |chat| {
+                            chat.send_revision += 1;
+                            Ok(())
+                        })
+                        .unwrap();
+                }
+                let value: Value = serde_json::from_slice(&fs::read(&request).unwrap()).unwrap();
+                let response =
+                    directory.join(format!("response-{}.json", value["id"].as_str().unwrap()));
+                fs::write(response.with_extension("tmp"), r#"{"ok":true}"#).unwrap();
+                fs::rename(response.with_extension("tmp"), response).unwrap();
+            });
+            let result = store.update(
+                "fast-live",
+                Update {
+                    fast_mode: Some(true),
+                    expected_revision: Some(chat.send_revision),
+                    ..Update::default()
+                },
+            );
+            responder.join().unwrap();
+            let alive = manager.info(&process.id).unwrap().alive;
+            manager.close(&process.id).unwrap();
+            let current = store.get("fast-live").unwrap();
+            assert_eq!(
+                current.resume_token.as_deref(),
+                Some("session-from-drainer")
+            );
+            if change_revision {
+                assert!(result.unwrap_err().contains("conversation changed"));
+                assert!(!current.fast_mode);
+                assert!(!alive, "an acknowledged but unsaved paid setting must stop");
+            } else {
+                assert!(result.unwrap().fast_mode);
+                assert!(current.fast_mode);
+                assert!(alive, "an acknowledged speed change must keep its turn");
+            }
+        }
     }
 
     #[test]

@@ -13,10 +13,10 @@ class ChatFastModeTest {
         val models = Json.parseToJsonElement("""["opus","claude-opus-5-5","claude-opus-5","claude-opus-4-8"]""") as JsonArray
         assertFalse(chatFastModeAvailable("opus", null))
         assertTrue(chatFastModeAvailable(null, JsonArray(emptyList())))
-        for (model in listOf("opus", "opus[1m]", "claude-opus-5-5", "claude-opus-4-8-20260525")) {
+        for (model in listOf("opus", "opus[1m]", "claude-opus-5-5", "claude-opus-5-5[1m]", "claude-opus-4-8-20260525", "claude-opus-4-8-20260525[1m]")) {
             assertTrue(chatFastModeAvailable(model, models))
         }
-        for (model in listOf(null, "sonnet", "haiku", "claude-opus-4-7", "claude-opus-5-9")) {
+        for (model in listOf(null, "sonnet", "haiku", "claude-opus-4-7", "claude-opus-5-9", "claude-opus-5-9[1m]", "claude-opus-4-7-20260416[1m]", "opus[bogus]")) {
             assertFalse(chatFastModeAvailable(model, models))
         }
         assertFalse(chatFastModeOn(Json.parseToJsonElement("{}") as JsonObject))
