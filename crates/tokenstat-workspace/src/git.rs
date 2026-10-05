@@ -742,17 +742,12 @@ pub fn indexed_text(file: &Path, max_bytes: usize) -> Option<String> {
     // `:./name` is the index entry for this name relative to `-C`, so the
     // repository root never has to be worked out.
     let blob = git(dir, &["rev-parse", "--verify", &format!(":./{name}")])?;
-    blob_text(dir, blob.trim(), max_bytes, None)
+    blob_text(dir, blob.trim(), max_bytes)
 }
 
 /// Read an immutable blob only after checking its size. Capturing stdout
 /// first would allocate even a multi-gigabyte tracked file before refusing it.
-fn blob_text(
-    dir: &Path,
-    blob: &str,
-    max_bytes: usize,
-    checkout_path: Option<&str>,
-) -> Option<String> {
+fn blob_text(dir: &Path, blob: &str, max_bytes: usize) -> Option<String> {
     let size = git(dir, &["cat-file", "-s", blob])?
         .trim()
         .parse::<u64>()
@@ -760,20 +755,7 @@ fn blob_text(
     if size > max_bytes as u64 {
         return None;
     }
-    let path_arg;
-    let args = if let Some(path) = checkout_path {
-        // Built-in checkout conversions include CRLF and working-tree encoding.
-        // Never run a repository's external smudge filter for a line count.
-        let attr = git(dir, &["check-attr", "-z", "filter", "--", path])?;
-        if !matches!(attr.split('\0').nth(2), Some("unspecified" | "unset")) {
-            return None;
-        }
-        path_arg = format!("--path={path}");
-        vec!["cat-file", "--filters", &path_arg, blob]
-    } else {
-        vec!["cat-file", "blob", blob]
-    };
-    let mut child = git_command(dir, &args)
+    let mut child = git_command(dir, &["cat-file", "blob", blob])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -837,6 +819,7 @@ pub struct IndexSnapshot {
     root: PathBuf,
     blobs: HashMap<PathBuf, Option<String>>,
     changed: Vec<PathBuf>,
+    autocrlf: bool,
 }
 
 impl IndexSnapshot {
@@ -857,10 +840,16 @@ impl IndexSnapshot {
             blobs.insert(root.join(path), text.then(|| blob.to_string()));
         }
         let changed = changed_files_at(&root)?;
+        let autocrlf = git(
+            &root,
+            &["config", "--type=bool-or-str", "--get", "core.autocrlf"],
+        )
+        .is_some_and(|value| matches!(value.trim(), "true" | "input"));
         Some(Self {
             root,
             blobs,
             changed,
+            autocrlf,
         })
     }
 
@@ -894,18 +883,42 @@ impl IndexSnapshot {
             .is_some_and(|out| out.status.code() == Some(1))
     }
 
-    /// The captured blob in its checkout form, including Git's line-ending
-    /// conversion. None means an unreadable baseline, rather than an absent file.
-    pub fn text(&self, file: &Path, max_bytes: usize) -> Option<String> {
+    fn repository_path(&self, file: &Path) -> Option<String> {
         let path = file.strip_prefix(&self.root).ok()?.to_str()?.to_owned();
         #[cfg(windows)]
         let path = path.replace('\\', "/");
-        blob_text(
+        Some(path)
+    }
+
+    /// Whether Git ignores CRLF/LF differences for this text file. A clean
+    /// working file can use either ending even when checkout would produce CRLF.
+    pub fn normalizes_crlf(&self, file: &Path) -> bool {
+        let Some(path) = self.repository_path(file) else {
+            return false;
+        };
+        let Some(attrs) = git(
             &self.root,
-            self.blobs.get(file)?.as_deref()?,
-            max_bytes,
-            Some(&path),
-        )
+            &["check-attr", "-z", "text", "eol", "--", &path],
+        ) else {
+            return false;
+        };
+        let fields: Vec<_> = attrs.split('\0').collect();
+        match fields.get(2).copied() {
+            Some("unset") => false,
+            Some("set" | "auto") => true,
+            _ => self.autocrlf || matches!(fields.get(5).copied(), Some("lf" | "crlf")),
+        }
+    }
+
+    /// None means an unreadable baseline, rather than an absent file. External
+    /// checkout filters cannot be reconstructed by this read-only measurement.
+    pub fn text(&self, file: &Path, max_bytes: usize) -> Option<String> {
+        let path = self.repository_path(file)?;
+        let attr = git(&self.root, &["check-attr", "-z", "filter", "--", &path])?;
+        if !matches!(attr.split('\0').nth(2), Some("unspecified" | "unset")) {
+            return None;
+        }
+        blob_text(&self.root, self.blobs.get(file)?.as_deref()?, max_bytes)
     }
 }
 

@@ -13,7 +13,7 @@
 //! - a file already changed when the turn began, read then;
 //! - a file this turn already edited, as that edit left it;
 //! - otherwise the captured index blob, which for a file clean at the start of the
-//!   turn is exactly what was on disk.
+//!   turn matches the working text after Git's line-ending normalization.
 //!
 //! The difference becomes the same `Edit` event every other agent sends
 //! itself. Everything here reads. Nothing writes to the folder or to git.
@@ -142,7 +142,20 @@ impl EditMeasure {
                 self.known.insert(path, after);
                 continue;
             }
-            let (added, removed, patch) = difference(text_of(&before), text_of(&after));
+            // Git keeps LF in the index for normalized text, while clean
+            // working files may hold LF or CRLF. Compare both in Git's form.
+            let (added, removed, patch) = if self
+                .index
+                .as_ref()
+                .is_some_and(|index| index.normalizes_crlf(&path))
+            {
+                difference(
+                    &text_of(&before).replace("\r\n", "\n"),
+                    &text_of(&after).replace("\r\n", "\n"),
+                )
+            } else {
+                difference(text_of(&before), text_of(&after))
+            };
             self.known.insert(path, after);
             if added + removed > 0 {
                 edits.push(Event::Edit {
@@ -619,30 +632,33 @@ mod tests {
     }
 
     #[test]
-    fn clean_crlf_files_use_the_checkout_form_of_the_index() {
+    fn clean_lf_and_crlf_files_use_gits_normalization_rules() {
         for autocrlf in [true, false] {
-            let dir = repository();
-            if autocrlf {
-                git(dir.path(), &["config", "core.autocrlf", "true"]);
-            } else {
-                git(dir.path(), &["config", "core.autocrlf", "false"]);
-                std::fs::write(dir.path().join(".gitattributes"), "*.txt text eol=crlf\n").unwrap();
+            for ending in ["\n", "\r\n"] {
+                let dir = repository();
+                if autocrlf {
+                    git(dir.path(), &["config", "core.autocrlf", "true"]);
+                } else {
+                    git(dir.path(), &["config", "core.autocrlf", "false"]);
+                    std::fs::write(dir.path().join(".gitattributes"), "*.txt text eol=crlf\n")
+                        .unwrap();
+                }
+                let file = dir.path().join("file.txt");
+                std::fs::write(&file, ["one", "two", "three", ""].join(ending)).unwrap();
+                git(dir.path(), &["add", "."]);
+                let mut measure = EditMeasure::start(dir.path());
+                std::fs::write(&file, ["one", "TWO", "three", ""].join(ending)).unwrap();
+                assert_eq!(
+                    edit_counts(&measure.observe(vec![start("e", &file), end("e")])),
+                    vec![(1, 1)],
+                    "only the edited line, for either working-tree line ending"
+                );
             }
-            let file = dir.path().join("file.txt");
-            std::fs::write(&file, "one\r\ntwo\r\nthree\r\n").unwrap();
-            git(dir.path(), &["add", "."]);
-            let mut measure = EditMeasure::start(dir.path());
-            std::fs::write(&file, "one\r\nTWO\r\nthree\r\n").unwrap();
-            assert_eq!(
-                edit_counts(&measure.observe(vec![start("e", &file), end("e")])),
-                vec![(1, 1)],
-                "only the edited line, not every CRLF line"
-            );
         }
     }
 
     #[test]
-    fn checkout_conversions_stay_bounded_and_do_not_run_external_filters() {
+    fn normalized_baselines_stay_bounded_and_do_not_run_external_filters() {
         let dir = repository();
         git(dir.path(), &["config", "core.autocrlf", "true"]);
         let file = dir.path().join("file.txt");
@@ -650,12 +666,9 @@ mod tests {
         git(dir.path(), &["add", "."]);
         let index = tokenstat_workspace::git::IndexSnapshot::read(dir.path()).unwrap();
         let file = canonical(&file);
-        assert_eq!(index.text(&file, 6).as_deref(), Some("a\r\nb\r\n"));
-        assert_eq!(
-            index.text(&file, 4),
-            None,
-            "converted output exceeds its cap"
-        );
+        assert_eq!(index.text(&file, 4).as_deref(), Some("a\nb\n"));
+        assert!(index.normalizes_crlf(&file));
+        assert_eq!(index.text(&file, 3), None, "baseline exceeds its cap");
 
         std::fs::write(dir.path().join(".gitattributes"), "*.txt filter=external\n").unwrap();
         git(
@@ -668,6 +681,22 @@ mod tests {
         );
         assert_eq!(index.text(&file, 1024), None);
         assert!(!dir.path().join("filter-ran").exists());
+    }
+
+    #[test]
+    fn disabling_text_normalization_keeps_real_line_ending_changes() {
+        let dir = repository();
+        git(dir.path(), &["config", "core.autocrlf", "true"]);
+        std::fs::write(dir.path().join(".gitattributes"), "*.txt -text\n").unwrap();
+        let file = dir.path().join("file.txt");
+        std::fs::write(&file, "one\r\ntwo\r\n").unwrap();
+        git(dir.path(), &["add", "."]);
+        let mut measure = EditMeasure::start(dir.path());
+        std::fs::write(&file, "one\ntwo\n").unwrap();
+        assert_eq!(
+            edit_counts(&measure.observe(vec![start("e", &file), end("e")])),
+            vec![(2, 2)]
+        );
     }
 
     #[test]
