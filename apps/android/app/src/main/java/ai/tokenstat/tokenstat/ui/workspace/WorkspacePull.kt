@@ -8,6 +8,7 @@ import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
+import ai.tokenstat.tokenstat.ui.components.TsModalScreen
 import ai.tokenstat.tokenstat.ui.localization.L10n
 import ai.tokenstat.tokenstat.ui.logic.HostContracts
 import ai.tokenstat.tokenstat.ui.logic.TunnelCopy
@@ -15,11 +16,7 @@ import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
@@ -37,12 +34,11 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
@@ -59,27 +55,50 @@ fun PullButton(
     hostLabel: String,
     incoming: Int,
     protocol: Long?,
+    modifier: Modifier = Modifier,
+    onPulled: () -> Unit,
+) = PullAction(
+    request = { method, params -> model.workspaceSection(peer, method, params) },
+    peer = peer,
+    workspace = workspace,
+    folderName = folderName,
+    hostLabel = hostLabel,
+    incoming = incoming,
+    protocol = protocol,
+    modifier = modifier,
+    onPulled = onPulled,
+)
+
+@Composable
+internal fun PullAction(
+    request: suspend (String, JsonObject) -> JsonElement,
+    peer: String,
+    workspace: String,
+    folderName: String,
+    hostLabel: String,
+    incoming: Int,
+    protocol: Long?,
+    modifier: Modifier = Modifier,
     onPulled: () -> Unit,
 ) {
     if (!HostContracts.supportsReviewedPull(protocol)) return
-    var presenting by remember { mutableStateOf(false) }
+    var presenting by remember(peer, workspace) { mutableStateOf(false) }
     TsSecondaryButton(
         label = if (incoming > 0) L10n.text("android.gitpull.pull_count", "$incoming") else L10n.text("android.gitpull.pull"),
         icon = ActionIcon.Download.vector,
-        small = true,
+        modifier = modifier,
         onClick = { presenting = true },
     )
     if (presenting) {
-        PullSheet(model, peer, workspace, folderName, hostLabel, onDismiss = { presenting = false }, onPulled = onPulled)
+        PullSheet(request, workspace, folderName, hostLabel, onDismiss = { presenting = false }, onPulled = onPulled)
     }
 }
 
 private fun JsonObject.count(key: String): Long = get(key)?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L
 
 @Composable
-private fun PullSheet(
-    model: AppViewModel,
-    peer: String,
+internal fun PullSheet(
+    request: suspend (String, JsonObject) -> JsonElement,
     workspace: String,
     folderName: String,
     hostLabel: String,
@@ -95,17 +114,19 @@ private fun PullSheet(
     var error by remember { mutableStateOf<String?>(null) }
 
     suspend fun check() {
+        if (working) return
         working = true
         error = null
         outcome = null
         try {
             runCatching {
-                model.workspaceSection(peer, "workspace.pullReview", buildJsonObject { put("id", workspace) }) as? JsonObject
+                gitFormRequest(request, "workspace.pullReview", buildJsonObject { put("id", workspace) }).gitFormObject()
             }.onSuccess {
                 review = it
                 // The fetch moved ahead and behind, so the folder's numbers move too.
                 onPulled()
             }.onFailure {
+                if (it is kotlinx.coroutines.CancellationException) throw it
                 review = null
                 error = TunnelCopy.display(it.message ?: L10n.text("android.gitpull.failed"), hostLabel)
             }
@@ -115,19 +136,21 @@ private fun PullSheet(
     }
 
     suspend fun pull(reviewed: JsonObject) {
+        if (working || outcome != null) return
         working = true
         pulling = true
         error = null
         try {
             runCatching {
-                model.workspaceSection(peer, "workspace.pullReviewed", buildJsonObject {
+                gitFormRequest(request, "workspace.pullReviewed", buildJsonObject {
                     put("id", workspace)
                     put("review", reviewed)
-                }) as? JsonObject
+                }).gitFormObject()
             }.onSuccess {
                 outcome = it
                 onPulled()
             }.onFailure {
+                if (it is kotlinx.coroutines.CancellationException) throw it
                 // A refused pull would refuse again with the same review.
                 // Drop it so the dialog offers Check again, not the same Pull.
                 review = null
@@ -146,67 +169,58 @@ private fun PullSheet(
     val outgoing = review?.count("outgoing") ?: 0L
     val pulled = outcome?.bol("ok") == true
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(Space.m)
-                .verticalScroll(rememberScrollState()).padding(bottom = TabBarChrome.contentBottomInset),
-            verticalArrangement = Arrangement.spacedBy(Space.m),
-        ) {
-            Column {
-                Text(L10n.text("android.gitpull.title"), style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
-                val subtitle = listOfNotNull(folderName.takeIf { it.isNotBlank() }, hostLabel.takeIf { it.isNotBlank() }).joinToString(" · ")
-                if (subtitle.isNotBlank()) Text(subtitle, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
+    TsModalScreen(
+        title = L10n.text("android.gitpull.title"),
+        subtitle = listOfNotNull(folderName.takeIf { it.isNotBlank() }, hostLabel.takeIf { it.isNotBlank() }).joinToString(" · "),
+        onDismiss = onDismiss,
+        dismissEnabled = !pulling,
+        footer = {
+            val reviewed = review
+            when {
+                pulled || state == "upToDate" ->
+                    TsAccentButton(label = L10n.text("common.done"), icon = ActionIcon.Done.vector, modifier = Modifier.fillMaxWidth(), onClick = onDismiss)
+                reviewed != null && state == "fastForward" && outcome == null ->
+                    TsAccentButton(
+                        label = if (incoming == 1L) L10n.text("android.gitpull.pull_commits.one", "1") else L10n.text("android.gitpull.pull_commits.other", "$incoming"),
+                        icon = ActionIcon.Download.vector,
+                        enabled = !working,
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { scope.launch { pull(reviewed) } },
+                    )
+                else ->
+                    TsAccentButton(
+                        label = L10n.text("android.gitpull.check_again"),
+                        icon = ActionIcon.Refresh.vector,
+                        enabled = !working,
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { scope.launch { check() } },
+                    )
             }
-            review?.let { shown ->
-                Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                    Text((shown.str("branch") ?: "").removePrefix("refs/heads/"), style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
-                    val source = (shown.str("remote") ?: "") + "/" + (shown.str("remoteRef") ?: "").removePrefix("refs/heads/")
-                    Text(L10n.text("android.gitpull.from", source), style = TextStyle(fontSize = 14.sp), color = colors.textSecondary)
-                    if (outcome == null) {
-                        val summary = when (state) {
-                            "upToDate" -> L10n.text("android.gitpull.up_to_date")
-                            "ahead" -> L10n.text("android.gitpull.ahead")
-                            "fastForward" -> if (incoming == 1L) L10n.text("android.gitpull.incoming.one", "1") else L10n.text("android.gitpull.incoming.other", "$incoming")
-                            "diverged" -> L10n.text("android.gitpull.diverged", "$incoming", "$outgoing")
-                            else -> L10n.text("android.gitpull.missing")
-                        }
-                        Text(summary, style = TextStyle(fontSize = 14.sp), color = if (state == "diverged" || state == "missing") colors.warning else colors.textPrimary)
+        },
+    ) {
+        review?.let { shown ->
+            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                Text((shown.str("branch") ?: "").removePrefix("refs/heads/"), style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
+                val source = (shown.str("remote") ?: "") + "/" + (shown.str("remoteRef") ?: "").removePrefix("refs/heads/")
+                Text(L10n.text("android.gitpull.from", source), style = TextStyle(fontSize = 14.sp), color = colors.textSecondary)
+                if (outcome == null) {
+                    val summary = when (state) {
+                        "upToDate" -> L10n.text("android.gitpull.up_to_date")
+                        "ahead" -> L10n.text("android.gitpull.ahead")
+                        "fastForward" -> if (incoming == 1L) L10n.text("android.gitpull.incoming.one", "1") else L10n.text("android.gitpull.incoming.other", "$incoming")
+                        "diverged" -> L10n.text("android.gitpull.diverged", "$incoming", "$outgoing")
+                        else -> L10n.text("android.gitpull.missing")
                     }
-                }
-            }
-            outcome?.str("message")?.let { Banner(it, if (pulled) BannerSeverity.SUCCESS else BannerSeverity.DANGER) }
-            error?.let { Banner(it, BannerSeverity.DANGER) }
-            if (working) {
-                Text(if (pulling) L10n.text("android.gitpull.pulling") else L10n.text("android.gitpull.checking"), style = TextStyle(fontSize = 14.sp), color = colors.textSecondary)
-            }
-            Text(L10n.text("android.gitpull.help"), style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                TsSecondaryButton(label = L10n.text("common.close"), small = true, onClick = onDismiss, modifier = Modifier.weight(1f))
-                val reviewed = review
-                when {
-                    pulled || state == "upToDate" ->
-                        TsAccentButton(label = L10n.text("common.done"), small = true, modifier = Modifier.weight(1f), onClick = onDismiss)
-                    reviewed != null && state == "fastForward" && outcome == null ->
-                        TsAccentButton(
-                            label = if (incoming == 1L) L10n.text("android.gitpull.pull_commits.one", "1") else L10n.text("android.gitpull.pull_commits.other", "$incoming"),
-                            small = true,
-                            enabled = !working,
-                            modifier = Modifier.weight(1f),
-                            onClick = { scope.launch { pull(reviewed) } },
-                        )
-                    else ->
-                        TsAccentButton(
-                            label = L10n.text("android.gitpull.check_again"),
-                            small = true,
-                            enabled = !working,
-                            modifier = Modifier.weight(1f),
-                            onClick = { scope.launch { check() } },
-                        )
+                    Text(summary, style = TextStyle(fontSize = 14.sp), color = if (state == "diverged" || state == "missing") colors.warning else colors.textPrimary)
                 }
             }
         }
+        outcome?.str("message")?.let { Banner(it, if (pulled) BannerSeverity.SUCCESS else BannerSeverity.DANGER) }
+        error?.let { Banner(it, BannerSeverity.DANGER) }
+        if (working) {
+            Text(if (pulling) L10n.text("android.gitpull.pulling") else L10n.text("android.gitpull.checking"), style = TextStyle(fontSize = 14.sp), color = colors.textSecondary)
+        }
+        Text(L10n.text("android.gitpull.help"), style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
     }
 }
 
@@ -220,6 +234,7 @@ fun BranchPullButton(
     folderName: String,
     hostLabel: String,
     protocol: Long?,
+    modifier: Modifier = Modifier,
 ) {
     if (!HostContracts.supportsReviewedPull(protocol)) return
     val uri = LocalUriHandler.current
@@ -244,14 +259,14 @@ fun BranchPullButton(
         TsSecondaryButton(
             label = L10n.text("android.branchpull.number", pull.str("number") ?: ""),
             icon = ActionIcon.External.vector,
-            small = true,
+            modifier = modifier,
             onClick = { pull.str("url")?.takeIf { it.startsWith("https://") }?.let { runCatching { uri.openUri(it) } } },
         )
     } else if (answer?.bol("connected") == true && answer?.str("branch") != null) {
         TsSecondaryButton(
             label = L10n.text("android.branchpull.create"),
             icon = ActionIcon.Merge.vector,
-            small = true,
+            modifier = modifier,
             onClick = { creating = true },
         )
     }

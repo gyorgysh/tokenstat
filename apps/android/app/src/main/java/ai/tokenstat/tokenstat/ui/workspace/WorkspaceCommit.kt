@@ -41,10 +41,12 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import ai.tokenstat.tokenstat.AppViewModel
+import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
+import ai.tokenstat.tokenstat.ui.components.TsModalScreen
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.components.cardRadiusDp
 import ai.tokenstat.tokenstat.ui.logic.CommitDraft
@@ -295,10 +297,34 @@ fun PushButton(
     hostLabel: String,
     outgoing: Int,
     protocol: Long?,
+    modifier: Modifier = Modifier,
+    onPushed: () -> Unit,
+) = PushAction(
+    request = { method, params -> model.workspaceSection(peer, method, params) },
+    peer = peer,
+    workspace = workspace,
+    folderName = folderName,
+    hostLabel = hostLabel,
+    outgoing = outgoing,
+    protocol = protocol,
+    modifier = modifier,
+    onPushed = onPushed,
+)
+
+@Composable
+internal fun PushAction(
+    request: suspend (String, JsonObject) -> JsonElement,
+    peer: String,
+    workspace: String,
+    folderName: String,
+    hostLabel: String,
+    outgoing: Int,
+    protocol: Long?,
+    modifier: Modifier = Modifier,
     onPushed: () -> Unit,
 ) {
-    var presenting by remember { mutableStateOf(false) }
-    var submitted by remember { mutableStateOf<String?>(null) }
+    var presenting by remember(peer, workspace) { mutableStateOf(false) }
+    var submitted by remember(peer, workspace) { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     LaunchedEffect(peer, workspace) {
         val prefs = context.getSharedPreferences("tokenstat.push.v1", android.content.Context.MODE_PRIVATE)
@@ -306,13 +332,13 @@ fun PushButton(
     }
     TsSecondaryButton(
         label = PushLabel.label(submitted != null, outgoing.toLong()),
-        small = true,
+        icon = ActionIcon.Upload.vector,
+        modifier = modifier,
         onClick = { presenting = true },
     )
     if (presenting) {
         PushSheet(
-            model = model,
-            peer = peer,
+            request = request,
             workspace = workspace,
             folderName = folderName,
             hostLabel = hostLabel,
@@ -321,7 +347,7 @@ fun PushButton(
             onOperationId = { opId ->
                 submitted = opId
                 context.getSharedPreferences("tokenstat.push.v1", android.content.Context.MODE_PRIVATE)
-                    .edit().putString(L10n.text("android.workspacecommit.0_1_operationid.e339e779", "${peer}", "${workspace}"), opId).apply()
+                    .edit().putString("$peer|$workspace|operationId", opId).apply()
             },
             onDismiss = { presenting = false },
             onPushed = onPushed,
@@ -330,9 +356,8 @@ fun PushButton(
 }
 
 @Composable
-private fun PushSheet(
-    model: AppViewModel,
-    peer: String,
+internal fun PushSheet(
+    request: suspend (String, JsonObject) -> JsonElement,
     workspace: String,
     folderName: String,
     hostLabel: String,
@@ -359,15 +384,19 @@ private fun PushSheet(
                 return
             }
             runCatching {
-                model.workspaceSection(peer, "workspace.pushReview", buildJsonObject { put("id", workspace) }) as? JsonObject
+                gitFormRequest(request, "workspace.pushReview", buildJsonObject { put("id", workspace) }).gitFormObject()
             }.onSuccess { review = it; outcome = null; error = null }
-                .onFailure { error = TunnelCopy.display(it.message ?: L10n.text("android.workspacecommit.the_request_failed.db4fb447"), hostLabel) }
+                .onFailure {
+                    if (it is kotlinx.coroutines.CancellationException) throw it
+                    error = TunnelCopy.display(it.message ?: L10n.text("android.workspacecommit.the_request_failed.db4fb447"), hostLabel)
+                }
         } finally {
             working = false
         }
     }
 
     suspend fun send(retry: Boolean) {
+        if (working || (operationId != null && !retry)) return
         val frozen = review ?: return
         val opId = operationId ?: run {
             val fresh = java.util.UUID.randomUUID().toString()
@@ -379,14 +408,14 @@ private fun PushSheet(
         working = true
         try {
             runCatching {
-                model.workspaceSection(peer, "workspace.pushReviewed", buildJsonObject {
+                gitFormRequest(request, "workspace.pushReviewed", buildJsonObject {
                     put("id", workspace)
                     put("operationId", opId)
                     put("review", frozen)
                     put("retry", retry)
-                }) as? JsonObject
+                }).gitFormObject()
             }.onSuccess { receipt ->
-                if (receipt != null && receipt.str("operationId") == opId && receipt.get("review") == frozen) {
+                if (receipt.str("operationId") == opId && receipt.get("review") == frozen) {
                     outcome = receipt
                     error = null
                     canRetry = receipt.bol("retryAllowed")
@@ -397,8 +426,11 @@ private fun PushSheet(
                         onOperationId(null)
                         if (state == "succeeded") onPushed()
                     }
+                } else {
+                    error = L10n.text("android.workspacecommit.the_push_outcome_has_not_been_confirmed_ch.128c6a9f", L10n.text("android.workspacecommit.the_request_failed.db4fb447"))
                 }
             }.onFailure {
+                if (it is kotlinx.coroutines.CancellationException) throw it
                 error = L10n.text("android.workspacecommit.the_push_outcome_has_not_been_confirmed_ch.128c6a9f", "${TunnelCopy.display(it.message ?: L10n.text("android.workspacecommit.the_request_failed.db4fb447"), hostLabel)}")
             }
         } finally {
@@ -411,45 +443,48 @@ private fun PushSheet(
         if (working) return
         working = true
         try {
-            val receipt = runCatching {
-                model.workspaceSection(peer, "workspace.pushReceipt", buildJsonObject {
-                    put("id", workspace); put("operationId", opId)
-                }) as? JsonObject
-            }.getOrNull()
-            if (receipt != null) {
-                val state = receipt.str("state") ?: ""
+            val params = buildJsonObject { put("id", workspace); put("operationId", opId) }
+            val answer = gitFormRequest(request, "workspace.pushReceipt", params)
+            if (answer == kotlinx.serialization.json.JsonNull) {
+                // Retry is safe only after a successful read confirms absence.
+                canRetry = review != null
+                error = if (review != null) {
+                    L10n.text("android.workspacecommit.this_computer_has_no_receipt_for_the_submi.cadba34a")
+                } else {
+                    L10n.text("android.workspacecommit.missing_receipt_review_again")
+                }
+                if (review == null) {
+                    operationId = null
+                    onOperationId(null)
+                }
+            } else {
+                var receipt = answer.gitFormObject()
+                require(receipt.str("operationId") == opId && (review == null || receipt["review"] == review)) {
+                    L10n.text("android.workspacecommit.the_request_failed.db4fb447")
+                }
+                val receiptReview = receipt["review"] as? JsonObject
+                    ?: error(L10n.text("android.workspacecommit.the_request_failed.db4fb447"))
+                if (receipt.str("state") !in listOf("succeeded", "failed")) {
+                    receipt = gitFormRequest(request, "workspace.pushRecover", params).gitFormObject()
+                    require(receipt.str("operationId") == opId && receipt["review"] == receiptReview) {
+                        L10n.text("android.workspacecommit.the_request_failed.db4fb447")
+                    }
+                }
+                outcome = receipt
+                error = null
+                canRetry = receipt.bol("retryAllowed")
+                review = receipt["review"] as? JsonObject
+                val state = receipt.str("state")
                 if (state == "succeeded" || state == "failed") {
-                    outcome = receipt
-                    error = null
-                    canRetry = receipt.bol("retryAllowed")
                     operationId = null
                     review = null
                     onOperationId(null)
                     if (state == "succeeded") onPushed()
-                } else {
-                    val recovered = runCatching {
-                        model.workspaceSection(peer, "workspace.pushRecover", buildJsonObject {
-                            put("id", workspace); put("operationId", opId)
-                        }) as? JsonObject
-                    }.getOrNull()
-                    if (recovered != null) {
-                        outcome = recovered
-                        error = null
-                        val recoveredState = recovered.str("state") ?: ""
-                        canRetry = recovered.bol("retryAllowed")
-                        if (recoveredState == "succeeded" || recoveredState == "failed") {
-                            operationId = null
-                            review = null
-                            onOperationId(null)
-                            if (recoveredState == "succeeded") onPushed()
-                        }
-                    }
                 }
-            } else {
-                canRetry = true
-                error = L10n.text("android.workspacecommit.this_computer_has_no_receipt_for_the_submi.cadba34a")
             }
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            canRetry = false
             error = TunnelCopy.display(e.message ?: L10n.text("android.workspacecommit.the_request_failed.db4fb447"), hostLabel)
         } finally {
             working = false
@@ -462,110 +497,93 @@ private fun PushSheet(
     val outcomeState = outcome?.str("state")
     val submitted = operationId != null
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(Space.m)
-                .verticalScroll(rememberScrollState()).padding(bottom = TabBarChrome.contentBottomInset),
-            verticalArrangement = Arrangement.spacedBy(Space.m),
-        ) {
-            Column {
+    TsModalScreen(
+        title = L10n.text("android.workspacecommit.push_branch.97deb7c0"),
+        subtitle = listOfNotNull(folderName.takeIf { it.isNotBlank() }, hostLabel.takeIf { it.isNotBlank() }).joinToString(" · "),
+        onDismiss = onDismiss,
+        footer = {
+            if (submitted) {
+                if (canRetry) {
+                    TsSecondaryButton(
+                        label = L10n.text("android.workspacecommit.retry_same_push.d4ab8f02"),
+                        icon = ActionIcon.Upload.vector,
+                        enabled = !working,
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { scope.launch { send(retry = true) } },
+                    )
+                }
+                TsAccentButton(
+                    label = L10n.text("android.workspacecommit.check_outcome.9200a2fd"),
+                    icon = ActionIcon.Refresh.vector,
+                    enabled = !working,
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { scope.launch { checkOutcome() } },
+                )
+            } else if (outcomeState == "succeeded" || shown?.let { it.str("remoteHead") == it.str("head") } == true || shown?.get("outgoing")?.jsonPrimitive?.contentOrNull == "0") {
+                TsAccentButton(label = L10n.text("common.done"), icon = ActionIcon.Done.vector, modifier = Modifier.fillMaxWidth(), onClick = onDismiss)
+            } else if (review != null) {
+                TsAccentButton(
+                    label = if (review!!.str("remoteHead") == null) L10n.text("android.workspacecommit.publish_branch.e1f5968c") else L10n.text("android.workspacecommit.push_branch.97deb7c0"),
+                    icon = ActionIcon.Upload.vector,
+                    enabled = !working,
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { scope.launch { send(retry = false) } },
+                )
+            } else {
+                TsAccentButton(
+                    label = L10n.text("android.workspacecommit.check_branch.8128e71f"),
+                    icon = ActionIcon.Refresh.vector,
+                    enabled = !working,
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { scope.launch { prepare() } },
+                )
+            }
+        },
+    ) {
+        if (shown != null) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                 Text(
-                    L10n.text("android.workspacecommit.push_branch.97deb7c0"),
-                    style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
+                    (shown.str("branch") ?: "").removePrefix("refs/heads/"),
+                    style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
                     color = LocalTsColors.current.textPrimary,
                 )
-                val subtitle = listOfNotNull(folderName.takeIf { it.isNotBlank() }, hostLabel.takeIf { it.isNotBlank() })
-                    .joinToString(" · ")
-                if (subtitle.isNotBlank()) {
-                    Text(subtitle, style = TextStyle(fontSize = 12.sp), color = LocalTsColors.current.textSecondary)
+                val remote = shown.str("remote") ?: ""
+                val remoteRef = (shown.str("remoteRef") ?: "").removePrefix("refs/heads/")
+                if (remote.isNotBlank()) {
+                    Text(L10n.text("android.workspacecommit.to_0_1.cbcce59b", "${remote}", "${remoteRef}"), style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textSecondary)
                 }
-            }
-            if (shown != null) {
-                Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                (shown.str("head") ?: "").take(10).takeIf { it.isNotBlank() }?.let {
+                    Text(it, style = TsType.mono(12), color = LocalTsColors.current.textSecondary)
+                }
+                val head = shown.str("head")
+                val remoteHead = shown.str("remoteHead")
+                val outgoing = shown.get("outgoing")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                when {
+                    remoteHead == head -> Text(L10n.text("android.workspacecommit.this_branch_is_up_to_date.01b49ce3"), style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.accent)
+                    outgoing == 0L -> Text(L10n.text("android.workspacecommit.no_outgoing_commits_the_remote_branch_is_a.7072ceca"), style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textPrimary)
+                    remoteHead == null -> Text(L10n.text("android.workspacecommit.publish_this_branch_to_0.e623bfa9", "${remote}"), style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textPrimary)
+                    outgoing != null -> Text(L10n.text("android.workspacecommit.0_1_to_push.190b18e2", "${outgoing}", "${if (outgoing == 1L) L10n.text("android.workspacecommit.commit.9505cacb") else L10n.text("android.workspacecommit.commits.02686016")}"), style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textPrimary)
+                    else -> Text(L10n.text("android.workspacecommit.the_computer_will_check_whether_the_remote.2c0a07ce"), style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textPrimary)
+                }
+                if (shown.bol("setUpstream")) {
                     Text(
-                        (shown.str("branch") ?: "").removePrefix("refs/heads/"),
-                        style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
-                        color = LocalTsColors.current.textPrimary,
-                    )
-                    val remote = shown.str("remote") ?: ""
-                    val remoteRef = (shown.str("remoteRef") ?: "").removePrefix("refs/heads/")
-                    if (remote.isNotBlank()) {
-                        Text(L10n.text("android.workspacecommit.to_0_1.cbcce59b", "${remote}", "${remoteRef}"), style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textSecondary)
-                    }
-                    (shown.str("head") ?: "").take(10).takeIf { it.isNotBlank() }?.let {
-                        Text(it, style = TsType.mono(12), color = LocalTsColors.current.textSecondary)
-                    }
-                    val head = shown.str("head")
-                    val remoteHead = shown.str("remoteHead")
-                    val outgoing = shown.get("outgoing")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
-                    when {
-                        remoteHead == head -> Text(L10n.text("android.workspacecommit.this_branch_is_up_to_date.01b49ce3"), style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.accent)
-                        outgoing == 0L -> Text(L10n.text("android.workspacecommit.no_outgoing_commits_the_remote_branch_is_a.7072ceca"), style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textPrimary)
-                        remoteHead == null -> Text(L10n.text("android.workspacecommit.publish_this_branch_to_0.e623bfa9", "${remote}"), style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textPrimary)
-                        outgoing != null -> Text(L10n.text("android.workspacecommit.0_1_to_push.190b18e2", "${outgoing}", "${if (outgoing == 1L) L10n.text("android.workspacecommit.commit.9505cacb") else L10n.text("android.workspacecommit.commits.02686016")}"), style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textPrimary)
-                        else -> Text(L10n.text("android.workspacecommit.the_computer_will_check_whether_the_remote.2c0a07ce"), style = TextStyle(fontSize = 14.sp), color = LocalTsColors.current.textPrimary)
-                    }
-                    if (shown.bol("setUpstream")) {
-                        Text(
-                            L10n.text("android.workspacecommit.this_will_also_set_the_branch_s_tracking_d.95dfeac0"),
-                            style = TextStyle(fontSize = 12.sp),
-                            color = LocalTsColors.current.textSecondary,
-                        )
-                    }
-                }
-            }
-            outcome?.str("message")?.let {
-                Banner(it, if (outcomeState == "succeeded") BannerSeverity.SUCCESS else BannerSeverity.DANGER)
-            }
-            if (error != null) Banner(error!!, BannerSeverity.DANGER)
-            if (working) {
-                Text(
-                    if (submitted) L10n.text("android.workspacecommit.checking_push.00fa6ce0") else L10n.text("android.workspacecommit.checking_the_branch.3733503a"),
-                    style = TextStyle(fontSize = 14.sp),
-                    color = LocalTsColors.current.textSecondary,
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                TsSecondaryButton(label = L10n.text("common.close"), small = true, onClick = onDismiss, modifier = Modifier.weight(1f))
-                if (submitted) {
-                    if (canRetry) {
-                        TsSecondaryButton(
-                            label = L10n.text("android.workspacecommit.retry_same_push.d4ab8f02"),
-                            small = true,
-                            enabled = !working,
-                            modifier = Modifier.weight(1f),
-                            onClick = { scope.launch { send(retry = true) } },
-                        )
-                    }
-                    TsAccentButton(
-                        label = L10n.text("android.workspacecommit.check_outcome.9200a2fd"),
-                        small = true,
-                        enabled = !working,
-                        modifier = Modifier.weight(1f),
-                        onClick = { scope.launch { checkOutcome() } },
-                    )
-                } else if (outcomeState == "succeeded" || shown?.let { it.str("remoteHead") == it.str("head") } == true || shown?.get("outgoing")?.jsonPrimitive?.contentOrNull == "0") {
-                    TsAccentButton(label = L10n.text("common.done"), small = true, modifier = Modifier.weight(1f), onClick = onDismiss)
-                } else if (review != null) {
-                    TsAccentButton(
-                        label = if (review!!.str("remoteHead") == null) L10n.text("android.workspacecommit.publish_branch.e1f5968c") else L10n.text("android.workspacecommit.push_branch.97deb7c0"),
-                        small = true,
-                        enabled = !working,
-                        modifier = Modifier.weight(1f),
-                        onClick = { scope.launch { send(retry = false) } },
-                    )
-                } else {
-                    TsAccentButton(
-                        label = L10n.text("android.workspacecommit.check_branch.8128e71f"),
-                        small = true,
-                        enabled = !working,
-                        modifier = Modifier.weight(1f),
-                        onClick = { scope.launch { prepare() } },
+                        L10n.text("android.workspacecommit.this_will_also_set_the_branch_s_tracking_d.95dfeac0"),
+                        style = TextStyle(fontSize = 12.sp),
+                        color = LocalTsColors.current.textSecondary,
                     )
                 }
             }
+        }
+        outcome?.str("message")?.let {
+            Banner(it, if (outcomeState == "succeeded") BannerSeverity.SUCCESS else BannerSeverity.DANGER)
+        }
+        if (error != null) Banner(error!!, BannerSeverity.DANGER)
+        if (working) {
+            Text(
+                if (submitted) L10n.text("android.workspacecommit.checking_push.00fa6ce0") else L10n.text("android.workspacecommit.checking_the_branch.3733503a"),
+                style = TextStyle(fontSize = 14.sp),
+                color = LocalTsColors.current.textSecondary,
+            )
         }
     }
 }

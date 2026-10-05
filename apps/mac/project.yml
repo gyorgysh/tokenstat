@@ -231,7 +231,8 @@ settings:
     # fixes, Muse recovery and the dated October 5 release notes.
     # 131 was uploaded as 1.2.0. 132 accompanies the Android host capability
     # lookup fix. No Apple upload is part of this build update.
-    CURRENT_PROJECT_VERSION: "132"
+    # 133 carries Android full-screen Git/vault forms and SSH empty states.
+    CURRENT_PROJECT_VERSION: "133"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,

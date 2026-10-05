@@ -126,7 +126,6 @@ import ai.tokenstat.tokenstat.ui.logic.money
 import ai.tokenstat.tokenstat.ui.logic.moneyValue
 import ai.tokenstat.tokenstat.ui.logic.shortDate
 import ai.tokenstat.tokenstat.ui.logic.normalizedRecovery
-import ai.tokenstat.tokenstat.ui.logic.vaultPasswordProblems
 import ai.tokenstat.tokenstat.ui.devices.DeviceDetailScreen
 import ai.tokenstat.tokenstat.ui.devices.DevicesHeader
 import ai.tokenstat.tokenstat.ui.logic.DeviceUsage
@@ -2442,25 +2441,16 @@ private fun AndroidSSHScreenForAccount(
             },
         )
         if (rows.isEmpty()) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                if (vaultAllowed) {
-                    EmptyState(
-                        icon = if (tab == 0) ActionIcon.Device.vector else if (tab == 1) ActionIcon.Token.vector else ActionIcon.Docs.vector,
-                        title = L10n.text("android.tokenstatapp.no_0_yet.91be7356", "${tabs[tab].lowercase()}"),
-                        message = if (tab == 0) L10n.text("android.tokenstatapp.save_a_server_address_and_choose_authentic.268fdc9a") else if (tab == 1) L10n.text("android.tokenstatapp.generated_and_imported_keys_are_protected.1a42622f") else L10n.text("android.tokenstatapp.save_commands_you_use_often.27b06324"),
-                        action = {
-                            TsAccentButton(
-                                label = L10n.text("android.tokenstatapp.add_0.882c2180", "${tabs[tab].lowercase().trimEnd('s')}"),
-                                onClick = {
-                                    if (tab == 0) addHost = true
-                                    else if (tab == 2) addSnippet = true
-                                    else addKey = true
-                                },
-                            )
-                        },
-                    )
-                }
-            }
+            if (vaultAllowed) ai.tokenstat.tokenstat.ui.ssh.SshLibraryEmptyState(
+                tab = tab,
+                tabName = tabs[tab],
+                modifier = Modifier.weight(1f),
+                onAdd = {
+                    if (tab == 0) addHost = true
+                    else if (tab == 2) addSnippet = true
+                    else addKey = true
+                },
+            ) else Spacer(Modifier.weight(1f))
         } else {
             LazyColumn(
                 if (tabBarScroll == null) Modifier.weight(1f) else Modifier.weight(1f).nestedScroll(tabBarScroll),
@@ -2562,7 +2552,10 @@ private fun AndroidSSHScreenForAccount(
         error = error,
         syncError = vaultError,
         onDismiss = { vaultOpen = false },
-        onSetup = { vaultSetup = true },
+        onSetup = {
+            vaultOpen = false
+            vaultSetup = true
+        },
         onSync = {
             if (currentVaultOwner() && !vaultWorking && !vaultSyncing && vaultSyncCount == 0) {
                 vaultSyncing = true
@@ -2608,7 +2601,7 @@ private fun AndroidSSHScreenForAccount(
             onSaved = { editKey = null; scope.launch { load() } },
         )
     }
-    if (vaultSetup) AndroidVaultDialog(
+    if (vaultSetup) ai.tokenstat.tokenstat.ui.ssh.VaultPasswordDialog(
         existing = vault?.bool("created") == true,
         working = vaultWorking || vaultSyncing || vaultSyncCount > 0,
         error = error,
@@ -2864,75 +2857,6 @@ private fun SSHSnippetDialog(existing: JsonObject? = null, onDismiss: () -> Unit
             }) { Text(L10n.text("common.save")) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(L10n.text("common.cancel")) } },
-    )
-}
-
-@Composable
-private fun AndroidVaultDialog(
-    existing: Boolean,
-    working: Boolean,
-    error: String?,
-    onDismiss: () -> Unit,
-    onCreate: (String) -> Unit,
-    onUnlock: (String) -> Unit,
-    onReset: (String, String) -> Unit,
-    onDrop: () -> Unit,
-) {
-    var password by remember { mutableStateOf("") }
-    var confirm by remember { mutableStateOf("") }
-    var recovery by remember { mutableStateOf("") }
-    var forgot by remember { mutableStateOf(false) }
-    val problems = vaultPasswordProblems(password)
-    val matches = password == confirm
-    val canSubmit = if (!existing) {
-        problems.isEmpty() && matches
-    } else if (forgot) {
-        recovery.trim().isNotEmpty() && problems.isEmpty() && matches
-    } else {
-        password.isNotEmpty()
-    }
-    AlertDialog(
-        onDismissRequest = { if (!working) onDismiss() },
-        title = { Text(if (existing) L10n.text("android.tokenstatapp.unlock_your_vault.67a7b04b") else L10n.text("android.tokenstatapp.create_your_vault.de203ed0")) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                error?.let { Banner(it, BannerSeverity.DANGER) }
-                if (existing && forgot) {
-                    Text(L10n.text("android.tokenstatapp.enter_your_recovery_code_and_choose_a_new.42e12740"))
-                    OutlinedTextField(recovery, { recovery = it }, label = { Text(L10n.text("android.tokenstatapp.recovery_code.5bda8302")) }, minLines = 2)
-                    OutlinedTextField(password, { password = it }, label = { Text(L10n.text("android.tokenstatapp.new_password.3dd9df44")) }, visualTransformation = PasswordVisualTransformation())
-                    OutlinedTextField(confirm, { confirm = it }, label = { Text(L10n.text("android.tokenstatapp.type_it_again.3b2acc21")) }, visualTransformation = PasswordVisualTransformation())
-                    problems.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
-                    TextButton(onClick = { forgot = false }) { Text(L10n.text("android.tokenstatapp.use_the_password_instead.8dd1f753")) }
-                } else if (existing) {
-                    OutlinedTextField(password, { password = it }, label = { Text(L10n.text("android.tokenstatapp.vault_password.1853752f")) }, visualTransformation = PasswordVisualTransformation())
-                    TextButton(onClick = { forgot = true }) { Text(L10n.text("android.tokenstatapp.i_forgot_the_password.c3aabb38")) }
-                } else {
-                    Text(L10n.text("android.tokenstatapp.one_password_protects_every_saved_server_a.8bb557dc"))
-                    OutlinedTextField(password, { password = it }, label = { Text(L10n.text("android.tokenstatapp.vault_password.1853752f")) }, visualTransformation = PasswordVisualTransformation())
-                    OutlinedTextField(confirm, { confirm = it }, label = { Text(L10n.text("android.tokenstatapp.type_it_again.3b2acc21")) }, visualTransformation = PasswordVisualTransformation())
-                    problems.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                enabled = canSubmit && !working,
-                onClick = {
-                    when {
-                        !existing -> onCreate(password)
-                        forgot -> onReset(recovery, password)
-                        else -> onUnlock(password)
-                    }
-                },
-            ) { Text(if (!existing) L10n.text("android.tokenstatapp.create_vault.c8c44253") else if (forgot) L10n.text("android.tokenstatapp.reset_password.e0edfeb3") else L10n.text("android.tokenstatapp.unlock.4ac709aa")) }
-        },
-        dismissButton = {
-            Row {
-                if (existing) TextButton(enabled = !working, onClick = onDrop) { Text(L10n.text("android.tokenstatapp.delete_vault.9fd7de76")) }
-                TextButton(enabled = !working, onClick = onDismiss) { Text(L10n.text("common.cancel")) }
-            }
-        },
     )
 }
 

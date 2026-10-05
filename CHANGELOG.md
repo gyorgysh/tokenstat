@@ -63,6 +63,12 @@ at the end.
 
 ### Fixed
 
+- Android (2026-10-06): Pull and Push use matching buttons and opaque
+  full-screen review forms. Vault management and unlock fill the phone screen,
+  with actions kept above the keyboard. Empty SSH libraries place their Add
+  action directly below search instead of halfway down the page.
+- Android push recovery distinguishes an unreachable computer from a missing
+  receipt before offering Retry. Closing a Git review ignores late responses.
 - Android reads capabilities from the connected computer, so Pull in Changes,
   the New pull request flow and chat-question answers become available on
   supported computers. Temporary connection failures retry, and changing

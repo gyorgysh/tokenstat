@@ -261,39 +261,45 @@ fun ChangesSection(
             maxLines = 1,
         )
         // Bring commits in, send them out, and the pull request they belong
-        // to, side by side like the Apple Changes footer.
-        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s),
-            verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-            PullButton(
-                model = model,
-                peer = peer,
-                workspace = workspace,
-                folderName = folderName,
-                hostLabel = hostLabel,
-                incoming = state.behind,
-                protocol = protocol,
-                onPulled = { scope.launch { load() } },
-            )
-            PushButton(
-                model = model,
-                peer = peer,
-                workspace = workspace,
-                folderName = folderName,
-                hostLabel = hostLabel,
-                outgoing = state.ahead,
-                protocol = protocol,
-                onPushed = { scope.launch { load() } },
-            )
-            BranchPullButton(
-                model = model,
-                peer = peer,
-                workspace = workspace,
-                branch = state.branch,
-                folderName = folderName,
-                hostLabel = hostLabel,
-                protocol = protocol,
-            )
-        }
+        // to. Pull and Push share the available width and touch size.
+        GitTransferActions(
+            pull = { actionModifier ->
+                PullButton(
+                    model = model,
+                    peer = peer,
+                    workspace = workspace,
+                    folderName = folderName,
+                    hostLabel = hostLabel,
+                    incoming = state.behind,
+                    protocol = protocol,
+                    modifier = actionModifier,
+                    onPulled = { scope.launch { load() } },
+                )
+            },
+            push = { actionModifier ->
+                PushButton(
+                    model = model,
+                    peer = peer,
+                    workspace = workspace,
+                    folderName = folderName,
+                    hostLabel = hostLabel,
+                    outgoing = state.ahead,
+                    protocol = protocol,
+                    modifier = actionModifier,
+                    onPushed = { scope.launch { load() } },
+                )
+            },
+        )
+        BranchPullButton(
+            model = model,
+            peer = peer,
+            workspace = workspace,
+            branch = state.branch,
+            folderName = folderName,
+            hostLabel = hostLabel,
+            protocol = protocol,
+            modifier = Modifier.fillMaxWidth(),
+        )
         BranchRow(
             model = model,
             peer = peer,
