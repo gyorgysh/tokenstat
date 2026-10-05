@@ -456,3 +456,12 @@ Check(ChatQuestionText.Strip(abandonedQuestion) == abandonedQuestion, "an oversi
 Check(ChatQuestionText.Strip(abandonedQuestion + "\n```tokenstat-question\n{\"question\":\"Later\"}\n```") == abandonedQuestion,
     "an abandoned block cannot hide a later question");
 Console.WriteLine("Windows diff text: multi-megabyte layout bounds, lossless source and Unicode boundaries pass.");
+
+var fastModels = Json("""["opus","claude-opus-5-5","claude-opus-5","claude-opus-4-8"]""") as JsonArray;
+Check(!ChatFastMode.Available("opus", null), "older hosts must not offer a speed control");
+Check(ChatFastMode.Available(null, new JsonArray()), "Codex Default leaves availability to the provider");
+foreach (var model in new[] { "opus", "opus[1m]", "claude-opus-5-5", "claude-opus-4-8-20260525" })
+    Check(ChatFastMode.Available(model, fastModels), "supported Opus aliases and snapshots must retain fast mode");
+foreach (var model in new string?[] { null, "sonnet", "haiku", "claude-opus-4-7", "claude-opus-5-9" })
+    Check(!ChatFastMode.Available(model, fastModels), "unsupported models must not enable paid fast mode");
+Console.WriteLine("Windows chat fast mode: old-host compatibility, Default, aliases, snapshots and unsupported models pass.");

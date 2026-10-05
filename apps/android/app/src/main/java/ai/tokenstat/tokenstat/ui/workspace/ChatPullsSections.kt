@@ -28,6 +28,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -240,6 +246,7 @@ fun ChatSection(
     /// Why a setup change did not take. The host refuses one while a turn is
     /// running, and a pill that snaps back explains nothing by itself.
     var setupError by remember(projectOwner) { mutableStateOf<String?>(null) }
+    var fastModeSaveId by remember(projectOwner) { mutableStateOf<String?>(null) }
     // A conversation opens on its latest turn and stays with it, the way the
     // Apple transcript does. Fresh per conversation, so opening another chat
     // starts pinned again rather than inheriting a scrollback.
@@ -1790,6 +1797,7 @@ fun ChatSection(
                 onAgent = { showingAgent = true },
                 launchMode = LaunchDefaults.mode(launchChoice.read()),
                 offline = offline,
+                fastModeSaving = fastModeSaveId != null,
                 onQueueWhenConnected = {
                     val id = openId ?: return@ChatComposer
                     // Text only: an attachment cannot be uploaded with no
@@ -1809,23 +1817,31 @@ fun ChatSection(
                 },
                 onChange = { field, value ->
                     val id = openId ?: return@ChatComposer
+                    val fastModeChange = field == "fastMode"
+                    if (fastModeChange && fastModeSaveId != null) return@ChatComposer
+                    if (fastModeChange) fastModeSaveId = id
                     scope.launch {
-                        runCatching {
-                            model.workspaceSection(peer, "chat.update", buildJsonObject {
-                                put("id", id); put(field, value)
-                            })
-                        }.onSuccess {
-                            setupError = null
-                            loadChats()
-                        }.onFailure {
-                            // The host refuses a setup change while a turn is
-                            // running. Swallowing that left the pill snapping
-                            // back with nothing said: somebody pressing
-                            // Execute saw Plan stay lit and no reason why.
-                            setupError = TunnelCopy.display(
-                                it.message ?: L10n.text("android.chatpullssections.the_request_failed.db4fb447"),
-                                hostLabel.ifBlank { L10n.text("android.chatpullssections.the_computer.da52d93a") },
-                            )
+                        try {
+                            runCatching {
+                                model.workspaceSection(peer, "chat.update", buildJsonObject {
+                                    put("id", id)
+                                    if (fastModeChange) put(field, value.toBooleanStrict()) else put(field, value)
+                                })
+                            }.onSuccess {
+                                setupError = null
+                                loadChats()
+                            }.onFailure {
+                                // The host refuses a setup change while a turn is
+                                // running. Swallowing that left the pill snapping
+                                // back with nothing said: somebody pressing
+                                // Execute saw Plan stay lit and no reason why.
+                                setupError = TunnelCopy.display(
+                                    it.message ?: L10n.text("android.chatpullssections.the_request_failed.db4fb447"),
+                                    hostLabel.ifBlank { L10n.text("android.chatpullssections.the_computer.da52d93a") },
+                                )
+                            }
+                        } finally {
+                            if (fastModeChange && fastModeSaveId == id) fastModeSaveId = null
                         }
                     }
                 },
@@ -2794,6 +2810,7 @@ private fun ChatWorkingIndicator(
 /// between being told and being acted on, and that is not a preference to go
 /// hunting for.
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun ChatComposer(
     chat: JsonObject?,
     draft: String,
@@ -2817,6 +2834,7 @@ private fun ChatComposer(
     launchMode: String,
     /// Whether this device can reach the host at all.
     offline: Boolean = false,
+    fastModeSaving: Boolean = false,
     /// Keep the draft and send it once there is a connection again.
     onQueueWhenConnected: () -> Unit = {},
 ) {
@@ -2956,6 +2974,27 @@ private fun ChatComposer(
                         L10n.text("android.chatpullssections.attach_a_file.21298c62"),
                         tint = if (sending) colors.textTertiary else colors.accent,
                     )
+                }
+                val fastModels = backends.firstOrNull { it.str("id") == chat?.str("backend") }?.get("fastModeModels") as? JsonArray
+                if (fastModels != null && !offline) {
+                    val fast = chatFastModeOn(chat)
+                    val fastAvailable = chatFastModeAvailable(chat?.str("model"), fastModels)
+                    val title = if (fast) L10n.text("common.chat.fast_mode_priority") else L10n.text("common.chat.fast_mode_default")
+                    val help = if (!fastAvailable) L10n.text("common.chat.fast_mode_select_opus")
+                    else title + ". " + (if (chat?.str("backend") == "claude") L10n.text("common.chat.fast_mode_claude_help") else L10n.text("common.chat.fast_mode_codex_help"))
+                    TooltipBox(
+                        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+                        tooltip = { PlainTooltip { Text(help) } },
+                        state = rememberTooltipState(),
+                    ) {
+                        IconButton(
+                            onClick = { onChange("fastMode", (!fast).toString()) },
+                            enabled = !locked && !fastModeSaving && fastAvailable,
+                            modifier = Modifier.background(if (fast) colors.accentSoft else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(8.dp)),
+                        ) {
+                            Icon(ActionIcon.FastMode.vector, help, tint = if (fast) colors.accent else colors.textSecondary)
+                        }
+                    }
                 }
                 OutlinedTextField(
                     draft,

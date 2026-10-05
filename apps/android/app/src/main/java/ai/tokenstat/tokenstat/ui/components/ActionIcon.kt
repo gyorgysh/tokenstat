@@ -4,6 +4,7 @@ package ai.tokenstat.tokenstat.ui.components
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
@@ -62,7 +63,7 @@ enum class ActionIcon {
     Merge, Comment, Reopen, Checkout, Filter, EnterFullScreen, ExitFullScreen,
     Delete,
     External, Next, Latest, Back, More, Search, SearchAll, Reveal, Docs, Source, Profile, Home, Help,
-    Send, Attach, Persona, Plan, Allow, Deny, Apply, Calculate, Compare, Benchmarks,
+    Send, Attach, FastMode, Persona, Plan, Allow, Deny, Apply, Calculate, Compare, Benchmarks,
     Dismiss, Done, HideKeyboard, Scheduled, CurrentPlan,
     Disclosure,
     ;
@@ -129,6 +130,7 @@ enum class ActionIcon {
             // A paperclip, like the composer on every other client. A
             // document sheet reads as "a file", not as "add a file".
             Attach -> Icons.Default.AttachFile
+            FastMode -> Icons.Default.Bolt
             Persona -> Icons.Default.Person
             Plan -> Icons.Default.Description
             Allow -> Icons.Default.Check

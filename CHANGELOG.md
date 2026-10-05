@@ -15,6 +15,9 @@ at the end.
 
 ### Added
 
+- A lightning control beside chat attachments for Codex and supported Claude
+  Opus models. Default/Priority is saved per conversation, with provider-specific
+  guidance about faster responses, usage limits and paid credits.
 - A guided New pull request flow on Apple, Windows and Android: choose a
   branch, select and review files to commit, publish the branch, then write
   a title and description. Draft is the default, and matching open pull

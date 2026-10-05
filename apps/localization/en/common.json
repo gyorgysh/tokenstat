@@ -78,5 +78,12 @@
   "common.sidebar.move_projects_above_servers": "Move Projects above Servers",
   "common.sidebar.section_options": "Sidebar section options",
   "common.sidebar.collapse_projects": "Collapse Projects",
-  "common.sidebar.expand_projects": "Expand Projects"
+  "common.sidebar.expand_projects": "Expand Projects",
+  "common.chat.fast_mode_priority": "Priority · Fast mode",
+  "common.chat.fast_mode_default": "Default · Fast mode off",
+  "common.chat.fast_mode_on": "On",
+  "common.chat.fast_mode_off": "Off",
+  "common.chat.fast_mode_select_opus": "Select a supported Opus model to use fast mode. Faster responses use paid usage credits, even when your plan has usage remaining.",
+  "common.chat.fast_mode_codex_help": "Faster responses where available. Uses subscription limits faster and costs more when billed by credits or API tokens. You may reach your usage limit sooner. Speed depends on the model and your account.",
+  "common.chat.fast_mode_claude_help": "Faster Opus responses where available. Uses paid usage credits, even when your plan has usage remaining, or higher API pricing. Availability depends on your account. Enabling it mid-conversation can cost more."
 }

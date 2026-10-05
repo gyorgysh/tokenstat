@@ -63,6 +63,8 @@ pub mod chat_brain;
 #[cfg(feature = "local-host")]
 mod chat_edit_measure;
 #[cfg(feature = "local-host")]
+mod chat_fast;
+#[cfg(feature = "local-host")]
 pub mod chat_gate;
 pub mod chat_question;
 #[cfg(feature = "local-host")]

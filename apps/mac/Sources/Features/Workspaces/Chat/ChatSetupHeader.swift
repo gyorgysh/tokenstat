@@ -236,6 +236,92 @@ struct ChatSetupHeader: View {
     }
 }
 
+/// Speed for the next turn, saved with the conversation.
+struct ChatFastModeButton: View {
+    @Bindable var model: ChatModel
+    let chat: ChatConversation
+    var locked: Bool
+    @State private var saving = false
+    #if os(iOS)
+    @State private var showingOptions = false
+    #endif
+
+    private var backend: ChatBackend? { model.backend(for: chat.backend) }
+    private var available: Bool { ChatFastMode.available(model: chat.model, models: backend?.fastModeModels) }
+    private var title: String { chat.fastMode ? L10n.text("common.chat.fast_mode_priority") : L10n.text("common.chat.fast_mode_default") }
+    private var help: String {
+        if !available { return L10n.text("common.chat.fast_mode_select_opus") }
+        let tradeoff = chat.backend == "claude" ? L10n.text("common.chat.fast_mode_claude_help") : L10n.text("common.chat.fast_mode_codex_help")
+        return title + ". " + tradeoff
+    }
+
+    var body: some View {
+        if backend?.fastModeModels != nil, backend?.installed != false, model.savedCopy == nil {
+            Button(title, .fastMode) {
+                #if os(macOS)
+                save(!chat.fastMode)
+                #else
+                showingOptions = true
+                #endif
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.plain)
+            .font(Theme.callout)
+            #if os(macOS)
+            .frame(width: 28, height: 28)
+            #else
+            .frame(width: 44, height: 44)
+            #endif
+            .foregroundStyle(chat.fastMode ? Theme.accent : .secondary)
+            .background(chat.fastMode ? Theme.accentSoft : .clear, in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(.rect)
+            #if os(macOS)
+            .disabled(locked || saving || !available)
+            #else
+            .popover(isPresented: $showingOptions) {
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    Text(help)
+                        .font(Theme.body)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ChoiceChip(title: L10n.text("common.chat.fast_mode_default"), isSelected: !chat.fastMode) {
+                        save(false)
+                        showingOptions = false
+                    }
+                    .disabled(locked || saving)
+                    ChoiceChip(title: L10n.text("common.chat.fast_mode_priority"), isSelected: chat.fastMode) {
+                        save(true)
+                        showingOptions = false
+                    }
+                    .disabled(locked || saving || !available)
+                }
+                .padding(Theme.Space.m)
+                .frame(width: 300, alignment: .leading)
+                .presentationCompactAdaptation(.popover)
+            }
+            .onChange(of: model.currentReference) { _, _ in showingOptions = false }
+            #endif
+            .help(help)
+            .accessibilityLabel(title)
+            .accessibilityHint(help)
+            .accessibilityValue(chat.fastMode ? L10n.text("common.chat.fast_mode_on") : L10n.text("common.chat.fast_mode_off"))
+            .accessibilityIdentifier("chat.fastMode")
+        }
+    }
+
+    private func save(_ fast: Bool) {
+        guard !locked, !saving, fast != chat.fastMode, !fast || available else { return }
+        let owner = model.currentReference
+        saving = true
+        Task {
+            defer { saving = false }
+            guard model.currentReference == owner, model.selected?.id == chat.id,
+                  model.savedCopy == nil, model.selected?.running == false else { return }
+            await model.update(fastMode: fast)
+        }
+    }
+}
+
 /// One field for agent, model and effort. Plan and permission sit beside it.
 ///
 /// Full setup stays in the inspector. These controls must not stretch across

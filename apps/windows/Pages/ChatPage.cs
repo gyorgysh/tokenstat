@@ -1675,11 +1675,14 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var attach = Buttons.ToolbarIcon(ActionIcon.Attach, L10n.Text("windows.chatpage.attach_a_file.21298c62"), async (_, _) => await AttachAsync());
         attach.IsEnabled = !Busy();
+        var attachmentTools = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+        attachmentTools.Children.Add(attach);
+        attachmentTools.Children.Add(FastModeButton());
         var options = CompactSetup();
         Grid.SetColumn((FrameworkElement)options, 1);
         RebuildComposerActions();
         Grid.SetColumn(_composerActions, 2);
-        row.Children.Add(attach);
+        row.Children.Add(attachmentTools);
         row.Children.Add(options);
         row.Children.Add(_composerActions);
         // Keep the same draft, menu and action controls mounted across a
@@ -1692,7 +1695,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             compact = next;
             Grid.SetColumn((FrameworkElement)options, next ? 0 : 1);
             Grid.SetColumnSpan((FrameworkElement)options, next ? 3 : 1);
-            Grid.SetRow(attach, next ? 1 : 0);
+            Grid.SetRow(attachmentTools, next ? 1 : 0);
             Grid.SetRow(_composerActions, next ? 1 : 0);
             row.RowSpacing = next ? Theme.SpaceS : 0;
         }
@@ -1955,6 +1958,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private void RebuildComposerActions()
     {
+        RefreshFastModeButton();
         RefreshComposerHint();
         _composerActions.Children.Clear();
         if (Busy())
@@ -2177,6 +2181,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             // chat.update returns the saved record, which has no parked note.
             // Preserve the current note, which may have changed while awaiting.
             _openChat = ChatSteerOverlay.MergeRecord(updated, _openChat);
+            RefreshFastModeButton();
             ChatLaunchChoice.Save(_openChat);
             if (patch.ContainsKey("backend")) CheckSelectedSignIn();
         }

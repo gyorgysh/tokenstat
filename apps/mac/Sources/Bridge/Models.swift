@@ -2681,6 +2681,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     var personaID: String?
     var model: String?
     var effort: String?
+    var fastMode = false
     var systemPrompt: String
     var mode: String
     var autonomy: String
@@ -2729,7 +2730,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         case workspaceID = "workspaceId"
         case title, backend
         case personaID = "personaId"
-        case model, effort, systemPrompt, mode, autonomy, resumeToken
+        case model, effort, fastMode, systemPrompt, mode, autonomy, resumeToken
         case allowedTools, allowedShellPrefixes, budgetSeconds
         case createdAtMs, updatedAtMs, lastMessageAtMs, lastMessageAuthor, running, sendRevision, pendingSteer
         case branch, pull
@@ -2745,6 +2746,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         personaID = try c.decodeIfPresent(String.self, forKey: .personaID)
         model = try c.decodeIfPresent(String.self, forKey: .model)
         effort = try c.decodeIfPresent(String.self, forKey: .effort)
+        fastMode = try c.decodeIfPresent(Bool.self, forKey: .fastMode) ?? false
         systemPrompt = try c.decodeIfPresent(String.self, forKey: .systemPrompt) ?? ""
         mode = try c.decodeIfPresent(String.self, forKey: .mode) ?? "plan"
         autonomy = try c.decodeIfPresent(String.self, forKey: .autonomy) ?? "standard"
@@ -2773,6 +2775,7 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         try c.encodeIfPresent(personaID, forKey: .personaID)
         try c.encodeIfPresent(model, forKey: .model)
         try c.encodeIfPresent(effort, forKey: .effort)
+        try c.encode(fastMode, forKey: .fastMode)
         try c.encode(systemPrompt, forKey: .systemPrompt)
         try c.encode(mode, forKey: .mode)
         try c.encode(autonomy, forKey: .autonomy)
@@ -2844,6 +2847,9 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
     var command: String
     var models: [String]
     var efforts: [String]
+    /// Nil on older hosts and agents without speed selection. Empty means
+    /// the provider decides availability for the selected model/account.
+    var fastModeModels: [String]? = nil
     var modelListStatus: String? = nil
     var installed: Bool? = nil
     var launcherID: String? = nil
@@ -2869,7 +2875,7 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, label, name, command, models, efforts, gateTier, modelListStatus, installed
+        case id, label, name, command, models, efforts, fastModeModels, gateTier, modelListStatus, installed
         case launcherID = "launcherId"
         case canInstall, readiness, signIn, canCheckSignIn
     }
@@ -2890,6 +2896,7 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
         command = try c.decodeIfPresent(String.self, forKey: .command) ?? ""
         models = try c.decodeIfPresent([String].self, forKey: .models) ?? []
         efforts = try c.decodeIfPresent([String].self, forKey: .efforts) ?? []
+        fastModeModels = try c.decodeIfPresent([String].self, forKey: .fastModeModels)
         gateTier = try c.decodeIfPresent(String.self, forKey: .gateTier) ?? "full"
     }
 
@@ -2900,6 +2907,7 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
         try c.encode(command, forKey: .command)
         try c.encode(models, forKey: .models)
         try c.encode(efforts, forKey: .efforts)
+        try c.encodeIfPresent(fastModeModels, forKey: .fastModeModels)
         try c.encode(gateTier, forKey: .gateTier)
         try c.encodeIfPresent(modelListStatus, forKey: .modelListStatus)
         try c.encodeIfPresent(installed, forKey: .installed)

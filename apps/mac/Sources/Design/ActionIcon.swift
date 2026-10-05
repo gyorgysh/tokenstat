@@ -93,6 +93,7 @@ enum ActionIcon {
     // Tools
     case send
     case attach
+    case fastMode
     case persona
     case plan
     case allow
@@ -190,6 +191,7 @@ enum ActionIcon {
 
         case .send: return "paperplane"
         case .attach: return "paperclip"
+        case .fastMode: return "bolt.fill"
         case .persona: return "person.text.rectangle"
         case .plan: return "list.clipboard"
         case .allow: return "checkmark.circle"

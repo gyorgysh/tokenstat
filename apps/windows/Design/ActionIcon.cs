@@ -27,7 +27,7 @@ internal enum ActionIcon
     Merge, Comment, Reopen, Checkout, Filter, EnterFullScreen, ExitFullScreen,
     Delete,
     External, Next, Latest, Back, More, Search, SearchAll, Reveal, Docs, Source, Profile, Home, Help,
-    Send, Attach, Persona, Plan, Allow, Deny, Apply, Calculate, Compare, Benchmarks,
+    Send, Attach, FastMode, Persona, Plan, Allow, Deny, Apply, Calculate, Compare, Benchmarks,
     Dismiss, Done, HideKeyboard, Scheduled, CurrentPlan,
 }
 
@@ -146,6 +146,7 @@ internal static class ActionIconGlyph
         ActionIcon.Help => Sigil(FluentSymbol.Help),
         ActionIcon.Send => Sigil(FluentSymbol.Send),
         ActionIcon.Attach => Sigil(FluentSymbol.Attach),
+        ActionIcon.FastMode => Glyph(0xE945), // LightningBolt
         ActionIcon.Persona => Glyph(0xE779), // ContactInfo
         ActionIcon.Plan => Sigil(FluentSymbol.Document),
         ActionIcon.Apply => Glyph(0xE9D5), // CheckList
@@ -230,6 +231,7 @@ internal static class ActionIconGlyph
         ActionIcon.Help => Microsoft.UI.Xaml.Controls.Symbol.Help,
         ActionIcon.Send => Microsoft.UI.Xaml.Controls.Symbol.Send,
         ActionIcon.Attach => Microsoft.UI.Xaml.Controls.Symbol.Attach,
+        ActionIcon.FastMode => (Microsoft.UI.Xaml.Controls.Symbol)0xE945,
         ActionIcon.Persona => Microsoft.UI.Xaml.Controls.Symbol.Contact,
         ActionIcon.Plan or ActionIcon.Calculate => Microsoft.UI.Xaml.Controls.Symbol.Document,
         ActionIcon.Allow => Microsoft.UI.Xaml.Controls.Symbol.Accept,

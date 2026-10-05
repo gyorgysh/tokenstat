@@ -7,6 +7,7 @@
     <NoWarn>$(NoWarn);CS0649</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../../apps/windows/Pages/ChatFastMode.cs" Link="ChatFastMode.cs" />
     <Compile Include="../../../apps/windows/Pages/DiffTextChunks.cs" Link="DiffTextChunks.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatHistoryBuffer.cs" Link="ChatHistoryBuffer.cs" />
     <Compile Include="../../../apps/windows/Pages/ChatSteerOverlay.cs" Link="ChatSteerOverlay.cs" />

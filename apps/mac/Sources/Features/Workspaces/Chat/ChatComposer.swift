@@ -165,7 +165,10 @@ struct ChatComposer: View {
             }
             field
             ComposerUtilityLayout(spacing: Theme.Space.s, controlsGap: Theme.Space.m) {
-                attachControl
+                HStack(spacing: Theme.Space.s) {
+                    attachControl
+                    ChatFastModeButton(model: model, chat: chat, locked: running)
+                }
                 ChatComposerControls(model: model, chat: chat, locked: running)
                 HStack(spacing: Theme.Space.s) {
                     turnStatus

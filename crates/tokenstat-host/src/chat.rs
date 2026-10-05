@@ -106,6 +106,8 @@ pub struct Conversation {
     #[serde(default)]
     pub effort: Option<String>,
     #[serde(default)]
+    pub fast_mode: bool,
+    #[serde(default)]
     pub system_prompt: String,
     #[serde(default = "default_mode")]
     pub mode: String,
@@ -330,6 +332,7 @@ pub struct Create {
     pub backend: String,
     pub model: Option<String>,
     pub effort: Option<String>,
+    pub fast_mode: bool,
     pub mode: Option<String>,
     pub autonomy: Option<String>,
     pub budget_seconds: Option<u64>,
@@ -343,6 +346,7 @@ pub struct Update {
     pub backend: Option<String>,
     pub model: Option<String>,
     pub effort: Option<String>,
+    pub fast_mode: Option<bool>,
     pub mode: Option<String>,
     pub autonomy: Option<String>,
     pub allowed_tools: Option<Vec<String>>,
@@ -2000,6 +2004,11 @@ impl Store {
         if backend.trim().is_empty() {
             return Err("chat.create needs a backend".into());
         }
+        if input.fast_mode && !crate::chat_fast::available(&backend, input.model.as_deref()) {
+            return Err(
+                "Select a supported Codex model or Claude Opus model to use fast mode.".into(),
+            );
+        }
         let id = mint_record_id("chat");
         let now = now_ms();
         let chat = Conversation {
@@ -2013,6 +2022,7 @@ impl Store {
             persona_id: persona.as_ref().map(|persona| persona.id.clone()),
             model: input.model,
             effort: input.effort,
+            fast_mode: input.fast_mode,
             system_prompt: persona
                 .as_ref()
                 .map(|persona| persona.system_prompt.clone())
@@ -2155,6 +2165,7 @@ impl Store {
                 && (changes.backend.is_some()
                     || changes.model.is_some()
                     || changes.effort.is_some()
+                    || changes.fast_mode.is_some()
                     || changes.mode.is_some()
                     || changes.autonomy.is_some())
             {
@@ -2173,6 +2184,7 @@ impl Store {
                 // recover its own token from `resume_tokens`.
                 chat.model = None;
                 chat.effort = None;
+                chat.fast_mode = false;
                 chat.resume_token = chat.resume_tokens.get(&chat.backend).cloned();
             }
             if let Some(model) = changes.model {
@@ -2180,6 +2192,18 @@ impl Store {
             }
             if let Some(effort) = changes.effort {
                 chat.effort = Some(effort).filter(|value| !value.trim().is_empty());
+            }
+            if !crate::chat_fast::available(&chat.backend, chat.model.as_deref()) {
+                chat.fast_mode = false;
+            }
+            if let Some(fast) = changes.fast_mode {
+                if fast && !crate::chat_fast::available(&chat.backend, chat.model.as_deref()) {
+                    return Err(
+                        "Select a supported Codex model or Claude Opus model to use fast mode."
+                            .into(),
+                    );
+                }
+                chat.fast_mode = fast;
             }
             if let Some(mode) = changes.mode {
                 chat.mode = mode;
@@ -3213,6 +3237,12 @@ impl Store {
                 grok_allow_rules: &grok_allow_rules,
                 attachments: &attachments,
             },
+        )?;
+        crate::chat_fast::apply(
+            &chat.backend,
+            chat.model.as_deref(),
+            chat.fast_mode,
+            &mut argv,
         )?;
         let turn = if asks_before_tools || muse_note {
             let token = self.register_turn_token(id, &chat.backend)?;
@@ -4997,6 +5027,9 @@ pub fn backends(force: bool) -> Vec<Value> {
                 );
             }
             let id = backend["id"].as_str().unwrap_or("").to_string();
+            if let Some(models) = crate::chat_fast::models(&id) {
+                backend["fastModeModels"] = json!(models);
+            }
             if let Some(profile) = catalog.as_array().and_then(|profiles| {
                 profiles
                     .iter()
@@ -6026,6 +6059,7 @@ mod tests {
             persona_id: None,
             model: None,
             effort: None,
+            fast_mode: false,
             system_prompt: String::new(),
             mode: default_mode(),
             autonomy: default_autonomy(),
@@ -7228,6 +7262,7 @@ mod tests {
             persona_id: None,
             model: None,
             effort: None,
+            fast_mode: false,
             system_prompt: String::new(),
             mode: default_mode(),
             autonomy: default_autonomy(),
@@ -7325,6 +7360,7 @@ mod tests {
             persona_id: None,
             model: None,
             effort: None,
+            fast_mode: false,
             system_prompt: String::new(),
             mode: default_mode(),
             autonomy: default_autonomy(),
@@ -7429,6 +7465,7 @@ mod tests {
             persona_id: None,
             model: None,
             effort: None,
+            fast_mode: false,
             system_prompt: String::new(),
             mode: default_mode(),
             autonomy: default_autonomy(),
@@ -7484,6 +7521,7 @@ mod tests {
             persona_id: None,
             model: None,
             effort: None,
+            fast_mode: false,
             system_prompt: String::new(),
             mode: default_mode(),
             autonomy: default_autonomy(),
@@ -7584,6 +7622,98 @@ mod tests {
             store.event_page(&fork.id, None, 1).unwrap().usage.unwrap(),
             expected
         );
+    }
+
+    #[test]
+    fn fast_mode_is_opt_in_persisted_and_reset_for_unsupported_models() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "fast-chat");
+        let chat = store.get("fast-chat").unwrap();
+        let mut legacy = serde_json::to_value(&chat).unwrap();
+        legacy.as_object_mut().unwrap().remove("fastMode");
+        assert!(
+            !serde_json::from_value::<Conversation>(legacy)
+                .unwrap()
+                .fast_mode
+        );
+
+        let enabled = store
+            .update(
+                "fast-chat",
+                Update {
+                    model: Some("opus".into()),
+                    fast_mode: Some(true),
+                    ..Update::default()
+                },
+            )
+            .unwrap();
+        assert!(enabled.fast_mode);
+        assert!(enabled.send_revision > chat.send_revision);
+        assert!(
+            Store::load_at(root.path().join("chat"))
+                .get("fast-chat")
+                .unwrap()
+                .fast_mode
+        );
+
+        store.set_running("fast-chat", true).unwrap();
+        assert!(
+            store
+                .update(
+                    "fast-chat",
+                    Update {
+                        fast_mode: Some(false),
+                        ..Update::default()
+                    }
+                )
+                .is_err()
+        );
+        store.set_running("fast-chat", false).unwrap();
+
+        let sonnet = store
+            .update(
+                "fast-chat",
+                Update {
+                    model: Some("sonnet".into()),
+                    ..Update::default()
+                },
+            )
+            .unwrap();
+        assert!(!sonnet.fast_mode);
+        assert!(
+            store
+                .update(
+                    "fast-chat",
+                    Update {
+                        fast_mode: Some(true),
+                        ..Update::default()
+                    }
+                )
+                .is_err()
+        );
+        assert!(!store.get("fast-chat").unwrap().fast_mode);
+        let codex = store
+            .update(
+                "fast-chat",
+                Update {
+                    backend: Some("codex".into()),
+                    fast_mode: Some(true),
+                    ..Update::default()
+                },
+            )
+            .unwrap();
+        assert!(codex.fast_mode);
+        let switched = store
+            .update(
+                "fast-chat",
+                Update {
+                    backend: Some("claude".into()),
+                    ..Update::default()
+                },
+            )
+            .unwrap();
+        assert!(!switched.fast_mode);
     }
 
     #[test]
@@ -9559,6 +9689,7 @@ mod tests {
             persona_id: None,
             model: None,
             effort: None,
+            fast_mode: false,
             system_prompt: String::new(),
             mode: "execute".into(),
             autonomy: default_autonomy(),
@@ -9674,6 +9805,7 @@ mod tests {
             persona_id: None,
             model: None,
             effort: None,
+            fast_mode: false,
             system_prompt: String::new(),
             mode: "execute".into(),
             autonomy: default_autonomy(),
@@ -9814,6 +9946,7 @@ mod tests {
             persona_id: None,
             model: None,
             effort: None,
+            fast_mode: false,
             system_prompt: String::new(),
             mode: "execute".into(),
             autonomy: default_autonomy(),
@@ -9917,6 +10050,7 @@ mod tests {
             persona_id: None,
             model: None,
             effort: None,
+            fast_mode: false,
             system_prompt: String::new(),
             mode: default_mode(),
             autonomy: default_autonomy(),
@@ -10030,6 +10164,7 @@ mod tests {
             persona_id: None,
             model: None,
             effort: None,
+            fast_mode: false,
             system_prompt: String::new(),
             mode: default_mode(),
             autonomy: default_autonomy(),
@@ -10081,6 +10216,7 @@ mod tests {
             persona_id: None,
             model: None,
             effort: None,
+            fast_mode: false,
             system_prompt: String::new(),
             mode: default_mode(),
             autonomy: default_autonomy(),
@@ -10159,6 +10295,7 @@ mod tests {
             persona_id: None,
             model: None,
             effort: None,
+            fast_mode: false,
             system_prompt: String::new(),
             mode: default_mode(),
             autonomy: default_autonomy(),
@@ -10446,6 +10583,7 @@ mod tests {
             persona_id: Some(first.id.clone()),
             model: None,
             effort: None,
+            fast_mode: false,
             system_prompt: first.system_prompt.clone(),
             mode: default_mode(),
             autonomy: default_autonomy(),
