@@ -11,7 +11,7 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one. Do not reconstruct release notes from commits
 at the end.
 
-## [1.1.1] - Unreleased
+## [1.2.0] - Unreleased
 
 ### Added
 
@@ -36,7 +36,7 @@ at the end.
 - Finished chat turns list the files they changed and their added and removed
   lines. Review opens the project's Changes, where files can be read,
   committed, pushed and turned into a pull request. Desktop chats open Changes
-  beside the conversation. Chat lists show the last known pull request state.
+  in a full tab. Chat lists show the last known pull request state.
 - Pull beside Push in Changes on every client. Review fetches the branch's
   upstream, then Pull brings in exactly the reviewed commits, fast-forward
   only. Uncommitted work and branches that need a merge are left for you to
@@ -50,6 +50,11 @@ at the end.
 
 ### Fixed
 
+- The main Changes review keeps its contents and reading position during
+  background refreshes, avoiding repeated redraws. Chat detail controls use
+  the app's themed selector and action buttons.
+- Codex edit counts start from the files as they were before the turn,
+  including uncommitted work, newly created files and deleted files.
 - Large single-line JSON changes render in bounded pieces on desktop, with
   access to the complete diff. Inspector previews refresh after file saves,
   release their source when closed, and offer Retry when a diff cannot load.
