@@ -11,15 +11,6 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one. Do not reconstruct release notes from commits
 at the end.
 
-## [Unreleased]
-
-### Fixed
-
-- Android reads capabilities from the connected computer, so Pull in Changes,
-  the New pull request flow and chat-question answers become available on
-  supported computers. Temporary connection failures retry, and changing
-  accounts or computers clears the previous computer's capabilities.
-
 ## [1.2.0] - 2026-10-05
 
 ### Added
@@ -72,6 +63,10 @@ at the end.
 
 ### Fixed
 
+- Android reads capabilities from the connected computer, so Pull in Changes,
+  the New pull request flow and chat-question answers become available on
+  supported computers. Temporary connection failures retry, and changing
+  accounts or computers clears the previous computer's capabilities.
 - Cursor plan usage reads the current sign-in from the Cursor app as well
   as the CLI, so an expired CLI login no longer leaves last cycle's limits
   on screen. Expired sign-ins say when they expired and how to renew them.
