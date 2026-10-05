@@ -396,8 +396,16 @@ impl Parser {
             match value.get("type").and_then(Value::as_str) {
                 Some("assistant") => {
                     let text = cursor_assistant_text(&value);
-                    if !text.is_empty() && self.cursor_absorbs(&text) {
-                        events.retain(|event| !matches!(event, Event::Text { .. }));
+                    if !text.is_empty() {
+                        if let Some(delta) = self.cursor_delta(&text) {
+                            for event in &mut events {
+                                if let Event::Text { delta: output } = event {
+                                    *output = delta.clone();
+                                }
+                            }
+                        } else {
+                            events.retain(|event| !matches!(event, Event::Text { .. }));
+                        }
                     }
                 }
                 Some("result") => {
@@ -433,54 +441,56 @@ impl Parser {
         self.take_events(events)
     }
 
-    /// Whether this piece of cursor prose is already on the transcript.
+    /// The part of this piece of cursor prose not already on the transcript.
     ///
-    /// True means drop it. Anything kept is appended to the turn, which is
+    /// None means drop it. Anything kept is appended to the turn, which is
     /// what the next comparison is made against.
-    fn cursor_absorbs(&mut self, text: &str) -> bool {
-        match self.cursor_replay {
+    fn cursor_delta(&mut self, text: &str) -> Option<String> {
+        let replay = match self.cursor_replay {
             Some(CursorReplay::Pending) => {
                 // The first record after a reconnect says where the stream
                 // resumed: the newest message boundary it continues from.
-                if let Some(from) = self.cursor_replay_anchor(text) {
-                    self.cursor_replay = Some(CursorReplay::At {
-                        from,
-                        at: from + text.len(),
-                    });
-                    return true;
-                }
-                self.cursor_replay = None;
+                self.cursor_replay_anchor(text).map(|from| (from, from))
             }
             Some(CursorReplay::At { from, at }) => {
-                if self.cursor_since(at).starts_with(text) {
-                    self.cursor_replay = Some(CursorReplay::At {
-                        from,
-                        at: at + text.len(),
-                    });
-                    return true;
+                let seen = self.cursor_since(at);
+                if seen.starts_with(text) || (!seen.is_empty() && text.starts_with(seen)) {
+                    Some((from, at))
+                } else if let Some(from) = self.cursor_replay_anchor(text) {
+                    // A reconnect can drop again and resume at another
+                    // message, so the replay may carry on elsewhere.
+                    Some((from, from))
+                } else {
+                    // What it repeated is the start of the message this
+                    // continues, so its closing snapshot still matches it.
+                    self.cursor_open_message_at(from);
+                    None
                 }
-                // Not where it was, but a reconnect can drop again and
-                // resume at another message, so a boundary that this record
-                // does start is the replay carrying on elsewhere.
-                if let Some(from) = self.cursor_replay_anchor(text) {
-                    self.cursor_replay = Some(CursorReplay::At {
-                        from,
-                        at: from + text.len(),
-                    });
-                    return true;
-                }
-                // The replay has said something new. What it repeated is the
-                // start of the message this continues, so the snapshot that
-                // closes that message still matches it.
-                self.cursor_replay = None;
-                self.cursor_open_message_at(from);
             }
-            None => {}
+            None => None,
+        };
+        if let Some((from, at)) = replay {
+            let seen_len = self.cursor_since(at).len();
+            if seen_len >= text.len() {
+                self.cursor_replay = Some(CursorReplay::At {
+                    from,
+                    at: at + text.len(),
+                });
+                return None;
+            }
+            // A retry delta can span the end of the replayed text. Keep
+            // only its fresh suffix, even if the CLI changed chunk sizes.
+            let delta = &text[seen_len..];
+            self.cursor_replay = None;
+            self.cursor_open_message_at(from);
+            self.cursor_turn.push_str(delta);
+            return Some(delta.to_string());
         }
+        self.cursor_replay = None;
         if text == self.cursor_since(self.cursor_msg_start()) {
             // The whole message, after its pieces.
             self.cursor_end_message();
-            return true;
+            return None;
         }
         if self.cursor_repeats >= 2
             && (text == self.cursor_turn || text == self.cursor_since(self.cursor_run_start))
@@ -489,17 +499,18 @@ impl Parser {
             // messages. Two dropped copies behind it, so a second identical
             // message on its own is kept rather than mistaken for one.
             self.cursor_end_message();
-            return true;
+            return None;
         }
         self.cursor_turn.push_str(text);
-        false
+        Some(text.to_string())
     }
 
     /// The newest message boundary a replay could be resuming from: the last
     /// one whose text this record starts.
     fn cursor_replay_anchor(&self, text: &str) -> Option<usize> {
         self.cursor_msg_starts.iter().rev().copied().find(|at| {
-            !self.cursor_since(*at).is_empty() && self.cursor_since(*at).starts_with(text)
+            let seen = self.cursor_since(*at);
+            !seen.is_empty() && (seen.starts_with(text) || text.starts_with(seen))
         })
     }
 
@@ -3790,6 +3801,84 @@ mod tests {
             })
             .collect();
         assert_eq!(text, "hello, world. That is all.");
+    }
+
+    #[test]
+    fn cursor_retry_delta_can_cross_the_end_of_previously_seen_text() {
+        // Reconnected streams need not keep the original chunk boundaries.
+        // A new delta can include both a replayed prefix and fresh text.
+        for replay in [
+            concat!(
+                r#"{"type":"assistant","message":{"content":[{"text":"hello, world. That is all."}]}}"#,
+                "\n",
+            ),
+            concat!(
+                r#"{"type":"assistant","message":{"content":[{"text":"hel"}]}}"#,
+                "\n",
+                r#"{"type":"assistant","message":{"content":[{"text":"lo, world. That is all."}]}}"#,
+                "\n",
+            ),
+        ] {
+            let raw = concat!(
+                r#"{"type":"assistant","message":{"content":[{"text":"hel"}]}}"#,
+                "\n",
+                r#"{"type":"assistant","message":{"content":[{"text":"lo, world."}]}}"#,
+                "\n",
+                r#"{"type":"assistant","message":{"content":[{"text":"hello, world."}]}}"#,
+                "\n",
+                r#"{"type":"retry","subtype":"starting","is_resume":true}"#,
+                "\n",
+            )
+            .to_string()
+                + replay
+                + concat!(
+                    r#"{"type":"assistant","message":{"content":[{"text":"hello, world. That is all."}]}}"#,
+                    "\n",
+                    r#"{"type":"result","result":"hello, world. That is all."}"#,
+                    "\n",
+                );
+            let mut parser = Parser::new("cursor");
+            let events = parser.push_events(raw.as_bytes());
+            let text: String = events
+                .iter()
+                .filter_map(|event| match event {
+                    Event::Text { delta } => Some(delta.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(text, "hello, world. That is all.");
+        }
+    }
+
+    #[test]
+    fn cursor_distinct_replies_during_retries_remain_visible() {
+        // Retrying can regenerate a different answer, which is real model
+        // output. Only the CLI's exact snapshot copies should disappear.
+        let replies = ["Hello.", "Hi there.", "Hey, how can I help?"];
+        let mut parser = Parser::new("cursor");
+        let mut events = Vec::new();
+        for reply in replies {
+            events.extend(parser.push_events(b"{\"type\":\"retry\",\"subtype\":\"starting\"}\n"));
+            let record = serde_json::json!({
+                "type": "assistant", "message": {"content": [{"text": reply}]}
+            })
+            .to_string()
+                + "\n";
+            events.extend(parser.push_events(record.as_bytes()));
+            events.extend(parser.push_events(record.as_bytes()));
+        }
+        events.extend(parser.push_events(b"RetriableError: WritableIterable is closed\n"));
+        let text: String = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Text { delta } => Some(delta.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, replies.join(""));
+        assert!(events.iter().any(|event| matches!(
+            event, Event::Failed { text } if text.contains("lost its connection")
+        )));
     }
 
     #[test]
