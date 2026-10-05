@@ -35,7 +35,7 @@ fn live_controls_apply_without_restarting_or_resending_a_turn() {
         let root = tempfile::tempdir().unwrap();
         let fake = root.path().join("fake-agent");
         fs::write(&fake, r##"#!/usr/bin/env python3
-import sys,json
+import sys,json,os
 backend=sys.argv[1]
 def emit(v): print(json.dumps(v),flush=True)
 count=0
@@ -61,6 +61,7 @@ for line in sys.stdin:
   elif method=='thread/resume':
    assert p['threadId']=='session' and p['config']['bypass_hook_trust']
    assert p['sandbox']=='read-only' and p['approvalPolicy']=='never'
+   assert p['cwd']==os.getcwd() and p['excludeTurns']
    emit({'id':m['id'],'result':{'thread':{'id':'session'}}})
   elif method=='turn/start':
    assert p['input'][0]['text']=='literal prompt'

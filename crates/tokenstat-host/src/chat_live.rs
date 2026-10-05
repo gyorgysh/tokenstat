@@ -402,7 +402,7 @@ pub fn run(path: &Path) -> Result<(), String> {
         serde_json::from_slice(&fs::read(path).map_err(|error| error.to_string())?)
             .map_err(|error| error.to_string())?;
     let directory = path.parent().ok_or("missing live control directory")?;
-    let (args, setup, initial) = match config.backend.as_str() {
+    let (args, mut setup, initial) = match config.backend.as_str() {
         "codex" => codex_launch(&config.argv)?,
         "claude" => {
             let (args, prompt) = claude_launch(&config.argv)?;
@@ -410,6 +410,16 @@ pub fn run(path: &Path) -> Result<(), String> {
         }
         _ => return Err("unsupported live agent".into()),
     };
+    if config.backend == "codex" {
+        // Like exec, each turn uses the workspace it was launched in. A
+        // resumed thread may remember a directory that has since moved.
+        setup["cwd"] = json!(std::env::current_dir().map_err(|error| error.to_string())?);
+        if setup["threadId"].is_string() {
+            // Only the thread identity is needed; its old messages remain in
+            // the provider's session and must not be hydrated into this turn.
+            setup["excludeTurns"] = json!(true);
+        }
+    }
     let mut command = tokenstat_pty::headless_command(&config.argv[0], &args);
     #[cfg(unix)]
     {
