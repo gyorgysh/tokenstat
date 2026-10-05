@@ -11,7 +11,7 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one. Do not reconstruct release notes from commits
 at the end.
 
-## [1.2.0] - Unreleased
+## [1.2.0] - 2026-10-05
 
 ### Added
 
@@ -21,16 +21,23 @@ at the end.
   versions can apply a speed change to the next model request during a turn.
 - A Glass sidebar switch and opacity slider in Settings → This Mac. Full screen
   and Reduce Transparency use an opaque sidebar.
+- Mac and Windows remember which sidebar sections are open and let you
+  reorder Projects and Servers.
 - A guided New pull request flow on Apple, Windows and Android: choose a
   branch, select and review files to commit, publish the branch, then write
   a title and description. Draft is the default, and matching open pull
   requests are reused when retrying.
 - Chat sign-in guidance for installed coding agents. Open the agent's
   terminal on the chat's computer, follow browser or code instructions,
-  and check sign-in without losing the chat draft. A Claude authentication
-  failure offers the same guided sign-in even when the CLI cannot report its
-  login status. On Mac, iPhone and iPad, a Codex sign-in opens its page in
-  your browser and copies the one-time code for you.
+  and check sign-in without losing the chat draft. Cursor and Muse join
+  Claude and Codex. On Mac, iPhone and iPad, Claude, Cursor and Muse
+  authentication failures offer guided sign-in and a retry with the original
+  text and files. Codex and Muse sign-in open the page in your browser and
+  copy the one-time code. A message held for sign-in keeps its text and files
+  until you choose Continue.
+- Cursor chats can ask before running tools in Standard mode. A short note
+  can steer the next step of a running Standard chat. Plan mode stays
+  read-only.
 - Four chat detail levels on Apple, Windows and Android. Compact, the default,
   shows one quiet line per step, with the lines each edit added and removed,
   Codex edits included. Opening a line shows the step's output or diff
@@ -56,6 +63,18 @@ at the end.
 
 ### Fixed
 
+- Cursor plan usage reads the current sign-in from the Cursor app as well
+  as the CLI, so an expired CLI login no longer leaves last cycle's limits
+  on screen. Expired sign-ins say when they expired and how to renew them.
+- Cursor reconnects no longer repeat replies when the stream changes its
+  chunk sizes. Cursor's own authentication refusal offers sign-in without
+  treating another tool's login error as a Cursor failure.
+- A Muse chat that needs sign-in ends with a sign-in message instead of
+  waiting indefinitely or showing a device code in the conversation.
+  On Mac, iPhone and iPad, guided Muse sign-in starts waiting for browser
+  approval automatically, including when the chat runs on another computer.
+- Resumed Codex turns use the chat's current project folder and keep earlier
+  messages from appearing again in the new turn.
 - The main Changes review keeps its contents and reading position during
   background refreshes, avoiding repeated redraws. Chat detail controls use
   the app's themed selector and action buttons.

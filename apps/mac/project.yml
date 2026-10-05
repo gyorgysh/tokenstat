@@ -227,7 +227,9 @@ settings:
     # 127 is 1.1.1. 128 completes chat review and pull request controls.
     # 129 is 1.2.0, including chat detail, full Changes review and edit counts.
     # 129 went up. 130 adds per-conversation Codex and Claude fast mode.
-    CURRENT_PROJECT_VERSION: "130"
+    # 130 was uploaded as 1.2.0. 131 carries the Cursor authentication review
+    # fixes, Muse recovery and the dated October 5 release notes.
+    CURRENT_PROJECT_VERSION: "131"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,

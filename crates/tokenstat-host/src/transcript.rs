@@ -912,7 +912,17 @@ fn cli_refusal_text(backend: &str, line: &str) -> Option<String> {
 /// as though the agent had answered with a stack trace. These are failures,
 /// and they say what to do about them.
 fn cursor_error_text(lower: &str) -> Option<String> {
-    if !(lower.starts_with("retriableerror") || lower.starts_with("error:")) {
+    let refusal = lower.strip_prefix("error:").unwrap_or(lower).trim_start();
+    let sign_in_refusal = refusal.starts_with("authentication required.")
+        && refusal.contains("cursor_api_key")
+        && [
+            "'agent login'",
+            "'cursor-agent login'",
+            "'cursor agent login'",
+        ]
+        .iter()
+        .any(|command| refusal.contains(command));
+    if !(lower.starts_with("retriableerror") || lower.starts_with("error:") || sign_in_refusal) {
         return None;
     }
     if lower.contains("resource_exhausted") || lower.contains("rate limit") {
@@ -921,11 +931,7 @@ fn cursor_error_text(lower: &str) -> Option<String> {
                 .into(),
         );
     }
-    if lower.contains("unauthenticated")
-        || lower.contains("unauthorized")
-        || (lower.starts_with("error: authentication required.")
-            && (lower.contains("'agent login'") || lower.contains("cursor_api_key")))
-    {
+    if lower.contains("unauthenticated") || lower.contains("unauthorized") || sign_in_refusal {
         return Some(
             "Cursor is not signed in on this machine. Open a terminal and run cursor-agent login."
                 .into(),
@@ -3341,6 +3347,8 @@ mod tests {
         let refused = "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable.";
         for line in [
             refused,
+            "Authentication required. Please run 'cursor agent login' first, or set CURSOR_API_KEY environment variable.",
+            "Error: Authentication required. Run 'cursor-agent login', pass --api-key/--auth-token, or set CURSOR_API_KEY/CURSOR_AUTH_TOKEN.",
             "Error: Unauthorized",
             "RetriableError: [unauthenticated] Error",
         ] {
@@ -3357,6 +3365,18 @@ mod tests {
             (
                 "cursor",
                 "Error: Authentication required. Please run 'gh auth login' first.",
+            ),
+            (
+                "cursor",
+                "Error: Authentication required. Please run 'agent login' first.",
+            ),
+            (
+                "cursor",
+                "Error: Authentication required. Set CURSOR_API_KEY environment variable.",
+            ),
+            (
+                "cursor",
+                "Error: Authentication required. Run 'gh auth login'; the tool reads CURSOR_API_KEY.",
             ),
         ] {
             let mut parser = Parser::new(backend);
