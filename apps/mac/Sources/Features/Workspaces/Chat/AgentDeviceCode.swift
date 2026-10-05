@@ -22,4 +22,16 @@ struct AgentDeviceCode: Equatable, Sendable {
               let url = URL(string: String(link.output)), url.host != nil else { return nil }
         return AgentDeviceCode(url: url, code: String(code.output))
     }
+
+    /// Muse's launcher offers to open a browser before it starts polling for
+    /// approval. The sheet already opens the page on this device. EOF skips
+    /// that optional launcher step, without closing the terminal or approving
+    /// the login, and avoids opening another browser on a remote chat host.
+    func browserPromptReply(backend: String, screen: String) -> [UInt8]? {
+        guard backend == "muse", url.host == "auth.meta.com",
+              screen.contains("Open this page to sign in:"),
+              let printedCode = screen.range(of: code, options: .backwards),
+              screen[printedCode.upperBound...].contains("Press Enter to open it in your browser:") else { return nil }
+        return [0x04]
+    }
 }

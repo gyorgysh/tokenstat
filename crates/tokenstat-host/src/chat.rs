@@ -3780,6 +3780,7 @@ impl Store {
         let reader = format!("chat:{id}");
         let mut offset = 0;
         let mut assistant_text = String::new();
+        let mut muse_sign_in_required = false;
         let mut questions = crate::chat_question::Scanner::default();
         let deadline = self.get(id).ok().and_then(|chat| {
             (chat.budget_seconds > 0)
@@ -3797,8 +3798,16 @@ impl Store {
                 if !chunk.bytes.is_empty() {
                     let _ = append_raw(raw_path, &chunk.bytes);
                     let events = measured(parser.push_events(&chunk.bytes));
+                    muse_sign_in_required |= backend == "muse"
+                        && events.iter().any(crate::transcript::muse_sign_in_required);
                     questions.shift(collect_agent_text(&events, &mut assistant_text));
                     self.record_events(id, backend, events);
+                    if muse_sign_in_required {
+                        // Muse exec waits for browser login instead of exiting.
+                        // This is only its own normalized startup challenge;
+                        // guided sign-in runs in a separate launcher PTY.
+                        let _ = manager.kill(pty);
+                    }
                     // Mid-turn, so the card is in front of the person while
                     // an answer can still reach this turn.
                     self.record_questions(id, backend, questions.scan(&assistant_text));
@@ -3818,10 +3827,14 @@ impl Store {
         {
             let _ = append_raw(raw_path, &chunk.bytes);
             let events = measured(parser.push_events(&chunk.bytes));
+            muse_sign_in_required |=
+                backend == "muse" && events.iter().any(crate::transcript::muse_sign_in_required);
             questions.shift(collect_agent_text(&events, &mut assistant_text));
             self.record_events(id, backend, events);
         }
         let events = measured(parser.finish_events());
+        muse_sign_in_required |=
+            backend == "muse" && events.iter().any(crate::transcript::muse_sign_in_required);
         questions.shift(collect_agent_text(&events, &mut assistant_text));
         self.record_events(id, backend, events);
         self.record_questions(id, backend, questions.finish(&assistant_text));
@@ -3832,7 +3845,11 @@ impl Store {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(id);
-        let status = turn_status(exit, stopped);
+        let status = if muse_sign_in_required {
+            "error"
+        } else {
+            turn_status(exit, stopped)
+        };
         self.record_events(
             id,
             backend,
@@ -7775,6 +7792,91 @@ mod tests {
             store.event_page(&fork.id, None, 1).unwrap().usage.unwrap(),
             expected
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn muse_exec_device_login_retires_the_turn_without_exposing_the_challenge() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::at(root.path().join("chat")));
+        let id = "muse-blocked-sign-in";
+        conversation_for_receipts(&store, id);
+        store
+            .update(
+                id,
+                Update {
+                    backend: Some("muse".into()),
+                    ..Update::default()
+                },
+            )
+            .unwrap();
+        store.set_running(id, true).unwrap();
+        store
+            .append(
+                id,
+                &StoredEvent::User {
+                    text: "Original request".into(),
+                    at_ms: 2,
+                },
+            )
+            .unwrap();
+        // No actual authentication or network request: this process models
+        // Muse waiting for browser login after printing its own challenge.
+        let process = tokenstat_pty::manager()
+            .spawn(&tokenstat_pty::Spawn {
+                command: "/bin/sh".into(),
+                args: vec![
+                    "-c".into(),
+                    "printf '%s\\n' 'Open this page to sign in:' 'https://auth.meta.com/device?user_code=TEST-CODE' 'confirm this code matches:' 'TEST-CODE' '' 'Press Enter to open it in your browser:'; exec /bin/sleep 8".into(),
+                ],
+                cwd: root.path().into(),
+                workspace_id: None,
+                hidden: true,
+                rows: 24,
+                cols: 120,
+                no_color: true,
+                dark: None,
+                environment: Vec::new(),
+            })
+            .unwrap();
+        store
+            .active
+            .lock()
+            .unwrap()
+            .insert(id.into(), process.id.clone());
+        crate::presence::claim(id, "test");
+        let started = Instant::now();
+        Arc::clone(&store).drain(
+            id,
+            "muse",
+            &process.id,
+            &root.path().join("raw.ndjson"),
+            &root.path().join("output"),
+            None,
+        );
+        crate::presence::release(id, "test");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "a blocked Muse exec must end before its browser wait finishes"
+        );
+        store
+            .finish_turn(id, &process.id, None, || {}, || {})
+            .unwrap();
+        assert!(!store.get(id).unwrap().running);
+        assert!(!store.active.lock().unwrap().contains_key(id));
+        let (events, _) = store.events(id, 0).unwrap();
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0]["text"], "Original request");
+        assert_eq!(events[1]["event"]["kind"], "failed");
+        assert_eq!(
+            events[1]["event"]["text"],
+            "Muse is not signed in on this machine. Open a terminal and run muse login."
+        );
+        assert_eq!(events[2]["event"]["kind"], "done");
+        assert_eq!(events[2]["event"]["status"], "error");
+        let visible = serde_json::to_string(&events).unwrap();
+        assert!(!visible.contains("auth.meta.com"));
+        assert!(!visible.contains("TEST-CODE"));
     }
 
     #[cfg(unix)]

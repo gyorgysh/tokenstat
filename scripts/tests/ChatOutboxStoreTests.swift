@@ -48,6 +48,23 @@ struct ChatAttachment: Codable, Equatable, Sendable { let id: String; let name: 
         try first.update(ref("sign-in-host")) { $0[0].signInBackend = nil }
         let resumed = try reopened.items(for: ref("sign-in-host"))[0]
         assert(resumed.id == signIn.id && resumed.signInBackend == nil && resumed.text == signIn.text)
+        // A send-time check can discover Muse needs sign-in before a send
+        // attempt exists. The guided flow owns the original durable message.
+        var musePending = ChatQueuedMessage(id: "muse-preflight", text: "hu", attachments: [.init(id: "muse-file", name: "photo.png")])
+        musePending.expectedRevision = 9
+        try first.update(ref("muse-preflight")) { $0.append(musePending) }
+        try first.update(ref("muse-preflight")) { items in
+            guard items[0] == musePending else { throw ChatOutboxStore.Failure.conflict }
+            items[0].delivery = .waiting
+            items[0].signInBackend = "muse"
+        }
+        let museHeld = try reopened.items(for: ref("muse-preflight"))[0]
+        assert(museHeld.id == musePending.id && museHeld.text == "hu" && museHeld.attachments == musePending.attachments)
+        assert(museHeld.signInBackend == "muse" && museHeld.expectedRevision == 9)
+        assert(museHeld.attemptedAt == nil && museHeld.firstAttemptAt == nil && !museHeld.needsReceipt)
+        try first.update(ref("muse-preflight")) { $0[0].signInBackend = nil }
+        let museContinued = try reopened.items(for: ref("muse-preflight"))[0]
+        assert(museContinued == musePending, "Continue must retain the original words, files and delivery identity")
         assert(decoded.expectedRevision == nil)
         assert(decoded.firstAttemptAt == nil && decoded.attemptedAt != nil)
         assert(first.beginDelivery(ref()))

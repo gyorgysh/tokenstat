@@ -358,11 +358,23 @@ struct AgentSignInSheet: View {
         for _ in 0..<240 {
             try? await Task.sleep(for: .milliseconds(250))
             if Task.isCancelled { return }
-            guard let found = AgentDeviceCode.parse(screenText) else { continue }
-            deviceCode = found
-            copy(found.code)
-            openInBrowser(found.url)
-            return
+            let screen = screenText
+            guard let found = AgentDeviceCode.parse(screen) else { continue }
+            if deviceCode == nil {
+                deviceCode = found
+                copy(found.code)
+                openInBrowser(found.url)
+            }
+            guard backend.id == "muse" else { return }
+            // The code can render before the launcher's optional browser
+            // prompt. Keep watching until it arrives, then skip it once so
+            // Muse starts polling for the person's browser approval now.
+            if let reply = found.browserPromptReply(backend: backend.id, screen: screen),
+               let terminal {
+                terminal.sendBytes(reply)
+                return
+            }
+            if screen.contains("Waiting for approval (link expires in") { return }
         }
     }
 

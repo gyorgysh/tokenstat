@@ -10,6 +10,7 @@ enum ChatAuthenticationFailure {
     }
 
     static func latestRecovery(in items: [ChatDisplayItem], backend: String) -> Recovery? {
+        let items = presented(items)
         guard let start = items.lastIndex(where: { if case .user = $0.kind { return true }; return false }),
               case let .user(text) = items[start].kind,
               let failure = items[(start + 1)...].last(where: {
@@ -35,6 +36,7 @@ enum ChatAuthenticationFailure {
         switch backend {
         case "claude", "claude_code": return isClaudeSignInRefusal(text)
         case "cursor", "cursor_agent": return isCursorSignInRefusal(text)
+        case "muse": return text.lowercased().hasPrefix("muse is not signed in on this machine.")
         default: return false
         }
     }
@@ -63,12 +65,38 @@ enum ChatAuthenticationFailure {
             && ["'agent login'", "'cursor-agent login'", "'cursor agent login'"].contains(where: lower.contains)
     }
 
+    private static let museSignInRefusal = "Muse is not signed in on this machine. Open a terminal and run muse login."
+
+    /// Older hosts joined the CLI's plain startup lines into an assistant
+    /// row. Require its complete device challenge and its own backend before
+    /// replacing that row, without persisting or presenting the device code.
+    private static func isLegacyMuseChallenge(_ text: String, backend: String?) -> Bool {
+        guard backend == "muse" else { return false }
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let heading = "Open this page to sign in:"
+        let confirmations = ["confirm this code matches:", "Confirm this code matches:"]
+        guard text.hasPrefix(heading),
+              text.hasSuffix("Press Enter to open it in your browser:"),
+              let confirm = confirmations.compactMap({ text.range(of: $0) }).first else { return false }
+        let urlText = text[text.index(text.startIndex, offsetBy: heading.count)..<confirm.lowerBound]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URLComponents(string: urlText) else { return false }
+        return url.scheme == "https" && url.host == "auth.meta.com"
+    }
+
     /// Hide duplicate CLI refusal prose and empty counters only in turns with
     /// a normalized auth failure. The persisted transcript remains intact.
     static func presented(_ items: [ChatDisplayItem]) -> [ChatDisplayItem] {
         var output: [ChatDisplayItem] = []
         var turn: [ChatDisplayItem] = []
         func flush() {
+            turn = turn.map { item in
+                guard case let .assistant(text, backend) = item.kind,
+                      isLegacyMuseChallenge(text, backend: backend) else { return item }
+                return ChatDisplayItem(id: item.id, kind: .failed(museSignInRefusal),
+                                       lastSequence: item.lastSequence, groupID: item.groupID,
+                                       plainStep: item.plainStep)
+            }
             let refused = turn.contains { if case let .failed(text) = $0.kind {
                 return isClaudeSignInRefusal(text)
             }; return false }

@@ -910,7 +910,7 @@ final class ChatModel {
         let toggled = toggledGroups
         if isShowingCachedTranscript {
             // A preview is one window of rows, briefly, while a chat opens.
-            return ChatTranscriptFold.fold(recentMessagePreview, detail: detail, running: false) { open != toggled.contains($0) }
+            return ChatTranscriptFold.fold(ChatAuthenticationFailure.presented(recentMessagePreview), detail: detail, running: false) { open != toggled.contains($0) }
         }
         let pending = outgoing
         let rows = coalescedItems
@@ -2195,6 +2195,26 @@ final class ChatModel {
             guard current(), !busy else {
                 if current() { busyTurnError() }
                 return false
+            }
+            // Setup's background probe can still be in flight on a newly
+            // opened chat, and a catalog refresh replaces its local evidence.
+            // Check before sending, so a CLI that signs in automatically in
+            // exec mode cannot park a browser challenge inside the chat.
+            if let backend = backend(for: selected?.backend ?? ""),
+               backend.canCheckSignIn, backend.signInFlow?.supported == true {
+                let status = await checkSignIn(backend)
+                guard current(), selected?.backend == backend.id, !busy else { return false }
+                if status?.checked == true, ["needsSignIn", "expired"].contains(status?.readiness ?? "") {
+                    publish(try ChatOutboxStore.shared.update(reference) { items in
+                        guard let index = items.firstIndex(where: { $0.id == item.id }), items[index] == item else {
+                            throw ChatOutboxStore.Failure.conflict
+                        }
+                        items[index].delivery = .waiting
+                        items[index].signInBackend = backend.id
+                    })
+                    authorizedQueueItems.remove(item.id)
+                    return false
+                }
             }
             let resolved = try await resolveDraftAttachments(item.attachments, reference: reference, peer: targetPeer)
             guard current(), !busy else {

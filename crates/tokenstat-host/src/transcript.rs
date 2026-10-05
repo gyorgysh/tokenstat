@@ -87,6 +87,30 @@ pub enum Event {
     },
 }
 
+const MUSE_AUTH_PROMPT: &str = "Open this page to sign in:";
+const MUSE_SIGN_IN_REQUIRED: &str =
+    "Muse is not signed in on this machine. Open a terminal and run muse login.";
+
+/// Only the CLI's blocked startup login challenge should retire a chat exec.
+/// Assistant and tool output can discuss signing in without failing a turn.
+pub(crate) fn muse_sign_in_required(event: &Event) -> bool {
+    matches!(event, Event::Failed { text } if text == MUSE_SIGN_IN_REQUIRED)
+}
+
+enum MuseAuthState {
+    Startup,
+    AwaitUrl,
+    Refused,
+    Active,
+}
+
+enum MuseAuthLine {
+    Pass,
+    Hold,
+    Failure,
+    ReleasePrefix,
+}
+
 /// A reconnected cursor stream saying its turn again.
 enum CursorReplay {
     /// Waiting for the first record, which is what says where it resumed.
@@ -154,6 +178,9 @@ pub struct Parser {
     /// Muse names a tool when its task is proposed, then gives its stable call
     /// id when it is scheduled. Keep that tiny join until the card can start.
     muse_tasks: HashMap<String, String>,
+    /// A plain device login challenge can precede Muse's JSON stream and
+    /// wait forever for terminal input. Keep its URL/code out of chat.
+    muse_auth: MuseAuthState,
 }
 
 impl Parser {
@@ -173,6 +200,7 @@ impl Parser {
             cursor_replay: None,
             last_session: None,
             muse_tasks: HashMap::new(),
+            muse_auth: MuseAuthState::Startup,
         }
     }
 
@@ -224,6 +252,11 @@ impl Parser {
             let bytes = std::mem::take(&mut self.leftover);
             self.line_events(&String::from_utf8_lossy(&bytes))
         };
+        if self.take_muse_auth_prefix() {
+            events.push(Event::Text {
+                delta: MUSE_AUTH_PROMPT.into(),
+            });
+        }
         events.extend(self.close_open_tools(false, Some("ended".into())));
         self.cursor_reset();
         events
@@ -233,12 +266,19 @@ impl Parser {
     /// has gone, so a last `printf` without a newline still becomes text.
     pub fn finish(&mut self) -> String {
         if self.leftover.is_empty() {
-            return String::new();
+            let mut out = String::new();
+            if self.take_muse_auth_prefix() {
+                self.emit(&mut out, Piece::Block(MUSE_AUTH_PROMPT.into()));
+            }
+            return out;
         }
         let leftover = std::mem::take(&mut self.leftover);
         let mut out = String::new();
         if let Some(piece) = self.line(&String::from_utf8_lossy(&leftover)) {
             self.emit(&mut out, piece);
+        }
+        if self.take_muse_auth_prefix() {
+            self.emit(&mut out, Piece::Block(MUSE_AUTH_PROMPT.into()));
         }
         out
     }
@@ -307,7 +347,7 @@ impl Parser {
         }
     }
 
-    fn line(&self, raw: &str) -> Option<Piece> {
+    fn line(&mut self, raw: &str) -> Option<Piece> {
         let cleaned = strip_ansi(raw)
             .trim()
             .trim_start_matches('\u{feff}')
@@ -316,12 +356,26 @@ impl Parser {
         if cleaned.is_empty() {
             return None;
         }
-        if !cleaned.starts_with('{') {
-            if self.backend == "muse"
-                && (cleaned.starts_with("muse:") || cleaned.starts_with("Muse Code updated "))
-            {
-                return None;
+        if self.backend == "muse"
+            && (cleaned.starts_with("muse:") || cleaned.starts_with("Muse Code updated "))
+        {
+            return None;
+        }
+        match self.muse_auth_line(&cleaned) {
+            MuseAuthLine::Hold => return None,
+            MuseAuthLine::Failure => return Some(Piece::Block(MUSE_SIGN_IN_REQUIRED.into())),
+            MuseAuthLine::ReleasePrefix => {
+                let text = match self.line(raw) {
+                    Some(Piece::Text(text) | Piece::Block(text)) => {
+                        format!("{MUSE_AUTH_PROMPT}\n\n{text}")
+                    }
+                    None => MUSE_AUTH_PROMPT.into(),
+                };
+                return Some(Piece::Block(text));
             }
+            MuseAuthLine::Pass => {}
+        }
+        if !cleaned.starts_with('{') {
             if self.is_json_backend() {
                 // Truncated or escape-polluted JSON must not become the view.
                 if cleaned.contains("\"type\":") {
@@ -352,12 +406,28 @@ impl Parser {
         if cleaned.is_empty() {
             return Vec::new();
         }
-        if !cleaned.starts_with('{') {
-            if self.backend == "muse"
-                && (cleaned.starts_with("muse:") || cleaned.starts_with("Muse Code updated "))
-            {
-                return Vec::new();
+        if self.backend == "muse"
+            && (cleaned.starts_with("muse:") || cleaned.starts_with("Muse Code updated "))
+        {
+            return Vec::new();
+        }
+        match self.muse_auth_line(&cleaned) {
+            MuseAuthLine::Hold => return Vec::new(),
+            MuseAuthLine::Failure => {
+                return self.take_events(vec![Event::Failed {
+                    text: MUSE_SIGN_IN_REQUIRED.into(),
+                }]);
             }
+            MuseAuthLine::ReleasePrefix => {
+                let mut events = vec![Event::Text {
+                    delta: MUSE_AUTH_PROMPT.into(),
+                }];
+                events.extend(self.line_events(raw));
+                return events;
+            }
+            MuseAuthLine::Pass => {}
+        }
+        if !cleaned.starts_with('{') {
             let events = if self.is_json_backend() && cleaned.contains("\"type\":") {
                 Vec::new()
             } else if let Some(text) = cli_refusal_text(&self.backend, &cleaned) {
@@ -439,6 +509,48 @@ impl Parser {
             }
         }
         self.take_events(events)
+    }
+
+    fn muse_auth_line(&mut self, line: &str) -> MuseAuthLine {
+        if self.backend != "muse" {
+            return MuseAuthLine::Pass;
+        }
+        match self.muse_auth {
+            MuseAuthState::Startup if line == MUSE_AUTH_PROMPT => {
+                self.muse_auth = MuseAuthState::AwaitUrl;
+                MuseAuthLine::Hold
+            }
+            MuseAuthState::Startup => {
+                self.muse_auth = MuseAuthState::Active;
+                MuseAuthLine::Pass
+            }
+            MuseAuthState::AwaitUrl => {
+                let device_url = reqwest::Url::parse(line).is_ok_and(|url| {
+                    url.scheme() == "https"
+                        && url.host_str() == Some("auth.meta.com")
+                        && url.username().is_empty()
+                        && url.password().is_none()
+                });
+                if device_url {
+                    self.muse_auth = MuseAuthState::Refused;
+                    MuseAuthLine::Failure
+                } else {
+                    self.muse_auth = MuseAuthState::Active;
+                    MuseAuthLine::ReleasePrefix
+                }
+            }
+            MuseAuthState::Refused => MuseAuthLine::Hold,
+            MuseAuthState::Active => MuseAuthLine::Pass,
+        }
+    }
+
+    fn take_muse_auth_prefix(&mut self) -> bool {
+        if matches!(self.muse_auth, MuseAuthState::AwaitUrl) {
+            self.muse_auth = MuseAuthState::Active;
+            true
+        } else {
+            false
+        }
     }
 
     /// The part of this piece of cursor prose not already on the transcript.
@@ -3022,6 +3134,106 @@ mod tests {
             .map(|chunk| prose.push(chunk))
             .collect::<String>();
         assert_eq!(text, "hihi 😀 café");
+    }
+
+    #[test]
+    fn muse_startup_device_login_is_a_private_sign_in_failure() {
+        // Synthetic device URL/code: no actual login challenge belongs in a
+        // fixture. The CLI waits for Enter after printing this plain prompt.
+        let raw = concat!(
+            "muse: workspace root: /tmp (explicit)\n",
+            "Open this page to sign in:\n",
+            "https://auth.meta.com/device?user_code=TEST-CODE\n",
+            "confirm this code matches:\n",
+            "TEST-CODE\n\n",
+            "Press Enter to open it in your browser:\n",
+        );
+        for chunk_size in [1, 7, raw.len()] {
+            let mut parser = Parser::new("muse");
+            let mut events = raw
+                .as_bytes()
+                .chunks(chunk_size)
+                .flat_map(|chunk| parser.push_events(chunk))
+                .collect::<Vec<_>>();
+            events.extend(parser.finish_events());
+            assert_eq!(
+                events,
+                vec![Event::Failed {
+                    text: MUSE_SIGN_IN_REQUIRED.into()
+                }]
+            );
+            assert!(muse_sign_in_required(&events[0]));
+
+            let mut readable = Parser::new("muse");
+            let mut text = raw
+                .as_bytes()
+                .chunks(chunk_size)
+                .map(|chunk| readable.push(chunk))
+                .collect::<String>();
+            text.push_str(&readable.finish());
+            assert_eq!(text, MUSE_SIGN_IN_REQUIRED);
+        }
+    }
+
+    #[test]
+    fn muse_login_probe_preserves_other_output_and_incomplete_headings() {
+        let heading = format!("{MUSE_AUTH_PROMPT}\n");
+        let mut parser = Parser::new("muse");
+        assert!(parser.push_events(heading.as_bytes()).is_empty());
+        assert_eq!(
+            parser.finish_events(),
+            vec![Event::Text {
+                delta: MUSE_AUTH_PROMPT.into()
+            }]
+        );
+
+        let other_url = "https://auth.meta.com.example.invalid/device";
+        let mut parser = Parser::new("muse");
+        let events = parser.push_events(format!("{heading}{other_url}\n").as_bytes());
+        assert_eq!(
+            events,
+            vec![
+                Event::Text {
+                    delta: MUSE_AUTH_PROMPT.into()
+                },
+                Event::Text {
+                    delta: other_url.into()
+                },
+            ]
+        );
+
+        let prose = format!("{heading}https://auth.meta.com/device?user_code=TEST-CODE");
+        let record = serde_json::json!({
+            "payload_type":"run.output.delta", "payload":{"text":prose}
+        })
+        .to_string()
+            + "\n";
+        let mut parser = Parser::new("muse");
+        assert_eq!(
+            parser.push_events(record.as_bytes()),
+            vec![Event::Text { delta: prose }]
+        );
+        assert!(!muse_sign_in_required(&Event::Text {
+            delta: MUSE_SIGN_IN_REQUIRED.into()
+        }));
+    }
+
+    #[test]
+    fn muse_device_login_without_a_final_newline_is_still_failed() {
+        let mut parser = Parser::new("muse");
+        assert!(
+            parser
+                .push_events(
+                    b"Open this page to sign in:\nhttps://auth.meta.com/device?user_code=TEST-CODE"
+                )
+                .is_empty()
+        );
+        assert_eq!(
+            parser.finish_events(),
+            vec![Event::Failed {
+                text: MUSE_SIGN_IN_REQUIRED.into()
+            }]
+        );
     }
 
     #[test]

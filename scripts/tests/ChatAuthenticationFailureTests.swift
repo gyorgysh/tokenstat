@@ -45,6 +45,13 @@ struct ChatAuthenticationFailureTests {
             precondition(!ChatAuthenticationFailure.needsSignIn(cursorRaw, backend: backend))
             precondition(!ChatAuthenticationFailure.needsSignIn(cursorNormalized, backend: backend))
         }
+        let museNormalized = "Muse is not signed in on this machine. Open a terminal and run muse login."
+        precondition(ChatAuthenticationFailure.needsSignIn(museNormalized, backend: "muse"))
+        for backend in ["claude", "codex", "cursor"] {
+            precondition(!ChatAuthenticationFailure.needsSignIn(museNormalized, backend: backend))
+        }
+        precondition(!ChatAuthenticationFailure.needsSignIn("Run muse login to use the CLI.", backend: "muse"))
+        precondition(!ChatAuthenticationFailure.needsSignIn("The tool output says \(museNormalized)", backend: "muse"))
         let refused = ChatDisplayItem(id: "refused", kind: .failed("Claude Code is not signed in on this computer."))
         let prompt = ChatDisplayItem(id: "prompt", kind: .user("hello"))
         precondition(ChatAuthenticationFailure.latestFailureID(in: [prompt, refused], backend: "claude") == "refused")
@@ -89,6 +96,36 @@ struct ChatAuthenticationFailureTests {
         let unrelatedFailure = ChatDisplayItem(id: "other-failure", kind: .failed("Network disconnected."))
         precondition(ChatAuthenticationFailure.latestRecovery(in: [prompt, cursorFailed, prompt, unrelatedFailure], backend: "cursor") == nil,
                      "A newer failed turn must not revive an earlier Cursor login refusal")
+        let museFailed = ChatDisplayItem(id: "muse-failed", kind: .failed(museNormalized))
+        let museRecovery = ChatAuthenticationFailure.latestRecovery(in: [prompt, file, museFailed], backend: "muse")!
+        precondition(museRecovery.text == "hello" && museRecovery.attachments.map(\.id) == ["input"])
+        precondition(ChatAuthenticationFailure.latestRecovery(in: [prompt, museFailed, prompt, reply], backend: "muse") == nil)
+        let museChallenge = "Open this page to sign in:\nhttps://auth.meta.com/device?user_code=TEST-CODE\nconfirm this code matches:\nTEST-CODE\n\nPress Enter to open it in your browser:"
+        let museLauncherChallenge = museChallenge.replacingOccurrences(of: "confirm this code matches:", with: "Confirm this code matches:")
+        for text in [museChallenge, museChallenge.replacingOccurrences(of: "\n", with: ""),
+                     museLauncherChallenge, museLauncherChallenge.replacingOccurrences(of: "\n", with: "")] {
+            let legacy = ChatDisplayItem(id: "muse-legacy", kind: .assistant(text, backend: "muse"), lastSequence: 12)
+            let presented = ChatAuthenticationFailure.presented([prompt, file, legacy])
+            precondition(presented.last?.kind == .failed(museNormalized),
+                         "Old Muse startup challenges must not expose device URLs or codes")
+            precondition(presented.last?.id == legacy.id && presented.last?.lastSequence == 12)
+            let recovery = ChatAuthenticationFailure.latestRecovery(in: [prompt, file, legacy], backend: "muse")!
+            precondition(recovery.failureID == legacy.id && recovery.text == "hello" && recovery.attachments.map(\.id) == ["input"])
+            precondition(ChatAuthenticationFailure.latestRecovery(in: [prompt, legacy], backend: "cursor") == nil)
+            precondition(ChatAuthenticationFailure.latestRecovery(in: [prompt, legacy, prompt, reply], backend: "muse") == nil)
+        }
+        for unrelated in [
+            ChatDisplayItem(id: "other-backend", kind: .assistant(museChallenge, backend: "claude")),
+            ChatDisplayItem(id: "quoted-challenge", kind: .assistant("For example:\n" + museChallenge, backend: "muse")),
+            ChatDisplayItem(id: "wrong-host", kind: .assistant(museChallenge.replacingOccurrences(of: "auth.meta.com/", with: "auth.meta.com.example.invalid/"), backend: "muse")),
+            ChatDisplayItem(id: "incomplete-challenge", kind: .assistant("Open this page to sign in:\nhttps://auth.meta.com/device", backend: "muse")),
+            ChatDisplayItem(id: "tool-challenge", kind: .tool(ChatToolState(
+                callId: "muse-tool", verb: "Shell", target: "muse login", running: false, failed: true,
+                detail: museChallenge, startedAtMs: 0, endedAtMs: 1, snippet: [museChallenge]))),
+        ] {
+            precondition(ChatAuthenticationFailure.presented([prompt, unrelated]).last == unrelated)
+            precondition(ChatAuthenticationFailure.latestRecovery(in: [prompt, unrelated], backend: "muse") == nil)
+        }
         print("ChatAuthenticationFailureTests passed")
     }
 }

@@ -33,6 +33,23 @@ import Foundation
         // Only https links are opened.
         assert(AgentDeviceCode.parse("http://example.invalid/device\nABCD-12345") == nil)
         assert(AgentDeviceCode.parse("") == nil)
+
+        // Muse shows its code before offering to open a browser. The sheet
+        // opens it locally, then EOF skips only that optional opener so the
+        // launcher can poll. A code alone must not send terminal input.
+        let museCode = """
+        Open this page to sign in:
+          https://auth.meta.com/device?user_code=ABCD-12345
+        Confirm this code matches:
+          ABCD-12345
+        """
+        let muse = AgentDeviceCode.parse(museCode)!
+        assert(muse.browserPromptReply(backend: "muse", screen: museCode) == nil)
+        let musePrompt = museCode + "\nPress Enter to open it in your browser: "
+        assert(muse.browserPromptReply(backend: "muse", screen: musePrompt) == [0x04])
+        assert(muse.browserPromptReply(backend: "codex", screen: musePrompt) == nil)
+        assert(found?.browserPromptReply(backend: "muse", screen: screen + "\nPress Enter to open it in your browser:") == nil)
+        assert(muse.browserPromptReply(backend: "muse", screen: "Press Enter to open it in your browser:\n" + museCode) == nil)
         print("AgentDeviceCodeTests passed")
     }
 }
