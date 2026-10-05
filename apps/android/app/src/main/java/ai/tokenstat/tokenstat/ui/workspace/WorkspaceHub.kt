@@ -15,7 +15,6 @@ import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.components.cardRadiusDp
 import ai.tokenstat.tokenstat.ui.components.tsPanel
-import ai.tokenstat.tokenstat.ui.logic.HostContracts
 import ai.tokenstat.tokenstat.ui.logic.HubCounts
 import ai.tokenstat.tokenstat.ui.logic.HubCountsParser
 import ai.tokenstat.tokenstat.ui.logic.HubSection
@@ -334,6 +333,7 @@ fun WorkspaceHub(
     // the conversation worth returning to, even on an already-open Chat page.
     var chatNonce by rememberSaveable(folder.str("id")) { mutableStateOf(0) }
     val section = openSection
+    val protocol = rememberWorkspaceHostProtocol(model, peer, workspace, section)
     // A section is a push inside the folder, and the folder is a push inside
     // Workspaces. Back steps out one at a time rather than closing the app.
     BackHandler(enabled = section != null) { openSection = null }
@@ -392,7 +392,7 @@ fun WorkspaceHub(
                 workspace = workspace,
                 hostLabel = host.str("label") ?: L10n.text("android.workspacehub.computer.76ed42d2"),
                 section = section,
-                protocol = HostContracts.protocolOf(host),
+                protocol = protocol,
                 folderName = folderName,
                 modifier = Modifier.weight(1f),
                 onOpenTerminal = onOpenTerminal,

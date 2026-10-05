@@ -11,6 +11,15 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one. Do not reconstruct release notes from commits
 at the end.
 
+## [Unreleased]
+
+### Fixed
+
+- Android reads capabilities from the connected computer, so Pull in Changes,
+  the New pull request flow and chat-question answers become available on
+  supported computers. Temporary connection failures retry, and changing
+  accounts or computers clears the previous computer's capabilities.
+
 ## [1.2.0] - 2026-10-05
 
 ### Added

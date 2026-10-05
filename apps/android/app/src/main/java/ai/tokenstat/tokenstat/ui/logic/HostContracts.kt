@@ -4,7 +4,7 @@ package ai.tokenstat.tokenstat.ui.logic
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
 /// Shared host contract constants. Mirrors Apple `Bridge.swift`
@@ -35,9 +35,11 @@ object HostContracts {
     fun supportsReviewedPull(protocol: Long?): Boolean =
         protocol != null && protocol >= REVIEWED_PULL_MIN_PROTOCOL
 
-    fun protocolOf(status: kotlinx.serialization.json.JsonObject?): Long? =
-        status?.get("protocol")?.jsonPrimitive?.longOrNull
-            ?: status?.get("protocolVersion")?.jsonPrimitive?.longOrNull
+    fun protocolOf(status: JsonObject?): Long? {
+        fun version(key: String): Long? =
+            (status?.get(key) as? JsonPrimitive)?.longOrNull?.takeIf { it > 0 }
+        return version("protocol") ?: version("protocolVersion")
+    }
 
     fun supportsChat(protocol: Long?): Boolean =
         protocol == null || protocol >= CHAT_MIN_PROTOCOL

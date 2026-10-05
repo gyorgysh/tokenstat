@@ -20,6 +20,9 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 
@@ -47,15 +50,21 @@ fun PullCreateDialog(model: AppViewModel, peer: String, workspace: String, proto
     suspend fun check() {
         if (!owns()) return
         working = true
-        runCatching { model.workspaceSection(peer, "pulls.prepareCreate", buildJsonObject { put("workspaceId", workspace) }) as? JsonObject }
-            .onSuccess {
-                if (owns()) {
-                    context = it
-                    if (base.isEmpty()) base = it?.get("defaultBase")?.jsonPrimitive?.contentOrNull ?: ""
-                    error = null
-                }
-            }.onFailure { context = null; error = it.message }
-        working = false
+        try {
+            val prepared = model.workspaceSection(peer, "pulls.prepareCreate", buildJsonObject { put("workspaceId", workspace) }) as? JsonObject
+            currentCoroutineContext().ensureActive()
+            if (owns()) {
+                context = prepared
+                if (base.isEmpty()) base = prepared?.get("defaultBase")?.jsonPrimitive?.contentOrNull ?: ""
+                error = null
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            if (owns()) { context = null; error = failure.message }
+        } finally {
+            working = false
+        }
     }
     LaunchedEffect(owner) {
         owner?.let {
@@ -68,7 +77,10 @@ fun PullCreateDialog(model: AppViewModel, peer: String, workspace: String, proto
         }
         commit.restore(android)
         loaded = true
-        if (HostContracts.supportsPullCreation(protocol)) check()
+    }
+    val supportsCreation = HostContracts.supportsPullCreation(protocol)
+    LaunchedEffect(owner, loaded, supportsCreation) {
+        if (loaded && supportsCreation) check()
     }
     LaunchedEffect(title, body, base, isDraft, loaded) {
         if (loaded && owns()) prefs.edit().putString(owner!!.key, buildJsonObject {
@@ -84,7 +96,7 @@ fun PullCreateDialog(model: AppViewModel, peer: String, workspace: String, proto
                 Text(L10n.text("android.pullcreate.new"), style = MaterialTheme.typography.titleLarge)
                 // An unknown protocol is an old host until it says otherwise,
                 // like every other feature newer than the client's first read.
-                if (!HostContracts.supportsPullCreation(protocol)) Text(L10n.text("android.pullcreate.update_host"))
+                if (!supportsCreation) Text(L10n.text("android.pullcreate.update_host"))
                 else if (result != null) {
                     val number = result?.get("number")?.jsonPrimitive?.content ?: ""
                     Text(if (result?.get("existing")?.jsonPrimitive?.booleanOrNull == true)
