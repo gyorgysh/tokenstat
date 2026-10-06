@@ -43,9 +43,13 @@ class UsageSnapshotTest {
     }
     @Test fun logoutAndAccountSwitchRejectLateLoads() {
         val session = UsageSession()
+        assertTrue(session.acceptsCachedOwner(owner))
         val a = session.verify(owner, session.epoch, fromApp = true)!!
+        assertTrue(session.acceptsCachedOwner(owner))
+        assertFalse(session.acceptsCachedOwner("b".repeat(64)))
         val priorCheck = session.epoch
         session.clear(block = true)
+        assertFalse(session.acceptsCachedOwner(owner))
         assertFalse(session.current(a))
         assertNull(session.verify(owner, priorCheck, fromApp = false))
         assertNull(session.verify(owner, session.epoch, fromApp = false))
@@ -54,6 +58,7 @@ class UsageSnapshotTest {
         val b = session.verify("b".repeat(64), session.epoch, fromApp = true)!!
         assertFalse(session.current(newA)); assertTrue(session.current(b))
         assertNull(session.verify(null, session.epoch, fromApp = true))
+        assertFalse(session.acceptsCachedOwner(b.owner))
         assertFalse(session.current(b))
     }
 }

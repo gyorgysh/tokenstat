@@ -27,6 +27,37 @@ import kotlinx.serialization.json.*
 /** Inflate real RemoteViews at widget sizes, with privacy and overflow cases. */
 @RunWith(AndroidJUnit4::class)
 class UsageWidgetLayoutTest {
+    @Test fun accountSwitchCannotRestoreOldUsageWhenStorageWriteFails() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val cache = context.noBackupFilesDir.resolve("widget-usage.json")
+        val obstruction = File(cache.path + ".new")
+        fun account(id: String) = buildJsonObject { put("signedIn", true); put("host", "https://example.test"); put("accountId", id) }
+        val calendar = buildJsonObject {
+            put("scope", "account"); put("fetchedAtMs", System.currentTimeMillis())
+            put("rows", JsonArray(listOf(JsonArray(listOf(buildJsonObject {
+                put("date", LocalDate.now().toString()); put("value", 18_420_000L); put("locked", false)
+            })))))
+        }
+        UsageWidgetStore.clear(context)
+        try {
+            val first = UsageWidgetStore.verify(context, account("first"), UsageWidgetStore.epoch(), fromApp = true)!!
+            UsageWidgetStore.publish(context, first, calendar)
+            assertEquals(18_420_000L, UsageWidgetStore.read(context)!!.value(false))
+            // A nonempty directory blocks AtomicFile's replacement write,
+            // exercising a real filesystem failure rather than a mock.
+            assertTrue(obstruction.mkdir())
+            obstruction.resolve("unavailable").writeText("fixture")
+            val second = UsageWidgetStore.verify(context, account("second"), UsageWidgetStore.epoch(), fromApp = true)!!
+            assertNull(UsageWidgetStore.read(context)?.value(false))
+            assertFalse(cache.isFile)
+            assertTrue(obstruction.deleteRecursively())
+            UsageWidgetStore.publish(context, second, calendar)
+            assertEquals(second.owner, UsageWidgetStore.read(context)!!.owner)
+        } finally {
+            obstruction.deleteRecursively()
+            UsageWidgetStore.clear(context)
+        }
+    }
     @Test fun widgetPaletteMatchesAppAndSecondaryTextIsReadable() {
         val base = InstrumentationRegistry.getInstrumentation().targetContext
         for (dark in listOf(false, true)) {

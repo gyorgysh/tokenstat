@@ -24,7 +24,9 @@ object UsageWidgetStore {
                 count += read
             }
             require(count <= 32 * 1024)
-            json.decodeFromString<UsageSnapshot>(buffer.copyOf(count).toString(Charsets.UTF_8)).takeIf { snapshot -> snapshot.valid }
+            json.decodeFromString<UsageSnapshot>(buffer.copyOf(count).toString(Charsets.UTF_8)).takeIf { snapshot ->
+                snapshot.valid && session.acceptsCachedOwner(snapshot.owner)
+            }
         }
     }.getOrNull()
 
@@ -36,7 +38,12 @@ object UsageWidgetStore {
             if (owner == null) { file(context).delete(); UsageWidgetProvider.updateAll(context) }
             return null
         }
-        if (read(context)?.owner != owner) write(context, UsageSnapshot(lease.owner))
+        if (read(context)?.owner != owner) {
+            // Delete before replacing: a full disk or interrupted write must
+            // never restore another account's aggregates from AtomicFile.
+            file(context).delete()
+            if (!write(context, UsageSnapshot(lease.owner))) UsageWidgetProvider.updateAll(context)
+        }
         return lease
     }
 
@@ -60,11 +67,12 @@ object UsageWidgetStore {
         if (lease != null && !session.current(lease) || lease == null && observedEpoch == null) return
         read(context)?.takeIf { lease == null || it.owner == lease.owner }?.let { write(context, it.copy(refreshFailed = true)) }
     }
-    private fun write(context: Context, snapshot: UsageSnapshot) {
+    private fun write(context: Context, snapshot: UsageSnapshot): Boolean {
         val atomic = file(context)
-        val output = runCatching { atomic.startWrite() }.getOrNull() ?: return
+        val output = runCatching { atomic.startWrite() }.getOrNull() ?: return false
         try { output.write(json.encodeToString(snapshot).toByteArray()); atomic.finishWrite(output) }
-        catch (error: Exception) { atomic.failWrite(output); return }
+        catch (error: Exception) { atomic.failWrite(output); return false }
         UsageWidgetProvider.updateAll(context)
+        return true
     }
 }

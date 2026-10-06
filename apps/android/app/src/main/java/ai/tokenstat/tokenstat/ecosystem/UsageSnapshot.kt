@@ -64,14 +64,17 @@ class UsageSession {
     var epoch = 0L; private set
     private var owner: String? = null
     private var blocked = false
+    private var verified = false
 
     fun verify(next: String?, observed: Long, fromApp: Boolean): UsageLease? {
         if (observed != epoch || blocked && !fromApp) return null
         if (fromApp) blocked = false
+        verified = true
         if (next != owner) { epoch++; owner = next }
         return lease()
     }
-    fun clear(block: Boolean = false) { epoch++; owner = null; blocked = block }
+    fun clear(block: Boolean = false) { epoch++; owner = null; blocked = block; verified = true }
+    fun acceptsCachedOwner(owner: String): Boolean = !blocked && (!verified || this.owner == owner)
     fun lease(): UsageLease? = owner?.let { UsageLease(it, epoch) }
     fun current(lease: UsageLease): Boolean = lease == lease()
 }
