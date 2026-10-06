@@ -44,7 +44,7 @@ final class TokenstatWatchModel: NSObject, WCSessionDelegate {
     }
 
     func refresh() {
-        send(["action": destination == .requests ? "approvals" : "refresh"])
+        send(["action": EcosystemWatchAction.refreshAction(for: destination.rawValue).rawValue])
     }
 
     func resolve(_ approval: EcosystemApproval, choice: String) {
@@ -53,7 +53,7 @@ final class TokenstatWatchModel: NSObject, WCSessionDelegate {
             message = "This request expired. Refresh to check pending requests."
             return
         }
-        send(["action": "resolve", "owner": owner, "choice": choice, "approval": data],
+        send(["action": EcosystemWatchAction.resolve.rawValue, "owner": owner, "choice": choice, "approval": data],
              success: choice == "deny" ? "Request denied." : choice == "allowAlways" ? "Allowed for this chat." : "Allowed once.")
     }
 

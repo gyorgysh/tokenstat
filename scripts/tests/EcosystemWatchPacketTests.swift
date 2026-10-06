@@ -4,6 +4,12 @@ import Foundation
 
 @main struct EcosystemWatchPacketTests {
     static func main() throws {
+        assert(EcosystemWatchAction.refreshAction(for: "limits") == .limits)
+        assert(EcosystemWatchAction.refreshAction(for: "requests") == .approvals)
+        assert(EcosystemWatchAction.refreshAction(for: "usage") == .refresh)
+        assert(EcosystemWatchAction.refreshAction(for: "projects") == .refresh)
+        assert(EcosystemWatchAction(rawValue: "limits") == .limits)
+        assert(EcosystemWatchAction(rawValue: "unrecognized") == nil)
         let installation = UUID()
         let time = Date()
         let first = EcosystemWatchPacket(installation: installation, revision: 10, sentAt: time, snapshot: .preview)
@@ -36,6 +42,23 @@ import Foundation
         assert(!EcosystemWatchPacket(installation: installation, revision: 12, sentAt: time, snapshot: .empty, approvals: [approval]).isValid)
         assert(!EcosystemWatchPacket(installation: installation, revision: 12, sentAt: time, snapshot: .preview, approvals: [approval, approval]).isValid)
         assert(!EcosystemWatchPacket(installation: installation, revision: 12, sentAt: time, snapshot: .preview, approvals: Array(repeating: approval, count: 13)).isValid)
+        let smallRequests = (0..<13).map { index in
+            EcosystemApproval(requestID: "small-\(index)", conversationID: "chat", peer: "host", host: "MacBook", verb: "shell",
+                              preview: "git status", fingerprint: String(repeating: "a", count: 64), expiresAt: time.addingTimeInterval(Double(30 + index)))
+        }
+        let expired = EcosystemApproval(requestID: "expired", conversationID: "chat", peer: "host", host: "MacBook", verb: "shell",
+                                       preview: "git status", fingerprint: String(repeating: "a", count: 64), expiresAt: time)
+        let selection = EcosystemApproval.watchSelection(Array(smallRequests.reversed()) + [smallRequests[0], expired], at: time)
+        assert(selection.requests == Array(smallRequests.prefix(12)))
+        assert(selection.omittedCount == 1) // Count truncation needs a hint even when the packet fits.
+        let selectedPacket = EcosystemWatchPacket(installation: installation, revision: 13, sentAt: time, snapshot: .preview,
+                                                 approvals: selection.requests, omittedApprovals: selection.omittedCount)
+        assert(EcosystemWatchPacket.decode(selectedPacket.encodedForTransfer()!) == selectedPacket)
+        let manySmallRequests = (0..<40).map { index in
+            EcosystemApproval(requestID: "many-\(index)", conversationID: "chat", peer: "host", host: "MacBook", verb: "shell",
+                              preview: "git status", fingerprint: String(repeating: "a", count: 64), expiresAt: time.addingTimeInterval(30))
+        }
+        assert(EcosystemApproval.watchSelection(manySmallRequests, at: time).omittedCount == 12)
         let bulky = (0..<12).map { index in
             EcosystemApproval(requestID: "request-\(index)", conversationID: "chat", peer: "host", host: "MacBook", verb: "shell",
                               preview: String(repeating: "x", count: 8192), fingerprint: String(repeating: "a", count: 64), expiresAt: time.addingTimeInterval(30))
@@ -47,6 +70,10 @@ import Foundation
         assert(trimmed.approvals!.count > 0 && trimmed.approvals!.first == bulky.first)
         assert(trimmed.omittedApprovals == 12 - trimmed.approvals!.count)
         assert(bulkyPacket.encodedForTransfer(maximumBytes: 1) == nil)
+        var alreadyOmitted = bulkyPacket
+        alreadyOmitted.omittedApprovals = 12
+        let furtherTrimmed = EcosystemWatchPacket.decode(alreadyOmitted.encodedForTransfer()!)!
+        assert(furtherTrimmed.approvals!.count < bulky.count && furtherTrimmed.omittedApprovals == 12)
         var providersSnapshot = EcosystemSnapshot.preview
         providersSnapshot.limits = (0..<32).map { index in
             EcosystemLimitProvider(source: "vendor_\(index)", observedAt: time, stale: false,
@@ -57,6 +84,10 @@ import Foundation
         assert(quotaTrimmed.approvals == [approval]) // Quotas cannot displace urgent review requests.
         assert((quotaTrimmed.omittedProviders ?? 0) > 0)
         assert((quotaTrimmed.omittedProviders ?? 0) + (quotaTrimmed.snapshot.limits?.count ?? 0) == 32)
+        var alreadyOmittedProviders = quotaPacket
+        alreadyOmittedProviders.omittedProviders = 32
+        let furtherQuotaTrimmed = EcosystemWatchPacket.decode(alreadyOmittedProviders.encodedForTransfer(maximumBytes: 8 * 1024)!)!
+        assert(furtherQuotaTrimmed.snapshot.limits!.count < 32 && furtherQuotaTrimmed.omittedProviders == 32)
 
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

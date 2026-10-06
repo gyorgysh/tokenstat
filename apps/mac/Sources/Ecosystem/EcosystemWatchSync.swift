@@ -29,7 +29,8 @@ final class EcosystemWatchSync: NSObject, WCSessionDelegate {
                            UInt64(max(0, Date().timeIntervalSince1970 * 1_000_000)))
         defaults.set(revision, forKey: "ecosystem.watch.revision")
         return EcosystemWatchPacket(installation: installation, revision: revision, sentAt: Date(), snapshot: snapshot,
-                                   approvals: EcosystemApprovalService.requests(for: snapshot.owner)).encodedForTransfer()
+                                   approvals: EcosystemApprovalService.requests(for: snapshot.owner),
+                                   omittedApprovals: EcosystemApprovalService.omittedRequests(for: snapshot.owner)).encodedForTransfer()
     }
 
     private func sendPending() {
@@ -58,19 +59,21 @@ final class EcosystemWatchSync: NSObject, WCSessionDelegate {
         let choice = message["choice"] as? String
         let approvalData = message["approval"] as? Data
         Task { @MainActor in
-            guard ["refresh", "approvals", "resolve"].contains(action ?? ""),
+            guard let action = EcosystemWatchAction(rawValue: action ?? ""),
                   requestedOwner == nil || requestedOwner == EcosystemSnapshotStore().read().owner else {
                 replyHandler(["error": "accountChanged"]); return
             }
             do {
-                if action == "resolve" {
+                if action == .resolve {
                     guard let requestedOwner, let choice, let approvalData, approvalData.count <= 60 * 1024,
                           let approval = try? JSONDecoder().decode(EcosystemApproval.self, from: approvalData) else {
                         replyHandler(["error": "invalidRequest"]); return
                     }
                     try await EcosystemApprovalService.resolve(approval, owner: requestedOwner, choice: choice)
-                } else if action == "approvals" {
+                } else if action == .approvals {
                     _ = try await EcosystemApprovalService.load(owner: requestedOwner)
+                } else if action == .limits {
+                    try await EcosystemPublisher.refreshLimitsOnly()
                 } else { try await EcosystemPublisher.refresh() }
                 let snapshot = EcosystemSnapshotStore().read()
                 self.publish(snapshot)

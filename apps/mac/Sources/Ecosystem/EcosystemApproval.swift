@@ -32,6 +32,14 @@ struct EcosystemApproval: Codable, Equatable, Sendable, Identifiable {
         isValid && date < expiresAt && (choice == "deny" || (!requiresPhoneReview
             && (choice == "allow" || (choice == "allowAlways" && alwaysAllowScope != nil))))
     }
+
+    /// Keep the next expiring requests and retain a bounded hint for the rest.
+    static func watchSelection(_ requests: [Self], at date: Date = Date()) -> (requests: [Self], omittedCount: Int) {
+        var seen = Set<String>()
+        let valid = requests.filter { $0.isValid && $0.expiresAt > date && seen.insert($0.id).inserted }
+            .sorted { $0.expiresAt == $1.expiresAt ? $0.id < $1.id : $0.expiresAt < $1.expiresAt }
+        return (Array(valid.prefix(12)), min(12, max(0, valid.count - 12)))
+    }
 }
 
 #if os(iOS) && !ECOSYSTEM_QA
@@ -40,12 +48,18 @@ import CryptoKit
 @MainActor enum EcosystemApprovalService {
     private static var cachedOwner: String?
     private static var cached: [EcosystemApproval] = []
+    private static var cachedOmittedCount = 0
     private static var revision = UUID()
-    static func clear() { revision = UUID(); cachedOwner = nil; cached = [] }
+    static func clear() { revision = UUID(); cachedOwner = nil; cached = []; cachedOmittedCount = 0 }
 
     static func requests(for owner: String?) -> [EcosystemApproval] {
         guard let owner, owner == cachedOwner else { return [] }
         return cached.filter { $0.expiresAt > Date() && EcosystemPublisher.isAuthorizedPeer($0.peer) }
+    }
+
+    static func omittedRequests(for owner: String?) -> Int {
+        guard let owner, owner == cachedOwner else { return 0 }
+        return cachedOmittedCount
     }
 
     private static func authorize(owner: String?) async throws -> (Account, EcosystemPublicationLease) {
@@ -92,9 +106,9 @@ import CryptoKit
         }
         guard successful else { throw EcosystemIntentError.usageUnavailable }
         cachedOwner = lease.owner
-        var seen = Set<String>()
-        cached = Array(requests.filter { $0.isValid && seen.insert($0.id).inserted }
-            .sorted { $0.expiresAt < $1.expiresAt }.prefix(12))
+        let selection = EcosystemApproval.watchSelection(requests)
+        cached = selection.requests
+        cachedOmittedCount = selection.omittedCount
         return cached
     }
 

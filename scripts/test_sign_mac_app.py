@@ -29,6 +29,7 @@ class ProfileTests(unittest.TestCase):
                 "com.apple.developer.team-identifier": "EXAMPLETEAM",
                 "com.apple.application-identifier": "EXAMPLETEAM.ai.tokenstat.tokenstat",
                 "keychain-access-groups": ["EXAMPLETEAM.*"],
+                "com.apple.security.application-groups": ["group.ai.tokenstat.tokenstat"],
             },
         }
 
@@ -38,6 +39,7 @@ class ProfileTests(unittest.TestCase):
             "com.apple.application-identifier": "EXAMPLETEAM.ai.tokenstat.tokenstat",
             "com.apple.developer.team-identifier": "EXAMPLETEAM",
             "keychain-access-groups": ["EXAMPLETEAM.ai.tokenstat.tokenstat"],
+            "com.apple.security.application-groups": ["group.ai.tokenstat.tokenstat"],
         })
 
     def test_rejects_wrong_platform_distribution_expiry_and_certificate(self):

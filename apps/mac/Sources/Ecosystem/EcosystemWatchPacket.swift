@@ -1,6 +1,18 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
+enum EcosystemWatchAction: String, Sendable {
+    case refresh, limits, approvals, resolve
+
+    static func refreshAction(for screen: String) -> Self {
+        switch screen {
+        case "limits": .limits
+        case "requests": .approvals
+        default: .refresh
+        }
+    }
+}
+
 /// WatchConnectivity transports aggregate activity and bounded, expiring requests.
 /// A monotonic revision rejects replies that arrive after a newer account reset.
 struct EcosystemWatchPacket: Codable, Equatable, Sendable {
@@ -32,11 +44,11 @@ struct EcosystemWatchPacket: Codable, Equatable, Sendable {
             if !packet.snapshot.projects.isEmpty { packet.snapshot.projects.removeLast() }
             else if packet.snapshot.limits?.isEmpty == false {
                 packet.snapshot.limits?.removeLast()
-                packet.omittedProviders = (packet.omittedProviders ?? 0) + 1
+                packet.omittedProviders = min(32, (packet.omittedProviders ?? 0) + 1)
             }
             else if packet.approvals?.isEmpty == false {
                 packet.approvals?.removeLast()
-                packet.omittedApprovals = (packet.omittedApprovals ?? 0) + 1
+                packet.omittedApprovals = min(12, (packet.omittedApprovals ?? 0) + 1)
             } else { return nil }
         }
         return nil

@@ -11,7 +11,7 @@ then begin the next one. Do not reconstruct release notes from commits at the en
 
 ## [Unreleased]
 
-## [1.3.0] - 2026-10-06
+## [1.3.0] - 2026-10-07
 
 ### Added
 
@@ -64,6 +64,12 @@ then begin the next one. Do not reconstruct release notes from commits at the en
 
 ### Fixed
 
+- Chats wait briefly for the process exit status after terminal output closes,
+  so successful runs are not prematurely marked as failed.
+- Refreshing Apple Watch plan limits no longer depends on the usage calendar
+  being available.
+- Apple Watch shows a reminder to review more requests on iPhone when there
+  are more pending approvals than the Watch can display.
 - macOS release signing checks the app and widget profiles before notarization
   and avoids unsupported stapling attempts on standalone CLI binaries.
 - iPhone Live Activities give the running timer a bounded layout and use a
@@ -78,7 +84,8 @@ then begin the next one. Do not reconstruct release notes from commits at the en
 - Muse compact tool rows recover logged commands, file paths, skill names,
   search queries and todo counts, including retained older tool results.
 - Grok's paid fast variants are not mistaken for cheaper models for automatic
-  work. Timed-out model-list commands stop their child processes cleanly.
+  work. Timed-out model-list commands stop their child process trees cleanly
+  on Mac, Linux and Windows.
 - Live Activity starts retry after offline launch or late account verification;
   streamed chat updates no longer interrupt activation. Tapping an activity
   opens the correct remote chat or terminal, including retained terminal output

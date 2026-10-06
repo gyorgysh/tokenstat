@@ -368,6 +368,10 @@ fn run_list_with_timeout(bin: &str, args: &[&str], timeout: Duration) -> Option<
 }
 
 fn reap_list_child(child: &mut std::process::Child) {
+    #[cfg(windows)]
+    // A CLI launcher can own a Node child that still holds stdout. Retire
+    // its tree while the live launcher PID identifies this exact process.
+    tokenstat_pty::kill_windows_process_tree(child.id());
     #[cfg(unix)]
     if let Ok(pid) = i32::try_from(child.id()) {
         // Both listing launchers create their own process group. Signal it
@@ -860,6 +864,54 @@ gpt-oss-120b-mediumGPT-OSS 120B (Medium)
         assert!(
             start.elapsed() < Duration::from_secs(5),
             "list timeout should fire well before the sleep ends"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn reaping_a_model_list_launcher_also_stops_its_child() {
+        use std::io::{BufRead, BufReader};
+        use std::os::windows::process::CommandExt;
+
+        let mut child = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "$start = [Diagnostics.ProcessStartInfo]::new('powershell.exe', '-NoProfile -Command \"Start-Sleep -Seconds 300\"'); $start.UseShellExecute = $false; $start.CreateNoWindow = $true; $agent = [Diagnostics.Process]::Start($start); [Console]::WriteLine('CHILD:' + $agent.Id); $agent.WaitForExit()",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .creation_flags(0x08000000)
+            .spawn()
+            .unwrap();
+        let output = child.stdout.take().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut line = String::new();
+            let _ = BufReader::new(output).read_line(&mut line);
+            let _ = tx.send(line);
+        });
+        // A readiness handshake permits slow PowerShell startup on CI. The
+        // child cannot naturally exit before we exercise launcher cleanup.
+        let pid = rx
+            .recv_timeout(Duration::from_secs(20))
+            .ok()
+            .and_then(|line| line.strip_prefix("CHILD:")?.trim().parse::<u32>().ok());
+        reap_list_child(&mut child);
+        let pid = pid.expect("the model-list launcher must report its child PID");
+        let check = format!(
+            "if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{ exit 1 }} else {{ exit 0 }}"
+        );
+        assert!(
+            run_list_with_timeout(
+                "powershell.exe",
+                &["-NoProfile", "-NonInteractive", "-Command", &check],
+                Duration::from_secs(20),
+            )
+            .is_some(),
+            "the model-list launcher's child survived cleanup"
         );
     }
 

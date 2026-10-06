@@ -19,6 +19,7 @@ import ActivityKit
     private static var cached: [EcosystemApproval] = []
     static func clear() { cached = [] }
     static func requests(for owner: String?) -> [EcosystemApproval] { owner == "preview" ? cached : [] }
+    static func omittedRequests(for owner: String?) -> Int { 0 }
     static func seed() {
         cached = [.init(requestID: UUID().uuidString, conversationID: "qa-chat", peer: "qa-host", host: "MacBook",
                         verb: "shell", preview: "git status --short", fingerprint: String(repeating: "a", count: 64),
