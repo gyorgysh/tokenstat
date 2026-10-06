@@ -41,6 +41,7 @@ at the end.
 
 ### Fixed
 
+- Improved async runtime cleanup for child processes, timers and task queues.
 - Rust installer updates preserve the pinned compiler across CI, preview and
   release builds instead of requesting unreleased compiler versions.
 - Android widgets reject malformed calendars and unknown fetch ages instead

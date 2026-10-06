@@ -32,7 +32,7 @@ unfinished row in [PARITY.md](PARITY.md).
 Build both signed distribution formats with:
 
 ```bash
-scripts/build-android-release.sh dist/android/1.3.0-139
+scripts/build-android-release.sh dist/android/1.3.0-140
 ```
 
 The script loads the existing local Play upload-key environment and produces a
