@@ -23,9 +23,19 @@ struct TokenstatWatchProvider: TimelineProvider {
     }
 }
 
+private struct TokenstatWatchComplicationMark: View {
+    var size: CGFloat
+    @Environment(\.widgetRenderingMode) private var renderingMode
+
+    var body: some View {
+        TokenstatWidgetMark(size: size, fullColor: renderingMode == .fullColor)
+    }
+}
+
 struct TokenstatWatchComplicationView: View {
     let entry: TokenstatWatchEntry
     @Environment(\.widgetFamily) private var family
+    @Environment(\.widgetRenderingMode) private var renderingMode
     private var value: UInt64? { entry.snapshot.usage?.today(at: entry.date)?.value }
     private var amount: String { value.map(EcosystemUsage.displayMoney) ?? "—" }
     var body: some View {
@@ -35,16 +45,16 @@ struct TokenstatWatchComplicationView: View {
                 Label { Text("tokenstat · \(amount)") } icon: { Image("tokenstat_logo") }
             case .accessoryRectangular:
                 VStack(alignment: .leading, spacing: 2) {
-                    Label { Text("tokenstat · Today") } icon: { TokenstatWidgetMark(size: 13) }
-                        .font(.caption).foregroundStyle(Color("AccentColor")).widgetAccentable()
+                    Label { Text("tokenstat · Today") } icon: { TokenstatWatchComplicationMark(size: 13) }
+                        .font(.caption).foregroundStyle(Color("AccentColor")).widgetAccentable(renderingMode != .fullColor)
                     Text(amount).font(.headline).monospacedDigit()
                     Text(value == nil ? "Open iPhone to sync" : "Value at list rates").font(.caption2)
                 }
             case .accessoryCorner:
-                TokenstatWidgetMark(size: 22).foregroundStyle(Color("AccentColor")).widgetLabel { Text(amount) }
+                TokenstatWatchComplicationMark(size: 22).foregroundStyle(Color("AccentColor")).widgetLabel { Text(amount) }
             default:
                 VStack(spacing: 2) {
-                    TokenstatWidgetMark(size: 15).foregroundStyle(Color("AccentColor"))
+                    TokenstatWatchComplicationMark(size: 15).foregroundStyle(Color("AccentColor"))
                     Text(value.map(EcosystemUsage.displayMoney) ?? "—")
                         .font(.system(.caption, design: .rounded, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.5)
                 }.widgetLabel { Text("tokenstat · \(amount) at list rates") }
@@ -76,6 +86,7 @@ struct TokenstatWatchLimitsWidget: Widget {
 struct TokenstatWatchLimitsView: View {
     let entry: TokenstatWatchEntry
     @Environment(\.widgetFamily) private var family
+    @Environment(\.widgetRenderingMode) private var renderingMode
     private var provider: EcosystemLimitProvider? {
         entry.snapshot.limits?.filter { $0.peak(at: entry.date) != nil }.max { ($0.peak(at: entry.date)?.percent ?? 0) < ($1.peak(at: entry.date)?.percent ?? 0) }
     }
@@ -84,7 +95,7 @@ struct TokenstatWatchLimitsView: View {
         Group {
             if family == .accessoryCircular {
                 Gauge(value: window?.fraction ?? 0) {
-                    TokenstatWidgetMark(size: 13)
+                    TokenstatWatchComplicationMark(size: 13)
                 } currentValueLabel: {
                     Text(window.map { "\(Int($0.percent.rounded()))%" } ?? "—").font(.caption2).minimumScaleFactor(0.6)
                 }.gaugeStyle(.accessoryCircular).tint(Color("AccentColor"))
@@ -93,8 +104,8 @@ struct TokenstatWatchLimitsView: View {
                 Label { Text("\(provider?.name ?? "Limits") · \(window.map { "\(Int($0.percent.rounded()))%" } ?? "—")") } icon: { Image("tokenstat_logo") }
             } else {
                 VStack(alignment: .leading, spacing: 2) {
-                    Label { Text(provider?.name ?? "Plan limits") } icon: { TokenstatWidgetMark(size: 13) }
-                        .font(.caption).foregroundStyle(Color("AccentColor")).widgetAccentable()
+                    Label { Text(provider?.name ?? "Plan limits") } icon: { TokenstatWatchComplicationMark(size: 13) }
+                        .font(.caption).foregroundStyle(Color("AccentColor")).widgetAccentable(renderingMode != .fullColor)
                     Text(window.map { "\(Int($0.percent.rounded()))% used · \($0.label)" } ?? "Open iPhone to sync").font(.caption).lineLimit(1)
                     if let provider { Text("\(provider.isStale(at: entry.date) ? "Cached · " : "")\(provider.observedAt, style: .relative)").font(.caption2).foregroundStyle(.secondary) }
                 }
@@ -110,7 +121,7 @@ struct TokenstatWatchRequestsWidget: Widget {
             let count = (entry.packet?.approvals ?? []).filter { $0.expiresAt > entry.date }.count
             let omitted = entry.packet?.omittedApprovals ?? 0
             VStack(spacing: 2) {
-                TokenstatWidgetMark(size: 15).foregroundStyle(Color("AccentColor")).widgetAccentable()
+                TokenstatWatchComplicationMark(size: 15).foregroundStyle(Color("AccentColor"))
                 Text("\(count)\(omitted > 0 ? "+" : "")").font(.headline).monospacedDigit()
             }.widgetLabel { Text("Last synced requests") }.containerBackground(.clear, for: .widget).privacySensitive()
                 .widgetURL(URL(string: "tokenstat://watch/requests"))

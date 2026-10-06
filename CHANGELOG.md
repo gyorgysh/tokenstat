@@ -64,6 +64,10 @@ then begin the next one. Do not reconstruct release notes from commits at the en
 
 ### Fixed
 
+- iPhone Live Activities give the running timer a bounded layout and use a
+  compact Lock Screen layout for larger text. Live Activities and the Apple
+  Watch app use the existing three-color app logo; complications keep system
+  tinting where required by the watch face.
 - Codex runtime diagnostics remain in raw logs instead of appearing as agent
   replies. Actual tool failures and failed turns remain visible in chat.
 - Stopping a Codex chat interrupts its active turn and lets the agent persist

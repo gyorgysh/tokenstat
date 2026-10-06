@@ -7,12 +7,13 @@ import WidgetKit
 struct TokenstatWidgetMark: View {
     var size: CGFloat = 18
     var decorative = true
+    var fullColor = false
     var body: some View {
-        Image("tokenstat_logo")
-            .renderingMode(.template)
+        Image(fullColor ? "tokenstat_brand_mark" : "tokenstat_logo")
+            .renderingMode(fullColor ? .original : .template)
             .resizable().scaledToFit()
             .frame(width: size, height: size)
-            .widgetAccentable()
+            .widgetAccentable(!fullColor)
             .accessibilityHidden(decorative)
     }
 }

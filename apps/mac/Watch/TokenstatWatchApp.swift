@@ -53,7 +53,7 @@ struct TokenstatWatchRoot: View {
 
     private func heading(_ title: String) -> some View {
         HStack(spacing: 7) {
-            TokenstatWidgetMark(size: 19).foregroundStyle(accent)
+            TokenstatWidgetMark(size: 19, fullColor: true)
             Text(title).font(.system(.headline, design: .rounded))
         }
     }
@@ -143,7 +143,7 @@ struct TokenstatWatchRoot: View {
                 ForEach(model.approvals) { approval in
                     Button { model.selectedApproval = approval } label: {
                         HStack(alignment: .top, spacing: 8) {
-                            TokenstatWidgetMark(size: 17).foregroundStyle(accent)
+                            TokenstatWidgetMark(size: 17, fullColor: true)
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(approval.verb).font(.headline).lineLimit(2)
                                 Text(approval.host).font(.caption2).foregroundStyle(.secondary).lineLimit(1)

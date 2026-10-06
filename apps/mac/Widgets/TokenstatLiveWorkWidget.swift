@@ -18,7 +18,7 @@ struct TokenstatLiveWorkWidget: Widget {
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     HStack(spacing: 7) {
-                        TokenstatWidgetMark(size: 20).frame(width: 20, height: 20).foregroundStyle(LiveWorkStyle.brand)
+                        TokenstatWidgetMark(size: 20, fullColor: true).frame(width: 20, height: 20)
                         Text("tokenstat").font(.caption.weight(.semibold))
                     }
                 }
@@ -36,13 +36,13 @@ struct TokenstatLiveWorkWidget: Widget {
                     }.padding(.top, 3)
                 }
             } compactLeading: {
-                TokenstatWidgetMark(size: 18, decorative: false).frame(width: 18, height: 18).foregroundStyle(LiveWorkStyle.brand)
+                TokenstatWidgetMark(size: 18, decorative: false, fullColor: true).frame(width: 18, height: 18)
                     .accessibilityLabel("tokenstat")
             } compactTrailing: {
                 LiveWorkSymbol(phase: context.state.phase, stale: context.isStale).frame(width: 20)
             } minimal: {
                 if context.state.phase == .working && !context.isStale {
-                    TokenstatWidgetMark(size: 20, decorative: false).frame(width: 20, height: 20).foregroundStyle(LiveWorkStyle.brand)
+                    TokenstatWidgetMark(size: 20, decorative: false, fullColor: true).frame(width: 20, height: 20)
                         .accessibilityLabel("tokenstat working")
                 } else {
                     LiveWorkSymbol(phase: context.state.phase, stale: context.isStale)
@@ -57,7 +57,8 @@ struct TokenstatLiveWorkWidget: Widget {
 #endif
 
 enum LiveWorkStyle {
-    static let brand = Color(red: 0.64, green: 0.44, blue: 1)
+    // The middle bar of the existing app logo, used for the activity's keyline.
+    static let brand = Color(red: 0x6A / 255, green: 0x3D / 255, blue: 0xFF / 255)
     static func title(_ phase: LiveWorkPhase, stale: Bool) -> String {
         stale && !phase.finished ? "Reconnecting" : phase.title
     }
@@ -86,7 +87,7 @@ enum LiveWorkStyle {
         switch phase {
         case .waiting, .failed: return .orange
         case .done: return .mint
-        default: return brand
+        default: return .white
         }
     }
 }
@@ -121,6 +122,7 @@ struct LiveWorkElapsed: View {
     var state: LiveWorkAttributes.ContentState
     var stale = false
     @Environment(\.isLuminanceReduced) private var dimmed
+    @ScaledMetric(relativeTo: .caption) private var elapsedWidth: CGFloat = 76
     var body: some View {
         Group {
             if state.phase.finished || dimmed || stale {
@@ -128,9 +130,14 @@ struct LiveWorkElapsed: View {
                 Text(seconds >= 3600 ? String(format: "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
                      : String(format: "%d:%02d", seconds / 60, seconds % 60))
             } else {
-                Text(timerInterval: Date(timeIntervalSince1970: attributes.startedAt)...Date.distantFuture, countsDown: false, showsHours: false)
+                Text(Date(timeIntervalSince1970: attributes.startedAt), style: .timer)
             }
-        }.font(.caption.monospacedDigit()).foregroundStyle(.secondary).fixedSize()
+        }
+        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        // WidgetKit archives timer text as a horizontally flexible view; it
+        // cannot remeasure as the digits change. Give it a finite layout slot.
+        .multilineTextAlignment(.trailing)
+        .frame(width: elapsedWidth, alignment: .trailing)
     }
 }
 
@@ -139,24 +146,42 @@ struct LiveWorkCard: View {
     var state: LiveWorkAttributes.ContentState
     var stale = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var textSize
     var body: some View {
-        HStack(spacing: 14) {
-            TokenstatWidgetMark(size: 32).frame(width: 32, height: 32)
-                .foregroundStyle(LiveWorkStyle.brand)
-                .padding(13)
-                .background(LiveWorkStyle.brand.opacity(0.12), in: RoundedRectangle(cornerRadius: 18))
-                .accessibilityLabel("tokenstat")
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 10) {
-                    Text(attributes.projectName).font(.headline).lineLimit(1).privacySensitive()
-                    Spacer(minLength: 0)
+        Group {
+            if textSize.isAccessibilitySize {
+                // The Lock Screen caps Live Activity height. Give each reading
+                // its own row so a large timer cannot displace the project.
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 10) {
+                        TokenstatWidgetMark(size: 24, fullColor: true)
+                        Text(attributes.projectName).font(.headline).lineLimit(1).privacySensitive()
+                    }
+                    LiveWorkStatus(phase: state.phase, stale: stale)
                     LiveWorkElapsed(attributes: attributes, state: state, stale: stale)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                 }
-                LiveWorkStatus(phase: state.phase, stale: stale)
-                Text(LiveWorkStyle.detail(state.phase, stale: stale)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                .padding(14)
+            } else {
+                HStack(spacing: 14) {
+                    TokenstatWidgetMark(size: 32, decorative: false, fullColor: true).frame(width: 32, height: 32)
+                        .padding(13)
+                        .background(LiveWorkStyle.brand.opacity(0.12), in: RoundedRectangle(cornerRadius: 18))
+                        .accessibilityLabel("tokenstat")
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(spacing: 10) {
+                            Text(attributes.projectName).font(.headline).lineLimit(1).privacySensitive()
+                            Spacer(minLength: 0)
+                            LiveWorkElapsed(attributes: attributes, state: state, stale: stale)
+                        }
+                        LiveWorkStatus(phase: state.phase, stale: stale)
+                        Text(LiveWorkStyle.detail(state.phase, stale: stale)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }.padding(18)
             }
         }
-        .foregroundStyle(.white).padding(18)
+        .foregroundStyle(.white)
         .animation(reduceMotion ? nil : .smooth(duration: 0.35), value: state.phase)
         .environment(\.colorScheme, .dark)
     }

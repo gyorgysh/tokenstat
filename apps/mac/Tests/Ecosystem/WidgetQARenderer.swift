@@ -6,10 +6,31 @@ import ImageIO
 import UniformTypeIdentifiers
 
 @MainActor enum WidgetQARenderer {
-    static func export() {
+    struct LiveWorkRender: Codable {
+        var filename: String
+        var width: Int
+        var height: Int
+        var nonBlackFraction: Double?
+    }
+    struct ExportReport: Codable {
+        var liveWorkImages = 0
+        var liveWork: [LiveWorkRender] = []
+        var failures: [String] = []
+        var summary: String {
+            "Live Activity QA: \(liveWorkImages) images, \(failures.count) failures"
+                + (failures.first.map { " · \($0)" } ?? "")
+        }
+    }
+    static func export(liveWorkOnly: Bool = false, reportFilename: String = "live-work-report.json") -> ExportReport {
         let directory = ProcessInfo.processInfo.environment["TOKENSTAT_QA_OUTPUT_DIR"].map { URL(fileURLWithPath: $0) }
             ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("widget-layouts")
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var report = ExportReport()
+        do { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) }
+        catch {
+            report.failures.append("Cannot create export directory: \(error.localizedDescription)")
+            print("[Widget QA] \(report.summary)")
+            return report
+        }
         let families: [(WidgetFamily, CGFloat, CGFloat, String)] = [
             (.systemSmall, 170, 170, "small"), (.systemMedium, 360, 170, "medium"),
             (.systemLarge, 360, 376, "large"), (.systemExtraLarge, 720, 376, "extra-large")
@@ -45,19 +66,34 @@ import UniformTypeIdentifiers
             ("black", .black, .brand, true, .fullColor), ("teal", .light, .teal, false, .fullColor),
             ("monochrome", .black, .monochrome, true, .fullColor), ("tinted", .dark, .pink, false, .accented)
         ]
-        let attributes = LiveWorkAttributes(startedAt: Date().addingTimeInterval(-147).timeIntervalSince1970,
+        let now = Date()
+        let attributes = LiveWorkAttributes(startedAt: now.addingTimeInterval(-147).timeIntervalSince1970,
             owner: "preview", peer: "preview", key: "preview", revision: "1", projectName: "Studio", route: "tokenstat://open/workspaces")
-        for (phase, stale) in [(LiveWorkPhase.working, false), (.waiting, false), (.done, false), (.failed, false), (.stopped, false), (.working, true)] {
-            let state = LiveWorkAttributes.ContentState(phase: phase, updatedAt: Date().timeIntervalSince1970)
-            let renderer = ImageRenderer(content: LiveWorkCard(attributes: attributes, state: state, stale: stale)
-                .transaction { $0.animation = nil; $0.disablesAnimations = true }
-                .frame(width: 390, height: 120).background(Color.black).environment(\.colorScheme, .dark))
-            renderer.scale = 2
-            if let image = renderer.cgImage,
-               let destination = CGImageDestinationCreateWithURL(directory.appendingPathComponent("live-work-\(stale ? "reconnecting" : phase.rawValue).png") as CFURL, UTType.png.identifier as CFString, 1, nil) {
-                CGImageDestinationAddImage(destination, image, nil); CGImageDestinationFinalize(destination)
+        // Six variants across six states: 36 images, independent of the widget matrix.
+        let variants: [(String, CGFloat, CGFloat, Bool, DynamicTypeSize, String)] = [
+            ("", 390, 120, false, .large, "Studio"),
+            ("narrow", 320, 120, false, .large, "Studio"),
+            ("long-project", 390, 120, false, .large, "A project with a very long descriptive name"),
+            ("dimmed", 390, 120, true, .large, "Studio"),
+            ("large-text", 320, 160, false, .xxxLarge, "A project with a very long descriptive name"),
+            ("accessibility", 320, 160, false, .accessibility3, "A project with a very long descriptive name")
+        ]
+        for (variant, width, height, dimmed, textSize, project) in variants {
+            var variantAttributes = attributes
+            variantAttributes.projectName = project
+            for (phase, stale) in [(LiveWorkPhase.working, false), (.waiting, false), (.done, false), (.failed, false), (.stopped, false), (.working, true)] {
+                let state = LiveWorkAttributes.ContentState(phase: phase, updatedAt: now.timeIntervalSince1970)
+                let filename = "live-work-\(stale ? "reconnecting" : phase.rawValue)\(variant.isEmpty ? "" : "-\(variant)").png"
+                let renderer = ImageRenderer(content: LiveWorkCard(attributes: variantAttributes, state: state, stale: stale)
+                    .transaction { $0.animation = nil; $0.disablesAnimations = true }
+                    .frame(width: width, height: height).background(Color.black)
+                    .environment(\.colorScheme, .dark).environment(\.isLuminanceReduced, dimmed).environment(\.dynamicTypeSize, textSize))
+                renderer.scale = 2
+                exportLiveWork(renderer.cgImage, filename: filename, directory: directory, report: &report)
             }
         }
+        writeReport(&report, directory: directory, filename: reportFilename)
+        if liveWorkOnly { return report }
         for (style, appearance, tint, dark, mode) in styles {
             for (family, width, height, name) in families {
                 for (state, snapshot) in snapshots {
@@ -122,6 +158,60 @@ import UniformTypeIdentifiers
             }
             #endif
         }
+        return report
+    }
+
+    private static func exportLiveWork(_ image: CGImage?, filename: String, directory: URL, report: inout ExportReport) {
+        let url = directory.appendingPathComponent(filename)
+        // A prior successful artifact must not hide this run's missing render.
+        try? FileManager.default.removeItem(at: url)
+        guard let image else {
+            report.failures.append("\(filename): ImageRenderer returned no image")
+            return
+        }
+        let visible = nonBlackFraction(image)
+        report.liveWork.append(.init(filename: filename, width: image.width, height: image.height, nonBlackFraction: visible))
+        if let visible {
+            // Detect an absent whole card, without depending on timer digits,
+            // antialiasing, exact colors or a particular SwiftUI font rasterizer.
+            if visible < 0.0025 { report.failures.append("\(filename): near-black card (\(visible))") }
+        } else {
+            report.failures.append("\(filename): cannot inspect rendered pixels")
+        }
+        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
+            report.failures.append("\(filename): cannot create PNG destination")
+            return
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        if CGImageDestinationFinalize(destination) { report.liveWorkImages += 1 }
+        else { report.failures.append("\(filename): cannot write PNG") }
+    }
+
+    private static func nonBlackFraction(_ image: CGImage) -> Double? {
+        guard image.width > 0, image.height > 0 else { return nil }
+        var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        return pixels.withUnsafeMutableBytes { bytes in
+            guard let context = CGContext(data: bytes.baseAddress, width: image.width, height: image.height,
+                bitsPerComponent: 8, bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue) else { return nil }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: CGFloat(image.width), height: CGFloat(image.height)))
+            context.flush()
+            var visible = 0
+            for index in stride(from: 0, to: bytes.count, by: 4) {
+                if bytes[index + 3] > 24 && max(bytes[index], bytes[index + 1], bytes[index + 2]) > 24 { visible += 1 }
+            }
+            return Double(visible) / Double(image.width * image.height)
+        }
+    }
+
+    private static func writeReport(_ report: inout ExportReport, directory: URL, filename: String) {
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(report).write(to: directory.appendingPathComponent(filename), options: .atomic)
+        } catch { report.failures.append("Cannot write render report: \(error.localizedDescription)") }
+        print("[Widget QA] \(report.summary)")
+        for failure in report.failures { print("[Widget QA] ERROR: \(failure)") }
     }
 
     private static func render<V: View>(_ view: V, width: CGFloat, height: CGFloat, entry: TokenstatWidgetEntry,

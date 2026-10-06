@@ -52,6 +52,9 @@ import ActivityKit
 @main struct WidgetQAApp: App {
     @State private var navigation = EcosystemNavigation.shared
     @State private var status = "Widget QA"
+    #if os(iOS)
+    @State private var liveWorkBusy = false
+    #endif
     init() {
         _ = EcosystemSnapshotStore().write(.preview)
         EcosystemWatchSync.shared.publish(.preview)
@@ -88,6 +91,16 @@ import ActivityKit
                         catch { status = "Usage failed: \(error.localizedDescription)" }
                     } }
                     #if os(iOS)
+                    Section("Local Live Activity") {
+                        Button("Working") { Task { await setLiveWork(.working) } }
+                            .accessibilityIdentifier("qa.live-work.working")
+                        Button("Waiting for you") { Task { await setLiveWork(.waiting) } }
+                            .accessibilityIdentifier("qa.live-work.waiting")
+                        Button("Done") { Task { await setLiveWork(.done) } }
+                            .accessibilityIdentifier("qa.live-work.done")
+                        Button("Stopped") { Task { await setLiveWork(.stopped) } }
+                            .accessibilityIdentifier("qa.live-work.stopped")
+                    }.disabled(liveWorkBusy)
                     Button("Watch sync status") {
                         EcosystemWatchSync.shared.activate()
                         let session = WCSession.default
@@ -101,19 +114,18 @@ import ActivityKit
                 #if os(iOS)
                 if ProcessInfo.processInfo.arguments.contains("--live-work-preview") {
                     try? await Task.sleep(for: .seconds(2))
-                    let attrs = LiveWorkAttributes(startedAt: Date().addingTimeInterval(-147).timeIntervalSince1970,
-                        owner: "preview", peer: "preview", key: "preview", revision: "1", projectName: "Studio", route: "tokenstat://open/workspaces")
-                    do {
-                        let activity = try Activity.request(attributes: attrs,
-                            content: ActivityContent(state: LiveWorkAttributes.ContentState(phase: .working, updatedAt: Date().timeIntervalSince1970), staleDate: Date().addingTimeInterval(180)), pushType: nil)
-                        status = "Live Activity \(activity.activityState)"
-                    } catch { status = "Live Activity failed: \(error.localizedDescription)" }
+                    await setLiveWork(.working)
                 }
                 #endif
-                if ProcessInfo.processInfo.arguments.contains("--render-widget-gallery") {
-                    WidgetQARenderer.export()
+                let liveWorkOnly = ProcessInfo.processInfo.arguments.contains("--render-live-work-gallery")
+                if liveWorkOnly || ProcessInfo.processInfo.arguments.contains("--render-widget-gallery") {
+                    let firstReport = WidgetQARenderer.export(liveWorkOnly: liveWorkOnly, reportFilename: "live-work-first-report.json")
                     await Task.yield()
-                    WidgetQARenderer.export()
+                    let report = WidgetQARenderer.export(liveWorkOnly: liveWorkOnly)
+                    status = report.summary
+                    if !firstReport.failures.isEmpty {
+                        status += " · First render: \(firstReport.failures.count) failures"
+                    }
                 }
             }
             .onOpenURL { url in navigation.receive(url) }
@@ -131,4 +143,46 @@ import ActivityKit
         WidgetCenter.shared.reloadAllTimelines()
         status = snapshot.owner == nil ? "Account cleared" : "Seeded activity"
     }
+    #if os(iOS)
+    @MainActor private func setLiveWork(_ phase: LiveWorkPhase) async {
+        guard !liveWorkBusy else { return }
+        liveWorkBusy = true
+        defer { liveWorkBusy = false }
+        let previews = Activity<LiveWorkAttributes>.activities.filter {
+            $0.attributes.owner == "preview" && $0.attributes.peer == "preview" && $0.attributes.key == "preview"
+        }
+        var activities = previews.filter { $0.activityState == .active || $0.activityState == .stale }
+        if phase == .working || activities.isEmpty {
+            // Ended cards may remain enumerable while visible, but cannot be
+            // updated. Clear retained previews before requesting a fresh run.
+            for activity in previews { await activity.end(nil, dismissalPolicy: .immediate) }
+            activities = []
+        }
+        let now = Date()
+        do {
+            if activities.isEmpty {
+                let attributes = LiveWorkAttributes(startedAt: now.addingTimeInterval(-147).timeIntervalSince1970,
+                    owner: "preview", peer: "preview", key: "preview", revision: UUID().uuidString,
+                    projectName: "Studio", route: "tokenstat://open/workspaces")
+                let activity = try Activity.request(attributes: attributes,
+                    content: ActivityContent(state: .init(phase: phase.finished ? .working : phase, updatedAt: now.timeIntervalSince1970),
+                                             staleDate: now.addingTimeInterval(180)), pushType: nil)
+                activities = [activity]
+            }
+            let content = ActivityContent(state: LiveWorkAttributes.ContentState(phase: phase, updatedAt: now.timeIntervalSince1970),
+                                          staleDate: phase.finished ? nil : now.addingTimeInterval(180))
+            for activity in activities {
+                if phase.finished {
+                    // End every QA run, retaining its final card briefly for inspection.
+                    await activity.end(content, dismissalPolicy: .after(now.addingTimeInterval(60)))
+                } else {
+                    await activity.update(content)
+                }
+            }
+            status = "Live Activity \(phase.title) · \(activities.count) local \(activities.count == 1 ? "activity" : "activities")"
+        } catch {
+            status = "Live Activity failed: \(error.localizedDescription)"
+        }
+    }
+    #endif
 }
