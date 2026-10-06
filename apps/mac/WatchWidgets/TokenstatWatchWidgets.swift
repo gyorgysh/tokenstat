@@ -29,18 +29,19 @@ struct TokenstatWatchComplicationView: View {
         Group {
             switch family {
             case .accessoryInline:
-                Text("tokenstat · \(amount)")
+                Label { Text("tokenstat · \(amount)") } icon: { Image("tokenstat_logo") }
             case .accessoryRectangular:
                 VStack(alignment: .leading, spacing: 2) {
-                    Label("tokenstat · Today", systemImage: "chart.bar.xaxis").font(.caption).foregroundStyle(Color("AccentColor")).widgetAccentable()
+                    Label { Text("tokenstat · Today") } icon: { TokenstatWidgetMark(size: 13) }
+                        .font(.caption).foregroundStyle(Color("AccentColor")).widgetAccentable()
                     Text(amount).font(.headline).monospacedDigit()
                     Text(value == nil ? "Open iPhone to sync" : "Value at list rates").font(.caption2)
                 }
             case .accessoryCorner:
-                Image(systemName: "chart.bar.xaxis").foregroundStyle(Color("AccentColor")).widgetAccentable().widgetLabel { Text(amount) }
+                TokenstatWidgetMark(size: 22).foregroundStyle(Color("AccentColor")).widgetLabel { Text(amount) }
             default:
                 VStack(spacing: 2) {
-                    Image(systemName: "chart.bar.xaxis").font(.caption).foregroundStyle(Color("AccentColor")).widgetAccentable()
+                    TokenstatWidgetMark(size: 15).foregroundStyle(Color("AccentColor"))
                     Text(value.map(EcosystemUsage.displayMoney) ?? "—")
                         .font(.system(.caption, design: .rounded, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.5)
                 }.widgetLabel { Text("tokenstat · \(amount) at list rates") }

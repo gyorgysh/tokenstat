@@ -14,6 +14,7 @@ import android.graphics.LinearGradient
 import android.graphics.Shader
 import android.os.Bundle
 import android.util.SizeF
+import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
 import androidx.work.*
@@ -25,6 +26,7 @@ import java.text.NumberFormat
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
@@ -39,7 +41,8 @@ class UsageWidgetProvider : AppWidgetProvider() {
         update(context, id)
     }
     override fun onDisabled(context: Context) {
-        WorkManager.getInstance(context).cancelUniqueWork(PERIODIC)
+        runCatching { WorkManager.getInstance(context).cancelUniqueWork(PERIODIC) }
+            .onFailure { Log.w("ts-widget", "Widget scheduler unavailable") }
     }
     override fun onDeleted(context: Context, ids: IntArray) {
         prefs(context).edit { ids.forEach { remove("week.$it") } }
@@ -48,15 +51,22 @@ class UsageWidgetProvider : AppWidgetProvider() {
         super.onReceive(context, intent)
         if (intent.action !in setOf(REFRESH, PERIOD)) return
         val id = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
-        if (id !in AppWidgetManager.getInstance(context).getAppWidgetIds(ComponentName(context, UsageWidgetProvider::class.java))) return
+        if (id !in widgetIds(context)) return
         if (intent.action == PERIOD) {
             prefs(context).edit { putBoolean("week.$id", !prefs(context).getBoolean("week.$id", false)) }
             update(context, id)
         } else {
+            val epoch = UsageWidgetStore.epoch()
             queuedRefresh = true
             updateAll(context)
-            WorkManager.getInstance(context).enqueueUniqueWork(REFRESH, ExistingWorkPolicy.KEEP,
-                OneTimeWorkRequestBuilder<UsageWidgetWorker>().build())
+            runCatching {
+                val operation = WorkManager.getInstance(context).enqueueUniqueWork(REFRESH, ExistingWorkPolicy.KEEP,
+                    OneTimeWorkRequestBuilder<UsageWidgetWorker>().build())
+                // Enqueue can fail after it returns, before any worker starts.
+                operation.result.addListener({
+                    runCatching { operation.result.get() }.onFailure { refreshSchedulingFailed(context, epoch) }
+                }, Executor { it.run() })
+            }.onFailure { refreshSchedulingFailed(context, epoch) }
         }
     }
 
@@ -68,16 +78,32 @@ class UsageWidgetProvider : AppWidgetProvider() {
         private const val PERIOD = "ai.tokenstat.tokenstat.WIDGET_PERIOD"
         private const val PERIODIC = "usage-widget-periodic"
         private fun prefs(context: Context) = context.getSharedPreferences("usage-widget", Context.MODE_PRIVATE)
+        private fun widgetIds(context: Context): IntArray = runCatching {
+            AppWidgetManager.getInstance(context).getAppWidgetIds(ComponentName(context, UsageWidgetProvider::class.java))
+        }.getOrElse { Log.w("ts-widget", "Widget list unavailable"); intArrayOf() }
+        private fun refreshSchedulingFailed(context: Context, epoch: Long) {
+            queuedRefresh = false
+            UsageWidgetStore.failed(context, UsageWidgetStore.lease(), epoch)
+            updateAll(context)
+            Log.w("ts-widget", "Widget scheduler unavailable")
+        }
         fun updateAll(context: Context) {
-            val ids = AppWidgetManager.getInstance(context).getAppWidgetIds(ComponentName(context, UsageWidgetProvider::class.java))
-            ids.forEach { update(context, it) }
+            widgetIds(context).forEach { update(context, it) }
         }
         private fun schedule(context: Context) {
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork(PERIODIC, ExistingPeriodicWorkPolicy.KEEP,
-                PeriodicWorkRequestBuilder<UsageWidgetWorker>(1, TimeUnit.HOURS)
-                    .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build())
+            runCatching {
+                WorkManager.getInstance(context).enqueueUniquePeriodicWork(PERIODIC, ExistingPeriodicWorkPolicy.KEEP,
+                    PeriodicWorkRequestBuilder<UsageWidgetWorker>(1, TimeUnit.HOURS)
+                        .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build())
+            }.onFailure { Log.w("ts-widget", "Widget scheduler unavailable") }
         }
         fun update(context: Context, id: Int) {
+            // System services may be absent or denied on restricted devices.
+            // Every entry point, including resize, must preserve app operation.
+            runCatching { updateViews(context, id) }
+                .onFailure { Log.w("ts-widget", "Widget update unavailable") }
+        }
+        private fun updateViews(context: Context, id: Int) {
             val manager = AppWidgetManager.getInstance(context)
             val week = prefs(context).getBoolean("week.$id", false)
             val snapshot = UsageWidgetStore.read(context)
@@ -176,33 +202,40 @@ class UsageWidgetProvider : AppWidgetProvider() {
 }
 
 class UsageWidgetWorker(context: Context, parameters: WorkerParameters) : CoroutineWorker(context, parameters) {
-    override suspend fun doWork(): Result {
-        val context = applicationContext
+    override suspend fun doWork(): Result = UsageWidgetRefresh(applicationContext).run()
+}
+
+/** Refresh orchestration is separate so unavailable accounts/services can be verified offline. */
+internal class UsageWidgetRefresh(
+    private val context: Context,
+    private val call: suspend (String, JsonObject) -> JsonElement = CoreClient::call,
+) {
+    suspend fun run(): ListenableWorker.Result {
         var lease: UsageLease? = null
         val epoch = UsageWidgetStore.epoch()
         UsageWidgetProvider.setRefreshing(context, true)
         return try {
-            val account = CoreClient.call("account.status") as? JsonObject
+            val account = call("account.status", buildJsonObject {}) as? JsonObject
             if (account == null) {
                 UsageWidgetStore.failed(context, null, epoch)
-                return Result.failure()
+                return ListenableWorker.Result.failure()
             }
-            lease = UsageWidgetStore.verify(context, account, epoch) ?: return Result.success()
-            val calendar = CoreClient.call("activity.calendar", buildJsonObject {
+            lease = UsageWidgetStore.verify(context, account, epoch) ?: return ListenableWorker.Result.success()
+            val calendar = call("activity.calendar", buildJsonObject {
                 put("weeks", 6); put("scope", "account"); put("force", true)
             })
             if (calendar !is JsonObject && calendar !is JsonNull) {
                 UsageWidgetStore.failed(context, lease, epoch)
-                return Result.failure()
+                return ListenableWorker.Result.failure()
             }
             UsageWidgetStore.publish(context, lease, calendar as? JsonObject)
-            Result.success()
+            ListenableWorker.Result.success()
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) {
             UsageWidgetStore.failed(context, lease, epoch)
             // A manual refresh reports its failure instead of silently retrying
             // for hours. The periodic task and next tap can try again.
-            Result.failure()
+            ListenableWorker.Result.failure()
         } finally { UsageWidgetProvider.setRefreshing(context, false) }
     }
 }

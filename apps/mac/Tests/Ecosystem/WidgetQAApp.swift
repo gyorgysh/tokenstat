@@ -2,7 +2,18 @@
 // Isolated simulator fixture. This file is excluded from the shipping targets.
 import SwiftUI
 import WidgetKit
+#if os(iOS)
 import WatchConnectivity
+import ActivityKit
+#endif
+
+#if os(macOS)
+@MainActor final class EcosystemWatchSync {
+    static let shared = EcosystemWatchSync()
+    func publish(_ snapshot: EcosystemSnapshot) {}
+    func activate() {}
+}
+#endif
 
 @MainActor enum EcosystemApprovalService {
     private static var cached: [EcosystemApproval] = []
@@ -73,15 +84,26 @@ import WatchConnectivity
                         do { let result = try await intent.perform(); status = "Week USD \(result.value ?? 0)" }
                         catch { status = "Usage failed: \(error.localizedDescription)" }
                     } }
+                    #if os(iOS)
                     Button("Watch sync status") {
                         EcosystemWatchSync.shared.activate()
                         let session = WCSession.default
                         status = "Watch supported \(WCSession.isSupported()), paired \(session.isPaired), installed \(session.isWatchAppInstalled), reachable \(session.isReachable), activated \(session.activationState.rawValue)"
                     }
+                    #endif
                 }.navigationTitle("tokenstat Widget QA")
             }
             .task {
                 EcosystemWatchSync.shared.activate()
+                #if os(iOS)
+                if ProcessInfo.processInfo.arguments.contains("--live-work-preview") {
+                    try? await Task.sleep(for: .seconds(2))
+                    let attrs = LiveWorkAttributes(startedAt: Date().addingTimeInterval(-147).timeIntervalSince1970,
+                        owner: "preview", peer: "preview", key: "preview", revision: "1", projectName: "Studio", route: "tokenstat://open/workspaces")
+                    _ = try? Activity.request(attributes: attrs,
+                        content: ActivityContent(state: LiveWorkAttributes.ContentState(phase: .working, updatedAt: Date().timeIntervalSince1970), staleDate: Date().addingTimeInterval(180)), pushType: nil)
+                }
+                #endif
                 if ProcessInfo.processInfo.arguments.contains("--render-widget-gallery") {
                     WidgetQARenderer.export()
                     await Task.yield()

@@ -115,7 +115,7 @@ struct OpenTokenstatContentIntent: OpenIntent {
 
 struct GetTokenstatUsageIntent: AppIntent {
     static var title: LocalizedStringResource = "Get tokenstat Usage"
-    static var description = IntentDescription("Read today's last synced value at list rates in US dollars. Open tokenstat to refresh it.")
+    static var description = IntentDescription("Read daily or weekly usage at list rates in US dollars. Refresh when available, or return cached usage with its last update time.")
     static var authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
 
     @Parameter(title: "Period", default: .today) var period: EcosystemPeriod
@@ -163,7 +163,7 @@ struct TokenstatAppShortcuts: AppShortcutsProvider {
                     shortTitle: "Open Project", systemImageName: "folder.fill")
         AppShortcut(intent: GetTokenstatUsageIntent(),
                     phrases: ["Show my usage in \(.applicationName)", "What is my usage today in \(.applicationName)"],
-                    shortTitle: "Usage", systemImageName: "chart.bar.xaxis")
+                    shortTitle: "Usage", systemImageName: "dollarsign.circle")
         AppShortcut(intent: RefreshTokenstatIntent(), phrases: ["Refresh \(.applicationName)", "Update my usage in \(.applicationName)"],
                     shortTitle: "Refresh", systemImageName: "arrow.clockwise")
         AppShortcut(intent: SearchTokenstatIntent(), phrases: ["Search \(.applicationName)", "Find my work in \(.applicationName)"],
@@ -182,9 +182,19 @@ enum EcosystemPeriod: String, AppEnum {
 }
 
 enum EcosystemAppearance: String, AppEnum {
-    case automatic, light, dark
+    case automatic, light, dark, clean, black
     static var typeDisplayRepresentation: TypeDisplayRepresentation { "Appearance" }
-    static var caseDisplayRepresentations: [Self: DisplayRepresentation] { [.automatic: "Automatic", .light: "Light", .dark: "Dark"] }
+    static var caseDisplayRepresentations: [Self: DisplayRepresentation] {
+        [.automatic: "Automatic", .light: "Light", .dark: "Dark", .clean: "Clean · Glass", .black: "Black"]
+    }
+}
+
+enum EcosystemTint: String, AppEnum {
+    case brand, teal, orange, pink, monochrome
+    static var typeDisplayRepresentation: TypeDisplayRepresentation { "Accent tint" }
+    static var caseDisplayRepresentations: [Self: DisplayRepresentation] {
+        [.brand: "tokenstat", .teal: "Teal", .orange: "Orange", .pink: "Pink", .monochrome: "Monochrome"]
+    }
 }
 
 struct TokenstatUsageConfiguration: WidgetConfigurationIntent {
@@ -192,7 +202,8 @@ struct TokenstatUsageConfiguration: WidgetConfigurationIntent {
     static var description = IntentDescription("Choose a period and appearance. Data follows the scope selected on tokenstat Home.")
     @Parameter(title: "Period", default: .today) var period: EcosystemPeriod
     @Parameter(title: "Appearance", default: .automatic) var appearance: EcosystemAppearance
-    static var parameterSummary: some ParameterSummary { Summary { \.$period; \.$appearance } }
+    @Parameter(title: "Accent tint", default: .brand) var tint: EcosystemTint
+    static var parameterSummary: some ParameterSummary { Summary { \.$period; \.$appearance; \.$tint } }
 }
 
 struct TokenstatLauncherConfiguration: WidgetConfigurationIntent {
@@ -200,7 +211,8 @@ struct TokenstatLauncherConfiguration: WidgetConfigurationIntent {
     @Parameter(title: "Screen", default: .workspaces) var screen: EcosystemScreen
     @Parameter(title: "Favorite project") var project: TokenstatProjectEntity?
     @Parameter(title: "Appearance", default: .automatic) var appearance: EcosystemAppearance
-    static var parameterSummary: some ParameterSummary { Summary { \.$screen; \.$project; \.$appearance } }
+    @Parameter(title: "Accent tint", default: .brand) var tint: EcosystemTint
+    static var parameterSummary: some ParameterSummary { Summary { \.$screen; \.$project; \.$appearance; \.$tint } }
 }
 
 struct RefreshTokenstatIntent: AppIntent {

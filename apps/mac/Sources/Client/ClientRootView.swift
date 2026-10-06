@@ -382,7 +382,7 @@ struct ClientRootView: View {
               target.owner == EcosystemPublisher.ownerKey(scope) else { return }
         let parts = id.split(separator: ":", maxSplits: 2).map(String.init)
         guard parts.count == 3, parts[0] == "remote", !parts[1].isEmpty, !parts[2].isEmpty else { return }
-        let reference = WorkReference(scope: scope, hostIdentity: parts[1], workspaceID: parts[2], kind: .workspace, itemID: nil)
+        let reference = WorkReference(scope: scope, hostIdentity: parts[1], workspaceID: parts[2], kind: target.chatID == nil ? .workspace : .conversation, itemID: target.chatID)
         navigation.restoredRoute = WorkMobileRoute(scope: scope, tab: "workspaces", reference: reference, section: target.section?.rawValue ?? "sessions")
     }
 

@@ -15,7 +15,6 @@
     <string name="widget_usage_unavailable">Usage unavailable</string>
     <string name="widget_refresh">Refresh usage</string>
     <string name="widget_period_hint">Switch between Today and Last 7 Days</string>
-    <string name="shortcut_home">Home</string>
     <string name="shortcut_workspaces">Workspaces</string>
     <string name="shortcut_insights">Insights</string>
     <string name="shortcut_ssh">SSH</string>

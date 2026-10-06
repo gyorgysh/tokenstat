@@ -8,6 +8,7 @@ struct TokenstatWidgetEntry: TimelineEntry {
     let snapshot: EcosystemSnapshot
     var period: EcosystemPeriod = .today
     var appearance: EcosystemAppearance = .automatic
+    var tint: EcosystemTint = .brand
     var screen: EcosystemScreen = .workspaces
     var favoriteID: String?
 
@@ -26,7 +27,7 @@ private func widgetTimeline(_ entry: TokenstatWidgetEntry) -> Timeline<Tokenstat
     let midnight = calendar.startOfDay(for: calendar.date(byAdding: .day, value: 1, to: entry.date)!)
     var tomorrow = entry
     tomorrow = .init(date: midnight, snapshot: entry.snapshot, period: entry.period, appearance: entry.appearance,
-                     screen: entry.screen, favoriteID: entry.favoriteID)
+                     tint: entry.tint, screen: entry.screen, favoriteID: entry.favoriteID)
     // Midnight is evaluated locally; the system controls the requested reload budget.
     return Timeline(entries: [entry, tomorrow], policy: .after(entry.date.addingTimeInterval(30 * 60)))
 }
@@ -41,7 +42,7 @@ struct TokenstatUsageProvider: AppIntentTimelineProvider {
     }
     private func entry(_ configuration: TokenstatUsageConfiguration, preview: Bool = false) -> TokenstatWidgetEntry {
         .init(date: Date(), snapshot: preview ? .preview : EcosystemSnapshotStore().read(),
-              period: configuration.period, appearance: configuration.appearance)
+              period: configuration.period, appearance: configuration.appearance, tint: configuration.tint)
     }
 }
 
@@ -55,7 +56,7 @@ struct TokenstatLauncherProvider: AppIntentTimelineProvider {
     }
     private func entry(_ configuration: TokenstatLauncherConfiguration, preview: Bool = false) -> TokenstatWidgetEntry {
         .init(date: Date(), snapshot: preview ? .preview : EcosystemSnapshotStore().read(),
-              appearance: configuration.appearance, screen: configuration.screen, favoriteID: configuration.project?.id)
+              appearance: configuration.appearance, tint: configuration.tint, screen: configuration.screen, favoriteID: configuration.project?.id)
     }
 }
 
@@ -67,11 +68,42 @@ struct TokenstatWidgetSurface<Content: View>: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.widgetRenderingMode) private var renderingMode
     var body: some View {
-        content().environment(\.colorScheme, appearance == .automatic || renderingMode != .fullColor ? scheme : appearance == .dark ? .dark : .light)
+        content().environment(\.colorScheme, resolvedScheme)
+    }
+    private var resolvedScheme: ColorScheme {
+        guard renderingMode == .fullColor else { return scheme }
+        switch appearance {
+        case .automatic, .clean: return scheme
+        case .light: return .light
+        case .dark, .black: return .dark
+        }
     }
 }
 
 enum WidgetStyle {
+    static func icon(for screen: EcosystemScreen) -> Image {
+        screen == .insights ? Image("tokenstat_logo") : Image(systemName: screen.symbol)
+    }
+    static func accent(_ tint: EcosystemTint, dark: Bool) -> Color {
+        switch tint {
+        case .brand: return accent(dark)
+        case .teal: return dark ? Color(red: 0.18, green: 0.83, blue: 0.75) : Color(red: 0.0, green: 0.44, blue: 0.40)
+        case .orange: return dark ? Color(red: 1, green: 0.68, blue: 0.35) : Color(red: 0.69, green: 0.30, blue: 0.0)
+        case .pink: return dark ? Color(red: 1, green: 0.48, blue: 0.70) : Color(red: 0.75, green: 0.15, blue: 0.43)
+        case .monochrome: return .primary
+        }
+    }
+    @ViewBuilder static func background(_ appearance: EcosystemAppearance, dark: Bool) -> some View {
+        switch appearance {
+        case .black: Color.black
+        case .clean:
+            Rectangle().fill(.ultraThinMaterial)
+                .overlay((dark ? Color.black : Color.white).opacity(dark ? 0.20 : 0.75))
+                .overlay(LinearGradient(colors: [.white.opacity(dark ? 0.10 : 0.35), .clear], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(.white.opacity(dark ? 0.12 : 0.5)))
+        default: background(dark)
+        }
+    }
     static func accent(_ dark: Bool) -> Color {
         dark ? Color(red: 0x8B / 255, green: 0x5C / 255, blue: 0xF6 / 255)
              : Color(red: 0x6A / 255, green: 0x3D / 255, blue: 1)
@@ -115,7 +147,8 @@ struct TokenstatUsageView: View {
     @Environment(\.widgetFamily) private var systemFamily
     private var family: WidgetFamily { familyOverride ?? systemFamily }
     @Environment(\.colorScheme) private var colorScheme
-    private var accent: Color { WidgetStyle.accent(colorScheme == .dark) }
+    private var accent: Color { WidgetStyle.accent(entry.tint, dark: colorScheme == .dark) }
+    private var muted: Color { entry.appearance == .clean ? .primary.opacity(0.72) : .secondary }
     private var usage: EcosystemUsage? { entry.snapshot.usage }
     private var today: EcosystemDay? { usage?.today(at: entry.date) }
     private var week: [EcosystemDay] { usage?.weekWindow(at: entry.date) ?? [] }
@@ -128,11 +161,12 @@ struct TokenstatUsageView: View {
             #if os(iOS)
             switch family {
             case .accessoryInline:
-                Text(selectedValue.map { "tokenstat · \(EcosystemUsage.displayMoney($0))" } ?? "tokenstat · Open to update")
+                Label { Text(selectedValue.map { "tokenstat · \(EcosystemUsage.displayMoney($0))" } ?? "tokenstat · Open to update") }
+                    icon: { Image("tokenstat_logo") }
                     .privacySensitive()
             case .accessoryCircular:
                 VStack(spacing: 2) {
-                    Image(systemName: "chart.bar.xaxis")
+                    TokenstatWidgetMark(size: 18)
                     Text(selectedValue.map(EcosystemUsage.displayMoney) ?? "—")
                         .font(.system(.headline, design: .rounded)).lineLimit(1).minimumScaleFactor(0.4)
                 }
@@ -140,7 +174,8 @@ struct TokenstatUsageView: View {
                 .accessibilityLabel(selectedValue.map { "\(periodTitle) value at list rates: \(EcosystemUsage.money($0))" } ?? "Open tokenstat to update usage")
             case .accessoryRectangular:
                 VStack(alignment: .leading, spacing: 2) {
-                    Label(entry.period == .today ? "tokenstat · Today" : "tokenstat · Week", systemImage: "chart.bar.xaxis").font(.caption)
+                    Label { Text(entry.period == .today ? "tokenstat · Today" : "tokenstat · Week") }
+                        icon: { TokenstatWidgetMark(size: 13) }.font(.caption)
                     Text(selectedValue.map { EcosystemUsage.displayMoney($0) } ?? "Open to update").font(.headline).lineLimit(1).minimumScaleFactor(0.6)
                     Text(usage?.scope ?? "Value at list rates").font(.caption2)
                 }.privacySensitive()
@@ -156,10 +191,10 @@ struct TokenstatUsageView: View {
             if [.accessoryCircular, .accessoryRectangular, .accessoryInline].contains(family) {
                 AccessoryWidgetBackground()
             } else {
-                WidgetStyle.background(colorScheme == .dark)
+                WidgetStyle.background(entry.appearance, dark: colorScheme == .dark)
             }
             #else
-            WidgetStyle.background(colorScheme == .dark)
+            WidgetStyle.background(entry.appearance, dark: colorScheme == .dark)
             #endif
         }
     }
@@ -170,10 +205,10 @@ struct TokenstatUsageView: View {
                 header
                 Spacer(minLength: 0)
                 if family != .systemSmall {
-                    Image(systemName: "chart.bar.xaxis").font(.title2).foregroundStyle(accent)
+                    TokenstatWidgetMark(size: 26).foregroundStyle(accent)
                 }
                 Text("Your work, at a glance").font(.headline)
-                Text("Open tokenstat to load your activity.").font(.caption).foregroundStyle(.secondary)
+                Text("Open tokenstat to load your activity.").font(.caption).foregroundStyle(muted)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
@@ -188,12 +223,13 @@ struct TokenstatUsageView: View {
 
     private var header: some View {
         HStack {
-            Label("tokenstat", systemImage: "chart.bar.xaxis")
+            Label { Text("tokenstat") } icon: { TokenstatWidgetMark(size: 14) }
                 .font(.system(.caption, design: .rounded, weight: .bold))
                 .foregroundStyle(accent)
+                .widgetAccentable()
             Spacer(minLength: 2)
             if family != .systemSmall {
-                Text(usage?.scope ?? "ACTIVITY").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                Text(usage?.scope ?? "ACTIVITY").font(.caption2).foregroundStyle(muted).lineLimit(1)
             }
             refreshButton
         }
@@ -201,13 +237,13 @@ struct TokenstatUsageView: View {
 
     private var value: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(periodTitle).font(.system(.caption2, design: .rounded, weight: .semibold)).foregroundStyle(.secondary)
+            Text(periodTitle).font(.system(.caption2, design: .rounded, weight: .semibold)).foregroundStyle(muted)
             Text(selectedValue.map { EcosystemUsage.displayMoney($0) } ?? "—")
                 .font(.system(size: family == .systemSmall ? 28 : 36, weight: .semibold, design: .rounded))
                 .monospacedDigit().lineLimit(1).minimumScaleFactor(0.4)
                 .contentTransition(.numericText()).invalidatableContent()
                 .accessibilityLabel(selectedValue.map(EcosystemUsage.money) ?? "Value unavailable")
-            Text(selectedValue == nil ? "Refresh to update" : "Value at list rates").font(.caption2).foregroundStyle(.secondary)
+            Text(selectedValue == nil ? "Refresh to update" : "Value at list rates").font(.caption2).foregroundStyle(muted)
         }.privacySensitive()
     }
 
@@ -216,6 +252,7 @@ struct TokenstatUsageView: View {
             Image(systemName: "arrow.clockwise").font(.system(size: 12, weight: .semibold))
                 .frame(width: 24, height: 24).contentShape(Circle())
         }.buttonStyle(.plain).foregroundStyle(accent)
+            .widgetAccentable()
             .accessibilityLabel("Refresh tokenstat usage")
     }
 
@@ -227,7 +264,7 @@ struct TokenstatUsageView: View {
             else { Text("Not yet synced") }
             Spacer(minLength: 0)
         }
-        .font(.caption2).foregroundStyle(.secondary)
+        .font(.caption2).foregroundStyle(muted)
         .accessibilityLabel("Last updated \(usage?.updatedAt.formatted(date: .abbreviated, time: .shortened) ?? "unknown")")
     }
 
@@ -249,7 +286,7 @@ struct TokenstatUsageView: View {
                 value.frame(maxWidth: .infinity, alignment: .leading)
                 VStack(alignment: .leading, spacing: 7) {
                     HStack {
-                        Text(entry.period == .today ? "7 DAYS" : "TODAY").font(.caption2).foregroundStyle(.secondary)
+                        Text(entry.period == .today ? "7 DAYS" : "TODAY").font(.caption2).foregroundStyle(muted)
                         Spacer()
                         Text(entry.period == .today ? weekValue : today.map { EcosystemUsage.displayMoney($0.value) } ?? "—")
                             .font(.caption).fontWeight(.semibold).lineLimit(1).minimumScaleFactor(0.55)
@@ -287,7 +324,7 @@ struct TokenstatUsageView: View {
             value
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(entry.period == .today ? "7 DAYS" : "TODAY").font(.caption2).foregroundStyle(.secondary)
+                    Text(entry.period == .today ? "7 DAYS" : "TODAY").font(.caption2).foregroundStyle(muted)
                     Text(entry.period == .today ? weekValue : today.map { EcosystemUsage.displayMoney($0.value) } ?? "—")
                         .font(.headline).monospacedDigit().lineLimit(1).minimumScaleFactor(0.55)
                 }
@@ -307,7 +344,7 @@ struct TokenstatUsageView: View {
             HStack(alignment: .bottom, spacing: 5) {
                 ForEach(week) { day in
                     RoundedRectangle(cornerRadius: 3)
-                        .fill(LinearGradient(colors: [WidgetStyle.secondary(colorScheme == .dark), accent], startPoint: .top, endPoint: .bottom))
+                        .fill(LinearGradient(colors: [entry.tint == .brand ? WidgetStyle.secondary(colorScheme == .dark) : accent, accent], startPoint: .top, endPoint: .bottom))
                         .opacity(day.locked ? 0.12 : day.day == today?.day ? 1 : 0.5)
                         .widgetAccentable()
                         .frame(height: max(3, geometry.size.height * CGFloat(day.locked ? 0 : day.value) / CGFloat(maxValue)))
@@ -321,7 +358,7 @@ struct TokenstatUsageView: View {
 
     private var activity: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("RECENT ACTIVITY").font(.system(.caption2, design: .rounded, weight: .semibold)).foregroundStyle(.secondary)
+            Text("RECENT ACTIVITY").font(.system(.caption2, design: .rounded, weight: .semibold)).foregroundStyle(muted)
             // Include quiet and locked days rather than packing active days.
             let days = usage?.days ?? []
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 7), spacing: 5) {
@@ -329,17 +366,18 @@ struct TokenstatUsageView: View {
                     RoundedRectangle(cornerRadius: 4)
                         .fill(accent.opacity(day.locked ? 0.07 : day.level == 0 ? 0.10 : Double(min(4, max(0, day.level))) * 0.2 + 0.15))
                         .frame(height: family == .systemExtraLarge ? 28 : 15)
+                        .widgetAccentable()
                 }
             }
             HStack {
-                Text("Last \(days.count) days").font(.caption2).foregroundStyle(.secondary)
+                Text("Last \(days.count) days").font(.caption2).foregroundStyle(muted)
                 Spacer()
-                Text("Less").font(.caption2).foregroundStyle(.secondary)
+                Text("Less").font(.caption2).foregroundStyle(muted)
                 ForEach(0..<4) { i in
                     RoundedRectangle(cornerRadius: 2).fill(accent.opacity(Double(i + 1) / 4))
                         .frame(width: 7, height: 7)
                 }
-                Text("More").font(.caption2).foregroundStyle(.secondary)
+                Text("More").font(.caption2).foregroundStyle(muted)
             }
         }
         .accessibilityElement(children: .ignore)
@@ -356,7 +394,14 @@ struct TokenstatLauncherWidget: Widget {
         }
         .configurationDisplayName("Open tokenstat")
         .description("Your projects and favorite screens, one tap away.")
-        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
+        .supportedFamilies(Self.families)
+    }
+    private static var families: [WidgetFamily] {
+        #if os(iOS)
+        [.systemSmall, .systemMedium, .systemLarge, .accessoryCircular, .accessoryRectangular]
+        #else
+        [.systemSmall, .systemMedium, .systemLarge]
+        #endif
     }
 }
 
@@ -366,25 +411,62 @@ struct TokenstatLauncherView: View {
     @Environment(\.widgetFamily) private var systemFamily
     private var family: WidgetFamily { familyOverride ?? systemFamily }
     @Environment(\.colorScheme) private var colorScheme
-    private var accent: Color { WidgetStyle.accent(colorScheme == .dark) }
+    private var accent: Color { WidgetStyle.accent(entry.tint, dark: colorScheme == .dark) }
+    private var muted: Color { entry.appearance == .clean ? .primary.opacity(0.72) : .secondary }
+    @Environment(\.widgetRenderingMode) private var renderingMode
 
     var body: some View {
+        Group {
+            #if os(iOS)
+            switch family {
+            case .accessoryCircular:
+                TokenstatWidgetMark(size: 28, decorative: false).foregroundStyle(accent)
+                    .accessibilityLabel("Open tokenstat")
+            case .accessoryRectangular:
+                HStack(spacing: 8) {
+                    TokenstatWidgetMark(size: 24).foregroundStyle(accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("tokenstat").font(.caption)
+                        Text(entry.favorite?.name ?? entry.screen.title).font(.headline).lineLimit(1).privacySensitive()
+                    }
+                }.accessibilityLabel("Open \(entry.favorite?.name ?? entry.screen.title) in tokenstat").privacySensitive()
+            default: card
+            }
+            #else
+            card
+            #endif
+        }
+        .tint(accent)
+        .widgetURL(entry.destination.url)
+        .containerBackground(for: .widget) {
+            #if os(iOS)
+            if [.accessoryCircular, .accessoryRectangular].contains(family) { AccessoryWidgetBackground() }
+            else { WidgetStyle.background(entry.appearance, dark: colorScheme == .dark) }
+            #else
+            WidgetStyle.background(entry.appearance, dark: colorScheme == .dark)
+            #endif
+        }
+    }
+
+    private var card: some View {
         VStack(alignment: .leading, spacing: family == .systemMedium ? 8 : 10) {
             HStack {
-                Text("tokenstat").font(.system(.caption, design: .rounded, weight: .bold)).foregroundStyle(accent)
+                Label { Text("tokenstat") } icon: { TokenstatWidgetMark(size: 14) }
+                    .font(.system(.caption, design: .rounded, weight: .bold)).foregroundStyle(accent).widgetAccentable()
                 Spacer()
                 Button(intent: RefreshTokenstatIntent()) {
                     Image(systemName: "arrow.clockwise").font(.system(size: 12, weight: .semibold)).frame(width: 28, height: 28)
-                }.buttonStyle(.plain).foregroundStyle(accent).accessibilityLabel("Refresh tokenstat")
+                }.buttonStyle(.plain).foregroundStyle(accent).widgetAccentable().accessibilityLabel("Refresh tokenstat")
             }
             if family == .systemSmall {
                 // Small widgets have one system tap target. A single launcher
                 // makes that behavior clear instead of drawing four buttons.
                 VStack(alignment: .leading, spacing: 8) {
                     Spacer(minLength: 0)
-                    Image(systemName: entry.favorite == nil ? entry.screen.symbol : "folder.fill").font(.system(size: 30)).foregroundStyle(accent)
+                    (entry.favorite == nil ? WidgetStyle.icon(for: entry.screen) : Image(systemName: "folder.fill"))
+                        .font(.system(size: 30)).foregroundStyle(accent).widgetAccentable()
                     Text(entry.favorite?.name ?? entry.screen.title).font(.headline).lineLimit(2).privacySensitive()
-                    Text(entry.favorite?.host ?? "Pick up your work").font(.caption).lineLimit(1).privacySensitive().foregroundStyle(.secondary)
+                    Text(entry.favorite?.host ?? "Pick up your work").font(.caption).lineLimit(1).privacySensitive().foregroundStyle(muted)
                     Spacer(minLength: 0)
                 }
             } else {
@@ -402,9 +484,6 @@ struct TokenstatLauncherView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .tint(accent)
-        .widgetURL(entry.destination.url)
-        .containerBackground(for: .widget) { WidgetStyle.background(colorScheme == .dark) }
     }
 
     private var screenGrid: some View {
@@ -412,11 +491,12 @@ struct TokenstatLauncherView: View {
             ForEach(Array(([entry.screen] + EcosystemScreen.allCases.filter { $0 != entry.screen }).prefix(4)), id: \.self) { screen in
                 Link(destination: EcosystemRoute(screen: screen).url) {
                     VStack(spacing: 4) {
-                        Image(systemName: screen.symbol).font(.system(size: 16, weight: .medium))
+                        WidgetStyle.icon(for: screen).font(.system(size: 16, weight: .medium))
                         Text(screen.title).font(.system(size: 10, weight: .medium)).lineLimit(1).minimumScaleFactor(0.7)
                     }.frame(maxWidth: .infinity).padding(.vertical, 4)
                         .foregroundStyle(accent)
-                        .background(accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                        .background(accent.opacity(renderingMode == .fullColor ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 12))
+                        .widgetAccentable()
                 }.buttonStyle(.plain).accessibilityLabel("Open \(screen.title) in tokenstat")
             }
         }
@@ -429,9 +509,9 @@ struct TokenstatLauncherView: View {
 
     private var projects: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("PROJECTS").font(.caption2).foregroundStyle(.secondary)
+            Text("PROJECTS").font(.caption2).foregroundStyle(muted)
             if entry.snapshot.projects.isEmpty {
-                Text("Open a project in tokenstat to keep it within reach.").font(.caption).foregroundStyle(.secondary)
+                Text("Open a project in tokenstat to keep it within reach.").font(.caption).foregroundStyle(muted)
             } else {
                 ForEach(Array(orderedProjects.prefix(family == .systemLarge ? 4 : 2))) { project in
                     Link(destination: EcosystemRoute(screen: .workspaces, projectID: project.id, owner: entry.snapshot.owner).url) {
@@ -439,7 +519,7 @@ struct TokenstatLauncherView: View {
                             Image(systemName: "folder.fill").foregroundStyle(accent)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(project.name).font(.caption).fontWeight(.semibold).foregroundStyle(.primary)
-                                Text(project.host).font(.caption2).foregroundStyle(.secondary)
+                                Text(project.host).font(.caption2).foregroundStyle(muted)
                             }.lineLimit(1)
                             Spacer(minLength: 0)
                         }
@@ -461,7 +541,7 @@ struct TokenstatQuickAccessControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         AppIntentControlConfiguration(kind: "ai.tokenstat.quick-access", intent: TokenstatControlConfiguration.self) { configuration in
             ControlWidgetButton(action: OpenTokenstatScreenIntent(target: configuration.screen)) {
-                Label(configuration.screen.title, systemImage: configuration.screen.symbol)
+                Label { Text(configuration.screen.title) } icon: { Image("tokenstat_logo") }
             }
         }
         .displayName("tokenstat Quick Access")
@@ -479,6 +559,9 @@ struct TokenstatWidgetBundle: WidgetBundle {
     var body: some Widget {
         TokenstatUsageWidget()
         TokenstatLauncherWidget()
+        #if os(iOS)
+        TokenstatLiveWorkWidget()
+        #endif
         if #available(iOS 18.0, macOS 26.0, *) { TokenstatQuickAccessControl() }
     }
 }

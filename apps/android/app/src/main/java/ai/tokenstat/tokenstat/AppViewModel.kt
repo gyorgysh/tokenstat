@@ -243,7 +243,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         runCatching { CoreClient.call("account.status") }
             .onSuccess { account ->
                 val accountObject = account.jsonObject
-                UsageWidgetStore.verify(getApplication(), accountObject, widgetEpoch, fromApp = true)
+                if (signingOut || !UsageWidgetStore.verifyForeground(getApplication(), accountObject, widgetEpoch)) return@onSuccess
+                ai.tokenstat.tokenstat.ecosystem.SystemProjects.verify(getApplication(), accountObject)
                 mutableState.value = mutableState.value.copy(
                     account = accountObject,
                     authChecked = true,
@@ -446,10 +447,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (signingOut) return@launch
         signingOut = true
         UsageWidgetStore.clear(getApplication(), block = true)
+        ai.tokenstat.tokenstat.ecosystem.SystemProjects.clear(getApplication())
         try {
             signInJob?.cancelAndJoin()
             refreshJob?.cancelAndJoin()
             dashboardJob?.cancelAndJoin()
+            ai.tokenstat.tokenstat.ecosystem.SystemProjects.flush()
             PushRegistrar.unregister { CoreClient.call("account.logout") }
             workspacesConnection.disconnect()
             workspacesConnection.setHost(null)
@@ -468,7 +471,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun applyAccount(element: JsonElement) = viewModelScope.launch {
         if (signingOut || !state.value.signedIn) return@launch
         val account = element as? JsonObject ?: return@launch
-        UsageWidgetStore.verify(getApplication(), account, UsageWidgetStore.epoch(), fromApp = true)
+        if (ai.tokenstat.tokenstat.ecosystem.UsageSnapshot.owner(account) != state.value.account?.let(ai.tokenstat.tokenstat.ecosystem.UsageSnapshot::owner)) return@launch
+        if (!UsageWidgetStore.verifyForeground(getApplication(), account, UsageWidgetStore.epoch())) return@launch
+        ai.tokenstat.tokenstat.ecosystem.SystemProjects.verify(getApplication(), account)
         mutableState.value = mutableState.value.copy(account = account)
         if (account["signedIn"]?.jsonPrimitive?.content == "true") {
             dashboardJob?.cancel()
@@ -544,8 +549,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         })
     }
 
-    suspend fun workspaces(peer: String): JsonArray =
-        CoreClient.remote(peer, "workspace.list") as? JsonArray ?: JsonArray(emptyList())
+    suspend fun workspaces(peer: String): JsonArray {
+        val owner = ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
+        val folders = CoreClient.remote(peer, "workspace.list") as? JsonArray ?: JsonArray(emptyList())
+        ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(getApplication(), peer, folders, owner)
+        return folders
+    }
 
     suspend fun hostStats(peer: String): JsonObject =
         CoreClient.remote(peer, "host.stats") as? JsonObject ?: buildJsonObject {}

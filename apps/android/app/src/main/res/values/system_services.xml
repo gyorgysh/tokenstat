@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <bool name="app_functions_enabled">false</bool>
+    <string name="system_pin_project">Add to Home screen</string>
+    <string name="system_share_response">Share response</string>
+</resources>

@@ -177,6 +177,199 @@ pub fn unregister_device(token: &str) -> Result<(), ProfileError> {
     post(&host, &bearer, "/api/v1/push/unregister", &body).map(|_| ())
 }
 
+/// An opaque conversation key; work names and transcript content never travel in a push.
+pub fn activity_key(conversation: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(format!("chat:{conversation}"))
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+pub fn register_activity(
+    token: &str,
+    peer: &str,
+    key: &str,
+    revision: &str,
+    environment: &str,
+) -> Result<(), ProfileError> {
+    if !(64..=200).contains(&token.len())
+        || !token.len().is_multiple_of(2)
+        || !token.bytes().all(|b| b.is_ascii_hexdigit())
+        || peer.len() != 64
+        || !peer.bytes().all(|b| b.is_ascii_hexdigit())
+        || key.len() != 64
+        || !key.bytes().all(|b| b.is_ascii_hexdigit())
+        || revision
+            .parse::<u64>()
+            .ok()
+            .map(|value| value.to_string())
+            .as_deref()
+            != Some(revision)
+        || !matches!(environment, "sandbox" | "production")
+    {
+        return Err(ProfileError::Message(
+            "Invalid Live Activity registration.".into(),
+        ));
+    }
+    let host = resolve_api_host(None)?;
+    let bearer = keychain::load_token(&host)?
+        .ok_or_else(|| ProfileError::Message("Sign in first.".into()))?;
+    post(&host, &bearer, "/api/v1/push/activity/register", &serde_json::json!({
+        "token": token, "peer": peer, "key": key, "revision": revision, "environment": environment,
+        "machine": crate::config::ensure_machine_id()?,
+    })).map(|_| ())
+}
+
+pub fn unregister_activity(token: &str) -> Result<(), ProfileError> {
+    if !(64..=200).contains(&token.len())
+        || !token.len().is_multiple_of(2)
+        || !token.bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        return Err(ProfileError::Message("Invalid Live Activity token.".into()));
+    }
+    let host = resolve_api_host(None)?;
+    let Some(bearer) = keychain::load_token(&host)? else {
+        return Ok(());
+    };
+    post(
+        &host,
+        &bearer,
+        "/api/v1/push/activity/unregister",
+        &serde_json::json!({"token": token}),
+    )
+    .map(|_| ())
+}
+
+// Credentials are captured when work is queued; a later account switch cannot reattribute it.
+struct ActivityUpdate {
+    host: String,
+    bearer: String,
+    machine: String,
+    key: String,
+    revision: u64,
+    phase: &'static str,
+}
+impl ActivityUpdate {
+    fn terminal(&self) -> bool {
+        matches!(self.phase, "done" | "failed" | "stopped")
+    }
+    fn same_run(&self, other: &Self) -> bool {
+        self.host == other.host
+            && self.bearer == other.bearer
+            && self.machine == other.machine
+            && self.key == other.key
+            && self.revision == other.revision
+    }
+}
+fn queue_activity(queue: &mut std::collections::VecDeque<ActivityUpdate>, update: ActivityUpdate) {
+    if let Some(pending) = queue.iter_mut().find(|pending| pending.same_run(&update)) {
+        if !pending.terminal() {
+            *pending = update;
+        }
+        return;
+    }
+    if queue.len() == 64 {
+        // Heartbeats must not displace completion, even while the network is unavailable.
+        let Some(index) = queue.iter().position(|pending| !pending.terminal()) else {
+            return;
+        };
+        queue.remove(index);
+    }
+    queue.push_back(update);
+}
+#[derive(Default)]
+struct ActivityQueue {
+    pending: std::sync::Mutex<std::collections::VecDeque<ActivityUpdate>>,
+    changed: std::sync::Condvar,
+}
+
+/// A bounded, best-effort status path independent of notification preferences/presence.
+pub fn activity_in_background(conversation: &str, revision: u64, phase: &'static str) {
+    if !matches!(phase, "working" | "waiting" | "done" | "failed" | "stopped") {
+        return;
+    }
+    let Ok(host) = resolve_api_host(None) else {
+        return;
+    };
+    let Ok(Some(bearer)) = keychain::load_token(&host) else {
+        return;
+    };
+    let Ok(machine) = crate::config::ensure_machine_id() else {
+        return;
+    };
+    static QUEUE: std::sync::OnceLock<std::sync::Arc<ActivityQueue>> = std::sync::OnceLock::new();
+    let queue = QUEUE.get_or_init(|| {
+        let queue = std::sync::Arc::new(ActivityQueue::default());
+        let worker = std::sync::Arc::clone(&queue);
+        let _ = std::thread::Builder::new()
+            .name("tokenstat-live-activity".into())
+            .spawn(move || {
+                loop {
+                    let update = {
+                        let mut pending = worker
+                            .pending
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        while pending.is_empty() {
+                            pending = worker
+                                .changed
+                                .wait(pending)
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        }
+                        let index = pending
+                            .iter()
+                            .position(ActivityUpdate::terminal)
+                            .unwrap_or(0);
+                        pending
+                            .remove(index)
+                            .expect("nonempty pending activity queue")
+                    };
+                    for attempt in 0..3 {
+                        // Revocation wins over retries. Never resolve a new account's bearer for old work.
+                        if resolve_api_host(None).ok().as_ref() != Some(&update.host)
+                            || keychain::load_token(&update.host).ok().flatten().as_ref()
+                                != Some(&update.bearer)
+                        {
+                            break;
+                        }
+                        let sent = post(
+                            &update.host,
+                            &update.bearer,
+                            "/api/v1/push/activity/update",
+                            &serde_json::json!({
+                                "machine": update.machine, "key": update.key,
+                                "revision": update.revision.to_string(), "phase": update.phase,
+                            }),
+                        );
+                        if sent.is_ok() || !update.terminal() {
+                            break;
+                        }
+                        if attempt < 2 {
+                            std::thread::sleep(Duration::from_secs(attempt + 1));
+                        }
+                    }
+                }
+            });
+        queue
+    });
+    let update = ActivityUpdate {
+        host,
+        bearer,
+        machine,
+        key: activity_key(conversation),
+        revision,
+        phase,
+    };
+    let mut pending = queue
+        .pending
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    queue_activity(&mut pending, update);
+    drop(pending);
+    queue.changed.notify_one();
+}
+
 fn post(
     host: &str,
     bearer: &str,
@@ -265,6 +458,61 @@ pub fn notify_in_background(reason: Reason) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn activity_fixture(key: &str, phase: &'static str) -> ActivityUpdate {
+        ActivityUpdate {
+            host: "fixture".into(),
+            bearer: "account-a".into(),
+            machine: "fixture-machine".into(),
+            key: key.into(),
+            revision: 1,
+            phase,
+        }
+    }
+    #[test]
+    fn pending_activity_heartbeats_coalesce_without_regressing_completion() {
+        let mut queue = std::collections::VecDeque::new();
+        queue_activity(&mut queue, activity_fixture("chat", "working"));
+        queue_activity(&mut queue, activity_fixture("chat", "waiting"));
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue[0].phase, "waiting");
+        queue_activity(&mut queue, activity_fixture("chat", "done"));
+        queue_activity(&mut queue, activity_fixture("chat", "working"));
+        assert_eq!(queue[0].phase, "done");
+        let mut other_account = activity_fixture("chat", "working");
+        other_account.bearer = "account-b".into();
+        queue_activity(&mut queue, other_account);
+        assert_eq!(queue.len(), 2);
+    }
+    #[test]
+    fn pending_activity_capacity_preserves_completion_under_heartbeat_pressure() {
+        let mut queue = std::collections::VecDeque::new();
+        queue_activity(&mut queue, activity_fixture("finished", "done"));
+        for i in 0..100 {
+            queue_activity(&mut queue, activity_fixture(&i.to_string(), "working"));
+        }
+        assert_eq!(queue.len(), 64);
+        assert!(queue.iter().any(|pending| pending.key == "finished"));
+        queue_activity(&mut queue, activity_fixture("last", "failed"));
+        assert_eq!(queue.len(), 64);
+        assert!(queue.iter().any(|pending| pending.key == "last"));
+    }
+
+    #[test]
+    fn live_activity_keys_are_opaque_and_registration_is_validated_locally() {
+        let key = activity_key("conversation-fixture");
+        assert_eq!(key.len(), 64);
+        assert!(key.bytes().all(|b| b.is_ascii_hexdigit()));
+        assert_eq!(key, activity_key("conversation-fixture"));
+        assert_ne!(key, activity_key("another-conversation"));
+        for (token, peer, key, revision, environment) in [
+            ("", "peer", key.as_str(), "1", "sandbox"),
+            ("not-a-token", "peer", key.as_str(), "1", "sandbox"),
+            ("", "peer", "project name", "1", "production"),
+        ] {
+            assert!(register_activity(token, peer, key, revision, environment).is_err());
+        }
+    }
 
     #[test]
     fn exit_code_decides_which_sentence() {

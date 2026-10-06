@@ -15,6 +15,11 @@ import Foundation
             sectionRoute.section = section
             assert(EcosystemRoute(url: sectionRoute.url) == sectionRoute)
         }
+        let liveRoute = EcosystemRoute(screen: .workspaces, projectID: "remote:host:p", owner: owner, section: .chat, chatID: "chat /?#🧪")
+        assert(EcosystemRoute(url: liveRoute.url) == liveRoute)
+        for invalid in ["tokenstat://open/workspaces?project=p&owner=o&chat=x", "tokenstat://open/workspaces?project=p&owner=o&section=notes&chat=x", "tokenstat://open/workspaces?project=p&owner=o&section=chat&chat="] {
+            assert(EcosystemRoute(url: URL(string: invalid)!) == nil)
+        }
         var indexedURL = URLComponents(string: "tokenstat://open/workspaces")!
         indexedURL.queryItems = [.init(name: "entity", value: Data("\(owner)\n\(route.projectID!)".utf8).base64EncodedString())]
         assert(EcosystemRoute(url: indexedURL.url!) == route)

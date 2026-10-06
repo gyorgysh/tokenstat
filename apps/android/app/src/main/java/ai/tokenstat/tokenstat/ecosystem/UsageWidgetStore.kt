@@ -3,14 +3,19 @@ package ai.tokenstat.tokenstat.ecosystem
 
 import android.content.Context
 import android.util.AtomicFile
+import androidx.core.content.edit
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 
 object UsageWidgetStore {
     private val session = UsageSession()
     private val json = Json { ignoreUnknownKeys = true }
     private fun file(context: Context) = AtomicFile(context.noBackupFilesDir.resolve("widget-usage.json"))
+    private fun privacy(context: Context) = context.getSharedPreferences("widget-account-privacy", Context.MODE_PRIVATE)
+    private fun blocked(context: Context) = privacy(context).getBoolean("blocked", false)
 
     @Synchronized fun epoch(): Long = session.epoch
     @Synchronized fun lease(): UsageLease? = session.lease()
@@ -25,19 +30,20 @@ object UsageWidgetStore {
             }
             require(count <= 32 * 1024)
             json.decodeFromString<UsageSnapshot>(buffer.copyOf(count).toString(Charsets.UTF_8)).takeIf { snapshot ->
-                snapshot.valid && session.acceptsCachedOwner(snapshot.owner)
+                snapshot.valid && !blocked(context) && session.acceptsCachedOwner(snapshot.owner)
             }
         }
     }.getOrNull()
 
     @Synchronized fun verify(context: Context, account: JsonObject, observed: Long, fromApp: Boolean = false): UsageLease? {
-        if (session.epoch != observed) return null
+        if (session.epoch != observed || blocked(context) && !fromApp) return null
         val owner = UsageSnapshot.owner(account)
         val lease = session.verify(owner, observed, fromApp)
         if (lease == null) {
             if (owner == null) { file(context).delete(); UsageWidgetProvider.updateAll(context) }
             return null
         }
+        if (fromApp) privacy(context).edit(commit = true) { putBoolean("blocked", false) }
         if (read(context)?.owner != owner) {
             // Delete before replacing: a full disk or interrupted write must
             // never restore another account's aggregates from AtomicFile.
@@ -47,8 +53,18 @@ object UsageWidgetStore {
         return lease
     }
 
+    /** A verified signed-out response is an account answer, even though it has no usage lease. */
+    @Synchronized fun verifyForeground(context: Context, account: JsonObject, observed: Long): Boolean {
+        if (session.epoch != observed) return false
+        val lease = verify(context, account, observed, fromApp = true)
+        return lease != null || (account["signedIn"] as? JsonPrimitive)?.booleanOrNull == false
+    }
+
     @Synchronized fun clear(context: Context, block: Boolean = false) {
         session.clear(block)
+        // A background worker can start in a new process while logout is
+        // still pending. Keep sign-out's privacy boundary across that restart.
+        privacy(context).edit(commit = true) { putBoolean("blocked", block) }
         file(context).delete()
         UsageWidgetProvider.updateAll(context)
     }

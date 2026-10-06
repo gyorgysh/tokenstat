@@ -27,6 +27,7 @@ class WidgetSigningTests(unittest.TestCase):
         def png(color, transparent=False):
             return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1024, 1024, 8, color, 0, 0, 0)) + (chunk(b"tRNS", b"\x00") if transparent else b"") + chunk(b"IEND", b"")
         icons.validate_store_icon(png(2), size=1024)
+        icons.validate_store_icon(png(2)[:8] + chunk(b"CgBI", b"\x40\xa0\x60\x82") + png(2)[8:], size=1024)
         for color, transparent in [(6, False), (4, False), (3, True)]:
             with self.assertRaises(ValueError):
                 icons.validate_store_icon(png(color, transparent), size=1024)
@@ -47,6 +48,14 @@ class WidgetSigningTests(unittest.TestCase):
                 "com.apple.security.application-groups": ["group.ai.tokenstat.tokenstat"],
             },
         }, digest
+
+    def test_corrupt_or_truncated_icon_metadata_is_rejected(self):
+        data = (signing.ROOT / "apps/mac/WatchResources/Assets.xcassets/AppIcon.appiconset/app-icon.png").read_bytes()
+        corrupt = bytearray(data)
+        corrupt[29] ^= 1  # IHDR checksum
+        for invalid in (data[:-12], data[:-1], data + b"trailing", bytes(corrupt)):
+            with self.assertRaises(ValueError):
+                icons.validate_store_icon(invalid, size=1024)
 
     def test_app_and_extension_have_distinct_entitlements(self):
         profile, digest = self.profile(signing.BUNDLE_ID)

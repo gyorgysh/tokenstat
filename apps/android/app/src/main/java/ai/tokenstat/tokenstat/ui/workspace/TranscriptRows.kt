@@ -23,6 +23,10 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,6 +68,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboard
@@ -262,6 +268,12 @@ private fun AssistantPanel(text: String, agentName: String) {
     val clipboard = LocalClipboard.current
     val copyScope = rememberCoroutineScope()
     var copied by remember(text) { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    fun copy() { copyScope.launch {
+        clipboard.setClipEntry(ClipEntry(android.content.ClipData.newPlainText("response", text)))
+        copied = true
+    } }
     Column(
         Modifier
             .fillMaxWidth()
@@ -285,20 +297,18 @@ private fun AssistantPanel(text: String, agentName: String) {
                 color = colors.accent,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = {
-                copyScope.launch {
-                    clipboard.setClipEntry(
-                        ClipEntry(android.content.ClipData.newPlainText("response", text)),
-                    )
-                    copied = true
-                }
-            }, modifier = Modifier.size(28.dp)) {
+            Box(Modifier.size(28.dp).combinedClickable(role = Role.Button, onClick = ::copy, onLongClick = { menu = true }), contentAlignment = Alignment.Center) {
                 Icon(
                     if (copied) Icons.Default.Check else ActionIcon.Copy.vector,
                     L10n.text("android.transcriptrows.copy_response.f0f755af"),
                     tint = colors.textSecondary,
                     modifier = Modifier.size(16.dp),
                 )
+                DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(text = { Text(L10n.text("common.copy")) }, onClick = { menu = false; copy() })
+                    DropdownMenuItem(text = { Text(stringResource(ai.tokenstat.tokenstat.R.string.system_share_response)) },
+                        onClick = { menu = false; ai.tokenstat.tokenstat.ecosystem.SystemShare.send(context, text) })
+                }
             }
         }
         MarkdownText(

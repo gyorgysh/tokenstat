@@ -1222,6 +1222,8 @@ fn owner_only_method(method: &str) -> bool {
                 | "push.register"
                 | "push.unregister"
                 | "push.test"
+                | "push.activity.register"
+                | "push.activity.unregister"
         )
 }
 
@@ -1800,6 +1802,36 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                 return Err("push.unregister needs a device token".into());
             }
             tokenstat_sync::push::unregister_device(&p.token).envelope()?;
+            Ok(json!({"registered": false}))
+        }
+
+        "push.activity.register" => {
+            #[derive(Deserialize, Default)]
+            struct Params {
+                token: String,
+                peer: String,
+                key: String,
+                revision: String,
+                environment: String,
+            }
+            let p: Params = parse(params)?;
+            tokenstat_sync::push::register_activity(
+                &p.token,
+                &p.peer,
+                &p.key,
+                &p.revision,
+                &p.environment,
+            )
+            .envelope()?;
+            Ok(json!({"registered": true}))
+        }
+        "push.activity.unregister" => {
+            #[derive(Deserialize, Default)]
+            struct Params {
+                token: String,
+            }
+            let p: Params = parse(params)?;
+            tokenstat_sync::push::unregister_activity(&p.token).envelope()?;
             Ok(json!({"registered": false}))
         }
 

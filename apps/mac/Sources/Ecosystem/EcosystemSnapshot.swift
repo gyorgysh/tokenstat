@@ -36,6 +36,7 @@ struct EcosystemRoute: Equatable, Sendable {
     var owner: String?
     var searchTerm: String?
     var section: EcosystemProjectSection?
+    var chatID: String?
 
     var url: URL {
         var parts = URLComponents()
@@ -46,17 +47,19 @@ struct EcosystemRoute: Equatable, Sendable {
             parts.queryItems = [URLQueryItem(name: "project", value: projectID),
                                 URLQueryItem(name: "owner", value: owner)]
             if let section { parts.queryItems?.append(URLQueryItem(name: "section", value: section.rawValue)) }
+            if let chatID { parts.queryItems?.append(URLQueryItem(name: "chat", value: chatID)) }
         }
         if let searchTerm, screen == .search { parts.queryItems = [URLQueryItem(name: "query", value: searchTerm)] }
         return parts.url!
     }
 
-    init(screen: EcosystemScreen, projectID: String? = nil, owner: String? = nil, searchTerm: String? = nil, section: EcosystemProjectSection? = nil) {
+    init(screen: EcosystemScreen, projectID: String? = nil, owner: String? = nil, searchTerm: String? = nil, section: EcosystemProjectSection? = nil, chatID: String? = nil) {
         self.screen = screen
         self.projectID = projectID
         self.owner = owner
         self.searchTerm = searchTerm
         self.section = section
+        self.chatID = chatID
     }
 
     init?(url: URL) {
@@ -66,7 +69,7 @@ struct EcosystemRoute: Equatable, Sendable {
               parts.fragment == nil,
               let screen = EcosystemScreen(rawValue: String(parts.path.dropFirst())) else { return nil }
         let items = parts.queryItems ?? []
-        guard items.allSatisfy({ ["project", "owner", "query", "section", "entity"].contains($0.name) }),
+        guard items.allSatisfy({ ["project", "owner", "query", "section", "entity", "chat"].contains($0.name) }),
               items.allSatisfy({ $0.value != nil }),
               Set(items.map(\.name)).count == items.count else { return nil }
         if let entity = items.first(where: { $0.name == "entity" })?.value {
@@ -84,11 +87,13 @@ struct EcosystemRoute: Equatable, Sendable {
         let sectionValue = items.first { $0.name == "section" }?.value
         let section = sectionValue.flatMap(EcosystemProjectSection.init(rawValue:))
         guard sectionValue == nil || section != nil else { return nil }
+        let chat = items.first { $0.name == "chat" }?.value
+        guard chat == nil || (screen == .workspaces && section == .chat && project != nil && owner != nil) else { return nil }
         let query = items.first { $0.name == "query" }?.value
         guard items.isEmpty || (screen == .workspaces && project != nil && owner != nil && query == nil)
                 || (screen == .search && query != nil && project == nil && owner == nil && section == nil),
-              [project, owner, query].compactMap({ $0 }).allSatisfy({ !$0.isEmpty && $0.utf8.count <= 2048 }) else { return nil }
-        self.init(screen: screen, projectID: project, owner: owner, searchTerm: query, section: section)
+              [project, owner, query, chat].compactMap({ $0 }).allSatisfy({ !$0.isEmpty && $0.utf8.count <= 2048 }) else { return nil }
+        self.init(screen: screen, projectID: project, owner: owner, searchTerm: query, section: section, chatID: chat)
     }
 }
 
@@ -209,7 +214,15 @@ struct EcosystemSnapshotStore {
     static let widgetKinds = ["ai.tokenstat.usage", "ai.tokenstat.launcher"]
     let directory: URL?
 
-    init(directory: URL? = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)) {
+    static var defaultDirectory: URL? {
+        #if ECOSYSTEM_QA && os(macOS)
+        // Desktop fixture rendering must never overwrite the signed-in app's shared cache.
+        return FileManager.default.temporaryDirectory.appendingPathComponent("tokenstat-widget-qa-\(ProcessInfo.processInfo.processIdentifier)")
+        #else
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)
+        #endif
+    }
+    init(directory: URL? = Self.defaultDirectory) {
         self.directory = directory
     }
 

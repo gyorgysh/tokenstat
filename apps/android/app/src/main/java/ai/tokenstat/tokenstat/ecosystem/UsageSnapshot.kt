@@ -30,7 +30,7 @@ data class UsageSnapshot(
 
     companion object {
         fun owner(account: JsonObject): String? {
-            if (account["signedIn"]?.jsonPrimitive?.booleanOrNull != true) return null
+            if ((account["signedIn"] as? JsonPrimitive)?.booleanOrNull != true) return null
             val host = (account["host"] as? JsonPrimitive)?.contentOrNull ?: return null
             val identity = (account["accountId"] as? JsonPrimitive)?.contentOrNull
                 ?: (account["handle"] as? JsonPrimitive)?.contentOrNull ?: return null
@@ -44,15 +44,19 @@ data class UsageSnapshot(
         fun calendar(owner: String, calendar: JsonObject): UsageSnapshot? = runCatching {
             // This widget promises all-device usage, never silently local data.
             require(calendar["scope"]?.jsonPrimitive?.content == "account")
-            val days = (calendar["rows"] as JsonArray).flatMap { (it as JsonArray).filterIsInstance<JsonObject>() }
+            val days = (calendar["rows"] as JsonArray).flatMap { (it as JsonArray).filter { cell -> cell !is JsonNull } }
                 .map { row ->
-                    val raw = row["value"]!!.jsonPrimitive.content.toBigInteger()
+                    val cell = row as JsonObject
+                    val raw = cell["value"]!!.jsonPrimitive.content.toBigInteger()
                     require(raw.signum() >= 0)
-                    UsageDay(row["date"]!!.jsonPrimitive.content,
-                        raw.min(Long.MAX_VALUE.toBigInteger()).toLong(), row["locked"]?.jsonPrimitive?.booleanOrNull ?: false)
-                }.sortedBy { it.date }.takeLast(35)
-            val fetchedAt = calendar["fetchedAtMs"]?.jsonPrimitive?.longOrNull ?: System.currentTimeMillis()
-            UsageSnapshot(owner, fetchedAt, days, calendar["noticeCode"]?.jsonPrimitive?.contentOrNull == "stale").takeIf { it.valid }
+                    val locked = if ("locked" in cell) cell["locked"]!!.jsonPrimitive.booleanOrNull ?: error("Invalid lock state") else false
+                    UsageDay(cell["date"]!!.jsonPrimitive.content, raw.min(Long.MAX_VALUE.toBigInteger()).toLong(), locked)
+                }
+            require(days.map { it.date }.distinct().size == days.size)
+            require(days.all { LocalDate.parse(it.date).toString() == it.date })
+            // Missing cache age must never turn a remembered grid into a fresh fetch.
+            val fetchedAt = calendar["fetchedAtMs"]?.jsonPrimitive?.longOrNull ?: return null
+            UsageSnapshot(owner, fetchedAt, days.sortedBy { it.date }.takeLast(35), calendar["noticeCode"]?.jsonPrimitive?.contentOrNull == "stale").takeIf { it.valid }
         }.getOrNull()
     }
 }

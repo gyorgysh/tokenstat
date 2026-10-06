@@ -15,12 +15,21 @@ at the end.
 
 ### Added
 
+- Android recent/pinned project shortcuts, account-scoped AppSearch discovery,
+  text Share/Direct Share into chat drafts, and contextual response sharing.
+  Supported system assistants can search projects, read cached usage and create
+  notes through experimental AppFunctions.
+- iPhone Live Activities for foreground-observed conversations on compatible
+  hosts: branded Lock Screen/Dynamic Island status, elapsed time, waiting and
+  completion states, exact-chat navigation and background APNs updates.
 - Android usage widgets with light/dark appearance, per-widget day/week
   switching and background refresh; launcher shortcuts, a Workspaces Quick
   Settings tile and a notification action for reviewing live agent requests.
 - Configurable usage and project widgets for Mac, iPhone and iPad, including
   iPad extra-large layouts and iPhone Lock Screen accessories. Choose a period,
   appearance, favorite project or screen, and refresh usage from the widget.
+- Clean glass and pure black Apple widget appearances, configurable accent
+  tints, and Lock Screen launchers with the tokenstat logo.
 - Shortcuts and Siri actions for screens, project sections, search, usage and
   activity streaks, with account-scoped Spotlight project discovery and the
   latest Apple content-opening and search schemas on supported systems.
@@ -29,6 +38,19 @@ at the end.
 - A paired Apple Watch app with activity, projects, Handoff, Shortcuts and
   complications. Review pending agent requests, Allow Once, Always Allow for
   that chat or Deny after the host revalidates the exact live request.
+
+### Fixed
+
+- Android widgets reject malformed calendars and unknown fetch ages instead
+  of presenting them as fresh or unlocked usage. Sign-out blocks survive process
+  restarts, and launcher update failures no longer interrupt account cleanup or
+  background refresh bookkeeping. Missing widget services and scheduler failures
+  are handled without crashing or leaving a queued refresh indicator stuck.
+- Live Activities recover token registration after an offline start, avoid duplicate
+  creation, and keep queued completion updates bound to their original account.
+- Android signed-out startup completes account verification; late account updates
+  and project indexing cannot restore another account’s metadata.
+- Apple store-icon checks reject corrupt and truncated PNG metadata.
 
 ## [1.2.0] - 2026-10-05
 

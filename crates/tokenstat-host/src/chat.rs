@@ -139,6 +139,12 @@ pub struct Conversation {
     /// output. An old conversation starts at zero until its next such change.
     #[serde(default)]
     pub send_revision: u64,
+    /// The reservation that started the most recent turn. Live speed/title
+    /// edits change send_revision while this identity stays fixed for pushes.
+    #[serde(default)]
+    pub run_revision: Option<u64>,
+    #[serde(default)]
+    pub run_started_at_ms: Option<i64>,
     /// The last human or agent event, separate from `updated_at_ms`: changing
     /// a title or setup must not make a conversation look unread.
     #[serde(default)]
@@ -983,6 +989,13 @@ impl Store {
             if !already_waiting && !crate::presence::is_watched(conversation_id) {
                 tokenstat_sync::push::notify_in_background(
                     tokenstat_sync::push::Reason::RunNeedsInput,
+                );
+            }
+            if let Ok(chat) = self.get(conversation_id) {
+                tokenstat_sync::push::activity_in_background(
+                    conversation_id,
+                    chat.run_revision.unwrap_or(chat.send_revision),
+                    "waiting",
                 );
             }
         }
@@ -2051,6 +2064,8 @@ impl Store {
             updated_at_ms: now,
             last_message_at_ms: None,
             send_revision: 0,
+            run_revision: None,
+            run_started_at_ms: None,
             last_message_author: None,
             running: false,
             branch: None,
@@ -2108,6 +2123,8 @@ impl Store {
         fork.created_at_ms = now_ms();
         fork.updated_at_ms = fork.created_at_ms;
         fork.send_revision = 0;
+        fork.run_revision = None;
+        fork.run_started_at_ms = None;
         fork.resume_token = None;
         fork.resume_tokens.clear();
         fork.standing_sent.clear();
@@ -3458,6 +3475,8 @@ impl Store {
         let branch = tokenstat_workspace::git::current_branch(&workspace.path);
         self.edit_conversation(id, |current| {
             current.send_revision = next_send_revision(current.send_revision)?;
+            current.run_revision = Some(current.send_revision);
+            current.run_started_at_ms = Some(now_ms());
             current.branch = branch;
             Ok(())
         })?;
@@ -3779,6 +3798,11 @@ impl Store {
         let mut parser = Parser::new(backend);
         let reader = format!("chat:{id}");
         let mut offset = 0;
+        let activity_revision = self
+            .get(id)
+            .map(|chat| chat.run_revision.unwrap_or(chat.send_revision))
+            .unwrap_or(0);
+        let mut activity_tick: Option<Instant> = None;
         let mut assistant_text = String::new();
         let mut muse_sign_in_required = false;
         let mut questions = crate::chat_question::Scanner::default();
@@ -3793,6 +3817,15 @@ impl Store {
             None => events,
         };
         loop {
+            if activity_tick.is_none_or(|tick| tick.elapsed() >= Duration::from_secs(60)) {
+                let phase = if self.approvals(Some(id)).is_empty() {
+                    "working"
+                } else {
+                    "waiting"
+                };
+                tokenstat_sync::push::activity_in_background(id, activity_revision, phase);
+                activity_tick = Some(Instant::now());
+            }
             if let Ok(chunk) = manager.read_for_stream(pty, &reader, offset) {
                 offset = chunk.next_offset;
                 if !chunk.bytes.is_empty() {
@@ -3850,6 +3883,15 @@ impl Store {
         } else {
             turn_status(exit, stopped)
         };
+        tokenstat_sync::push::activity_in_background(
+            id,
+            activity_revision,
+            match status {
+                "ok" => "done",
+                "stopped" => "stopped",
+                _ => "failed",
+            },
+        );
         self.record_events(
             id,
             backend,
@@ -6204,6 +6246,8 @@ mod tests {
             updated_at_ms: 1,
             last_message_at_ms: None,
             send_revision: 0,
+            run_revision: None,
+            run_started_at_ms: None,
             last_message_author: None,
             running: true,
             branch: None,
@@ -7446,6 +7490,8 @@ mod tests {
             updated_at_ms: 1,
             last_message_at_ms: None,
             send_revision: 0,
+            run_revision: None,
+            run_started_at_ms: None,
             last_message_author: None,
             running: false,
             branch: None,
@@ -7544,6 +7590,8 @@ mod tests {
             updated_at_ms: 1,
             last_message_at_ms: None,
             send_revision: 0,
+            run_revision: None,
+            run_started_at_ms: None,
             last_message_author: None,
             running: false,
             branch: None,
@@ -7649,6 +7697,8 @@ mod tests {
             updated_at_ms: 1,
             last_message_at_ms: None,
             send_revision: 0,
+            run_revision: None,
+            run_started_at_ms: None,
             last_message_author: None,
             running: false,
             branch: None,
@@ -7705,6 +7755,8 @@ mod tests {
             updated_at_ms: 1,
             last_message_at_ms: None,
             send_revision: 0,
+            run_revision: None,
+            run_started_at_ms: None,
             last_message_author: None,
             running: false,
             branch: None,
@@ -8963,6 +9015,38 @@ mod tests {
     }
 
     #[test]
+    fn live_activity_turn_identity_survives_setup_edits_and_reload() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("chat");
+        let store = Store::at(path.clone());
+        conversation_for_receipts(&store, "live-turn");
+        store
+            .edit_conversation("live-turn", |chat| {
+                chat.send_revision = 7;
+                chat.run_revision = Some(7);
+                chat.run_started_at_ms = Some(100);
+                Ok(())
+            })
+            .unwrap();
+        let edited = store
+            .update(
+                "live-turn",
+                Update {
+                    title: Some("New title".into()),
+                    ..Update::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(edited.send_revision, 8);
+        assert_eq!(edited.run_revision, Some(7));
+        assert_eq!(edited.run_started_at_ms, Some(100));
+        assert_eq!(
+            Store::load_at(path).get("live-turn").unwrap().run_revision,
+            Some(7)
+        );
+    }
+
+    #[test]
     fn send_revision_survives_reload_and_rejects_stale_setup_before_launch() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
@@ -10110,6 +10194,8 @@ mod tests {
             updated_at_ms: 1,
             last_message_at_ms: None,
             send_revision: 0,
+            run_revision: None,
+            run_started_at_ms: None,
             last_message_author: None,
             running: false,
             branch: None,
@@ -10226,6 +10312,8 @@ mod tests {
             updated_at_ms: 1,
             last_message_at_ms: None,
             send_revision: 0,
+            run_revision: None,
+            run_started_at_ms: None,
             last_message_author: None,
             running: false,
             branch: None,
@@ -10367,6 +10455,8 @@ mod tests {
             updated_at_ms: 1,
             last_message_at_ms: None,
             send_revision: 0,
+            run_revision: None,
+            run_started_at_ms: None,
             last_message_author: None,
             running: false,
             branch: None,
@@ -10471,6 +10561,8 @@ mod tests {
             updated_at_ms: 1,
             last_message_at_ms: None,
             send_revision: 0,
+            run_revision: None,
+            run_started_at_ms: None,
             last_message_author: None,
             running: false,
             branch: None,
@@ -10585,6 +10677,8 @@ mod tests {
             updated_at_ms: 1,
             last_message_at_ms: None,
             send_revision: 0,
+            run_revision: None,
+            run_started_at_ms: None,
             last_message_author: None,
             running: false,
             branch: None,
@@ -10637,6 +10731,8 @@ mod tests {
             updated_at_ms: 1,
             last_message_at_ms: None,
             send_revision: 0,
+            run_revision: None,
+            run_started_at_ms: None,
             last_message_author: None,
             running: false,
             branch: None,
@@ -10716,6 +10812,8 @@ mod tests {
             updated_at_ms: 1,
             last_message_at_ms: None,
             send_revision: 0,
+            run_revision: None,
+            run_started_at_ms: None,
             last_message_author: None,
             running: false,
             branch: None,
@@ -11004,6 +11102,8 @@ mod tests {
             updated_at_ms: 1,
             last_message_at_ms: None,
             send_revision: 0,
+            run_revision: None,
+            run_started_at_ms: None,
             last_message_author: None,
             running: false,
             branch: None,

@@ -2697,6 +2697,8 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     /// `user` or `agent`; optional for hosts predating recent chats.
     var lastMessageAuthor: String?
     var sendRevision: UInt64?
+    var runRevision: UInt64? = nil
+    var runStartedAtMs: Int64? = nil
     var running: Bool
     /// A note the host will hand to the next tool step. Injected on `chat.list`
     /// only, so a restart cannot send words the person no longer sees.
@@ -2732,13 +2734,15 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         case personaID = "personaId"
         case model, effort, fastMode, systemPrompt, mode, autonomy, resumeToken
         case allowedTools, allowedShellPrefixes, budgetSeconds
-        case createdAtMs, updatedAtMs, lastMessageAtMs, lastMessageAuthor, running, sendRevision, pendingSteer
+        case createdAtMs, updatedAtMs, lastMessageAtMs, lastMessageAuthor, running, sendRevision, runRevision, runStartedAtMs, pendingSteer
         case branch, pull
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         sendRevision = try c.decodeIfPresent(UInt64.self, forKey: .sendRevision)
+        runRevision = try c.decodeIfPresent(UInt64.self, forKey: .runRevision)
+        runStartedAtMs = try c.decodeIfPresent(Int64.self, forKey: .runStartedAtMs)
         id = try c.decode(String.self, forKey: .id)
         workspaceID = try c.decode(String.self, forKey: .workspaceID)
         title = try c.decode(String.self, forKey: .title)
@@ -2769,6 +2773,9 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
+        try c.encodeIfPresent(sendRevision, forKey: .sendRevision)
+        try c.encodeIfPresent(runRevision, forKey: .runRevision)
+        try c.encodeIfPresent(runStartedAtMs, forKey: .runStartedAtMs)
         try c.encode(workspaceID, forKey: .workspaceID)
         try c.encode(title, forKey: .title)
         try c.encode(backend, forKey: .backend)

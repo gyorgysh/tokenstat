@@ -84,9 +84,9 @@ struct TokenstatWatchShortcuts: AppShortcutsProvider {
     static var shortcutTileColor: ShortcutTileColor { .grape }
     static var appShortcuts: [AppShortcut] {
         AppShortcut(intent: OpenTokenstatWatchIntent(), phrases: ["Open \(.applicationName) \(\.$target) on my watch"],
-                    shortTitle: "Open Screen", systemImageName: "chart.bar.xaxis")
+                    shortTitle: "Open Screen", systemImageName: "square.grid.2x2")
         AppShortcut(intent: GetTokenstatWatchUsageIntent(), phrases: ["Show my usage in \(.applicationName) on my watch"],
-                    shortTitle: "Today's Usage", systemImageName: "chart.bar")
+                    shortTitle: "Today's Usage", systemImageName: "dollarsign.circle")
         AppShortcut(intent: OpenTokenstatWatchProjectIntent(), phrases: ["Open \(\.$project) in \(.applicationName) on my watch"],
                     shortTitle: "Open Project", systemImageName: "folder")
     }

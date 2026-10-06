@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
-    <shortcut android:shortcutId="home" android:icon="@drawable/ic_notification" android:shortcutShortLabel="@string/shortcut_home">
-        <intent android:action="ai.tokenstat.tokenstat.OPEN_SCREEN" android:targetPackage="ai.tokenstat.tokenstat" android:targetClass="ai.tokenstat.tokenstat.MainActivity"><extra android:name="screen" android:value="home" /></intent>
-    </shortcut>
+    <share-target android:targetClass="ai.tokenstat.tokenstat.MainActivity">
+        <data android:mimeType="text/plain" />
+        <data android:mimeType="text/uri-list" />
+        <category android:name="ai.tokenstat.project.share" />
+    </share-target>
     <shortcut android:shortcutId="workspaces" android:icon="@drawable/feature_mark_folder" android:shortcutShortLabel="@string/shortcut_workspaces">
         <intent android:action="ai.tokenstat.tokenstat.OPEN_SCREEN" android:targetPackage="ai.tokenstat.tokenstat" android:targetClass="ai.tokenstat.tokenstat.MainActivity"><extra android:name="screen" android:value="workspaces" /></intent>
     </shortcut>

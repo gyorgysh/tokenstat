@@ -6,6 +6,10 @@ targets:
     sources:REPLACE:
       - path: Tests/Ecosystem
       - path: Widgets
+      - path: Sources/Ecosystem/TokenstatWidgetMark.swift
+      - path: Sources/Ecosystem/LiveWorkActivity.swift
+      - path: BrandResources
+        buildPhase: resources
       - path: Sources/Ecosystem/EcosystemSnapshot.swift
       - path: Sources/Ecosystem/EcosystemWatchPacket.swift
       - path: Sources/Ecosystem/EcosystemApproval.swift

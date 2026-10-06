@@ -615,14 +615,20 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     val quickAccess by ai.tokenstat.tokenstat.ecosystem.QuickAccess.request.collectAsStateWithLifecycle()
     LaunchedEffect(quickAccess) {
         val request = quickAccess ?: return@LaunchedEffect
+        val project = request.projectId?.let { ai.tokenstat.tokenstat.ecosystem.SystemProjects.find(it, request.owner) }
+        if (request.projectId != null && project == null) {
+            ai.tokenstat.tokenstat.ecosystem.SystemShare.clear()
+            ai.tokenstat.tokenstat.ecosystem.QuickAccess.take(request)
+            return@LaunchedEffect
+        }
         accountOpen = request.screen == "account"
         searchOpen = request.screen == "search"
         wizardOpen = false
-        pendingWorkHostId = null
-        pendingWorkFolderId = null
-        pendingWorkKind = null
+        pendingWorkHostId = project?.hostId
+        pendingWorkFolderId = project?.workspaceId
+        pendingWorkKind = if (project != null) "CHAT" else null
         pendingWorkItem = null
-        pendingWorkOwner = null
+        pendingWorkOwner = if (project != null) HomeStores.pinIdentity(state.account) else null
         pendingDeviceId = null
         selected = Destination.entries.find { it.id == request.screen } ?: Destination.Home
         ai.tokenstat.tokenstat.ecosystem.QuickAccess.take(request)
@@ -3165,6 +3171,7 @@ private fun WorkspacesScreen(
     LaunchedEffect(peerKey, folderId) {
         val peer = peerKey ?: return@LaunchedEffect
         val id = folderId ?: return@LaunchedEffect
+        ai.tokenstat.tokenstat.ecosystem.SystemProjects.opened(context, peer, id)
         val record = stores ?: return@LaunchedEffect
         val identity = RecentPlaces.accountIdentity(
             state.account?.string("handle"),
@@ -3689,7 +3696,7 @@ private fun WorkspaceList(
                             (it.string("name") ?: "").contains(search, ignoreCase = true) ||
                             (it.string("path") ?: "").contains(search, ignoreCase = true)
                     }) { folder ->
-                        WorkspaceFolderRow(folder = folder, onOpen = { onFolder(folder) }, onRename = { renamingProject = folder })
+                        WorkspaceFolderRow(folder = folder, onOpen = { onFolder(folder) }, onRename = { renamingProject = folder }, peer = peer)
                     }
                 }
                 WorkSection.RECENT_CHATS -> if (chatRows.isNotEmpty()) {

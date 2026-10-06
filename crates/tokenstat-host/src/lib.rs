@@ -237,4 +237,4 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 30 adds reviewed fast-forward pulls (`workspace.pullReview` and
 /// `workspace.pullReviewed`) and `pulls.branch`, and conversations carry the
 /// branch they last worked on with its cached pull request.
-pub const PROTOCOL_VERSION: &str = "30";
+pub const PROTOCOL_VERSION: &str = "31";

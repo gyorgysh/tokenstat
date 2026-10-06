@@ -808,7 +808,7 @@ final class PushRegistrar {
     /// Which Apple host this build's tokens belong to. A development build's
     /// token is a sandbox token and the production host answers it with
     /// BadDeviceToken, which is why the account stores this per device.
-    private static var environment: String {
+    static var environment: String {
         #if DEBUG
         "sandbox"
         #else

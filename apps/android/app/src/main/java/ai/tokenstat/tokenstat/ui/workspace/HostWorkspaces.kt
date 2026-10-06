@@ -44,6 +44,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -93,6 +94,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -638,10 +640,13 @@ private fun SecurityKeyRow(
 /// One registered folder: its name, path, and git state. Port of
 /// `ClientFolderRow`.
 @Composable
-fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> Unit)? = null) {
+fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> Unit)? = null, peer: String? = null) {
     val colors = LocalTsColors.current
     val git = folder["git"] as? JsonObject
     var actionsOpen by remember(folder.str("id"), folder.str("path")) { mutableStateOf(false) }
+    var systemActions by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val systemId = peer?.let { ai.tokenstat.tokenstat.ecosystem.SystemProjects.idFor(it, folder.str("id").orEmpty()) }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.s),
@@ -649,9 +654,15 @@ fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> 
             .fillMaxWidth()
             .clip(RoundedCornerShape(cardRadiusDp))
             .tsPanel()
-            .clickable { onOpen() }
+            .combinedClickable(onClick = onOpen, onLongClick = if (systemId == null) null else ({ systemActions = true }))
             .padding(Space.m),
     ) {
+        DropdownMenu(systemActions, onDismissRequest = { systemActions = false }) {
+            DropdownMenuItem(text = { Text(stringResource(ai.tokenstat.tokenstat.R.string.system_pin_project)) }, onClick = {
+                systemActions = false
+                systemId?.let { ai.tokenstat.tokenstat.ecosystem.SystemProjects.pin(context, it) }
+            })
+        }
         Box(
             Modifier.size(ROW_MARK.dp).clip(RoundedCornerShape((ROW_MARK * 0.28f).dp))
                 .background(colors.accent.copy(alpha = 0.12f)),

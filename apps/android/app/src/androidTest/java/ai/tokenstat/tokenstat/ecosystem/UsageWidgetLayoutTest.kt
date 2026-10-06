@@ -27,6 +27,25 @@ import kotlinx.serialization.json.*
 /** Inflate real RemoteViews at widget sizes, with privacy and overflow cases. */
 @RunWith(AndroidJUnit4::class)
 class UsageWidgetLayoutTest {
+    @Test fun persistedLogoutBlockRejectsBackgroundVerification() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val privacy = context.getSharedPreferences("widget-account-privacy", android.content.Context.MODE_PRIVATE)
+        val account = buildJsonObject { put("signedIn", true); put("host", "https://example.test"); put("accountId", "first") }
+        UsageWidgetStore.clear(context)
+        try {
+            UsageWidgetStore.verify(context, account, UsageWidgetStore.epoch(), fromApp = true)!!
+            assertNotNull(UsageWidgetStore.read(context))
+            // Model a prior process's sign-out marker with an otherwise
+            // unblocked in-memory session and an old cache still on disk.
+            assertTrue(privacy.edit().putBoolean("blocked", true).commit())
+            assertNull(UsageWidgetStore.read(context))
+            assertNull(UsageWidgetStore.verify(context, account, UsageWidgetStore.epoch()))
+            assertNotNull(UsageWidgetStore.verify(context, account, UsageWidgetStore.epoch(), fromApp = true))
+            assertFalse(privacy.getBoolean("blocked", true))
+            UsageWidgetStore.clear(context, block = true)
+            assertTrue(privacy.getBoolean("blocked", false))
+        } finally { UsageWidgetStore.clear(context) }
+    }
     @Test fun accountSwitchCannotRestoreOldUsageWhenStorageWriteFails() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val cache = context.noBackupFilesDir.resolve("widget-usage.json")
@@ -107,7 +126,7 @@ class UsageWidgetLayoutTest {
     @Test fun shortcutsAndTileAreRegistered() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val shortcuts = context.getSystemService(ShortcutManager::class.java).manifestShortcuts
-        assertEquals(setOf("home", "workspaces", "insights", "ssh"), shortcuts.map { it.id }.toSet())
+        assertEquals(setOf("workspaces", "insights", "ssh"), shortcuts.map { it.id }.toSet())
         assertTrue(shortcuts.all { it.isEnabled && it.intent?.action == QuickAccess.ACTION })
         val tile = context.packageManager.getServiceInfo(ComponentName(context, WorkspacesTileService::class.java), 0)
         assertTrue(tile.exported)

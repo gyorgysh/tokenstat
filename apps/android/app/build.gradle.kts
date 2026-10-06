@@ -13,6 +13,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+    id("com.google.devtools.ksp")
 }
 
 if (file("google-services.json").exists()) apply(plugin = "com.google.gms.google-services")
@@ -41,13 +42,13 @@ val languageResources by tasks.registering(GenerateLanguageResources::class) {
 
 android {
     namespace = "ai.tokenstat.tokenstat"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "ai.tokenstat.tokenstat"
         minSdk = 28
         targetSdk = 36
-        versionCode = 136
+        versionCode = 138
         versionName = "1.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -137,6 +138,11 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.12.0")
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.work:work-runtime-ktx:2.12.0")
+    implementation("androidx.appsearch:appsearch:1.1.0")
+    implementation("androidx.appsearch:appsearch-platform-storage:1.1.0")
+    implementation("androidx.appsearch:appsearch-local-storage:1.1.0")
+    implementation("androidx.appfunctions:appfunctions:1.0.0-alpha12")
+    ksp("androidx.appfunctions:appfunctions-compiler:1.0.0-alpha12")
     implementation("androidx.fragment:fragment-ktx:1.8.9")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")

@@ -1892,6 +1892,14 @@ extension Bridge {
         _ = try await background("push.unregister", ["token": token], as: PushRegistration.self)
     }
 
+    static func liveActivityRegister(token: String, peer: String, key: String, revision: String, environment: String) async throws {
+        _ = try await background("push.activity.register",
+            ["token": token, "peer": peer, "key": key, "revision": revision, "environment": environment], as: PushRegistration.self)
+    }
+    static func liveActivityUnregister(token: String) async throws {
+        _ = try await background("push.activity.unregister", ["token": token], as: PushRegistration.self)
+    }
+
     /// Ask the account to send this device a test notification.
     ///
     /// Answers how many devices took it, and whether the server can send at

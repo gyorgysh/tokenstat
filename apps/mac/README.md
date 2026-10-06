@@ -21,9 +21,26 @@ Usage attempts a fresh load and returns US dollars at list rates, the selected s
 
 ## Widgets and controls
 
-Usage at a Glance supports small, medium and large sizes on Mac, iPhone and iPad, extra-large on iPad, and circular, rectangular and inline iOS Lock Screen accessories. Configure Today or Last 7 Days and Automatic, Light or Dark appearance. Full-color widgets use the selected appearance; system-tinted and accessory widgets respect system rendering. Refresh buttons invoke the containing app to fetch usage, with update failures preserving the last successful figures.
+Usage at a Glance supports small, medium and large sizes on Mac, iPhone and iPad, extra-large on iPad, and circular, rectangular and inline iOS Lock Screen accessories. Configure Today or Last 7 Days and Automatic, Light, Dark, Clean (glass) or Black appearance. Accent tints include tokenstat, Teal, Orange, Pink and Monochrome. Black uses a pure black background and light text; Clean follows the system's light/dark scheme with a translucent material. Full-color widgets use the selected appearance and tint; system-tinted, clear and accessory widgets respect system rendering. Backgrounds remain removable so the system can supply its own glass. Refresh buttons invoke the containing app to fetch usage, with update failures preserving the last successful figures.
 
-Open tokenstat provides a configurable screen or favorite project in small, and screen/project links in medium and large. The selected screen is included in larger layouts. Quick Access controls support Control Center on iOS 18 and macOS 26, plus supported iOS Lock Screen slots and the Action button.
+Open tokenstat provides a configurable screen or favorite project in small, and screen/project links in medium and large. Circular and rectangular Lock Screen launchers open that same configured destination. The selected screen is included in larger layouts. Widgets, complications and Quick Access controls share the tokenstat three-bar symbol, using the same geometry as the app logo. Quick Access controls support Control Center on iOS 18 and macOS 26, plus supported iOS Lock Screen slots and the Action button. App Shortcut tiles require SF Symbols and use action-specific icons.
+
+On iPhone, an active conversation observed in the foreground starts a Live Activity
+on compatible hosts (protocol 31+). Lock Screen and Dynamic Island layouts show
+the tokenstat mark, elapsed time and working/waiting/completed state. Tapping opens
+the exact conversation. Completion stays briefly; sign-out and computer revocation
+remove the activity. Disabled Live Activities or system limits leave chat usable.
+Status transitions respect Reduce Motion and the always-on display. Background
+updates use the host's bounded status queue and the website's activity-specific
+APNs transport; they require the matching host/client/backend deployment and APNs
+configuration. Push content carries only opaque conversation keys, revisions,
+fixed phases and timestamps, never project names or transcript text. Project names
+are stored in the phone's local activity attributes. Disconnected activities become
+stale rather than claiming that a run is still working.
+
+Further Apple integrations include onscreen project context for Siri (entity
+annotations/action donations) and task/note entities with focused Shortcuts actions.
+See Apple's [contextual cues guidance](https://developer.apple.com/documentation/appintents/providing-contextual-cues-to-apple-intelligence-and-siri).
 
 Snapshots contain aggregate activity and project names/device labels, never credentials, paths, messages or drafts. They update after successful app loads. Extensions do not establish host connections. Partial or locked weeks display unavailable totals instead of a misleading sum. Midnight timeline entries prevent yesterday's value from becoming today's value. Account leases reject late asynchronous publications, and sign-out clears shared data.
 
@@ -61,4 +78,4 @@ xcodebuild -project apps/mac/WidgetQA.xcodeproj -scheme Tokenstat \
   -derivedDataPath target/WidgetQA ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
 ```
 
-The fixture can seed typical, empty, offline and large-value/long-name snapshots and an inert approval request, refresh data and execute navigation/search/usage intents. Launch with `--render-widget-gallery` to export native SwiftUI layout PNGs into its Documents/widget-layouts directory for all card sizes and both appearances. These are layout checks; system widget rendering and interactions still need simulator/device checks. The fixture is excluded from shipping targets. Test system widget configuration, sizes, appearance, tint, links, controls and Watch sync on signed simulator installations. Spoken Siri, Apple Intelligence behavior, Lock Screen privacy and physical-device Handoff also require device/TestFlight verification.
+The fixture can seed typical, empty, offline and large-value/long-name snapshots and an inert approval request, refresh data and execute navigation/search/usage intents. Launch with `--render-widget-gallery` to export native SwiftUI layout PNGs into its Documents/widget-layouts directory for all card sizes, glass/black styles, accent tints and Lock Screen launcher layouts. The accented-mode fixture exercises adaptive layout but ImageRenderer does not apply the system compositor's tint/glass effects. These are layout checks; system widget rendering and interactions still need simulator/device checks. The fixture is excluded from shipping targets. Test system widget configuration, sizes, appearance, tint, links, controls and Watch sync on signed simulator installations. Spoken Siri, Apple Intelligence behavior, Lock Screen privacy and physical-device Handoff also require device/TestFlight verification.

@@ -235,7 +235,9 @@ settings:
     # 133 carries Android full-screen Git/vault forms and SSH empty states.
     # 134 carries the Android Git/vault review fixes.
     # 135 is 1.3.0: configurable widgets, Siri actions and paired Watch approvals.
-    CURRENT_PROJECT_VERSION: "136"
+    # 137 adds glass/black widget styles, tints and branded Lock Screen launchers.
+    # 138 adds reviewed iPhone Live Activities and Android system project integrations.
+    CURRENT_PROJECT_VERSION: "138"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
@@ -323,6 +325,7 @@ targets:
       path: Generated/Tokenstat-Info.plist
       properties:
         NSUserActivityTypes: [ai.tokenstat.open]
+        NSSupportsLiveActivities: true
         CFBundleURLTypes:
           - CFBundleURLName: ai.tokenstat.navigation
             CFBundleURLSchemes: [tokenstat]
@@ -330,6 +333,8 @@ targets:
       - path: Sources
       - path: ../localization
         type: folder
+        buildPhase: resources
+      - path: BrandResources
         buildPhase: resources
       # Vendor marks for the harnesses. See TRADEMARK.md: these belong to
       # their owners and are not covered by this project's licence.
@@ -432,6 +437,10 @@ targets:
     type: app-extension
     supportedDestinations: [macOS, iOS]
     sources:
+      - path: Sources/Ecosystem/TokenstatWidgetMark.swift
+      - path: Sources/Ecosystem/LiveWorkActivity.swift
+      - path: BrandResources
+        buildPhase: resources
       - path: Widgets
       - path: Sources/Ecosystem/EcosystemSnapshot.swift
       - path: Sources/Ecosystem/TokenstatIntents.swift
@@ -462,6 +471,9 @@ targets:
     platform: watchOS
     deploymentTarget: "10.0"
     sources:
+      - path: Sources/Ecosystem/TokenstatWidgetMark.swift
+      - path: BrandResources
+        buildPhase: resources
       - path: Watch
       - path: Sources/Ecosystem/EcosystemSnapshot.swift
       - path: Sources/Ecosystem/EcosystemWatchPacket.swift
@@ -494,6 +506,9 @@ targets:
     platform: watchOS
     deploymentTarget: "10.0"
     sources:
+      - path: Sources/Ecosystem/TokenstatWidgetMark.swift
+      - path: BrandResources
+        buildPhase: resources
       - path: WatchWidgets
       - path: Sources/Ecosystem/EcosystemSnapshot.swift
       - path: Sources/Ecosystem/EcosystemWatchPacket.swift

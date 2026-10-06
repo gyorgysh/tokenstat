@@ -40,6 +40,24 @@ class UsageSnapshotTest {
         assertNotEquals(UsageSnapshot.owner(account("a", "bc")), UsageSnapshot.owner(account("ab", "c")))
         assertTrue(UsageSnapshot.owner(account("https://example.test", "private"))!!.matches(Regex("[a-f0-9]{64}")))
         assertNull(UsageSnapshot.owner(buildJsonObject { put("signedIn", false) }))
+        assertNull(UsageSnapshot.owner(buildJsonObject { put("signedIn", buildJsonObject {}) }))
+    }
+    @Test fun malformedCalendarsCannotBecomeFreshOrUnlockedUsage() {
+        val cell = buildJsonObject { put("date", today.toString()); put("value", 1_000_000L); put("locked", false) }
+        fun calendar(cells: List<JsonElement>, timestamp: JsonElement? = JsonPrimitive(1234L)) = buildJsonObject {
+            put("scope", "account")
+            if (timestamp != null) put("fetchedAtMs", timestamp)
+            put("rows", JsonArray(listOf(JsonArray(cells))))
+        }
+        assertNotNull(UsageSnapshot.calendar(owner, calendar(listOf(JsonNull, cell))))
+        assertNull(UsageSnapshot.calendar(owner, calendar(listOf(cell), null)))
+        assertNull(UsageSnapshot.calendar(owner, calendar(listOf(cell), JsonPrimitive("invalid"))))
+        assertNull(UsageSnapshot.calendar(owner, calendar(listOf(cell, JsonPrimitive("invalid")))))
+        assertNull(UsageSnapshot.calendar(owner, calendar(listOf(JsonObject(cell + ("locked" to JsonPrimitive("invalid")))))))
+        // Duplicates outside the retained 35 days must still invalidate the response.
+        val old = JsonObject(cell + ("date" to JsonPrimitive(today.minusDays(40).toString())))
+        val rows = (35 downTo 0).map { JsonObject(cell + ("date" to JsonPrimitive(today.minusDays(it.toLong()).toString()))) }
+        assertNull(UsageSnapshot.calendar(owner, calendar(listOf(old, old) + rows)))
     }
     @Test fun logoutAndAccountSwitchRejectLateLoads() {
         val session = UsageSession()

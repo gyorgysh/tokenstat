@@ -217,6 +217,19 @@ fun ChatSection(
         remember(composerKey, composerRevision) { model.chatComposers.attachments(composerKey) }
     var draft: String by draftDelegate
     var staged: List<StagedAttachment> by stagedDelegate
+    val sharedDraft by ai.tokenstat.tokenstat.ecosystem.SystemShare.draft.collectAsStateWithLifecycle()
+    LaunchedEffect(sharedDraft, composerKey) {
+        val shared = sharedDraft ?: return@LaunchedEffect
+        if (composerKey == null || !ownsProject()) return@LaunchedEffect
+        val projectId = ai.tokenstat.tokenstat.ecosystem.SystemProjects.idFor(peer, workspace)
+        if (shared.owner != null && shared.owner != ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner) {
+            ai.tokenstat.tokenstat.ecosystem.SystemShare.take(shared); return@LaunchedEffect
+        }
+        if (shared.projectId != null && shared.projectId != projectId) return@LaunchedEffect
+        if (ai.tokenstat.tokenstat.ecosystem.SystemShare.take(shared)) {
+            draft = if (draft.isBlank()) shared.text else draft + "\n\n" + shared.text
+        }
+    }
     val composerFailure by model.chatComposers.failure.collectAsStateWithLifecycle()
     /// Which conversations have a send in flight. Per conversation, because a
     /// send outlives a navigation: one unkeyed flag showed the spinner on

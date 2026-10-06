@@ -38,6 +38,9 @@ enum EcosystemPublisher {
         if newlyVerified { generation = UUID() }
         verifiedOwner = owner
         allowedPeers = Set(account?.machines.filter { $0.trustState != "revoked" }.compactMap(\.publicIdentity) ?? [])
+        #if os(iOS)
+        LiveWorkController.shared.verify(owner: owner)
+        #endif
         var snapshot = store.read()
         let previousProjects = snapshot.projects
         if snapshot.owner != owner { snapshot = EcosystemSnapshot(owner: owner) }
@@ -70,6 +73,9 @@ enum EcosystemPublisher {
     }
 
     static func clear() {
+        #if os(iOS)
+        LiveWorkController.shared.verify(owner: nil)
+        #endif
         generation = UUID()
         verifiedOwner = nil
         allowedPeers = []

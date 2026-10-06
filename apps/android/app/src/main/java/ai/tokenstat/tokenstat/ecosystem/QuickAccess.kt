@@ -15,10 +15,25 @@ object QuickAccess {
     const val ACTION = "ai.tokenstat.tokenstat.OPEN_SCREEN"
     private const val EXTRA = "screen"
     private val screens = setOf("home", "workspaces", "insights", "machines", "ssh", "account", "search")
-    data class Request(val screen: String, val sequence: Long)
+    data class Request(val screen: String, val sequence: Long, val projectId: String? = null, val owner: String? = null)
     private val pending = MutableStateFlow<Request?>(null)
     val request = pending.asStateFlow()
     fun offer(intent: Intent?) {
+        if (intent?.action == Intent.ACTION_SEND) {
+            val destination = SystemShare.offer(intent) ?: return
+            if (destination == "workspaces") pending.value = Request("workspaces", System.nanoTime())
+            else pending.value = Request("workspaces", System.nanoTime(), destination.removePrefix("project."))
+            return
+        }
+        val url = intent?.data
+        if (intent?.action == Intent.ACTION_VIEW && url?.scheme == "tokenstat" && url.host == "project") {
+            if (!url.isHierarchical || url.userInfo != null || url.port != -1 || url.fragment != null
+                || url.queryParameterNames != setOf("owner") || url.getQueryParameters("owner").size != 1) return
+            val id = url.pathSegments.singleOrNull()?.takeIf { it.matches(Regex("[0-9a-f]{64}")) } ?: return
+            val owner = url.getQueryParameter("owner")?.takeIf { it.matches(Regex("[0-9a-f]{64}")) } ?: return
+            pending.value = Request("workspaces", System.nanoTime(), id, owner)
+            return
+        }
         if (intent?.action != ACTION) return
         val screen = intent.getStringExtra(EXTRA)?.takeIf { it in screens } ?: return
         pending.value = Request(screen, System.nanoTime())
