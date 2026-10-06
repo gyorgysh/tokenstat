@@ -7,7 +7,8 @@ name: release
 #
 # Tag-only trigger. Do not add branch pushes or workflow_dispatch here: that
 # pattern created empty "No jobs were run" failure runs on every push to main.
-# To re-run a failed release, move the tag and push again.
+# After correcting signing inputs, re-run the failed jobs using the existing
+# tag and build artifacts. Keep published tags immutable.
 #
 # Signing secrets and required reviewers live on the `release` environment,
 # with deployment limited to tags matching `v*`. The build matrix cannot access
@@ -420,6 +421,25 @@ jobs:
             echo "Skipping notarization (NOTARY_* secrets not set)."
           fi
 
+          prepare_app() {
+            local work="${RUNNER_TEMP}/sign-app"
+            local app="${work}/Tokenstat.app"
+            rm -rf "${work}"
+            mkdir -p "${work}"
+            ditto -x -k dist/Tokenstat-app-unsigned.zip "${work}"
+            if [ ! -d "${app}" ]; then
+              echo "no Tokenstat.app in dist/Tokenstat-app-unsigned.zip" >&2
+              exit 1
+            fi
+            # Reject stale app/widget profiles before submitting CLI binaries
+            # to the notarization service.
+            python3 scripts/sign-mac-app.py "${app}" --identity "${IDENTITY}" --check-only
+          }
+
+          if [ -f dist/Tokenstat-app-unsigned.zip ]; then
+            prepare_app
+          fi
+
           sign_one() {
             local target="$1"
             local archive="dist/tokenstat-${VERSION}-${target}.tar.gz"
@@ -450,7 +470,8 @@ jobs:
                 --key-id "${NOTARY_KEY_ID}" \
                 --issuer "${NOTARY_ISSUER_ID}" \
                 --wait
-              xcrun stapler staple "${bin}" || true
+              # Standalone Mach-O executables can be notarized but cannot carry
+              # stapled tickets. Gatekeeper retrieves their tickets online.
               rm -f "${zip}"
             fi
             local dir
@@ -472,13 +493,6 @@ jobs:
           sign_app() {
             local work="${RUNNER_TEMP}/sign-app"
             local app="${work}/Tokenstat.app"
-            rm -rf "${work}"
-            mkdir -p "${work}"
-            ditto -x -k dist/Tokenstat-app-unsigned.zip "${work}"
-            if [ ! -d "${app}" ]; then
-              echo "no Tokenstat.app in dist/Tokenstat-app-unsigned.zip" >&2
-              exit 1
-            fi
 
             python3 scripts/sign-mac-app.py "${app}" --identity "${IDENTITY}"
 

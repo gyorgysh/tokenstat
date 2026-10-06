@@ -64,6 +64,8 @@ then begin the next one. Do not reconstruct release notes from commits at the en
 
 ### Fixed
 
+- macOS release signing checks the app and widget profiles before notarization
+  and avoids unsupported stapling attempts on standalone CLI binaries.
 - iPhone Live Activities give the running timer a bounded layout and use a
   compact Lock Screen layout for larger text. Live Activities and the Apple
   Watch app use the existing three-color app logo; complications keep system
