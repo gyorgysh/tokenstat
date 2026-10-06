@@ -14,7 +14,7 @@ cargo install cargo-ndk --locked
 apps/android/gradlew -p apps/android testDebugUnitTest lintDebug lintRelease bundleRelease
 ```
 
-The launcher pins Gradle 9.3.1 and verifies downloaded distributions. The build
+The launcher pins Gradle 9.8.0 and verifies downloaded distributions. The build
 uses Android Gradle Plugin 9.1.1 with built-in Kotlin; release builds enable
 both R8 code optimization and optimized resource shrinking. Keep the release
 mapping files alongside native symbols for crash diagnosis (CI archives both).
@@ -32,7 +32,7 @@ unfinished row in [PARITY.md](PARITY.md).
 Build both signed distribution formats with:
 
 ```bash
-scripts/build-android-release.sh dist/android/1.3.0-138
+scripts/build-android-release.sh dist/android/1.3.0-139
 ```
 
 The script loads the existing local Play upload-key environment and produces a

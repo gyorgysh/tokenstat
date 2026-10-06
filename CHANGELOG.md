@@ -41,6 +41,8 @@ at the end.
 
 ### Fixed
 
+- Rust installer updates preserve the pinned compiler across CI, preview and
+  release builds instead of requesting unreleased compiler versions.
 - Android widgets reject malformed calendars and unknown fetch ages instead
   of presenting them as fresh or unlocked usage. Sign-out blocks survive process
   restarts, and launcher update failures no longer interrupt account cleanup or

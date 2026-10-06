@@ -338,8 +338,10 @@ and an explicitly enabled Always-on host keep their existing behavior.
 
 ## Development
 
-Requires Rust 1.99 or later (`rust-toolchain.toml` follows stable). Native app
-builds also need the platform tools described in each app's README.
+Requires Rust 1.99 or later. Local builds and CI pin the compiler independently
+of the Rust installer action. Linux CI, preview and release builds use Ubuntu
+24.04 as their baseline. Native app builds also need the platform tools described
+in each app's README.
 
 ```bash
 cargo fmt --all

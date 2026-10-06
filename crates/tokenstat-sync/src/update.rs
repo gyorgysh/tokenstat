@@ -1736,7 +1736,8 @@ fn extract_zip(archive: &Path, dest: &Path) -> Result<(), UpdateError> {
         let mut entry = zip
             .by_index(index)
             .map_err(|e| UpdateError::Message(format!("could not read zip entry: {e}")))?;
-        // zip 7 strips a leading root or drive prefix instead of refusing it:
+        // The zip reader strips a leading root or drive prefix instead of
+        // refusing it:
         // `/tmp/evil` comes back from `enclosed_name` as `tmp/evil` and lands
         // in the sandbox renamed. That stays inside the sandbox, but this
         // extractor promises a refusal, so absolute entries are rejected on
@@ -2370,10 +2371,83 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn a_good_zip_extracts_to_the_sandbox() {
         use std::io::Write;
-        let dir = scratch("zip-good");
+        let binary = if cfg!(windows) {
+            "tokenstat.exe"
+        } else {
+            "tokenstat"
+        };
+        for (tag, method, zip64, nested) in [
+            ("zip-stored", zip::CompressionMethod::Stored, false, false),
+            (
+                "zip-deflated",
+                zip::CompressionMethod::Deflated,
+                false,
+                true,
+            ),
+            (
+                "zip64-deflated",
+                zip::CompressionMethod::Deflated,
+                true,
+                true,
+            ),
+        ] {
+            let dir = scratch(tag);
+            let archive = dir.join("rel.zip");
+            let file = fs::File::create(&archive).unwrap();
+            let mut writer = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(method)
+                .large_file(zip64);
+            let name = if nested {
+                writer.add_directory("release/", options).unwrap();
+                writer.add_directory("release/bin/", options).unwrap();
+                format!("release/bin/{binary}")
+            } else {
+                binary.to_owned()
+            };
+            writer.start_file(&name, options).unwrap();
+            writer.write_all(b"binary").unwrap();
+            writer.finish().unwrap();
+            let found = extract_binary(&archive, &dir).unwrap();
+            assert_eq!(found, dir.join("extract").join(&name), "{tag}");
+            assert_eq!(fs::read(found).unwrap(), b"binary", "{tag}");
+            let _ = fs::remove_dir_all(&dir);
+        }
+    }
+
+    #[test]
+    fn unsupported_zip_compression_is_refused_without_writing_a_binary() {
+        use std::io::Write;
+        let dir = scratch("zip-unsupported-compression");
+        let archive = dir.join("rel.zip");
+        let file = fs::File::create(&archive).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        writer
+            .start_file("tokenstat", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(b"binary").unwrap();
+        writer.finish().unwrap();
+        let mut bytes = fs::read(&archive).unwrap();
+        let central = bytes
+            .windows(4)
+            .position(|w| w == [0x50, 0x4b, 0x01, 0x02])
+            .unwrap();
+        // Zstandard is deliberately not enabled in the updater's zip build.
+        bytes[8..10].copy_from_slice(&93u16.to_le_bytes());
+        bytes[central + 10..central + 12].copy_from_slice(&93u16.to_le_bytes());
+        fs::write(&archive, &bytes).unwrap();
+        let err = extract_binary(&archive, &dir).expect_err("unsupported compression must fail");
+        assert!(err.to_string().contains("compression"), "{err}");
+        assert!(!dir.join("extract").join("tokenstat").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn corrupt_zip_checksum_removes_the_partial_binary() {
+        use std::io::Write;
+        let dir = scratch("zip-corrupt-checksum");
         let archive = dir.join("rel.zip");
         let file = fs::File::create(&archive).unwrap();
         let mut writer = zip::ZipWriter::new(file);
@@ -2382,8 +2456,13 @@ mod tests {
         writer.start_file("tokenstat", options).unwrap();
         writer.write_all(b"binary").unwrap();
         writer.finish().unwrap();
-        let found = extract_binary(&archive, &dir).unwrap();
-        assert_eq!(found, dir.join("extract").join("tokenstat"));
+        let mut bytes = fs::read(&archive).unwrap();
+        let data = bytes.windows(6).position(|w| w == b"binary").unwrap();
+        bytes[data] ^= 1;
+        fs::write(&archive, &bytes).unwrap();
+        let err = extract_binary(&archive, &dir).expect_err("invalid checksum must fail");
+        assert!(err.to_string().contains("checksum"), "{err}");
+        assert!(!dir.join("extract").join("tokenstat").exists());
         let _ = fs::remove_dir_all(&dir);
     }
 

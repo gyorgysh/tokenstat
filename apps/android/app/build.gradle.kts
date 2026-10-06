@@ -35,7 +35,7 @@ abstract class GenerateLanguageResources : DefaultTask() {
         }
     }
 }
-val languageResources by tasks.registering(GenerateLanguageResources::class) {
+val languageResources = tasks.register<GenerateLanguageResources>("languageResources") {
     sourceDirectory.set(rootProject.layout.projectDirectory.dir("../localization"))
     outputDirectory.set(layout.buildDirectory.dir("generated-resources/localization"))
 }
@@ -48,7 +48,7 @@ android {
         applicationId = "ai.tokenstat.tokenstat"
         minSdk = 28
         targetSdk = 36
-        versionCode = 138
+        versionCode = 139
         versionName = "1.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -98,18 +98,18 @@ abstract class GenerateAndroidFiles : Exec() {
     }
 }
 
-val buildRust by tasks.registering(GenerateAndroidFiles::class) {
+val buildRust = tasks.register<GenerateAndroidFiles>("buildRust") {
     outputDirectory.set(layout.buildDirectory.dir("rust-jni"))
     workingDir(rootProject.projectDir.resolve("../.."))
     commandLine("scripts/build-ffi-android.sh", outputDirectory.get().asFile)
 }
-val generatePriceBook by tasks.registering(GenerateAndroidFiles::class) {
+val generatePriceBook = tasks.register<GenerateAndroidFiles>("generatePriceBook") {
     outputDirectory.set(layout.buildDirectory.dir("generated-assets/pricing"))
     workingDir(rootProject.projectDir.resolve("../.."))
     commandLine("cargo", "run", "--locked", "-q", "-p", "xtask", "--", "pricing-seed",
         outputDirectory.file("PriceBookSeed.json").get().asFile)
 }
-val generateNotices by tasks.registering(GenerateAndroidFiles::class) {
+val generateNotices = tasks.register<GenerateAndroidFiles>("generateNotices") {
     outputDirectory.set(layout.buildDirectory.dir("generated-assets/notices"))
     workingDir(rootProject.projectDir.resolve("../.."))
     commandLine("scripts/notices-android.sh",

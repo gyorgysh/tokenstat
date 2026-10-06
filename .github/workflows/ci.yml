@@ -20,12 +20,13 @@ permissions:
 jobs:
   lint:
     name: fmt and clippy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
+          toolchain: 1.99.0
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
@@ -50,11 +51,13 @@ jobs:
   # thing that actually broke.
   no-network:
     name: privacy boundary
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.99.0
 
       - uses: Swatinem/rust-cache@v2
 
@@ -65,11 +68,13 @@ jobs:
   # all of it. A third party copyleft dependency would quietly end that.
   dep-licences:
     name: dependency licences
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.99.0
 
       - uses: Swatinem/rust-cache@v2
 
@@ -80,7 +85,7 @@ jobs:
   # uses that revision's rules, which is how a 30 MB static library once got in.
   no-artifacts:
     name: no build artifacts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -89,7 +94,7 @@ jobs:
 
   localization:
     name: native language catalogs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - name: Check resource keys and translation placeholders
@@ -101,7 +106,7 @@ jobs:
   # not hide a bare button, and the red check should name the rule.
   action-icons:
     name: action icons
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -112,7 +117,7 @@ jobs:
   # are two different rules, and one red check should name one of them.
   accent-colour:
     name: accent colour
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -121,7 +126,7 @@ jobs:
 
   chrome-bars:
     name: chrome bars
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -130,7 +135,7 @@ jobs:
 
   sheet-surfaces:
     name: sheet surfaces
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -141,7 +146,7 @@ jobs:
   # rules sharing one red check is one check that says nothing.
   fonts:
     name: fonts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -153,7 +158,7 @@ jobs:
   # build time. A red check with its own name is the only warning there is.
   bridge-keys:
     name: bridge keys
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -162,7 +167,7 @@ jobs:
 
   sample-offline:
     name: sample stays local
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -178,7 +183,7 @@ jobs:
   # check with its own name is the only warning there is.
   windows-packaging:
     name: windows packaging
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -191,7 +196,7 @@ jobs:
   # check with its own name is the only warning there is.
   windows-pipe:
     name: windows pipe timeouts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -200,7 +205,7 @@ jobs:
 
   installer-tests:
     name: installer rollback
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - name: Failed replacements preserve the installed pair
@@ -225,7 +230,7 @@ jobs:
       - name: Validate Apple widget signing rules
         run: python3 scripts/tests/AppleWidgetSigningTests.py
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
 
@@ -234,7 +239,7 @@ jobs:
 
   windows-state-tests:
     name: windows state tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
@@ -251,11 +256,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.99.0
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -337,8 +344,9 @@ jobs:
       # the link on x86_64 even on an Apple Silicon runner. Installing the
       # second target is cheaper than teaching the build to skip it, and it is
       # the slice anyone on an Intel Mac needs anyway.
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
+          toolchain: 1.99.0
           targets: aarch64-apple-ios-sim, x86_64-apple-ios
 
       - uses: Swatinem/rust-cache@v2
@@ -368,7 +376,7 @@ jobs:
 
   android-client:
     name: android client
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -377,8 +385,9 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
+          toolchain: 1.99.0
           targets: aarch64-linux-android,x86_64-linux-android
 
       - uses: Swatinem/rust-cache@v2
@@ -390,7 +399,7 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: "9.3.1"
+          gradle-version: "9.8.0"
 
       - name: Unit tests and release bundle
         run: gradle -p apps/android testDebugUnitTest lintDebug lintRelease bundleRelease
@@ -406,7 +415,7 @@ jobs:
 
   audit:
     name: dependency audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # rustsec/audit-check posts a check run; default workflow perms are read-only.
     permissions:
       contents: read
@@ -414,6 +423,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: rustsec/audit-check@v2
+      - uses: rustsec/audit-check@858dc40f52ca2b8570b7a997c1c4e35c6fc9a432 # main (Node 24)
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
