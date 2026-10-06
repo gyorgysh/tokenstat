@@ -2,6 +2,22 @@
 // Compile with Singleflight.swift using swiftc -parse-as-library, then run.
 import Foundation
 
+@MainActor
+private final class TestSignal {
+    private var ready = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    func wait() async {
+        if ready { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+    func signal() {
+        ready = true
+        let pending = waiters
+        waiters.removeAll()
+        pending.forEach { $0.resume() }
+    }
+}
+
 @main
 struct SingleflightTests {
     static func require(_ condition: Bool, _ message: String) {
@@ -12,12 +28,16 @@ struct SingleflightTests {
     static func main() async {
         let gate = Singleflight<Int>()
         var starts = 0
+        var arrivals = 0
+        let allArrived = TestSignal()
         await withTaskGroup(of: Int.self) { group in
             for _ in 0..<8 {
-                group.addTask {
-                    await gate.run {
+                group.addTask { @MainActor in
+                    arrivals += 1
+                    if arrivals == 8 { allArrived.signal() }
+                    return await gate.run {
                         starts += 1
-                        try? await Task.sleep(for: .milliseconds(50))
+                        await allArrived.wait()
                         return starts
                     }
                 }
@@ -40,13 +60,19 @@ struct SingleflightTests {
 
         let flag = Singleflight<Int>()
         require(!flag.isRunning, "idle starts idle")
-        async let slow: Int = flag.run {
-            try? await Task.sleep(for: .milliseconds(50))
-            return 7
+        let entered = TestSignal()
+        let release = TestSignal()
+        let slow = Task { @MainActor in
+            await flag.run {
+                entered.signal()
+                await release.wait()
+                return 7
+            }
         }
-        try? await Task.sleep(for: .milliseconds(10))
+        await entered.wait()
         require(flag.isRunning, "running reads true mid-flight")
-        require(await slow == 7, "the attempt still answers")
+        release.signal()
+        require(await slow.value == 7, "the attempt still answers")
         require(!flag.isRunning, "the slot clears after")
         print("SingleflightTests passed.")
     }
