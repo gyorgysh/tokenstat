@@ -103,7 +103,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@1.120.0
         with:
           targets: ${{ matrix.target }}
 
@@ -184,7 +184,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@1.120.0
         with:
           # Universal, so one download runs on both kinds of Mac.
           targets: aarch64-apple-darwin,x86_64-apple-darwin
@@ -222,7 +222,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@1.120.0
         with:
           targets: x86_64-pc-windows-msvc
 

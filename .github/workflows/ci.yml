@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@1.120.0
         with:
           components: rustfmt, clippy
 
@@ -54,7 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@1.120.0
 
       - uses: Swatinem/rust-cache@v2
 
@@ -69,7 +69,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@1.120.0
 
       - uses: Swatinem/rust-cache@v2
 
@@ -255,7 +255,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@1.120.0
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -337,7 +337,7 @@ jobs:
       # the link on x86_64 even on an Apple Silicon runner. Installing the
       # second target is cheaper than teaching the build to skip it, and it is
       # the slice anyone on an Intel Mac needs anyway.
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@1.120.0
         with:
           targets: aarch64-apple-ios-sim, x86_64-apple-ios
 
@@ -377,7 +377,7 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@1.120.0
         with:
           targets: aarch64-linux-android,x86_64-linux-android
 
