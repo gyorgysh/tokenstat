@@ -1515,7 +1515,7 @@
   "apple.clientpaywallview.100_mib.98243968": "100 MiB",
   "apple.clientpaywallview.1_gib.7dd46450": "1 GiB",
   "apple.clientpaywallview.20_gib.4488c54a": "20 GiB",
-  "apple.clientpaywallview.3_days_free_then_the_yearly_price_once_per.6b22ed3a": "3 days free, then the yearly price. Once per account.",
+  "apple.clientpaywallview.3_days_free_then_the_yearly_price_once_per.6b22ed3a": "3 days free, then {0}/year. Cancel at least 24 hours before the trial ends to avoid a charge. Once per account.",
   "apple.clientpaywallview.5_gib.aa5f04aa": "5 GiB",
   "apple.clientpaywallview.all.a52ace42": "All",
   "apple.clientpaywallview.badge.002474e3": "Badge",
@@ -5660,5 +5660,6 @@
   "apple.sidebarappearance.glass": "Glass sidebar",
   "apple.sidebarappearance.opacity": "Sidebar opacity",
   "apple.sidebarappearance.subtitle": "The sidebar on this Mac.",
-  "apple.sidebarappearance.title": "Appearance"
+  "apple.sidebarappearance.title": "Appearance",
+  "apple.clientpaywallview.renewal_terms": "{0}. Renews automatically until cancelled. Payment is charged to your Apple ID. Turn off auto-renewal in Apple ID subscriptions at least 24 hours before the trial or current period ends to avoid the next charge."
 }

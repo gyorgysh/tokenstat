@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.tokenstat.tokenstat.billing.PlayBillingManager
+import ai.tokenstat.tokenstat.billing.humanizeBillingPeriod
 import ai.tokenstat.tokenstat.ui.components.SectionTitle
 import ai.tokenstat.tokenstat.ui.components.SegmentedCapsulePicker
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
@@ -220,6 +221,14 @@ fun PaywallSheet(
                         Text(pitch.relayCaption, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
                         product?.introCaption?.let {
                             Text(it, style = TextStyle(fontSize = 12.sp), color = colors.accent)
+                        }
+                        if (product != null && !readsCurrent) {
+                            Text(
+                                L10n.text("android.paywallsheet.renewal_terms", product.price,
+                                    humanizeBillingPeriod(product.billingPeriod)),
+                                style = TextStyle(fontSize = 13.sp),
+                                color = colors.textPrimary,
+                            )
                         }
                         val buttonLabel = when {
                             readsCurrent -> L10n.text("android.paywallsheet.your_current_plan.2653f9e7")

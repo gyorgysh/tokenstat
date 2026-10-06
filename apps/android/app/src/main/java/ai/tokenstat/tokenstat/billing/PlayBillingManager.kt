@@ -27,6 +27,7 @@ data class PlanProduct(
     val label: String,
     val price: String,
     val introCaption: String? = null,
+    val billingPeriod: String,
 )
 data class BillingState(
     val loading: Boolean = true,
@@ -137,6 +138,7 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
                             details.name,
                             phase.formattedPrice,
                             introCaption(phases.map { PhaseView(it.formattedPrice, it.billingPeriod) }),
+                            phase.billingPeriod,
                         )
                     }
             })

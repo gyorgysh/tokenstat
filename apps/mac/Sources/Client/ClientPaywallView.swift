@@ -175,7 +175,9 @@ struct ClientPaywallView: View {
         // here and have spent the group's offer under a previous account, and
         // promising them three free days puts the full price in Apple's sheet.
         let showTrial = item == .patron && item.interval == .year && current == nil
-            && !trialUsed && intro != nil && store.isIntroEligible
+            && !trialUsed && intro?.paymentMode == .freeTrial
+            && intro?.period.unit == .day && intro?.period.value == 3
+            && intro?.periodCount == 1 && store.isIntroEligible
         let busy = store.purchasingProductID == item.rawValue
         let isCurrent = current == item
         let isQueued = queued == item && current != item
@@ -232,7 +234,7 @@ struct ClientPaywallView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if showTrial {
-                Text(L10n.text("apple.clientpaywallview.3_days_free_then_the_yearly_price_once_per.6b22ed3a"))
+                Text(L10n.text("apple.clientpaywallview.3_days_free_then_the_yearly_price_once_per.6b22ed3a", product?.displayPrice ?? ""))
                     .font(ClientType.caption)
                     .foregroundStyle(Theme.accent)
             }
@@ -241,6 +243,15 @@ struct ClientPaywallView: View {
             // an offline open must not present the second as the first.
             if isCurrent, store.renewalStatusKnown, !store.willAutoRenew {
                 Text(renewalOffCaption(account: account, item: item))
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let product, !isCurrent {
+                Text(L10n.text("apple.clientpaywallview.renewal_terms",
+                               product.displayPrice + (item.interval == .month
+                                   ? L10n.text("apple.clientpaywallview.month.38428048")
+                                   : L10n.text("apple.clientpaywallview.year.af0dde2c"))))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
