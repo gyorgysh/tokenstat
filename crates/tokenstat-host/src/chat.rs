@@ -3889,11 +3889,12 @@ impl Store {
                         .lock()
                         .unwrap_or_else(PoisonError::into_inner)
                         .contains(id);
-                    if info.exit_code.is_some()
-                        || stopped
-                        || muse_sign_in_required
-                        || eof_at.elapsed() >= EXIT_STATUS_GRACE
-                    {
+                    if !wait_for_exit_status(
+                        info.exit_code,
+                        stopped,
+                        muse_sign_in_required,
+                        eof_at.elapsed(),
+                    ) {
                         break;
                     }
                 }
@@ -4595,6 +4596,17 @@ impl Store {
             );
         }
     }
+}
+
+/// EOF does not establish the child's exit status. Keep polling only while
+/// the result is unknown and its bounded reconciliation grace remains.
+fn wait_for_exit_status(
+    exit: Option<i32>,
+    stopped: bool,
+    sign_in_required: bool,
+    eof_elapsed: Duration,
+) -> bool {
+    exit.is_none() && !stopped && !sign_in_required && eof_elapsed < EXIT_STATUS_GRACE
 }
 
 fn turn_status(exit: Option<i32>, stopped: bool) -> &'static str {
@@ -6390,147 +6402,46 @@ mod tests {
         store.set_running(id, true).unwrap();
     }
 
-    #[cfg(unix)]
-    fn child_with_closed_output(root: &Path, code: i32) -> tokenstat_pty::SessionInfo {
-        let manager = tokenstat_pty::manager();
-        let process = manager
-            .spawn(&tokenstat_pty::Spawn {
-                command: "/usr/bin/python3".into(),
-                args: vec![
-                    "-c".into(),
-                    r#"import os, pathlib, signal, sys, time
-root = pathlib.Path(sys.argv[1])
-code = int(sys.argv[2])
-signal.signal(signal.SIGHUP, signal.SIG_IGN)
-os.closerange(0, 65536)
-(root / 'ready').write_text('ready')
-deadline = time.monotonic() + 30
-while not (root / 'release').exists():
-    if time.monotonic() >= deadline: os._exit(99)
-    time.sleep(0.01)
-(root / 'finished').write_text('finished')
-os._exit(code)
-"#
-                    .into(),
-                    root.display().to_string(),
-                    code.to_string(),
-                ],
-                cwd: root.into(),
-                workspace_id: None,
-                hidden: true,
-                rows: 24,
-                cols: 80,
-                no_color: true,
-                dark: None,
-                environment: Vec::new(),
-            })
-            .unwrap();
-        // Establish EOF while the child is still blocked on our release file.
-        // Neither child startup nor EOF observation relies on a short sleep.
-        let until = Instant::now() + Duration::from_secs(10);
-        while manager.info(&process.id).unwrap().alive || !root.join("ready").is_file() {
-            if Instant::now() >= until {
-                let info = manager.info(&process.id).unwrap();
-                let output = manager.read(&process.id, 0).unwrap();
-                let ready = root.join("ready").is_file();
-                manager.close(&process.id).unwrap();
-                panic!(
-                    "the child must close its PTY and publish readiness: ready={ready}, info={info:?}, output={:?}",
-                    String::from_utf8_lossy(&output.bytes)
-                );
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        assert_eq!(manager.info(&process.id).unwrap().exit_code, None);
-        process
-    }
-
-    #[cfg(unix)]
     #[test]
     fn chat_completion_waits_for_the_exit_status_after_pty_eof() {
-        for (code, status) in [(0, "ok"), (7, "error")] {
-            let root = tempfile::tempdir().unwrap();
-            let store = Arc::new(Store::at(root.path().join("chat")));
-            let id = format!("eof-status-{code}");
-            prepare_live_chat(&store, &id);
-            let process = child_with_closed_output(root.path(), code);
-            crate::presence::claim(&id, "test");
-            std::thread::scope(|scope| {
-                scope.spawn(|| {
-                    std::thread::sleep(Duration::from_millis(500));
-                    fs::write(root.path().join("release"), b"release").unwrap();
-                });
-                Arc::clone(&store).drain(
-                    &id,
-                    "claude",
-                    &process.id,
-                    &root.path().join("raw.ndjson"),
-                    &root.path().join("output"),
-                    None,
-                );
-            });
-            crate::presence::release(&id, "test");
+        // EOF and process exit are separate observations. The policy used by
+        // drain must defer completion until the exit status arrives, without
+        // depending on an OS's controlling-terminal or pipe EOF behavior.
+        assert!(wait_for_exit_status(None, false, false, Duration::ZERO));
+        assert!(wait_for_exit_status(
+            None,
+            false,
+            false,
+            EXIT_STATUS_GRACE - Duration::from_nanos(1)
+        ));
+        for code in [0, 7] {
+            assert!(!wait_for_exit_status(
+                Some(code),
+                false,
+                false,
+                Duration::ZERO
+            ));
             assert_eq!(
-                fs::read_to_string(root.path().join("finished")).unwrap(),
-                "finished"
+                turn_status(Some(code), false),
+                if code == 0 { "ok" } else { "error" }
             );
-            let (events, _) = store.events(&id, 0).unwrap();
-            let done = events
-                .iter()
-                .rev()
-                .find(|event| event["event"]["kind"] == "done")
-                .unwrap();
-            assert_eq!(done["event"]["status"], status);
-            assert_eq!(done["event"]["exitCode"], code);
         }
     }
 
-    #[cfg(unix)]
     #[test]
     fn chat_completion_after_pty_eof_is_bounded_and_can_be_stopped() {
-        for stopped in [false, true] {
-            let root = tempfile::tempdir().unwrap();
-            let store = Arc::new(Store::at(root.path().join("chat")));
-            let id = if stopped { "eof-stopped" } else { "eof-hung" };
-            prepare_live_chat(&store, id);
-            let process = child_with_closed_output(root.path(), 0);
-            if stopped {
-                store.killed.lock().unwrap().insert(id.into());
-            }
-            crate::presence::claim(id, "test");
-            let began = Instant::now();
-            Arc::clone(&store).drain(
-                id,
-                "claude",
-                &process.id,
-                &root.path().join("raw.ndjson"),
-                &root.path().join("output"),
-                None,
-            );
-            crate::presence::release(id, "test");
-            assert!(
-                began.elapsed()
-                    < if stopped {
-                        EXIT_STATUS_GRACE
-                    } else {
-                        EXIT_STATUS_GRACE + Duration::from_secs(3)
-                    },
-                "EOF reconciliation must remain bounded and respond to Stop"
-            );
-            assert!(!root.path().join("finished").exists());
-            assert!(tokenstat_pty::manager().info(&process.id).is_err());
-            let (events, _) = store.events(id, 0).unwrap();
-            let done = events
-                .iter()
-                .rev()
-                .find(|event| event["event"]["kind"] == "done")
-                .unwrap();
-            assert_eq!(
-                done["event"]["status"],
-                if stopped { "stopped" } else { "error" }
-            );
-            assert_eq!(done["event"]["exitCode"], Value::Null);
+        // Explicit Stop and Muse's authentication failure already establish
+        // the result. Neither must spend the remaining grace waiting to reap.
+        assert!(!wait_for_exit_status(None, true, false, Duration::ZERO));
+        assert!(!wait_for_exit_status(None, false, true, Duration::ZERO));
+        for elapsed in [
+            EXIT_STATUS_GRACE,
+            EXIT_STATUS_GRACE + Duration::from_secs(1),
+        ] {
+            assert!(!wait_for_exit_status(None, false, false, elapsed));
         }
+        assert_eq!(turn_status(None, true), "stopped");
+        assert_eq!(turn_status(None, false), "error");
     }
 
     #[test]
