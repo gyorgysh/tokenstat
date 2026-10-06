@@ -24,13 +24,25 @@ class WidgetSigningTests(unittest.TestCase):
     def test_alpha_and_palette_transparency_are_rejected(self):
         def chunk(kind, payload):
             return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload))
-        def png(color, transparent=False):
-            return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1024, 1024, 8, color, 0, 0, 0)) + (chunk(b"tRNS", b"\x00") if transparent else b"") + chunk(b"IEND", b"")
+        def png(color, transparent=False, optimized=False):
+            rows = (b"\0" * (1 + 1024 * (3 if color == 2 else 4))) * 1024
+            compressor = zlib.compressobj(wbits=-15 if optimized else 15)
+            image = compressor.compress(rows) + compressor.flush()
+            return b"\x89PNG\r\n\x1a\n" + (chunk(b"CgBI", b"\x40\xa0\x60\x82") if optimized else b"") + chunk(b"IHDR", struct.pack(">IIBBBBB", 1024, 1024, 8, color, 0, 0, 0)) + (chunk(b"tRNS", b"\x00") if transparent else b"") + chunk(b"IDAT", image) + chunk(b"IEND", b"")
         icons.validate_store_icon(png(2), size=1024)
-        icons.validate_store_icon(png(2)[:8] + chunk(b"CgBI", b"\x40\xa0\x60\x82") + png(2)[8:], size=1024)
+        icons.validate_store_icon(png(2, optimized=True), size=1024)
         for color, transparent in [(6, False), (4, False), (3, True)]:
             with self.assertRaises(ValueError):
                 icons.validate_store_icon(png(color, transparent), size=1024)
+
+    def test_crc_valid_corrupt_image_stream_is_rejected(self):
+        def chunk(kind, payload):
+            return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload))
+        header = chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 2, 8, 2, 0, 0, 0))
+        for image in (b"unreadable", zlib.compress(b"\0" * 13), zlib.compress(b"\0" * 15),
+                      zlib.compress(b"\5" + b"\0" * 13), zlib.compress(b"\0" * 14) + b"trailing"):
+            with self.assertRaises(ValueError):
+                icons.validate_store_icon(b"\x89PNG\r\n\x1a\n" + header + chunk(b"IDAT", image) + chunk(b"IEND", b""))
 
     def profile(self, bundle_id):
         certificate = b"fixture-certificate"

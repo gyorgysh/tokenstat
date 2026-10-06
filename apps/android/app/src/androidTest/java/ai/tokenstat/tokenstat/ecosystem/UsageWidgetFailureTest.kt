@@ -83,7 +83,7 @@ class UsageWidgetFailureTest {
                     if (method == "account.status") account() else throw denial
                 }.run()
                 assertEquals(ListenableWorker.Result.failure(), result)
-                assertEquals(listOf("account.status", "activity.calendar"), methods)
+                assertEquals(listOf("account.status", "activity.calendar", "usage.limits"), methods)
                 val retained = UsageWidgetStore.read(context)!!
                 assertEquals(cached.value(false), retained.value(false))
                 assertEquals(cached.updatedAt, retained.updatedAt)

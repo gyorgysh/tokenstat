@@ -79,4 +79,25 @@ class UsageSnapshotTest {
         assertFalse(session.acceptsCachedOwner(b.owner))
         assertFalse(session.current(b))
     }
+    @Test fun quotasSupportUnknownProvidersAndRequireDatedFiniteReadings() {
+        val wire = Json.parseToJsonElement("""[{"source":"future_vendor","observedAtMs":1234,"windows":[{"label":"weekly","scope":"primary","percent":104,"resetsAtMs":5000},{"label":"weekly","scope":"secondary","percent":20}]}]""")
+        val unavailable = Json.parseToJsonElement("""{"source":"unavailable","observedAtMs":0,"windows":[]}""")
+        assertEquals(1, QuotaProvider.parse(JsonArray(wire.jsonArray + unavailable))!!.size)
+        val provider = QuotaProvider.parse(wire)!!.single()
+        assertEquals("Future vendor", provider.name)
+        assertEquals(1f, provider.windows.first().fraction)
+        assertEquals(104.0, provider.peak(4000)!!.percent, 0.0)
+        assertEquals(20.0, provider.peak(5000)!!.percent, 0.0)
+        assertTrue(provider.windows.first().expired(5000))
+        assertTrue(provider.stale(1_000_000))
+        assertFalse(provider.copy(windows = listOf(QuotaWindow("weekly", Double.NaN))).valid)
+        assertNull(QuotaProvider.parse(Json.parseToJsonElement("""[{"source":"new","windows":[]}]""")))
+        assertNull(QuotaProvider.parse(JsonArray(listOf(wire.jsonArray.first(), wire.jsonArray.first()))))
+        assertFalse(UsageSnapshot(owner, limits = listOf(provider, provider)).valid)
+        assertFalse(provider.copy(source = "../private").valid)
+        assertFalse(provider.copy(windows = List(9) { QuotaWindow("window-$it", 1.0) }).valid)
+        val old = Json.decodeFromJsonElement<UsageSnapshot>(buildJsonObject { put("owner", owner) })
+        assertTrue(old.valid && old.limits.isEmpty())
+    }
+
 }

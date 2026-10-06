@@ -19,6 +19,8 @@ import UniformTypeIdentifiers
         stress.usage?.days[index].value = 1_234_567_890_000
         stress.projects[0].name = "A project with a very long descriptive name"
         stress.projects += [.init(id: "preview-3", name: "Client", host: "Studio"), .init(id: "preview-4", name: "Website", host: "MacBook")]
+        stress.limits = [.init(source: "provider_with_a_long_name", observedAt: .now.addingTimeInterval(-86_400), stale: true,
+                               windows: [.init(label: "Weekly quota with long label", percent: 104, resetsAt: .now.addingTimeInterval(-60))])]
         var offline = EcosystemSnapshot.preview
         offline.refreshFailed = true
         let snapshots: [(String, EcosystemSnapshot)] = [("activity", .preview), ("empty", .empty), ("stress", stress), ("offline", offline)]
@@ -47,6 +49,31 @@ import UniformTypeIdentifiers
                     let entry = TokenstatWidgetEntry(date: Date(), snapshot: snapshot, appearance: appearance, tint: tint)
                     render(TokenstatUsageView(entry: entry, familyOverride: family), width: width, height: height, entry: entry, dark: dark, mode: mode,
                            url: directory.appendingPathComponent("usage-\(name)-\(style)-\(state).png"))
+                }
+                if family != .systemExtraLarge {
+                    for (state, snapshot) in snapshots {
+                        let quotas = state == "stress" ? stress : snapshot
+                        let entry = TokenstatLimitsEntry(date: .now, snapshot: quotas, appearance: appearance, tint: tint)
+                        render(TokenstatLimitsView(entry: entry, familyOverride: family), width: width, height: height,
+                               entry: TokenstatWidgetEntry(date: .now, snapshot: quotas, appearance: appearance, tint: tint), dark: dark, mode: mode,
+                               url: directory.appendingPathComponent("limits-\(name)-\(style)-\(state).png"))
+                    }
+                }
+                if family != .systemExtraLarge {
+                    for display in [EcosystemGaugeStyle.rings, .bars] {
+                        for count in [1, 3, 4, 9] {
+                            var quotas = EcosystemSnapshot.preview
+                            quotas.limits = (0..<count).map { index in
+                                var reading = EcosystemSnapshot.preview.limits![index % 3]
+                                if index >= 3 { reading.source = "vendor_\(index)" }
+                                return reading
+                            }
+                            let quotaEntry = TokenstatLimitsEntry(date: .now, snapshot: quotas, display: display, appearance: appearance, tint: tint)
+                            let styleEntry = TokenstatWidgetEntry(date: .now, snapshot: quotas, appearance: appearance, tint: tint)
+                            render(TokenstatLimitsView(entry: quotaEntry, familyOverride: family), width: width, height: height, entry: styleEntry, dark: dark, mode: mode,
+                                   url: directory.appendingPathComponent("limits-\(name)-\(style)-\(display.rawValue)-\(count).png"))
+                        }
+                    }
                 }
                 if family != .systemExtraLarge {
                     for (state, snapshot) in snapshots.prefix(3) {

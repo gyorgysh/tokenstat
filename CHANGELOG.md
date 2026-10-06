@@ -15,6 +15,9 @@ at the end.
 
 ### Added
 
+- Plan-limit widgets on Apple and Android with dynamic one/multiple-provider
+  selection, circle/bar percentages, reset times and dated cached readings.
+  Android adds a compact activity layout and a Quick Launch widget down to one cell.
 - Android recent/pinned project shortcuts, account-scoped AppSearch discovery,
   text Share/Direct Share into chat drafts, and contextual response sharing.
   Supported system assistants can search projects, read cached usage and create
@@ -35,8 +38,9 @@ at the end.
   latest Apple content-opening and search schemas on supported systems.
 - Quick Access controls for Control Center and supported Lock Screen and
   Action button slots.
-- A paired Apple Watch app with activity, projects, Handoff, Shortcuts and
-  complications. Review pending agent requests, Allow Once, Always Allow for
+- A paired Apple Watch app focused on Today/Week activity, plan limits and
+  actionable requests, with branded light/dark/tinted icons, Shortcuts and
+  activity/allowance/request complications. Review pending agent requests, Allow Once, Always Allow for
   that chat or Deny after the host revalidates the exact live request.
 
 ### Fixed
@@ -53,7 +57,11 @@ at the end.
   creation, and keep queued completion updates bound to their original account.
 - Android signed-out startup completes account verification; late account updates
   and project indexing cannot restore another account’s metadata.
-- Apple store-icon checks reject corrupt and truncated PNG metadata.
+- Apple widget configuration labels explain that full-color style/accent settings
+  follow the system in Clear/Tinted mode. Quota refresh remains independent of
+  calendar access, and expired allowances no longer imply fresh zero usage.
+- Replaced an unreadable Watch fallback icon. Apple store-icon checks validate
+  compressed image data as well as metadata, checksums, filters and dimensions.
 
 ## [1.2.0] - 2026-10-05
 

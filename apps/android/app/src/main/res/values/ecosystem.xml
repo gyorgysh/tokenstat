@@ -6,6 +6,7 @@
     <string name="widget_description">Daily and weekly usage. Tap the period to switch, or refresh without opening tokenstat.</string>
     <string name="widget_today">TODAY</string>
     <string name="widget_week">LAST 7 DAYS</string>
+    <string name="widget_week_compact">7d</string>
     <string name="widget_week_short">7 DAYS</string>
     <string name="widget_list_rates">Value at list rates</string>
     <string name="widget_sign_in">Sign in to sync</string>
@@ -24,4 +25,27 @@
     <color name="ts_widget_surface">#FBFBFD</color>
     <color name="ts_widget_text">#FF000000</color>
     <color name="ts_widget_muted">#99000000</color>
+    <string name="widget_limits_name">Plan Limits</string>
+    <string name="widget_limits_description">Used allowances from one or several providers, with circles or bars. Configure to select providers.</string>
+    <string name="widget_limits_empty">Enable Share with my devices in Plan limits on your computer, then refresh.</string>
+    <string name="widget_launcher_name">Quick Launch</string>
+    <string name="widget_launcher_description">Open Workspaces, Home, Insights or Devices. Resize down to a single launch icon.</string>
+    <string name="widget_configure">Configure plan limits</string>
+    <string name="widget_provider_selection">Providers</string>
+    <string name="widget_all_providers">All available providers</string>
+    <string name="widget_display">Display</string>
+    <string name="widget_circles">Circles</string>
+    <string name="widget_bars_label">Bars</string>
+    <string name="widget_save">Save widget</string>
+    <string name="widget_select_provider">Select at least one provider</string>
+    <string name="widget_cached">Cached · %1$s</string>
+    <string name="widget_used">Used · %1$s</string>
+    <string name="widget_resets">Resets %1$s</string>
+    <string name="widget_reset_passed">Reset passed · Refresh</string>
+    <string name="widget_no_reading">No reading</string>
+    <string name="widget_percent_used">%1$s percent used</string>
+    <string name="shortcut_home">Home</string>
+    <string name="shortcut_devices">Devices</string>
+    <color name="ts_widget_warning">#9F5400</color>
+    <color name="ts_widget_danger">#C62828</color>
 </resources>

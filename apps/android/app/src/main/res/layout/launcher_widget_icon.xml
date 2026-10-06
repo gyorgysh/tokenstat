@@ -1,0 +1,4 @@
+<?xml version="1.0" ?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/launcher_root" android:layout_width="match_parent" android:layout_height="match_parent" android:padding="8dp" android:background="@drawable/widget_background">
+    <ImageView android:layout_gravity="center" android:layout_width="32dp" android:layout_height="32dp" android:src="@drawable/ic_notification" android:tint="@color/ts_widget_accent" android:contentDescription="@string/shortcut_workspaces"/>
+</FrameLayout>

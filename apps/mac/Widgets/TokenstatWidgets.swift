@@ -24,7 +24,7 @@ struct TokenstatWidgetEntry: TimelineEntry {
 
 private func widgetTimeline(_ entry: TokenstatWidgetEntry) -> Timeline<TokenstatWidgetEntry> {
     let calendar = Calendar.current
-    let midnight = calendar.startOfDay(for: calendar.date(byAdding: .day, value: 1, to: entry.date)!)
+    let midnight = calendar.startOfDay(for: calendar.date(byAdding: .day, value: 1, to: entry.date) ?? entry.date.addingTimeInterval(24 * 60 * 60))
     var tomorrow = entry
     tomorrow = .init(date: midnight, snapshot: entry.snapshot, period: entry.period, appearance: entry.appearance,
                      tint: entry.tint, screen: entry.screen, favoriteID: entry.favoriteID)
@@ -558,6 +558,7 @@ struct TokenstatQuickAccessControl: ControlWidget {
 struct TokenstatWidgetBundle: WidgetBundle {
     var body: some Widget {
         TokenstatUsageWidget()
+        TokenstatLimitsWidget()
         TokenstatLauncherWidget()
         #if os(iOS)
         TokenstatLiveWorkWidget()

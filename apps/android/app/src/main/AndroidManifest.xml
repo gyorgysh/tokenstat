@@ -72,6 +72,17 @@
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/usage_widget" />
         </receiver>
+        <activity android:name=".ecosystem.LimitsWidgetConfigurationActivity" android:exported="true" android:theme="@style/Theme.Tokenstat">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" /></intent-filter>
+        </activity>
+        <receiver android:name=".ecosystem.LimitsWidgetProvider" android:exported="false" android:label="@string/widget_limits_name">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/limits_widget" />
+        </receiver>
+        <receiver android:name=".ecosystem.LauncherWidgetProvider" android:exported="false" android:label="@string/widget_launcher_name">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/launcher_widget" />
+        </receiver>
         <service android:name=".ecosystem.WorkspacesTileService" android:exported="true"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
             android:icon="@drawable/ic_tile_workspaces" android:label="@string/shortcut_workspaces">

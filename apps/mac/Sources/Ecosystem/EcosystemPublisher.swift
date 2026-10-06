@@ -13,6 +13,7 @@ enum EcosystemPublisher {
     private static var verifiedOwner: String?
     private static var generation = UUID()
     private static var allowedPeers: Set<String> = []
+    private static var limitsRefreshTask: Task<Void, Error>?
     private static var refreshTask: Task<Void, Error>?
     private static var indexing: Task<Void, Never>?
 
@@ -58,6 +59,7 @@ enum EcosystemPublisher {
                 let grid = try await Bridge.activityCalendar(scope: activityScope)
                 publish(calendar: grid, lease: lease)
             } catch { /* Keep the last successful snapshot while offline. */ }
+            await refreshLimits(lease: lease)
             #if os(macOS)
             if let folders = try? await Bridge.workspaces() {
                 publish(projects: folders.filter(\.exists).map {
@@ -100,6 +102,26 @@ enum EcosystemPublisher {
         try await task.value
     }
 
+    static func refreshLimitsOnly() async throws {
+        if let limitsRefreshTask { return try await limitsRefreshTask.value }
+        let task = Task { try await performLimitsRefresh() }
+        limitsRefreshTask = task
+        defer { limitsRefreshTask = nil }
+        try await task.value
+    }
+
+    private static func performLimitsRefresh() async throws {
+        let startingGeneration = generation
+        BridgeLaunch.begin()
+        await BridgeLaunch.wait()
+        let account = try await Bridge.account()
+        guard generation == startingGeneration else { throw EcosystemIntentError.sessionChanged }
+        WorkSessionContext.shared.update(account: account)
+        verifyOwner(account: account, loadInitial: false)
+        guard let lease else { throw EcosystemIntentError.usageUnavailable }
+        guard await refreshLimits(lease: lease) else { throw EcosystemIntentError.usageUnavailable }
+    }
+
     private static func performRefresh() async throws {
         let startingGeneration = generation
         var refreshLease = lease
@@ -112,6 +134,7 @@ enum EcosystemPublisher {
             verifyOwner(account: account, loadInitial: false)
             guard let lease else { throw EcosystemIntentError.usageUnavailable }
             refreshLease = lease
+            await refreshLimits(lease: lease)
             let grid = try await Bridge.activityCalendar(scope: activityScope, force: true)
             guard isCurrent(lease) else { throw EcosystemIntentError.sessionChanged }
             publish(calendar: grid, lease: lease)
@@ -136,9 +159,15 @@ enum EcosystemPublisher {
         guard isCurrent(lease), let lease else { return }
         var snapshot = store.read()
         guard snapshot.owner == lease.owner else { return }
+        if let calendar {
+            guard let fetchedAt = calendar.fetchedAt, fetchedAt.timeIntervalSince1970.isFinite else {
+                snapshot.refreshFailed = true; save(snapshot); return
+            }
+            if let previous = snapshot.usage?.updatedAt, fetchedAt < previous { return }
+        }
         snapshot.refreshFailed = calendar?.noticeCode == "stale" ? true : nil
         snapshot.usage = calendar.map { grid in
-            EcosystemUsage(updatedAt: grid.fetchedAt ?? Date(),
+            EcosystemUsage(updatedAt: grid.fetchedAt ?? .distantPast,
                            scope: grid.scope == "account" ? "All devices" : "This device",
                            days: Array(grid.rows.flatMap { $0.compactMap { $0 } }
                             .sorted { $0.date < $1.date }.suffix(35)).map {
@@ -146,6 +175,40 @@ enum EcosystemPublisher {
                             }, streak: max(0, grid.streakCurrent))
         }
         save(snapshot)
+    }
+
+    static func publish(limits: [ProviderLimits], lease: EcosystemPublicationLease?) {
+        guard isCurrent(lease), let lease else { return }
+        var snapshot = store.read()
+        guard snapshot.owner == lease.owner else { return }
+        let previous = Dictionary(uniqueKeysWithValues: (snapshot.limits ?? []).map { ($0.source, $0) })
+        var seen = Set<String>()
+        snapshot.limits = Array(limits.compactMap { provider -> EcosystemLimitProvider? in
+            guard let observed = provider.observedAt else { return nil }
+            let reading = EcosystemLimitProvider(source: provider.source, observedAt: observed, stale: provider.isStale,
+                windows: Array(provider.windows.prefix(8)).map {
+                    EcosystemLimitWindow(label: $0.displayLabel, percent: $0.percent, resetsAt: $0.resetsAt)
+                })
+            guard reading.isValid, seen.insert(reading.source).inserted else { return nil }
+            return previous[reading.source].flatMap { $0.observedAt > reading.observedAt ? $0 : nil } ?? reading
+        }.prefix(32))
+        save(snapshot)
+    }
+
+    @discardableResult private static func refreshLimits(lease: EcosystemPublicationLease) async -> Bool {
+        do {
+            let settings = try await Bridge.limitsSync()
+            guard isCurrent(lease) else { return false }
+            let providers = try await Bridge.usageLimits()
+            publish(limits: providers.filter { !settings.skip.contains($0.source) }, lease: lease)
+            return isCurrent(lease)
+        } catch {
+            guard isCurrent(lease) else { return false }
+            var snapshot = store.read()
+            snapshot.limits = snapshot.limits?.map { var reading = $0; reading.stale = true; return reading }
+            save(snapshot)
+            return false
+        }
     }
 
     static func publish(projects: [EcosystemProject], lease: EcosystemPublicationLease?, replacing source: EcosystemProjectSource) {

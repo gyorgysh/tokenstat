@@ -10,6 +10,7 @@ struct EcosystemWatchPacket: Codable, Equatable, Sendable {
     var snapshot: EcosystemSnapshot
     var approvals: [EcosystemApproval]? = nil
     var omittedApprovals: Int? = nil
+    var omittedProviders: Int? = nil
 
     var isValid: Bool {
         snapshot.isValid && sentAt.timeIntervalSince1970.isFinite
@@ -18,6 +19,7 @@ struct EcosystemWatchPacket: Codable, Equatable, Sendable {
             && (approvals?.allSatisfy(\.isValid) ?? true)
             && Set(approvals?.map(\.id) ?? []).count == (approvals?.count ?? 0)
             && (0...12).contains(omittedApprovals ?? 0)
+            && (0...32).contains(omittedProviders ?? 0)
     }
 
     /// Leave headroom for the property-list envelope used by WatchConnectivity.
@@ -28,6 +30,10 @@ struct EcosystemWatchPacket: Codable, Equatable, Sendable {
         while let data = try? JSONEncoder().encode(packet) {
             if data.count <= maximumBytes { return data }
             if !packet.snapshot.projects.isEmpty { packet.snapshot.projects.removeLast() }
+            else if packet.snapshot.limits?.isEmpty == false {
+                packet.snapshot.limits?.removeLast()
+                packet.omittedProviders = (packet.omittedProviders ?? 0) + 1
+            }
             else if packet.approvals?.isEmpty == false {
                 packet.approvals?.removeLast()
                 packet.omittedApprovals = (packet.omittedApprovals ?? 0) + 1

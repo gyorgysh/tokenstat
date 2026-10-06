@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.*
 
-class UsageWidgetProvider : AppWidgetProvider() {
+open class UsageWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
         ids.forEach { update(context, it) }
         schedule(context)
@@ -41,11 +41,12 @@ class UsageWidgetProvider : AppWidgetProvider() {
         update(context, id)
     }
     override fun onDisabled(context: Context) {
+        if (widgetIds(context).isNotEmpty()) return
         runCatching { WorkManager.getInstance(context).cancelUniqueWork(PERIODIC) }
             .onFailure { Log.w("ts-widget", "Widget scheduler unavailable") }
     }
     override fun onDeleted(context: Context, ids: IntArray) {
-        prefs(context).edit { ids.forEach { remove("week.$it") } }
+        prefs(context).edit { ids.forEach { remove("week.$it"); remove("provider.$it"); remove("style.$it") } }
     }
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
@@ -79,7 +80,9 @@ class UsageWidgetProvider : AppWidgetProvider() {
         private const val PERIODIC = "usage-widget-periodic"
         private fun prefs(context: Context) = context.getSharedPreferences("usage-widget", Context.MODE_PRIVATE)
         private fun widgetIds(context: Context): IntArray = runCatching {
-            AppWidgetManager.getInstance(context).getAppWidgetIds(ComponentName(context, UsageWidgetProvider::class.java))
+            val manager = AppWidgetManager.getInstance(context)
+            manager.getAppWidgetIds(ComponentName(context, UsageWidgetProvider::class.java)) +
+                manager.getAppWidgetIds(ComponentName(context, LimitsWidgetProvider::class.java))
         }.getOrElse { Log.w("ts-widget", "Widget list unavailable"); intArrayOf() }
         private fun refreshSchedulingFailed(context: Context, epoch: Long) {
             queuedRefresh = false
@@ -90,7 +93,7 @@ class UsageWidgetProvider : AppWidgetProvider() {
         fun updateAll(context: Context) {
             widgetIds(context).forEach { update(context, it) }
         }
-        private fun schedule(context: Context) {
+        internal fun schedule(context: Context) {
             runCatching {
                 WorkManager.getInstance(context).enqueueUniquePeriodicWork(PERIODIC, ExistingPeriodicWorkPolicy.KEEP,
                     PeriodicWorkRequestBuilder<UsageWidgetWorker>(1, TimeUnit.HOURS)
@@ -107,24 +110,31 @@ class UsageWidgetProvider : AppWidgetProvider() {
             val manager = AppWidgetManager.getInstance(context)
             val week = prefs(context).getBoolean("week.$id", false)
             val snapshot = UsageWidgetStore.read(context)
+            if (isLimits(context, id)) {
+                manager.updateAppWidget(id, LimitsWidgetProvider.render(context, snapshot,
+                    id, broadcast(context, id, REFRESH), refreshing))
+                return
+            }
             val views = if (android.os.Build.VERSION.SDK_INT >= 31) {
                 RemoteViews(mapOf(
-                    SizeF(160f, 170f) to render(context, id, week, snapshot, false),
-                    SizeF(280f, 170f) to render(context, id, week, snapshot, true),
+                    SizeF(110f, 64f) to render(context, id, week, snapshot, false, compact = true),
+                    SizeF(110f, 130f) to render(context, id, week, snapshot, false),
+                    SizeF(280f, 130f) to render(context, id, week, snapshot, true),
                     SizeF(160f, 280f) to render(context, id, week, snapshot, false, true),
                     SizeF(280f, 280f) to render(context, id, week, snapshot, true, true),
                 ))
             } else {
                 val options = manager.getAppWidgetOptions(id)
                 render(context, id, week, snapshot, options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH) >= 280,
-                    options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT) >= 280)
+                    options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT) >= 280,
+                    compact = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT) < 130)
             }
             manager.updateAppWidget(id, views)
         }
 
         /** Also used by layout verification: no credentials or network needed. */
-        fun render(context: Context, id: Int, week: Boolean, snapshot: UsageSnapshot?, wide: Boolean, tall: Boolean = false): RemoteViews {
-            val views = RemoteViews(context.packageName, if (tall) R.layout.usage_widget_tall else R.layout.usage_widget)
+        fun render(context: Context, id: Int, week: Boolean, snapshot: UsageSnapshot?, wide: Boolean, tall: Boolean = false, compact: Boolean = false): RemoteViews {
+            val views = RemoteViews(context.packageName, when { compact -> R.layout.usage_widget_compact; tall -> R.layout.usage_widget_tall; else -> R.layout.usage_widget })
             val today = LocalDate.now()
             val value = snapshot?.value(week, today)
             val amount = if (value == null) "—" else money(value)
@@ -132,11 +142,12 @@ class UsageWidgetProvider : AppWidgetProvider() {
             views.setContentDescription(R.id.widget_value, if (value == null) context.getString(R.string.widget_usage_unavailable)
                 else NumberFormat.getNumberInstance().apply { maximumFractionDigits = 2; minimumFractionDigits = 2 }
                     .format(value / 1_000_000.0) + " USD")
-            val dateLabel = today.format(DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()))
+            val dateLabel = today.format(DateTimeFormatter.ofPattern(if (compact) "d/M" else "d MMM", Locale.getDefault()))
             // A launcher may defer its update past midnight. An explicit date
             // keeps the cached number honest until Android refreshes the view.
-            views.setTextViewText(R.id.widget_period, if (value == null) context.getString(if (week) R.string.widget_week else R.string.widget_today)
-                else if (week) context.getString(R.string.widget_week_short) + " · " + dateLabel else dateLabel)
+            views.setTextViewText(R.id.widget_period, if (value == null) context.getString(if (week && compact) R.string.widget_week_compact else if (week) R.string.widget_week else R.string.widget_today)
+                else if (week) context.getString(if (compact) R.string.widget_week_compact else R.string.widget_week_short) + " · " + dateLabel else dateLabel)
+            views.setContentDescription(R.id.widget_period, context.getString(if (week) R.string.widget_week else R.string.widget_today) + " · " + today)
             views.setTextViewText(R.id.widget_caption, context.getString(if (snapshot == null) R.string.widget_sign_in else R.string.widget_list_rates))
             val age = snapshot?.updatedAt?.let { android.text.format.DateUtils.getRelativeTimeSpanString(it, System.currentTimeMillis(),
                 android.text.format.DateUtils.MINUTE_IN_MILLIS).toString() }
@@ -183,6 +194,8 @@ class UsageWidgetProvider : AppWidgetProvider() {
             queuedRefresh = false
             updateAll(context)
         }
+        private fun isLimits(context: Context, id: Int): Boolean =
+            AppWidgetManager.getInstance(context).getAppWidgetInfo(id)?.provider?.className == LimitsWidgetProvider::class.java.name
         private fun broadcast(context: Context, id: Int, action: String): PendingIntent = PendingIntent.getBroadcast(
             context, id, Intent(context, UsageWidgetProvider::class.java).apply {
                 this.action = action; putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
@@ -221,15 +234,21 @@ internal class UsageWidgetRefresh(
                 return ListenableWorker.Result.failure()
             }
             lease = UsageWidgetStore.verify(context, account, epoch) ?: return ListenableWorker.Result.success()
-            val calendar = call("activity.calendar", buildJsonObject {
-                put("weeks", 6); put("scope", "account"); put("force", true)
-            })
-            if (calendar !is JsonObject && calendar !is JsonNull) {
-                UsageWidgetStore.failed(context, lease, epoch)
-                return ListenableWorker.Result.failure()
-            }
-            UsageWidgetStore.publish(context, lease, calendar as? JsonObject)
-            ListenableWorker.Result.success()
+            var activitySucceeded = false
+            try {
+                val calendar = call("activity.calendar", buildJsonObject {
+                    put("weeks", 6); put("scope", "account"); put("force", true)
+                })
+                require(calendar is JsonObject || calendar is JsonNull)
+                UsageWidgetStore.publish(context, lease, calendar as? JsonObject)
+                activitySucceeded = calendar is JsonNull || UsageSnapshot.calendar(lease.owner, calendar as JsonObject) != null
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { UsageWidgetStore.failed(context, lease, epoch) }
+            // Missing activity access must not prevent an independent allowance refresh.
+            try { UsageWidgetStore.publishLimits(context, lease, call("usage.limits", buildJsonObject {})) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { UsageWidgetStore.failedLimits(context, lease) }
+            if (activitySucceeded) ListenableWorker.Result.success() else ListenableWorker.Result.failure()
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) {
             UsageWidgetStore.failed(context, lease, epoch)

@@ -3,16 +3,16 @@ import AppIntents
 import Foundation
 
 enum WatchScreen: String, AppEnum {
-    case usage, projects, requests
+    case usage, limits, projects, requests
     static var typeDisplayRepresentation: TypeDisplayRepresentation { "tokenstat Watch screen" }
-    static var caseDisplayRepresentations: [Self: DisplayRepresentation] { [.usage: "Usage", .projects: "Projects", .requests: "Requests"] }
+    static var caseDisplayRepresentations: [Self: DisplayRepresentation] { [.usage: "Activity", .limits: "Plan limits", .projects: "Projects", .requests: "Requests"] }
 }
 
 struct OpenTokenstatWatchIntent: OpenIntent {
     static var title: LocalizedStringResource = "Open tokenstat on Watch"
     @Parameter(title: "Screen", default: .usage) var target: WatchScreen
     @MainActor func perform() async throws -> some IntentResult {
-        TokenstatWatchModel.shared.destination = target
+        TokenstatWatchModel.shared.destination = target == .projects ? .usage : target
         return .result()
     }
 }
@@ -63,15 +63,14 @@ struct OpenTokenstatWatchProjectIntent: AppIntent {
     static var authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
     @available(watchOS 26.0, *) static var supportedModes: IntentModes { .foreground }
     @Parameter(title: "Project") var project: TokenstatWatchProject
-    @MainActor func perform() async throws -> some IntentResult {
+    @MainActor func perform() async throws -> some IntentResult & ProvidesDialog {
         let model = TokenstatWatchModel.shared
         guard let owner = model.snapshot.owner, owner == project.owner,
-              let resolved = model.snapshot.projects.first(where: {
+              model.snapshot.projects.contains(where: {
                   Data((owner + "\n" + $0.id).utf8).base64EncodedString() == project.id
               }) else { throw WatchIntentError.syncRequired }
-        model.destination = .projects
-        model.projectID = resolved.id
-        return .result()
+        model.destination = .usage
+        return .result(dialog: "Open this project on your iPhone. Your Watch shows activity, plan limits and approval requests.")
     }
 }
 

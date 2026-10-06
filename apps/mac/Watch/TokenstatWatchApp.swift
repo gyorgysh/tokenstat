@@ -13,12 +13,15 @@ struct TokenstatWatchApp: App {
 struct TokenstatWatchRoot: View {
     @Environment(TokenstatWatchModel.self) private var model
     @Environment(\.scenePhase) private var phase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var week = false
+    private var accent: Color { Color("AccentColor") }
     var body: some View {
         @Bindable var model = model
         NavigationStack {
             TabView(selection: $model.destination) {
                 usage.tag(WatchScreen.usage)
-                projects.tag(WatchScreen.projects)
+                limits.tag(WatchScreen.limits)
                 requests.tag(WatchScreen.requests)
             }.tabViewStyle(.verticalPage)
                 .navigationTitle("tokenstat")
@@ -26,111 +29,130 @@ struct TokenstatWatchRoot: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { model.refresh() } label: {
                             if model.refreshing { ProgressView().tint(.white) }
-                            else { Image(systemName: "arrow.clockwise").foregroundStyle(.white) }
+                            else { Image(systemName: "arrow.clockwise").foregroundStyle(accent) }
                         }.disabled(model.refreshing).accessibilityLabel("Refresh from iPhone")
-                    }
-                }
-                .navigationDestination(item: $model.projectID) { id in
-                    if let project = model.snapshot.projects.first(where: { $0.id == id }) {
-                        ScrollView { VStack(spacing: 10) {
-                            Image(systemName: "folder.fill").font(.largeTitle).foregroundStyle(Color("AccentColor"))
-                            Text(project.name).font(.headline).multilineTextAlignment(.center)
-                            Text(project.host).font(.caption).foregroundStyle(.secondary)
-                            Text("Continue in tokenstat on your iPhone using Handoff.").font(.caption).multilineTextAlignment(.center)
-                        }.frame(maxWidth: .infinity).privacySensitive() }
-                            .userActivity("ai.tokenstat.open") { activity in
-                                activity.title = "Open \(project.name) in tokenstat"
-                                activity.userInfo = ["url": EcosystemRoute(screen: .workspaces, projectID: project.id, owner: model.snapshot.owner).url.absoluteString]
-                                activity.isEligibleForHandoff = true
-                            }
                     }
                 }
                 .sheet(item: $model.selectedApproval) { approval in
                     TokenstatWatchApprovalView(approval: approval)
                 }
         }
+        .onOpenURL { url in
+            guard url.scheme == "tokenstat", url.host == "watch", url.user == nil, url.password == nil, url.port == nil, url.query == nil, url.fragment == nil else { return }
+            if url.path == "/limits" { model.destination = .limits }
+            else if url.path == "/requests" { model.destination = .requests }
+        }
         .onChange(of: phase) { _, value in
             if value == .active { model.activate(); if model.destination == .requests { model.refresh() } }
         }
-        .task(id: model.destination) { if model.destination == .requests { model.refresh() } }
+        .task(id: model.destination) {
+            if model.destination == .projects { model.destination = .usage }
+            if model.destination == .requests { model.refresh() }
+        }
+    }
+
+    private func heading(_ title: String) -> some View {
+        HStack(spacing: 7) {
+            TokenstatWidgetMark(size: 19).foregroundStyle(accent)
+            Text(title).font(.system(.headline, design: .rounded))
+        }
     }
 
     private var usage: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                if let usage = model.snapshot.usage {
-                    Text("TODAY").font(.caption2).foregroundStyle(.secondary)
-                    Text(usage.today().map { EcosystemUsage.displayMoney($0.value) } ?? "—")
-                        .font(.system(size: 34, weight: .semibold, design: .rounded)).monospacedDigit()
-                        .lineLimit(1).minimumScaleFactor(0.55).contentTransition(.numericText())
-                    Text("Value at list rates · USD").font(.caption2).foregroundStyle(.secondary)
-                    HStack(alignment: .bottom, spacing: 4) {
-                        let week = usage.weekWindow()
-                        let peak = max(1, week.filter { !$0.locked }.map(\.value).max() ?? 1)
-                        ForEach(week) { day in
-                            RoundedRectangle(cornerRadius: 3).fill(Color("AccentColor").gradient)
-                                .frame(height: max(3, CGFloat(day.locked ? 0 : day.value) / CGFloat(peak) * 42))
-                                .opacity(day.locked ? 0.15 : 1)
-                        }
-                    }.frame(height: 42).accessibilityHidden(true)
-                    HStack { Text("7 days"); Spacer(); Text(usage.weekTotal().map(EcosystemUsage.displayMoney) ?? "—").monospacedDigit() }.font(.caption)
-                    Label("\(usage.streak) day streak", systemImage: "flame.fill").font(.caption).foregroundStyle(Color("AccentColor"))
-                    Text(usage.scope).font(.caption2).foregroundStyle(.secondary)
-                    Text(usage.updatedAt, style: .relative).font(.caption2).foregroundStyle(.secondary)
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Your work, at a glance").font(.headline)
-                        Text("Sync usage and projects from tokenstat on your iPhone.").font(.caption2).foregroundStyle(.secondary)
-                        Button("Sync from iPhone") { model.refresh() }.font(.caption).buttonStyle(.bordered).disabled(model.refreshing)
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    heading("Activity")
+                    HStack(spacing: 6) {
+                        periodButton("Today", selected: !week) { week = false }
+                        periodButton("Week", selected: week) { week = true }
                     }
-                }
-                if let message = model.message { Text(message).font(.caption2).foregroundStyle(.secondary) }
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 2).privacySensitive()
+                    if let usage = model.snapshot.usage {
+                        let value = week ? usage.weekTotal(at: context.date) : usage.today(at: context.date)?.value
+                        Text(value.map(EcosystemUsage.displayMoney) ?? "—")
+                            .font(.system(size: 34, weight: .semibold, design: .rounded)).monospacedDigit()
+                            .lineLimit(1).minimumScaleFactor(0.55).contentTransition(.numericText())
+                        Text("Value at list rates").font(.caption2).foregroundStyle(.secondary)
+                        HStack(alignment: .bottom, spacing: 4) {
+                            let days = usage.weekWindow(at: context.date)
+                            let peak = max(1, days.filter { !$0.locked }.map(\.value).max() ?? 1)
+                            ForEach(days) { day in
+                                RoundedRectangle(cornerRadius: 3).fill(accent.gradient)
+                                    .frame(height: max(3, CGFloat(day.locked ? 0 : day.value) / CGFloat(peak) * 42))
+                                    .opacity(day.locked ? 0.15 : 1)
+                            }
+                        }.frame(height: 42).accessibilityHidden(true)
+                        HStack { Text(week ? "Today" : "7 days"); Spacer()
+                            Text((week ? usage.today(at: context.date)?.value : usage.weekTotal(at: context.date)).map(EcosystemUsage.displayMoney) ?? "—")
+                                .monospacedDigit()
+                        }.font(.caption)
+                        Text(usage.scope).font(.caption2).foregroundStyle(.secondary)
+                        Text(usage.updatedAt, style: .relative).font(.caption2).foregroundStyle(.secondary)
+                    } else {
+                        Text("Open tokenstat on your iPhone to sync your activity.").font(.caption).foregroundStyle(.secondary)
+                        Button("Sync from iPhone") { model.refresh() }.buttonStyle(.bordered).disabled(model.refreshing)
+                    }
+                    message
+                }.frame(maxWidth: .infinity, alignment: .leading).privacySensitive()
+            }
         }
     }
 
-    private var projects: some View {
-        List {
-            if model.snapshot.projects.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Projects", systemImage: "folder.fill").font(.headline)
-                    Text("Visit a project on your iPhone to keep it within reach here.").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            ForEach(model.snapshot.projects) { project in
-                Button { model.projectID = project.id } label: {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Label(project.name, systemImage: "folder.fill").font(.headline).lineLimit(2)
-                        Text(project.host).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+    private func periodButton(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button { withAnimation(reduceMotion ? nil : .snappy(duration: 0.2), action) } label: {
+            Text(title).font(.caption.weight(.semibold)).frame(maxWidth: .infinity).frame(height: 36)
+                .background(selected ? accent.opacity(0.24) : .white.opacity(0.07), in: Capsule())
+                .foregroundStyle(selected ? accent : .primary)
+        }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var limits: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    heading("Plan limits")
+                    if (model.snapshot.limits ?? []).isEmpty {
+                        Text("Enable Share with my devices in Plan limits on your computer, then refresh on your iPhone.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                }.privacySensitive()
+                    ForEach(model.snapshot.limits ?? []) { provider in
+                        TokenstatLimitReadingView(provider: provider, date: context.date, accent: accent, maximumWindows: 8)
+                            .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 15))
+                    }
+                    if model.omittedProviders > 0 { Text("More providers on your iPhone.").font(.caption2).foregroundStyle(.secondary) }
+                    message
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+
+    @ViewBuilder private var message: some View {
+        if let message = model.message { Text(message).font(.caption2).foregroundStyle(.secondary) }
     }
 
     private var requests: some View {
         TimelineView(.periodic(from: .now, by: 10)) { _ in
             List {
+                heading("Requests").listRowBackground(Color.clear)
                 if model.approvals.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Requests", systemImage: "hand.raised.fill").font(.headline)
-                        Text("Pending agent requests from your connected hosts appear here. Refresh to check.")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
+                    Text("No pending requests. Refresh to check your connected computers.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 ForEach(model.approvals) { approval in
                     Button { model.selectedApproval = approval } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(approval.verb).font(.headline).lineLimit(2)
-                            Text(approval.host).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                            Text(approval.preview).font(.caption2).lineLimit(2)
+                        HStack(alignment: .top, spacing: 8) {
+                            TokenstatWidgetMark(size: 17).foregroundStyle(accent)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(approval.verb).font(.headline).lineLimit(2)
+                                Text(approval.host).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                Text(approval.preview).font(.caption2).lineLimit(2)
+                            }
                         }
-                    }.privacySensitive()
+                    }.privacySensitive().listRowBackground(accent.opacity(0.10))
                 }
-                if model.omittedApprovals > 0 {
-                    Text("Review more requests on your iPhone.").font(.caption2).foregroundStyle(.secondary)
-                }
-                if let message = model.message { Text(message).font(.caption2).foregroundStyle(.secondary) }
+                if model.omittedApprovals > 0 { Text("Review more requests on your iPhone.").font(.caption2).foregroundStyle(.secondary) }
+                message
             }
         }
     }

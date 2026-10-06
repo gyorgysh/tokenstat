@@ -32,7 +32,7 @@ unfinished row in [PARITY.md](PARITY.md).
 Build both signed distribution formats with:
 
 ```bash
-scripts/build-android-release.sh dist/android/1.3.0-140
+scripts/build-android-release.sh dist/android/1.3.0-141
 ```
 
 The script loads the existing local Play upload-key environment and produces a
@@ -41,11 +41,15 @@ Play signs delivered APKs with its app-signing key; a locally upload-key-signed
 APK cannot update those installs when the certificates differ. Neither file is
 uploaded by this script.
 
+The widget gallery has three entries: **Usage at a Glance**, **Plan Limits**, and **Quick Launch**. Usage can shrink to a compact two-by-one layout; wider/taller cards show the weekly chart. Quick Launch can shrink to a one-cell tokenstat icon, expand to a Workspaces link, or show Home/Workspaces/Insights/Devices. Cell sizes ultimately depend on the launcher.
+
+Plan Limits uses shared provider readings from the account. Enable **Share with my devices** in Plan limits on the computer, then refresh. Its configuration button (or launcher widget edit action) chooses any one or several available providers and Circles/Bars; All available providers includes future supported providers automatically. Circles show the highest active window; bars show the selected windows and reset details. Observation dates, stale markers and expired-window prompts keep cached percentages honest. Provider selections are bound to their account; sign-out clears readings and rejects late publications. The allowance refresh runs even if the activity calendar is unavailable. Native widget configuration is separate from app navigation.
+
 Usage at a Glance is a resizable home-screen widget with automatic light/dark
 appearance, Today/Last 7 Days switching, a weekly chart on wide and tall layouts and
 refresh through WorkManager while the app is closed. Values are US dollars at
 list rates across the account. Its backup-excluded snapshot holds only a hashed
-owner and daily aggregates; sign-out clears it and rejects late refreshes. The
+owner, daily aggregates and dated provider percentages; sign-out clears it and rejects late refreshes. The
 sign-out block survives process restarts until a foreground account verification. An
 incomplete or locked week stays unavailable. Cached data retains its fetch time.
 This is tokenstat's usage heatmap, not the device calendar: no Calendar Provider
@@ -81,3 +85,5 @@ signed-out review devices and cancellation without network requests.
 `SystemIntegrationTest` checks real AppSearch publication/removal, account and
 revocation boundaries, cold Direct Share, one-time draft consumption, invalid
 shares and denied shortcut services on an isolated emulator.
+
+To verify system integrations, add all three widgets and resize them down/up; configure one/multiple providers, Circles/Bars, and repeat in light/dark with larger text. Try signed-out/offline refreshes and expired quotas. Pin a project from its row, use the Workspaces Quick Settings tile, share text into a project and confirm it stays an unsent draft, and long-press a response's copy control to share it. Search discovery and AppFunctions depend on the device/system assistant; unavailable services remain optional. No Calendar Provider permission, Wear OS app or run-progress notification is required.

@@ -111,6 +111,49 @@ struct EcosystemProject: Codable, Hashable, Sendable, Identifiable {
     var host: String
 }
 
+/// Dated quota readings only. Never copy provider credentials or response text.
+struct EcosystemLimitWindow: Codable, Hashable, Sendable, Identifiable {
+    var label: String
+    var percent: Double
+    var resetsAt: Date?
+    var id: String { label }
+    var fraction: Double { min(1, max(0, percent / 100)) }
+    func expired(at date: Date) -> Bool { resetsAt.map { $0 <= date } ?? false }
+    var isValid: Bool {
+        !label.isEmpty && label.utf8.count <= 160 && percent.isFinite && (0...10_000).contains(percent)
+            && (resetsAt?.timeIntervalSince1970.isFinite ?? true)
+    }
+}
+
+struct EcosystemLimitProvider: Codable, Hashable, Sendable, Identifiable {
+    var source: String
+    var observedAt: Date
+    var stale: Bool
+    var windows: [EcosystemLimitWindow]
+    func peak(at date: Date) -> EcosystemLimitWindow? { windows.filter { !$0.expired(at: date) }.max { $0.percent < $1.percent } }
+    var id: String { source }
+    var name: String {
+        switch source {
+        case "claude_code": "Claude"
+        case "codex": "Codex"
+        case "cursor": "Cursor"
+        case "grok": "Grok"
+        case "antigravity": "Antigravity"
+        case "opencode": "OpenCode"
+        default: source.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+    func isStale(at date: Date) -> Bool {
+        stale || date.timeIntervalSince(observedAt) > 15 * 60 || observedAt > date.addingTimeInterval(5 * 60)
+    }
+    var isValid: Bool {
+        !source.isEmpty && source.utf8.count <= 64 && source.utf8.allSatisfy { (97...122).contains($0) || (48...57).contains($0) || $0 == 95 || $0 == 45 }
+            && observedAt.timeIntervalSince1970.isFinite
+            && observedAt.timeIntervalSince1970 > 0 && windows.count <= 8
+            && Set(windows.map(\.id)).count == windows.count && windows.allSatisfy(\.isValid)
+    }
+}
+
 struct EcosystemUsage: Codable, Equatable, Sendable {
     var updatedAt: Date
     var scope: String
@@ -174,6 +217,7 @@ struct EcosystemSnapshot: Codable, Equatable, Sendable {
     var usage: EcosystemUsage?
     var projects: [EcosystemProject] = []
     var refreshFailed: Bool?
+    var limits: [EcosystemLimitProvider]?
 
     mutating func replaceProjects(_ newProjects: [EcosystemProject], from source: EcosystemProjectSource) {
         projects.removeAll { source.contains($0.id) }
@@ -184,9 +228,11 @@ struct EcosystemSnapshot: Codable, Equatable, Sendable {
     var isValid: Bool {
         guard version == 1, projects.count <= 24,
               Set(projects.map(\.id)).count == projects.count else { return false }
-        guard let owner else { return usage == nil && projects.isEmpty }
+        guard let owner else { return usage == nil && projects.isEmpty && limits?.isEmpty != false }
         guard !owner.isEmpty, owner.utf8.count <= 2048,
               projects.allSatisfy({ !$0.id.isEmpty && !$0.name.isEmpty && $0.id.utf8.count <= 2048 && $0.name.utf8.count <= 512 && $0.host.utf8.count <= 512 }) else { return false }
+        guard (limits?.count ?? 0) <= 32, Set(limits?.map(\.source) ?? []).count == (limits?.count ?? 0),
+              limits?.allSatisfy(\.isValid) ?? true else { return false }
         guard let usage else { return true }
         return usage.updatedAt.timeIntervalSince1970.isFinite && usage.streak >= 0 && usage.streak <= 36600
             && ["All devices", "This device"].contains(usage.scope) && usage.days.count <= 35
@@ -205,13 +251,18 @@ struct EcosystemSnapshot: Codable, Equatable, Sendable {
         }
         return Self(owner: "preview", usage: EcosystemUsage(updatedAt: Date(), scope: "All devices", days: days, streak: 6),
                     projects: [EcosystemProject(id: "preview-1", name: "tokenstat", host: "MacBook Pro"),
-                               EcosystemProject(id: "preview-2", name: "Studio", host: "Mac mini")])
+                               EcosystemProject(id: "preview-2", name: "Studio", host: "Mac mini")],
+                    limits: ["claude_code", "codex", "cursor"].enumerated().map { index, source in
+                        EcosystemLimitProvider(source: source, observedAt: Date().addingTimeInterval(-180), stale: false,
+                            windows: [.init(label: "5-hour", percent: Double(35 + index * 18), resetsAt: Date().addingTimeInterval(7200)),
+                                      .init(label: "Weekly", percent: Double(58 + index * 12), resetsAt: Date().addingTimeInterval(172800))])
+                    })
     }
 }
 
 struct EcosystemSnapshotStore {
     static let appGroup = "group.ai.tokenstat.tokenstat"
-    static let widgetKinds = ["ai.tokenstat.usage", "ai.tokenstat.launcher"]
+    static let widgetKinds = ["ai.tokenstat.usage", "ai.tokenstat.launcher", "ai.tokenstat.limits"]
     let directory: URL?
 
     static var defaultDirectory: URL? {

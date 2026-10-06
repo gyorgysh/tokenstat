@@ -1,0 +1,5 @@
+<?xml version="1.0" ?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/launcher_root" android:layout_width="match_parent" android:layout_height="match_parent" android:padding="8dp" android:background="@drawable/widget_background" android:gravity="center_vertical">
+    <ImageView android:layout_width="32dp" android:layout_height="32dp" android:src="@drawable/ic_notification" android:tint="@color/ts_widget_accent" android:contentDescription="@string/shortcut_workspaces"/>
+    <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:paddingStart="8dp" android:paddingEnd="0dp" android:text="@string/shortcut_workspaces" android:textColor="@color/ts_widget_text" android:textSize="16sp" android:textStyle="bold" android:fontFamily="@font/widget_manrope" android:maxLines="1" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="10sp" android:autoSizeMaxTextSize="16sp"/>
+</LinearLayout>

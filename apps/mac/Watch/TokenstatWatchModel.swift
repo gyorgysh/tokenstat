@@ -7,13 +7,14 @@ import WidgetKit
 @MainActor @Observable
 final class TokenstatWatchModel: NSObject, WCSessionDelegate {
     static let shared = TokenstatWatchModel()
-    private(set) var snapshot = EcosystemSnapshotStore().read()
+    private(set) var snapshot = EcosystemSnapshot.empty
     private(set) var refreshing = false
     private(set) var message: String?
     var destination: WatchScreen = .usage
     var projectID: String?
     var selectedApproval: EcosystemApproval?
     var approvals: [EcosystemApproval] { (lastPacket?.approvals ?? []).filter { $0.expiresAt > Date() } }
+    var omittedProviders: Int { lastPacket?.omittedProviders ?? 0 }
     var omittedApprovals: Int { lastPacket?.omittedApprovals ?? 0 }
     @ObservationIgnored private var lastPacket: EcosystemWatchPacket?
     @ObservationIgnored private var request: UUID?
@@ -23,6 +24,7 @@ final class TokenstatWatchModel: NSObject, WCSessionDelegate {
     override private init() {
         super.init()
         lastPacket = EcosystemWatchPacketStore().read()
+        snapshot = lastPacket?.snapshot ?? .empty
     }
 
     func activate() {

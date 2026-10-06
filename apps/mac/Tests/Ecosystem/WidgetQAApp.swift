@@ -33,6 +33,9 @@ import ActivityKit
 
 @MainActor enum EcosystemPublisher {
     static var lease: EcosystemPublicationLease? { .init(owner: "preview", generation: UUID()) }
+    static func refreshLimitsOnly() async throws {
+        try await refresh()
+    }
     static func refresh() async throws {
         try await Task.sleep(for: .milliseconds(200))
         var snapshot = EcosystemSnapshotStore().read()

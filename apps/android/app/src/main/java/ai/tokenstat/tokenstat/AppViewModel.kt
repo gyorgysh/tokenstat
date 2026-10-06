@@ -319,6 +319,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         runCatching { limits.await() }
             .onSuccess {
+                if (widgetLease != null) UsageWidgetStore.publishLimits(getApplication(), widgetLease, it)
                 mutableState.value = mutableState.value.copy(
                     limits = it as? JsonArray ?: JsonArray(emptyList()),
                     limitsError = null,
@@ -326,6 +327,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             .onFailure {
                 if (it is CancellationException) throw it
+                if (widgetLease != null) UsageWidgetStore.failedLimits(getApplication(), widgetLease)
                 mutableState.value = mutableState.value.copy(limitsError = it.message)
             }
     }

@@ -21,14 +21,14 @@ object UsageWidgetStore {
     @Synchronized fun lease(): UsageLease? = session.lease()
     @Synchronized fun read(context: Context): UsageSnapshot? = runCatching {
         file(context).openRead().use {
-            val buffer = ByteArray(32 * 1024 + 1)
+            val buffer = ByteArray(128 * 1024 + 1)
             var count = 0
             while (count < buffer.size) {
                 val read = it.read(buffer, count, buffer.size - count)
                 if (read < 0) break
                 count += read
             }
-            require(count <= 32 * 1024)
+            require(count <= 128 * 1024)
             json.decodeFromString<UsageSnapshot>(buffer.copyOf(count).toString(Charsets.UTF_8)).takeIf { snapshot ->
                 snapshot.valid && !blocked(context) && session.acceptsCachedOwner(snapshot.owner)
             }
@@ -76,7 +76,22 @@ object UsageWidgetStore {
         val existing = read(context)
         if (existing?.owner == lease.owner && existing.updatedAt != null && snapshot.updatedAt != null
             && snapshot.updatedAt < existing.updatedAt) return
-        write(context, snapshot)
+        write(context, snapshot.copy(limits = existing?.limits.orEmpty()))
+    }
+    @Synchronized fun publishLimits(context: Context, lease: UsageLease, readings: kotlinx.serialization.json.JsonElement) {
+        if (!session.current(lease)) return
+        val providers = QuotaProvider.parse(readings) ?: run { failedLimits(context, lease); return }
+        val snapshot = read(context)?.takeIf { it.owner == lease.owner } ?: return
+        val previous = snapshot.limits.associateBy { it.source }
+        write(context, snapshot.copy(limits = providers.map { provider ->
+            previous[provider.source]?.takeIf { it.observedAt > provider.observedAt } ?: provider
+        }))
+    }
+    @Synchronized fun failedLimits(context: Context, lease: UsageLease) {
+        if (!session.current(lease)) return
+        read(context)?.takeIf { it.owner == lease.owner }?.let { snapshot ->
+            write(context, snapshot.copy(limits = snapshot.limits.map { it.copy(stale = true) }))
+        }
     }
     @Synchronized fun failed(context: Context, lease: UsageLease?, observedEpoch: Long? = null) {
         if (observedEpoch != null && observedEpoch != session.epoch) return
@@ -84,9 +99,11 @@ object UsageWidgetStore {
         read(context)?.takeIf { lease == null || it.owner == lease.owner }?.let { write(context, it.copy(refreshFailed = true)) }
     }
     private fun write(context: Context, snapshot: UsageSnapshot): Boolean {
+        val encoded = json.encodeToString(snapshot).toByteArray()
+        if (!snapshot.valid || encoded.size > 128 * 1024) return false
         val atomic = file(context)
         val output = runCatching { atomic.startWrite() }.getOrNull() ?: return false
-        try { output.write(json.encodeToString(snapshot).toByteArray()); atomic.finishWrite(output) }
+        try { output.write(encoded); atomic.finishWrite(output) }
         catch (error: Exception) { atomic.failWrite(output); return false }
         UsageWidgetProvider.updateAll(context)
         return true

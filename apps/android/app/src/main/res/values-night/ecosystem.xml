@@ -5,4 +5,6 @@
     <color name="ts_widget_surface">#100E1A</color>
     <color name="ts_widget_text">#FFFFFFFF</color>
     <color name="ts_widget_muted">#99FFFFFF</color>
+    <color name="ts_widget_warning">#FFB74D</color>
+    <color name="ts_widget_danger">#FF7B7B</color>
 </resources>

@@ -1,0 +1,2 @@
+<?xml version="1.0" ?>
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android" android:initialLayout="@layout/launcher_widget_icon" android:description="@string/widget_launcher_description" android:minWidth="48dp" android:minHeight="48dp" android:minResizeWidth="48dp" android:minResizeHeight="48dp" android:resizeMode="horizontal|vertical" android:widgetCategory="home_screen" android:updatePeriodMillis="1800000" android:targetCellWidth="1" android:targetCellHeight="1" android:previewLayout="@layout/launcher_widget_icon"/>

@@ -47,6 +47,17 @@ import Foundation
         assert(trimmed.approvals!.count > 0 && trimmed.approvals!.first == bulky.first)
         assert(trimmed.omittedApprovals == 12 - trimmed.approvals!.count)
         assert(bulkyPacket.encodedForTransfer(maximumBytes: 1) == nil)
+        var providersSnapshot = EcosystemSnapshot.preview
+        providersSnapshot.limits = (0..<32).map { index in
+            EcosystemLimitProvider(source: "vendor_\(index)", observedAt: time, stale: false,
+                windows: (0..<8).map { .init(label: "window-\($0)-" + String(repeating: "x", count: 140), percent: 95, resetsAt: time.addingTimeInterval(60)) })
+        }
+        let quotaPacket = EcosystemWatchPacket(installation: installation, revision: 14, sentAt: time, snapshot: providersSnapshot, approvals: [approval])
+        let quotaTrimmed = EcosystemWatchPacket.decode(quotaPacket.encodedForTransfer(maximumBytes: 8 * 1024)!)!
+        assert(quotaTrimmed.approvals == [approval]) // Quotas cannot displace urgent review requests.
+        assert((quotaTrimmed.omittedProviders ?? 0) > 0)
+        assert((quotaTrimmed.omittedProviders ?? 0) + (quotaTrimmed.snapshot.limits?.count ?? 0) == 32)
+
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = EcosystemWatchPacketStore(directory: directory)

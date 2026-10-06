@@ -561,6 +561,7 @@ final class HomeModel {
     /// These queries belong to the limits section. Archive plan usage can
     /// publish before a slower provider reply, without delaying the calendar.
     func loadPlanLimits(force: Bool = true) async {
+        let ecosystemLease = EcosystemPublisher.lease
         if !force, let last = lastLimitsLoadedAt, Date().timeIntervalSince(last) < 60 { return }
         guard !layout.hidden.contains(.limits), !Task.isCancelled, !isLoadingLimits else { return }
         limitsGeneration &+= 1
@@ -580,6 +581,7 @@ final class HomeModel {
             guard current() else { return }
             let skip = Set(settings.skip)
             planLimits = all.filter { !skip.contains($0.source) }
+            EcosystemPublisher.publish(limits: planLimits, lease: ecosystemLease)
             hasLoadedPlanLimits = true
             lastLimitsLoadedAt = Date()
             planLimitsError = nil

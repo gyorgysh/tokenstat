@@ -158,7 +158,7 @@ class UsageWidgetLayoutTest {
             "stress" to typical.copy(days = typical.days.map { it.copy(value = 1_234_567_890_000L) }))
         val output = File(base.filesDir, "widget-layouts").apply { mkdirs() }
         instrumentation.runOnMainSync {
-            for (week in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) for (dark in listOf(false, true)) for ((name, snapshot) in states) for ((width, height) in listOf(160 to 170, 280 to 170, 360 to 170, 160 to 320, 360 to 360)) {
+            for (week in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) for (dark in listOf(false, true)) for ((name, snapshot) in states) for ((width, height) in listOf(110 to 64, 160 to 64, 160 to 170, 280 to 170, 360 to 170, 160 to 320, 360 to 360)) {
                 val config = Configuration(base.resources.configuration).apply {
                     this.fontScale = fontScale
                     uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
@@ -166,7 +166,7 @@ class UsageWidgetLayoutTest {
                 }
                 val context = base.createConfigurationContext(config)
                 val parent = FrameLayout(context)
-                val view = UsageWidgetProvider.render(context, 1, week, snapshot, width >= 280, height >= 280).apply(context, parent)
+                val view = UsageWidgetProvider.render(context, 1, week, snapshot, width >= 280, height >= 280, compact = height < 130).apply(context, parent)
                 val density = context.resources.displayMetrics.density
                 val w = (width * density).toInt(); val h = (height * density).toInt()
                 view.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY))
@@ -176,7 +176,7 @@ class UsageWidgetLayoutTest {
                 assertTrue("Amount must fit $name $width $dark", value.layout.getEllipsisCount(0) == 0 && value.layout.getLineWidth(0) <= value.width + 1)
                 assertEquals(context.getColor(R.color.ts_widget_text), value.currentTextColor)
                 val brand = view.findViewById<TextView>(R.id.widget_brand_label)
-                assertTrue("Brand must fit", brand.layout.getLineWidth(0) <= brand.width - brand.paddingStart - brand.paddingEnd + 1)
+                if (brand.visibility == View.VISIBLE) assertTrue("Brand must fit", brand.layout.getLineWidth(0) <= brand.width - brand.paddingStart - brand.paddingEnd + 1)
                 val period = view.findViewById<TextView>(R.id.widget_period)
                 assertTrue("Period must fit $width $fontScale $week", period.layout.getLineWidth(0) <= period.width - period.paddingStart - period.paddingEnd + 1)
                 val status = view.findViewById<TextView>(R.id.widget_status)

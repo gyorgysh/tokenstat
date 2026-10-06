@@ -199,19 +199,20 @@ enum EcosystemTint: String, AppEnum {
 
 struct TokenstatUsageConfiguration: WidgetConfigurationIntent {
     static var title: LocalizedStringResource = "Usage at a Glance"
-    static var description = IntentDescription("Choose a period and appearance. Data follows the scope selected on tokenstat Home.")
+    static var description = IntentDescription("Choose a period and full-color style. Clear and Tinted follow your Home Screen appearance. Data follows tokenstat Home.")
     @Parameter(title: "Period", default: .today) var period: EcosystemPeriod
-    @Parameter(title: "Appearance", default: .automatic) var appearance: EcosystemAppearance
-    @Parameter(title: "Accent tint", default: .brand) var tint: EcosystemTint
+    @Parameter(title: "Full-color style", default: .automatic) var appearance: EcosystemAppearance
+    @Parameter(title: "Full-color accent", default: .brand) var tint: EcosystemTint
     static var parameterSummary: some ParameterSummary { Summary { \.$period; \.$appearance; \.$tint } }
 }
 
 struct TokenstatLauncherConfiguration: WidgetConfigurationIntent {
     static var title: LocalizedStringResource = "tokenstat Quick Access"
+    static var description = IntentDescription("Clear and Tinted follow your Home Screen appearance. Style and accent apply to full-color widgets.")
     @Parameter(title: "Screen", default: .workspaces) var screen: EcosystemScreen
     @Parameter(title: "Favorite project") var project: TokenstatProjectEntity?
-    @Parameter(title: "Appearance", default: .automatic) var appearance: EcosystemAppearance
-    @Parameter(title: "Accent tint", default: .brand) var tint: EcosystemTint
+    @Parameter(title: "Full-color style", default: .automatic) var appearance: EcosystemAppearance
+    @Parameter(title: "Full-color accent", default: .brand) var tint: EcosystemTint
     static var parameterSummary: some ParameterSummary { Summary { \.$screen; \.$project; \.$appearance; \.$tint } }
 }
 
@@ -226,6 +227,26 @@ struct RefreshTokenstatIntent: AppIntent {
     @MainActor func perform() async throws -> some IntentResult {
         #if !TOKENSTAT_WIDGET_EXTENSION
         try await EcosystemPublisher.refresh()
+        #else
+        // This intent belongs in the containing app; never report a no-op as a refresh.
+        try unavailableWidgetRefresh()
+        #endif
+        return .result()
+    }
+}
+
+struct RefreshTokenstatLimitsIntent: AppIntent {
+    static var title: LocalizedStringResource = "Refresh tokenstat Plan Limits"
+    static var parameterSummary: some ParameterSummary { Summary("Refresh plan limits") }
+    static var description = IntentDescription("Fetch shared provider allowances independently of activity-calendar access.")
+    static var authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
+    @available(iOS 26.0, macOS 26.0, *) static var supportedModes: IntentModes { [.background, .foreground(.dynamic)] }
+    #if compiler(>=6.4)
+    @available(iOS 27.0, macOS 27.0, *) static var allowedExecutionTargets: IntentExecutionTargets { .main }
+    #endif
+    @MainActor func perform() async throws -> some IntentResult {
+        #if !TOKENSTAT_WIDGET_EXTENSION
+        try await EcosystemPublisher.refreshLimitsOnly()
         #else
         // This intent belongs in the containing app; never report a no-op as a refresh.
         try unavailableWidgetRefresh()
@@ -279,6 +300,7 @@ struct GetTokenstatStreakIntent: AppIntent {
 
 #if !TOKENSTAT_WIDGET_EXTENSION
 extension RefreshTokenstatIntent: ForegroundContinuableIntent {}
+extension RefreshTokenstatLimitsIntent: ForegroundContinuableIntent {}
 extension GetTokenstatUsageIntent: ForegroundContinuableIntent {}
 #endif
 

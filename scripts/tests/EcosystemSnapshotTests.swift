@@ -84,6 +84,24 @@ import Foundation
         invalid = .preview; invalid.owner = nil
         assert(!invalid.isValid)
 
+        let quota = EcosystemLimitProvider(source: "future_vendor", observedAt: now, stale: false, windows: [
+            .init(label: "weekly", percent: 104, resetsAt: now.addingTimeInterval(60)),
+            .init(label: "monthly", percent: 20)])
+        assert(quota.isValid && quota.windows[0].fraction == 1)
+        assert(quota.peak(at: now)?.percent == 104)
+        assert(quota.peak(at: now.addingTimeInterval(60))?.percent == 20) // Reset is unknown, never zero.
+        assert(quota.isStale(at: now.addingTimeInterval(901)))
+        assert(!EcosystemLimitWindow(label: "weekly", percent: .nan).isValid)
+        assert(!EcosystemLimitWindow(label: "weekly", percent: -.infinity).isValid)
+        var quotaSnapshot = EcosystemSnapshot(owner: owner, limits: [quota])
+        assert(quotaSnapshot.isValid)
+        quotaSnapshot.limits?.append(quota)
+        assert(!quotaSnapshot.isValid)
+        quotaSnapshot = .init(owner: nil, limits: [quota])
+        assert(!quotaSnapshot.isValid)
+        let oldSnapshot = try JSONDecoder().decode(EcosystemSnapshot.self, from: Data("{\"version\":1,\"owner\":\"preview\",\"projects\":[]}".utf8))
+        assert(oldSnapshot.isValid && oldSnapshot.limits == nil)
+
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = EcosystemSnapshotStore(directory: directory)
