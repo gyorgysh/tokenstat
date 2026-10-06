@@ -2516,7 +2516,6 @@ mod tests {
         path
     }
 
-    #[cfg(unix)]
     fn scratch(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("tokenstat-upd-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
