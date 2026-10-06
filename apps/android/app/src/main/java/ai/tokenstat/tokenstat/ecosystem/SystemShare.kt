@@ -12,7 +12,7 @@ object SystemShare {
     data class Draft(val text: String, val projectId: String?, val owner: String?, val sequence: Long)
     private val pending = MutableStateFlow<Draft?>(null)
     val draft = pending.asStateFlow()
-    fun offer(intent: Intent?): String? {
+    @Synchronized fun offer(intent: Intent?): String? {
         if (intent?.action != Intent.ACTION_SEND || intent.type !in setOf("text/plain", "text/uri-list")) return null
         val text = runCatching { intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() }.getOrNull()
             ?.takeIf { it.isNotBlank() && it.length <= 100_000 } ?: return null
@@ -24,8 +24,13 @@ object SystemShare {
         pending.value = Draft(text, targetId, SystemProjects.find(targetId.orEmpty())?.owner ?: SystemProjects.owner, System.nanoTime())
         return targetId?.let { "project.$it" } ?: "workspaces"
     }
-    fun take(value: Draft) = pending.compareAndSet(value, null)
-    fun clear() { pending.value = null }
+    @Synchronized fun take(value: Draft) = pending.compareAndSet(value, null)
+    /** Keep the incoming text available when bounded composer storage refuses it. */
+    @Synchronized fun consume(value: Draft, store: (String) -> Boolean): Boolean {
+        if (pending.value != value || !store(value.text)) return false
+        return pending.compareAndSet(value, null)
+    }
+    @Synchronized fun clear() { pending.value = null }
     fun send(context: Context, text: String) {
         if (text.isBlank()) return
         runCatching {

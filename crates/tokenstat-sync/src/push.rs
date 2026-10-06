@@ -179,8 +179,17 @@ pub fn unregister_device(token: &str) -> Result<(), ProfileError> {
 
 /// An opaque conversation key; work names and transcript content never travel in a push.
 pub fn activity_key(conversation: &str) -> String {
+    work_activity_key("chat", conversation)
+}
+
+/// Terminals have one run per unique PTY id, with revision zero.
+pub fn terminal_activity_key(terminal: &str) -> String {
+    work_activity_key("terminal", terminal)
+}
+
+fn work_activity_key(kind: &str, id: &str) -> String {
     use sha2::{Digest, Sha256};
-    Sha256::digest(format!("chat:{conversation}"))
+    Sha256::digest(format!("{kind}:{id}"))
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
@@ -241,7 +250,8 @@ pub fn unregister_activity(token: &str) -> Result<(), ProfileError> {
     .map(|_| ())
 }
 
-// Credentials are captured when work is queued; a later account switch cannot reattribute it.
+// Credentials are captured once when a run starts, before its first status.
+#[derive(Clone)]
 struct ActivityUpdate {
     host: String,
     bearer: String,
@@ -249,6 +259,61 @@ struct ActivityUpdate {
     key: String,
     revision: u64,
     phase: &'static str,
+}
+
+fn activity_runs() -> &'static std::sync::Mutex<std::collections::HashMap<String, ActivityUpdate>> {
+    static RUNS: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, ActivityUpdate>>,
+    > = std::sync::OnceLock::new();
+    RUNS.get_or_init(Default::default)
+}
+
+/// Bind this turn's status to its original account. Signing in or changing
+/// accounts while it runs must never subscribe the new account to old work.
+pub fn begin_activity(conversation: &str, revision: u64) {
+    begin_work_activity(activity_key(conversation), revision);
+}
+
+/// A failed launch has no drainer to retire its account binding.
+pub fn abandon_activity(conversation: &str, revision: u64) {
+    let key = activity_key(conversation);
+    let mut runs = activity_runs()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if runs.get(&key).is_some_and(|run| run.revision == revision) {
+        runs.remove(&key);
+    }
+}
+
+pub fn begin_terminal_activity(terminal: &str) -> bool {
+    begin_work_activity(terminal_activity_key(terminal), 0)
+}
+
+fn begin_work_activity(key: String, revision: u64) -> bool {
+    let update = (|| {
+        let host = resolve_api_host(None).ok()?;
+        let bearer = keychain::load_token(&host).ok()??;
+        Some(ActivityUpdate {
+            host,
+            bearer,
+            machine: crate::config::ensure_machine_id().ok()?,
+            key: key.clone(),
+            revision,
+            phase: "working",
+        })
+    })();
+    let mut runs = activity_runs()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    // A signed-out launch deliberately clears any old binding. Later status
+    // calls cannot resolve credentials for an account that arrived mid-run.
+    runs.remove(&key);
+    if let Some(update) = update {
+        runs.insert(key, update);
+        true
+    } else {
+        false
+    }
 }
 impl ActivityUpdate {
     fn terminal(&self) -> bool {
@@ -286,16 +351,41 @@ struct ActivityQueue {
 
 /// A bounded, best-effort status path independent of notification preferences/presence.
 pub fn activity_in_background(conversation: &str, revision: u64, phase: &'static str) {
+    work_activity_in_background(&activity_key(conversation), revision, phase);
+}
+
+pub fn terminal_activity_in_background(terminal: &str, phase: &'static str) {
+    work_activity_in_background(&terminal_activity_key(terminal), 0, phase);
+}
+
+fn take_activity_update(
+    runs: &mut std::collections::HashMap<String, ActivityUpdate>,
+    key: &str,
+    revision: u64,
+    phase: &'static str,
+) -> Option<ActivityUpdate> {
+    let mut update = runs
+        .get(key)
+        .filter(|run| run.revision == revision)?
+        .clone();
+    update.phase = phase;
+    if update.terminal() {
+        // Late hooks/heartbeats can no longer revive this completed run.
+        runs.remove(key);
+    }
+    Some(update)
+}
+
+fn work_activity_in_background(key: &str, revision: u64, phase: &'static str) {
     if !matches!(phase, "working" | "waiting" | "done" | "failed" | "stopped") {
         return;
     }
-    let Ok(host) = resolve_api_host(None) else {
-        return;
-    };
-    let Ok(Some(bearer)) = keychain::load_token(&host) else {
-        return;
-    };
-    let Ok(machine) = crate::config::ensure_machine_id() else {
+    // Keep the run lock until enqueueing: a concurrent completion must not
+    // overtake an extracted heartbeat and let it arrive after the ending.
+    let mut runs = activity_runs()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(update) = take_activity_update(&mut runs, key, revision, phase) else {
         return;
     };
     static QUEUE: std::sync::OnceLock<std::sync::Arc<ActivityQueue>> = std::sync::OnceLock::new();
@@ -353,20 +443,13 @@ pub fn activity_in_background(conversation: &str, revision: u64, phase: &'static
             });
         queue
     });
-    let update = ActivityUpdate {
-        host,
-        bearer,
-        machine,
-        key: activity_key(conversation),
-        revision,
-        phase,
-    };
     let mut pending = queue
         .pending
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     queue_activity(&mut pending, update);
     drop(pending);
+    drop(runs);
     queue.changed.notify_one();
 }
 
@@ -469,6 +552,29 @@ mod tests {
             phase,
         }
     }
+
+    #[test]
+    fn activity_updates_keep_the_launch_account_and_reject_retired_runs() {
+        let mut runs = std::collections::HashMap::new();
+        runs.insert("chat".into(), activity_fixture("chat", "working"));
+        assert!(take_activity_update(&mut runs, "chat", 2, "working").is_none());
+        let waiting = take_activity_update(&mut runs, "chat", 1, "waiting").unwrap();
+        assert_eq!(waiting.bearer, "account-a");
+        let ending = take_activity_update(&mut runs, "chat", 1, "done").unwrap();
+        assert_eq!(ending.bearer, "account-a");
+        assert!(take_activity_update(&mut runs, "chat", 1, "waiting").is_none());
+        let mut next = activity_fixture("chat", "working");
+        next.bearer = "account-b".into();
+        next.revision = 2;
+        runs.insert("chat".into(), next);
+        assert!(take_activity_update(&mut runs, "chat", 1, "failed").is_none());
+        assert_eq!(
+            take_activity_update(&mut runs, "chat", 2, "working")
+                .unwrap()
+                .bearer,
+            "account-b"
+        );
+    }
     #[test]
     fn pending_activity_heartbeats_coalesce_without_regressing_completion() {
         let mut queue = std::collections::VecDeque::new();
@@ -505,6 +611,11 @@ mod tests {
         assert!(key.bytes().all(|b| b.is_ascii_hexdigit()));
         assert_eq!(key, activity_key("conversation-fixture"));
         assert_ne!(key, activity_key("another-conversation"));
+        assert_ne!(key, terminal_activity_key("conversation-fixture"));
+        assert_eq!(
+            terminal_activity_key("terminal"),
+            work_activity_key("terminal", "terminal")
+        );
         for (token, peer, key, revision, environment) in [
             ("", "peer", key.as_str(), "1", "sandbox"),
             ("not-a-token", "peer", key.as_str(), "1", "sandbox"),

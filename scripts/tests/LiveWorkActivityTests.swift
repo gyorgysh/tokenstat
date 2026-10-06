@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with LiveWorkActivity.swift.
+// Compile with LiveWorkActivity.swift and EcosystemSnapshot.swift.
 import Foundation
 
 @main struct LiveWorkActivityTests {

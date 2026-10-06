@@ -255,7 +255,7 @@ internal class UsageWidgetRefresh(
                 UsageWidgetStore.publish(context, lease, calendar as? JsonObject)
                 activitySucceeded = calendar is JsonNull || UsageSnapshot.calendar(lease.owner, calendar as JsonObject) != null
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { UsageWidgetStore.failed(context, lease, epoch) }
+            catch (_: Exception) { UsageWidgetStore.failed(context, lease) }
             // Missing activity access must not prevent an independent allowance refresh.
             try { UsageWidgetStore.publishLimits(context, lease, call("usage.limits", buildJsonObject {})) }
             catch (cancelled: CancellationException) { throw cancelled }
@@ -263,7 +263,11 @@ internal class UsageWidgetRefresh(
             if (activitySucceeded) ListenableWorker.Result.success() else ListenableWorker.Result.failure()
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) {
-            UsageWidgetStore.failed(context, lease, epoch)
+            // Verification may advance the epoch when a process first learns
+            // the account. The verified lease then owns the failure; the
+            // original epoch is only useful before an account was verified.
+            if (lease == null) UsageWidgetStore.failed(context, null, epoch)
+            else UsageWidgetStore.failed(context, lease)
             // A manual refresh reports its failure instead of silently retrying
             // for hours. The periodic task and next tap can try again.
             ListenableWorker.Result.failure()

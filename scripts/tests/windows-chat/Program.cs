@@ -460,8 +460,44 @@ Console.WriteLine("Windows diff text: multi-megabyte layout bounds, lossless sou
 var fastModels = Json("""["opus","claude-opus-5-5","claude-opus-5","claude-opus-4-8"]""") as JsonArray;
 Check(!ChatFastMode.Available("opus", null), "older hosts must not offer a speed control");
 Check(ChatFastMode.Available(null, new JsonArray()), "Codex Default leaves availability to the provider");
+var grokSpeedModels = Json("""["grok-4.7", ""]""") as JsonArray;
+Check(ChatFastMode.Available(null, grokSpeedModels, "grok"), "Grok Default supports fast mode only when its model has a listed pair");
+Check(ChatFastMode.Available("grok-4.7", grokSpeedModels, "grok"), "the listed Grok base model supports fast mode");
+foreach (var model in new[] { "grok-4.6", "-20261006", "grok-4.7-20261006", "grok-4.7[1m]" })
+    Check(!ChatFastMode.Available(model, grokSpeedModels, "grok"), "Grok requires an exact listed pair without Claude suffix normalization");
+Check(!ChatFastMode.Available(null, new JsonArray(), "grok"), "Grok must not assume provider-controlled Default support");
+Check(!ChatFastMode.Available(null, new JsonArray("grok-4.7"), "grok"), "Grok Default is not assumed to match an explicit model");
+Check(ChatFastMode.Available("grok-4.7-20261006", new JsonArray("grok-4.7-20261006"), "grok"), "an explicitly advertised dated Grok model remains supported");
 foreach (var model in new[] { "opus", "opus[1m]", "claude-opus-5-5", "claude-opus-5-5[1m]", "claude-opus-4-8-20260525", "claude-opus-4-8-20260525[1m]" })
     Check(ChatFastMode.Available(model, fastModels), "supported Opus aliases and snapshots must retain fast mode");
 foreach (var model in new string?[] { null, "sonnet", "haiku", "claude-opus-4-7", "claude-opus-5-9", "claude-opus-5-9[1m]", "claude-opus-4-7-20260416[1m]", "opus[bogus]" })
     Check(!ChatFastMode.Available(model, fastModels), "unsupported models must not enable paid fast mode");
 Console.WriteLine("Windows chat fast mode: old-host compatibility, Default, aliases, snapshots and unsupported models pass.");
+
+var museCases = new (string Verb, string Detail, string ExpectedVerb, string ExpectedTarget)[]
+{
+    ("Bash", "{\"command\":\"cargo test\",\"description\":\"Run tests\",\"output\":\"ok\"}", "Bash", "cargo test"),
+    ("Bash Input", "Run tests\n$ cargo test\nok", "Bash", "cargo test"),
+    ("Read", "Read text file `/tmp/a file.txt`.\n1|contents", "Read", "/tmp/a file.txt"),
+    ("Write", "wrote 23 bytes to /tmp/a file.txt", "Write", "/tmp/a file.txt"),
+    ("Read Skill", "<read-skill-result name=\"bundled:git\" status=\"ok\">\nbody", "Read", "bundled:git"),
+    ("Read", "<read-skill-result name=\"bundled:git\" status=\"ok\">\nbody", "Read", "bundled:git"),
+    ("WebSearch", "{\"query\":\"Muse release notes\",\"results\":[]}", "WebSearch", "Muse release notes"),
+    ("Write Todos", "{\"ok\":true,\"revision\":2,\"items\":4}", "TodoWrite", "4 todos (revision 2)"),
+    ("TodoWrite", "4 todos (revision 2)", "TodoWrite", "4 todos (revision 2)"),
+};
+foreach (var sample in museCases)
+{
+    var result = MuseToolPresentation.Refine("muse", sample.Verb, "", sample.Detail);
+    Check(result == (sample.ExpectedVerb, sample.ExpectedTarget), "Muse compact subject comes from logged metadata: " + sample.Verb);
+    Check(MuseToolPresentation.Refine("muse", sample.Verb, "explicit", sample.Detail).Target == "explicit", "Muse preserves explicit targets");
+    Check(MuseToolPresentation.Refine("codex", sample.Verb, "", sample.Detail) == (sample.Verb, ""), "Muse metadata never relabels another provider");
+    var museRow = Tool("muse-tool", result.Verb);
+    museRow.Target = result.Target;
+    var folded = FoldRows([museRow], ChatDetail.Compact);
+    Check(GroupOf(folded, "g:muse-tool")?.Subject == result.Target, "Muse recovered subject reaches the compact row");
+}
+foreach (var sample in new[] { ("Grep", "/tmp/a.txt:1:match"), ("WebFetch", "[link](https://example.test)"), ("Bash", "output\nmore\n$ not a command header"), ("Read", "{broken") })
+    Check(MuseToolPresentation.Refine("muse", sample.Item1, "", sample.Item2).Target == "", "output cannot invent a Muse tool subject");
+Check(MuseToolPresentation.Refine("muse", "Bash", "", new string('x', 5 * 1024 * 1024)).Target == "", "Muse parsing is bounded");
+Console.WriteLine("Windows Muse tools: recorded commands, file paths, skill names, queries and todo counts reach compact rows.");

@@ -5,16 +5,19 @@ and MCP server. They develop together under one version number. A stable
 release carries every CLI target and the macOS desktop app. The Windows
 desktop is a review build. Android is in review on Google Play. Newest first.
 
-The Unreleased section is always the complete, person-facing delta from the
-latest `v<version>` tag to `main`. Work that has not appeared in a shipped app
-still belongs there. When a release is tagged, close that delta under its
-version and begin the next one. Do not reconstruct release notes from commits
-at the end.
+Collect the complete, person-facing delta for the next release under Unreleased.
+When preparing a release, close that delta under its version and release date,
+then begin the next one. Do not reconstruct release notes from commits at the end.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-06
+
 ### Added
 
+- Grok chats gain a per-conversation fast-mode switch for models with an
+  available fast variant. Default/Fast applies to the next turn, with guidance
+  about higher cost and faster subscription-allowance use.
 - Plan-limit widgets on Apple and Android with dynamic one/multiple-provider
   selection, circle/bar percentages, reset times and dated cached readings.
   Choose 5-hour, weekly, both or highest-usage windows; circle layouts fit four
@@ -26,9 +29,10 @@ at the end.
   text Share/Direct Share into chat drafts, and contextual response sharing.
   Supported system assistants can search projects, read cached usage and create
   notes through experimental AppFunctions.
-- iPhone Live Activities for foreground-observed conversations on compatible
-  hosts: branded Lock Screen/Dynamic Island status, elapsed time, waiting and
-  completion states, exact-chat navigation and background APNs updates.
+- iPhone Live Activities for foreground-observed chats and project terminals
+  on compatible hosts: branded Lock Screen/Dynamic Island status, elapsed time,
+  waiting and completion states, exact-session navigation and background APNs
+  updates.
 - Android usage widgets with light/dark appearance, per-widget day/week
   switching and background refresh; launcher shortcuts, a Workspaces Quick
   Settings tile and a notification action for reviewing live agent requests.
@@ -44,11 +48,59 @@ at the end.
   Action button slots.
 - A paired Apple Watch app focused on Today/Week activity, plan limits and
   actionable requests, with branded light/dark/tinted icons, Shortcuts and
-  activity/allowance/request complications. Review pending agent requests, Allow Once, Always Allow for
-  that chat or Deny after the host revalidates the exact live request.
+  activity/allowance/request complications. Review pending agent requests,
+  Allow Once, Always Allow for that chat or Deny after the host revalidates
+  the exact live request.
+
+### Changed
+
+- Shared plan-limit fetches follow the account plan's sync interval, with a
+  five-minute minimum and hourly fallback. Mac widgets pick up updated local
+  readings without fetching vendors again.
+- Watch sync uses a visible refresh icon and clearer instructions to open
+  tokenstat on the paired iPhone for the first sync or when disconnected.
+- Subscription purchase actions show recurring charges and renewal terms
+  beside the button on Apple and Android.
 
 ### Fixed
 
+- Codex runtime diagnostics remain in raw logs instead of appearing as agent
+  replies. Actual tool failures and failed turns remain visible in chat.
+- Stopping a Codex chat interrupts its active turn and lets the agent persist
+  canceled tool results before shutdown, preventing missing-output history on
+  resume. Unresponsive agents still stop within a bounded deadline.
+- Muse compact tool rows recover logged commands, file paths, skill names,
+  search queries and todo counts, including retained older tool results.
+- Grok's paid fast variants are not mistaken for cheaper models for automatic
+  work. Timed-out model-list commands stop their child processes cleanly.
+- Live Activity starts retry after offline launch or late account verification;
+  streamed chat updates no longer interrupt activation. Tapping an activity
+  opens the correct remote chat or terminal, including retained terminal output
+  after completion. Waiting clears promptly after the last approval, and late
+  status updates cannot revive completed runs or cross an account change.
+  Token registration recovers after an offline start and duplicate activities
+  are avoided.
+- Project refreshes on iPhone and iPad discard late terminal/chat responses
+  after an account or computer change.
+- Android 12 and later retain widget configuration and compact allowance
+  resizing. Widget failures display refresh feedback after account verification,
+  and stale plan-limit readings are explicitly marked as cached.
+- Android shared text stays queued until it has been saved to the chat draft,
+  including when draft storage is full or the incoming text is too large.
+- Android Pull and Push use matching buttons and opaque full-screen review
+  forms. Vault management and unlock fill the phone screen,
+  with actions kept above the keyboard. Empty SSH libraries place their Add
+  action directly below search instead of halfway down the page. Searches with
+  no matches offer Clear search. Recovery codes use a keyboard without
+  autocorrection.
+- Android push recovery distinguishes an unreachable computer from a missing
+  receipt before offering Retry. Closing a Git review ignores late responses.
+  Saved push operations keep their identity while an older computer needs an
+  update, without calling unsupported recovery methods.
+- Android reads capabilities from the connected computer, so Pull in Changes,
+  the New pull request flow and chat-question answers become available on
+  supported computers. Temporary connection failures retry, and changing
+  accounts or computers clears the previous computer's capabilities.
 - Improved async runtime cleanup for child processes, timers and task queues.
 - Rust installer updates preserve the pinned compiler across CI, preview and
   release builds instead of requesting unreleased compiler versions.
@@ -57,8 +109,6 @@ at the end.
   restarts, and launcher update failures no longer interrupt account cleanup or
   background refresh bookkeeping. Missing widget services and scheduler failures
   are handled without crashing or leaving a queued refresh indicator stuck.
-- Live Activities recover token registration after an offline start, avoid duplicate
-  creation, and keep queued completion updates bound to their original account.
 - Android signed-out startup completes account verification; late account updates
   and project indexing cannot restore another account’s metadata.
 - Apple widget configuration labels explain that full-color style/accent settings
@@ -119,20 +169,6 @@ at the end.
 
 ### Fixed
 
-- Android (2026-10-06): Pull and Push use matching buttons and opaque
-  full-screen review forms. Vault management and unlock fill the phone screen,
-  with actions kept above the keyboard. Empty SSH libraries place their Add
-  action directly below search instead of halfway down the page. Searches with
-  no matches offer Clear search. Recovery codes use a keyboard without
-  autocorrection.
-- Android push recovery distinguishes an unreachable computer from a missing
-  receipt before offering Retry. Closing a Git review ignores late responses.
-  Saved push operations keep their identity while an older computer needs an
-  update, without calling unsupported recovery methods.
-- Android reads capabilities from the connected computer, so Pull in Changes,
-  the New pull request flow and chat-question answers become available on
-  supported computers. Temporary connection failures retry, and changing
-  accounts or computers clears the previous computer's capabilities.
 - Cursor plan usage reads the current sign-in from the Cursor app as well
   as the CLI, so an expired CLI login no longer leaves last cycle's limits
   on screen. Expired sign-ins say when they expired and how to renew them.
@@ -202,12 +238,6 @@ can mix local coding tools with saved SSH servers.
   investigate performance problems.
 
 ### Changed
-
-- Shared plan-limit fetches follow the account plan's sync interval, with a
-  five-minute minimum and hourly fallback. Mac widgets pick up updated local
-  readings without fetching vendors again.
-- Watch sync uses a visible refresh icon and clearer instructions to open
-  tokenstat on the paired iPhone for the first sync or when disconnected.
 
 - The Mac and Windows window is an icon rail beside a project sidebar.
   Each project lists its five latest chats and its running terminals,

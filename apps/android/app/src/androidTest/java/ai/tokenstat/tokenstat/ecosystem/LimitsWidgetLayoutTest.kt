@@ -53,6 +53,21 @@ class LimitsWidgetLayoutTest {
             assertTrue(LimitsWidgetProvider.readings(context, snapshot.copy(owner = "b".repeat(64)), 77).isEmpty())
         } finally { prefs.edit().remove("provider.77").commit() }
     }
+    @Test fun staleProviderObservationsAreLabeledAsCachedEvenWhenRecentlyFetched() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val base = context
+        val now = System.currentTimeMillis()
+        val provider = QuotaProvider("codex", now, listOf(QuotaWindow("weekly", 58.0)), stale = true)
+        val cached = base.getString(R.string.widget_cached, "").substringBefore("·").trim()
+        instrumentation.runOnMainSync {
+            for (height in listOf(64, 160)) {
+                val view = LimitsWidgetProvider.renderSize(base, UsageSnapshot("a".repeat(64), limits = listOf(provider)),
+                    listOf(provider), 1, true, 160, height).apply(base, FrameLayout(base))
+                assertTrue(view.findViewById<TextView>(R.id.limits_status).text.toString().contains(cached))
+                assertTrue(view.findViewById<View>(R.id.limits_gauges).contentDescription.toString().contains(cached))
+            }
+        }
+    }
     @Test fun rendersQuotaAndLauncherSizesWithResetAndLongNameStates() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val now = System.currentTimeMillis()

@@ -2451,6 +2451,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     {
         var items = new List<DisplayItem>();
         var tools = new Dictionary<string, int>();
+        var toolBackends = new Dictionary<int, string>();
         var questions = new Dictionary<string, int>();
         var text = "";
         var textId = "";
@@ -2579,6 +2580,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     var callId = Format.Text(ev, "callId");
                     if (string.IsNullOrEmpty(callId)) callId = "tool-" + items.Count;
                     tools[callId] = items.Count;
+                    toolBackends[items.Count] = Format.Text(row, "backend", Format.Text(_openChat, "backend"));
                     items.Add(new DisplayItem
                     {
                         Id = "tool-" + callId,
@@ -2603,6 +2605,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                             tool.Failed = !Format.Flag(ev, "ok");
                         }
                         tool.Detail = Format.Text(ev, "detail");
+                        var presentation = MuseToolPresentation.Refine(
+                            toolBackends.GetValueOrDefault(index, Format.Text(row, "backend", Format.Text(_openChat, "backend"))),
+                            tool.Verb, tool.Target, tool.Detail);
+                        tool.Verb = presentation.Verb;
+                        tool.Target = presentation.Target;
                         var ended = Format.Long(row, "atMs");
                         tool.Duration = Duration(tool.StartedAt, ended);
                         tool.EndedAt = ended;

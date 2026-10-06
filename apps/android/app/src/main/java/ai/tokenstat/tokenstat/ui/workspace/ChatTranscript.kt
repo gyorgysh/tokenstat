@@ -246,6 +246,7 @@ fun coalesceTranscript(
     // running under that name rather than the newest start.
     val toolIndexes = mutableMapOf<String, MutableList<Int>>()
     val toolStarts = mutableMapOf<String, Int>()
+    val toolBackends = mutableMapOf<String, String>()
     val editStarts = mutableMapOf<String, Int>()
     val approvalIndex = mutableMapOf<String, Int>()
     val questionIndex = mutableMapOf<String, Int>()
@@ -507,6 +508,7 @@ fun coalesceTranscript(
                 // Empty when the event named no tool. The row then says Working.
                 val verb = inner.str("verb") ?: ""
                 val target = ChatToolState.clip(inner.str("target") ?: "")
+                if (eventBackend != null) toolBackends[rowID] = eventBackend
                 noteToolIndex(items.size, callId)
                 // A bare "tool" event without a start/end pair arrives
                 // already finished; only true starts run open.
@@ -559,12 +561,20 @@ fun coalesceTranscript(
                 if (index != null && index in items.indices) {
                     when (val item = items[index]) {
                         is ChatDisplayItem.Tool -> {
+                            val presentation = refineMuseToolPresentation(
+                                toolBackends[item.id] ?: eventBackend,
+                                item.state.verb,
+                                item.state.target,
+                                inner.str("detail"),
+                            )
                             val state = item.state.copy(
+                                verb = presentation.verb,
+                                target = presentation.target,
                                 running = false,
                                 failed = !(inner.safeBool("ok") ?: true),
                                 detail = inner.str("detail"),
                                 snippet = ChatToolState.makeSnippet(
-                                    item.state.verb,
+                                    presentation.verb,
                                     inner.str("detail"),
                                 ),
                                 endedAtMs = atMsOf(ev, inner),
@@ -606,6 +616,8 @@ fun coalesceTranscript(
                     val fallback = callId.ifEmpty { "end-${stamp(ev, items.size)}" }
                     // Empty when the event named no tool. The row then says Worked.
                     val fallbackVerb = inner.str("verb") ?: ""
+                    val presentation = refineMuseToolPresentation(eventBackend, fallbackVerb,
+                        ChatToolState.clip(inner.str("target") ?: ""), inner.str("detail"))
                     val rowID = if (ev.safeLong("seq") != null) {
                         "tool-${stamp(ev, items.size)}"
                     } else {
@@ -616,14 +628,14 @@ fun coalesceTranscript(
                             rowID,
                             ChatToolState(
                                 callId = fallback,
-                                verb = fallbackVerb,
-                                target = ChatToolState.clip(inner.str("target") ?: ""),
+                                verb = presentation.verb,
+                                target = presentation.target,
                                 running = false,
                                 failed = !(inner.safeBool("ok") ?: true),
                                 detail = inner.str("detail"),
                                 startedAtMs = atMsOf(ev, inner) ?: 0,
                                 endedAtMs = atMsOf(ev, inner),
-                                snippet = ChatToolState.makeSnippet(fallbackVerb, inner.str("detail")),
+                                snippet = ChatToolState.makeSnippet(presentation.verb, inner.str("detail")),
                             ),
                         ),
                     )

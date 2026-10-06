@@ -131,7 +131,9 @@ class LimitsWidgetProvider : UsageWidgetProvider() {
             val oldest = shown.minOfOrNull { it.provider.observedAt }
             val age = oldest?.let { android.text.format.DateUtils.getRelativeTimeSpanString(it, now, 60_000, android.text.format.DateUtils.FORMAT_ABBREV_RELATIVE).toString() }
             val status = when { refreshing -> context.getString(R.string.widget_updating)
-                readings.isEmpty() -> context.getString(R.string.widget_open_to_sync); else -> age.orEmpty() } +
+                readings.isEmpty() -> context.getString(R.string.widget_open_to_sync)
+                shown.any { it.provider.stale(now) } -> context.getString(R.string.widget_cached, age.orEmpty())
+                else -> age.orEmpty() } +
                 if (all.size > shown.size) " · +${all.size - shown.size}" else ""
             views.setTextViewText(R.id.limits_status, status)
             if (compact) {
@@ -144,7 +146,9 @@ class LimitsWidgetProvider : UsageWidgetProvider() {
                     if (window.expired(now)) context.getString(R.string.widget_reset_passed)
                     else window.displayLabel + " " + context.getString(R.string.widget_percent_used, NumberFormat.getIntegerInstance().format(window.percent)) +
                         (window.resetsAt?.let { " " + context.getString(R.string.widget_resets, java.util.Date(it).toString()) } ?: "")
-                } ?: context.getString(R.string.widget_no_reading)) + ". " + java.util.Date(cell.provider.observedAt)
+                } ?: context.getString(R.string.widget_no_reading)) + ". " +
+                    if (cell.provider.stale(now)) context.getString(R.string.widget_cached, java.util.Date(cell.provider.observedAt).toString())
+                    else java.util.Date(cell.provider.observedAt).toString()
             })
             views.setOnClickPendingIntent(R.id.limits_root, QuickAccess.pendingIntent(context, "home"))
             views.setOnClickPendingIntent(R.id.limits_configure, PendingIntent.getActivity(context, id,

@@ -109,6 +109,26 @@ class SystemIntegrationTest {
         SystemProjects.clear(context)
         assertNull(SystemShare.draft.value)
     }
+    @Test fun aFullComposerKeepsSharedTextUntilItCanBeStored() {
+        seed()
+        val composers = ai.tokenstat.tokenstat.ui.logic.ChatComposerSessions<String>(attachmentCost = { 0L })
+        assertTrue(composers.update("conversation", composers.snapshot("conversation").copy(text = "x".repeat(128 * 1024))))
+        SystemShare.offer(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, "Keep this shared text") })
+        val shared = SystemShare.draft.value!!
+        fun store(text: String): Boolean {
+            val current = composers.snapshot("conversation")
+            return composers.update("conversation", current.copy(text = current.text + text))
+        }
+        assertFalse(SystemShare.consume(shared, ::store))
+        assertEquals(shared, SystemShare.draft.value)
+        assertEquals(128 * 1024, composers.snapshot("conversation").text.length)
+        assertNotNull(composers.failure.value)
+        assertTrue(composers.update("conversation", composers.snapshot("conversation").copy(text = "")))
+        assertTrue(SystemShare.consume(shared, ::store))
+        assertEquals(shared.text, composers.snapshot("conversation").text)
+        assertNull(SystemShare.draft.value)
+        assertFalse(SystemShare.consume(shared, ::store))
+    }
     @Test fun unsupportedOrOversizedSharesAreIgnored() {
         seed()
         assertNull(SystemShare.offer(Intent(Intent.ACTION_SEND).apply { type = "image/png"; putExtra(Intent.EXTRA_TEXT, "text") }))

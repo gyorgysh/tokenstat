@@ -59,6 +59,8 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     @ObservationIgnored private var closeWhenAttached = false
     @ObservationIgnored private var lastInfoAt = Date.distantPast
     @ObservationIgnored private var inForeground = true
+    @ObservationIgnored private var liveInfo: PtySessionInfo?
+    @ObservationIgnored private let observedAt = Date()
 
     private enum PtyEvent {
         case write([UInt8])
@@ -81,6 +83,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     init(peer: String, info: PtySessionInfo) {
         id = UUID().uuidString
         self.peer = peer
+        liveInfo = info
         hostID = info.id
         workspaceID = info.workspaceID
         command = info.command
@@ -110,6 +113,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         guard isPending else { return }
         if removed && !closeWhenAttached { return }
         hostID = info.id
+        liveInfo = info
         workspaceID = info.workspaceID
         alive = info.alive
         exitCode = info.exitCode
@@ -164,6 +168,9 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
             transportError = error.localizedDescription
             throw error
         }
+        alive = false
+        exitCode = nil
+        await updateLiveActivity(stopped: true)
         removed = true
         endLocalWork()
     }
@@ -181,6 +188,16 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     /// the supervisor instead of waiting out a leftover backoff.
     func setForeground(_ active: Bool) {
         inForeground = active
+    }
+
+    func updateLiveActivity(stopped: Bool = false) async {
+        guard ownerScope != nil, ownerScope == WorkSessionContext.shared.scope,
+              var info = liveInfo else { return }
+        info.alive = alive
+        info.exitCode = exitCode
+        await LiveWorkController.shared.track(terminal: info, peer: peer,
+            projectName: URL(fileURLWithPath: cwd).lastPathComponent, observedAt: observedAt, stopped: stopped,
+            mayStart: { !self.removed && self.alive && self.hostID == info.id })
     }
 
     /// A path change is not a dead process. Drop the last transport error so
@@ -286,6 +303,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
                     let sessions = try await ClientRemote.ptyList(peer: peer)
                     if !sessions.contains(where: { $0.id == id }) {
                         alive = false
+                        await updateLiveActivity(stopped: true)
                         return false
                     }
                 } catch {
@@ -295,15 +313,18 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
             }
             return true
         }
+        liveInfo = info
         if rows != info.rows { rows = info.rows }
         if cols != info.cols { cols = info.cols }
         if alive != info.alive { alive = info.alive }
         if let code = info.exitCode {
             exitCode = code
+            alive = false
             return false
         }
         if info.alive { transportError = nil }
-        return info.alive
+        // EOF can precede reaping, including during tunnel recovery.
+        return info.exitCode == nil
     }
 
     private struct Plan: Sendable {
@@ -360,6 +381,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         guard let info = try? await ClientRemote.ptyInfo(peer: peer, id: id) else {
             return true
         }
+        liveInfo = info
         if rows != info.rows { rows = info.rows }
         if cols != info.cols { cols = info.cols }
         if alive != info.alive { alive = info.alive }
@@ -370,7 +392,8 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         }
         if !info.alive {
             alive = false
-            return false
+            // Give the wait thread a chance to expose a real exit status.
+            return info.exitCode == nil
         }
         transportError = nil
         return true
@@ -658,6 +681,13 @@ struct ClientTerminalScreen: View {
             rememberTerminal()
         }
         .onChange(of: session.hostID) { _, _ in rememberTerminal() }
+        .task(id: "live-\(session.hostID)-\(scenePhase == .active)") {
+            guard scenePhase == .active else { return }
+            while !Task.isCancelled {
+                await session.updateLiveActivity()
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             session.setForeground(phase == .active)
             if phase == .active {

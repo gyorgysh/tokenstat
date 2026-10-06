@@ -28,16 +28,18 @@ Usage at a Glance supports small, medium and large sizes on Mac, iPhone and iPad
 
 Open tokenstat provides a configurable screen or favorite project in small, and screen/project links in medium and large. Circular and rectangular Lock Screen launchers open that same configured destination. The selected screen is included in larger layouts. Widgets, complications and Quick Access controls share the tokenstat three-bar symbol, using the same geometry as the app logo. Quick Access controls support Control Center on iOS 18 and macOS 26, plus supported iOS Lock Screen slots and the Action button. App Shortcut tiles require SF Symbols and use action-specific icons.
 
-On iPhone, an active conversation observed in the foreground starts a Live Activity
-on compatible hosts (protocol 31+). Lock Screen and Dynamic Island layouts show
+On iPhone, an active conversation or terminal observed in the foreground starts a Live Activity
+on compatible hosts (protocol 31+ for chats, 32+ for terminals). Foreground reconciliation
+retries after connection recovery and keeps quiet sessions current. Lock Screen and Dynamic Island layouts show
 the tokenstat mark, elapsed time and working/waiting/completed state. Tapping opens
-the exact conversation. Completion stays briefly; sign-out and computer revocation
+the exact conversation or terminal. Terminal idle/attention states wait for you; elapsed time
+uses the host's process spawn time and survives reattachment. Completion stays briefly; sign-out and computer revocation
 remove the activity. Disabled Live Activities or system limits leave chat usable.
 Status transitions respect Reduce Motion and the always-on display. Background
 updates use the host's bounded status queue and the website's activity-specific
 APNs transport; they require the matching host/client/backend deployment and APNs
-configuration. Push content carries only opaque conversation keys, revisions,
-fixed phases and timestamps, never project names or transcript text. Project names
+configuration. Push content carries only opaque work keys, revisions,
+fixed phases and timestamps, never project names, commands or transcript text. Project names
 are stored in the phone's local activity attributes. Disconnected activities become
 stale rather than claiming that a run is still working.
 
@@ -87,7 +89,7 @@ The fixture can seed typical, empty, offline and large-value/long-name snapshots
 
 Use the following checks on the new TestFlight build with a signed-in account and a running, trusted computer:
 
-1. **Live Activities:** enable Tokenstat's Live Activities in iPhone Settings. Start a longer conversation and open that exact running chat on the phone, then lock the phone or return Home. Check the Lock Screen and Dynamic Island while working, waiting for approval, done, failed, stopped and disconnected. Tap the activity to return to the exact chat. Test a run finishing while the phone is locked to verify the deployed APNs path. Activities start from a run observed by the foreground app; backend deployment alone does not remotely start an activity. The matching host must support the live-work protocol (31 or later). Disabled activities must leave chat usable.
+1. **Live Activities:** enable Tokenstat's Live Activities in iPhone Settings. Start a longer conversation or terminal and open that exact session on the phone, then lock the phone or return Home. Check the Lock Screen and Dynamic Island while working, waiting for approval/input, done, failed, stopped and disconnected. Tap the activity to return to the exact chat or terminal. Test a run finishing while the phone is locked to verify the deployed APNs path. Reopen after an offline launch and confirm that an activity starts after reconnection. Activities start from a run observed by the foreground app; backend deployment alone does not remotely start an activity. The matching host must support protocol 31 or later for chats and 32 or later for terminals. Disabled activities must leave sessions usable. ActivityKit request failures appear under the `LiveActivities` category in the iPhone device console.
 2. **Shortcuts and Siri:** open Shortcuts, add an action from Tokenstat, and run Open Screen, Open Project, Get Usage, Refresh, Search and Get Streak. Use a visited project so it appears in the account-scoped picker. Then try “Show my usage in tokenstat,” “Open tokenstat Workspaces,” and “What is my streak in tokenstat.” Usage announces its date/scope; it does not expose chat contents or execute agent commands. Confirm old project selections stop resolving after account changes. Apple Intelligence contextual actions depend on device/language support and require physical-device verification.
 3. **Widgets and Watch:** select one provider, several, and all; compare Circles/Bars, 5-hour/Weekly/Both windows, chart-free totals, all supported sizes, Light/Dark/Glass/Black and system Clear/Tinted. Check expired/offline readings and sign-out. On Watch, switch Today/Week, refresh limits, and review an approval including expiry and Always Allow confirmation. Check the icon, complications, account changes, unreachable phone, large text and Reduce Motion.
 4. **iPhone Duo:** compile with Xcode 27.1 RC or newer and test the app's existing responsive layouts in Duo's poses and orientations. SDK support does not replace device/Device Hub layout checks.

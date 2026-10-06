@@ -193,7 +193,9 @@ struct ClientSavedPlaceView: View {
             } else if place.id.kind == .terminal, let id = place.id.itemID {
                 let sessions = try await ClientRemote.ptyList(peer: place.id.peer)
                 guard stillCurrent() else { return }
-                if let info = sessions.first(where: { $0.id == id && $0.alive }) {
+                // Finished sessions retain output on the host. A completed
+                // Live Activity should still open that exact terminal for review.
+                if let info = sessions.first(where: { $0.id == id && $0.hidden != true }) {
                     terminal = ClientTerminalSession(peer: place.id.peer, info: info)
                     showTerminal = onRestoredTerminalClose == nil
                 } else {

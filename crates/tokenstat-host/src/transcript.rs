@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 /// How much one `automation.transcript` reply may carry.
 pub const REPLY_CAP: usize = 64 * 1024;
@@ -178,6 +178,9 @@ pub struct Parser {
     /// Muse names a tool when its task is proposed, then gives its stable call
     /// id when it is scheduled. Keep that tiny join until the card can start.
     muse_tasks: HashMap<String, String>,
+    /// The scheduled tool's name survives until its result, which older Muse
+    /// records can emit without correlation_facts.
+    muse_calls: HashMap<String, String>,
     /// A plain device login challenge can precede Muse's JSON stream and
     /// wait forever for terminal input. Keep its URL/code out of chat.
     muse_auth: MuseAuthState,
@@ -200,6 +203,7 @@ impl Parser {
             cursor_replay: None,
             last_session: None,
             muse_tasks: HashMap::new(),
+            muse_calls: HashMap::new(),
             muse_auth: MuseAuthState::Startup,
         }
     }
@@ -356,6 +360,9 @@ impl Parser {
         if cleaned.is_empty() {
             return None;
         }
+        if self.backend == "codex" && codex_diagnostic(&cleaned) {
+            return None;
+        }
         if self.backend == "muse"
             && (cleaned.starts_with("muse:") || cleaned.starts_with("Muse Code updated "))
         {
@@ -404,6 +411,9 @@ impl Parser {
             .to_string();
         let cleaned = without_stdin_notice(&cleaned);
         if cleaned.is_empty() {
+            return Vec::new();
+        }
+        if self.backend == "codex" && codex_diagnostic(&cleaned) {
             return Vec::new();
         }
         if self.backend == "muse"
@@ -724,6 +734,7 @@ impl Parser {
     fn close_open_tools(&mut self, ok: bool, detail: Option<String>) -> Vec<Event> {
         self.tool_inputs.clear();
         self.muse_tasks.clear();
+        self.muse_calls.clear();
         std::mem::take(&mut self.open_tools)
             .into_iter()
             .map(|call_id| Event::ToolEnd {
@@ -776,21 +787,29 @@ impl Parser {
                             .map(str::to_string)
                     });
                     if let Some(name) = name {
+                        self.muse_calls.insert(call.into(), name.clone());
                         events.push(tool_start_with_id(call, &name, Value::Null));
                     }
                 }
             }
             Some("tool.result") => {
                 let call = payload.get("call_id").and_then(Value::as_str);
+                let remembered = call.and_then(|id| self.muse_calls.remove(id));
                 let name = payload
                     .pointer("/correlation_facts/tool_name")
                     .and_then(Value::as_str)
+                    .or(remembered.as_deref())
+                    .or_else(|| muse_result_name(payload))
                     .unwrap_or("tool");
                 if let Some(call) = call {
                     // A result without a scheduled task is still useful when
                     // attaching to a running Muse session.
                     if !self.open_tools.iter().any(|open| open == call) {
-                        events.push(tool_start_with_id(call, name, Value::Null));
+                        events.push(tool_start_with_id(
+                            call,
+                            name,
+                            muse_result_input(payload, name),
+                        ));
                     }
                     events.push(Event::ToolEnd {
                         call_id: call.into(),
@@ -844,6 +863,28 @@ fn without_stdin_notice(line: &str) -> String {
         };
     }
     line.to_string()
+}
+
+/// stderr shares the PTY with NDJSON. Codex's timestamped tracing records
+/// describe its runtime/history and are retained in the raw transcript; they
+/// are not assistant replies or evidence that the current tool failed.
+fn codex_diagnostic(line: &str) -> bool {
+    let mut fields = line.split_whitespace();
+    let Some(timestamp) = fields.next() else {
+        return false;
+    };
+    if timestamp.parse::<jiff::Timestamp>().is_err() {
+        return false;
+    }
+    if !matches!(
+        fields.next(),
+        Some("TRACE" | "DEBUG" | "INFO" | "WARN" | "ERROR")
+    ) {
+        return false;
+    }
+    fields.next().is_some_and(|target| {
+        target.starts_with("codex_") && target.contains("::") && target.ends_with(':')
+    })
 }
 
 /// Headless CLIs print a refusal as plain text, not NDJSON. That is a failed
@@ -1846,6 +1887,79 @@ fn muse_session(value: &Value) -> Option<&str> {
 /// `tool.*` ones belong in the conversation timeline.
 fn muse_tool_name(kind: &str) -> Option<&str> {
     kind.strip_prefix("tool.")
+}
+
+fn muse_result_name(payload: &Value) -> Option<&'static str> {
+    let text = payload.get("text")?.as_str()?;
+    if text.len() > 128 * 1024 {
+        return None;
+    }
+    let value: Value = serde_json::from_str(text).ok()?;
+    // Bash results can lack correlation facts while the command remains
+    // active. Require the CLI's execution envelope, not an arbitrary JSON
+    // document which happens to contain a command field.
+    (value.get("command").is_some_and(Value::is_string)
+        && ["chunk_id", "exit_code", "execution_state", "session_id"]
+            .iter()
+            .any(|key| value.get(key).is_some()))
+    .then_some("bash")
+}
+
+/// Muse starts omit arguments, but completed results carry explicit metadata.
+/// Use only those fields and the CLI's anchored status headers; search matches
+/// and fetched document text cannot establish the query or URL that was used.
+fn muse_result_input(payload: &Value, name: &str) -> Value {
+    let mut input = serde_json::Map::new();
+    if let Some(path) = payload.pointer("/edit_facts/path").and_then(Value::as_str) {
+        input.insert("path".into(), json!(path));
+    }
+    if let Some(text) = payload
+        .get("text")
+        .and_then(Value::as_str)
+        .filter(|text| text.len() <= 128 * 1024)
+    {
+        if let Ok(Value::Object(value)) = serde_json::from_str(text) {
+            let keys: &[&str] = match name {
+                "bash" | "bash_input" | "shell" => &["command", "description"],
+                "read_file" | "write_file" | "edit_file" => &["path", "file_path"],
+                "web_search" => &["query"],
+                "web_fetch" => &["url"],
+                "search" => &["pattern", "query"],
+                _ => &[],
+            };
+            for &key in keys {
+                if let Some(value) = value.get(key).filter(|value| value.is_string()) {
+                    input.entry(key).or_insert_with(|| value.clone());
+                }
+            }
+            if matches!(name, "write_todos" | "todo_write" | "TodoWrite")
+                && let Some(detail) = muse_todo_detail(&Value::Object(value))
+            {
+                input.insert("description".into(), json!(detail));
+            }
+        } else {
+            let first = text.lines().next().unwrap_or("");
+            if name == "read_file"
+                && let Some(path) = first
+                    .strip_prefix("Read text file `")
+                    .and_then(|path| path.strip_suffix("`."))
+            {
+                input.insert("path".into(), json!(path));
+            } else if name == "read_skill"
+                && let Some(skill) = first
+                    .strip_prefix("<read-skill-result name=\"")
+                    .and_then(|value| value.split_once('"'))
+                    .map(|(name, _)| name)
+            {
+                input.insert("path".into(), json!(skill));
+            }
+        }
+    }
+    if input.is_empty() {
+        Value::Null
+    } else {
+        Value::Object(input)
+    }
 }
 
 /// Muse's Bash tool returns a JSON document *as the text field* of its normal
@@ -2879,7 +2993,8 @@ fn display_verb(name: &str) -> String {
         "edit" | "edit_file" | "str_replace" | "search_replace" | "replace_file_content" => {
             return "Edit".into();
         }
-        "bash" => return "Bash".into(),
+        "bash" | "bash_input" => return "Bash".into(),
+        "read_skill" => return "Read".into(),
         "shell" | "run_command" | "run_terminal_command" | "shell_exec" | "run" => {
             return "Shell".into();
         }
@@ -2888,7 +3003,7 @@ fn display_verb(name: &str) -> String {
         "glob" | "find_by_name" | "list_dir" | "list_directory" | "ls" => return "Glob".into(),
         "webfetch" | "web_fetch" | "read_url_content" | "fetch" => return "WebFetch".into(),
         "websearch" | "web_search" | "search_web" => return "WebSearch".into(),
-        "todowrite" | "todo_write" => return "TodoWrite".into(),
+        "todowrite" | "todo_write" | "write_todos" => return "TodoWrite".into(),
         "task" | "get_command_or_subagent_output" | "subagent" => return "Subagent".into(),
         _ => {}
     }
@@ -3341,6 +3456,104 @@ mod tests {
     }
 
     #[test]
+    fn muse_result_only_tools_recover_explicit_subjects_and_canonical_verbs() {
+        let cases = [
+            (
+                "bash",
+                json!({"command":"cargo test", "description":"Run tests", "output":"ok"}),
+                "Bash",
+                "cargo test",
+            ),
+            (
+                "bash_input",
+                json!({"command":"cargo test", "session_id":1}),
+                "Bash",
+                "cargo test",
+            ),
+            (
+                "web_search",
+                json!({"query":"Muse release notes", "results":[]}),
+                "WebSearch",
+                "Muse release notes",
+            ),
+            (
+                "write_todos",
+                json!({"ok":true, "revision":2, "items":4}),
+                "TodoWrite",
+                "4 todos (revision 2)",
+            ),
+        ];
+        for (name, result, verb, target) in cases {
+            let mut parser = Parser::new("muse");
+            let record = json!({"payload_type":"tool.result","payload":{"call_id":"call","text":result.to_string(),"correlation_facts":{"tool_name":name,"outcome":"success"}}});
+            let events = parser.push_events(format!("{record}\n").as_bytes());
+            assert!(events.iter().any(|event| matches!(event, Event::ToolStart { verb: actual, target: subject, .. } if actual == verb && subject == target)), "{events:?}");
+        }
+        for (name, text, verb, target) in [
+            (
+                "read_file",
+                "Read text file `/tmp/a file.txt`.\ncontents",
+                "Read",
+                "/tmp/a file.txt",
+            ),
+            (
+                "read_skill",
+                "<read-skill-result name=\"bundled:git\" status=\"ok\">\nbody",
+                "Read",
+                "bundled:git",
+            ),
+        ] {
+            let record = json!({"payload_type":"tool.result","payload":{"call_id":"call","text":text,"correlation_facts":{"tool_name":name,"outcome":"success"}}});
+            let events = Parser::new("muse").push_events(format!("{record}\n").as_bytes());
+            assert!(events.iter().any(|event| matches!(event, Event::ToolStart { verb: actual, target: subject, .. } if actual == verb && subject == target)), "{events:?}");
+        }
+        // A file edit's recorded facts identify the target independently of its patch.
+        assert_eq!(
+            muse_result_input(
+                &json!({"edit_facts":{"path":"/tmp/new.txt"},"text":"wrote 5 bytes"}),
+                "write_file"
+            )["path"],
+            "/tmp/new.txt"
+        );
+        // Output bodies do not establish a search query or fetched URL.
+        assert_eq!(
+            muse_result_input(&json!({"text":"/tmp/a.txt:1:match"}), "search"),
+            Value::Null
+        );
+        assert_eq!(
+            muse_result_input(&json!({"text":"[link](https://example.test)"}), "web_fetch"),
+            Value::Null
+        );
+    }
+
+    #[test]
+    fn muse_scheduled_names_survive_results_without_correlation_facts() {
+        let raw = concat!(
+            "{\"payload_type\":\"task.lifecycle.proposed\",\"payload\":{\"task_id\":\"task\",\"event\":{\"task_kind\":\"tool.bash_input\"}}}\n",
+            "{\"payload_type\":\"task.lifecycle.scheduled\",\"payload\":{\"task_id\":\"task\",\"event\":{\"idempotency_key\":\"tool:call\"}}}\n",
+            "{\"payload_type\":\"tool.result\",\"payload\":{\"call_id\":\"call\",\"text\":\"{\\\"command\\\":\\\"cargo test\\\",\\\"session_id\\\":1}\"}}\n"
+        );
+        let mut parser = Parser::new("muse");
+        let events = parser.push_events(raw.as_bytes());
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, Event::ToolStart { .. }))
+                .count(),
+            1
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, Event::ToolStart { verb, .. } if verb == "Bash"))
+        );
+        assert!(parser.muse_calls.is_empty());
+        let record = json!({"payload_type":"tool.result","payload":{"call_id":"other","text":json!({"command":"cargo test", "chunk_id":"exec-1"}).to_string()}});
+        let events = Parser::new("muse").push_events(format!("{record}\n").as_bytes());
+        assert!(events.iter().any(|event| matches!(event, Event::ToolStart { verb, target, .. } if verb == "Bash" && target == "cargo test")));
+    }
+
+    #[test]
     fn cursor_cli_authentication_failure_names_sign_in_recovery() {
         let normalized =
             "Cursor is not signed in on this machine. Open a terminal and run cursor-agent login.";
@@ -3386,6 +3599,59 @@ mod tests {
                 "{events:?}"
             );
         }
+    }
+
+    #[test]
+    fn codex_runtime_diagnostics_stay_out_of_assistant_prose() {
+        let log = "2026-10-06T18:59:35.808503Z ERROR codex_core::util: Custom tool call output is missing for call id: call_test";
+        for with_newline in [true, false] {
+            let raw = format!("{log}{}", if with_newline { "\n" } else { "" });
+            let mut parser = Parser::new("codex");
+            assert!(parser.push_events(raw.as_bytes()).is_empty());
+            assert!(parser.finish_events().is_empty());
+            assert_eq!(render_raw("codex", raw.as_bytes()), "");
+        }
+        let mut parser = Parser::new("codex");
+        let tool = br#"{"type":"item.started","item":{"type":"command_execution","id":"tool","command":"pwd"}}
+"#;
+        assert!(matches!(
+            parser.push_events(tool).first(),
+            Some(Event::ToolStart { .. })
+        ));
+        assert!(
+            parser
+                .push_events(format!("\u{1b}[31m{log}\u{1b}[0m\r\n").as_bytes())
+                .is_empty()
+        );
+        let assistant =
+            serde_json::json!({"type":"item.completed","item":{"type":"agent_message","text":log}});
+        assert!(
+            matches!(parser.push_events(format!("{assistant}\n").as_bytes()).first(), Some(Event::Text { delta }) if delta == log)
+        );
+        let failure = br#"{"type":"error","message":"Cannot resume this thread"}
+"#;
+        let events = parser.push_events(failure);
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, Event::Failed { .. }))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, Event::ToolEnd { ok: false, .. }))
+        );
+        // Plain CLI refusals and another provider's output remain visible.
+        assert!(
+            !Parser::new("codex")
+                .push_events(b"Error: service tier unavailable\n")
+                .is_empty()
+        );
+        assert!(
+            !Parser::new("grok")
+                .push_events(format!("{log}\n").as_bytes())
+                .is_empty()
+        );
     }
 
     #[test]

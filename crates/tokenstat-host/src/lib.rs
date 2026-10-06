@@ -90,6 +90,8 @@ pub(crate) mod keep_awake;
 #[cfg(feature = "local-host")]
 pub(crate) mod launcher;
 #[cfg(feature = "local-host")]
+mod live_work;
+#[cfg(feature = "local-host")]
 pub(crate) mod local_models;
 mod machine;
 pub mod open_files;
@@ -237,4 +239,6 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 30 adds reviewed fast-forward pulls (`workspace.pullReview` and
 /// `workspace.pullReviewed`) and `pulls.branch`, and conversations carry the
 /// branch they last worked on with its cached pull request.
-pub const PROTOCOL_VERSION: &str = "31";
+/// Version 31 adds Live Activity registration and stable chat turn identity.
+/// Version 32 adds host-driven terminal Live Activity updates.
+pub const PROTOCOL_VERSION: &str = "32";

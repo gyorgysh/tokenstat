@@ -315,6 +315,10 @@ fn list(command: &str, args: &[&str], parse: fn(&str) -> Vec<String>) -> Option<
 }
 
 fn run_list(bin: &str, args: &[&str]) -> Option<String> {
+    run_list_with_timeout(bin, args, LIST_TIMEOUT)
+}
+
+fn run_list_with_timeout(bin: &str, args: &[&str], timeout: Duration) -> Option<String> {
     let mut cmd = Command::new(bin);
     #[cfg(windows)]
     {
@@ -339,28 +343,19 @@ fn run_list(bin: &str, args: &[&str]) -> Option<String> {
         let _ = stdout.take(LIST_CAP as u64).read_to_end(&mut buf);
         let _ = tx.send(buf);
     });
-    let deadline = Instant::now() + LIST_TIMEOUT;
+    let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) => {
                 if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    #[cfg(unix)]
-                    {
-                        let pid = child.id();
-                        let _ = Command::new("kill")
-                            .args(["-9", &format!("-{pid}")])
-                            .status();
-                    }
-                    let _ = child.wait();
+                    reap_list_child(&mut child);
                     return None;
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
             Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                reap_list_child(&mut child);
                 return None;
             }
         }
@@ -370,6 +365,20 @@ fn run_list(bin: &str, args: &[&str]) -> Option<String> {
     }
     let bytes = rx.recv_timeout(Duration::from_secs(1)).ok()?;
     Some(String::from_utf8_lossy_owned(bytes))
+}
+
+fn reap_list_child(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    if let Ok(pid) = i32::try_from(child.id()) {
+        // Both listing launchers create their own process group. Signal it
+        // before killing/reaping its leader: signaling a zombie-only group
+        // returns EPERM on macOS, and spawning `kill` adds another unbounded
+        // process to a path that is supposed to have reached its deadline.
+        // SAFETY: the negative pid names this child's dedicated process group.
+        unsafe { libc::kill(-pid, libc::SIGKILL) };
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// Codex's model list, over its app server.
@@ -443,15 +452,7 @@ fn codex_models() -> Option<Vec<String>> {
         }
     });
     let answer = rx.recv_timeout(LIST_TIMEOUT);
-    let _ = child.kill();
-    #[cfg(unix)]
-    {
-        let pid = child.id();
-        let _ = Command::new("kill")
-            .args(["-9", &format!("-{pid}")])
-            .status();
-    }
-    let _ = child.wait();
+    reap_list_child(&mut child);
     parse_codex_models(&answer.ok()?)
 }
 
@@ -642,9 +643,15 @@ pub fn cheapest_model(backend: &str, models: &[String]) -> Option<String> {
     if models.is_empty() {
         return None;
     }
+    // Grok's build-fast variants charge a premium for speed. The "fast"
+    // marker describes a cheaper model for some providers, but choosing a
+    // build-fast variant here would increase the cost of automatic work.
+    let eligible =
+        |model: &&String| backend != "grok" || !model.to_ascii_lowercase().ends_with("-build-fast");
     for marker in CHEAP_MARKERS {
         if let Some(id) = models
             .iter()
+            .filter(eligible)
             .find(|m| m.to_ascii_lowercase().contains(marker))
         {
             return Some(id.clone());
@@ -653,7 +660,11 @@ pub fn cheapest_model(backend: &str, models: &[String]) -> Option<String> {
     if backend == "claude" {
         return models.last().cloned();
     }
-    models.first().cloned()
+    models
+        .iter()
+        .find(eligible)
+        .or_else(|| models.first())
+        .cloned()
 }
 
 /// `low` or `minimal` when advertised, otherwise the first level.
@@ -716,6 +727,24 @@ mod tests {
     fn cheapest_model_on_claude_without_a_marker_uses_the_last() {
         let models = ["opus", "sonnet"].map(String::from);
         assert_eq!(cheapest_model("claude", &models).as_deref(), Some("sonnet"));
+    }
+
+    #[test]
+    fn cheapest_grok_model_skips_premium_build_fast_variants() {
+        for models in [
+            ["grok-4.7", "grok-4.7-build-fast"],
+            ["grok-4.7-build-fast", "grok-4.7"],
+        ] {
+            assert_eq!(
+                cheapest_model("grok", &models.map(String::from)).as_deref(),
+                Some("grok-4.7")
+            );
+        }
+        let models = ["grok-4.7-build-fast", "grok-4-fast"].map(String::from);
+        assert_eq!(
+            cheapest_model("grok", &models).as_deref(),
+            Some("grok-4-fast")
+        );
     }
 
     #[test]
@@ -806,23 +835,30 @@ gpt-oss-120b-mediumGPT-OSS 120B (Medium)
         args: &[&str],
         parse: fn(&str) -> Vec<String>,
     ) -> Option<Vec<String>> {
-        let out = std::process::Command::new(command)
-            .args(args)
-            .output()
-            .ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        let list = parse(&String::from_utf8_lossy(&out.stdout));
+        let out = run_list(command, args)?;
+        let list = parse(&out);
         if list.is_empty() { None } else { Some(list) }
     }
 
     #[test]
     fn a_hanging_list_command_is_reaped() {
         let start = Instant::now();
-        assert!(run_list("/bin/sleep", &["30"]).is_none());
+        let (command, args): (&str, &[&str]) = if cfg!(windows) {
+            (
+                "powershell.exe",
+                &[
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "Start-Sleep -Seconds 30",
+                ],
+            )
+        } else {
+            ("/bin/sleep", &["30"])
+        };
+        assert!(run_list_with_timeout(command, args, Duration::from_millis(100)).is_none());
         assert!(
-            start.elapsed() < Duration::from_secs(12),
+            start.elapsed() < Duration::from_secs(5),
             "list timeout should fire well before the sleep ends"
         );
     }

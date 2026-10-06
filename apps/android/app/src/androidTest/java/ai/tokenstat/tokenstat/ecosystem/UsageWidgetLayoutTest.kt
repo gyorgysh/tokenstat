@@ -5,6 +5,8 @@ import android.content.res.Configuration
 import android.content.Intent
 import android.content.ComponentName
 import android.content.pm.ShortcutManager
+import android.appwidget.AppWidgetManager
+import android.appwidget.AppWidgetProviderInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.view.View
@@ -27,6 +29,16 @@ import kotlinx.serialization.json.*
 /** Inflate real RemoteViews at widget sizes, with privacy and overflow cases. */
 @RunWith(AndroidJUnit4::class)
 class UsageWidgetLayoutTest {
+    @Test fun launcherMetadataKeepsUsageConfigurationAndCompactLimitResizing() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val providers = AppWidgetManager.getInstance(context).installedProviders
+        val usage = providers.single { it.provider == ComponentName(context, UsageWidgetProvider::class.java) }
+        assertEquals(ComponentName(context, UsageWidgetConfigurationActivity::class.java), usage.configure)
+        assertTrue(usage.widgetFeatures and AppWidgetProviderInfo.WIDGET_FEATURE_RECONFIGURABLE != 0)
+        val limits = providers.single { it.provider == ComponentName(context, LimitsWidgetProvider::class.java) }
+        assertTrue(limits.minResizeHeight <= 64 * context.resources.displayMetrics.density + 1)
+    }
+
     @Test fun persistedLogoutBlockRejectsBackgroundVerification() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val privacy = context.getSharedPreferences("widget-account-privacy", android.content.Context.MODE_PRIVATE)

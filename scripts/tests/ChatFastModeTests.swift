@@ -9,6 +9,14 @@ struct ChatFastModeTests {
         precondition(!ChatFastMode.available(model: "opus", models: nil))
         // Codex advertises provider-controlled availability, including Default.
         precondition(ChatFastMode.available(model: nil, models: []))
+        precondition(ChatFastMode.available(model: nil, models: ["grok-4.7", ""], backend: "grok"))
+        precondition(ChatFastMode.available(model: "grok-4.7", models: ["grok-4.7", ""], backend: "grok"))
+        precondition(!ChatFastMode.available(model: nil, models: ["grok-4.7"], backend: "grok"))
+        for name in ["grok-4.6", "-20261006", "grok-4.7-20261006", "grok-4.7[1m]"] {
+            precondition(!ChatFastMode.available(model: name, models: ["grok-4.7", ""], backend: "grok"))
+        }
+        precondition(!ChatFastMode.available(model: nil, models: [], backend: "grok"))
+        precondition(ChatFastMode.available(model: "grok-4.7-20261006", models: ["grok-4.7-20261006"], backend: "grok"))
         let opus = ["opus", "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"]
         for name in ["opus", "opus[1m]", "claude-opus-5-5", "claude-opus-5-5[1m]", "claude-opus-4-8-20260525", "claude-opus-4-8-20260525[1m]"] {
             precondition(ChatFastMode.available(model: name, models: opus))

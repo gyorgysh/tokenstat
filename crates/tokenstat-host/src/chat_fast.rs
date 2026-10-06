@@ -4,24 +4,50 @@
 
 use serde_json::{Value, json};
 
-pub(crate) fn models(backend: &str) -> Option<&'static [&'static str]> {
-    match backend {
+pub(crate) fn models(backend: &str) -> Option<Vec<String>> {
+    let fixed: &[&str] = match backend {
         // Codex decides availability for the selected model/account.
-        "codex" => Some(&[]),
-        "claude" => Some(&[
+        "codex" => &[],
+        "claude" => &[
             "opus",
             "claude-opus-5-5",
             "claude-opus-5",
             "claude-opus-4-8",
-        ]),
-        _ => None,
+        ],
+        "grok" => return grok_models(&crate::agent_models::for_backend("grok", &[])),
+        _ => return None,
+    };
+    Some(fixed.iter().map(|model| (*model).into()).collect())
+}
+
+/// Grok Build exposes speed as separate model IDs, not a service-tier flag.
+/// Only offer pairs the installed CLI actually lists for this account.
+fn grok_models(catalog: &[String]) -> Option<Vec<String>> {
+    let mut models: Vec<String> = catalog
+        .iter()
+        .filter(|model| catalog.contains(&format!("{model}-build-fast")))
+        .cloned()
+        .collect();
+    if models.is_empty() {
+        return None;
     }
+    // An empty entry explicitly supports the CLI's Default selection; an
+    // empty list still means provider-controlled availability for Codex.
+    if catalog.first().is_some_and(|model| models.contains(model)) {
+        models.push(String::new());
+    }
+    Some(models)
 }
 
 pub(crate) fn available(backend: &str, model: Option<&str>) -> bool {
     let Some(models) = models(backend) else {
         return false;
     };
+    if backend == "grok" {
+        return models
+            .iter()
+            .any(|supported| supported == model.unwrap_or(""));
+    }
     if models.is_empty() {
         return true;
     }
@@ -30,8 +56,8 @@ pub(crate) fn available(backend: &str, model: Option<&str>) -> bool {
     // aliases. Strip it before checking the optional snapshot date.
     let model = model.strip_suffix("[1m]").unwrap_or(model);
     models.iter().any(|prefix| {
-        model == *prefix
-            || model.strip_prefix(prefix).is_some_and(|suffix| {
+        model == prefix
+            || model.strip_prefix(prefix.as_str()).is_some_and(|suffix| {
                 suffix.strip_prefix('-').is_some_and(|date| {
                     date.len() == 8 && date.bytes().all(|byte| byte.is_ascii_digit())
                 })
@@ -46,7 +72,7 @@ pub(crate) fn apply(
     argv: &mut Vec<String>,
 ) -> Result<(), String> {
     if fast && !available(backend, model) {
-        return Err("Fast mode requires a supported Codex model or Claude Opus model.".into());
+        return Err("Fast mode requires a supported model listed by this agent. Refresh the model list and select a supported model.".into());
     }
     match backend {
         "codex" => {
@@ -75,7 +101,35 @@ pub(crate) fn apply(
                 );
             }
         }
+        "grok" if fast => {
+            apply_grok(model, &crate::agent_models::for_backend("grok", &[]), argv)?;
+        }
         _ => {}
+    }
+    Ok(())
+}
+
+fn apply_grok(
+    model: Option<&str>,
+    catalog: &[String],
+    argv: &mut Vec<String>,
+) -> Result<(), String> {
+    let explicit = model.is_some();
+    let model = model
+        .or_else(|| catalog.first().map(String::as_str))
+        .ok_or("Refresh Grok's model list before enabling fast mode.")?;
+    let fast = format!("{model}-build-fast");
+    if !catalog.iter().any(|id| id == model) || !catalog.contains(&fast) {
+        return Err("This Grok model has no available fast variant. Refresh the model list and select a supported model.".into());
+    }
+    if explicit {
+        let at = argv
+            .windows(2)
+            .position(|pair| pair[0] == "--model" && pair[1] == model)
+            .ok_or("missing Grok model")?;
+        argv[at + 1] = fast;
+    } else {
+        argv.splice(1..1, ["--model".into(), fast]);
     }
     Ok(())
 }
@@ -111,7 +165,57 @@ mod tests {
             assert!(!available("claude", model));
         }
         assert!(available("codex", None));
-        assert!(!available("grok", None));
+        assert!(!available("grok", Some("grok-code-fast-1")));
+    }
+
+    #[test]
+    fn grok_fast_mode_uses_only_listed_pairs_and_preserves_resume_and_prompt() {
+        let catalog = ["grok-4.7", "grok-4.7-build-fast", "grok-4.6"].map(String::from);
+        assert_eq!(
+            grok_models(&catalog),
+            Some(vec!["grok-4.7".into(), String::new()])
+        );
+        assert_eq!(grok_models(&["grok-4.6".into()]), None);
+        assert_eq!(
+            grok_models(&["grok-4.7-build-fast".into(), "grok-4.7".into()]),
+            Some(vec!["grok-4.7".into()])
+        );
+        for model in [None, Some("grok-4.7")] {
+            let mut argv = vec![
+                "grok".into(),
+                "--resume".into(),
+                "session".into(),
+                "-p".into(),
+                "literal --model text".into(),
+            ];
+            if let Some(model) = model {
+                argv.splice(1..1, ["--model".into(), model.into()]);
+            }
+            apply_grok(model, &catalog, &mut argv).unwrap();
+            assert_eq!(&argv[..3], ["grok", "--model", "grok-4.7-build-fast"]);
+            assert_eq!(
+                &argv[3..],
+                ["--resume", "session", "-p", "literal --model text"]
+            );
+            // Off leaves the selected base model in the ordinary launch.
+            let mut off = vec![
+                "grok".into(),
+                "--model".into(),
+                "grok-4.7".into(),
+                "-p".into(),
+                "prompt".into(),
+            ];
+            apply("grok", model, false, &mut off).unwrap();
+            assert_eq!(off[2], "grok-4.7");
+        }
+        assert!(apply_grok(Some("grok-4.6"), &catalog, &mut vec!["grok".into()]).is_err());
+        assert!(apply_grok(None, &[], &mut vec!["grok".into()]).is_err());
+        let mut literal = vec!["grok".into(), "-p".into(), "--model".into()];
+        apply_grok(None, &catalog, &mut literal).unwrap();
+        assert_eq!(
+            literal,
+            ["grok", "--model", "grok-4.7-build-fast", "-p", "--model"]
+        );
     }
 
     #[test]

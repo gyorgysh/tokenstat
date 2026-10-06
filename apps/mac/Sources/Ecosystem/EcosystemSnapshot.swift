@@ -37,6 +37,7 @@ struct EcosystemRoute: Equatable, Sendable {
     var searchTerm: String?
     var section: EcosystemProjectSection?
     var chatID: String?
+    var terminalID: String?
 
     var url: URL {
         var parts = URLComponents()
@@ -48,18 +49,20 @@ struct EcosystemRoute: Equatable, Sendable {
                                 URLQueryItem(name: "owner", value: owner)]
             if let section { parts.queryItems?.append(URLQueryItem(name: "section", value: section.rawValue)) }
             if let chatID { parts.queryItems?.append(URLQueryItem(name: "chat", value: chatID)) }
+            if let terminalID { parts.queryItems?.append(URLQueryItem(name: "terminal", value: terminalID)) }
         }
         if let searchTerm, screen == .search { parts.queryItems = [URLQueryItem(name: "query", value: searchTerm)] }
         return parts.url!
     }
 
-    init(screen: EcosystemScreen, projectID: String? = nil, owner: String? = nil, searchTerm: String? = nil, section: EcosystemProjectSection? = nil, chatID: String? = nil) {
+    init(screen: EcosystemScreen, projectID: String? = nil, owner: String? = nil, searchTerm: String? = nil, section: EcosystemProjectSection? = nil, chatID: String? = nil, terminalID: String? = nil) {
         self.screen = screen
         self.projectID = projectID
         self.owner = owner
         self.searchTerm = searchTerm
         self.section = section
         self.chatID = chatID
+        self.terminalID = terminalID
     }
 
     init?(url: URL) {
@@ -69,7 +72,7 @@ struct EcosystemRoute: Equatable, Sendable {
               parts.fragment == nil,
               let screen = EcosystemScreen(rawValue: String(parts.path.dropFirst())) else { return nil }
         let items = parts.queryItems ?? []
-        guard items.allSatisfy({ ["project", "owner", "query", "section", "entity", "chat"].contains($0.name) }),
+        guard items.allSatisfy({ ["project", "owner", "query", "section", "entity", "chat", "terminal"].contains($0.name) }),
               items.allSatisfy({ $0.value != nil }),
               Set(items.map(\.name)).count == items.count else { return nil }
         if let entity = items.first(where: { $0.name == "entity" })?.value {
@@ -89,11 +92,13 @@ struct EcosystemRoute: Equatable, Sendable {
         guard sectionValue == nil || section != nil else { return nil }
         let chat = items.first { $0.name == "chat" }?.value
         guard chat == nil || (screen == .workspaces && section == .chat && project != nil && owner != nil) else { return nil }
+        let terminal = items.first { $0.name == "terminal" }?.value
+        guard terminal == nil || (chat == nil && screen == .workspaces && section == .sessions && project != nil && owner != nil) else { return nil }
         let query = items.first { $0.name == "query" }?.value
         guard items.isEmpty || (screen == .workspaces && project != nil && owner != nil && query == nil)
                 || (screen == .search && query != nil && project == nil && owner == nil && section == nil),
-              [project, owner, query, chat].compactMap({ $0 }).allSatisfy({ !$0.isEmpty && $0.utf8.count <= 2048 }) else { return nil }
-        self.init(screen: screen, projectID: project, owner: owner, searchTerm: query, section: section, chatID: chat)
+              [project, owner, query, chat, terminal].compactMap({ $0 }).allSatisfy({ !$0.isEmpty && $0.utf8.count <= 2048 }) else { return nil }
+        self.init(screen: screen, projectID: project, owner: owner, searchTerm: query, section: section, chatID: chat, terminalID: terminal)
     }
 }
 

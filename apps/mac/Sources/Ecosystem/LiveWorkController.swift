@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 #if os(iOS)
 import ActivityKit
-import CryptoKit
 import Foundation
+import OSLog
 import UIKit
 
 @MainActor
@@ -18,6 +18,7 @@ final class LiveWorkController {
     private var registeredTokens: [String: String] = [:]
     private var seen = UserDefaults.standard.stringArray(forKey: "liveWork.seen.v1") ?? []
     private var generation = UUID()
+    private let logger = Logger(subsystem: "ai.tokenstat.tokenstat", category: "LiveActivities")
 
     func verify(owner: String?) {
         if self.owner != owner { generation = UUID() }
@@ -35,14 +36,36 @@ final class LiveWorkController {
     }
 
     func track(chat: ChatConversation, peer: String, projectID: String, projectName: String,
-               startedAt: Date, phase: LiveWorkPhase) async {
+               startedAt: Date, phase: LiveWorkPhase, mayStart: () -> Bool) async {
+        guard let revision = chat.runRevision ?? chat.sendRevision else { return }
+        await track(kind: .chat, id: chat.id, revision: String(revision), running: chat.running,
+                    peer: peer, projectID: projectID, projectName: projectName,
+                    startedAt: startedAt, phase: phase, feature: .liveActivities, mayStart: mayStart)
+    }
+
+    func track(terminal: PtySessionInfo, peer: String, projectName: String, observedAt: Date, stopped: Bool = false,
+               mayStart: () -> Bool) async {
+        guard let workspaceID = terminal.workspaceID, !workspaceID.isEmpty, terminal.hidden != true else { return }
+        // The process can die just before its wait thread publishes the exit
+        // code. Do not end a successful run as Stopped during that gap.
+        guard terminal.alive || terminal.exitCode != nil || stopped else { return }
+        let startedAt = terminal.startedAtMs.flatMap { $0 > 0 ? Date(timeIntervalSince1970: Double($0) / 1000) : nil } ?? observedAt
+        await track(kind: .terminal, id: terminal.id, revision: "0", running: terminal.alive,
+                    peer: peer, projectID: workspaceID, projectName: projectName, startedAt: startedAt,
+                    phase: stopped ? .stopped : .terminal(alive: terminal.alive, exitCode: terminal.exitCode,
+                                     activity: terminal.activity, attention: terminal.attention), feature: .terminalLiveActivities, mayStart: mayStart)
+    }
+
+    private func track(kind: LiveWorkKind, id: String, revision: String, running: Bool,
+                       peer: String, projectID: String, projectName: String, startedAt: Date,
+                       phase: LiveWorkPhase, feature: RemoteHostFeature, mayStart: () -> Bool) async {
         guard let owner, owner == EcosystemPublisher.ownerKey(WorkSessionContext.shared.scope),
-              EcosystemPublisher.isAuthorizedPeer(peer), let revision = chat.runRevision ?? chat.sendRevision,
+              EcosystemPublisher.isAuthorizedPeer(peer),
               ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        let key = SHA256.hash(data: Data("chat:\(chat.id)".utf8)).map { String(format: "%02x", $0) }.joined()
+        let key = LiveWorkAttributes.key(kind: kind, id: id)
         let identity = "\(owner):\(peer):\(key):\(revision)"
         let current = Activity<LiveWorkAttributes>.activities.first {
-            $0.attributes.owner == owner && $0.attributes.peer == peer && $0.attributes.key == key && $0.attributes.revision == String(revision)
+            $0.attributes.owner == owner && $0.attributes.peer == peer && $0.attributes.key == key && $0.attributes.revision == revision
         }
         let state = LiveWorkAttributes.ContentState(phase: phase, updatedAt: Date().timeIntervalSince1970)
         if let current {
@@ -55,12 +78,12 @@ final class LiveWorkController {
             }
             return
         }
-        guard chat.running, !phase.finished, !seen.contains(identity), UIApplication.shared.applicationState == .active else { return }
+        guard running, mayStart(), !phase.finished, !seen.contains(identity), UIApplication.shared.applicationState == .active else { return }
         guard starting.insert(identity).inserted else { return }
         defer { starting.remove(identity) }
         let observed = generation
-        guard await RemoteHostFeature.liveActivities.isSupported(peer: peer), generation == observed,
-              owner == self.owner, !Task.isCancelled, !seen.contains(identity),
+        guard await feature.isSupported(peer: peer), generation == observed,
+              owner == self.owner, !Task.isCancelled, mayStart(), !seen.contains(identity),
               UIApplication.shared.applicationState == .active,
               EcosystemPublisher.isAuthorizedPeer(peer) else { return }
         // One foreground-observed run per activity; a user's dismissal is respected.
@@ -68,12 +91,12 @@ final class LiveWorkController {
             await old.end(nil, dismissalPolicy: .immediate); release(old.id)
         }
         guard generation == observed, !Task.isCancelled, owner == self.owner,
-              EcosystemPublisher.isAuthorizedPeer(peer), UIApplication.shared.applicationState == .active else { return }
+              mayStart(), EcosystemPublisher.isAuthorizedPeer(peer), UIApplication.shared.applicationState == .active else { return }
         // A computer's clock can be ahead of the phone; elapsed time must never start in the future.
         let start = min(Date().timeIntervalSince1970, max(0, startedAt.timeIntervalSince1970))
-        let attributes = LiveWorkAttributes(startedAt: start, owner: owner, peer: peer, key: key, revision: String(revision),
+        let attributes = LiveWorkAttributes(startedAt: start, owner: owner, peer: peer, key: key, revision: revision,
             projectName: String(projectName.prefix(100)),
-            route: EcosystemRoute(screen: .workspaces, projectID: projectID, owner: owner, section: .chat, chatID: chat.id).url.absoluteString)
+            route: LiveWorkAttributes.destination(kind: kind, id: id, peer: peer, workspaceID: projectID, owner: owner).url.absoluteString)
         do {
             let activity = try Activity.request(attributes: attributes,
                 content: ActivityContent(state: state, staleDate: Date().addingTimeInterval(180)), pushType: .token)
@@ -81,7 +104,10 @@ final class LiveWorkController {
             seen = Array(seen.suffix(100))
             UserDefaults.standard.set(seen, forKey: "liveWork.seen.v1")
             observe(activity)
-        } catch { /* Disabled, unavailable or at the system limit: the chat continues normally. */ }
+        } catch {
+            // Preserve the work while making device-only ActivityKit failures diagnosable.
+            logger.error("Could not start Live Activity: \(String(describing: error), privacy: .public)")
+        }
     }
 
     private func observe(_ activity: Activity<LiveWorkAttributes>) {

@@ -13,6 +13,15 @@ class ChatFastModeTest {
         val models = Json.parseToJsonElement("""["opus","claude-opus-5-5","claude-opus-5","claude-opus-4-8"]""") as JsonArray
         assertFalse(chatFastModeAvailable("opus", null))
         assertTrue(chatFastModeAvailable(null, JsonArray(emptyList())))
+        val grok = Json.parseToJsonElement("""["grok-4.7", ""]""") as JsonArray
+        assertTrue(chatFastModeAvailable(null, grok, "grok"))
+        assertTrue(chatFastModeAvailable("grok-4.7", grok, "grok"))
+        for (model in listOf("grok-4.6", "-20261006", "grok-4.7-20261006", "grok-4.7[1m]")) {
+            assertFalse(chatFastModeAvailable(model, grok, "grok"))
+        }
+        assertFalse(chatFastModeAvailable(null, JsonArray(emptyList()), "grok"))
+        assertFalse(chatFastModeAvailable(null, Json.parseToJsonElement("""["grok-4.7"]""") as JsonArray, "grok"))
+        assertTrue(chatFastModeAvailable("grok-4.7-20261006", Json.parseToJsonElement("""["grok-4.7-20261006"]""") as JsonArray, "grok"))
         for (model in listOf("opus", "opus[1m]", "claude-opus-5-5", "claude-opus-5-5[1m]", "claude-opus-4-8-20260525", "claude-opus-4-8-20260525[1m]")) {
             assertTrue(chatFastModeAvailable(model, models))
         }

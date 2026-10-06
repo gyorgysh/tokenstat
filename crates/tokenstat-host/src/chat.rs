@@ -991,13 +991,11 @@ impl Store {
                     tokenstat_sync::push::Reason::RunNeedsInput,
                 );
             }
-            if let Ok(chat) = self.get(conversation_id) {
-                tokenstat_sync::push::activity_in_background(
-                    conversation_id,
-                    chat.run_revision.unwrap_or(chat.send_revision),
-                    "waiting",
-                );
-            }
+            tokenstat_sync::push::activity_in_background(
+                conversation_id,
+                chat.run_revision.unwrap_or(chat.send_revision),
+                "waiting",
+            );
         }
         Ok(approval)
     }
@@ -1839,6 +1837,15 @@ impl Store {
                 at_ms: now_ms(),
             },
         )?;
+        if self.approvals(Some(&out.conversation_id)).is_empty()
+            && let Ok(chat) = self.get(&out.conversation_id)
+        {
+            tokenstat_sync::push::activity_in_background(
+                &out.conversation_id,
+                chat.run_revision.unwrap_or(chat.send_revision),
+                "working",
+            );
+        }
         Ok(out)
     }
 
@@ -2031,7 +2038,7 @@ impl Store {
         }
         if input.fast_mode && !crate::chat_fast::available(&backend, input.model.as_deref()) {
             return Err(
-                "Select a supported Codex model or Claude Opus model to use fast mode.".into(),
+                "Select a supported model listed by this agent to use fast mode. Refresh the model list if needed.".into(),
             );
         }
         let id = mint_record_id("chat");
@@ -2213,7 +2220,7 @@ impl Store {
                 if fast && !crate::chat_fast::available(&current.backend, current.model.as_deref())
                 {
                     return Err(
-                        "Select a supported Codex model or Claude Opus model to use fast mode."
+                        "Select a supported model listed by this agent to use fast mode. Refresh the model list if needed."
                             .into(),
                     );
                 }
@@ -2249,19 +2256,25 @@ impl Store {
                 chat.fast_mode = false;
                 chat.resume_token = chat.resume_tokens.get(&chat.backend).cloned();
             }
+            let model_changed = changes.model.is_some();
             if let Some(model) = changes.model {
                 chat.model = Some(model).filter(|value| !value.trim().is_empty());
             }
             if let Some(effort) = changes.effort {
                 chat.effort = Some(effort).filter(|value| !value.trim().is_empty());
             }
-            if !crate::chat_fast::available(&chat.backend, chat.model.as_deref()) {
+            // Grok's account model list can be temporarily unavailable after
+            // restart. Renaming a chat or changing unrelated setup must not
+            // erase its saved speed; launch still validates the actual pair.
+            if (chat.backend != "grok" || model_changed)
+                && !crate::chat_fast::available(&chat.backend, chat.model.as_deref())
+            {
                 chat.fast_mode = false;
             }
             if let Some(fast) = changes.fast_mode {
                 if fast && !crate::chat_fast::available(&chat.backend, chat.model.as_deref()) {
                     return Err(
-                        "Select a supported Codex model or Claude Opus model to use fast mode."
+                        "Select a supported model listed by this agent to use fast mode. Refresh the model list if needed."
                             .into(),
                     );
                 }
@@ -2302,7 +2315,7 @@ impl Store {
         {
             // A runtime change whose saved record failed must not continue
             // using a paid setting that none of the clients can see.
-            let _ = tokenstat_pty::manager().kill(&pty);
+            let _ = self.stop_pty(id, &pty);
         }
         result
     }
@@ -3473,12 +3486,12 @@ impl Store {
         // Reserve a new revision durably before launch. Even a failed spawn
         // consumes it: another client must review the changed launch intent.
         let branch = tokenstat_workspace::git::current_branch(&workspace.path);
-        self.edit_conversation(id, |current| {
+        let activity_revision = self.edit_conversation(id, |current| {
             current.send_revision = next_send_revision(current.send_revision)?;
             current.run_revision = Some(current.send_revision);
             current.run_started_at_ms = Some(now_ms());
             current.branch = branch;
-            Ok(())
+            Ok(current.send_revision)
         })?;
         let accepted_at = now_ms();
         if let Some(key) = &receipt_key {
@@ -3498,6 +3511,7 @@ impl Store {
         let measure = (chat.backend == "codex")
             .then(|| crate::chat_edit_measure::EditMeasure::start(Path::new(&workspace.path)));
         let spawn_argv = live_speed.as_ref().map_or(&argv, |live| &live.argv);
+        tokenstat_sync::push::begin_activity(id, activity_revision);
         let info = match tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
                 command: crate::launcher::spawn_command(&spawn_argv[0]),
@@ -3515,6 +3529,7 @@ impl Store {
         {
             Ok(info) => info,
             Err(error) => {
+                tokenstat_sync::push::abandon_activity(id, activity_revision);
                 // Nothing was delivered, so the receipt has to go with it or
                 // the next attempt would be refused as a repeat.
                 if let Some(key) = &receipt_key {
@@ -3699,6 +3714,20 @@ impl Store {
             .map_err(DispatchError::delivery_unknown)
     }
 
+    fn stop_pty(&self, id: &str, pty: &str) -> Result<(), tokenstat_pty::PtyError> {
+        let live = self
+            .live_speed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(id)
+            .filter(|(current, _)| current == pty)
+            .map(|(_, live)| Arc::clone(live));
+        match live {
+            Some(live) => live.stop(pty),
+            None => tokenstat_pty::manager().kill(pty),
+        }
+    }
+
     pub fn stop(&self, id: &str) -> Result<(), String> {
         validate_record_id(id)?;
         let branch = self.folder_branch(id);
@@ -3718,7 +3747,7 @@ impl Store {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .insert(id.into());
-            match tokenstat_pty::manager().kill(&pty) {
+            match self.stop_pty(id, &pty) {
                 Ok(()) | Err(tokenstat_pty::PtyError::NoSession(_)) => {}
                 Err(error) => {
                     self.killed
@@ -3850,7 +3879,7 @@ impl Store {
                 break;
             }
             if deadline.is_some_and(|when| Instant::now() >= when) {
-                let _ = manager.kill(pty);
+                let _ = self.stop_pty(id, pty);
             }
             std::thread::sleep(POLL);
         }
@@ -4188,14 +4217,22 @@ impl Store {
         id: &str,
         branch: Option<Option<String>>,
     ) -> Result<Conversation, String> {
-        self.edit_conversation(id, |chat| {
+        let chat = self.edit_conversation(id, |chat| {
             chat.running = false;
             chat.updated_at_ms = now_ms();
             if let Some(branch) = branch {
                 chat.branch = branch;
             }
             Ok(chat.clone())
-        })
+        })?;
+        // Ordinary drainers already posted their exact ending and retired
+        // the binding. This covers Stop recovering a missing PTY/drainer.
+        tokenstat_sync::push::activity_in_background(
+            id,
+            chat.run_revision.unwrap_or(chat.send_revision),
+            "stopped",
+        );
+        Ok(chat)
     }
 
     fn set_running(&self, id: &str, running: bool) -> Result<Conversation, String> {
@@ -6276,6 +6313,57 @@ mod tests {
         store.steers.lock().unwrap().get(id).cloned()
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn stopping_a_live_turn_requests_its_mailbox_before_killing_the_pty() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "live-stop");
+        store.set_running("live-stop", true).unwrap();
+        let mailbox = tempfile::tempdir().unwrap();
+        let directory = mailbox.path().to_path_buf();
+        let manager = tokenstat_pty::manager();
+        let process = manager
+            .spawn(&tokenstat_pty::Spawn {
+                command: "/bin/sh".into(),
+                args: vec![
+                    "-c".into(),
+                    "trap 'exit 19' HUP; while [ ! -f \"$1/stop\" ]; do /bin/sleep 0.02; done; printf handled > \"$1/handled\"".into(),
+                    "mailbox".into(),
+                    directory.display().to_string(),
+                ],
+                cwd: root.path().into(),
+                workspace_id: None,
+                hidden: true,
+                rows: 24,
+                cols: 80,
+                no_color: true,
+                dark: None,
+                environment: Vec::new(),
+            })
+            .unwrap();
+        store
+            .active
+            .lock()
+            .unwrap()
+            .insert("live-stop".into(), process.id.clone());
+        store.live_speed.lock().unwrap().insert(
+            "live-stop".into(),
+            (
+                process.id.clone(),
+                Arc::new(crate::chat_live::Launch::test_mailbox(mailbox)),
+            ),
+        );
+        store.stop("live-stop").unwrap();
+        assert_eq!(
+            fs::read_to_string(directory.join("handled")).unwrap(),
+            "handled"
+        );
+        assert!(!manager.info(&process.id).unwrap().alive);
+        assert!(store.killed.lock().unwrap().contains("live-stop"));
+        manager.close(&process.id).unwrap();
+    }
+
     fn prepare_live_chat(store: &Store, id: &str) {
         conversation_for_receipts(store, id);
         store.set_running(id, true).unwrap();
@@ -8075,6 +8163,70 @@ mod tests {
                     Update {
                         fast_mode: Some(true),
                         expected_revision: Some(current.send_revision),
+                        ..Update::default()
+                    }
+                )
+                .unwrap()
+                .fast_mode
+        );
+    }
+
+    #[test]
+    fn grok_saved_speed_survives_unrelated_edits_when_model_enumeration_is_unavailable() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        conversation_for_receipts(&store, "grok-saved");
+        // Simulate loading a previously supported selection that the current
+        // account catalog cannot enumerate. No CLI probe or global cache edit.
+        store
+            .edit_conversation("grok-saved", |chat| {
+                chat.backend = "grok".into();
+                chat.model = Some("grok-unlisted".into());
+                chat.fast_mode = true;
+                Ok(())
+            })
+            .unwrap();
+        let renamed = store
+            .update(
+                "grok-saved",
+                Update {
+                    title: Some("Renamed".into()),
+                    ..Update::default()
+                },
+            )
+            .unwrap();
+        assert!(renamed.fast_mode);
+        assert!(
+            Store::load_at(root.path().join("chat"))
+                .get("grok-saved")
+                .unwrap()
+                .fast_mode
+        );
+        assert!(
+            !store
+                .update(
+                    "grok-saved",
+                    Update {
+                        fast_mode: Some(false),
+                        ..Update::default()
+                    }
+                )
+                .unwrap()
+                .fast_mode
+        );
+        // Explicit unsupported model changes still reset the paid selection.
+        store
+            .edit_conversation("grok-saved", |chat| {
+                chat.fast_mode = true;
+                Ok(())
+            })
+            .unwrap();
+        assert!(
+            !store
+                .update(
+                    "grok-saved",
+                    Update {
+                        model: Some("grok-other-unlisted".into()),
                         ..Update::default()
                     }
                 )

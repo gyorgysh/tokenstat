@@ -103,8 +103,11 @@ import ActivityKit
                     try? await Task.sleep(for: .seconds(2))
                     let attrs = LiveWorkAttributes(startedAt: Date().addingTimeInterval(-147).timeIntervalSince1970,
                         owner: "preview", peer: "preview", key: "preview", revision: "1", projectName: "Studio", route: "tokenstat://open/workspaces")
-                    _ = try? Activity.request(attributes: attrs,
-                        content: ActivityContent(state: LiveWorkAttributes.ContentState(phase: .working, updatedAt: Date().timeIntervalSince1970), staleDate: Date().addingTimeInterval(180)), pushType: nil)
+                    do {
+                        let activity = try Activity.request(attributes: attrs,
+                            content: ActivityContent(state: LiveWorkAttributes.ContentState(phase: .working, updatedAt: Date().timeIntervalSince1970), staleDate: Date().addingTimeInterval(180)), pushType: nil)
+                        status = "Live Activity \(activity.activityState)"
+                    } catch { status = "Live Activity failed: \(error.localizedDescription)" }
                 }
                 #endif
                 if ProcessInfo.processInfo.arguments.contains("--render-widget-gallery") {

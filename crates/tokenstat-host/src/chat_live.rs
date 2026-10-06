@@ -13,6 +13,10 @@ use std::process::{Child, Stdio};
 use std::sync::{Mutex, OnceLock, PoisonError, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+const INTERRUPT_TIMEOUT: Duration = Duration::from_secs(3);
+const EXIT_TIMEOUT: Duration = Duration::from_secs(3);
+const STOP_TIMEOUT: Duration = Duration::from_secs(8);
+
 #[cfg(unix)]
 static STOPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -208,11 +212,30 @@ impl Launch {
             }
             if Instant::now() >= until {
                 // An unacknowledged paid setting must not continue invisibly.
-                let _ = tokenstat_pty::manager().kill(pty);
+                let _ = self.stop(pty);
                 return Err("The agent did not acknowledge its speed setting. The turn was stopped; try again.".into());
             }
             std::thread::sleep(Duration::from_millis(40));
         }
+    }
+
+    pub(crate) fn stop(&self, pty: &str) -> Result<(), tokenstat_pty::PtyError> {
+        // PTY kill allows only a short signal grace period. Give the helper
+        // its own cancellation request first, so Codex can persist aborted
+        // tool outputs and flush its rollout before the process is retired.
+        if fs::File::create(self.directory.path().join("stop")).is_ok() {
+            let until = Instant::now() + STOP_TIMEOUT;
+            loop {
+                if !tokenstat_pty::manager().info(pty)?.alive {
+                    return Ok(());
+                }
+                if Instant::now() >= until {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(40));
+            }
+        }
+        tokenstat_pty::manager().kill(pty)
     }
 }
 
@@ -335,6 +358,48 @@ fn read_messages(child: &mut Child) -> Result<mpsc::Receiver<Result<Value, Strin
 }
 
 impl Protocol {
+    fn interrupt(&self, input: &mut impl Write, messages: &mpsc::Receiver<Result<Value, String>>) {
+        if self.backend != "codex" || self.thread.is_empty() || self.turn.is_empty() {
+            return;
+        }
+        if send(
+            input,
+            &json!({"id":"interrupt","method":"turn/interrupt","params":{"threadId":self.thread,"turnId":self.turn}}),
+        )
+        .is_err()
+        {
+            return;
+        }
+        let until = Instant::now() + INTERRUPT_TIMEOUT;
+        while Instant::now() < until {
+            match messages.recv_timeout(Duration::from_millis(40)) {
+                Ok(Ok(message))
+                    if message["method"] == "turn/completed"
+                        && message["params"]["threadId"] == self.thread
+                        && message["params"]["turn"]["id"] == self.turn =>
+                {
+                    // Closing stdin next performs the server's thread shutdown
+                    // and flush. Unsubscribe alone only removes a subscriber.
+                    return;
+                }
+                Ok(Ok(message))
+                    if matches!(
+                        message["method"].as_str(),
+                        Some("item/started" | "item/completed")
+                    ) =>
+                {
+                    if let Some(item) = codex_item(&message["params"]["item"]) {
+                        let _ = emit(
+                            &json!({"type":if message["method"] == "item/started" {"item.started"} else {"item.completed"},"item":item}),
+                        );
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                _ => {}
+            }
+        }
+    }
+
     fn controls(&mut self, directory: &Path, input: &mut impl Write) -> Result<(), String> {
         for entry in fs::read_dir(directory).map_err(|error| error.to_string())? {
             let entry = entry.map_err(|error| error.to_string())?;
@@ -469,8 +534,12 @@ pub fn run(path: &Path) -> Result<(), String> {
         let mut initialized = false;
         let mut started = false;
         loop {
+            let stop_requested = directory.join("stop").is_file();
             #[cfg(unix)]
-            if STOPPED.load(std::sync::atomic::Ordering::SeqCst) {
+            let stop_requested =
+                stop_requested || STOPPED.load(std::sync::atomic::Ordering::SeqCst);
+            if stop_requested {
+                protocol.interrupt(&mut input, &rx);
                 return Err("The turn was stopped.".into());
             }
             if !started && Instant::now() >= startup_deadline {
@@ -573,8 +642,8 @@ pub fn run(path: &Path) -> Result<(), String> {
                     return Err("Codex did not complete the turn.".into());
                 }
                 emit(&json!({"type":"turn.completed","usage":protocol.usage}))?;
-                // Match exec's shutdown: retiring the thread lets its rollout
-                // writer flush before the stdio server itself is closed.
+                // Match exec's subscription cleanup. Closing protocol stdin
+                // afterward shuts down the thread and flushes its rollout.
                 send(
                     &mut input,
                     &json!({"id":"shutdown","method":"thread/unsubscribe","params":{"threadId":protocol.thread}}),
@@ -617,17 +686,13 @@ pub fn run(path: &Path) -> Result<(), String> {
             }
         }
     })();
-    // Closing protocol stdin lets the CLI flush its resume history. A Stop
-    // or failure terminates immediately; a successful turn gets a brief,
-    // bounded graceful shutdown before its process is retired.
+    // Closing protocol stdin starts the app-server's thread shutdown. Even a
+    // stopped/failed turn needs this bounded grace period to flush its history.
+    // On a protocol failure the server also cancels any still-running work.
     let mut exited = false;
-    if result.is_ok() {
-        let until = Instant::now() + Duration::from_secs(3);
+    if result.is_ok() || config.backend == "codex" {
+        let until = Instant::now() + EXIT_TIMEOUT;
         while Instant::now() < until {
-            #[cfg(unix)]
-            if STOPPED.load(std::sync::atomic::Ordering::SeqCst) {
-                break;
-            }
             if child.try_wait().is_ok_and(|status| status.is_some()) {
                 exited = true;
                 break;

@@ -4439,6 +4439,8 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
     /// When the process last produced output, epoch milliseconds. Absent
     /// when the host predates the field or nothing has been read yet.
     var lastActivityAtMs: Int64?
+    /// Host process spawn time, so Live Activities retain elapsed time after reattachment.
+    var startedAtMs: UInt64? = nil
     /// What the host's detector says this session is doing: `working` or
     /// `idle`. Absent when the sampler has not reached it yet, which is not
     /// the same as idle and must not be shown as idle.
@@ -4491,6 +4493,7 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
         case exitCode
         case totalBytes
         case lastActivityAtMs
+        case startedAtMs
         case activity
         case cpuPercent
         case memoryMb

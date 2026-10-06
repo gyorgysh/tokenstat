@@ -104,6 +104,24 @@ class UsageWidgetFailureTest {
         } finally { UsageWidgetStore.clear(context) }
     }
 
+    @Test fun refreshFailureUsesTheAccountLeaseAfterVerificationChangesEpoch() = runBlocking {
+        seed()
+        try {
+            val changedAccount = JsonObject(account().toMutableMap().apply { put("accountId", JsonPrimitive("other-fixture")) })
+            val observed = UsageWidgetStore.epoch()
+            val result = UsageWidgetRefresh(context) { method, _ ->
+                if (method == "account.status") changedAccount else throw SecurityException("Usage access denied")
+            }.run()
+            assertEquals(ListenableWorker.Result.failure(), result)
+            assertTrue(UsageWidgetStore.epoch() > observed)
+            val snapshot = UsageWidgetStore.read(context)!!
+            assertEquals(UsageSnapshot.owner(changedAccount), snapshot.owner)
+            assertTrue(snapshot.refreshFailed)
+            assertNull(snapshot.value(false))
+            assertRefreshFinished(snapshot)
+        } finally { UsageWidgetStore.clear(context) }
+    }
+
     @Test fun signedOutReviewDeviceDoesNotRequestUsageData() = runBlocking {
         seed()
         try {

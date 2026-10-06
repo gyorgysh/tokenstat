@@ -687,6 +687,7 @@ final class ClientWorkspacesModel {
     /// they tapped was still on screen. That is what connected the first tap
     /// on a second machine to the first one.
     private(set) var chosenPeer: String?
+    @ObservationIgnored private var remoteLoadGeneration = UUID()
     private(set) var errorMessage: String?
     /// What this phone is called. It is never in the host list (it cannot dial
     /// itself), so it gets one line of its own.
@@ -852,6 +853,14 @@ final class ClientWorkspacesModel {
     /// drops. Both end up here, never two at once.
     private func dial(_ host: ClientHost, recovering: Bool) async {
         let ecosystemLease = EcosystemPublisher.lease
+        let ownerScope = WorkSessionContext.shared.scope
+        let loadGeneration = UUID()
+        func stillCurrent() -> Bool {
+            !Task.isCancelled && ownerScope == WorkSessionContext.shared.scope
+                && EcosystemPublisher.lease == ecosystemLease
+                && remoteLoadGeneration == loadGeneration
+                && (chosenPeer == nil || chosenPeer == host.peerKey)
+        }
         if pendingPeer == host.peerKey { pendingPeer = nil }
         guard isConnecting == nil else { return }
         guard host.online != false else {
@@ -865,6 +874,7 @@ final class ClientWorkspacesModel {
             }
             return
         }
+        remoteLoadGeneration = loadGeneration
         isConnecting = host.peerKey
         defer { isConnecting = nil }
         if !recovering {
@@ -876,6 +886,7 @@ final class ClientWorkspacesModel {
         }
         let delays: [UInt64] = [0, 1, 2, 4]
         for (index, delay) in delays.enumerated() {
+            guard stillCurrent() else { return }
             if delay > 0 {
                 infoMessage = ClientTunnelCopy.waiting(host.name)
                 errorMessage = nil
@@ -883,12 +894,15 @@ final class ClientWorkspacesModel {
             }
             do {
                 await ClientDeviceName.publish()
+                guard stillCurrent() else { return }
                 let peer = try await Bridge.pair(
                     key: host.peerKey,
                     label: host.name,
                     address: ""
                 )
+                guard stillCurrent() else { return }
                 _ = try await Bridge.setTunnel(true)
+                guard stillCurrent() else { return }
                 // Asked before anything is loaded, and asked *for* rather than
                 // reported. Connect used to walk straight into the refusal and
                 // show it as a failure with a Try again that could never
@@ -896,8 +910,10 @@ final class ClientWorkspacesModel {
                 // the device's own page. Pressing Connect is somebody saying
                 // they want in, so this asks on their behalf and waits.
                 let allowed = try await Bridge.workspaceAccessAllowed(peer: peer.key)
+                guard stillCurrent() else { return }
                 if !allowed {
                     _ = try? await Bridge.askWorkspaceAccess(peer: host.peerKey)
+                    guard stillCurrent() else { return }
                     // Its own state, not `infoMessage`. Waiting on a person at
                     // another computer is the one thing on this screen where
                     // nothing will change until they act, and a line of grey
@@ -919,17 +935,20 @@ final class ClientWorkspacesModel {
                 async let loadedSessions = ClientRemote.ptyList(peer: peer.key)
                 async let loadedChats = ClientRemote.recentChats(peer: peer.key)
                 let newFolders = try await loadedFolders
-                guard EcosystemPublisher.lease == ecosystemLease else { return }
+                let newSessions = try? await loadedSessions
+                let newChats = try? await loadedChats
+                guard stillCurrent() else { return }
                 publishEcosystem(newFolders, peer: host.peerKey, host: host.name, lease: ecosystemLease)
                 folders = newFolders
-                sessions = (try? await loadedSessions) ?? []
-                recentChats = (try? await loadedChats) ?? []
+                sessions = newSessions ?? []
+                recentChats = newChats ?? []
                 connectedKey = host.peerKey
                 UserDefaults.standard.set(host.peerKey, forKey: "client.lastConnectedHost")
                 errorMessage = nil
                 infoMessage = nil
                 return
             } catch {
+                guard stillCurrent() else { return }
                 let text = error.localizedDescription
                 if Self.isApprovalNeeded(text) {
                     infoMessage = L10n.text("apple.clientworkspacesview.approve_this_device_on_0_open_machines.fef8f93c", "\(host.name)")
@@ -978,11 +997,17 @@ final class ClientWorkspacesModel {
     /// it succeeds or the screen goes away.
     private func watchForAccess(_ host: ClientHost) {
         accessWatch?.cancel()
+        let ownerScope = WorkSessionContext.shared.scope
+        let ecosystemLease = EcosystemPublisher.lease
+        let loadGeneration = remoteLoadGeneration
         accessWatch = Task { [weak self] in
             for _ in 0..<ClientAccessWatch.attempts {
                 guard !Task.isCancelled else { return }
                 try? await Task.sleep(for: ClientAccessWatch.interval)
                 guard !Task.isCancelled, let self else { return }
+                guard ownerScope == WorkSessionContext.shared.scope, ecosystemLease == EcosystemPublisher.lease,
+                      self.remoteLoadGeneration == loadGeneration,
+                      self.chosenPeer == nil || self.chosenPeer == host.peerKey else { return }
                 // The key is already known, so this asks one small question
                 // and nothing else. Re-pairing on every tick would rewrite
                 // this device's peer store every five seconds to learn a
@@ -990,7 +1015,9 @@ final class ClientWorkspacesModel {
                 guard let allowed = try? await Bridge.workspaceAccessAllowed(peer: host.peerKey),
                       allowed
                 else { continue }
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, ownerScope == WorkSessionContext.shared.scope,
+                      ecosystemLease == EcosystemPublisher.lease, self.remoteLoadGeneration == loadGeneration,
+                      self.chosenPeer == nil || self.chosenPeer == host.peerKey else { return }
                 // Let go of the handle before connecting. The dial stops the
                 // watch on its way in, and a task that cancels itself
                 // mid-flight would take the retry ladder's own sleeps with it.
@@ -1017,6 +1044,7 @@ final class ClientWorkspacesModel {
     }
 
     func disconnect() {
+        remoteLoadGeneration = UUID()
         pendingPeer = nil
         chosenPeer = nil
         stopWatchingForAccess()
@@ -1051,15 +1079,29 @@ final class ClientWorkspacesModel {
 
     private func reloadRemote(peerKey: String) async {
         let ecosystemLease = EcosystemPublisher.lease
+        let ownerScope = WorkSessionContext.shared.scope
+        guard isConnecting == nil, connectedKey == peerKey, chosenPeer == nil || chosenPeer == peerKey else { return }
+        let loadGeneration = UUID()
+        remoteLoadGeneration = loadGeneration
         guard let peer = try? await Bridge.peers().first(where: { $0.key == peerKey }) else {
             return
         }
-        if let newFolders = try? await Bridge.remoteWorkspaces(peer: peer), EcosystemPublisher.lease == ecosystemLease {
+        guard !Task.isCancelled, ownerScope == WorkSessionContext.shared.scope,
+              EcosystemPublisher.lease == ecosystemLease, connectedKey == peerKey,
+              chosenPeer == nil || chosenPeer == peerKey, remoteLoadGeneration == loadGeneration else { return }
+        async let loadedFolders = try? Bridge.remoteWorkspaces(peer: peer)
+        async let loadedSessions = try? ClientRemote.ptyList(peer: peer.key)
+        async let loadedChats = try? ClientRemote.recentChats(peer: peer.key)
+        let (newFolders, newSessions, newChats) = await (loadedFolders, loadedSessions, loadedChats)
+        guard !Task.isCancelled, ownerScope == WorkSessionContext.shared.scope,
+              EcosystemPublisher.lease == ecosystemLease, connectedKey == peerKey,
+              chosenPeer == nil || chosenPeer == peerKey, remoteLoadGeneration == loadGeneration else { return }
+        if let newFolders {
             publishEcosystem(newFolders, peer: peerKey, host: hosts.first { $0.peerKey == peerKey }?.name ?? "Computer", lease: ecosystemLease)
             folders = newFolders
         }
-        sessions = (try? await ClientRemote.ptyList(peer: peer.key)) ?? sessions
-        recentChats = (try? await ClientRemote.recentChats(peer: peer.key)) ?? recentChats
+        sessions = newSessions ?? sessions
+        recentChats = newChats ?? recentChats
     }
 
     private func publishEcosystem(_ folders: [WorkspaceFolder], peer: String, host: String, lease: EcosystemPublicationLease?) {

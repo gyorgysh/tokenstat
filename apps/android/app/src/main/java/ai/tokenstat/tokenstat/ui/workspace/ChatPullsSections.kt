@@ -218,7 +218,7 @@ fun ChatSection(
     var draft: String by draftDelegate
     var staged: List<StagedAttachment> by stagedDelegate
     val sharedDraft by ai.tokenstat.tokenstat.ecosystem.SystemShare.draft.collectAsStateWithLifecycle()
-    LaunchedEffect(sharedDraft, composerKey) {
+    LaunchedEffect(sharedDraft, composerKey, composerRevision) {
         val shared = sharedDraft ?: return@LaunchedEffect
         if (composerKey == null || !ownsProject()) return@LaunchedEffect
         val projectId = ai.tokenstat.tokenstat.ecosystem.SystemProjects.idFor(peer, workspace)
@@ -226,8 +226,11 @@ fun ChatSection(
             ai.tokenstat.tokenstat.ecosystem.SystemShare.take(shared); return@LaunchedEffect
         }
         if (shared.projectId != null && shared.projectId != projectId) return@LaunchedEffect
-        if (ai.tokenstat.tokenstat.ecosystem.SystemShare.take(shared)) {
-            draft = if (draft.isBlank()) shared.text else draft + "\n\n" + shared.text
+        ai.tokenstat.tokenstat.ecosystem.SystemShare.consume(shared) { text ->
+            val current = model.chatComposers.snapshot(composerKey)
+            model.chatComposers.update(composerKey, current.copy(
+                text = if (current.text.isBlank()) text else current.text + "\n\n" + text,
+            ))
         }
     }
     val composerFailure by model.chatComposers.failure.collectAsStateWithLifecycle()
@@ -2996,11 +2999,12 @@ private fun ChatComposer(
                 val fastModels = speedBackend?.get("fastModeModels") as? JsonArray
                 if (fastModels != null && !offline) {
                     val fast = chatFastModeOn(chat)
-                    val fastAvailable = chatFastModeAvailable(chat?.str("model"), fastModels)
-                    val title = if (fast) L10n.text("common.chat.fast_mode_priority") else L10n.text("common.chat.fast_mode_default")
-                    val help = if (!fastAvailable) L10n.text("common.chat.fast_mode_select_opus")
-                    else title + ". " + (if (chat?.str("backend") == "claude") L10n.text("common.chat.fast_mode_claude_help") else L10n.text("common.chat.fast_mode_codex_help")) +
-                        " " + (if (speedBackend?.bol("fastModeLive") == true) L10n.text("common.chat.fast_mode_live_help") else L10n.text("common.chat.fast_mode_next_turn_help"))
+                    val fastAvailable = chatFastModeAvailable(chat?.str("model"), fastModels, chat?.str("backend"))
+                    val grokSpeed = chat?.str("backend") == "grok"
+                    val title = if (fast) (if (grokSpeed) L10n.text("common.chat.fast_mode_fast") else L10n.text("common.chat.fast_mode_priority")) else L10n.text("common.chat.fast_mode_default")
+                    val help = if (!fastAvailable) (if (grokSpeed) L10n.text("common.chat.fast_mode_select_grok") else L10n.text("common.chat.fast_mode_select_opus"))
+                    else title + ". " + (if (chat?.str("backend") == "claude") L10n.text("common.chat.fast_mode_claude_help") else if (grokSpeed) L10n.text("common.chat.fast_mode_grok_help") else L10n.text("common.chat.fast_mode_codex_help")) +
+                        " " + (if (speedBackend?.bol("fastModeLive") == true) L10n.text("common.chat.fast_mode_live_help") else if (grokSpeed) L10n.text("common.chat.fast_mode_grok_next_turn_help") else L10n.text("common.chat.fast_mode_next_turn_help"))
                     TooltipBox(
                         positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
                         tooltip = { PlainTooltip { Text(help) } },

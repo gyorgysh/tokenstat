@@ -3399,6 +3399,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                     environment,
                 })
                 .map_err(|e| e.to_string())?;
+            crate::live_work::start_terminal(&info);
             serde_json::to_value(info).map_err(|e| e.to_string())
         }
         // `folders` filtered these, so nothing else can arrive.
@@ -4023,9 +4024,7 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                 return answer;
             }
             pty_id(params).and_then(|p| {
-                tokenstat_pty::manager()
-                    .kill(&p.id)
-                    .map_err(|e| e.to_string())?;
+                crate::live_work::stop_terminal(&p.id, false).map_err(|e| e.to_string())?;
                 Ok(json!({"killed": true}))
             })
         }
@@ -4041,9 +4040,7 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                 return answer;
             }
             pty_id(params).and_then(|p| {
-                tokenstat_pty::manager()
-                    .close(&p.id)
-                    .map_err(|e| e.to_string())?;
+                crate::live_work::stop_terminal(&p.id, true).map_err(|e| e.to_string())?;
                 Ok(json!({"closed": true}))
             })
         }

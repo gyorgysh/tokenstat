@@ -3,15 +3,18 @@
 import Foundation
 
 enum ChatFastMode {
-    /// The host supplies supported model prefixes; nil also covers older
+    /// Claude uses supported prefixes; Grok requires exact listed pairs.
+    /// A nil list also covers older
     /// hosts, which must not show a switch they cannot honor.
-    static func available(model: String?, models: [String]?) -> Bool {
+    static func available(model: String?, models: [String]?, backend: String? = nil) -> Bool {
         guard let models else { return false }
+        if backend == "grok" { return models.contains(model ?? "") }
         if models.isEmpty { return true }
-        guard let model else { return false }
+        guard let model else { return models.contains("") }
         let candidate = model.hasSuffix("[1m]") ? String(model.dropLast(4)) : model
         return models.contains { prefix in
             if candidate == prefix { return true }
+            guard !prefix.isEmpty else { return false }
             guard candidate.hasPrefix(prefix) else { return false }
             let suffix = String(candidate.dropFirst(prefix.count))
             guard suffix.hasPrefix("-") else { return false }

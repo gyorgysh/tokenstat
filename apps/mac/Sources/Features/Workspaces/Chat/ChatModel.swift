@@ -3914,6 +3914,9 @@ extension ChatDisplayItem {
         // its own, and most do, but Antigravity sends `call_id: "tool"` for
         // all of them.
         var toolStarts: [String: Int] = [:]
+        // A completion may belong to a different backend than the last text
+        // event in a mixed-provider transcript. Keep each start's provenance.
+        var toolBackends: [Int: String] = [:]
         // Same duplicate-id hazard as tools, for edits that carry a reused
         // call id (or none and the same path twice). Row ids feed ForEach.
         var editStarts: [String: Int] = [:]
@@ -4164,6 +4167,7 @@ extension ChatDisplayItem {
                 let verb = agent.verb ?? ""
                 let target = ChatToolState.clip(agent.target ?? "")
                 noteToolIndex(items.count, callId: callId)
+                toolBackends[items.count] = eventBackend ?? ""
                 if ChatToolState.isFileEditVerb(verb) {
                     items.append(
                         ChatDisplayItem(
@@ -4214,6 +4218,12 @@ extension ChatDisplayItem {
                 if let index = toolEndIndex(callId: callId) {
                     switch items[index].kind {
                     case .tool(var state):
+                        let presentation = MuseToolPresentation.completed(
+                            backend: toolBackends[index], verb: state.verb,
+                            target: state.target, detail: agent.detail
+                        )
+                        state.verb = presentation.verb
+                        state.target = ChatToolState.clip(presentation.target)
                         state.running = false
                         state.failed = !(agent.ok ?? true)
                         state.detail = agent.detail
@@ -4255,7 +4265,11 @@ extension ChatDisplayItem {
                 } else {
                     let fallback = callId.isEmpty ? "end-\(stamp(event, items.count))" : callId
                     // Empty when the event named no tool. The row then says Worked.
-                    let fallbackVerb = agent.verb ?? ""
+                    let presentation = MuseToolPresentation.completed(
+                        backend: eventBackend, verb: agent.verb ?? "",
+                        target: agent.target ?? "", detail: agent.detail
+                    )
+                    let fallbackVerb = presentation.verb
                     items.append(
                         ChatDisplayItem(
                             id: "tool-\(event.seq != nil ? stamp(event, items.count) : fallback)",
@@ -4263,7 +4277,7 @@ extension ChatDisplayItem {
                                 ChatToolState(
                                     callId: fallback,
                                     verb: fallbackVerb,
-                                    target: ChatToolState.clip(agent.target ?? ""),
+                                    target: ChatToolState.clip(presentation.target),
                                     running: false,
                                     failed: !(agent.ok ?? true),
                                     detail: agent.detail,

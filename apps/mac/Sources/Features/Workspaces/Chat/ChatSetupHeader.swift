@@ -247,14 +247,14 @@ struct ChatFastModeButton: View {
     #endif
 
     private var backend: ChatBackend? { model.backend(for: chat.backend) }
-    private var available: Bool { ChatFastMode.available(model: chat.model, models: backend?.fastModeModels) }
+    private var available: Bool { ChatFastMode.available(model: chat.model, models: backend?.fastModeModels, backend: chat.backend) }
     private var speedLocked: Bool { locked && !(chat.running && backend?.fastModeLive == true) }
-    private var title: String { chat.fastMode ? L10n.text("common.chat.fast_mode_priority") : L10n.text("common.chat.fast_mode_default") }
+    private var title: String { chat.fastMode ? (chat.backend == "grok" ? L10n.text("common.chat.fast_mode_fast") : L10n.text("common.chat.fast_mode_priority")) : L10n.text("common.chat.fast_mode_default") }
     private var help: String {
-        if !available { return L10n.text("common.chat.fast_mode_select_opus") }
-        let tradeoff = chat.backend == "claude" ? L10n.text("common.chat.fast_mode_claude_help") : L10n.text("common.chat.fast_mode_codex_help")
+        if !available { return chat.backend == "grok" ? L10n.text("common.chat.fast_mode_select_grok") : L10n.text("common.chat.fast_mode_select_opus") }
+        let tradeoff = chat.backend == "claude" ? L10n.text("common.chat.fast_mode_claude_help") : (chat.backend == "grok" ? L10n.text("common.chat.fast_mode_grok_help") : L10n.text("common.chat.fast_mode_codex_help"))
         return title + ". " + tradeoff + " " + (backend?.fastModeLive == true
-            ? L10n.text("common.chat.fast_mode_live_help") : L10n.text("common.chat.fast_mode_next_turn_help"))
+            ? L10n.text("common.chat.fast_mode_live_help") : (chat.backend == "grok" ? L10n.text("common.chat.fast_mode_grok_next_turn_help") : L10n.text("common.chat.fast_mode_next_turn_help")))
     }
 
     var body: some View {
@@ -291,7 +291,7 @@ struct ChatFastModeButton: View {
                         showingOptions = false
                     }
                     .disabled(speedLocked || saving)
-                    ChoiceChip(title: L10n.text("common.chat.fast_mode_priority"), isSelected: chat.fastMode) {
+                    ChoiceChip(title: chat.backend == "grok" ? L10n.text("common.chat.fast_mode_fast") : L10n.text("common.chat.fast_mode_priority"), isSelected: chat.fastMode) {
                         save(true)
                         showingOptions = false
                     }

@@ -787,17 +787,15 @@ struct ClientChatThread: View {
     var body: some View {
         chatPresentation
         .task(id: chatID) { await loadChat() }
-        .task(id: "live-\(chatID)-\(model.selected?.runRevision ?? model.selected?.sendRevision ?? 0)-\(model.busy)-\(model.approvals.count)-\(model.events.last?.seq ?? 0)-\(model.events.last?.event?.status ?? "")-\(scenePhase == .active)-\(isActive)") {
-            guard scenePhase == .active, isActive, let chat = model.selected, chat.id == chatID, let peer = model.peer, let folderID = model.folderID else { return }
-            let done = model.events.reversed().first {
-                $0.kind == "agent" && $0.event?.kind == "done" && ($0.atMs ?? .min) >= (chat.runStartedAtMs ?? .max)
-            }?.event?.status
-            guard chat.running || done != nil else { return }
-            let phase: LiveWorkPhase = chat.running ? (model.approvals.isEmpty ? .working : .waiting)
-                : (done == "error" ? .failed : done == "stopped" ? .stopped : .done)
-            await LiveWorkController.shared.track(chat: chat, peer: peer, projectID: folderID, projectName: folderName,
-                startedAt: chat.runStartedAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) }
-                    ?? model.turnStartedAt(for: chat.id) ?? Date(), phase: phase)
+        .task(id: "live-\(chatID)-\(scenePhase == .active)-\(isActive)") {
+            guard scenePhase == .active, isActive else { return }
+            // Transcript events must not cancel an in-flight capability probe.
+            // Retry after offline launch or account verification and heartbeat
+            // quiet runs even when no new transcript event is produced.
+            while !Task.isCancelled {
+                await updateLiveActivity()
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            }
         }
         .task(id: pollingIdentity) {
             // Backgrounded chats stop polling. Every mounted conversation
@@ -880,6 +878,24 @@ struct ClientChatThread: View {
         if let current = model.chats.first(where: { $0.id == chatID }) {
             ClientChatReadState.shared.markRead(peer: model.peer, chat: current)
         }
+    }
+
+    private func updateLiveActivity() async {
+        guard let chat = model.selected, chat.id == chatID, let peer = model.peer,
+              let workspaceID = model.workspaceID else { return }
+        let done = model.events.reversed().first {
+            $0.kind == "agent" && $0.event?.kind == "done" && ($0.atMs ?? .min) >= (chat.runStartedAtMs ?? .max)
+        }?.event?.status
+        guard chat.running || done != nil else { return }
+        let phase: LiveWorkPhase = chat.running ? (model.approvals.isEmpty ? .working : .waiting)
+            : (done == "error" ? .failed : done == "stopped" ? .stopped : .done)
+        await LiveWorkController.shared.track(chat: chat, peer: peer, projectID: workspaceID, projectName: folderName,
+            startedAt: chat.runStartedAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) }
+                ?? model.turnStartedAt(for: chat.id) ?? Date(), phase: phase, mayStart: {
+                    guard let current = model.selected else { return false }
+                    return current.id == chat.id && current.running && model.peer == peer && model.workspaceID == workspaceID
+                        && (current.runRevision ?? current.sendRevision) == (chat.runRevision ?? chat.sendRevision)
+                })
     }
 
     private var pollingIdentity: String {

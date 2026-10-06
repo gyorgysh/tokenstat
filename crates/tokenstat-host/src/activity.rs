@@ -191,6 +191,7 @@ pub fn start() {
         .spawn(|| {
             loop {
                 tick();
+                crate::live_work::poll_terminals();
                 std::thread::sleep(TICK);
             }
         })

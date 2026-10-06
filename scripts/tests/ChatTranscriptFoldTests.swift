@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with ChatDisplayItem.swift ChatTranscriptFold.swift ChatQuestion.swift using swiftc -parse-as-library, then run.
+// Compile with ChatDisplayItem.swift ChatTranscriptFold.swift ChatQuestion.swift MuseToolPresentation.swift using swiftc -parse-as-library, then run.
 import Foundation
 
 // Two models from Bridge/Models.swift, cut to what a row needs.
@@ -76,6 +76,7 @@ struct ChatTranscriptFoldTests {
         countsMatchTheirMembers()
         previewDropsMarkdownMarks()
         compactMakesEveryStepOneLine()
+        compactRecoversOlderMuseToolMetadata()
         compactKeepsRunningStepsAndOpensToTheRow()
         turnChangesSumPerFileAndWaitForTheTurn()
         print("ChatTranscriptFoldTests passed")
@@ -327,6 +328,35 @@ struct ChatTranscriptFoldTests {
         require(minimal.allSatisfy { $0.plainStep == nil }, "other levels keep their rows as they were")
         let reading = fold([user("u1"), think("k1")], .compact, running: true)
         require(ids(reading) == ["u1", "k1"], "reasoning still arriving stays open")
+    }
+
+    static func compactRecoversOlderMuseToolMetadata() {
+        func completed(_ id: String, _ verb: String, _ detail: String) -> ChatDisplayItem {
+            let value = MuseToolPresentation.completed(backend: "muse", verb: verb, target: "", detail: detail)
+            return .init(id: id, kind: .tool(ChatToolState(
+                callId: id, verb: value.verb, target: ChatToolState.clip(value.target), running: false,
+                failed: false, detail: detail, startedAtMs: 1, endedAtMs: 2,
+                snippet: ChatToolState.makeSnippet(verb: value.verb, detail: detail)
+            )))
+        }
+        let shellDetail = #"{"command":"cargo test","description":"Run tests","output":"passed"}"#
+        let rows = [
+            completed("shell", "Bash Input", shellDetail),
+            completed("read", "Read", "Read text file `/tmp/check.txt`.\ncontents"),
+            completed("write", "Write", "wrote 23 bytes to /tmp/output.txt"),
+            completed("skill", "Read Skill", #"<read-skill-result name="bundled:git" status="ok">"#),
+            completed("todos", "Write Todos", "4 todos (revision 2)"),
+        ]
+        let compact = fold(rows, .compact)
+        require(group(compact, "g:shell")?.verb == "Bash", "Bash Input completes as Bash")
+        require(group(compact, "g:shell")?.subject == "cargo test", "the compact command comes from the result metadata")
+        require(group(compact, "g:read")?.subject == "/tmp/check.txt", "the compact read names its file")
+        require(group(compact, "g:write")?.subject == "/tmp/output.txt", "the compact write names its file")
+        require(group(compact, "g:skill")?.subject == "bundled:git", "the compact skill read names its skill")
+        require(group(compact, "g:todos")?.subject == "4 todos (revision 2)", "the compact todo update names its result")
+        if case let .tool(shell) = rows[0].kind {
+            require(shell.detail == shellDetail && !shell.snippet.isEmpty, "expanded output is retained unchanged")
+        } else { require(false, "shell row") }
     }
 
     static func turnChangesSumPerFileAndWaitForTheTurn() {

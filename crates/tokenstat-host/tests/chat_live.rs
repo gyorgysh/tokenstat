@@ -217,3 +217,127 @@ for line in sys.stdin:
         state.trim().is_empty() || state.trim().starts_with('Z')
     });
 }
+
+#[test]
+fn stopping_codex_flushes_interrupted_tool_history_before_retiring_the_agent() {
+    let root = tempfile::tempdir().unwrap();
+    let fake = root.path().join("fake-codex");
+    fs::write(
+        &fake,
+        r#"#!/usr/bin/env python3
+import sys,json,pathlib,time
+root=pathlib.Path(__file__).parent
+def emit(v): print(json.dumps(v),flush=True)
+for line in sys.stdin:
+ m=json.loads(line);method=m.get('method')
+ if method=='initialize':emit({'id':m['id'],'result':{}})
+ elif method=='initialized':pass
+ elif method=='thread/resume':emit({'id':m['id'],'result':{'thread':{'id':'session'}}})
+ elif method=='turn/start':
+  with (root/'history').open('w') as f:f.write('custom_tool_call\n')
+  emit({'id':m['id'],'result':{'turn':{'id':'turn'}}})
+ elif method=='turn/interrupt':
+  assert m['params']=={'threadId':'session','turnId':'turn'}
+  emit({'id':m['id'],'result':{}})
+  # Persisting a cancelled tool can exceed the PTY kill's 200ms signal grace.
+  time.sleep(0.4)
+  with (root/'history').open('a') as f:f.write('custom_tool_call_output: aborted by user\n')
+  emit({'method':'item/completed','params':{'item':{'id':'tool','type':'commandExecution','status':'failed','command':'sleep 60','aggregatedOutput':'aborted by user'}}})
+  emit({'method':'turn/completed','params':{'threadId':'session','turn':{'id':'turn','status':'interrupted'}}})
+ else:raise Exception('stop must not restart or replay the turn')
+# EOF must get a chance to complete the server's final rollout flush too.
+time.sleep(0.4)
+(root/'flushed').write_text('true')
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+    let config = root.path().join("config.json");
+    fs::write(
+        &config,
+        json!({"backend":"codex","argv":[fake,"exec","resume","session","--json","--","literal prompt"]}).to_string(),
+    )
+    .unwrap();
+    let mut runner = Runner(
+        Command::new(env!("CARGO_BIN_EXE_tokenstat-hostd"))
+            .args(["chat-live", config.to_str().unwrap()])
+            .stdin(Stdio::null())
+            .stdout(fs::File::create(root.path().join("output")).unwrap())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    wait_for(|| root.path().join("ready.json").is_file());
+    fs::write(root.path().join("stop"), "").unwrap();
+    wait_for(|| runner.0.try_wait().unwrap().is_some());
+    assert!(!runner.0.wait().unwrap().success());
+    assert_eq!(
+        fs::read_to_string(root.path().join("history")).unwrap(),
+        "custom_tool_call\ncustom_tool_call_output: aborted by user\n"
+    );
+    assert!(root.path().join("flushed").is_file());
+    let output = fs::read_to_string(root.path().join("output")).unwrap();
+    assert!(output.contains("aborted by user"));
+}
+
+#[test]
+fn stopping_codex_forces_a_hung_server_to_exit_within_the_stop_deadline() {
+    let root = tempfile::tempdir().unwrap();
+    let fake = root.path().join("fake-codex");
+    fs::write(
+        &fake,
+        r#"#!/usr/bin/env python3
+import sys,json,time,pathlib,subprocess
+root=pathlib.Path(__file__).parent
+def emit(v): print(json.dumps(v),flush=True)
+for line in sys.stdin:
+ m=json.loads(line);method=m.get('method')
+ if method=='initialize':emit({'id':m['id'],'result':{}})
+ elif method=='initialized':pass
+ elif method=='thread/resume':emit({'id':m['id'],'result':{'thread':{'id':'session'}}})
+ elif method=='turn/start':
+  child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])
+  (root/'tool.pid').write_text(str(child.pid))
+  emit({'id':m['id'],'result':{'turn':{'id':'turn'}}})
+ elif method=='turn/interrupt':
+  (root/'interrupted').write_text('true')
+  time.sleep(60)
+ else:raise Exception('unexpected request')
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+    let config = root.path().join("config.json");
+    fs::write(
+        &config,
+        json!({"backend":"codex","argv":[fake,"exec","resume","session","--json","--","literal prompt"]}).to_string(),
+    )
+    .unwrap();
+    let mut runner = Runner(
+        Command::new(env!("CARGO_BIN_EXE_tokenstat-hostd"))
+            .args(["chat-live", config.to_str().unwrap()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    wait_for(|| root.path().join("ready.json").is_file());
+    let pid: u32 = fs::read_to_string(root.path().join("tool.pid"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    let started = Instant::now();
+    fs::write(root.path().join("stop"), "").unwrap();
+    wait_for(|| runner.0.try_wait().unwrap().is_some());
+    assert!(started.elapsed() < Duration::from_secs(8));
+    assert!(root.path().join("interrupted").is_file());
+    wait_for(|| {
+        let output = Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .unwrap();
+        let state = String::from_utf8_lossy(&output.stdout);
+        state.trim().is_empty() || state.trim().starts_with('Z')
+    });
+}
