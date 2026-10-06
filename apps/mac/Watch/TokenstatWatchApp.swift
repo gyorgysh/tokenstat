@@ -29,8 +29,8 @@ struct TokenstatWatchRoot: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { model.refresh() } label: {
                             if model.refreshing { ProgressView().tint(.white) }
-                            else { Image(systemName: "arrow.clockwise").foregroundStyle(accent) }
-                        }.disabled(model.refreshing).accessibilityLabel("Refresh from iPhone")
+                            else { Image(systemName: "arrow.clockwise").foregroundStyle(.white) }
+                        }.tint(accent).disabled(model.refreshing).accessibilityLabel("Sync from iPhone")
                     }
                 }
                 .sheet(item: $model.selectedApproval) { approval in
@@ -87,10 +87,11 @@ struct TokenstatWatchRoot: View {
                                 .monospacedDigit()
                         }.font(.caption)
                         Text(usage.scope).font(.caption2).foregroundStyle(.secondary)
-                        Text(usage.updatedAt, style: .relative).font(.caption2).foregroundStyle(.secondary)
+                        Text(EcosystemWidgetTime.age(usage.updatedAt, at: context.date)).font(.caption2).foregroundStyle(.secondary)
                     } else {
-                        Text("Open tokenstat on your iPhone to sync your activity.").font(.caption).foregroundStyle(.secondary)
-                        Button("Sync from iPhone") { model.refresh() }.buttonStyle(.bordered).disabled(model.refreshing)
+                        Text("Open tokenstat on your paired iPhone and sign in. Keep your iPhone nearby while your Watch syncs.").font(.caption).foregroundStyle(.secondary)
+                        Button { model.refresh() } label: { Label("Sync from iPhone", systemImage: "arrow.clockwise") }
+                            .buttonStyle(.bordered).disabled(model.refreshing)
                     }
                     message
                 }.frame(maxWidth: .infinity, alignment: .leading).privacySensitive()

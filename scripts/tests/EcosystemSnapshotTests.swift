@@ -102,6 +102,47 @@ import Foundation
         let oldSnapshot = try JSONDecoder().decode(EcosystemSnapshot.self, from: Data("{\"version\":1,\"owner\":\"preview\",\"projects\":[]}".utf8))
         assert(oldSnapshot.isValid && oldSnapshot.limits == nil)
 
+        let windows = EcosystemLimitProvider(source: "codex", observedAt: now, stale: false, windows: [
+            .init(label: "weekly (general)", percent: 48, resetsAt: now.addingTimeInterval(300), rawLabel: "weekly", scope: "general"),
+            .init(label: "weekly (secondary)", percent: 95, rawLabel: "weekly", scope: "current model"),
+            .init(label: "5-hour", percent: 15, resetsAt: now.addingTimeInterval(60))])
+        assert(EcosystemLimitWindowSelection.fiveHour.windows(from: windows, at: now).map(\.percent) == [15])
+        assert(EcosystemLimitWindowSelection.weekly.windows(from: windows, at: now).map(\.percent) == [48])
+        assert(EcosystemLimitWindowSelection.both.windows(from: windows, at: now).map(\.percent) == [15, 48])
+        assert(EcosystemLimitWindowSelection.fiveHour.windows(from: quota, at: now).isEmpty)
+        assert(EcosystemLimitWindowSelection.fiveHour.windows(from: windows, at: now.addingTimeInterval(61)).first!.expired(at: now.addingTimeInterval(61)))
+        let afterWeeklyReset = now.addingTimeInterval(301)
+        assert(EcosystemLimitWindowSelection.weekly.windows(from: windows, at: afterWeeklyReset).first!.percent == 48)
+        assert(EcosystemLimitWindowSelection.weekly.windows(from: windows, at: afterWeeklyReset).first!.expired(at: afterWeeklyReset))
+        assert(windows.windows[1].compactLabel == "Week · current model")
+        assert(EcosystemLimitWindow(label: "weekly (general)", percent: 1).kind == .weekly) // Old widget snapshots.
+        assert(EcosystemLimitWindow(label: "Gemini models · 5-hour", percent: 1).kind == .fiveHour)
+        let locale = Locale(identifier: "en_US")
+        let age = EcosystemWidgetTime.age(now.addingTimeInterval(-45 * 60), at: now, locale: locale)
+        assert(age == EcosystemWidgetTime.age(now.addingTimeInterval(-45 * 60), at: now.addingTimeInterval(59), locale: locale))
+        assert(!age.contains("sec"))
+        assert(EcosystemWidgetTime.age(now, at: now, locale: locale) == "Just now")
+        assert(EcosystemWidgetTime.age(now.addingTimeInterval(301), at: now, locale: locale) == "Unknown")
+
+        var feedback = EcosystemSnapshot(owner: owner)
+        let firstRefresh = feedback.beginRefresh(.usage, at: now)!
+        let limitRefresh = feedback.beginRefresh(.limits, at: now)!
+        assert(feedback.usageRefresh?.visiblePhase(at: now) == .working)
+        assert(feedback.usageRefresh?.visiblePhase(at: now.addingTimeInterval(120)) == .idle) // Killed app cannot leave a disabled button.
+        assert(feedback.finishRefresh(.limits, id: limitRefresh, success: false, at: now))
+        assert(feedback.limitsRefresh?.visiblePhase(at: now) == .failed)
+        let replacement = feedback.beginRefresh(.usage, at: now)!
+        assert(!feedback.finishRefresh(.usage, id: firstRefresh, success: true, at: now)) // Late completion cannot clear a newer tap.
+        assert(feedback.finishRefresh(.usage, id: replacement, success: true, at: now))
+        assert(feedback.usageRefresh?.visiblePhase(at: now.addingTimeInterval(5)) == .complete)
+        assert(feedback.usageRefresh?.visiblePhase(at: now.addingTimeInterval(6)) == .idle)
+        feedback = .empty
+        assert(!feedback.finishRefresh(.usage, id: replacement, success: true, at: now))
+        assert(feedback.beginRefresh(.usage, at: now) == nil)
+        var malformed = EcosystemSnapshot(owner: owner)
+        malformed.usageRefresh = .init(id: UUID(), phase: .working, changedAt: Date(timeIntervalSince1970: .infinity))
+        assert(!malformed.isValid)
+
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = EcosystemSnapshotStore(directory: directory)

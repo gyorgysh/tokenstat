@@ -66,10 +66,22 @@ class LimitsWidgetConfigurationActivity : Activity() {
         modes.addView(rings); modes.addView(bars)
         modes.check(if ((restored?.getString("style") ?: preferences.getString("style.$id", "rings")) == "bars") bars.id else rings.id)
         layout.addView(modes)
+        layout.addView(label(R.string.widget_limit_window))
+        val windows = RadioGroup(this)
+        val choices = listOf(QuotaWindowSelection.HIGHEST to R.string.widget_window_highest,
+            QuotaWindowSelection.FIVE_HOUR to R.string.widget_window_five_hour, QuotaWindowSelection.WEEKLY to R.string.widget_window_weekly,
+            QuotaWindowSelection.BOTH to R.string.widget_window_both, QuotaWindowSelection.ALL to R.string.widget_window_all).map { (selection, resource) ->
+            val button = RadioButton(this).apply { this.id = android.view.View.generateViewId(); setText(resource); setTextColor(ink); buttonTintList = ColorStateList.valueOf(accent) }
+            windows.addView(button); selection to button
+        }
+        val selection = QuotaWindowSelection.fromKey(restored?.getString("window") ?: preferences.getString("window.$id", "highest"))
+        windows.check(choices.first { it.first == selection }.second.id)
+        layout.addView(windows)
         saveConfigurationState = { Bundle().apply {
             putString("owner", snapshot?.owner); putBoolean("all", all.isChecked)
             putStringArrayList("providers", ArrayList(boxes.filter { it.second.isChecked }.map { it.first }))
             putString("style", if (modes.checkedRadioButtonId == bars.id) "bars" else "rings")
+            putString("window", choices.first { it.second.id == windows.checkedRadioButtonId }.first.key)
         } }
         val save = Button(this).apply {
             setText(R.string.widget_save); backgroundTintList = ColorStateList.valueOf(accent); setTextColor(android.graphics.Color.WHITE)
@@ -84,6 +96,7 @@ class LimitsWidgetConfigurationActivity : Activity() {
             preferences.edit {
                 if (all.isChecked) remove("provider.$id") else putStringSet("provider.$id", selected)
                 putString("style.$id", if (modes.checkedRadioButtonId == bars.id) "bars" else "rings")
+                putString("window.$id", choices.first { it.second.id == windows.checkedRadioButtonId }.first.key)
             }
             UsageWidgetProvider.update(this, id)
             UsageWidgetProvider.schedule(this)

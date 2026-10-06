@@ -72,6 +72,9 @@
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/usage_widget" />
         </receiver>
+        <activity android:name=".ecosystem.UsageWidgetConfigurationActivity" android:exported="true" android:theme="@style/Theme.Tokenstat">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" /></intent-filter>
+        </activity>
         <activity android:name=".ecosystem.LimitsWidgetConfigurationActivity" android:exported="true" android:theme="@style/Theme.Tokenstat">
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" /></intent-filter>
         </activity>

@@ -11,6 +11,7 @@ struct TokenstatWidgetEntry: TimelineEntry {
     var tint: EcosystemTint = .brand
     var screen: EcosystemScreen = .workspaces
     var favoriteID: String?
+    var showCharts = true
 
     var favorite: EcosystemProject? {
         guard let owner = snapshot.owner, let favoriteID else { return nil }
@@ -25,11 +26,44 @@ struct TokenstatWidgetEntry: TimelineEntry {
 private func widgetTimeline(_ entry: TokenstatWidgetEntry) -> Timeline<TokenstatWidgetEntry> {
     let calendar = Calendar.current
     let midnight = calendar.startOfDay(for: calendar.date(byAdding: .day, value: 1, to: entry.date) ?? entry.date.addingTimeInterval(24 * 60 * 60))
-    var tomorrow = entry
-    tomorrow = .init(date: midnight, snapshot: entry.snapshot, period: entry.period, appearance: entry.appearance,
-                     tint: entry.tint, screen: entry.screen, favoriteID: entry.favoriteID)
-    // Midnight is evaluated locally; the system controls the requested reload budget.
-    return Timeline(entries: [entry, tomorrow], policy: .after(entry.date.addingTimeInterval(30 * 60)))
+    var dates = (1...6).map { entry.date.addingTimeInterval(Double($0) * 5 * 60) } + [midnight]
+    if let feedback = entry.snapshot.usageRefresh, feedback.expiresAt > entry.date { dates.append(feedback.expiresAt) }
+    let entries = [entry] + Set(dates).sorted().map { date in
+        TokenstatWidgetEntry(date: date, snapshot: entry.snapshot, period: entry.period, appearance: entry.appearance,
+                            tint: entry.tint, screen: entry.screen, favoriteID: entry.favoriteID, showCharts: entry.showCharts)
+    }
+    // Coarse ages are pre-rendered locally, without extra network requests.
+    return Timeline(entries: entries, policy: .after(entry.date.addingTimeInterval(30 * 60)))
+}
+
+struct TokenstatWidgetRefreshButton<Intent: AppIntent>: View {
+    let intent: Intent
+    var feedback: EcosystemWidgetRefresh?
+    let date: Date
+    let accent: Color
+    var title = "Refresh tokenstat"
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isLuminanceReduced) private var luminanceReduced
+    private var phase: EcosystemWidgetRefresh.Phase { feedback?.visiblePhase(at: date) ?? .idle }
+    private var symbol: String {
+        switch phase {
+        case .idle: "arrow.clockwise"
+        case .working: "arrow.2.circlepath"
+        case .complete: "checkmark"
+        case .failed: "exclamationmark"
+        }
+    }
+    var body: some View {
+        Button(intent: intent) {
+            Image(systemName: symbol).font(.system(size: 12, weight: .semibold))
+                .rotationEffect(.degrees(phase == .working ? 180 : 0))
+                .animation(reduceMotion || luminanceReduced ? nil : .easeInOut(duration: 0.6), value: phase)
+                .frame(width: 24, height: 24).background(accent.opacity(0.09), in: Circle())
+                .contentShape(Circle()).invalidatableContent()
+        }.buttonStyle(.plain).foregroundStyle(phase == .failed ? Color.orange : accent).widgetAccentable()
+            .disabled(phase == .working)
+            .accessibilityLabel(phase == .working ? "Refreshing" : phase == .complete ? "Refresh complete" : phase == .failed ? "Refresh failed. Tap to retry." : title)
+    }
 }
 
 struct TokenstatUsageProvider: AppIntentTimelineProvider {
@@ -42,7 +76,7 @@ struct TokenstatUsageProvider: AppIntentTimelineProvider {
     }
     private func entry(_ configuration: TokenstatUsageConfiguration, preview: Bool = false) -> TokenstatWidgetEntry {
         .init(date: Date(), snapshot: preview ? .preview : EcosystemSnapshotStore().read(),
-              period: configuration.period, appearance: configuration.appearance, tint: configuration.tint)
+              period: configuration.period, appearance: configuration.appearance, tint: configuration.tint, showCharts: configuration.showCharts)
     }
 }
 
@@ -248,19 +282,15 @@ struct TokenstatUsageView: View {
     }
 
     private var refreshButton: some View {
-        Button(intent: RefreshTokenstatIntent()) {
-            Image(systemName: "arrow.clockwise").font(.system(size: 12, weight: .semibold))
-                .frame(width: 24, height: 24).contentShape(Circle())
-        }.buttonStyle(.plain).foregroundStyle(accent)
-            .widgetAccentable()
-            .accessibilityLabel("Refresh tokenstat usage")
+        TokenstatWidgetRefreshButton(intent: RefreshTokenstatIntent(), feedback: entry.snapshot.usageRefresh,
+                                     date: entry.date, accent: accent, title: "Refresh tokenstat usage")
     }
 
     private var freshness: some View {
         HStack(spacing: 4) {
             Image(systemName: entry.snapshot.refreshFailed == true ? "wifi.exclamationmark" : "clock").font(.system(size: 9))
             if entry.snapshot.refreshFailed == true { Text("Update unavailable").lineLimit(1) }
-            else if let date = usage?.updatedAt { Text(date, style: .relative).lineLimit(1) }
+            else if let date = usage?.updatedAt { Text(EcosystemWidgetTime.age(date, at: entry.date)).lineLimit(1) }
             else { Text("Not yet synced") }
             Spacer(minLength: 0)
         }
@@ -274,7 +304,15 @@ struct TokenstatUsageView: View {
             Spacer(minLength: 0)
             value
             Spacer(minLength: 0)
-            weekBars.frame(height: 18)
+            if entry.showCharts { weekBars.frame(height: 18) }
+            else {
+                HStack(spacing: 4) {
+                    Text(entry.period == .today ? "7 DAYS" : "TODAY").foregroundStyle(muted)
+                    Spacer(minLength: 0)
+                    Text(entry.period == .today ? weekValue : today.map { EcosystemUsage.displayMoney($0.value) } ?? "—")
+                        .monospacedDigit().lineLimit(1).minimumScaleFactor(0.5)
+                }.font(.caption2).privacySensitive()
+            }
             freshness
         }
     }
@@ -291,7 +329,7 @@ struct TokenstatUsageView: View {
                         Text(entry.period == .today ? weekValue : today.map { EcosystemUsage.displayMoney($0.value) } ?? "—")
                             .font(.caption).fontWeight(.semibold).lineLimit(1).minimumScaleFactor(0.55)
                     }
-                    weekBars.frame(height: 42)
+                    if entry.showCharts { weekBars.frame(height: 42) }
                 }.frame(maxWidth: .infinity).privacySensitive()
             }
             Spacer(minLength: 0)
@@ -302,13 +340,15 @@ struct TokenstatUsageView: View {
     private var large: some View {
         VStack(alignment: .leading, spacing: family == .systemMedium ? 8 : 10) {
             header
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 32) {
-                    summary.frame(width: 240)
-                    activity.frame(minWidth: 270)
+            if entry.showCharts {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 32) {
+                        summary.frame(width: 240)
+                        activity.frame(minWidth: 270)
+                    }
+                    VStack(alignment: .leading, spacing: 12) { summary; activity }
                 }
-                VStack(alignment: .leading, spacing: 12) { summary; activity }
-            }
+            } else { summary }
             Spacer(minLength: 0)
             HStack {
                 freshness
@@ -332,7 +372,7 @@ struct TokenstatUsageView: View {
                 Label("\(usage?.streak ?? 0) day streak", systemImage: "flame.fill")
                     .font(.caption).foregroundStyle(accent)
             }.privacySensitive()
-            if family == .systemExtraLarge {
+            if family == .systemExtraLarge && entry.showCharts {
                 weekBars.frame(height: 76).padding(.top, 8)
             }
         }
@@ -454,9 +494,8 @@ struct TokenstatLauncherView: View {
                 Label { Text("tokenstat") } icon: { TokenstatWidgetMark(size: 14) }
                     .font(.system(.caption, design: .rounded, weight: .bold)).foregroundStyle(accent).widgetAccentable()
                 Spacer()
-                Button(intent: RefreshTokenstatIntent()) {
-                    Image(systemName: "arrow.clockwise").font(.system(size: 12, weight: .semibold)).frame(width: 28, height: 28)
-                }.buttonStyle(.plain).foregroundStyle(accent).widgetAccentable().accessibilityLabel("Refresh tokenstat")
+                TokenstatWidgetRefreshButton(intent: RefreshTokenstatIntent(), feedback: entry.snapshot.usageRefresh,
+                                             date: entry.date, accent: accent)
             }
             if family == .systemSmall {
                 // Small widgets have one system tap target. A single launcher

@@ -59,8 +59,17 @@ final class TokenstatWatchModel: NSObject, WCSessionDelegate {
 
     private func send(_ values: [String: Any], success: String? = nil) {
         guard !refreshing else { return }
-        guard session.activationState == .activated, session.isReachable else {
-            message = "Could not reach your iPhone. Keep it nearby and unlock it, then try again."
+        guard session.activationState == .activated else {
+            activate()
+            message = "Open tokenstat on your paired iPhone to start syncing, then tap Sync again."
+            return
+        }
+        guard session.isCompanionAppInstalled else {
+            message = "Open tokenstat on your paired iPhone to sync. If the iPhone app is missing, install it and sign in first."
+            return
+        }
+        guard session.isReachable else {
+            message = "Open tokenstat on your paired iPhone and keep it nearby, then tap Sync again."
             return
         }
         refreshing = true
@@ -89,7 +98,7 @@ final class TokenstatWatchModel: NSObject, WCSessionDelegate {
         }, errorHandler: { _ in
             Task { @MainActor in
                 guard self.request == requestID else { return }
-                self.finish(message: "Could not reach your iPhone. Try again when it is nearby.")
+                self.finish(message: "Open tokenstat on your paired iPhone and keep it nearby, then tap Sync again.")
             }
         })
     }

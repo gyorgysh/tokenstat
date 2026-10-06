@@ -7,6 +7,20 @@ import org.junit.Test
 import kotlinx.serialization.json.*
 
 class UsageSnapshotTest {
+    @Test fun selectedQuotaWindowsNeverSubstituteAnotherPeriod() {
+        val provider = QuotaProvider("codex", 1, listOf(QuotaWindow("5-hour", 15.0, 100),
+            QuotaWindow("weekly", 48.0, 500, "general"), QuotaWindow("weekly", 95.0, null, "current model")))
+        assertEquals(listOf(15.0), QuotaWindowSelection.FIVE_HOUR.windows(provider, 50).map { it.percent })
+        assertEquals(listOf(48.0), QuotaWindowSelection.WEEKLY.windows(provider, 50).map { it.percent })
+        assertEquals(listOf(15.0, 48.0), QuotaWindowSelection.BOTH.windows(provider, 50).map { it.percent })
+        assertTrue(QuotaWindowSelection.FIVE_HOUR.windows(provider, 101).single().expired(101))
+        assertEquals(48.0, QuotaWindowSelection.WEEKLY.windows(provider, 501).single().percent, 0.0)
+        assertTrue(QuotaWindowSelection.WEEKLY.windows(provider, 501).single().expired(501))
+        assertEquals("7d · current model", provider.windows.last().compactLabel)
+        assertTrue(QuotaWindowSelection.WEEKLY.windows(provider.copy(windows = listOf(QuotaWindow("billing cycle", 50.0))), 50).isEmpty())
+        assertEquals(QuotaWindowSelection.FIVE_HOUR, QuotaWindow("Gemini models · 5-hour", 5.0).kind)
+        assertEquals(QuotaWindowSelection.HIGHEST, QuotaWindowSelection.fromKey("obsolete"))
+    }
     private val owner = "a".repeat(64)
     private val today = LocalDate.of(2026, 10, 6)
     private fun days() = (6 downTo 0).map { UsageDay(today.minusDays(it.toLong()).toString(), 1_000_000, false) }

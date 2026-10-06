@@ -17,7 +17,11 @@ at the end.
 
 - Plan-limit widgets on Apple and Android with dynamic one/multiple-provider
   selection, circle/bar percentages, reset times and dated cached readings.
-  Android adds a compact activity layout and a Quick Launch widget down to one cell.
+  Choose 5-hour, weekly, both or highest-usage windows; circle layouts fit four
+  readings in a small widget. Android adds one-row allowance cards, a compact
+  activity layout and a Quick Launch widget down to one cell.
+- Optional charts in Usage at a Glance keep Today and Week totals visible.
+  Widgets show one compact reading age, with clear refresh progress and feedback.
 - Android recent/pinned project shortcuts, account-scoped AppSearch discovery,
   text Share/Direct Share into chat drafts, and contextual response sharing.
   Supported system assistants can search projects, read cached usage and create
@@ -198,6 +202,12 @@ can mix local coding tools with saved SSH servers.
   investigate performance problems.
 
 ### Changed
+
+- Shared plan-limit fetches follow the account plan's sync interval, with a
+  five-minute minimum and hourly fallback. Mac widgets pick up updated local
+  readings without fetching vendors again.
+- Watch sync uses a visible refresh icon and clearer instructions to open
+  tokenstat on the paired iPhone for the first sync or when disconnected.
 
 - The Mac and Windows window is an icon rail beside a project sidebar.
   Each project lists its five latest chats and its running terminals,

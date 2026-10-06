@@ -90,6 +90,43 @@ class LimitsWidgetLayoutTest {
             }
         }
     }
+    @Test fun selectedWindowsFitOneRowAndTwoByTwoWithNativeRefreshFeedback() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val base = context
+        val prefs = LimitsWidgetProvider.preferences(base)
+        val now = System.currentTimeMillis()
+        val readings = listOf("claude_code", "codex").map { source -> QuotaProvider(source, now - 45 * 60_000,
+            listOf(QuotaWindow("5-hour", 15.0, now + 3_600_000), QuotaWindow("weekly", 48.0, now + 86_400_000, "general"))) }
+        val snapshot = UsageSnapshot("a".repeat(64), limits = readings)
+        val output = File(base.filesDir, "widget-layouts").apply { mkdirs() }
+        try {
+            prefs.edit().putString("window.77", "both").commit()
+            instrumentation.runOnMainSync {
+                for (fontScale in listOf(1f, 1.3f)) for (rtl in listOf(false, true)) {
+                    val target = base.createConfigurationContext(Configuration(base.resources.configuration).apply {
+                        this.fontScale = fontScale
+                        setLayoutDirection(if (rtl) Locale("ar") else Locale.ENGLISH)
+                    })
+                    for ((width, height) in listOf(110 to 64, 160 to 64, 280 to 64, 160 to 130, 160 to 160, 280 to 130)) for (rings in listOf(true, false)) {
+                        val view = LimitsWidgetProvider.renderSize(target, snapshot, readings, 77, rings, width, height, refreshing = true).apply(target, FrameLayout(target))
+                        save(target, view, width, height, File(output, "limits-both-$width-$height-$rings-$fontScale-$rtl.png"))
+                        val gauges = view.findViewById<View>(R.id.limits_gauges)
+                        assertTrue(gauges.width > 0 && gauges.height > 0)
+                        assertTrue(gauges.left >= view.paddingLeft && gauges.right <= view.width - view.paddingRight)
+                        assertEquals(View.VISIBLE, view.findViewById<View>(R.id.limits_progress).visibility)
+                        assertEquals(View.INVISIBLE, view.findViewById<View>(R.id.limits_refresh).visibility)
+                        val description = gauges.contentDescription.toString()
+                        assertTrue(description.contains("5-hour"))
+                        if (width == 160 && height >= 130 || width == 280) {
+                            assertEquals(2, Regex("Codex").findAll(description).count())
+                            assertTrue(description.contains("weekly"))
+                        }
+                        if (width == 110 && height == 64) assertEquals("+3", view.findViewById<TextView>(R.id.limits_overflow).text.toString())
+                    }
+                }
+            }
+        } finally { prefs.edit().remove("window.77").commit() }
+    }
     private fun save(context: Context, view: View, width: Int, height: Int, file: File) {
         val density = context.resources.displayMetrics.density
         val w = (width * density).toInt(); val h = (height * density).toInt()

@@ -34,6 +34,14 @@
     <string name="widget_provider_selection">Providers</string>
     <string name="widget_all_providers">All available providers</string>
     <string name="widget_display">Display</string>
+    <string name="widget_limit_window">Limit window</string>
+    <string name="widget_window_highest">Highest usage</string>
+    <string name="widget_window_five_hour">5-hour</string>
+    <string name="widget_window_weekly">Weekly</string>
+    <string name="widget_window_both">5-hour and weekly</string>
+    <string name="widget_window_all">All windows</string>
+    <string name="widget_show_charts">Show charts</string>
+    <string name="widget_configure_usage">Configure usage</string>
     <string name="widget_circles">Circles</string>
     <string name="widget_bars_label">Bars</string>
     <string name="widget_save">Save widget</string>
@@ -41,6 +49,9 @@
     <string name="widget_cached">Cached · %1$s</string>
     <string name="widget_used">Used · %1$s</string>
     <string name="widget_resets">Resets %1$s</string>
+    <string name="widget_reset_days">Resets in %1$sd</string>
+    <string name="widget_reset_hours">Resets in %1$sh</string>
+    <string name="widget_reset_minutes">Resets in %1$sm</string>
     <string name="widget_reset_passed">Reset passed · Refresh</string>
     <string name="widget_no_reading">No reading</string>
     <string name="widget_percent_used">%1$s percent used</string>

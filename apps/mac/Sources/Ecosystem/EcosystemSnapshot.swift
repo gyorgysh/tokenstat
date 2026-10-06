@@ -116,12 +116,49 @@ struct EcosystemLimitWindow: Codable, Hashable, Sendable, Identifiable {
     var label: String
     var percent: Double
     var resetsAt: Date?
+    var rawLabel: String?
+    var scope: String?
     var id: String { label }
     var fraction: Double { min(1, max(0, percent / 100)) }
+    var kind: EcosystemLimitWindowSelection {
+        let plain = (rawLabel ?? label).lowercased().components(separatedBy: " (").first ?? ""
+        let normalized = plain.replacingOccurrences(of: "-", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized == "5h" || normalized == "5 hour" || normalized.hasSuffix("· 5 hour") { return .fiveHour }
+        if normalized == "weekly" || normalized == "7d" || normalized.hasSuffix("· weekly") { return .weekly }
+        return .highest
+    }
+    var compactLabel: String {
+        let period = kind == .fiveHour ? "5h" : kind == .weekly ? "Week" : label
+        guard kind != .highest else { return period }
+        let qualified = (rawLabel ?? label).components(separatedBy: " · ")
+        let detail = scope ?? label.components(separatedBy: " (").dropFirst().first?.trimmingCharacters(in: CharacterSet(charactersIn: ")"))
+            ?? (qualified.count > 1 ? qualified.dropLast().joined(separator: " · ") : nil)
+        guard let detail, !detail.isEmpty, !["general", "primary"].contains(detail.lowercased()) else { return period }
+        return "\(period) · \(detail)"
+    }
+    var isPrimaryScope: Bool { ["general", "primary"].contains(scope?.lowercased() ?? "") || label.lowercased().contains("(general)") || label.lowercased().contains("(primary)") }
     func expired(at date: Date) -> Bool { resetsAt.map { $0 <= date } ?? false }
     var isValid: Bool {
         !label.isEmpty && label.utf8.count <= 160 && percent.isFinite && (0...10_000).contains(percent)
-            && (resetsAt?.timeIntervalSince1970.isFinite ?? true)
+            && (resetsAt?.timeIntervalSince1970.isFinite ?? true) && (rawLabel?.utf8.count ?? 0) <= 160 && (scope?.utf8.count ?? 0) <= 80
+    }
+}
+
+enum EcosystemLimitWindowSelection: String, Codable, CaseIterable, Sendable {
+    case highest, fiveHour, weekly, both, all
+    func windows(from provider: EcosystemLimitProvider, at date: Date) -> [EcosystemLimitWindow] {
+        func best(_ candidates: [EcosystemLimitWindow]) -> EcosystemLimitWindow? {
+            let primary = candidates.filter(\.isPrimaryScope)
+            let scoped = primary.isEmpty ? candidates : primary
+            let active = scoped.filter { !$0.expired(at: date) }
+            return (active.isEmpty ? scoped : active).max { $0.percent < $1.percent }
+        }
+        switch self {
+        case .highest: return [provider.peak(at: date) ?? provider.windows.first].compactMap { $0 }
+        case .fiveHour, .weekly: return [best(provider.windows.filter { $0.kind == self })].compactMap { $0 }
+        case .both: return [Self.fiveHour, .weekly].flatMap { $0.windows(from: provider, at: date) }
+        case .all: return provider.windows.sorted { $0.expired(at: date) == $1.expired(at: date) ? $0.percent > $1.percent : !$0.expired(at: date) }
+        }
     }
 }
 
@@ -210,6 +247,50 @@ struct EcosystemUsage: Codable, Equatable, Sendable {
     }
 }
 
+enum EcosystemRefreshKind: Sendable { case usage, limits }
+
+/// Brief interaction feedback, scoped to the same account as the readings.
+struct EcosystemWidgetRefresh: Codable, Equatable, Sendable {
+    enum Phase: String, Codable, Sendable { case working, complete, failed, idle }
+    var id: UUID
+    var phase: Phase
+    var changedAt: Date
+
+    var isValid: Bool { changedAt.timeIntervalSince1970.isFinite && changedAt.timeIntervalSince1970 > 0 && phase != .idle }
+    var expiresAt: Date { changedAt.addingTimeInterval(phase == .working ? 120 : phase == .complete ? 6 : 300) }
+    func visiblePhase(at date: Date) -> Phase {
+        guard date >= changedAt.addingTimeInterval(-5), date < expiresAt else { return .idle }
+        return phase
+    }
+}
+
+/// Static, coarse text avoids WidgetKit's second-by-second relative date source.
+enum EcosystemWidgetTime {
+    static func age(_ observed: Date, at date: Date, locale: Locale = .current) -> String {
+        let seconds = date.timeIntervalSince(observed)
+        guard seconds.isFinite, seconds >= -300 else { return "Unknown" }
+        guard seconds >= 60 else { return "Just now" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = locale
+        formatter.unitsStyle = .abbreviated
+        let parts: DateComponents
+        if seconds >= 86400 { parts = DateComponents(day: -Int(min(seconds / 86400, 36500))) }
+        else if seconds >= 3600 { parts = DateComponents(hour: -Int(seconds / 3600)) }
+        else { parts = DateComponents(minute: -Int(seconds / 60)) }
+        return formatter.localizedString(from: parts)
+    }
+
+    static func until(_ reset: Date, at date: Date) -> String {
+        let seconds = reset.timeIntervalSince(date)
+        guard seconds.isFinite, seconds > 0 else { return "Now" }
+        let formatter = DateComponentsFormatter()
+        formatter.unitsStyle = .abbreviated
+        formatter.allowedUnits = [.day, .hour, .minute]
+        formatter.maximumUnitCount = 1
+        return formatter.string(from: max(60, min(seconds, 36500 * 86400))) ?? "Soon"
+    }
+}
+
 /// A small, versioned snapshot. No credentials, paths, messages or drafts.
 struct EcosystemSnapshot: Codable, Equatable, Sendable {
     var version = 1
@@ -218,6 +299,27 @@ struct EcosystemSnapshot: Codable, Equatable, Sendable {
     var projects: [EcosystemProject] = []
     var refreshFailed: Bool?
     var limits: [EcosystemLimitProvider]?
+    var usageRefresh: EcosystemWidgetRefresh?
+    var limitsRefresh: EcosystemWidgetRefresh?
+
+    func refreshFeedback(for kind: EcosystemRefreshKind) -> EcosystemWidgetRefresh? {
+        kind == .usage ? usageRefresh : limitsRefresh
+    }
+
+    @discardableResult mutating func beginRefresh(_ kind: EcosystemRefreshKind, at date: Date = .now) -> UUID? {
+        guard owner != nil else { return nil }
+        let value = EcosystemWidgetRefresh(id: UUID(), phase: .working, changedAt: date)
+        if kind == .usage { usageRefresh = value } else { limitsRefresh = value }
+        return value.id
+    }
+
+    @discardableResult mutating func finishRefresh(_ kind: EcosystemRefreshKind, id: UUID, success: Bool, at date: Date = .now) -> Bool {
+        guard owner != nil, var value = refreshFeedback(for: kind), value.id == id else { return false }
+        value.phase = success ? .complete : .failed
+        value.changedAt = date
+        if kind == .usage { usageRefresh = value } else { limitsRefresh = value }
+        return true
+    }
 
     mutating func replaceProjects(_ newProjects: [EcosystemProject], from source: EcosystemProjectSource) {
         projects.removeAll { source.contains($0.id) }
@@ -228,7 +330,8 @@ struct EcosystemSnapshot: Codable, Equatable, Sendable {
     var isValid: Bool {
         guard version == 1, projects.count <= 24,
               Set(projects.map(\.id)).count == projects.count else { return false }
-        guard let owner else { return usage == nil && projects.isEmpty && limits?.isEmpty != false }
+        guard usageRefresh?.isValid ?? true, limitsRefresh?.isValid ?? true else { return false }
+        guard let owner else { return usage == nil && projects.isEmpty && limits?.isEmpty != false && usageRefresh == nil && limitsRefresh == nil }
         guard !owner.isEmpty, owner.utf8.count <= 2048,
               projects.allSatisfy({ !$0.id.isEmpty && !$0.name.isEmpty && $0.id.utf8.count <= 2048 && $0.name.utf8.count <= 512 && $0.host.utf8.count <= 512 }) else { return false }
         guard (limits?.count ?? 0) <= 32, Set(limits?.map(\.source) ?? []).count == (limits?.count ?? 0),

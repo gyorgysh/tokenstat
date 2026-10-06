@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/limits_root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:padding="6dp" android:background="@drawable/widget_background">
+    <LinearLayout android:id="@+id/limits_tools" android:layout_width="20dp" android:layout_height="match_parent"
+        android:layout_alignParentStart="true" android:orientation="vertical" android:gravity="center">
+        <ImageView android:layout_width="14dp" android:layout_height="14dp" android:src="@drawable/ic_notification"
+            android:tint="@color/ts_widget_accent" android:contentDescription="@null"/>
+        <TextView android:id="@+id/limits_overflow" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:textSize="11sp" android:textColor="@color/ts_widget_muted" android:fontFamily="@font/widget_manrope" android:visibility="gone"/>
+        <ImageButton android:id="@+id/limits_configure" android:layout_width="20dp" android:layout_height="20dp"
+            android:padding="4dp" android:src="@drawable/widget_configure" android:background="@android:color/transparent"
+            android:contentDescription="@string/widget_configure"/>
+    </LinearLayout>
+    <FrameLayout android:id="@+id/limits_refresh_container" android:layout_width="24dp" android:layout_height="24dp"
+        android:layout_alignParentEnd="true" android:layout_centerVertical="true">
+        <ImageButton android:id="@+id/limits_refresh" android:layout_width="match_parent" android:layout_height="match_parent"
+            android:padding="4dp" android:src="@drawable/widget_refresh" android:background="@android:color/transparent"
+            android:contentDescription="@string/widget_refresh"/>
+        <ProgressBar android:id="@+id/limits_progress" style="?android:attr/progressBarStyleSmall"
+            android:layout_width="match_parent" android:layout_height="match_parent" android:indeterminate="true"
+            android:indeterminateTint="@color/ts_widget_accent" android:visibility="gone" android:contentDescription="@string/widget_updating"/>
+    </FrameLayout>
+    <ImageView android:id="@+id/limits_gauges" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:layout_toEndOf="@id/limits_tools" android:layout_toStartOf="@id/limits_refresh_container"
+        android:scaleType="fitCenter" android:contentDescription="@string/widget_limits_name"/>
+    <TextView android:id="@+id/limits_empty" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:layout_toEndOf="@id/limits_tools" android:layout_toStartOf="@id/limits_refresh_container"
+        android:text="@string/widget_open_to_sync" android:textColor="@color/ts_widget_muted" android:textSize="11sp"
+        android:fontFamily="@font/widget_manrope" android:maxLines="2" android:gravity="center" android:visibility="gone"/>
+    <TextView android:id="@+id/limits_status" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:textSize="11sp" android:visibility="gone"/>
+</RelativeLayout>

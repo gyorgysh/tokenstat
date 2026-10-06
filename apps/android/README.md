@@ -32,7 +32,7 @@ unfinished row in [PARITY.md](PARITY.md).
 Build both signed distribution formats with:
 
 ```bash
-scripts/build-android-release.sh dist/android/1.3.0-141
+scripts/build-android-release.sh dist/android/1.3.0-142
 ```
 
 The script loads the existing local Play upload-key environment and produces a
@@ -43,7 +43,7 @@ uploaded by this script.
 
 The widget gallery has three entries: **Usage at a Glance**, **Plan Limits**, and **Quick Launch**. Usage can shrink to a compact two-by-one layout; wider/taller cards show the weekly chart. Quick Launch can shrink to a one-cell tokenstat icon, expand to a Workspaces link, or show Home/Workspaces/Insights/Devices. Cell sizes ultimately depend on the launcher.
 
-Plan Limits uses shared provider readings from the account. Enable **Share with my devices** in Plan limits on the computer, then refresh. Its configuration button (or launcher widget edit action) chooses any one or several available providers and Circles/Bars; All available providers includes future supported providers automatically. Circles show the highest active window; bars show the selected windows and reset details. Observation dates, stale markers and expired-window prompts keep cached percentages honest. Provider selections are bound to their account; sign-out clears readings and rejects late publications. The allowance refresh runs even if the activity calendar is unavailable. Native widget configuration is separate from app navigation.
+Plan Limits uses shared provider readings from the account. Enable **Share with my devices** in Plan limits on the computer, then refresh. Its configuration button (or launcher widget edit action) chooses any one or several available providers and Circles/Bars; All available providers includes future supported providers automatically. Choose Highest usage, 5-hour, Weekly, both or All windows. Circles and bars show the selected windows; an unavailable period stays unknown. Allowance cards resize down to one row, while a small two-row card fits four readings in a 2×2 layout. Larger cards show one compact footer with the oldest displayed reading's age; one-row cards keep timestamps in accessibility text. All expired windows stay unknown until refreshed. Refresh uses a native progress indicator. Provider selections are bound to their account; sign-out clears readings and rejects late publications. The allowance refresh runs even if the activity calendar is unavailable. Native widget configuration is separate from app navigation.
 
 Usage at a Glance is a resizable home-screen widget with automatic light/dark
 appearance, Today/Last 7 Days switching, a weekly chart on wide and tall layouts and
@@ -86,4 +86,6 @@ signed-out review devices and cancellation without network requests.
 revocation boundaries, cold Direct Share, one-time draft consumption, invalid
 shares and denied shortcut services on an isolated emulator.
 
-To verify system integrations, add all three widgets and resize them down/up; configure one/multiple providers, Circles/Bars, and repeat in light/dark with larger text. Try signed-out/offline refreshes and expired quotas. Pin a project from its row, use the Workspaces Quick Settings tile, share text into a project and confirm it stays an unsent draft, and long-press a response's copy control to share it. Search discovery and AppFunctions depend on the device/system assistant; unavailable services remain optional. No Calendar Provider permission, Wear OS app or run-progress notification is required.
+Usage at a Glance has launcher configuration for Today/Week and **Show charts**. Turning charts off keeps both totals on wider/taller cards; the smallest card keeps the selected total.
+
+To verify system integrations, add all three widgets and resize them down/up; configure one/multiple providers, Circles/Bars, 5-hour/Weekly/Both windows and charts off, and repeat in light/dark with larger text. Try signed-out/offline refreshes and expired quotas. Pin a project from its row, use the Workspaces Quick Settings tile, share text into a project and confirm it stays an unsent draft, and long-press a response's copy control to share it. Search discovery and AppFunctions depend on the device/system assistant; unavailable services remain optional. No Calendar Provider permission, Wear OS app or run-progress notification is required.

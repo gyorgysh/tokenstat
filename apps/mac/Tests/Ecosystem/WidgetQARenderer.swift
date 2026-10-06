@@ -23,7 +23,22 @@ import UniformTypeIdentifiers
                                windows: [.init(label: "Weekly quota with long label", percent: 104, resetsAt: .now.addingTimeInterval(-60))])]
         var offline = EcosystemSnapshot.preview
         offline.refreshFailed = true
-        let snapshots: [(String, EcosystemSnapshot)] = [("activity", .preview), ("empty", .empty), ("stress", stress), ("offline", offline)]
+        var old = EcosystemSnapshot.preview
+        old.limits = ["claude_code", "codex", "grok"].enumerated().map { index, source in
+            .init(source: source, observedAt: .now.addingTimeInterval(-45 * 60), stale: true,
+                  windows: [.init(label: "5-hour", percent: Double(index * 15 + 8), resetsAt: .now.addingTimeInterval(3600)),
+                            .init(label: "weekly (general)", percent: Double([15, 48, 0][index]), resetsAt: .now.addingTimeInterval(5 * 86400), rawLabel: "weekly", scope: "general")])
+        }
+        var working = old
+        _ = working.beginRefresh(.limits); _ = working.beginRefresh(.usage)
+        var complete = old
+        let completeID = complete.beginRefresh(.limits)!
+        complete.finishRefresh(.limits, id: completeID, success: true)
+        var failed = old
+        let failedID = failed.beginRefresh(.limits)!
+        failed.finishRefresh(.limits, id: failedID, success: false)
+        let snapshots: [(String, EcosystemSnapshot)] = [("activity", .preview), ("empty", .empty), ("stress", stress), ("offline", offline),
+                                                        ("old", old), ("working", working), ("complete", complete), ("failed", failed)]
         let styles: [(String, EcosystemAppearance, EcosystemTint, Bool, WidgetRenderingMode)] = [
             ("light", .light, .brand, false, .fullColor), ("dark", .dark, .brand, true, .fullColor),
             ("clean-light", .clean, .brand, false, .fullColor), ("clean-dark", .clean, .brand, true, .fullColor),
@@ -60,6 +75,21 @@ import UniformTypeIdentifiers
                     }
                 }
                 if family != .systemExtraLarge {
+                    for selection in [EcosystemLimitWindowSelection.fiveHour, .weekly, .both] {
+                        for display in [EcosystemGaugeStyle.rings, .bars] {
+                            var quotas = old
+                            quotas.limits = Array(quotas.limits!.prefix(2))
+                            let quotaEntry = TokenstatLimitsEntry(date: .now, snapshot: quotas, display: display,
+                                appearance: appearance, tint: tint, window: selection)
+                            let styleEntry = TokenstatWidgetEntry(date: .now, snapshot: quotas, appearance: appearance, tint: tint)
+                            render(TokenstatLimitsView(entry: quotaEntry, familyOverride: family), width: width, height: height,
+                                entry: styleEntry, dark: dark, mode: mode,
+                                url: directory.appendingPathComponent("limits-\(name)-\(style)-\(display.rawValue)-\(selection.rawValue).png"))
+                        }
+                    }
+                    let simple = TokenstatWidgetEntry(date: .now, snapshot: old, appearance: appearance, tint: tint, showCharts: false)
+                    render(TokenstatUsageView(entry: simple, familyOverride: family), width: width, height: height,
+                        entry: simple, dark: dark, mode: mode, url: directory.appendingPathComponent("usage-\(name)-\(style)-no-charts.png"))
                     for display in [EcosystemGaugeStyle.rings, .bars] {
                         for count in [1, 3, 4, 9] {
                             var quotas = EcosystemSnapshot.preview

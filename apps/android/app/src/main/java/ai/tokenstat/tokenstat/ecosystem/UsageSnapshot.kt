@@ -90,10 +90,40 @@ class UsageSession {
 data class QuotaWindow(val label: String, val percent: Double, val resetsAt: Long? = null, val scope: String? = null) {
     val id: String get() = "$label|${scope.orEmpty()}"
     val displayLabel: String get() = scope?.let { "$label ($it)" } ?: label
+    val kind: QuotaWindowSelection get() {
+        val normalized = label.lowercase(java.util.Locale.ROOT).replace('-', ' ').trim()
+        return when {
+            normalized == "5h" || normalized == "5 hour" || normalized.endsWith("· 5 hour") -> QuotaWindowSelection.FIVE_HOUR
+            normalized == "weekly" || normalized == "7d" || normalized.endsWith("· weekly") -> QuotaWindowSelection.WEEKLY
+            else -> QuotaWindowSelection.HIGHEST
+        }
+    }
+    val compactLabel: String get() {
+        val period = when (kind) { QuotaWindowSelection.FIVE_HOUR -> "5h"; QuotaWindowSelection.WEEKLY -> "7d"; else -> return label }
+        val detail = scope ?: label.substringBeforeLast(" · ", "").takeIf { it.isNotBlank() }
+        return if (detail.isNullOrBlank() || detail.lowercase(java.util.Locale.ROOT) in listOf("general", "primary")) period else "$period · $detail"
+    }
     val fraction: Float get() = (percent / 100).coerceIn(0.0, 1.0).toFloat()
     fun expired(now: Long) = resetsAt?.let { it <= now } == true
     val valid: Boolean get() = label.isNotBlank() && label.toByteArray().size <= 160 && percent.isFinite() && percent in 0.0..10_000.0
         && (scope == null || scope.toByteArray().size <= 80) && (resetsAt == null || resetsAt > 0)
+}
+
+enum class QuotaWindowSelection(val key: String) {
+    HIGHEST("highest"), FIVE_HOUR("fiveHour"), WEEKLY("weekly"), BOTH("both"), ALL("all");
+    fun windows(provider: QuotaProvider, now: Long): List<QuotaWindow> {
+        fun best(candidates: List<QuotaWindow>): QuotaWindow? {
+            val primary = candidates.filter { it.scope?.lowercase(java.util.Locale.ROOT) in listOf("general", "primary") }.ifEmpty { candidates }
+            return primary.filterNot { it.expired(now) }.ifEmpty { primary }.maxByOrNull { it.percent }
+        }
+        return when (this) {
+            HIGHEST -> listOfNotNull(provider.peak(now) ?: provider.windows.firstOrNull())
+            FIVE_HOUR, WEEKLY -> listOfNotNull(best(provider.windows.filter { it.kind == this }))
+            BOTH -> FIVE_HOUR.windows(provider, now) + WEEKLY.windows(provider, now)
+            ALL -> provider.windows.sortedWith(compareBy<QuotaWindow> { it.expired(now) }.thenByDescending { it.percent })
+        }
+    }
+    companion object { fun fromKey(key: String?) = entries.firstOrNull { it.key == key } ?: HIGHEST }
 }
 @Serializable
 data class QuotaProvider(val source: String, val observedAt: Long, val windows: List<QuotaWindow>, val stale: Boolean = false) {

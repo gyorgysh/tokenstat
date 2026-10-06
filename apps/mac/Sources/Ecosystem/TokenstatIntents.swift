@@ -201,9 +201,10 @@ struct TokenstatUsageConfiguration: WidgetConfigurationIntent {
     static var title: LocalizedStringResource = "Usage at a Glance"
     static var description = IntentDescription("Choose a period and full-color style. Clear and Tinted follow your Home Screen appearance. Data follows tokenstat Home.")
     @Parameter(title: "Period", default: .today) var period: EcosystemPeriod
+    @Parameter(title: "Show charts", default: true) var showCharts: Bool
     @Parameter(title: "Full-color style", default: .automatic) var appearance: EcosystemAppearance
     @Parameter(title: "Full-color accent", default: .brand) var tint: EcosystemTint
-    static var parameterSummary: some ParameterSummary { Summary { \.$period; \.$appearance; \.$tint } }
+    static var parameterSummary: some ParameterSummary { Summary { \.$period; \.$showCharts; \.$appearance; \.$tint } }
 }
 
 struct TokenstatLauncherConfiguration: WidgetConfigurationIntent {

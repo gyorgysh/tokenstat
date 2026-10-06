@@ -16,6 +16,9 @@ enum EcosystemPublisher {
     private static var limitsRefreshTask: Task<Void, Error>?
     private static var refreshTask: Task<Void, Error>?
     private static var indexing: Task<Void, Never>?
+    #if os(macOS)
+    private static var cachedLimitsTask: Task<Void, Never>?
+    #endif
 
     static var lease: EcosystemPublicationLease? {
         verifiedOwner.map { EcosystemPublicationLease(owner: $0, generation: generation) }
@@ -48,6 +51,19 @@ enum EcosystemPublisher {
         snapshot.projects.removeAll { !authorized($0) }
         save(snapshot)
         if newlyVerified || previousProjects != snapshot.projects { updateProjectDiscovery(snapshot) }
+        #if os(macOS)
+        if cachedLimitsTask == nil {
+            cachedLimitsTask = Task {
+                while !Task.isCancelled {
+                    // Read the daemon's dated cache, without polling vendors again.
+                    if let lease, let settings = try? await Bridge.limitsSync(), isCurrent(lease) {
+                        publish(limits: settings.providers.filter { !settings.skip.contains($0.source) }, lease: lease)
+                    }
+                    try? await Task.sleep(for: .seconds(60))
+                }
+            }
+        }
+        #endif
         #if os(iOS)
         EcosystemWatchSync.shared.publish(snapshot)
         #endif
@@ -81,6 +97,10 @@ enum EcosystemPublisher {
         generation = UUID()
         verifiedOwner = nil
         allowedPeers = []
+        #if os(macOS)
+        cachedLimitsTask?.cancel()
+        cachedLimitsTask = nil
+        #endif
         save(.empty)
         updateProjectDiscovery(.empty)
     }
@@ -96,7 +116,7 @@ enum EcosystemPublisher {
     /// dial, agent execution or foreground navigation is needed for usage.
     static func refresh() async throws {
         if let refreshTask { return try await refreshTask.value }
-        let task = Task { try await performRefresh() }
+        let task = Task { try await refreshWithFeedback(.usage) { try await performRefresh() } }
         refreshTask = task
         defer { refreshTask = nil }
         try await task.value
@@ -104,10 +124,32 @@ enum EcosystemPublisher {
 
     static func refreshLimitsOnly() async throws {
         if let limitsRefreshTask { return try await limitsRefreshTask.value }
-        let task = Task { try await performLimitsRefresh() }
+        let task = Task { try await refreshWithFeedback(.limits) { try await performLimitsRefresh() } }
         limitsRefreshTask = task
         defer { limitsRefreshTask = nil }
         try await task.value
+    }
+
+    private static func refreshWithFeedback(_ kind: EcosystemRefreshKind, operation: () async throws -> Void) async throws {
+        var snapshot = store.read()
+        let startingOwner = snapshot.owner
+        let id = snapshot.beginRefresh(kind)
+        if id != nil { save(snapshot) }
+        do {
+            try await operation()
+            finishFeedback(success: true)
+        } catch {
+            finishFeedback(success: false)
+            throw error
+        }
+        func finishFeedback(success: Bool) {
+            // Clearing/changing accounts removes the operation ID. Initial
+            // verification of the same cached account can change generation.
+            guard let id else { return }
+            var current = store.read()
+            guard current.owner == startingOwner, current.finishRefresh(kind, id: id, success: success) else { return }
+            save(current)
+        }
     }
 
     private static func performLimitsRefresh() async throws {
@@ -187,7 +229,7 @@ enum EcosystemPublisher {
             guard let observed = provider.observedAt else { return nil }
             let reading = EcosystemLimitProvider(source: provider.source, observedAt: observed, stale: provider.isStale,
                 windows: Array(provider.windows.prefix(8)).map {
-                    EcosystemLimitWindow(label: $0.displayLabel, percent: $0.percent, resetsAt: $0.resetsAt)
+                    EcosystemLimitWindow(label: $0.displayLabel, percent: $0.percent, resetsAt: $0.resetsAt, rawLabel: $0.label, scope: $0.scope)
                 })
             guard reading.isValid, seen.insert(reading.source).inserted else { return nil }
             return previous[reading.source].flatMap { $0.observedAt > reading.observedAt ? $0 : nil } ?? reading

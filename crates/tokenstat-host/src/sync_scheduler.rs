@@ -25,12 +25,12 @@ pub fn start(session: Arc<Mutex<Session>>) {
         let mut last_maintenance: Option<std::time::Instant> = None;
         loop {
             if tokenstat_sync::scheduled_network_allowed()
-                && last_maintenance.is_none_or(|at| at.elapsed() >= LIMITS_REFRESH_INTERVAL)
+                && last_maintenance.is_none_or(|at| at.elapsed() >= PRICING_REFRESH_INTERVAL)
             {
                 refresh_pricing(&maintenance_session);
-                post_limits();
                 last_maintenance = Some(std::time::Instant::now());
             }
+            post_limits();
             std::thread::sleep(UNLINKED_CHECK_INTERVAL);
         }
     });
@@ -60,12 +60,9 @@ pub fn start(session: Arc<Mutex<Session>>) {
 /// Quiet on failure: a machine that is offline keeps whatever the account
 /// already has, and the next pass retries.
 ///
-/// Two gates beyond the switch, because this pass is five vendor APIs and not
-/// a local read. Signed out there is nowhere to post to, so the whole pass is
-/// wasted work against somebody else's rate limit. And its own interval, which
-/// the sync loop's cannot be: that one drops to a minute whenever the machine
-/// is unlinked or the server asks for it, and a vendor sweep every minute is
-/// how an account gets itself throttled.
+/// The remembered account-plan interval paces vendor reads. Keep a five-minute
+/// floor and an hourly fallback until the server has established the cadence.
+/// Slow vendor calls stay on maintenance's thread, away from upload deadlines.
 fn post_limits() {
     if !tokenstat_sync::scheduled_network_allowed() {
         return;
@@ -76,23 +73,30 @@ fn post_limits() {
     // Posting needs the login credential. Without one the vendor reads have
     // nowhere to go, and the switch being on is a statement of intent for when
     // the machine is signed in again, not a licence to keep polling.
-    if !tokenstat_sync::scheduling_info(None).is_ok_and(|info| info.logged_in) {
+    let Ok(info) = tokenstat_sync::scheduling_info(None) else {
+        return;
+    };
+    if !info.logged_in {
         return;
     }
-    if !limits_pass_is_due() {
+    if !limits_pass_is_due(limits_refresh_interval(info.min_interval)) {
         return;
     }
     crate::dispatch::refresh_plan_limits();
 }
 
-/// How often the vendors are asked, whatever the sync loop is doing.
-///
-/// A quota window moves over hours, so an hour is already finer than the thing
-/// being measured, and a person who wants the number now opens Insights, which
-/// runs the pass on the spot.
-const LIMITS_REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 60);
+const PRICING_REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
-fn limits_pass_is_due() -> bool {
+fn limits_refresh_interval(plan_interval: Option<u64>) -> Duration {
+    Duration::from_secs(
+        plan_interval
+            .filter(|seconds| *seconds > 0)
+            .unwrap_or(3600)
+            .max(300),
+    )
+}
+
+fn limits_pass_is_due(interval: Duration) -> bool {
     use std::sync::OnceLock;
     static LAST: OnceLock<Mutex<Option<std::time::Instant>>> = OnceLock::new();
     let cell = LAST.get_or_init(|| Mutex::new(None));
@@ -100,7 +104,7 @@ fn limits_pass_is_due() -> bool {
         return false;
     };
     match *last {
-        Some(at) if at.elapsed() < LIMITS_REFRESH_INTERVAL => false,
+        Some(at) if at.elapsed() < interval => false,
         _ => {
             *last = Some(std::time::Instant::now());
             true
@@ -224,6 +228,19 @@ fn sync_due(next: Option<&str>, now: jiff::Timestamp) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn limits_follow_account_plan_without_rapid_polling() {
+        assert_eq!(limits_refresh_interval(Some(300)), Duration::from_secs(300));
+        assert_eq!(limits_refresh_interval(Some(900)), Duration::from_secs(900));
+        assert_eq!(
+            limits_refresh_interval(Some(86400)),
+            Duration::from_secs(86400)
+        );
+        assert_eq!(limits_refresh_interval(Some(60)), Duration::from_secs(300));
+        assert_eq!(limits_refresh_interval(Some(0)), Duration::from_secs(3600));
+        assert_eq!(limits_refresh_interval(None), Duration::from_secs(3600));
+    }
 
     #[test]
     fn shared_deadline_controls_sync_instead_of_cli_installation() {

@@ -46,7 +46,7 @@ open class UsageWidgetProvider : AppWidgetProvider() {
             .onFailure { Log.w("ts-widget", "Widget scheduler unavailable") }
     }
     override fun onDeleted(context: Context, ids: IntArray) {
-        prefs(context).edit { ids.forEach { remove("week.$it"); remove("provider.$it"); remove("style.$it") } }
+        prefs(context).edit { ids.forEach { remove("week.$it"); remove("provider.$it"); remove("style.$it"); remove("window.$it"); remove("charts.$it") } }
     }
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
@@ -135,6 +135,8 @@ open class UsageWidgetProvider : AppWidgetProvider() {
         /** Also used by layout verification: no credentials or network needed. */
         fun render(context: Context, id: Int, week: Boolean, snapshot: UsageSnapshot?, wide: Boolean, tall: Boolean = false, compact: Boolean = false): RemoteViews {
             val views = RemoteViews(context.packageName, when { compact -> R.layout.usage_widget_compact; tall -> R.layout.usage_widget_tall; else -> R.layout.usage_widget })
+            views.setViewVisibility(R.id.widget_configure, if (compact) View.GONE else View.VISIBLE)
+            views.setViewVisibility(R.id.widget_brand_label, if (wide && !compact) View.VISIBLE else View.GONE)
             val today = LocalDate.now()
             val value = snapshot?.value(week, today)
             val amount = if (value == null) "—" else money(value)
@@ -161,29 +163,39 @@ open class UsageWidgetProvider : AppWidgetProvider() {
             }
             views.setTextViewText(R.id.widget_status, status)
             views.setContentDescription(R.id.widget_status, status)
-            views.setViewVisibility(R.id.widget_chart, if ((wide || tall) && snapshot?.updatedAt != null) View.VISIBLE else View.GONE)
-            val weekAmount = snapshot?.value(true, today)?.let(::money) ?: "—"
+            val showSummary = (wide || tall) && !compact && snapshot?.updatedAt != null
+            val showCharts = showSummary && prefs(context).getBoolean("charts.$id", true)
+            views.setViewVisibility(R.id.widget_chart, if (showSummary) View.VISIBLE else View.GONE)
+            views.setViewVisibility(R.id.widget_bars, if (showCharts) View.VISIBLE else View.GONE)
+            views.setTextViewText(R.id.widget_secondary_period, context.getString(if (week) R.string.widget_today else R.string.widget_week_short))
+            val weekAmount = snapshot?.value(!week, today)?.let(::money) ?: "—"
             views.setTextViewText(R.id.widget_week_total, weekAmount.removeSuffix(" USD"))
             views.setContentDescription(R.id.widget_week_total, weekAmount)
-            val values = (6 downTo 0).map { offset -> snapshot?.days?.singleOrNull {
-                it.date == today.minusDays(offset.toLong()).toString() && !it.locked
-            }?.value ?: 0L }
-            val max = values.maxOrNull()?.coerceAtLeast(1) ?: 1
-            val scale = context.resources.displayMetrics.density
-            val chart = createBitmap((280 * scale).toInt().coerceAtLeast(1), (112 * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(chart)
-            canvas.scale(scale, scale)
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-            val accent = context.getColor(R.color.ts_widget_accent)
-            values.forEachIndexed { index, value ->
-                val height = (value.toDouble() / max * 104).toFloat().coerceAtLeast(5f)
-                paint.color = accent
-                paint.alpha = if (index == 6) 255 else 100
-                paint.shader = if (index == 6) LinearGradient(0f, 8f, 0f, 112f, context.getColor(R.color.ts_widget_secondary), accent, Shader.TileMode.CLAMP) else null
-                canvas.drawRoundRect(index * 40f, 112f - height, index * 40f + 28f, 112f, 4f, 4f, paint)
-            }
-            views.setImageViewBitmap(R.id.widget_bars, chart)
+            if (showCharts) {
+                val values = (6 downTo 0).map { offset -> snapshot?.days?.singleOrNull {
+                    it.date == today.minusDays(offset.toLong()).toString() && !it.locked
+                }?.value ?: 0L }
+                val max = values.maxOrNull()?.coerceAtLeast(1) ?: 1
+                val scale = context.resources.displayMetrics.density
+                val chart = createBitmap((280 * scale).toInt().coerceAtLeast(1), (112 * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(chart)
+                canvas.scale(scale, scale)
+                val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+                val accent = context.getColor(R.color.ts_widget_accent)
+                values.forEachIndexed { index, value ->
+                    val height = (value.toDouble() / max * 104).toFloat().coerceAtLeast(5f)
+                    paint.color = accent
+                    paint.alpha = if (index == 6) 255 else 100
+                    paint.shader = if (index == 6) LinearGradient(0f, 8f, 0f, 112f, context.getColor(R.color.ts_widget_secondary), accent, Shader.TileMode.CLAMP) else null
+                    canvas.drawRoundRect(index * 40f, 112f - height, index * 40f + 28f, 112f, 4f, 4f, paint)
+                }
+                views.setImageViewBitmap(R.id.widget_bars, chart)
+            } else { views.setImageViewBitmap(R.id.widget_bars, null) }
             views.setBoolean(R.id.widget_refresh, "setEnabled", !refreshing)
+            views.setViewVisibility(R.id.widget_refresh, if (refreshing) View.INVISIBLE else View.VISIBLE)
+            views.setViewVisibility(R.id.widget_progress, if (refreshing) View.VISIBLE else View.GONE)
+            views.setOnClickPendingIntent(R.id.widget_configure, PendingIntent.getActivity(context, id,
+                Intent(context, UsageWidgetConfigurationActivity::class.java).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             views.setOnClickPendingIntent(R.id.widget_root, QuickAccess.pendingIntent(context, "home"))
             views.setOnClickPendingIntent(R.id.widget_period, broadcast(context, id, PERIOD))
             views.setOnClickPendingIntent(R.id.widget_refresh, broadcast(context, id, REFRESH))

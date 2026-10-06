@@ -189,4 +189,38 @@ class UsageWidgetLayoutTest {
             }
         }
     }
+    @Test fun disablingChartsPreservesBothTotalsAndRefreshShowsProgress() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val prefs = LimitsWidgetProvider.preferences(context)
+        val today = LocalDate.now()
+        val snapshot = UsageSnapshot("a".repeat(64), System.currentTimeMillis(), (6 downTo 0).map {
+            UsageDay(today.minusDays(it.toLong()).toString(), (it + 1) * 1_000_000L, false)
+        })
+        try {
+            prefs.edit().putBoolean("charts.77", false).commit()
+            UsageWidgetProvider.setRefreshing(context, true)
+            instrumentation.runOnMainSync {
+                for (week in listOf(false, true)) {
+                    val view = UsageWidgetProvider.render(context, 77, week, snapshot, wide = true).apply(context, FrameLayout(context))
+                    assertEquals(View.VISIBLE, view.findViewById<View>(R.id.widget_chart).visibility)
+                    assertEquals(View.GONE, view.findViewById<View>(R.id.widget_bars).visibility)
+                    assertEquals(context.getString(if (week) R.string.widget_today else R.string.widget_week_short), view.findViewById<TextView>(R.id.widget_secondary_period).text)
+                    assertTrue(view.findViewById<TextView>(R.id.widget_week_total).text.isNotEmpty())
+                    assertEquals(View.VISIBLE, view.findViewById<View>(R.id.widget_progress).visibility)
+                    assertEquals(View.INVISIBLE, view.findViewById<View>(R.id.widget_refresh).visibility)
+                    assertFalse(view.findViewById<View>(R.id.widget_refresh).isEnabled)
+                    val density = context.resources.displayMetrics.density
+                    val w = (300 * density).toInt(); val h = (170 * density).toInt()
+                    view.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY))
+                    view.layout(0, 0, w, h)
+                    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                    view.draw(Canvas(bitmap))
+                    File(context.filesDir, "widget-layouts/usage-no-charts-$week.png").apply { parentFile?.mkdirs() }.outputStream().use {
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+                    }
+                }
+            }
+        } finally { UsageWidgetProvider.setRefreshing(context, false); prefs.edit().remove("charts.77").commit() }
+    }
 }
