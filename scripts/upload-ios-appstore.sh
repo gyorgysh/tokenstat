@@ -88,7 +88,7 @@ helper() {
     if [ -z "${UPLOAD_IOS_HELPER_PY:-}" ] || [ ! -f "$UPLOAD_IOS_HELPER_PY" ]; then
         UPLOAD_IOS_HELPER_PY="$(mktemp "${TMPDIR:-/tmp}/ts-ios-helper.XXXXXX")" || exit 1
         cat >"$UPLOAD_IOS_HELPER_PY" <<'PY'
-import os, re, shutil, subprocess, sys, tempfile, zipfile, plistlib
+import os, re, shutil, subprocess, sys, tempfile, zipfile, plistlib, importlib.util, json
 
 def redact():
     text = sys.stdin.read()
@@ -155,6 +155,9 @@ def bump(path):
 
 def check_ipa(ipa, expect_ver, expect_build):
     errors = []
+    icon_spec = importlib.util.spec_from_file_location("apple_icon", os.path.join(os.getcwd(), "scripts/apple-icon.py"))
+    icons = importlib.util.module_from_spec(icon_spec)
+    icon_spec.loader.exec_module(icons)
 
     def fail(name, detail=None):
         if detail:
@@ -272,6 +275,23 @@ def check_ipa(ipa, expect_ver, expect_build):
                 fail("ecosystem-signing")
             if not os.path.isfile(os.path.join(bundle, "PrivacyInfo.xcprivacy")):
                 fail("ecosystem-privacy-manifest")
+            if expected_id.endswith(".watchkitapp"):
+                store_icons = [name for name in os.listdir(bundle) if "AppIcon" in name and "1024x1024" in name and name.endswith(".png")]
+                for name in store_icons:
+                    try:
+                        with open(os.path.join(bundle, name), "rb") as stream:
+                            icons.validate_store_icon(stream.read(), size=1024)
+                    except (OSError, ValueError):
+                        fail("watch-store-icon", "dimensions or alpha channel")
+                # Modern Watch targets keep the icon in Assets.car rather
+                # than loose PNGs. Check the compiled rendition Apple sees.
+                try:
+                    assets = json.loads(subprocess.check_output(["xcrun", "assetutil", "--info", os.path.join(bundle, "Assets.car")], stderr=subprocess.DEVNULL))
+                    large = [item for item in assets if item.get("Name") == "AppIcon" and item.get("AssetType") == "Icon Image" and item.get("PixelWidth") == 1024]
+                    if not large or any(item.get("Opaque") is not True or item.get("PixelHeight") != 1024 for item in large):
+                        fail("watch-store-icon", "compiled icon dimensions or transparency")
+                except (OSError, ValueError, subprocess.CalledProcessError):
+                    fail("watch-store-icon", "compiled catalog unavailable")
         if errors:
             raise SystemExit(1)
         print("  widgets and Watch app: matching versions, authorized app groups, store profiles and verified signatures")

@@ -235,7 +235,7 @@ settings:
     # 133 carries Android full-screen Git/vault forms and SSH empty states.
     # 134 carries the Android Git/vault review fixes.
     # 135 is 1.3.0: configurable widgets, Siri actions and paired Watch approvals.
-    CURRENT_PROJECT_VERSION: "135"
+    CURRENT_PROJECT_VERSION: "136"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,

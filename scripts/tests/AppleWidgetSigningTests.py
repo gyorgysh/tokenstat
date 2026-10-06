@@ -5,13 +5,32 @@ import hashlib
 import importlib.util
 from pathlib import Path
 import unittest
+import struct
+import zlib
 
 spec = importlib.util.spec_from_file_location("sign_mac_app", Path(__file__).resolve().parents[1] / "sign-mac-app.py")
 signing = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(signing)
+icon_spec = importlib.util.spec_from_file_location("apple_icon", Path(__file__).resolve().parents[1] / "apple-icon.py")
+icons = importlib.util.module_from_spec(icon_spec)
+icon_spec.loader.exec_module(icons)
 
 
 class WidgetSigningTests(unittest.TestCase):
+    def test_watch_icon_is_store_ready(self):
+        path = signing.ROOT / "apps/mac/WatchResources/Assets.xcassets/AppIcon.appiconset/app-icon.png"
+        icons.validate_store_icon(path.read_bytes(), size=1024)
+
+    def test_alpha_and_palette_transparency_are_rejected(self):
+        def chunk(kind, payload):
+            return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload))
+        def png(color, transparent=False):
+            return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1024, 1024, 8, color, 0, 0, 0)) + (chunk(b"tRNS", b"\x00") if transparent else b"") + chunk(b"IEND", b"")
+        icons.validate_store_icon(png(2), size=1024)
+        for color, transparent in [(6, False), (4, False), (3, True)]:
+            with self.assertRaises(ValueError):
+                icons.validate_store_icon(png(color, transparent), size=1024)
+
     def profile(self, bundle_id):
         certificate = b"fixture-certificate"
         digest = hashlib.sha1(certificate).hexdigest().upper()
