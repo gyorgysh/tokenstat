@@ -22,6 +22,7 @@ import SwiftUI
 @Observable
 final class ClientNavigationModel {
     var showWorkSearch = false
+    var ecosystemSearchTerm = ""
 
     /// A screen or setting search picked, held until search has closed.
     ///

@@ -45,6 +45,11 @@ import UIKit
 /// device token, which arrives nowhere else. Everything else this app does at
 /// launch lives in `TokenstatApp.init`.
 final class ClientAppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        MainActor.assumeIsolated { EcosystemWatchSync.shared.activate() }
+        return true
+    }
+
     func application(
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
@@ -153,6 +158,7 @@ struct TokenstatApp: App {
         Self.adoptPreferencesFromPreviousBundleID()
         Self.excludeSecretsFromBackup()
         BridgeLaunch.begin()
+        Task.detached(priority: .utility) { TokenstatAppShortcuts.updateAppShortcutParameters() }
         // Before anything can deliver: a delegate installed later loses the
         // callbacks for whatever arrived first, and on a Mac that is the
         // difference between a banner and silence while the app is in front.

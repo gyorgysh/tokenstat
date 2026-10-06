@@ -66,6 +66,7 @@ struct ClientRootView: View {
     @State private var showAccount = false
     @State private var store = ClientStore()
     @State private var notificationOpen = NotificationOpen.shared
+    @State private var ecosystemNavigation = EcosystemNavigation.shared
     @State private var savedAccess = SavedWorkAccess.shared
 
     /// The door for a phone or an iPad with no account on it.
@@ -247,9 +248,16 @@ struct ClientRootView: View {
                 editors.reset()
             }
             navigation.restoreRoute(visibleTabs: tabCustomization.visibleTabs,
-                notificationPending: notificationOpen.request != nil)
+                notificationPending: notificationOpen.request != nil || ecosystemNavigation.hasRequestedNavigation)
+            openEcosystemDestination()
         }
+        .onContinueUserActivity("ai.tokenstat.open") { activity in
+            if let value = activity.userInfo?["url"] as? String, let url = URL(string: value) { ecosystemNavigation.receive(url) }
+        }
+        .onOpenURL { ecosystemNavigation.receive($0) }
+        .onChange(of: ecosystemNavigation.pending, initial: true) { _, _ in openEcosystemDestination() }
         .onChange(of: account.signedIn) { _, signedIn in
+            openEcosystemDestination()
             if !signedIn { editors.reset() }
             guard signedIn, let signed = account.account else { return }
             Task { await store.finishPendingIntent(with: signed) }
@@ -263,6 +271,7 @@ struct ClientRootView: View {
             Task { await Bridge.nudgeTunnel(reconnect: true) }
         }
         .onChange(of: scenePhase) { _, phase in
+            if phase == .active { EcosystemWatchSync.shared.activate() }
             if phase != .active { navigation.saveRoute() }
             guard phase == .active, account.signedIn else { return }
             Task { await Bridge.nudgeTunnelOnForeground() }
@@ -350,13 +359,36 @@ struct ClientRootView: View {
         .environment(editors)
     }
 
+    /// System routes wait for sign-in and reuse the saved-route availability
+    /// flow for a project on a remote host.
+    private func openEcosystemDestination() {
+        guard account.signedIn, let target = ecosystemNavigation.pending else { return }
+        ecosystemNavigation.pending = nil
+        if target.screen != .account { showAccount = false }
+        if target.screen != .search { navigation.showWorkSearch = false; navigation.ecosystemSearchTerm = "" }
+        navigation.presentedChat = nil
+        navigation.workspacesPath = []
+        navigation.folderID = nil
+        navigation.restoredRoute = nil
+        switch target.screen {
+        case .search:
+            navigation.ecosystemSearchTerm = target.searchTerm ?? ""
+            navigation.showWorkSearch = true
+        case .account: showAccount = true
+        default: navigation.destination = ClientTab(rawValue: target.screen.rawValue) ?? .home
+        }
+        guard let id = target.projectID, target.screen == .workspaces,
+              let scope = WorkSessionContext.shared.scope, scope.kind == .account,
+              target.owner == EcosystemPublisher.ownerKey(scope) else { return }
+        let parts = id.split(separator: ":", maxSplits: 2).map(String.init)
+        guard parts.count == 3, parts[0] == "remote", !parts[1].isEmpty, !parts[2].isEmpty else { return }
+        let reference = WorkReference(scope: scope, hostIdentity: parts[1], workspaceID: parts[2], kind: .workspace, itemID: nil)
+        navigation.restoredRoute = WorkMobileRoute(scope: scope, tab: "workspaces", reference: reference, section: target.section?.rawValue ?? "sessions")
+    }
+
     /// Go where search was asked to go, now that search has closed.
-    ///
-    /// On dismissal rather than on the tap, because the account sheet is
-    /// presented from this same view: two sheets on one view queue instead of
-    /// stacking, and the second one arrives minutes later or not at all. Tabs
-    /// wait for the same reason, so the app is not seen rearranging itself
-    /// behind a sheet that is still on screen.
+    /// The account sheet shares this presenter, so tabs and settings wait for
+    /// search dismissal instead of rearranging the interface behind it.
     private func openPendingPlace() {
         guard let place = navigation.pendingPlace else { return }
         navigation.pendingPlace = nil

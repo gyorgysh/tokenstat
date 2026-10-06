@@ -26,6 +26,8 @@ struct RootView: View {
 
     @State private var route: Route = .global(.home)
     @State private var showWorkSearch = false
+    @State private var ecosystemSearchTerm = ""
+    @State private var ecosystemNavigation = EcosystemNavigation.shared
     @State private var railAccountHovered = false
     /// The folder whose chat pane is mounted, on macOS.
     ///
@@ -226,7 +228,7 @@ struct RootView: View {
         #endif
         // Split the modifier chain. A single expression here is too much
         // for the Release type checker (it times out and fails the build).
-        return liveSession
+        return ecosystemSession
             // View menu shortcuts post here so a focused editor cannot swallow ⌘B
             // as "bold". Each destination owns its chrome buttons.
             .onReceive(NotificationCenter.default.publisher(for: .toggleLeftSidebar)) { _ in
@@ -333,6 +335,7 @@ struct RootView: View {
                 openPendingNotification()
             }
             .onChange(of: workspaces.folders.map(\.id)) { _, _ in
+                openEcosystemDestination()
                 openPendingNotification()
             }
             .onChange(of: terminals.sessions.map(\.id)) { _, _ in
@@ -354,6 +357,15 @@ struct RootView: View {
                 debugNavigate(target)
             }
             #endif
+    }
+
+    private var ecosystemSession: some View {
+        liveSession
+            .onOpenURL { ecosystemNavigation.receive($0) }
+            .onChange(of: ecosystemNavigation.pending, initial: true) { _, _ in openEcosystemDestination() }
+            .onChange(of: placeSettled) { _, _ in openEcosystemDestination() }
+            .onChange(of: workspaces.isLoading) { _, _ in openEcosystemDestination() }
+            .onChange(of: WorkSessionContext.shared.scope) { _, _ in openEcosystemDestination() }
     }
 
     #if DEBUG
@@ -558,8 +570,8 @@ struct RootView: View {
         .sheet(item: $savedFolder) { destination in
             WorkFolderCacheSettings(destination: destination)
         }
-        .sheet(isPresented: $showWorkSearch) {
-            DesktopWorkSearchPresentation(account: account, workspaces: workspaces, open: openSearchWork)
+        .sheet(isPresented: $showWorkSearch, onDismiss: { ecosystemSearchTerm = "" }) {
+            DesktopWorkSearchPresentation(account: account, workspaces: workspaces, open: openSearchWork, initialQuery: ecosystemSearchTerm)
         }
         .sheet(isPresented: $workspaces.isAddSheetPresented) {
             AddWorkspaceSheet(model: workspaces, machines: account.account?.machines ?? [])
@@ -3653,7 +3665,7 @@ struct RootView: View {
         // The route this reads is built from identifiers a call has to fetch:
         // wait for the transport before asking who owns what.
         await BridgeLaunch.wait()
-        guard WorkPlaceLaunch.claim(), LaunchPreferences.restoresLocation, let stored = WorkContinuityStore.shared.place() else { return }
+        guard !ecosystemNavigation.hasRequestedNavigation, WorkPlaceLaunch.claim(), LaunchPreferences.restoresLocation, let stored = WorkContinuityStore.shared.place() else { return }
         if let section = stored.globalSection {
             if let global = GlobalSection(rawValue: section), global != .account {
                 navigate(to: .global(global))
@@ -3774,6 +3786,36 @@ struct RootView: View {
             }
         default:
             break
+        }
+    }
+
+    private func openEcosystemDestination() {
+        guard placeSettled, let target = ecosystemNavigation.pending else { return }
+        if target.projectID != nil {
+            guard WorkSessionContext.shared.scope != nil, !workspaces.isLoading else { return }
+        }
+        // Consume screen routes immediately; a named project uses the existing
+        // availability flow and a fresh account scope before it is opened.
+        ecosystemNavigation.pending = nil
+        if target.screen != .search { showWorkSearch = false }
+        switch target.screen {
+        case .search:
+            ecosystemSearchTerm = target.searchTerm ?? ""
+            showWorkSearch = true
+        case .account: navigate(to: .global(.account))
+        case .ssh: navigate(to: .ssh(.hosts(folder: nil)))
+
+        case .home: navigate(to: .global(.home))
+        case .insights: navigate(to: .global(.insights))
+        case .machines: navigate(to: .global(.machines))
+        case .workspaces:
+            guard let id = target.projectID,
+                  target.owner == EcosystemPublisher.ownerKey(WorkSessionContext.shared.scope),
+                  workspaces.folders.contains(where: { $0.id == id && $0.exists }) else {
+                navigate(to: .workspacesOverview)
+                return
+            }
+            openSection(WorkspaceSection(rawValue: target.section?.rawValue ?? "sessions") ?? .sessions, in: id)
         }
     }
 

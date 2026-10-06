@@ -226,8 +226,55 @@ def check_ipa(ipa, expect_ver, expect_build):
         sig = (signed.stdout or "") + (signed.stderr or "")
         if "Authority=Apple Distribution" not in sig:
             fail("distribution-signature")
+        group = "group.ai.tokenstat.tokenstat"
+        if group not in ents.get("com.apple.security.application-groups", []):
+            fail("app-group")
+        nested = [
+            ("PlugIns/TokenstatWidgets.appex", "ai.tokenstat.tokenstat.widgets"),
+            ("Watch/TokenstatWatch.app", "ai.tokenstat.tokenstat.watchkitapp"),
+            ("Watch/TokenstatWatch.app/PlugIns/TokenstatWatchWidgets.appex", "ai.tokenstat.tokenstat.watchkitapp.widgets"),
+        ]
+        for relative, expected_id in nested:
+            bundle = os.path.join(app, relative)
+            if not os.path.isfile(os.path.join(bundle, "Info.plist")):
+                fail("ecosystem-bundle", "missing")
+                continue
+            with open(os.path.join(bundle, "Info.plist"), "rb") as handle:
+                nested_info = plistlib.load(handle)
+            if nested_info.get("CFBundleIdentifier") != expected_id:
+                fail("ecosystem-bundle-id")
+            if str(nested_info.get("CFBundleVersion")) != build or str(nested_info.get("CFBundleShortVersionString")) != version:
+                fail("ecosystem-version")
+            try:
+                nested_ents = plistlib.loads(subprocess.check_output(
+                    ["codesign", "-d", "--entitlements", "-", "--xml", bundle], stderr=subprocess.DEVNULL))
+                if group not in nested_ents.get("com.apple.security.application-groups", []):
+                    fail("ecosystem-app-group")
+                if nested_ents.get("get-task-allow"):
+                    fail("ecosystem-debug-entitlement")
+                provision = os.path.join(bundle, "embedded.mobileprovision")
+                nested_profile = plistlib.loads(subprocess.check_output(
+                    ["security", "cms", "-D", "-i", provision], stderr=subprocess.DEVNULL))
+                profile_ents = nested_profile.get("Entitlements", {})
+                if "ProvisionedDevices" in nested_profile or profile_ents.get("get-task-allow"):
+                    fail("ecosystem-store-profile")
+                if group not in profile_ents.get("com.apple.security.application-groups", []):
+                    fail("ecosystem-profile-group")
+                if not str(profile_ents.get("application-identifier", "")).endswith("." + expected_id):
+                    fail("ecosystem-profile-id")
+                nested_sig = subprocess.run(["codesign", "-dv", "--verbose=2", bundle], capture_output=True, text=True)
+                if "Authority=Apple Distribution" not in nested_sig.stderr:
+                    fail("ecosystem-distribution-signature")
+                verification = subprocess.run(["codesign", "--verify", "--strict", bundle], capture_output=True)
+                if verification.returncode:
+                    fail("ecosystem-signature-verification")
+            except (OSError, ValueError, subprocess.CalledProcessError):
+                fail("ecosystem-signing")
+            if not os.path.isfile(os.path.join(bundle, "PrivacyInfo.xcprivacy")):
+                fail("ecosystem-privacy-manifest")
         if errors:
             raise SystemExit(1)
+        print("  widgets and Watch app: matching versions, authorized app groups, store profiles and verified signatures")
         print("  %s (%s)" % (version, build))
         print("  production push")
         print("  testflight profile")
@@ -727,6 +774,7 @@ mkdir -p "$ROOT/dist/ios"
 
 echo "archiving"
 if ! run_redacted "$ARCHIVE_LOG" xcodebuild archive \
+    -jobs 2 \
     -project "$ROOT/apps/mac/Tokenstat.xcodeproj" \
     -scheme Tokenstat \
     -configuration Release \

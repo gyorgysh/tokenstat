@@ -25,6 +25,7 @@ final class AccountModel {
         didSet {
             let previous = WorkSessionContext.shared.scope
             WorkSessionContext.shared.update(account: account)
+            EcosystemPublisher.verifyOwner(account: account)
             // Nil is the unknown scope of a cold launch, not a different owner.
             // Purging on the first load threw the cache away every time.
             if let previous, previous != WorkSessionContext.shared.scope {
@@ -476,6 +477,7 @@ final class AccountModel {
             accountLoadGeneration &+= 1
             isLoading = false
             try await Bridge.signOut()
+            EcosystemPublisher.clear()
             accountLoadGeneration &+= 1
             isLoading = false
             if let purgeScope { try? WorkCacheCleanupJournal.shared.confirm(scope: WorkCache.scope(for: purgeScope)) }

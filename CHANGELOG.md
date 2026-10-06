@@ -11,6 +11,22 @@ still belongs there. When a release is tagged, close that delta under its
 version and begin the next one. Do not reconstruct release notes from commits
 at the end.
 
+## [Unreleased]
+
+### Added
+
+- Configurable usage and project widgets for Mac, iPhone and iPad, including
+  iPad extra-large layouts and iPhone Lock Screen accessories. Choose a period,
+  appearance, favorite project or screen, and refresh usage from the widget.
+- Shortcuts and Siri actions for screens, project sections, search, usage and
+  activity streaks, with account-scoped Spotlight project discovery and the
+  latest Apple content-opening and search schemas on supported systems.
+- Quick Access controls for Control Center and supported Lock Screen and
+  Action button slots.
+- A paired Apple Watch app with activity, projects, Handoff, Shortcuts and
+  complications. Review pending agent requests, Allow Once, Always Allow for
+  that chat or Deny after the host revalidates the exact live request.
+
 ## [1.2.0] - 2026-10-05
 
 ### Added

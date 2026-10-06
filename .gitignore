@@ -147,3 +147,7 @@ xcuserdata/
 /scripts/tests/windows-localization/bin/
 /scripts/tests/windows-localization/obj/
 __pycache__/
+
+# Info plists generated from the XcodeGen project specification.
+/apps/mac/Generated/
+/apps/mac/WidgetQA.xcodeproj/

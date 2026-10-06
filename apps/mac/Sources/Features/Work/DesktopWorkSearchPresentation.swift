@@ -6,6 +6,7 @@ struct DesktopWorkSearchPresentation: View {
     let account: AccountModel
     let workspaces: WorkspacesModel
     let open: (WorkReference) -> Bool
+    var initialQuery: String = ""
     @Environment(\.dismiss) private var dismiss
     @State private var model: WorkSearchModel?
     @State private var failure: String?
@@ -37,6 +38,7 @@ struct DesktopWorkSearchPresentation: View {
         // runs again. That is a search sheet that never opens its saved work.
         .task { visible = true; await prepare() }
         .onAppear { visible = true }
+        .onChange(of: initialQuery) { _, query in model?.query = query }
         .onDisappear { visible = false; model?.close() }
         .onChange(of: WorkSessionContext.shared.scope) { _, _ in model?.close(); dismiss() }
         .onChange(of: WorkAccessStore.shared.generation) { _, _ in model?.close(); dismiss() }
@@ -94,6 +96,7 @@ struct DesktopWorkSearchPresentation: View {
         if savedUnavailable {
             model.coverageNotice = L10n.text("apple.desktopworksearchpresentation.saved_copies_could_not_be_loaded_you_can_s.9efc5e59")
         }
+        model.query = initialQuery
         self.model = model
     }
 }

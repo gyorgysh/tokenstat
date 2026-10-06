@@ -182,6 +182,7 @@ final class HomeModel {
         calendarGeneration &+= 1
         let generation = calendarGeneration
         let requestedScope = scope
+        let ecosystemLease = EcosystemPublisher.lease
         defer {
             if generation == calendarGeneration {
                 isLoading = false
@@ -199,6 +200,7 @@ final class HomeModel {
             let grid = try await calendar
             guard !Task.isCancelled, generation == calendarGeneration, scope == requestedScope else { return }
             self.calendar = grid
+            EcosystemPublisher.publish(calendar: grid, lease: ecosystemLease)
             // Only null means the account/archive has no records. A grid
             // with zero active days can be a quiet or locked history window.
             hasConfirmedEmptyActivity = grid == nil

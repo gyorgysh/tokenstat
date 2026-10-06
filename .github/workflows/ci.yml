@@ -222,6 +222,9 @@ jobs:
       - name: Run the standalone client tests
         run: bash scripts/run-swift-tests.sh
 
+      - name: Validate Apple widget signing rules
+        run: python3 scripts/tests/AppleWidgetSigningTests.py
+
       - uses: actions/setup-node@v6
         with:
           node-version: '24'

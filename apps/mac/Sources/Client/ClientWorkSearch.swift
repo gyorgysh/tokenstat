@@ -64,8 +64,14 @@ struct ClientWorkSearchPresentation: View {
         // can run first: it guards every step of the preparation, and a task
         // that starts with it false gives up before doing anything and never
         // runs again. That is a search sheet that never opens its saved work.
-        .task { visible = true; await prepare() }
+        .task { visible = true; placeQuery = navigation.ecosystemSearchTerm; navigation.ecosystemSearchTerm = ""; await prepare() }
         .onAppear { visible = true }
+        .onChange(of: navigation.ecosystemSearchTerm) { _, query in
+            guard !query.isEmpty else { return }
+            placeQuery = query
+            model?.query = query
+            navigation.ecosystemSearchTerm = ""
+        }
         .onDisappear { visible = false; model?.close() }
         .onChange(of: WorkSessionContext.shared.scope) { _, _ in model?.close(); dismiss() }
         .onChange(of: WorkAccessStore.shared.generation) { _, _ in model?.close(); dismiss() }
@@ -149,6 +155,7 @@ struct ClientWorkSearchPresentation: View {
             model.coverageNotice = allowed.count < machines.count
                 ? L10n.text("apple.clientworksearch.search_covers_machines_with_verified_proje.0b813f10")
                 : (includesText ? nil : L10n.text("apple.clientworksearch.saved_conversation_text_is_off_search_cove.38f2ad0a"))
+            model.query = placeQuery
             self.model = model
             await learn(scope: scope, hosts: allowed, access: access, linked: Set(machines.keys))
         } catch {

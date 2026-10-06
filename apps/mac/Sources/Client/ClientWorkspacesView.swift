@@ -851,6 +851,7 @@ final class ClientWorkspacesModel {
     /// `connect`, which queues, and the auto path through `autoDial`, which
     /// drops. Both end up here, never two at once.
     private func dial(_ host: ClientHost, recovering: Bool) async {
+        let ecosystemLease = EcosystemPublisher.lease
         if pendingPeer == host.peerKey { pendingPeer = nil }
         guard isConnecting == nil else { return }
         guard host.online != false else {
@@ -917,7 +918,10 @@ final class ClientWorkspacesModel {
                 async let loadedFolders = Bridge.remoteWorkspaces(peer: peer)
                 async let loadedSessions = ClientRemote.ptyList(peer: peer.key)
                 async let loadedChats = ClientRemote.recentChats(peer: peer.key)
-                folders = try await loadedFolders
+                let newFolders = try await loadedFolders
+                guard EcosystemPublisher.lease == ecosystemLease else { return }
+                publishEcosystem(newFolders, peer: host.peerKey, host: host.name, lease: ecosystemLease)
+                folders = newFolders
                 sessions = (try? await loadedSessions) ?? []
                 recentChats = (try? await loadedChats) ?? []
                 connectedKey = host.peerKey
@@ -1046,12 +1050,22 @@ final class ClientWorkspacesModel {
     }
 
     private func reloadRemote(peerKey: String) async {
+        let ecosystemLease = EcosystemPublisher.lease
         guard let peer = try? await Bridge.peers().first(where: { $0.key == peerKey }) else {
             return
         }
-        folders = (try? await Bridge.remoteWorkspaces(peer: peer)) ?? folders
+        if let newFolders = try? await Bridge.remoteWorkspaces(peer: peer), EcosystemPublisher.lease == ecosystemLease {
+            publishEcosystem(newFolders, peer: peerKey, host: hosts.first { $0.peerKey == peerKey }?.name ?? "Computer", lease: ecosystemLease)
+            folders = newFolders
+        }
         sessions = (try? await ClientRemote.ptyList(peer: peer.key)) ?? sessions
         recentChats = (try? await ClientRemote.recentChats(peer: peer.key)) ?? recentChats
+    }
+
+    private func publishEcosystem(_ folders: [WorkspaceFolder], peer: String, host: String, lease: EcosystemPublicationLease?) {
+        EcosystemPublisher.publish(projects: folders.filter(\.exists).map {
+            EcosystemProject(id: $0.id, name: $0.name, host: $0.machineLabel ?? host)
+        }, lease: lease, replacing: .peer(peer))
     }
 
     /// What a notification tap should open on this host.

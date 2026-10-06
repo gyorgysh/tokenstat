@@ -938,10 +938,15 @@ final class WorkspacesModel {
     /// One host call. Cheap enough to run whenever files change, which is what
     /// separates it from `loadRemote`.
     func loadLocal() async {
+        let ecosystemLease = EcosystemPublisher.lease
         isLoading = true
         defer { isLoading = false }
         do {
             let loaded = try await Bridge.workspaces()
+            guard EcosystemPublisher.lease == ecosystemLease else { return }
+            EcosystemPublisher.publish(projects: loaded.filter(\.exists).map {
+                EcosystemProject(id: $0.id, name: $0.name, host: "This Mac")
+            }, lease: ecosystemLease, replacing: .local)
             localFolders = loaded
             publishFolders()
             errorMessage = nil
@@ -977,6 +982,7 @@ final class WorkspacesModel {
     /// failure is remembered rather than raised, and its last known folders
     /// stay listed.
     func loadRemote() async {
+        let ecosystemLease = EcosystemPublisher.lease
         nextRemoteLoad &+= 1
         let generation = nextRemoteLoad
         do {
@@ -988,7 +994,7 @@ final class WorkspacesModel {
             let peers = try await Bridge.peers().filter {
                 $0.trust == .approved && ($0.address?.isEmpty == false || tunnelOn)
             }
-            guard generation == nextRemoteLoad else { return }
+            guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease else { return }
             // Stage into locals across the per-peer awaits below. Mutating the
             // shared dictionaries before each dial lets an older sweep resume
             // after a newer one and publish stale folders over live ones.
@@ -1026,7 +1032,7 @@ final class WorkspacesModel {
                 if let nextDial = stagedNextDial[peer.key], Date() < nextDial { continue }
                 do {
                     let fetched = try await Bridge.remoteWorkspaces(peer: peer)
-                    guard generation == nextRemoteLoad else { return }
+                    guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease else { return }
                     // Disconnect lands while a dial is in flight. Taking the
                     // answer anyway restored the folders and re-posted
                     // didConnect, which unsuppressed the peer: Disconnect
@@ -1037,12 +1043,15 @@ final class WorkspacesModel {
                     // unsuppresses and spawns an immediate re-sweep: both
                     // Disconnect and auto-connect-off lasted one sweep.
                     let newlySeen = stagedFolders[peer.key] == nil
+                    EcosystemPublisher.publish(projects: fetched.filter(\.exists).map {
+                        EcosystemProject(id: $0.id, name: $0.name, host: $0.machineLabel ?? "Computer")
+                    }, lease: ecosystemLease, replacing: .peer(peer.key))
                     stagedFolders[peer.key] = fetched
                     // One call for every badge on every folder that machine
                     // has. Best effort: a host too old to answer leaves the
                     // badges off, which is what they were before this existed.
                     if let counts = try? await Bridge.remoteWorkspaceSummaries(peer: peer) {
-                        guard generation == nextRemoteLoad else { return }
+                        guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease else { return }
                         for summary in counts { stagedSummaries[summary.id] = summary }
                     }
                     stagedNextDial[peer.key] = Date().addingTimeInterval(Self.peerRefreshSeconds)
@@ -1052,7 +1061,7 @@ final class WorkspacesModel {
                         didConnectKeys.append(peer.key)
                     }
                 } catch {
-                    guard generation == nextRemoteLoad else { return }
+                    guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease else { return }
                     let text = error.localizedDescription
                     if Self.isWorkspaceRefusal(text) {
                         // Reached a host that has not let this device in. The
@@ -1103,7 +1112,7 @@ final class WorkspacesModel {
                     }
                 }
             }
-            guard generation == nextRemoteLoad else { return }
+            guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease else { return }
             // Re-validate before publishing: an older sweep resuming after a
             // newer one must not delete folders the newer sweep just went live
             // with, so suppressed keys are enforced again on the staged copy.

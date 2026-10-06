@@ -1,0 +1,27 @@
+include: [project.yml]
+name: WidgetQA
+packages:REPLACE: {}
+targets:
+  Tokenstat:
+    sources:REPLACE:
+      - path: Tests/Ecosystem
+      - path: Widgets
+      - path: Sources/Ecosystem/EcosystemSnapshot.swift
+      - path: Sources/Ecosystem/EcosystemWatchPacket.swift
+      - path: Sources/Ecosystem/EcosystemApproval.swift
+      - path: Sources/Ecosystem/EcosystemWatchSync.swift
+      - path: Sources/Ecosystem/EcosystemNavigation.swift
+      - path: Sources/Ecosystem/TokenstatIntents.swift
+      - path: Resources/Assets.xcassets
+        buildPhase: resources
+    dependencies:REPLACE:
+      - target: TokenstatWidgets
+        embed: true
+      - target: TokenstatWatch
+        embed: true
+        destinationFilters: [iOS]
+    preBuildScripts:REPLACE: []
+    postBuildScripts:REPLACE: []
+    settings:
+      base:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) ECOSYSTEM_QA"

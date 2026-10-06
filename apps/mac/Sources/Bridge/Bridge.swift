@@ -1574,6 +1574,10 @@ extension Bridge {
         try await chatInvoke(peer: peer, "chat.approvals", ["id": id], as: [ChatApproval].self)
     }
 
+    static func pendingChatApprovals(peer: String) async throws -> [ChatApproval] {
+        try await chatInvoke(peer: peer, "chat.approvals", as: [ChatApproval].self)
+    }
+
     static func resolveChatApproval(id: String, choice: String, peer: String? = nil) async throws -> ChatApproval {
         try await chatInvoke(
             peer: peer,
