@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_brand" translatable="false">tokenstat</string>
+    <string name="widget_unknown" translatable="false">—</string>
+    <string name="widget_name">Usage at a Glance</string>
+    <string name="widget_description">Daily and weekly usage. Tap the period to switch, or refresh without opening tokenstat.</string>
+    <string name="widget_today">TODAY</string>
+    <string name="widget_week">LAST 7 DAYS</string>
+    <string name="widget_week_short">7 DAYS</string>
+    <string name="widget_list_rates">Value at list rates</string>
+    <string name="widget_sign_in">Sign in to sync</string>
+    <string name="widget_open_to_sync">Open tokenstat</string>
+    <string name="widget_update_failed">Update unavailable</string>
+    <string name="widget_updating">Updating…</string>
+    <string name="widget_usage_unavailable">Usage unavailable</string>
+    <string name="widget_refresh">Refresh usage</string>
+    <string name="widget_period_hint">Switch between Today and Last 7 Days</string>
+    <string name="shortcut_home">Home</string>
+    <string name="shortcut_workspaces">Workspaces</string>
+    <string name="shortcut_insights">Insights</string>
+    <string name="shortcut_ssh">SSH</string>
+    <string name="notification_review">Review request</string>
+    <color name="ts_widget_accent">#6A3DFF</color>
+    <color name="ts_widget_secondary">#C026D3</color>
+    <color name="ts_widget_surface">#FBFBFD</color>
+    <color name="ts_widget_text">#FF000000</color>
+    <color name="ts_widget_muted">#99000000</color>
+</resources>

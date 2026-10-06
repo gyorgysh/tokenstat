@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import ai.tokenstat.tokenstat.core.ConnectivityMonitor
 import ai.tokenstat.tokenstat.core.CoreClient
+import ai.tokenstat.tokenstat.ecosystem.UsageWidgetStore
 import ai.tokenstat.tokenstat.core.CoreFailure
 import ai.tokenstat.tokenstat.core.CoreObserver
 import ai.tokenstat.tokenstat.core.NetworkGate
@@ -237,10 +238,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun refreshAccount() {
+        val widgetEpoch = UsageWidgetStore.epoch()
         mutableState.value = mutableState.value.copy(loading = true, error = null)
         runCatching { CoreClient.call("account.status") }
             .onSuccess { account ->
                 val accountObject = account.jsonObject
+                UsageWidgetStore.verify(getApplication(), accountObject, widgetEpoch, fromApp = true)
                 mutableState.value = mutableState.value.copy(
                     account = accountObject,
                     authChecked = true,
@@ -263,6 +266,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (accountObject["signedIn"]?.jsonPrimitive?.content == "true") {
                     PushRegistrar.refresh()
                     loadDashboard()
+                } else {
+                    mutableState.update { it.copy(home = null) }
                 }
             }
             .onFailure { err ->
@@ -296,6 +301,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun loadDashboard() = supervisorScope {
+        val widgetLease = UsageWidgetStore.lease()
         val calendar = async {
             CoreClient.call("activity.calendar", buildJsonObject {
                 put("weeks", 53); put("scope", "account"); put("force", false)
@@ -306,6 +312,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (it is CancellationException) throw it
         }.onSuccess {
             mutableState.value = mutableState.value.copy(home = (it as? JsonObject))
+            if (widgetLease != null && (it is JsonObject || it is JsonNull)) UsageWidgetStore.publish(getApplication(), widgetLease, it as? JsonObject)
+        }.onFailure {
+            UsageWidgetStore.failed(getApplication(), widgetLease)
         }
         runCatching { limits.await() }
             .onSuccess {
@@ -436,6 +445,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun signOut() = viewModelScope.launch {
         if (signingOut) return@launch
         signingOut = true
+        UsageWidgetStore.clear(getApplication(), block = true)
         try {
             signInJob?.cancelAndJoin()
             refreshJob?.cancelAndJoin()
@@ -458,6 +468,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun applyAccount(element: JsonElement) = viewModelScope.launch {
         if (signingOut || !state.value.signedIn) return@launch
         val account = element as? JsonObject ?: return@launch
+        UsageWidgetStore.verify(getApplication(), account, UsageWidgetStore.epoch(), fromApp = true)
         mutableState.value = mutableState.value.copy(account = account)
         if (account["signedIn"]?.jsonPrimitive?.content == "true") {
             dashboardJob?.cancel()

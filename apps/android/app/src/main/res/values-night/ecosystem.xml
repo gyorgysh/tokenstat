@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ts_widget_accent">#8B5CF6</color>
+    <color name="ts_widget_secondary">#E879F9</color>
+    <color name="ts_widget_surface">#100E1A</color>
+    <color name="ts_widget_text">#FFFFFFFF</color>
+    <color name="ts_widget_muted">#99FFFFFF</color>
+</resources>

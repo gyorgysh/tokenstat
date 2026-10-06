@@ -68,6 +68,11 @@ class TokenstatMessagingService : FirebaseMessagingService() {
                 .setContentText(PushPayload.body(delivery.reason))
                 .setAutoCancel(true)
                 .setContentIntent(pending)
+                .apply {
+                    if (delivery.reason == "run.needs_input") {
+                        addAction(R.drawable.feature_mark_folder, getString(R.string.notification_review), pending)
+                    }
+                }
                 .build(),
         )
     }

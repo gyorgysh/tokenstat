@@ -15,6 +15,9 @@ at the end.
 
 ### Added
 
+- Android usage widgets with light/dark appearance, per-widget day/week
+  switching and background refresh; launcher shortcuts, a Workspaces Quick
+  Settings tile and a notification action for reviewing live agent requests.
 - Configurable usage and project widgets for Mac, iPhone and iPad, including
   iPad extra-large layouts and iPhone Lock Screen accessories. Choose a period,
   appearance, favorite project or screen, and refresh usage from the widget.

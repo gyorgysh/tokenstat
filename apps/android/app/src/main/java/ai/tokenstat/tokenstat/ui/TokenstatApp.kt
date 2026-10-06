@@ -612,6 +612,21 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     var searchOpen by remember { mutableStateOf(false) }
     var pendingDeviceId by rememberSaveable { mutableStateOf<String?>(null) }
     var sshSignal by remember { mutableStateOf(0) }
+    val quickAccess by ai.tokenstat.tokenstat.ecosystem.QuickAccess.request.collectAsStateWithLifecycle()
+    LaunchedEffect(quickAccess) {
+        val request = quickAccess ?: return@LaunchedEffect
+        accountOpen = request.screen == "account"
+        searchOpen = request.screen == "search"
+        wizardOpen = false
+        pendingWorkHostId = null
+        pendingWorkFolderId = null
+        pendingWorkKind = null
+        pendingWorkItem = null
+        pendingWorkOwner = null
+        pendingDeviceId = null
+        selected = Destination.entries.find { it.id == request.screen } ?: Destination.Home
+        ai.tokenstat.tokenstat.ecosystem.QuickAccess.take(request)
+    }
     val context = LocalContext.current
     val homeStores = remember { HomeStores(context) }
     val billing = remember { PlayBillingManager(context) }

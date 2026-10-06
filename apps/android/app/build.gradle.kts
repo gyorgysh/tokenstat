@@ -47,8 +47,8 @@ android {
         applicationId = "ai.tokenstat.tokenstat"
         minSdk = 28
         targetSdk = 36
-        versionCode = 134
-        versionName = "1.2.0"
+        versionCode = 136
+        versionName = "1.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
@@ -136,6 +136,7 @@ dependencies {
     androidTestImplementation(composeBom)
     implementation("androidx.activity:activity-compose:1.12.0")
     implementation("androidx.core:core-ktx:1.17.0")
+    implementation("androidx.work:work-runtime-ktx:2.12.0")
     implementation("androidx.fragment:fragment-ktx:1.8.9")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")

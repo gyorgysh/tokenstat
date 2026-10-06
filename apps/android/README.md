@@ -32,7 +32,7 @@ unfinished row in [PARITY.md](PARITY.md).
 Build both signed distribution formats with:
 
 ```bash
-scripts/build-android-release.sh dist/android/1.1.0-118
+scripts/build-android-release.sh dist/android/1.3.0-136
 ```
 
 The script loads the existing local Play upload-key environment and produces a
@@ -40,3 +40,22 @@ release APK for direct installation and an AAB for Play Console upload. Google
 Play signs delivered APKs with its app-signing key; a locally upload-key-signed
 APK cannot update those installs when the certificates differ. Neither file is
 uploaded by this script.
+
+Usage at a Glance is a resizable home-screen widget with automatic light/dark
+appearance, Today/Last 7 Days switching, a weekly chart on wide and tall layouts and
+refresh through WorkManager while the app is closed. Values are US dollars at
+list rates across the account. Its backup-excluded snapshot holds only a hashed
+owner and daily aggregates; sign-out clears it and rejects late refreshes. An
+incomplete or locked week stays unavailable. Cached data retains its fetch time.
+
+Long-press the launcher icon for Home, Workspaces, Insights and SSH shortcuts.
+The Workspaces tile can be added in Quick Settings. Both reuse existing app
+navigation and sign-in. Permission notifications offer Review request, leading
+to the live host request and its existing Allow/Always Allow/Deny choices.
+
+`UsageSnapshotTest` checks account isolation, cache age, partial weeks and
+rollover. `UsageWidgetLayoutTest` verifies persisted-cache isolation, shortcut
+registration and pending navigation, then renders the actual RemoteViews in both
+themes at compact, wide and tall sizes, including empty, offline and large-value data.
+It saves PNGs in the debug app's files/widget-layouts directory. Launcher resize,
+tile and notification interactions also require device/emulator verification.

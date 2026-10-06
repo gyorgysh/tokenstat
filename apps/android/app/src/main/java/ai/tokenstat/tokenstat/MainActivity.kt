@@ -53,7 +53,10 @@ class MainActivity : ComponentActivity() {
         // and the app simply opens. Fresh launches only: the activity keeps
         // its intent across recreation, so without this a rotation re-offers
         // an already consumed tap.
-        if (savedInstanceState == null) NotificationOpen.offerFromIntent(intent)
+        if (savedInstanceState == null) {
+            NotificationOpen.offerFromIntent(intent)
+            ai.tokenstat.tokenstat.ecosystem.QuickAccess.offer(intent)
+        }
         setContent { TokenstatApp(model) }
     }
 
@@ -108,6 +111,7 @@ class MainActivity : ComponentActivity() {
         // already did while the browser was in front. The tap itself waits
         // in NotificationOpen until the workspaces screen resolves it.
         NotificationOpen.offerFromIntent(intent)
+        ai.tokenstat.tokenstat.ecosystem.QuickAccess.offer(intent)
         model.refresh()
     }
 

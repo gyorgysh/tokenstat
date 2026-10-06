@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="home" android:icon="@drawable/ic_notification" android:shortcutShortLabel="@string/shortcut_home">
+        <intent android:action="ai.tokenstat.tokenstat.OPEN_SCREEN" android:targetPackage="ai.tokenstat.tokenstat" android:targetClass="ai.tokenstat.tokenstat.MainActivity"><extra android:name="screen" android:value="home" /></intent>
+    </shortcut>
+    <shortcut android:shortcutId="workspaces" android:icon="@drawable/feature_mark_folder" android:shortcutShortLabel="@string/shortcut_workspaces">
+        <intent android:action="ai.tokenstat.tokenstat.OPEN_SCREEN" android:targetPackage="ai.tokenstat.tokenstat" android:targetClass="ai.tokenstat.tokenstat.MainActivity"><extra android:name="screen" android:value="workspaces" /></intent>
+    </shortcut>
+    <shortcut android:shortcutId="insights" android:icon="@drawable/feature_mark_insights" android:shortcutShortLabel="@string/shortcut_insights">
+        <intent android:action="ai.tokenstat.tokenstat.OPEN_SCREEN" android:targetPackage="ai.tokenstat.tokenstat" android:targetClass="ai.tokenstat.tokenstat.MainActivity"><extra android:name="screen" android:value="insights" /></intent>
+    </shortcut>
+    <shortcut android:shortcutId="ssh" android:icon="@drawable/feature_mark_terminal" android:shortcutShortLabel="@string/shortcut_ssh">
+        <intent android:action="ai.tokenstat.tokenstat.OPEN_SCREEN" android:targetPackage="ai.tokenstat.tokenstat" android:targetClass="ai.tokenstat.tokenstat.MainActivity"><extra android:name="screen" android:value="ssh" /></intent>
+    </shortcut>
+</shortcuts>
