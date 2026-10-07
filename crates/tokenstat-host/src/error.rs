@@ -50,6 +50,9 @@ pub const SSH_HOST_KEY_UNVERIFIED: &str = "ssh_host_key_unverified";
 /// The server is there and refused the key or the password.
 pub const SSH_AUTH_REFUSED: &str = "ssh_auth_refused";
 
+/// A handle has ended or was removed; retrying its output cannot recover it.
+pub const SSH_SESSION_MISSING: &str = "ssh_session_missing";
+
 /// A failed call, and the code the envelope will carry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DispatchError {

@@ -373,11 +373,14 @@ struct SSHLibraryView: View {
                 Text(session.title).lineLimit(1)
                 Text(session.alive ? L10n.text("common.running") : L10n.text("apple.sshlibraryview.ended.7cdc804e"))
                     .font(Theme.caption).foregroundStyle(.secondary)
+                if let failure = sessions.closeErrors[session.id] {
+                    Text(failure).font(Theme.caption).foregroundStyle(.red).lineLimit(2)
+                }
             }
             Spacer(minLength: 0)
             Image(systemName: "chevron.right").font(Theme.caption).foregroundStyle(.tertiary)
         }
-        .frame(height: Theme.Control.rowHeight)
+        .frame(minHeight: Theme.Control.rowHeight)
         .contentShape(.rect)
         .onTapGesture {
             sessions.select(session)

@@ -27,17 +27,31 @@ final class SSHSessionsModel {
     /// The session the pane is showing, or the leading half when split.
     var selectedID: String?
     var error: String?
+    private(set) var loaded = false
+    @ObservationIgnored private var active = true
+    @ObservationIgnored private var foreground = true
+    @ObservationIgnored private var epoch: UInt64 = 0
+    @ObservationIgnored private var reconcileFlights: [UInt64: Singleflight<Bool>] = [:]
+    @ObservationIgnored private var startupTasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var startupTickets: [String: UUID] = [:]
+    @ObservationIgnored private var startups: [String: Startup] = [:]
+    @ObservationIgnored private let startupSleep: @MainActor (UInt64) async throws -> Void
+    private struct Startup { var commands: [[UInt8]]; var next = 0 }
+    private(set) var closeErrors: [String: String] = [:]
+
+    init(startupSleep: @escaping @MainActor (UInt64) async throws -> Void = {
+        try await Task.sleep(for: .milliseconds($0))
+    }) {
+        self.startupSleep = startupSleep
+    }
 
     /// Which host each pane was last looking at, so returning to a server
     /// opens on the session that was in front rather than on the first one.
     private var selectedByHost: [String: String] = [:]
 
-    /// Sessions whose close is still in flight.
-    ///
-    /// Closing takes a tab off screen straight away and tells the host
-    /// afterwards, so for a moment the host still lists a session this app has
-    /// forgotten. Without this the next reconcile adopts it back and the tab
-    /// somebody just closed reappears.
+    /// Handles explicitly closed in this window. Handles are unique for a
+    /// shell's lifetime; an old list or connection callback must never adopt
+    /// one again after a newer snapshot has already confirmed its absence.
     @ObservationIgnored private var closingIDs: Set<String> = []
 
     var selected: SSHLiveTerminal? {
@@ -79,33 +93,78 @@ final class SSHSessionsModel {
     /// Runs on a timer while a pane is open, and once at launch. A session the
     /// host has forgotten is dropped here rather than left as a tab that
     /// writes into nothing.
-    func reconcile() async {
-        guard let summaries = try? await Bridge.sshSessions() else { return }
-        let known = Set(sessions.map(\.id))
-        for summary in summaries where !known.contains(summary.id) && !closingIDs.contains(summary.id) {
-            sessions.append(SSHLiveTerminal(adopting: summary))
+    @discardableResult
+    func reconcile() async -> Bool {
+        let attempt = epoch
+        guard isCurrent(attempt) else { return false }
+        let flight = reconcileFlights[attempt] ?? Singleflight<Bool>()
+        reconcileFlights[attempt] = flight
+        defer {
+            if reconcileFlights[attempt] === flight { reconcileFlights.removeValue(forKey: attempt) }
         }
-        let held = Set(summaries.map(\.id))
-        // `ssh.session.list` reaps an ended shell before answering. Keep its
-        // local terminal and scrollback until the person explicitly closes
-        // the tab; otherwise the five-second bookkeeping poll can erase the
-        // command's final output before it has been read. A session removed
-        // explicitly is already absent from `sessions` and is unaffected.
-        for session in sessions where session.alive && !held.contains(session.id) {
-            session.markClosed()
-        }
-        closingIDs.formIntersection(held)
-        if selectedID == nil || !sessions.contains(where: { $0.id == selectedID }) {
-            selectedID = sessions.last?.id
+        return await flight.run { [self] in
+            guard isCurrent(attempt) else { return false }
+            let observed = Set(sessions.map(\.id))
+            do {
+                let summaries = try await Bridge.sshSessions()
+                guard isCurrent(attempt) else { return false }
+                var known = Set(sessions.map(\.id))
+                for summary in summaries where !closingIDs.contains(summary.id) && known.insert(summary.id).inserted {
+                    let terminal = SSHLiveTerminal(adopting: summary)
+                    terminal.setForeground(foreground)
+                    sessions.append(terminal)
+                }
+                let held = Set(summaries.map(\.id))
+                let ended = Set(summaries.filter { !$0.alive }.map(\.id))
+                // Preserve ended scrollback. A snapshot begun before a
+                // connection cannot end a terminal adopted during its await.
+                for session in sessions where session.alive && observed.contains(session.id)
+                    && (!held.contains(session.id) || ended.contains(session.id)) {
+                    session.markClosed()
+                }
+                if selectedID == nil || !sessions.contains(where: { $0.id == selectedID }) {
+                    let next = sessions.last?.id
+                    if selectedID != next { selectedID = next }
+                }
+                if !loaded { loaded = true }
+                if error != nil { error = nil }
+                return true
+            } catch {
+                guard isCurrent(attempt) else { return false }
+                if self.error != error.localizedDescription { self.error = error.localizedDescription }
+                return false
+            }
         }
     }
 
     /// Keep the list honest while a pane is open. Slow on purpose: this is a
     /// bookkeeping poll, and the host excludes it from what holds sleep open.
     func watch() async {
-        while !Task.isCancelled {
+        while active && !Task.isCancelled {
             await reconcile()
             try? await Task.sleep(for: .seconds(5))
+        }
+    }
+
+    private func isCurrent(_ value: UInt64) -> Bool { active && foreground && epoch == value }
+
+    /// A reversible scene pause preserves terminal objects, read cursors and
+    /// startup progress. A new foreground gets a fresh list attempt even if
+    /// the predecessor's transport has not returned yet.
+    func setForeground(_ value: Bool) {
+        guard active, foreground != value else { return }
+        foreground = value
+        epoch &+= 1
+        reconcileFlights.removeAll()
+        cancelStartups()
+        for session in sessions { session.setForeground(value) }
+        if value {
+            for session in sessions { resumeStartup(in: session) }
+            let attempt = epoch
+            Task { [weak self] in
+                guard let self, self.isCurrent(attempt) else { return }
+                await self.reconcile()
+            }
         }
     }
 
@@ -116,7 +175,12 @@ final class SSHSessionsModel {
     /// `startup` is whatever the library says should run on this server as
     /// soon as a shell exists. Passed in rather than looked up, so the session
     /// model stays ignorant of the record store.
-    func adopt(_ session: SSHLiveTerminal, startup: [SSHSnippet] = []) {
+    @discardableResult
+    func adopt(_ session: SSHLiveTerminal, startup: [SSHSnippet] = []) -> SSHLiveTerminal? {
+        guard active, !closingIDs.contains(session.id) else {
+            session.detachPoll()
+            return nil
+        }
         // One object per session id, always.
         //
         // Opening a shell and the five-second bookkeeping poll race each
@@ -136,16 +200,16 @@ final class SSHSessionsModel {
         if let existing = sessions.first(where: { $0.id == session.id }), existing !== session {
             session.detachPoll()
             select(existing)
-            guard !startup.isEmpty else { return }
-            Task { await Self.runStartup(startup, in: existing) }
-            return
+            start(startup, in: existing)
+            return existing
         }
         if !sessions.contains(where: { $0 === session }) {
+            session.setForeground(foreground)
             sessions.append(session)
         }
         select(session)
-        guard !startup.isEmpty else { return }
-        Task { await Self.runStartup(startup, in: session) }
+        start(startup, in: session)
+        return session
     }
 
     /// Send the on-connect snippets, once the far end has had a moment to put
@@ -163,16 +227,70 @@ final class SSHSessionsModel {
     /// Snippets with placeholders are skipped. Asking for values is a sheet,
     /// and a sheet that opens by itself the moment a connection lands is not
     /// something to do to somebody.
-    private static func runStartup(_ snippets: [SSHSnippet], in session: SSHLiveTerminal) async {
-        try? await Task.sleep(for: .milliseconds(600))
-        for snippet in snippets where SSHSnippet.placeholders(in: snippet.command).isEmpty {
-            guard session.alive else { return }
-            session.sendBytes(SSHSnippet.bytesToRun(snippet.command))
-            try? await Task.sleep(for: .milliseconds(120))
+    private func start(_ snippets: [SSHSnippet], in session: SSHLiveTerminal) {
+        guard !snippets.isEmpty, startups[session.id] == nil else { return }
+        startups[session.id] = Startup(commands: snippets.filter {
+            SSHSnippet.placeholders(in: $0.command).isEmpty
+        }.map { SSHSnippet.bytesToRun($0.command) })
+        resumeStartup(in: session)
+    }
+
+    private func resumeStartup(in session: SSHLiveTerminal) {
+        let id = session.id
+        guard isCurrent(epoch), !closingIDs.contains(id), session.alive,
+              startupTickets[id] == nil, let progress = startups[id],
+              progress.next < progress.commands.count else { return }
+        let token = UUID(), attempt = epoch
+        startupTickets[id] = token
+        let sleep = startupSleep
+        startupTasks[id] = Task { [weak self, weak session] in
+            defer {
+                if self?.startupTickets[id] == token {
+                    self?.startupTickets.removeValue(forKey: id)
+                    self?.startupTasks.removeValue(forKey: id)
+                }
+            }
+            do {
+                try await sleep(progress.next == 0 ? 600 : 120)
+                while !Task.isCancelled {
+                    guard let self, self.isCurrent(attempt), self.startupTickets[id] == token,
+                          let session, session.alive, self.sessions.contains(where: { $0 === session }),
+                          let next = self.startups[id], next.next < next.commands.count else { return }
+                    let dispatched = await session.sendStartupBytes(next.commands[next.next]) { [weak self] in
+                        guard let self, !Task.isCancelled, self.isCurrent(attempt),
+                              self.startupTickets[id] == token, !self.closingIDs.contains(id) else { return false }
+                        // Commit progress at dispatch, before awaiting the RPC.
+                        // An uncertain reply must not replay a shell command.
+                        self.startups[id]?.next += 1
+                        return true
+                    }
+                    guard dispatched else { return }
+                    try await sleep(120)
+                }
+            } catch { return }
         }
     }
 
+    private func cancelStartups() {
+        for task in startupTasks.values { task.cancel() }
+        startupTasks.removeAll()
+        startupTickets.removeAll()
+    }
+
+    /// Retire this scene/account's local readers and delayed input. The
+    /// helper owns the remote shells, which stay running after sign-out.
+    func deactivate() {
+        guard active else { return }
+        active = false
+        epoch &+= 1
+        reconcileFlights.removeAll()
+        cancelStartups()
+        startups.removeAll()
+        for session in sessions { session.detachPoll() }
+    }
+
     func select(_ session: SSHLiveTerminal) {
+        guard active, sessions.contains(where: { $0 === session }) else { return }
         #if os(macOS)
         if let hostID = session.hostID {
             var selection = paneSelection(for: hostID)
@@ -187,6 +305,7 @@ final class SSHSessionsModel {
 
     /// The session to show when a host's pane opens.
     func restoreSelection(for hostID: String) {
+        guard active else { return }
         let mine = sessions(for: hostID)
         guard !mine.isEmpty else { return }
         if let remembered = selectedByHost[hostID], mine.contains(where: { $0.id == remembered }) {
@@ -196,11 +315,24 @@ final class SSHSessionsModel {
         }
     }
 
-    func close(_ session: SSHLiveTerminal) async {
+    @discardableResult
+    func close(_ session: SSHLiveTerminal) async -> Bool {
+        guard active, sessions.contains(where: { $0 === session }), closingIDs.insert(session.id).inserted else { return false }
+        startupTasks.removeValue(forKey: session.id)?.cancel()
+        startupTickets.removeValue(forKey: session.id)
+        if let count = startups[session.id]?.commands.count { startups[session.id]?.next = count }
+        let succeeded = await session.closeRemote()
+        guard active, sessions.contains(where: { $0 === session }) else { return false }
+        guard succeeded else {
+            closingIDs.remove(session.id)
+            closeErrors[session.id] = session.error ?? L10n.text("apple.sshliveterminal.could_not_end_retry")
+            return false
+        }
+        closeErrors.removeValue(forKey: session.id)
+        startups.removeValue(forKey: session.id)
         #if os(macOS)
         let oldSelection = session.hostID.map { paneSelection(for: $0) }
         #endif
-        closingIDs.insert(session.id)
         sessions.removeAll { $0.id == session.id }
         let selectedHosts = selectedByHost.compactMap { host, id in
             id == session.id ? host : nil
@@ -220,7 +352,7 @@ final class SSHSessionsModel {
         if selectedID == session.id {
             selectedID = session.hostID.flatMap { activeSession(for: $0)?.id } ?? sessions.last?.id
         }
-        session.stop()
+        return true
     }
 
     /// Close every session on one host. Used when a saved record is deleted.

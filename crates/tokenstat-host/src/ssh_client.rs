@@ -18,6 +18,8 @@ use tokio::sync::mpsc;
 const MAX_BUFFER: usize = 4 * 1024 * 1024;
 const MAX_READ: usize = 64 * 1024;
 const CLOSED_RETENTION: Duration = Duration::from_secs(60);
+const MAX_CLOSED_BYTES: usize = 32 * 1024 * 1024;
+const MAX_CLOSED_SESSIONS: usize = 32;
 
 /// How much of a directory listing is read before the rest is dropped.
 ///
@@ -81,6 +83,7 @@ struct Output {
     base: u64,
     closed: bool,
     closed_at: Option<Instant>,
+    drained_at: Option<Instant>,
     error: Option<String>,
 }
 
@@ -302,6 +305,7 @@ fn call_inner(method: &str, params: &str) -> Result<Value, crate::error::Dispatc
             let mut map = sessions().lock().map_err(|e| e.to_string())?;
             reap_closed(&mut map);
             map.insert(id.clone(), live);
+            reap_closed(&mut map);
             Ok(json!({"id": id}))
         }
         // Every session this host is holding, so a client that has been
@@ -342,9 +346,14 @@ fn call_inner(method: &str, params: &str) -> Result<Value, crate::error::Dispatc
             // session no longer exists". A closed session is cleared by the
             // retention timer, or an open/list after the grace period instead.
             let guard = sessions().lock().map_err(|e| e.to_string())?;
-            let live = guard.get(&p.id).ok_or("SSH session no longer exists")?;
-            let output = live.output.lock().map_err(|e| e.to_string())?;
-            Ok(read_output(&output, p.offset))
+            let live = guard.get(&p.id).ok_or_else(|| {
+                DispatchError::new(
+                    crate::error::SSH_SESSION_MISSING,
+                    "SSH session no longer exists",
+                )
+            })?;
+            let mut output = live.output.lock().map_err(|e| e.to_string())?;
+            Ok(read_output(&mut output, p.offset, Instant::now()))
         }
         "ssh.session.write" => command(params, |p| Command::Write(p.data)).map_err(Into::into),
         "ssh.session.resize" => {
@@ -951,6 +960,7 @@ async fn open(p: OpenParams, id: String, meta: SessionMeta) -> Result<LiveSessio
         base: 0,
         closed: false,
         closed_at: None,
+        drained_at: None,
         error: None,
     }));
     let handle = Arc::new(handle);
@@ -978,9 +988,17 @@ async fn open(p: OpenParams, id: String, meta: SessionMeta) -> Result<LiveSessio
             output.closed = true;
             output.closed_at = Some(Instant::now());
         }
+        {
+            let mut map = sessions().lock().unwrap_or_else(|e| e.into_inner());
+            reap_closed(&mut map);
+        }
         tokio::spawn(async move {
-            tokio::time::sleep(CLOSED_RETENTION).await;
-            sessions().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+            loop {
+                tokio::time::sleep(CLOSED_RETENTION).await;
+                let mut map = sessions().lock().unwrap_or_else(|e| e.into_inner());
+                reap_closed(&mut map);
+                if !map.contains_key(&id) { break; }
+            }
         });
         let _ = task_handle
             .disconnect(Disconnect::ByApplication, "closed", "en")
@@ -1041,7 +1059,12 @@ async fn authenticate_agent(
     Err("SSH agent authentication is not available on this platform".into())
 }
 
-fn read_output(output: &Output, offset: u64) -> Value {
+fn read_output(output: &mut Output, offset: u64, now: Instant) -> Value {
+    // A read at the consumed end confirms the preceding final batch reached
+    // the emulator. Merely sending that batch must not start its expiry.
+    if output.closed && offset == output.base + output.bytes.len() as u64 {
+        output.drained_at.get_or_insert(now);
+    }
     let start = usize::try_from(offset.saturating_sub(output.base))
         .unwrap_or(usize::MAX)
         .min(output.bytes.len());
@@ -1074,7 +1097,7 @@ fn append(output: &Mutex<Output>, data: &[u8]) {
 fn expired(output: &Output, now: Instant) -> bool {
     output.closed
         && output
-            .closed_at
+            .drained_at
             .is_some_and(|at| now.saturating_duration_since(at) >= CLOSED_RETENTION)
 }
 
@@ -1091,13 +1114,56 @@ fn new_id() -> Result<String, String> {
     Ok(format!("ssh_{}", tokenstat_identity::hex(&bytes)))
 }
 
-fn reap_closed(map: &mut HashMap<String, LiveSession>) {
-    map.retain(|_, live| {
-        live.output
-            .lock()
-            .map(|output| !expired(&output, Instant::now()))
-            .unwrap_or(false)
+struct ClosedCandidate {
+    id: String,
+    ended: Instant,
+    bytes: usize,
+    expired: bool,
+}
+
+fn closed_evictions(mut ended: Vec<ClosedCandidate>) -> HashSet<String> {
+    let mut removed = HashSet::new();
+    ended.retain(|item| {
+        if item.expired {
+            removed.insert(item.id.clone());
+            false
+        } else {
+            true
+        }
     });
+    ended.sort_by(|a, b| a.ended.cmp(&b.ended).then_with(|| a.id.cmp(&b.id)));
+    let mut bytes = ended.iter().map(|item| item.bytes).sum::<usize>();
+    let mut count = ended.len();
+    for item in ended {
+        if count <= MAX_CLOSED_SESSIONS && bytes <= MAX_CLOSED_BYTES {
+            break;
+        }
+        bytes = bytes.saturating_sub(item.bytes);
+        count -= 1;
+        removed.insert(item.id);
+    }
+    removed
+}
+
+fn reap_closed(map: &mut HashMap<String, LiveSession>) {
+    let now = Instant::now();
+    let ended = map
+        .iter()
+        .filter_map(|(id, live)| {
+            let output = live.output.lock().unwrap_or_else(|e| e.into_inner());
+            if !output.closed {
+                return None;
+            }
+            Some(ClosedCandidate {
+                id: id.clone(),
+                ended: output.closed_at.unwrap_or(now),
+                bytes: output.bytes.len(),
+                expired: expired(&output, now),
+            })
+        })
+        .collect();
+    let removed = closed_evictions(ended);
+    map.retain(|id, _| !removed.contains(id));
 }
 
 #[cfg(test)]
@@ -1160,6 +1226,7 @@ mod tests {
             base: 0,
             closed: false,
             closed_at: None,
+            drained_at: None,
             error: None,
         });
         append(&output, &vec![b'x'; MAX_BUFFER + 41]);
@@ -1171,23 +1238,32 @@ mod tests {
     #[test]
     fn closed_output_drains_in_bounded_batches_before_reporting_eof() {
         let now = Instant::now();
-        let output = Output {
+        let mut output = Output {
             bytes: (0..MAX_READ + 17).map(|n| (n % 251) as u8).collect(),
             base: 99,
             closed: true,
             closed_at: Some(now),
+            drained_at: None,
             error: None,
         };
-        let first = read_output(&output, 0);
+        let first = read_output(&mut output, 0, now);
         assert_eq!(first["data"].as_array().unwrap().len(), MAX_READ);
         assert_eq!(first["dropped"], true);
         assert_eq!(first["closed"], false);
-        let second = read_output(&output, first["nextOffset"].as_u64().unwrap());
+        let second = read_output(&mut output, first["nextOffset"].as_u64().unwrap(), now);
         assert_eq!(second["data"].as_array().unwrap().len(), 17);
         assert_eq!(second["data"][0], (MAX_READ % 251) as u8);
         assert_eq!(second["closed"], true);
         assert!(!expired(&output, now));
-        assert!(expired(&output, now + CLOSED_RETENTION));
+        assert!(!expired(&output, now + CLOSED_RETENTION * 10));
+        let end = second["nextOffset"].as_u64().unwrap();
+        let confirmed = now + CLOSED_RETENTION * 10;
+        let ack = read_output(&mut output, end, confirmed);
+        assert_eq!(ack["data"], json!([]));
+        assert_eq!(ack["closed"], true);
+        assert!(!expired(&output, confirmed));
+        read_output(&mut output, end, confirmed + CLOSED_RETENTION / 2);
+        assert!(expired(&output, confirmed + CLOSED_RETENTION));
     }
 
     #[test]
@@ -1197,16 +1273,83 @@ mod tests {
             base: 0,
             closed: false,
             closed_at: None,
+            drained_at: None,
             error: None,
         });
         append(&output, &vec![1; MAX_BUFFER]);
         append(&output, &[2; 37]);
-        let output = output.lock().unwrap();
+        let mut output = output.lock().unwrap();
         assert_eq!(output.bytes.len(), MAX_BUFFER);
         assert_eq!(output.base, 37);
         assert_eq!(output.bytes.back(), Some(&2));
-        let tail = read_output(&output, MAX_BUFFER as u64);
+        let tail = read_output(&mut output, MAX_BUFFER as u64, Instant::now());
         assert_eq!(tail["data"], json!(vec![2; 37]));
+    }
+
+    #[test]
+    fn ended_retention_is_bounded_and_evicts_oldest_without_expiring_unread_output() {
+        let now = Instant::now();
+        let candidates = (0..MAX_CLOSED_SESSIONS + 2)
+            .map(|n| ClosedCandidate {
+                id: n.to_string(),
+                ended: now + Duration::from_secs(n as u64),
+                bytes: 1,
+                expired: false,
+            })
+            .collect();
+        assert_eq!(
+            closed_evictions(candidates),
+            HashSet::from(["0".into(), "1".into()])
+        );
+        let candidates = (0..10)
+            .map(|n| ClosedCandidate {
+                id: n.to_string(),
+                ended: now + Duration::from_secs(n as u64),
+                bytes: MAX_BUFFER,
+                expired: false,
+            })
+            .collect();
+        assert_eq!(
+            closed_evictions(candidates),
+            HashSet::from(["0".into(), "1".into()])
+        );
+        let candidates = vec![
+            ClosedCandidate {
+                id: "expired".into(),
+                ended: now,
+                bytes: MAX_BUFFER,
+                expired: true,
+            },
+            ClosedCandidate {
+                id: "unread".into(),
+                ended: now,
+                bytes: MAX_BUFFER,
+                expired: false,
+            },
+        ];
+        assert_eq!(
+            closed_evictions(candidates),
+            HashSet::from(["expired".into()])
+        );
+    }
+
+    #[test]
+    fn only_the_exact_consumed_end_acknowledges_output() {
+        let now = Instant::now();
+        let mut output = Output {
+            bytes: VecDeque::from([1, 2, 3]),
+            base: 99,
+            closed: true,
+            closed_at: Some(now),
+            drained_at: None,
+            error: None,
+        };
+        read_output(&mut output, 103, now);
+        assert!(output.drained_at.is_none());
+        read_output(&mut output, 99, now);
+        assert!(output.drained_at.is_none());
+        read_output(&mut output, 102, now);
+        assert_eq!(output.drained_at, Some(now));
     }
 
     #[test]

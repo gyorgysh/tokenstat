@@ -19,11 +19,36 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     let id: String
     /// Which saved record this came from, when it came from one.
     let hostID: String?
-    let title: String
+    var title: String
     private(set) var closed = false
-    var error: String?
-    @ObservationIgnored private var offset: UInt64 = 0
-    @ObservationIgnored private var pollTask: Task<Void, Never>?
+    var attached: Bool { !reader.retired }
+    private var readError: String?
+    private var closeError: String?
+    var error: String? {
+        get { closeError ?? readError }
+        set { readError = newValue }
+    }
+    @ObservationIgnored private var resizeRevision: UInt64 = 0
+    @ObservationIgnored private var focusPresentation: UUID?
+    @ObservationIgnored private let closeFlight = Singleflight<Bool>()
+    @ObservationIgnored private lazy var reader = SSHOutputReader(
+        read: { [id] offset in
+            do {
+                let chunk = try await Bridge.readSSHSession(id: id, offset: offset)
+                return SSHOutputChunk(data: chunk.data, nextOffset: chunk.nextOffset,
+                                      dropped: chunk.dropped, closed: chunk.closed, error: chunk.error)
+            } catch {
+                if Bridge.isSSHSessionMissing(error) { throw SSHOutputReaderError.sessionMissing }
+                throw error
+            }
+        },
+        deliver: { [weak self] chunk in self?.consumeOutput(chunk) },
+        failed: { [weak self] error in
+            guard let self else { return }
+            if case SSHOutputReaderError.sessionMissing = error { self.markClosed(error: error.localizedDescription) }
+            else { self.error = error.localizedDescription }
+        }
+    )
     @ObservationIgnored private var terminalView: TerminalView?
     /// What the view is currently painted for, so a redraw is only done when
     /// the appearance actually changed.
@@ -120,6 +145,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// still in flight simply draws the characters again when it lands —
     /// and a no-op when nothing stands.
     func terminalReturnedToFront() {
+        guard reader.foreground, attached else { return }
         withdrawPredictions()
         reassertSize()
     }
@@ -129,11 +155,17 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// for the wrong grid until something forces a repaint: rows leak out as
     /// scrollback, the rest stays black. A same-size SIGWINCH only repaints.
     private func reassertSize() {
-        guard let terminal = terminalView?.getTerminal() else { return }
-        let cols = terminal.cols, rows = terminal.rows
-        guard cols > 0, rows > 0 else { return }
+        guard reader.canInput, let terminal = terminalView?.getTerminal() else { return }
+        queueResize(rows: terminal.rows, cols: terminal.cols)
+    }
+
+    private func queueResize(rows: Int, cols: Int) {
+        guard reader.canInput, rows > 0, cols > 0 else { return }
+        resizeRevision &+= 1
+        let revision = resizeRevision, epoch = reader.inputEpoch
         let handle = id
-        Task {
+        Task { [weak self] in
+            guard let self, self.reader.acceptsInput(epoch), self.resizeRevision == revision else { return }
             try? await Bridge.resizeSSHSession(id: handle, rows: rows, cols: cols)
         }
     }
@@ -143,7 +175,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         self.title = title
         self.hostID = hostID
         _ = view
-        pollTask = Task { [weak self] in await self?.poll() }
+        reader.start()
     }
 
     /// Adopt a session the host is already holding.
@@ -157,7 +189,8 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         self.hostID = session.hostID
         self.closed = !session.alive
         _ = view
-        pollTask = Task { [weak self] in await self?.poll() }
+        if closed { reader.noteShellEnded() }
+        reader.start()
     }
 
     var view: TerminalView {
@@ -176,14 +209,24 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         // over it, and clear painted an absent colour over the same pixels and
         // changed nothing. This view was the one of the three that never set
         // it. See `TerminalPalette`.
-        TerminalPalette.paint(dark: TerminalPalette.systemIsDark, to: made)
+        #if os(macOS)
+        let dark = made.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        #else
+        let dark = made.traitCollection.userInterfaceStyle == .dark
+        #endif
+        TerminalPalette.paint(dark: dark, to: made)
         made.optionAsMetaKey = true
         made.getTerminal().changeHistorySize(4_000)
         made.terminalDelegate = self
         #if !os(macOS)
         made.scrollMode = scrolls
         made.onReadingChanged = { [weak self] reading in
-            DispatchQueue.main.async { self?.readingOutput = reading }
+            guard let self else { return }
+            let epoch = self.reader.inputEpoch
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.attached, self.reader.foreground, self.reader.inputEpoch == epoch else { return }
+                if self.readingOutput != reading { self.readingOutput = reading }
+            }
         }
         #endif
         terminalView = made
@@ -200,47 +243,42 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         TerminalPalette.paint(dark: dark, to: terminalView)
     }
 
-    private func poll() async {
-        while !Task.isCancelled && !closed {
-            do {
-                let chunk = try await Bridge.readSSHSession(id: handle, offset: offset)
-                guard !Task.isCancelled, !closed else { return }
-                self.error = nil
-                if !chunk.data.isEmpty { noteEcho(chunk.data) }
-                // A gap in the stream says nothing about where the cursor is,
-                // so there is nothing to reconcile a guess against and every
-                // one of them comes off.
-                if chunk.dropped {
-                    withdrawPredictions()
-                    feedView(text: "\r\n[tokenstat: older output was dropped]\r\n")
-                }
-                if !chunk.data.isEmpty {
-                    offset = chunk.nextOffset
-                    // Before anything reaches the emulator, and only here.
-                    // What was guessed and is not confirmed by this chunk has
-                    // to come off the screen before the far end's own version
-                    // of it goes on, or the line ends up saying everything
-                    // twice. Both happen inside one turn on the main actor, so
-                    // there is no frame in which the line is missing.
-                    let rest = reconcilePredictions(with: chunk.data)
-                    if !rest.isEmpty { feedView(outputFilter.filter(rest)[...]) }
-                    // The prompt may have moved down a line, or the shell may
-                    // have redrawn it. The palette belongs beside the cursor,
-                    // so it follows rather than being left where it was.
-                    if !suggestions.isEmpty { placePalette() }
-                }
-                if chunk.closed {
-                    closed = true
-                    error = chunk.error
-                    break
-                }
-                try? await Task.sleep(for: .milliseconds(chunk.data.isEmpty ? 50 : 16))
-            } catch {
-                guard !Task.isCancelled, !closed else { return }
-                self.error = error.localizedDescription
-                try? await Task.sleep(for: .milliseconds(500))
-            }
+    private func consumeOutput(_ chunk: SSHOutputChunk) {
+        self.error = nil
+        if !chunk.data.isEmpty { noteEcho(chunk.data) }
+        // A gap in the stream says nothing about where the cursor is,
+        // so there is nothing to reconcile a guess against and every
+        // one of them comes off.
+        if chunk.dropped {
+            withdrawPredictions()
+            feedView(text: "\r\n[tokenstat: older output was dropped]\r\n")
         }
+        if !chunk.data.isEmpty {
+            // Before anything reaches the emulator, and only here.
+            // What was guessed and is not confirmed by this chunk has
+            // to come off the screen before the far end's own version
+            // of it goes on, or the line ends up saying everything
+            // twice. Both happen inside one turn on the main actor, so
+            // there is no frame in which the line is missing.
+            let rest = reconcilePredictions(with: chunk.data)
+            if !rest.isEmpty { feedView(outputFilter.filter(rest)[...]) }
+            // The prompt may have moved down a line, or the shell may
+            // have redrawn it. The palette belongs beside the cursor,
+            // so it follows rather than being left where it was.
+            if !suggestions.isEmpty { placePalette() }
+        }
+        if chunk.closed {
+            closed = true
+            error = chunk.error
+        }
+    }
+
+    func setForeground(_ value: Bool) {
+        guard reader.foreground != value else { return }
+        withdrawPredictions()
+        forgetLine()
+        reader.setForeground(value)
+        if value { reassertSize() }
     }
 
     // MARK: - What to offer
@@ -275,7 +313,9 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
                 let handle = handle
                 let line = typedLine
                 let directory = remoteDirectory
-                Task {
+                let epoch = reader.inputEpoch
+                Task { [weak self] in
+                    guard let self, self.reader.acceptsInput(epoch) else { return }
                     await Bridge.sshSessionRan(id: handle, command: line, directory: directory)
                 }
             }
@@ -303,7 +343,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// confirms, so nothing is ever offered beside one, and nothing typed
     /// into one is ever sent anywhere to be matched against.
     private var suggestionsWelcome: Bool {
-        guard !closed, lineEchoes, !lineSilent else { return false }
+        guard reader.canInput, lineEchoes, !lineSilent else { return false }
         guard let terminal = terminalView?.getTerminal() else { return false }
         // A full-screen program owns every cell, and the palette would be
         // drawn over somebody's editor.
@@ -320,8 +360,8 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     private func refreshSuggestions() {
         suggestTask?.cancel()
         suggestGeneration += 1
-        let generation = suggestGeneration
-        guard !closed, typedLine.count >= 2 else {
+        let generation = suggestGeneration, epoch = reader.inputEpoch
+        guard reader.canInput, typedLine.count >= 2 else {
             closePalette()
             return
         }
@@ -335,7 +375,8 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         suggestTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(Self.suggestDelayMs))
             for _ in 0..<Self.suggestAttempts {
-                guard !Task.isCancelled, let self, self.suggestGeneration == generation else {
+                guard !Task.isCancelled, let self, self.reader.acceptsInput(epoch),
+                      self.suggestGeneration == generation else {
                     return
                 }
                 guard self.suggestionsWelcome, self.typedLine == fragment else {
@@ -345,7 +386,8 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
                 let answer = try? await Bridge.suggestSSHSession(
                     id: handle, fragment: fragment, directory: directory
                 )
-                guard !Task.isCancelled, self.suggestGeneration == generation else { return }
+                guard !Task.isCancelled, self.reader.acceptsInput(epoch),
+                      self.suggestGeneration == generation else { return }
                 guard let answer, answer.fragment == fragment else { return }
                 // A directory the host has not read yet answers with what it
                 // does have, which is usually nothing. Drawing that would
@@ -473,7 +515,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// not a command being run for them, and the difference is the whole
     /// reason this is safe to offer.
     func insert(_ text: String, replacing count: Int) {
-        guard alive, count <= typedLine.count else { return }
+        guard reader.canInput, count <= typedLine.count else { return }
         // Our own guesses come off the screen before anything is sent: the
         // far end is about to echo the deletions and then the new text, and a
         // guess left standing would be rubbed out at the wrong column.
@@ -482,8 +524,11 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         bytes.append(contentsOf: Array(text.utf8))
         typedLine = String(typedLine.dropLast(count)) + text
         closePalette()
-        let handle = handle
-        Task { try? await Bridge.writeSSHSession(id: handle, data: bytes) }
+        let handle = handle, epoch = reader.inputEpoch
+        Task { [weak self] in
+            guard let self, self.reader.acceptsInput(epoch) else { return }
+            try? await Bridge.writeSSHSession(id: handle, data: bytes)
+        }
     }
 
     /// Move the keyboard's place in the list, or leave it.
@@ -853,7 +898,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// Put the keyboard away, or bring it back, without ending the session.
     func toggleKeyboard() {
         #if !os(macOS)
-        guard let view = terminalView else { return }
+        guard reader.canInput, let view = terminalView else { return }
         if view.isFirstResponder {
             _ = view.resignFirstResponder()
         } else {
@@ -866,21 +911,51 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// typing takes, so a tapped key and a typed one cannot arrive out of
     /// order.
     func sendBytes(_ bytes: [UInt8]) {
-        guard !bytes.isEmpty else { return }
-        let handle = handle
+        guard reader.canInput, !bytes.isEmpty else { return }
+        let handle = handle, epoch = reader.inputEpoch
         // Through the same guess as typing, so a tapped `esc` ends a line's
         // local echo exactly as a typed one does.
         predict(bytes)
-        Task { try? await Bridge.writeSSHSession(id: handle, data: bytes) }
+        Task { [weak self] in
+            guard let self, self.reader.acceptsInput(epoch) else { return }
+            try? await Bridge.writeSSHSession(id: handle, data: bytes)
+        }
+    }
+
+    /// Startup progress is committed immediately before dispatch. Once a
+    /// write has started, an uncertain reply must not replay the command.
+    func sendStartupBytes(_ bytes: [UInt8], beforeDispatch: @MainActor () -> Bool) async -> Bool {
+        guard reader.canInput, !bytes.isEmpty, beforeDispatch() else { return false }
+        predict(bytes)
+        try? await Bridge.writeSSHSession(id: id, data: bytes)
+        return true
     }
 
     func stop() {
-        pollTask?.cancel()
-        pollTask = nil
-        forgetPredictions()
-        forgetLine()
-        let handle = handle
-        Task { await Bridge.closeSSHSession(id: handle) }
+        Task { [self] in _ = await closeRemote() }
+    }
+
+    /// A transport failure keeps this exact terminal available for retry.
+    /// A successful missing-handle reply also acknowledges the desired End.
+    func closeRemote() async -> Bool {
+        guard attached else { return true }
+        return await closeFlight.run { [self] in
+            guard let token = reader.beginClose() else { return !attached }
+            withdrawPredictions()
+            forgetLine()
+            do {
+                try await Bridge.closeSSHSession(id: id)
+                reader.finishClose(token, succeeded: true)
+                closed = true
+                closeError = nil
+                error = nil
+                return true
+            } catch {
+                reader.finishClose(token, succeeded: false)
+                if attached { self.closeError = error.localizedDescription }
+                return false
+            }
+        }
     }
 
     /// Stop reading, without touching the shell on the far end.
@@ -891,8 +966,9 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// object is still showing it. This only lets go of the read loop, so the
     /// same bytes stop being fed into a second emulator.
     func detachPoll() {
-        pollTask?.cancel()
-        pollTask = nil
+        reader.retire()
+        withdrawPredictions()
+        forgetLine()
         closePalette()
     }
 
@@ -904,46 +980,36 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// request to discard the tab: its last screenful is often the result the
     /// person came back to read.
     func markClosed(error: String? = nil) {
-        pollTask?.cancel()
-        pollTask = nil
-        forgetPredictions()
+        reader.noteShellEnded()
+        withdrawPredictions()
         forgetLine()
         closed = true
         if let error { self.error = error }
     }
 
     nonisolated func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        let bytes = Array(data)
-        // `id`, not `handle`: they are the same string, and this one is a
-        // stored `let` a nonisolated method may read.
-        let handle = id
-        Task { @MainActor [weak self] in
-            var out = bytes
-            // The armed Ctrl belongs to the next typed key: fold it here, in
-            // the same path typing takes, so the bar's flag has an effect.
-            if let self, self.controlArmed {
-                self.controlArmed = false
-                if !out.isEmpty, let folded = TerminalControlCode.fold(out[0]) {
-                    out[0] = folded
-                }
+        // SwiftTerm invokes UI delegates on the main thread. Capture input
+        // ownership there, before the RPC task can be deferred past a pause.
+        guard Thread.isMainThread else { return }
+        MainActor.assumeIsolated {
+            guard source === terminalView, reader.canInput else { return }
+            var out = Array(data)
+            if controlArmed {
+                controlArmed = false
+                if !out.isEmpty, let folded = TerminalControlCode.fold(out[0]) { out[0] = folded }
             }
-            self?.predict(out)
-            try? await Bridge.writeSSHSession(id: handle, data: out)
+            sendBytes(out)
         }
     }
 
     nonisolated func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
-        guard newCols > 0, newRows > 0 else { return }
-        let handle = id
-        Task { @MainActor [weak self] in
-            // Dropped rather than withdrawn. A resize reflows the line and
-            // then the far end repaints it, so the backspaces that would undo
-            // a guess no longer land where the guess was drawn. Letting the
-            // repaint be the correction is the only safe answer. The palette
-            // goes with them: it was placed against a cursor that has moved.
-            self?.forgetPredictions()
-            self?.forgetLine()
-            try? await Bridge.resizeSSHSession(id: handle, rows: newRows, cols: newCols)
+        guard Thread.isMainThread, newCols > 0, newRows > 0 else { return }
+        MainActor.assumeIsolated {
+            guard source === terminalView, reader.canInput else { return }
+            // Reflow moved the cells; old predictions no longer own them.
+            forgetPredictions()
+            forgetLine()
+            queueResize(rows: newRows, cols: newCols)
         }
     }
 
@@ -956,8 +1022,11 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// place. Servers that do not emit it get absolute and `~` paths and
     /// nothing else, which is the quiet answer rather than the wrong one.
     nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
-        let path = SSHLiveTerminal.directoryPath(fromOSC7: directory)
-        Task { @MainActor [weak self] in self?.remoteDirectory = path }
+        guard Thread.isMainThread else { return }
+        MainActor.assumeIsolated {
+            guard source === terminalView, attached, reader.foreground else { return }
+            remoteDirectory = SSHLiveTerminal.directoryPath(fromOSC7: directory)
+        }
     }
 
     /// The path out of a `file://host/path` the far end sent, or nothing.
@@ -980,8 +1049,9 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     nonisolated func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
     nonisolated func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
     nonisolated func clipboardCopy(source: TerminalView, content: Data) {
-        guard let text = String(data: content, encoding: .utf8) else { return }
-        Task { @MainActor in
+        guard Thread.isMainThread, let text = String(data: content, encoding: .utf8) else { return }
+        MainActor.assumeIsolated {
+            guard source === terminalView, attached, reader.foreground else { return }
             #if os(macOS)
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
@@ -990,6 +1060,23 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
             #endif
         }
     }
+
+    func claimFocusPresentation() -> UUID {
+        let token = UUID()
+        focusPresentation = token
+        return token
+    }
+
+    func acceptsFocus(_ token: UUID, epoch: UInt64) -> Bool {
+        focusPresentation == token && reader.acceptsInput(epoch)
+    }
+
+    func releaseFocusPresentation(_ token: UUID) {
+        if focusPresentation == token { focusPresentation = nil }
+    }
+
+    var inputEpoch: UInt64 { reader.inputEpoch }
+
 }
 
 #if os(macOS)
@@ -1005,13 +1092,39 @@ private struct SSHNativeTerminal: NSViewRepresentable {
 struct SSHNativeTerminal: UIViewRepresentable {
     let session: SSHLiveTerminal
     @Environment(\.colorScheme) private var colorScheme
+    final class Coordinator {
+        var token: UUID?
+        weak var session: SSHLiveTerminal?
+    }
+    func makeCoordinator() -> Coordinator { Coordinator() }
     func makeUIView(context: Context) -> TerminalView {
-        DispatchQueue.main.async { _ = session.view.becomeFirstResponder() }
-        return session.view
+        let view = session.view
+        let token = session.claimFocusPresentation(), epoch = session.inputEpoch
+        context.coordinator.token = token
+        context.coordinator.session = session
+        DispatchQueue.main.async { [weak view, weak coordinator = context.coordinator] in
+            guard coordinator?.token == token, let view,
+                  session.acceptsFocus(token, epoch: epoch), let window = view.window,
+                  window.windowScene?.activationState == .foregroundActive,
+                  !view.bounds.isEmpty, view.alpha > 0.01,
+                  view.convert(view.bounds, to: window).intersects(window.bounds) else { return }
+            var ancestor: UIView? = view
+            while let current = ancestor {
+                guard !current.isHidden, current.alpha > 0.01 else { return }
+                ancestor = current.superview
+            }
+            _ = view.becomeFirstResponder()
+        }
+        return view
     }
     func updateUIView(_ view: TerminalView, context: Context) {
         session.applyColors(dark: colorScheme == .dark)
     }
+    static func dismantleUIView(_ view: TerminalView, coordinator: Coordinator) {
+        if let token = coordinator.token { coordinator.session?.releaseFocusPresentation(token) }
+        coordinator.token = nil
+    }
+
 }
 #endif
 
@@ -1036,6 +1149,8 @@ struct SSHLiveTerminalScreen: View {
 
     @State private var asking: SSHSnippet?
     @State private var confirmingClose = false
+    @State private var closeTicket: UUID?
+    @State private var closeFailure: String?
 
     /// Every session on this session's server, which is what the strip shows.
     private var siblings: [SSHLiveTerminal] {
@@ -1053,6 +1168,7 @@ struct SSHLiveTerminalScreen: View {
                 Spacer()
                 Button(L10n.text("apple.sshliveterminal.end_session.f00b921f"), .disconnect) { confirmingClose = true }
                     .buttonStyle(SecondaryButtonStyle(small: true))
+                    .disabled(closeTicket != nil)
                 // "Done" leaves it running, which is why it is not "Close".
                 Button(L10n.text("common.done"), .done) { dismiss() }
             }
@@ -1097,13 +1213,32 @@ struct SSHLiveTerminalScreen: View {
 
         .confirmationDialog(L10n.text("apple.sshliveterminal.end_this_session.2a445dc0"), isPresented: $confirmingClose, titleVisibility: .visible) {
             Button(L10n.text("apple.sshliveterminal.end_session.f00b921f"), role: .destructive) {
-                let doomed = session
-                dismiss()
-                Task { await sessions.close(doomed) }
+                endSession()
             }
             Button(L10n.text("common.cancel"), role: .cancel) {}
         } message: {
             Text(L10n.text("apple.sshliveterminal.whatever_is_running_in_it_stops_nothing_el.f25aee6b"))
+        }
+        .alert(L10n.text("apple.sshliveterminal.could_not_end_retry"), isPresented: Binding(
+            get: { closeFailure != nil }, set: { if !$0 { closeFailure = nil } }
+        )) {
+            Button(L10n.text("apple.clientsetupstate.try_again.d8b8392e")) { endSession() }
+            Button(L10n.text("common.cancel"), role: .cancel) {}
+        } message: { Text(closeFailure ?? "") }
+        .onDisappear { closeTicket = nil }
+        .onChange(of: session.id) { _, _ in closeTicket = nil; closeFailure = nil }
+    }
+
+    private func endSession() {
+        guard closeTicket == nil else { return }
+        let token = UUID(), doomed = session
+        closeTicket = token
+        Task {
+            let ended = await sessions.close(doomed)
+            guard closeTicket == token else { return }
+            closeTicket = nil
+            if ended { dismiss() }
+            else { closeFailure = doomed.error ?? L10n.text("apple.sshliveterminal.could_not_end_retry") }
         }
     }
 

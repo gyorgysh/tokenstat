@@ -3647,6 +3647,13 @@ extension Bridge {
         try await background("ssh.session.read", ["id": id, "offset": offset], as: SSHSessionRead.self)
     }
 
+    static func isSSHSessionMissing(_ error: Error) -> Bool {
+        guard case let BridgeError.core(code, message) = error else { return false }
+        // The exact legacy reply supports hosts predating the typed code.
+        return code == "ssh_session_missing"
+            || (code == "call_failed" && message == "SSH session no longer exists")
+    }
+
     static func writeSSHSession(id: String, data: [UInt8]) async throws {
         struct Accepted: Codable, Sendable { var accepted: Bool }
         _ = try await background("ssh.session.write", ["id": id, "data": data], as: Accepted.self)
@@ -3693,9 +3700,9 @@ extension Bridge {
         )
     }
 
-    static func closeSSHSession(id: String) async {
+    static func closeSSHSession(id: String) async throws {
         struct Closed: Codable, Sendable { var closed: Bool }
-        _ = try? await background("ssh.session.close", ["id": id], as: Closed.self)
+        _ = try await background("ssh.session.close", ["id": id], as: Closed.self)
     }
 
     private static func payload<T: Encodable>(_ value: T) throws -> [String: Any] {
