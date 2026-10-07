@@ -14,6 +14,12 @@ import ai.tokenstat.tokenstat.ui.logic.harnessName
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 import ai.tokenstat.tokenstat.ui.theme.cardRadius
+import ai.tokenstat.tokenstat.ui.logic.MarkdownTable
+import ai.tokenstat.tokenstat.ui.logic.MarkdownTables
+import ai.tokenstat.tokenstat.ui.logic.MarkdownTableAlignment
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.ui.draw.drawBehind
@@ -840,8 +846,7 @@ private fun AttachmentRow(
 internal enum class MarkdownPresentation { Document, Chat, Aside }
 
 /// Lightweight chat markdown: fences, headers, bullets, quotes, inline
-/// code, bold, italic and links. Full Markwon would need View interop in
-/// every lazy row; the transcript only ever uses this subset.
+/// code, bold, italic, links and tables, rendered directly in Compose.
 @Composable
 internal fun MarkdownText(
     text: String,
@@ -867,6 +872,7 @@ internal fun MarkdownText(
                             .padding(Space.s),
                     )
                 }
+                is MdBlock.Table -> MarkdownTableView(block.table, baseStyle, color)
                 is MdBlock.Header -> {
                     val headingStyle = when (presentation) {
                         MarkdownPresentation.Chat -> when (block.level) {
@@ -928,6 +934,7 @@ internal fun MarkdownText(
 
 private sealed interface MdBlock {
     data class Code(val code: String) : MdBlock
+    data class Table(val table: MarkdownTable) : MdBlock
     data class Header(val level: Int, val text: String) : MdBlock
     data class Bullet(val text: String) : MdBlock
     data class Numbered(val number: Int, val text: String) : MdBlock
@@ -957,7 +964,10 @@ private fun parseMarkdown(text: String): List<MdBlock> {
         number = 0
     }
 
-    for (raw in text.split("\n")) {
+    val lines = text.split("\n")
+    var skipUntil = 0
+    for ((index, raw) in lines.withIndex()) {
+        if (index < skipUntil) continue
         val line = raw.trimEnd()
         if (line.trimStart().startsWith("```")) {
             val open = fence
@@ -977,6 +987,14 @@ private fun parseMarkdown(text: String): List<MdBlock> {
             continue
         }
         val stripped = line.trimStart()
+        val table = MarkdownTables.parse(lines, index)
+        if (table != null) {
+            flushParagraph()
+            breakList()
+            blocks.add(MdBlock.Table(table))
+            skipUntil = table.end
+            continue
+        }
         when {
             stripped.isEmpty() -> flushParagraph()
             stripped == "---" || stripped == "***" || stripped == "___" -> {
@@ -1006,13 +1024,6 @@ private fun parseMarkdown(text: String): List<MdBlock> {
                 breakList()
                 blocks.add(MdBlock.Quote(stripped.drop(1).trim()))
             }
-            stripped.startsWith("|") -> {
-                // Tables are rare in chat; keep the pipes in mono so the
-                // columns still line up instead of reflowing as prose.
-                flushParagraph()
-                breakList()
-                blocks.add(MdBlock.Code(stripped))
-            }
             else -> {
                 if (paragraph.isNotEmpty()) paragraph.append("\n")
                 paragraph.append(line.trim())
@@ -1026,6 +1037,37 @@ private fun parseMarkdown(text: String): List<MdBlock> {
         flushParagraph()
     }
     return blocks
+}
+
+@Composable
+private fun MarkdownTableView(table: MarkdownTable, style: TextStyle, color: androidx.compose.ui.graphics.Color) {
+    val colors = LocalTsColors.current
+    val widths = remember(table) {
+        table.header.indices.map { column ->
+            val length = (table.rows.map { it[column].length } + table.header[column].length).max()
+            (length.coerceIn(12, 40) * 7 + 24).dp
+        }
+    }
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+        Column(Modifier.border(1.dp, colors.border, RoundedCornerShape(6.dp))) {
+            (listOf(table.header) + table.rows).forEachIndexed { index, cells ->
+                if (index > 0) HorizontalDivider(color = colors.border)
+                Row(Modifier.height(IntrinsicSize.Min)
+                    .background(if (index == 0) colors.accentSoft else androidx.compose.ui.graphics.Color.Transparent)) {
+                    cells.forEachIndexed { column, cell ->
+                        val alignment = when (table.alignment[column]) {
+                            MarkdownTableAlignment.Left -> TextAlign.Start
+                            MarkdownTableAlignment.Center -> TextAlign.Center
+                            MarkdownTableAlignment.Right -> TextAlign.End
+                        }
+                        InlineMarkdown(cell, style.copy(textAlign = alignment,
+                            fontWeight = if (index == 0) FontWeight.SemiBold else style.fontWeight), color,
+                            Modifier.width(widths[column]).padding(Space.s))
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
