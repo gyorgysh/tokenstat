@@ -250,7 +250,6 @@ struct ClientWorkspaceSessionsView: View {
                 openCard
                 launchCard
                 sessionsCard
-                ClientProjectSSHRows(peer: peer, workspace: workspaceID)
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.top, Theme.Space.s)

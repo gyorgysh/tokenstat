@@ -151,6 +151,14 @@ struct ClientSidebarRoot: View {
             await reload()
             await fulfillNotification()
         }
+        .task(id: "\(workspaces.connectedKey ?? ""):\(scenePhase == .active)") {
+            guard scenePhase == .active, let peer = workspaces.connectedKey else { return }
+            while !Task.isCancelled {
+                await workspaces.refreshSessions(peer: peer)
+                do { try await Task.sleep(for: .seconds(3)) }
+                catch { return }
+            }
+        }
         .onChange(of: notificationOpen.request) { _, _ in
             Task { await fulfillNotification() }
         }
@@ -278,6 +286,7 @@ struct ClientSidebarRoot: View {
                     .clientSidebarRowChrome()
                 }
             }
+            ClientServerRows(rowHeight: rowHeight)
             Section {
                 if workspaces.hosts.isEmpty {
                     Text(L10n.text("apple.clientsidebarroot.no_computers_yet.31d00b27"))
@@ -303,9 +312,6 @@ struct ClientSidebarRoot: View {
                                 ForEach(sessions(in: folder)) { session in
                                     sessionRow(session, in: folder, peer: host.peerKey)
                                 }
-                                ClientProjectSSHRows(peer: host.peerKey,
-                                    workspace: ClientRemote.rawWorkspaceID(of: folder) ?? folder.id,
-                                    sidebar: true, rowHeight: rowHeight)
                                 ClientProjectChatRows(peer: host.peerKey, hostName: host.name,
                                     folder: folder, rowHeight: rowHeight,
                                     entry: projectChats.entry(peer: host.peerKey,

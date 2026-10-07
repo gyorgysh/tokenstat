@@ -1088,6 +1088,19 @@ final class ClientWorkspacesModel {
         }
     }
 
+    /// The sidebar stays mounted while project detail owns its own loader.
+    /// Keep its terminal tree current without reloading the account or chats.
+    func refreshSessions(peer: String) async {
+        let generation = remoteLoadGeneration
+        guard !Task.isCancelled, !retired, ownerScope != nil,
+              ownerScope == WorkSessionContext.shared.scope,
+              connectedKey == peer, isConnecting == nil else { return }
+        guard let snapshot = try? await ClientRemote.ptyList(peer: peer) else { return }
+        guard !Task.isCancelled, !retired, ownerScope == WorkSessionContext.shared.scope,
+              connectedKey == peer, remoteLoadGeneration == generation else { return }
+        if sessions != snapshot { sessions = snapshot }
+    }
+
     private func reloadRemote(peerKey: String) async {
         guard !Task.isCancelled, !retired, ownerScope != nil, ownerScope == WorkSessionContext.shared.scope else { return }
         if let flight = remoteRefresh, flight.peer == peerKey, flight.generation == remoteLoadGeneration {
