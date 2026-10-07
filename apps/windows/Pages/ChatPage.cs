@@ -1770,11 +1770,13 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         row.Children.Add(ModePills(Format.Text(chat, "mode", "plan"), !locked));
         var gate = Format.Text(Backend(Format.Text(chat, "backend")), "gateTier", "full");
         row.Children.Add(AutonomyPills(Format.Text(chat, "autonomy", "standard"), !locked, gate == "bypassOnly"));
-        row.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.chatpage.setup.7013af4c"), ActionIcon.Settings, (_, _) =>
+        var setup = ActionIconGlyph.Button(L10n.Text("windows.chatpage.setup.7013af4c"), ActionIcon.Settings, (_, _) =>
         {
             _setupExpanded = true;
             PaintConversation();
-        }));
+        });
+        AutomationProperties.SetAutomationId(setup, "chat.setup");
+        row.Children.Add(setup);
         return row;
     }
 

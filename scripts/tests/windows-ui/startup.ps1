@@ -42,8 +42,16 @@ try {
         $condition = [System.Windows.Automation.AndCondition]::new(
             [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, $Name),
             [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button))
-        $button = $window.FindAll($descendants, $condition) | Where-Object { !$_.Current.IsOffscreen } | Select-Object -First 1
-        if (!$button) { throw "Rail destination '$Name' is missing" }
+        $button = $null
+        for ($attempt = 0; $attempt -lt 40; $attempt++) {
+            $process.Refresh()
+            if ($process.HasExited) { throw "GUI exited while waiting for '$Name'" }
+            $script:window = [System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
+            $button = $window.FindAll($descendants, $condition) | Where-Object { !$_.Current.IsOffscreen } | Select-Object -First 1
+            if ($button) { break }
+            Start-Sleep -Milliseconds 250
+        }
+        if (!$button) { throw "Rail destination '$Name' is missing after layout" }
         $invoke = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
         $invoke.Invoke()
     }
@@ -149,7 +157,9 @@ try {
     $value = $draft.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
     $value.SetValue('Retained unsent smoke draft')
     Wait-ForControl 'chat.title' | Out-Null
-    Open-Place 'Setup'
+    # Backend/persona discovery can repaint the composer after the transcript
+    # opens. Wait for its new native control to finish layout before invoking.
+    Invoke-Control (Wait-ForControl 'chat.setup')
     $draft = Wait-ForControl 'chat.composer'
     Wait-ForControl 'chat.send' | Out-Null
     if ($draft.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -ne 'Retained unsent smoke draft') {
