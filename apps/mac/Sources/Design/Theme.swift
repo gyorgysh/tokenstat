@@ -2432,7 +2432,19 @@ enum DisplayFit {
     /// The screen the fit was last computed for, if any.
     private static var tracked: NSScreen?
     #else
-    private static var trackedWidth: CGFloat?
+    /// The size of the screen the client's window is on.
+    ///
+    /// Observed, so a view that read the fit before the first report draws
+    /// again once it lands, and again when an iPhone Duo moves the window to
+    /// the other display. One value for every window, as `UIScreen.main`
+    /// was: windows on one screen agree on it rather than overwriting each
+    /// other with their own sizes.
+    @Observable
+    fileprivate final class TrackedScreen {
+        var size: CGSize?
+    }
+
+    fileprivate static let trackedScreen = TrackedScreen()
     #endif
 
     /// The size the fixed layout was tuned against, in points.
@@ -2475,8 +2487,12 @@ enum DisplayFit {
         ) { _ in cachedFactor = nil }
     }
     #else
-    static func update(width: CGFloat?) {
-        trackedWidth = width
+    /// Record the screen the window is on. Read from the window's scene by
+    /// `ScreenSizeReporter`, not from `UIScreen.main`, which is deprecated and
+    /// names the wrong display on an iPhone Duo once it opens.
+    static func update(screenSize: CGSize) {
+        guard trackedScreen.size != screenSize else { return }
+        trackedScreen.size = screenSize
     }
     #endif
 
@@ -2489,8 +2505,11 @@ enum DisplayFit {
         )
     }
     #else
+    /// Zero until the root view reports, which lands on the floor, the fit
+    /// every phone-sized screen gets anyway. Views that read it then draw
+    /// again when the report arrives, because the value is observed.
     private static var screenSize: CGSize {
-        CGSize(width: trackedWidth ?? UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)
+        trackedScreen.size ?? .zero
     }
     #endif
 

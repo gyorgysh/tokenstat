@@ -192,9 +192,10 @@ struct ClientHiddenTabBar: UIViewControllerRepresentable {
     }
 }
 
-/// Give the iPad the phone's tab bar.
+/// Give a window with room the phone's tab bar.
 ///
-/// iPadOS draws a `TabView` as a pill in the top bar: no icons, no minimise on
+/// A regular window (iPad, an open iPhone Duo) draws a `TabView` as a pill in
+/// the top bar: no icons, no minimise on
 /// scroll, and nowhere near a thumb. The floating bar the phone gets is not a
 /// separate control, it is the same one drawn for a compact width, so the way
 /// to have it is to tell the tab bar controller it is compact.
@@ -204,6 +205,11 @@ struct ClientHiddenTabBar: UIViewControllerRepresentable {
 /// iPad would become a large phone with a nice tab bar. Each tab's own
 /// controller is put back to regular, which is the whole trick and the reason
 /// this is a view rather than one modifier.
+///
+/// **The override follows the window.** An iPhone Duo folds while the app is
+/// open. Both overrides come off when the window stops having room, or the
+/// tabs would stay regular on the narrow outer screen. The window scene's own
+/// traits decide, because everything below the bar reads the override.
 ///
 /// Fails soft. If a future iOS hosts tabs differently, `tabBarController` is
 /// nil, nothing is overridden, and the iPad keeps the top bar it has today.
@@ -236,8 +242,26 @@ struct CompactTabBarOnPad: UIViewControllerRepresentable {
             controller.traitOverrides.horizontalSizeClass = value
         }
 
+        private static func clearOverride(_ controller: UIViewController) {
+            if controller.traitOverrides.contains(UITraitHorizontalSizeClass.self) {
+                controller.traitOverrides.remove(UITraitHorizontalSizeClass.self)
+            }
+        }
+
+        /// The scene whose size classes are being followed, held weakly so a
+        /// scene that goes away does not outlive itself here.
+        private weak var observedScene: UIWindowScene?
+        private var sceneRegistration: (any UITraitChangeRegistration)?
+
         override func didMove(toParent parent: UIViewController?) {
             super.didMove(toParent: parent)
+            apply()
+        }
+
+        override func viewIsAppearing(_ animated: Bool) {
+            super.viewIsAppearing(animated)
+            // The first point with a window and nothing drawn yet, so the bar
+            // never shows in the top position first.
             apply()
         }
 
@@ -249,10 +273,50 @@ struct CompactTabBarOnPad: UIViewControllerRepresentable {
             apply()
         }
 
+        /// Re-run when the window changes shape. Nothing appears or moves
+        /// when a Duo opens, so no other callback here would notice.
+        private func observeScene() {
+            guard let scene = view.window?.windowScene, scene !== observedScene else { return }
+            stopObservingScene()
+            observedScene = scene
+            sceneRegistration = scene.registerForTraitChanges(
+                [UITraitHorizontalSizeClass.self, UITraitVerticalSizeClass.self]
+            ) { [weak self] (_: UIWindowScene, _: UITraitCollection) in
+                self?.apply()
+            }
+        }
+
+        /// A layout swap builds a new prober every time the iPhone Duo folds,
+        /// so each one takes its registration with it rather than leaving the
+        /// scene a handler that only ever finds nil.
+        private func stopObservingScene() {
+            if let sceneRegistration, let observedScene {
+                observedScene.unregisterForTraitChanges(sceneRegistration)
+            }
+            sceneRegistration = nil
+            observedScene = nil
+        }
+
+        override func viewDidDisappear(_ animated: Bool) {
+            super.viewDidDisappear(animated)
+            stopObservingScene()
+        }
+
         func apply() {
-            guard UIDevice.current.userInterfaceIdiom == .pad else { return }
             guard #available(iOS 18, *) else { return }
+            observeScene()
+            guard let traits = view.window?.windowScene?.traitCollection else { return }
             guard let tabs = ClientTabBarHost.controller(from: self) else { return }
+            guard ClientLayout.hasRoom(
+                horizontal: UserInterfaceSizeClass(traits.horizontalSizeClass),
+                vertical: UserInterfaceSizeClass(traits.verticalSizeClass)
+            ) else {
+                Self.clearOverride(tabs)
+                for child in tabs.viewControllers ?? [] {
+                    Self.clearOverride(child)
+                }
+                return
+            }
             Self.override(tabs, with: .compact)
             // Put every tab's content back to regular. Without this the split
             // views inside collapse and the iPad reads as a phone.
@@ -264,9 +328,9 @@ struct CompactTabBarOnPad: UIViewControllerRepresentable {
 }
 
 extension View {
-    /// Draw the tab bar the way the phone draws it, on iPad.
+    /// Draw the tab bar the way the phone draws it, in a window with room.
     ///
-    /// A no-op on iPhone, where it is already true, and on anything that does
+    /// A no-op in a compact window, where it is already true, and on anything that does
     /// not host tabs in a `UITabBarController`.
     func clientCompactTabBarOnPad() -> some View {
         background(CompactTabBarOnPad().frame(width: 0, height: 0).allowsHitTesting(false))

@@ -64,6 +64,7 @@ struct WindowScreenObserver: NSViewRepresentable {
         private weak var window: NSWindow?
         private var observers: [NSObjectProtocol] = []
         private var pendingPublish: Task<Void, Never>?
+        private var livePublish: Task<Void, Never>?
         private var toggleStripWork: [DispatchWorkItem] = []
         /// True between willEnter/willExit and the matching didEnter/didExit.
         /// While set, no SwiftUI bindings are written and the toolbar is not
@@ -230,6 +231,8 @@ struct WindowScreenObserver: NSViewRepresentable {
             isFullScreenTransitioning = true
             pendingPublish?.cancel()
             pendingPublish = nil
+            livePublish?.cancel()
+            livePublish = nil
             if entering {
                 if window.styleMask.contains(.fullSizeContentView) {
                     window.styleMask.remove(.fullSizeContentView)
@@ -286,17 +289,43 @@ struct WindowScreenObserver: NSViewRepresentable {
         /// Publish after the current display cycle, not on `Task.yield()`.
         /// A yield can resume inside the next `NSDisplayCycleFlush`.
         private func schedulePublish() {
-            // AppKit still lays out the content continuously. Keep structural
-            // sidebar/inspector decisions stable while dragging instead of
-            // invalidating the entire SwiftUI shell every four points. The
-            // didEndLiveResize observer publishes the exact settled geometry.
-            guard !isFullScreenTransitioning, window?.inLiveResize != true else { return }
+            // AppKit still lays out the content continuously. While dragging,
+            // the shell hears the width coarsely (see `scheduleLivePublish`)
+            // instead of every four points. The didEndLiveResize observer
+            // publishes the exact settled geometry.
+            guard !isFullScreenTransitioning else { return }
+            if window?.inLiveResize == true {
+                scheduleLivePublish()
+                return
+            }
             pendingPublish?.cancel()
             pendingPublish = Task { @MainActor [weak self] in
                 await Self.afterDisplayCycle()
                 guard !Task.isCancelled, let self, !self.isFullScreenTransitioning else { return }
                 guard let window = self.window else { return }
                 self.publish(from: window)
+            }
+        }
+
+        /// The width only, a few times a second and in 40 point steps, while
+        /// the window is being dragged.
+        ///
+        /// Holding everything until the mouse came up left a sidebar that
+        /// should fold away on screen for the whole drag, then jumped. Mac
+        /// apps fold it as the edge crosses the line. This follows the drag
+        /// the same way without rebuilding the shell on every frame: a
+        /// structural decision changes at most a few times a second, and only
+        /// when the width moved far enough to matter.
+        private func scheduleLivePublish() {
+            guard livePublish == nil else { return }
+            livePublish = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(150))
+                guard let self else { return }
+                self.livePublish = nil
+                guard !Task.isCancelled, !self.isFullScreenTransitioning,
+                      let window = self.window, window.inLiveResize else { return }
+                let width = self.quantised(window.contentLayoutRect.width, step: 40)
+                if self.contentWidth?.wrappedValue != width { self.contentWidth?.wrappedValue = width }
             }
         }
 
@@ -403,6 +432,8 @@ struct WindowScreenObserver: NSViewRepresentable {
         private func detach() {
             pendingPublish?.cancel()
             pendingPublish = nil
+            livePublish?.cancel()
+            livePublish = nil
             toggleStripWork.forEach { $0.cancel() }
             toggleStripWork.removeAll()
             observers.forEach(NotificationCenter.default.removeObserver)
@@ -413,6 +444,7 @@ struct WindowScreenObserver: NSViewRepresentable {
 
         deinit {
             pendingPublish?.cancel()
+            livePublish?.cancel()
             toggleStripWork.forEach { $0.cancel() }
             observers.forEach(NotificationCenter.default.removeObserver)
         }

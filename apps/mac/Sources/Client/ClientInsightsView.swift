@@ -23,7 +23,8 @@ import Charts
 struct ClientInsightsView: View {
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(ClientNavigationModel.self) private var navigation
-    @State private var model = ClientInsightsModel()
+    /// The session's, from `ClientSessionModels`, so a layout swap keeps it.
+    @Environment(ClientInsightsModel.self) private var model
     @State private var search = ""
 
     var body: some View {
@@ -60,7 +61,8 @@ struct ClientInsightsView: View {
     // MARK: - Pieces
 
     private var cutPicker: some View {
-        SegmentedTabs(
+        @Bindable var model = model
+        return SegmentedTabs(
             options: ClientInsightsModel.Cut.allCases,
             selection: $model.cut
         ) { $0.label }

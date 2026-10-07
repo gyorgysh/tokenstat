@@ -51,6 +51,11 @@ then begin the next one. Do not reconstruct release notes from commits at the en
   activity/allowance/request complications. Review pending agent requests,
   Allow Once, Always Allow for that chat or Deny after the host revalidates
   the exact live request.
+- iPhone Duo support. Opened, it uses the iPad layout, and folded, the phone
+  layout. It switches as you fold and keeps the open chat, the connection to
+  your computer and the data on screen. iPhone and iPad layouts follow the
+  window's size rather than the device, so Split View and Stage Manager get
+  the wide layout whenever there is room for it.
 
 ### Changed
 
@@ -129,6 +134,21 @@ then begin the next one. Do not reconstruct release notes from commits at the en
   calendar access, and expired allowances no longer imply fresh zero usage.
 - Replaced an unreadable Watch fallback icon. Apple store-icon checks validate
   compressed image data as well as metadata, checksums, filters and dimensions.
+- Loading placeholders no longer drift across the screen while a landscape or
+  split layout settles.
+- Profile pictures that fail on a slow or dropped connection load by
+  themselves once the network answers, instead of staying as initials.
+- The Mac sidebar holds a project's chat order while the pointer is over it,
+  so hover cards no longer flash open and shut while chats are running, and a
+  click lands on the chat you aimed at.
+- The Mac app no longer opens with an empty project list when the account
+  finishes loading during launch, and retries while the background service is
+  still starting.
+- Mac sidebars and the inspector follow the window while it is being resized,
+  not only when the drag ends.
+- Home streak figures on the Mac stay whole in a narrow window, moving under
+  the greeting instead of wrapping digit by digit.
+- The iPad sidebar's account picture shows its plan badge clearly.
 
 ## [1.2.0] - 2026-10-05
 

@@ -321,13 +321,13 @@ private struct MiniGraphNode: View {
         .frame(width: dot, height: dot)
         // Only the node a run is sitting on breathes. A whole strip of moving
         // tiles says nothing about where the work is.
-        .opacity(dimmed ? 0.55 : 1)
+        // Scoped to the opacity: a forever animation on the whole view also
+        // swings its position when the layout around it moves.
         .animation(
             dimmed
                 ? .easeInOut(duration: 1.1).repeatForever(autoreverses: true)
-                : .easeInOut(duration: 0.2),
-            value: dimmed
-        )
+                : .easeInOut(duration: 0.2)
+        ) { $0.opacity(dimmed ? 0.55 : 1) }
         .onAppear { dimmed = shouldPulse }
         .onChange(of: live) { _, _ in dimmed = shouldPulse }
         .help(node.displayTitle)

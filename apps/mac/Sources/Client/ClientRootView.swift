@@ -33,6 +33,7 @@ struct ClientRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     /// iPad and iPhone want different intros. See `signedOut`.
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var launch = LaunchState()
     /// One account model for the whole client. The avatar reads it, the sheet
     /// edits it, and every screen that needs a tier or a machine list reads the
@@ -122,13 +123,51 @@ struct ClientRootView: View {
     /// than by every screen.
     @State private var windowWidth: CGFloat = 0
 
+    /// The projects connection, above the layout branch so both layouts use
+    /// the same one. See `ClientSessionModels`.
+    @State private var sessionModels = ClientSessionModels()
+
+    /// Where the person was when the layout last swapped, waiting for the
+    /// new layout to be on screen. See the `.task(id: layout)` below.
+    @State private var layoutHandoff: WorkMobileRoute?
+
     private var layout: ClientLayoutMode {
         ClientLayout.mode(
             preference: ClientLayoutPreference(rawValue: layoutPreference) ?? .automatic,
             hasDesktopInput: input.hasDesktopInput,
             sizeClass: sizeClass,
+            verticalSizeClass: verticalSizeClass,
             width: windowWidth
         )
+    }
+
+    /// Reopen a conversation the way a person reaches it: its folder's chat
+    /// screen, with the conversation selected in it. Back then lands on that
+    /// folder's chats, as it would have before the layout changed. False
+    /// when the folder is not known yet, so the caller falls back to the
+    /// conversation on its own.
+    private func reopenConversation(_ route: WorkMobileRoute) -> Bool {
+        guard let reference = route.reference, reference.kind == .conversation,
+              let chatID = reference.itemID, !chatID.isEmpty else { return false }
+        let workspaces = sessionModels.models(for: route.scope).workspaces
+        // `folders` is the connected computer's. A chat on another one must
+        // not be matched to a folder here by its id alone.
+        guard workspaces.connectedKey == reference.hostIdentity,
+              let folder = workspaces.folders.first(where: {
+            (ClientRemote.rawWorkspaceID(of: $0) ?? $0.id) == reference.workspaceID
+        }) else { return false }
+        if layout == .sidebar {
+            navigation.restoredRoute = nil
+            navigation.openChat(folderID: folder.id, chatID: chatID)
+        } else {
+            let hostName = workspaces.hosts.first { $0.peerKey == reference.hostIdentity }?.name ?? ""
+            navigation.restoredRoute = nil
+            navigation.workspacesPath = []
+            navigation.pushFolder(peerKey: reference.hostIdentity, hostName: hostName,
+                                  folder: folder, section: .chat)
+            navigation.requestedChat = reference
+        }
+        return true
     }
 
     var body: some View {
@@ -154,11 +193,16 @@ struct ClientRootView: View {
             } else if !account.signedIn {
                 signedOut
             } else if layout == .sidebar {
-                ClientSidebarRoot(showAccount: $showAccount)
+                ClientSidebarRoot(
+                    showAccount: $showAccount,
+                    workspaces: sessionModels.models(for: WorkSessionContext.shared.scope).workspaces
+                )
+                    .sessionScreens(sessionModels.models(for: WorkSessionContext.shared.scope))
                     .id(WorkSessionContext.shared.scope)
                     .transition(.opacity)
             } else {
                 tabs
+                    .sessionScreens(sessionModels.models(for: WorkSessionContext.shared.scope))
                     .id(WorkSessionContext.shared.scope)
                     .transition(.opacity)
                     // Hiding the open tab lands on the first visible one
@@ -186,6 +230,7 @@ struct ClientRootView: View {
                     .onAppear { windowWidth = geo.size.width }
                     .onChange(of: geo.size.width) { _, width in windowWidth = width }
             }
+            ScreenSizeReporter()
         }
         .task {
             connectivity.start()
@@ -238,8 +283,32 @@ struct ClientRootView: View {
             // Keep an exact destination above the subtree being replaced.
             if let route = navigation.currentRoute, route.reference != nil,
                navigation.presentedChat == nil {
-                navigation.restoredRoute = route
+                // A conversation waits for the new layout and is reopened
+                // through its folder below. Pushed here on its own, Back
+                // from it skipped the folder's chat list.
+                if route.reference?.kind != .conversation {
+                    navigation.restoredRoute = route
+                }
+                layoutHandoff = route
             }
+        }
+        // And put it back once the new layout is mounted. Set only in the
+        // same update as the swap, the route could be cleared by the old
+        // layout tearing down, or offered to a navigation stack that did
+        // not exist yet: folding an iPhone Duo on an open chat landed on the
+        // tab's top level instead of the chat.
+        .task(id: layout) {
+            guard let route = layoutHandoff else { return }
+            layoutHandoff = nil
+            await Task.yield()
+            guard !Task.isCancelled, route.scope == WorkSessionContext.shared.scope,
+                  navigation.presentedChat == nil else { return }
+            if reopenConversation(route) { return }
+            if let tab = ClientTab(rawValue: route.tab), tabCustomization.visibleTabs.contains(tab),
+               navigation.destination != tab {
+                navigation.destination = tab
+            }
+            if navigation.restoredRoute != route { navigation.restoredRoute = route }
         }
         .onChange(of: WorkSessionContext.shared.scope, initial: true) { oldScope, newScope in
             if oldScope != nil && oldScope != newScope {
@@ -258,7 +327,10 @@ struct ClientRootView: View {
         .onChange(of: ecosystemNavigation.pending, initial: true) { _, _ in openEcosystemDestination() }
         .onChange(of: account.signedIn) { _, signedIn in
             openEcosystemDestination()
-            if !signedIn { editors.reset() }
+            if !signedIn {
+                editors.reset()
+                sessionModels.reset()
+            }
             guard signedIn, let signed = account.account else { return }
             Task { await store.finishPendingIntent(with: signed) }
         }
@@ -288,7 +360,9 @@ struct ClientRootView: View {
         }
         .environment(\.openClientAccount, { showAccount = true })
         .sheet(isPresented: $showAccount) {
-            ClientAccountSheet()
+            ClientAccountSheet(
+                offersLayoutChoice: ClientLayout.hasRoom(horizontal: sizeClass, vertical: verticalSizeClass)
+            )
         }
         .sheet(isPresented: Binding(
             get: { store.showPaywall },
@@ -419,7 +493,7 @@ struct ClientRootView: View {
                 ForEach(tabCustomization.tabs(including: navigation.destination)) { tab in
                     Tab(tab.label, systemImage: tab.symbol, value: tab) {
                         NavigationStack(path: tab == .workspaces ? $navigation.workspacesPath : .constant([])) {
-                            tab.content
+                            tab.content(workspaces: sessionModels.models(for: WorkSessionContext.shared.scope).workspaces)
                                 .clientChrome(showAccount: $showAccount)
                                 .modifier(ClientRestoredDestination(tab: tab))
                                 .navigationDestination(for: ClientFolderPush.self) { $0.destination }
@@ -437,7 +511,7 @@ struct ClientRootView: View {
             TabView(selection: $navigation.destination) {
                 ForEach(tabCustomization.tabs(including: navigation.destination)) { tab in
                     NavigationStack(path: tab == .workspaces ? $navigation.workspacesPath : .constant([])) {
-                        tab.content
+                        tab.content(workspaces: sessionModels.models(for: WorkSessionContext.shared.scope).workspaces)
                             .clientChrome(showAccount: $showAccount)
                             .modifier(ClientRestoredDestination(tab: tab))
                             .navigationDestination(for: ClientFolderPush.self) { $0.destination }
@@ -515,10 +589,10 @@ enum ClientTab: String, CaseIterable, Identifiable, Hashable {
     /// this is an enum member rather than a `View`, so nothing else says it.
     @MainActor
     @ViewBuilder
-    var content: some View {
+    func content(workspaces: ClientWorkspacesModel) -> some View {
         switch self {
         case .home: ClientHomeView()
-        case .workspaces: ClientWorkspacesView()
+        case .workspaces: ClientWorkspacesView(model: workspaces, handlesNotifications: true)
         case .insights: ClientInsightsView()
         case .machines: ClientDevicesView()
         case .ssh: ClientSSHTab()
@@ -644,6 +718,88 @@ private struct TabBarMinimizeIfAvailable: ViewModifier {
             content.tabBarMinimizeBehavior(.onScrollDown)
         } else {
             content
+        }
+    }
+}
+
+
+/// The signed-in session's screen models, shared by both layouts.
+///
+/// An iPhone Duo swaps the sidebar and the tabs on every fold. Models owned
+/// by either layout went with it: opening the phone dialled the Mac again,
+/// and Home, Insights and Devices drew their placeholders while they read
+/// everything a second time. The Mac keeps these for the life of the window,
+/// and so does this. Keyed by work scope, the key the layouts are rebuilt on,
+/// so another scope still starts fresh. A cache read from the body, which is
+/// why it is a plain class: handing back the models must not count as a change.
+@MainActor
+final class ClientSessionModels {
+    @MainActor
+    final class Models {
+        let workspaces = ClientWorkspacesModel()
+        let home = HomeModel()
+        let insights = ClientInsightsModel()
+        let devices = ClientDevicesModel()
+    }
+
+    private var scope: WorkReference.Scope?
+    private var current: Models?
+
+    func models(for scope: WorkReference.Scope?) -> Models {
+        if let current, self.scope == scope { return current }
+        let fresh = Models()
+        self.scope = scope
+        current = fresh
+        return fresh
+    }
+
+    /// Drop everything on sign-out, as unmounting the layouts used to.
+    func reset() {
+        scope = nil
+        current = nil
+    }
+}
+
+private extension View {
+    /// The screens that read their model from the environment.
+    func sessionScreens(_ models: ClientSessionModels.Models) -> some View {
+        environment(models.home)
+            .environment(models.insights)
+            .environment(models.devices)
+    }
+}
+
+
+/// Tells `DisplayFit` the size of the screen this window is on.
+///
+/// Sized with the window, so it lays out again on every resize, a rotation
+/// and an iPhone Duo opening or folding included, and reads the screen from
+/// the window's own scene each time.
+private struct ScreenSizeReporter: UIViewRepresentable {
+    func makeUIView(context: Context) -> ReporterView {
+        let view = ReporterView()
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    // Layout and window changes report. Writing from here would publish in
+    // the middle of SwiftUI's own update.
+    func updateUIView(_ view: ReporterView, context: Context) {}
+
+    final class ReporterView: UIView {
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            report()
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            report()
+        }
+
+        func report() {
+            guard let size = window?.windowScene?.screen.bounds.size else { return }
+            DisplayFit.update(screenSize: size)
         }
     }
 }

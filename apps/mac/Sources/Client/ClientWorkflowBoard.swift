@@ -101,13 +101,13 @@ private struct ClientWorkflowBoardCard: View {
             RoundedRectangle(cornerRadius: Theme.cardRadius)
                 .strokeBorder(border, lineWidth: isCurrent || isSelected ? 1.5 : 1)
         }
-        .opacity(dimmed ? 0.55 : 1)
+        // Scoped to the opacity: a forever animation on the whole view also
+        // swings its position when the layout around it moves.
         .animation(
             dimmed
                 ? .easeInOut(duration: 1.1).repeatForever(autoreverses: true)
-                : .easeInOut(duration: 0.2),
-            value: dimmed
-        )
+                : .easeInOut(duration: 0.2)
+        ) { $0.opacity(dimmed ? 0.55 : 1) }
         .onAppear { dimmed = shouldPulse }
         .onChange(of: isCurrent) { _, _ in dimmed = shouldPulse }
         .accessibilityElement(children: .ignore)

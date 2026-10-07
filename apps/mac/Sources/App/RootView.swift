@@ -190,6 +190,12 @@ struct RootView: View {
     /// the title bar. Keep the longer list opt-in so a busy workspace does
     /// not turn the sidebar into a transcript index.
     @State private var expandedChatHistories = SidebarPreferences.shared.expandedIDs("history:")
+    /// Each folder's chat order as it stood when the pointer came over its
+    /// list. See `holdingOrder`. A plain reference, not observed state: the
+    /// pointer crossing a list must not redraw the whole window. The held
+    /// order only has to be in place for the next update that would move a
+    /// row, and that update draws it.
+    @State private var chatOrderHold = ChatOrderHold()
     /// The section each folder was last left on, so returning to a folder
     /// returns to what you were doing in it.
     @State private var lastSection: [String: WorkspaceSection] = [:]
@@ -747,17 +753,37 @@ struct RootView: View {
                 // Local folder names for the sidebar first. Git status is part of
                 // that call, but it is still cheaper than also dialling peers.
                 await BridgeLaunch.wait()
-                await workspaces.loadLocal()
-                // Remote peers wait for the post-heatmap warm (or the 600ms
-                // fallback below) so a cold Home does not compete with dials.
-                try? await Task.sleep(for: .milliseconds(600))
-                guard !Task.isCancelled else { return }
-                if !home.isArchiveReady {
-                    await workspaces.loadRemote()
+                // The daemon can still be starting when the window opens (an
+                // update, a login item racing the app). One failed read used
+                // to leave the sidebar empty until something else reloaded it,
+                // which looks exactly like every project being gone. The retry
+                // runs beside the peers, so a host that never answers cannot
+                // keep other machines' folders out of the sidebar too.
+                let localLoaded = await workspaces.loadLocal()
+                await withTaskGroup(of: Void.self) { group in
+                    if !localLoaded {
+                        group.addTask { @MainActor in
+                            var wait: Duration = .milliseconds(500)
+                            repeat {
+                                try? await Task.sleep(for: wait)
+                                guard !Task.isCancelled else { return }
+                                wait = min(wait * 2, .seconds(10))
+                            } while await !workspaces.loadLocal()
+                        }
+                    }
+                    group.addTask { @MainActor in
+                        // Remote peers wait for the post-heatmap warm (or the 600ms
+                        // fallback below) so a cold Home does not compete with dials.
+                        try? await Task.sleep(for: .milliseconds(600))
+                        guard !Task.isCancelled else { return }
+                        if !home.isArchiveReady {
+                            await workspaces.loadRemote()
+                        }
+                        // Other machines on their own slow schedule. Local folders
+                        // refresh from the file watcher, which must not dial anybody.
+                        await workspaces.watchPeers()
+                    }
                 }
-                // Other machines on their own slow schedule. Local folders refresh
-                // from the file watcher, which must not dial anybody.
-                await workspaces.watchPeers()
             }
             // A machine that just connected should not wait for the 60-second peer
             // sweep to show its folders.
@@ -3213,7 +3239,8 @@ struct RootView: View {
     }
 
     @ViewBuilder
-    private func chatHistoryList(for folder: WorkspaceFolder, conversations: [ChatConversation]) -> some View {
+    private func chatHistoryList(for folder: WorkspaceFolder, conversations incoming: [ChatConversation]) -> some View {
+        let conversations = Self.holdingOrder(incoming, held: chatOrderHold.order[folder.id])
         // Whether this folder's list is the live one. Rows under another
         // folder open through a reveal, so their transcript is read from the
         // owning host: selecting directly would fetch it against the folder
@@ -3231,7 +3258,7 @@ struct RootView: View {
             count: conversations.count, selected: selectedIndex, expanded: expanded
         )
         let visible = Array(conversations[window])
-        Group {
+        VStack(alignment: .leading, spacing: 0) {
             ForEach(visible) { conversation in
                 ChatSidebarConversationRow(
                     conversation: conversation,
@@ -3313,6 +3340,17 @@ struct RootView: View {
                 .padding(.vertical, 4)
             }
         }
+        // Hold the order while the pointer is over the list. Two running
+        // chats trade places on every reply, and the row under the pointer
+        // went with them: its card flashed open and shut, and a click could
+        // land on the chat that had just slid into its place.
+        .onHover { inside in
+            chatOrderHold.order[folder.id] = inside ? conversations.map(\.id) : nil
+        }
+        // A list that goes while the pointer is still on it (the folder
+        // collapsed from the keyboard, its last chat removed) never hears
+        // the pointer leave. Let go here, or the order stays frozen.
+        .onDisappear { chatOrderHold.order[folder.id] = nil }
         .onChange(of: chat.selected?.id) { _, selectedID in
             // Persist the auto-expansion above, so the footer still says
             // what the list is doing after the selection moves on.
@@ -3322,6 +3360,24 @@ struct RootView: View {
             else { return }
             setHistoryExpanded(folder.id, true)
         }
+    }
+
+    /// Unobserved on purpose. See `chatOrderHold`.
+    final class ChatOrderHold {
+        var order: [String: [String]] = [:]
+    }
+
+    /// The list in the order it had when the pointer arrived.
+    ///
+    /// Rows already on screen keep their places. A chat that appears
+    /// meanwhile goes to the end, where it moves nothing, and the list takes
+    /// its live order again once the pointer leaves.
+    static func holdingOrder(_ list: [ChatConversation], held: [String]?) -> [ChatConversation] {
+        guard let held else { return list }
+        let rank = Dictionary(held.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        let known = list.filter { rank[$0.id] != nil }
+            .sorted { (rank[$0.id] ?? 0) < (rank[$1.id] ?? 0) }
+        return known + list.filter { rank[$0.id] == nil }
     }
 
     /// What a section's badge says. Nil draws nothing: a zero is not news, and

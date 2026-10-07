@@ -25,6 +25,12 @@ struct ClientAutomationWorkspace: View {
     @State private var showingHistory = false
     @State private var pendingDelete: Automation?
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
+    private var hasRoom: Bool {
+        ClientLayout.hasRoom(horizontal: horizontalSizeClass, vertical: verticalSizeClass)
+    }
     private let opensDetailWhenReady: Bool
 
     init(peer: String, workspaceID: String, hostName: String, folderName: String) {
@@ -57,7 +63,7 @@ struct ClientAutomationWorkspace: View {
         GeometryReader { geo in
             let layout = ClientJobLayout.resolve(
                 width: geo.size.width,
-                prefersStack: UIDevice.current.userInterfaceIdiom != .pad || typeSize.isAccessibilitySize
+                prefersStack: !hasRoom || typeSize.isAccessibilitySize
             )
             workspace(layout)
                 .navigationDestination(isPresented: Binding(
@@ -114,14 +120,14 @@ struct ClientAutomationWorkspace: View {
             ) {
                 await session.load()
             }
-            .modifier(QueueSheetPresentation())
+            .modifier(QueueSheetPresentation(hasRoom: hasRoom))
         }
         .sheet(isPresented: $showingHistory) {
             if let job = session.selectedJob {
                 ClientAutomationHistorySheet(session: session, jobID: job.id) { run in
                     session.selectRun(run)
                 }
-                .modifier(HistorySheetPresentation())
+                .modifier(HistorySheetPresentation(hasRoom: hasRoom))
             }
         }
         .confirmationDialog(

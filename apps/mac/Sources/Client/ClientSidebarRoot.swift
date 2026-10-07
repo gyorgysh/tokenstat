@@ -30,8 +30,9 @@ struct ClientSidebarRoot: View {
     @Environment(\.scenePhase) private var scenePhase
 
     /// One workspaces model for the whole layout: the tree in the sidebar and
-    /// the screen in the detail column are the same connection, not two.
-    @State private var workspaces = ClientWorkspacesModel()
+    /// the screen in the detail column are the same connection, not two. The
+    /// root owns it, so swapping to tabs and back does not dial again.
+    let workspaces: ClientWorkspacesModel
     @State private var addingFirstProject = false
     /// Whether the host-wide task board link shows under a connected host.
     /// Off unless asked for in Customize Projects.
@@ -245,7 +246,7 @@ struct ClientSidebarRoot: View {
             // the window was zoomed.
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    AvatarButton { showAccount = true }
+                    AvatarButton(plainBadge: true) { showAccount = true }
                         // A couple of points off the bar's own margin, so the
                         // picture reads as inset from the column's edge rather
                         // than stuck to it. Positive, not negative: the pull
@@ -732,7 +733,7 @@ struct ClientSidebarRoot: View {
             case .home: ClientHomeView()
             case .insights: ClientInsightsView()
             case .machines: ClientDevicesView()
-            case .workspaces: ClientWorkspacesView(model: workspaces)
+            case .workspaces: ClientWorkspacesView(model: workspaces, handlesNotifications: false)
             case .ssh: ClientSSHTab()
             }
         }

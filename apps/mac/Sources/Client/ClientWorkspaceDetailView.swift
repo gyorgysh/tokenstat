@@ -57,6 +57,7 @@ struct ClientWorkspaceSessionsView: View {
     }
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     private var workspaceID: String {
         ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
@@ -225,15 +226,14 @@ struct ClientWorkspaceSessionsView: View {
         .onChange(of: WorkSessionContext.shared.scope) { _, _ in closeBrowser() }
     }
 
-    /// The forwarded browser beside the launcher on a wide iPad, instead of
-    /// over it. Compact layouts keep the full-screen browser. The URL is the
+    /// The forwarded browser beside the launcher when the window is regular
+    /// both ways (iPad, an open iPhone Duo), instead of over it. Compact layouts keep the full-screen browser. The URL is the
     /// tunnel proxy's, so host localhost resolves through the tunnel and
     /// never touches this device's own localhost. Rotation only moves the
     /// presentation: the port forward and the URL survive it.
     private var showsBrowserPane: Bool {
         browserSession != nil
-            && sizeClass == .regular
-            && UIDevice.current.userInterfaceIdiom == .pad
+            && ClientLayout.hasRoom(horizontal: sizeClass, vertical: verticalSizeClass)
     }
 
     private var sessionsColumn: some View {
@@ -815,7 +815,16 @@ struct ClientFilesView: View {
     let folderName: String
 
     @Environment(ClientEditorStore.self) private var editors
-    private var usesEditorTabs: Bool { UIDevice.current.userInterfaceIdiom == .pad }
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    /// Tabs when the window has room, and for as long as any tab is open in
+    /// this folder. Folding an iPhone Duo with a tab open keeps the strip:
+    /// hiding it let the same file open a second time from the host copy,
+    /// and whichever of the two was saved last overwrote the other.
+    private var usesEditorTabs: Bool {
+        ClientLayout.hasRoom(horizontal: horizontalSizeClass, vertical: verticalSizeClass)
+            || !editors.tabs(peer: peer, workspace: workspace).isEmpty
+    }
 
     @State private var pathStack: [String] = [""]
     @State private var children: [TreeEntry] = []

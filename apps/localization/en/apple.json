@@ -1442,7 +1442,7 @@
   "apple.clientlaunchtile.hide_extra_tools.6063173b": "Hide extra tools",
   "apple.clientlaunchtile.more.d47d7cb0": "More",
   "apple.clientlaunchtile.show_more_tools.fd6e5f9f": "Show more tools",
-  "apple.clientlayout.always_the_sidebar_on_this_ipad.b8da017a": "Always the sidebar, on this iPad.",
+  "apple.clientlayout.always_the_sidebar_on_this_ipad.b8da017a": "Always the sidebar, whenever the window has room.",
   "apple.clientlayout.always_the_tab_bar.4c8a527c": "Always the tab bar.",
   "apple.clientlayout.automatic.d461a493": "Automatic",
   "apple.clientlayout.sidebar.f7efa7bc": "Sidebar",

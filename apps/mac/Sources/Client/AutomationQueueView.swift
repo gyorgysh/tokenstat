@@ -312,8 +312,11 @@ struct ClientSchedulerCard: View {
 }
 
 struct QueueSheetPresentation: ViewModifier {
+    /// From the presenter: inside the sheet the size classes describe the sheet.
+    let hasRoom: Bool
+
     func body(content: Content) -> some View {
-        if UIDevice.current.userInterfaceIdiom == .pad {
+        if hasRoom {
             // iPad keeps the default form sheet. Detents would turn it into a
             // full-window card, which is how the dedicated fixture looked empty.
             content.presentationDragIndicator(.visible)

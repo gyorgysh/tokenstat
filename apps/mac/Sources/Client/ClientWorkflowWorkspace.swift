@@ -23,6 +23,12 @@ struct ClientWorkflowWorkspace: View {
     @State private var pendingDelete: WorkflowGraph?
     @State private var showingHistory = false
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
+    private var hasRoom: Bool {
+        ClientLayout.hasRoom(horizontal: horizontalSizeClass, vertical: verticalSizeClass)
+    }
     private let opensDetailWhenReady: Bool
 
     init(peer: String, workspaceID: String, hostName: String, folderName: String) {
@@ -55,7 +61,7 @@ struct ClientWorkflowWorkspace: View {
         GeometryReader { geo in
             let layout = ClientJobLayout.resolve(
                 width: geo.size.width,
-                prefersStack: UIDevice.current.userInterfaceIdiom != .pad || typeSize.isAccessibilitySize
+                prefersStack: !hasRoom || typeSize.isAccessibilitySize
             )
             workspace(layout)
                 .navigationDestination(isPresented: Binding(
@@ -97,7 +103,7 @@ struct ClientWorkflowWorkspace: View {
                 ClientWorkflowHistorySheet(session: session, graphID: graph.id) { run in
                     session.selectRun(run)
                 }
-                .modifier(HistorySheetPresentation())
+                .modifier(HistorySheetPresentation(hasRoom: hasRoom))
             }
         }
         .confirmationDialog(

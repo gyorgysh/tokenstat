@@ -26,7 +26,8 @@ struct ClientDevicesView: View {
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(ClientNavigationModel.self) private var navigation
-    @State private var model = ClientDevicesModel()
+    /// The session's, from `ClientSessionModels`, so a layout swap keeps it.
+    @Environment(ClientDevicesModel.self) private var model
     @State private var showSetup = false
     @State private var search = ""
 

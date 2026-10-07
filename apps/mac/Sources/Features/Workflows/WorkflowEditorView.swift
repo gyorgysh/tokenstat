@@ -66,6 +66,10 @@ struct WorkflowEditorView: View {
     var onFinished: (WorkflowGraph?) async -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var typeSize
+#if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+#endif
     @State private var surface: WorkflowEditorSurface = .graph
     @State private var stepPath: [String] = []
     @State private var canvasMode: WorkflowCanvasMode = .canvas
@@ -229,13 +233,13 @@ struct WorkflowEditorView: View {
 
     private var allowsCanvas: Bool {
 #if os(iOS)
-        UIDevice.current.userInterfaceIdiom == .pad
+        ClientLayout.hasRoom(horizontal: horizontalSizeClass, vertical: verticalSizeClass)
 #else
         true
 #endif
     }
 
-    /// Wide iPad: the touch canvas, or the step list as the accessible
+    /// Wide with room: the touch canvas, or the step list as the accessible
     /// alternate. Both edit the same document and inspector.
     @ViewBuilder
     private var graphColumn: some View {

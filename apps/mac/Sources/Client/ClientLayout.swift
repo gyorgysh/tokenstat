@@ -62,13 +62,27 @@ enum ClientLayout {
     /// alone would put a sidebar into 375 points.
     static let minimumSidebarWidth: CGFloat = 820
 
+    /// Room for the wide layout: regular across and regular down.
+    ///
+    /// An iPad has it, and so does an iPhone Duo opened out. A large iPhone in
+    /// landscape is regular across but compact down, and that is still a phone
+    /// surface, so width alone is not the test. Ask the view that draws the
+    /// layout, never the device: a Duo changes between the two while open.
+    static func hasRoom(
+        horizontal: UserInterfaceSizeClass?,
+        vertical: UserInterfaceSizeClass?
+    ) -> Bool {
+        horizontal == .regular && vertical == .regular
+    }
+
     static func mode(
         preference: ClientLayoutPreference,
         hasDesktopInput: Bool,
         sizeClass: UserInterfaceSizeClass?,
+        verticalSizeClass: UserInterfaceSizeClass?,
         width: CGFloat
     ) -> ClientLayoutMode {
-        guard UIDevice.current.userInterfaceIdiom == .pad else { return .tabs }
+        guard hasRoom(horizontal: sizeClass, vertical: verticalSizeClass) else { return .tabs }
         switch preference {
         case .tabs:
             return .tabs
@@ -78,7 +92,6 @@ enum ClientLayout {
             return width >= minimumSidebarWidth ? .sidebar : .tabs
         case .automatic:
             guard hasDesktopInput else { return .tabs }
-            guard sizeClass == .regular else { return .tabs }
             return width >= minimumSidebarWidth ? .sidebar : .tabs
         }
     }

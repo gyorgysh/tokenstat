@@ -60,11 +60,13 @@ struct ClientWorkspaceDetailView: View {
     }
 
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
-    /// iPad regular width only. A large iPhone in landscape is regular, and
-    /// that is still a phone surface.
+    /// Regular both ways only: an iPad, or an iPhone Duo opened out. A large
+    /// iPhone in landscape is regular across but compact down, and that is
+    /// still a phone surface.
     private var usesWorkspaceLayout: Bool {
-        sizeClass == .regular && UIDevice.current.userInterfaceIdiom == .pad
+        ClientLayout.hasRoom(horizontal: sizeClass, vertical: verticalSizeClass)
     }
 
     var body: some View {

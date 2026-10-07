@@ -429,73 +429,18 @@ struct HomeView: View {
     // MARK: - Profile
 
     private var profile: some View {
-        HStack(alignment: .center, spacing: Theme.Space.m) {
-            Avatar(
-                url: account.account?.avatar,
-                name: account.account?.title,
-                handle: account.account?.handle,
-                size: 52
-            )
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: Theme.Space.s) {
-                    Text(greetingTitle)
-                        .font(Theme.font(20, weight: .semibold))
-                    if let tier = account.account?.tier, !tier.isEmpty {
-                        // The glyph the profile page uses, not the written
-                        // pill. Beside a 20pt name a crown reads as a mark on
-                        // the person; a word in a capsule reads as a label
-                        // stuck to them.
-                        TierMark(tier: tier, size: 16)
-                    }
-                }
-                // The handle, and nothing else. The privacy sentence that was
-                // here is on the Account screen where someone reading about
-                // privacy would go looking for it, and repeating it on the
-                // screen you see every single launch turns a real guarantee
-                // into a slogan.
-                if let handle = account.account?.handle,
-                   handle != account.account?.title
-                {
-                    Text("@\(handle)")
-                        .font(Theme.callout)
-                        .foregroundStyle(.secondary)
-                } else if !account.signedIn {
-                    Text(L10n.text("apple.homeview.working_locally.da99af57"))
-                        .font(Theme.callout)
-                        .foregroundStyle(.secondary)
-                }
+        // Side by side when the card is wide enough, the numbers under the
+        // name when it is not. Squeezed into one row, a narrow window broke
+        // each figure into a column of single digits.
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: Theme.Space.m) {
+                profileIdentity
+                Spacer()
+                profileStats
             }
-
-            Spacer()
-
-            // Streaks live beside the name rather than inside the activity
-            // card: they are about the person, and the card below is about the
-            // data.
-            if isWarming {
-                // Pulsing wireframe in the same three slots the streaks will
-                // fill, so the name does not shift when numbers arrive.
-                HStack(spacing: Theme.Space.l) {
-                    ForEach(0..<3, id: \.self) { index in
-                        VStack(alignment: .leading, spacing: 4) {
-                            bar(width: 44, height: 8, phase: Double(index) * 0.1)
-                            bar(width: 62, height: 20, phase: Double(index) * 0.1 + 0.05)
-                        }
-                    }
-                }
-                .transition(.opacity)
-            } else if let calendar = model.calendar {
-                HStack(spacing: Theme.Space.l) {
-                    streak(
-                        L10n.text("apple.homeview.streak.41db983f"),
-                        "\(calendar.streakCurrent)",
-                        note: calendar.streakCurrent == 1 ? "day" : "days",
-                        tint: calendar.streakCurrent > 0 ? Theme.accent : .secondary
-                    )
-                    streak(L10n.text("apple.homeview.best.c47d21c6"), "\(calendar.streakBest)", note: "days")
-                    streak(L10n.text("common.active"), "\(calendar.activeDays)", note: "days")
-                }
-                .transition(.smoothIn(reduceMotion: reduceMotion))
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                profileIdentity
+                profileStats
             }
         }
         .animation(.easeOut(duration: 0.18), value: model.calendar != nil)
@@ -548,6 +493,79 @@ struct HomeView: View {
         Skeleton.Bar(width: width, height: height, phase: phase)
     }
 
+    private var profileIdentity: some View {
+        HStack(alignment: .center, spacing: Theme.Space.m) {
+            Avatar(
+                url: account.account?.avatar,
+                name: account.account?.title,
+                handle: account.account?.handle,
+                size: 52
+            )
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: Theme.Space.s) {
+                    Text(greetingTitle)
+                        .font(Theme.font(20, weight: .semibold))
+                    if let tier = account.account?.tier, !tier.isEmpty {
+                        // The glyph the profile page uses, not the written
+                        // pill. Beside a 20pt name a crown reads as a mark on
+                        // the person; a word in a capsule reads as a label
+                        // stuck to them.
+                        TierMark(tier: tier, size: 16)
+                    }
+                }
+                // The handle, and nothing else. The privacy sentence that was
+                // here is on the Account screen where someone reading about
+                // privacy would go looking for it, and repeating it on the
+                // screen you see every single launch turns a real guarantee
+                // into a slogan.
+                if let handle = account.account?.handle,
+                   handle != account.account?.title
+                {
+                    Text("@\(handle)")
+                        .font(Theme.callout)
+                        .foregroundStyle(.secondary)
+                } else if !account.signedIn {
+                    Text(L10n.text("apple.homeview.working_locally.da99af57"))
+                        .font(Theme.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var profileStats: some View {
+        // Streaks live beside the name rather than inside the activity
+        // card: they are about the person, and the card below is about the
+        // data.
+        if isWarming {
+            // Pulsing wireframe in the same three slots the streaks will
+            // fill, so the name does not shift when numbers arrive.
+            HStack(spacing: Theme.Space.l) {
+                ForEach(0..<3, id: \.self) { index in
+                    VStack(alignment: .leading, spacing: 4) {
+                        bar(width: 44, height: 8, phase: Double(index) * 0.1)
+                        bar(width: 62, height: 20, phase: Double(index) * 0.1 + 0.05)
+                    }
+                }
+            }
+            .transition(.opacity)
+        } else if let calendar = model.calendar {
+            HStack(spacing: Theme.Space.l) {
+                streak(
+                    L10n.text("apple.homeview.streak.41db983f"),
+                    "\(calendar.streakCurrent)",
+                    note: calendar.streakCurrent == 1 ? "day" : "days",
+                    tint: calendar.streakCurrent > 0 ? Theme.accent : .secondary
+                )
+                streak(L10n.text("apple.homeview.best.c47d21c6"), "\(calendar.streakBest)", note: "days")
+                streak(L10n.text("common.active"), "\(calendar.activeDays)", note: "days")
+            }
+            .transition(.smoothIn(reduceMotion: reduceMotion))
+        }
+    }
+
     private func streak(
         _ label: String,
         _ value: String,
@@ -566,6 +584,9 @@ struct HomeView: View {
                     .font(Theme.caption)
                     .foregroundStyle(.tertiary)
             }
+            // A figure is read whole. Never wrap it digit by digit.
+            .lineLimit(1)
+            .fixedSize()
         }
     }
 

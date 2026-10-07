@@ -17,6 +17,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlin.coroutines.coroutineContext
 
 /// One decoded profile picture per URL, for the life of the process and on
 /// disk across launches. Ported from `AvatarCache` in `Marks.swift`: the
@@ -40,17 +43,47 @@ object AvatarCache {
 
     /// In-flight fetches, so two seats for one account share a single request
     /// instead of racing each other.
-    private val pending = mutableMapOf<String, Deferred<Bitmap?>>()
+    private val pending = mutableMapOf<String, Deferred<Outcome>>()
+
+    /// A picture, no picture, or no answer. Only the last is worth asking
+    /// again: a 404 or a body that is not an image will say the same thing.
+    private sealed interface Outcome {
+        data class Picture(val bitmap: Bitmap) : Outcome
+        data object Missing : Outcome
+        data object Unreachable : Outcome
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /// Already decoded, or nil. Synchronous so the first frame can paint the
     /// picture instead of the letter when it is a cache hit.
     fun cached(url: String): Bitmap? = synchronized(decoded) { decoded.get(url.trim()) }
 
+    /// The picture, asked for again while it cannot be reached.
+    ///
+    /// One timeout used to leave the letter on screen until something
+    /// recomposed with a new key. A picture that is not there stops at once.
+    /// One that could not be reached waits and tries again, backing off to
+    /// every thirty seconds, for as long as the caller's coroutine runs. The
+    /// composable's effect ends it when the avatar leaves the screen.
     suspend fun image(context: Context, url: String): Bitmap? {
         val key = url.trim()
         if (key.isEmpty()) return null
-        cached(key)?.let { return it }
+        var wait = 2_000L
+        while (coroutineContext.isActive) {
+            when (val outcome = attempt(context, key)) {
+                is Outcome.Picture -> return outcome.bitmap
+                Outcome.Missing -> return null
+                Outcome.Unreachable -> {
+                    delay(wait)
+                    wait = (wait * 2).coerceAtMost(30_000L)
+                }
+            }
+        }
+        return null
+    }
+
+    private suspend fun attempt(context: Context, key: String): Outcome {
+        cached(key)?.let { return Outcome.Picture(it) }
         val app = context.applicationContext
         val job = synchronized(pending) {
             pending[key] ?: scope.async(start = CoroutineStart.LAZY) {
@@ -66,8 +99,8 @@ object AvatarCache {
         return job.await()
     }
 
-    private fun load(context: Context, key: String): Bitmap? {
-        cached(key)?.let { return it }
+    private fun load(context: Context, key: String): Outcome {
+        cached(key)?.let { return Outcome.Picture(it) }
         val disk = diskFile(context, key)
         if (disk != null && disk.isFile) {
             val bitmap = runCatching {
@@ -76,11 +109,13 @@ object AvatarCache {
             if (bitmap != null) {
                 disk.setLastModified(System.currentTimeMillis())
                 store(key, bitmap)
-                return bitmap
+                return Outcome.Picture(bitmap)
             }
             disk.delete()
         }
-        val bitmap = download(key) ?: return null
+        val fetched = download(key)
+        if (fetched !is Outcome.Picture) return fetched
+        val bitmap = fetched.bitmap
         store(key, bitmap)
         if (disk != null) runCatching {
             disk.parentFile?.mkdirs()
@@ -96,7 +131,7 @@ object AvatarCache {
             disk.parentFile?.listFiles()?.filter { it.isFile && !it.name.endsWith(".new") }
                 ?.sortedByDescending { it.lastModified() }?.drop(MAX_COUNT)?.forEach { it.delete() }
         }
-        return bitmap
+        return fetched
     }
 
     private fun decode(bytes: ByteArray): Bitmap? {
@@ -129,17 +164,21 @@ object AvatarCache {
     /// Fetch and decode one avatar off the caller's thread. The download
     /// streams with a cap, so a body larger than the limit is rejected by its
     /// size before any of it is read into memory and decoded.
-    private fun download(url: String): Bitmap? {
+    private fun download(url: String): Outcome {
         val connection = runCatching { URL(url).openConnection() as HttpURLConnection }.getOrNull()
-            ?: return null
+            ?: return Outcome.Missing
         return try {
             connection.connectTimeout = TIMEOUT_MS
             connection.readTimeout = TIMEOUT_MS
             connection.instanceFollowRedirects = true
             connection.connect()
-            if (connection.responseCode !in 200..299) return null
+            val status = connection.responseCode
+            // Busy, rate limited or failing on the server's side: the same
+            // request can succeed in a moment.
+            if (status == 408 || status == 429 || status >= 500) return Outcome.Unreachable
+            if (status !in 200..299) return Outcome.Missing
             val declared = connection.contentLengthLong
-            if (declared > BYTE_LIMIT) return null
+            if (declared > BYTE_LIMIT) return Outcome.Missing
             val out = ByteArrayOutputStream()
             connection.inputStream.use { input ->
                 val buffer = ByteArray(32 * 1024)
@@ -148,15 +187,31 @@ object AvatarCache {
                     val read = input.read(buffer)
                     if (read < 0) break
                     total += read
-                    if (total > BYTE_LIMIT) return null
+                    if (total > BYTE_LIMIT) return Outcome.Missing
                     out.write(buffer, 0, read)
                 }
             }
             val bytes = out.toByteArray()
-            if (bytes.isEmpty()) return null
-            decode(bytes)
+            if (bytes.isEmpty()) return Outcome.Missing
+            decode(bytes)?.let { Outcome.Picture(it) } ?: Outcome.Missing
+        } catch (_: javax.net.ssl.SSLPeerUnverifiedException) {
+            // A certificate the host cannot prove. Asking again gets the same.
+            Outcome.Missing
+        } catch (error: javax.net.ssl.SSLHandshakeException) {
+            // A rejected certificate is permanent. A handshake cut short is
+            // the network, and worth asking again.
+            if (error.cause is java.security.cert.CertificateException) Outcome.Missing else Outcome.Unreachable
+        } catch (_: java.net.ProtocolException) {
+            // A redirect loop, or a 401 that offers no way to answer it.
+            Outcome.Missing
+        } catch (_: java.net.UnknownServiceException) {
+            // A scheme this connection cannot speak, such as cleartext http.
+            Outcome.Missing
+        } catch (_: java.io.IOException) {
+            // No route, a timeout, a dropped connection.
+            Outcome.Unreachable
         } catch (_: Exception) {
-            null
+            Outcome.Missing
         } finally {
             connection.disconnect()
         }

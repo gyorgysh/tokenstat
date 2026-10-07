@@ -27,12 +27,16 @@ import UIKit
 /// squeezed onto a phone; this layout uses the client type scale and full-width
 /// actions that match the rest of the app.
 struct ClientAccountSheet: View {
+    /// Whether the window behind the sheet has room for a sidebar. Read by
+    /// the presenter: inside the sheet the size classes describe the sheet.
+    let offersLayoutChoice: Bool
+
     @Environment(AccountModel.self) private var account
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
-            ClientAccountContent()
+            ClientAccountContent(offersLayoutChoice: offersLayoutChoice)
                 .navigationTitle(L10n.text("common.account"))
                 .navigationBarTitleDisplayMode(.large)
                 .toolbar {
@@ -71,6 +75,8 @@ enum ClientAccountPane: String, CaseIterable, Hashable {
 
 /// Phone-sized account settings: identity, plan, devices, sign out, legal.
 private struct ClientAccountContent: View {
+    let offersLayoutChoice: Bool
+
     @Environment(AccountModel.self) private var model
     @Environment(ClientTabCustomization.self) private var tabCustomization
     @Environment(ClientNavigationModel.self) private var navigation
@@ -435,15 +441,15 @@ private struct ClientAccountContent: View {
         .cardSurface()
     }
 
-    /// Which shape the client draws itself in, on an iPad.
+    /// Which shape the client draws itself in, when the window has room.
     ///
     /// Automatic is the answer for almost everybody and it is what the app
     /// ships with. The card exists for the two cases a heuristic cannot see:
     /// a keyboard used only for typing, and a person who prefers one shape.
-    /// It is absent on iPhone, where there is only ever one shape.
+    /// It is absent on a phone-sized window, where there is only ever one shape.
     @ViewBuilder
     private var layoutCard: some View {
-        if UIDevice.current.userInterfaceIdiom == .pad {
+        if offersLayoutChoice {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 ClientSectionTitle(title: L10n.text("apple.clientaccountsheet.layout.a5119091"), mark: "mark_device")
                 SegmentedTabs(

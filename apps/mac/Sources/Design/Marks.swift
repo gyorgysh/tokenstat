@@ -92,7 +92,7 @@ final class AvatarCache {
     private let decoded = NSCache<NSString, Held>()
     /// In flight fetches, so three `Avatar` views for one account share a
     /// single request instead of racing each other.
-    private var pending: [String: Task<(image: Image, bytes: Int)?, Never>] = [:]
+    private var pending: [String: Task<AvatarFetch.Outcome, Never>] = [:]
 
     init() {
         decoded.countLimit = 128
@@ -107,22 +107,46 @@ final class AvatarCache {
         decoded.object(forKey: url as NSString)?.image
     }
 
+    /// The picture, asked for again while it cannot be reached.
+    ///
+    /// One timeout used to leave the letter on screen until something rebuilt
+    /// the view. A picture that is not there (a 404, not an image) stops at
+    /// once. One that could not be reached waits and tries again, backing off
+    /// to every thirty seconds, for as long as the caller's task runs. The
+    /// view's own task ends it when the view goes, so nothing polls for a
+    /// face nobody is looking at.
     func image(for url: String) async -> Image? {
         let url = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !url.isEmpty else { return nil }
-        if let hit = decoded.object(forKey: url as NSString) { return hit.image }
-        if let running = pending[url] { return await running.value?.image }
+        var wait: Duration = .seconds(2)
+        while !Task.isCancelled {
+            switch await attempt(url) {
+            case .image(let image, _):
+                return image
+            case .missing:
+                return nil
+            case .unreachable:
+                try? await Task.sleep(for: wait)
+                wait = min(wait * 2, .seconds(30))
+            }
+        }
+        return nil
+    }
+
+    private func attempt(_ url: String) async -> AvatarFetch.Outcome {
+        if let hit = decoded.object(forKey: url as NSString) { return .image(hit.image, bytes: 0) }
+        if let running = pending[url] { return await running.value }
 
         let task = Task.detached(priority: .utility) {
             await AvatarFetch.image(from: url)
         }
         pending[url] = task
-        let fetched = await task.value
+        let outcome = await task.value
         pending[url] = nil
-        if let fetched {
-            decoded.setObject(Held(fetched.image), forKey: url as NSString, cost: fetched.bytes)
+        if case .image(let image, let bytes) = outcome {
+            decoded.setObject(Held(image), forKey: url as NSString, cost: bytes)
         }
-        return fetched?.image
+        return outcome
     }
 }
 
@@ -135,34 +159,74 @@ private enum AvatarFetch {
     /// that is a response doing something other than showing a face.
     static let byteLimit = 4 * 1024 * 1024
 
-    static func image(from url: String) async -> (image: Image, bytes: Int)? {
-        guard let parsed = URL(string: url) else { return nil }
+    /// Errors that say the URL itself is the problem, not the network.
+    static let permanentFailures: Set<URLError.Code> = [
+        .badURL,
+        .unsupportedURL,
+        .appTransportSecurityRequiresSecureConnection,
+        .fileDoesNotExist,
+        .noPermissionsToReadFile,
+        .dataLengthExceedsMaximum,
+        // A certificate the host cannot prove, or a login it wants. Asking
+        // again gets the same answer.
+        .serverCertificateUntrusted,
+        .serverCertificateHasBadDate,
+        .serverCertificateNotYetValid,
+        .serverCertificateHasUnknownRoot,
+        .clientCertificateRejected,
+        .clientCertificateRequired,
+        .userAuthenticationRequired,
+    ]
+
+    /// A picture, no picture, or no answer. Only the last is worth asking
+    /// again: a 404 or a body that is not an image will say the same thing.
+    enum Outcome {
+        case image(Image, bytes: Int)
+        case missing
+        case unreachable
+    }
+
+    static func image(from url: String) async -> Outcome {
+        guard let parsed = URL(string: url) else { return .missing }
         var request = URLRequest(url: parsed)
         request.timeoutInterval = 15
         request.setValue("image/*", forHTTPHeaderField: "Accept")
-        guard let (file, response) = try? await URLSession.shared.download(for: request) else {
-            return nil
+        let fetched: (URL, URLResponse)
+        do {
+            fetched = try await URLSession.shared.download(for: request)
+        } catch let error as URLError where permanentFailures.contains(error.code) {
+            // A URL this device will never load. Asking again every thirty
+            // seconds for as long as the face is on screen changes nothing.
+            return .missing
+        } catch {
+            return .unreachable
         }
+        let (file, response) = fetched
         defer { try? FileManager.default.removeItem(at: file) }
         // A 404 body is not a picture. Treating any bytes as an image is
         // how a missing upload became a random face.
         if let http = response as? HTTPURLResponse {
-            guard (200..<300).contains(http.statusCode) else { return nil }
-            guard http.expectedContentLength <= Int64(byteLimit) else { return nil }
+            // Busy, rate limited or failing on the server's side: the same
+            // request can succeed in a moment.
+            if http.statusCode == 408 || http.statusCode == 429 || http.statusCode >= 500 {
+                return .unreachable
+            }
+            guard (200..<300).contains(http.statusCode) else { return .missing }
+            guard http.expectedContentLength <= Int64(byteLimit) else { return .missing }
         }
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: file.path),
               let size = (attributes[.size] as? NSNumber)?.intValue,
               size > 0, size <= byteLimit,
               let data = try? Data(contentsOf: file, options: .mappedIfSafe)
         else {
-            return nil
+            return .missing
         }
         #if os(macOS)
-        guard let image = NSImage(data: data) else { return nil }
-        return (Image(nsImage: image), size)
+        guard let image = NSImage(data: data) else { return .missing }
+        return .image(Image(nsImage: image), bytes: size)
         #else
-        guard let image = UIImage(data: data) else { return nil }
-        return (Image(uiImage: image), size)
+        guard let image = UIImage(data: data) else { return .missing }
+        return .image(Image(uiImage: image), bytes: size)
         #endif
     }
 }

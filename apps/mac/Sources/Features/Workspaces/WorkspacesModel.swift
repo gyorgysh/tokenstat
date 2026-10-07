@@ -936,17 +936,29 @@ final class WorkspacesModel {
     /// This machine's registered folders, with their git state.
     ///
     /// One host call. Cheap enough to run whenever files change, which is what
-    /// separates it from `loadRemote`.
-    func loadLocal() async {
+    /// separates it from `loadRemote`. False when the host did not answer, so
+    /// launch can ask again rather than leave the sidebar empty.
+    @discardableResult
+    func loadLocal() async -> Bool {
         let ecosystemLease = EcosystemPublisher.lease
+        let scope = WorkSessionContext.shared.scope
         isLoading = true
         defer { isLoading = false }
         do {
             let loaded = try await Bridge.workspaces()
-            guard EcosystemPublisher.lease == ecosystemLease else { return }
-            EcosystemPublisher.publish(projects: loaded.filter(\.exists).map {
-                EcosystemProject(id: $0.id, name: $0.name, host: "This Mac")
-            }, lease: ecosystemLease, replacing: .local)
+            // A different session owns the sidebar now. Say so, so launch
+            // asks again for the one on screen.
+            guard WorkSessionContext.shared.scope == scope else { return false }
+            // The lease guards the system publication only. It changes when
+            // the account is verified, which at launch lands while this call
+            // is in flight, and gating the sidebar on it threw the whole
+            // answer away: the app opened with no projects until something
+            // else reloaded them.
+            if EcosystemPublisher.lease == ecosystemLease {
+                EcosystemPublisher.publish(projects: loaded.filter(\.exists).map {
+                    EcosystemProject(id: $0.id, name: $0.name, host: "This Mac")
+                }, lease: ecosystemLease, replacing: .local)
+            }
             localFolders = loaded
             publishFolders()
             errorMessage = nil
@@ -959,8 +971,10 @@ final class WorkspacesModel {
                     summaries[summary.id] = summary
                 }
             }
+            return true
         } catch {
             errorMessage = error.localizedDescription
+            return false
         }
     }
 

@@ -34,17 +34,20 @@ enum Skeleton {
         var body: some View {
             RoundedRectangle(cornerRadius: 4)
                 .fill(Theme.border)
-                .frame(width: width, height: height)
-                .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
-                .opacity(reduceMotion ? 1 : (bright ? 1 : 0.52))
+                // The pulse animates the opacity and nothing else. Scoped
+                // after the frame, a forever animation also caught the bar's
+                // position while the layout was still settling (landscape, a
+                // split column, an iPhone Duo opening) and swung it between
+                // the old place and the new one for as long as it showed.
                 .animation(
                     reduceMotion
                         ? nil
                         : .easeInOut(duration: 0.95)
                             .repeatForever(autoreverses: true)
-                            .delay(phase),
-                    value: bright
-                )
+                            .delay(phase)
+                ) { $0.opacity(reduceMotion ? 1 : (bright ? 1 : 0.52)) }
+                .frame(width: width, height: height)
+                .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
                 .onAppear {
                     guard !reduceMotion else { return }
                     bright = true

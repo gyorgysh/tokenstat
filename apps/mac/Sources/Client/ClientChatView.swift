@@ -511,6 +511,7 @@ struct ClientChatThread: View {
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     /// The folder's uncommitted work and the branch's pull request, above
     /// the composer, as on the Mac.
@@ -546,12 +547,12 @@ struct ClientChatThread: View {
     }
 
     /// Files, Changes and History for this folder, beside the transcript.
-    /// Wide iPad only: compact layouts push the same surface instead, and a
-    /// large iPhone in landscape stays the phone layout.
+    /// Regular both ways only (iPad, an open iPhone Duo): compact layouts push
+    /// the same surface instead, and a large iPhone in landscape is compact
+    /// down, so it stays the phone layout.
     private var showsToolsPane: Bool {
         showingToolsPane
-            && sizeClass == .regular
-            && UIDevice.current.userInterfaceIdiom == .pad
+            && ClientLayout.hasRoom(horizontal: sizeClass, vertical: verticalSizeClass)
             && model.peer != nil
             && model.workspaceID != nil
     }
@@ -725,8 +726,7 @@ struct ClientChatThread: View {
                 if toolsIdentity != nil {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button(L10n.text("apple.clientchatview.project_tools.c50826a7"), .source) {
-                            if sizeClass == .regular,
-                               UIDevice.current.userInterfaceIdiom == .pad {
+                            if ClientLayout.hasRoom(horizontal: sizeClass, vertical: verticalSizeClass) {
                                 showingToolsPane.toggle()
                             } else {
                                 pushingTools = true

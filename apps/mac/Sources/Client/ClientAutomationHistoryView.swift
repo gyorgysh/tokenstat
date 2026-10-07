@@ -143,8 +143,11 @@ struct ClientAutomationHistoryList: View {
 }
 
 struct HistorySheetPresentation: ViewModifier {
+    /// From the presenter: inside the sheet the size classes describe the sheet.
+    let hasRoom: Bool
+
     func body(content: Content) -> some View {
-        if UIDevice.current.userInterfaceIdiom == .pad {
+        if hasRoom {
             content.presentationDragIndicator(.visible)
         } else {
             content

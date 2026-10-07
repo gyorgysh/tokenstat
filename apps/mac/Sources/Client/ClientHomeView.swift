@@ -20,7 +20,8 @@ struct ClientHomeView: View {
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(\.openClientAccount) private var openAccount
-    @State private var model = HomeModel()
+    /// The session's, from `ClientSessionModels`, so a layout swap keeps it.
+    @Environment(HomeModel.self) private var model
     @State private var layout = HomeLayout.shared
     /// The day whose detail sheet is open. A sheet rather than the Mac's hover
     /// popover, because a finger has no hover.
