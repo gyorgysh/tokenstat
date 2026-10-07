@@ -61,14 +61,37 @@ pub(crate) fn parse_identity(output: &str) -> Result<Value, String> {
 }
 
 pub(crate) fn stage_code_command() -> String {
-    // A retry must replace a code left by a previous attempt. Remove the
-    // reserved file first, then create it with noclobber still on, so two
-    // concurrent writers cannot both believe they won.
-    format!("umask 077; rm -f \"{CODE_PATH}\"; set -C; cat > \"{CODE_PATH}\"")
+    // Both material and its exact staging identity travel over stdin. Publish
+    // ownership first under the shared lock: an interrupted stage must never
+    // leave a new code carrying the preceding attempt's cleanup authority.
+    format!(
+        "{} IFS= read -r owner || exit 1; IFS= read -r code || exit 1; \
+         owner_tmp=$(mktemp \"$HOME/.tokenstat-pairing-owner.XXXXXX\") || exit 1; \
+         code_tmp=$(mktemp \"$HOME/.tokenstat-pairing-code.XXXXXX\") || {{ rm -f \"$owner_tmp\"; exit 1; }}; \
+         trap 'rm -f \"$owner_tmp\" \"$code_tmp\"; rmdir \"$lock\"' EXIT; \
+         printf '%s\\n' \"$owner\" > \"$owner_tmp\" && \
+         printf '%s\\n' \"$code\" > \"$code_tmp\" && \
+         mv -f \"$owner_tmp\" \"$HOME/.tokenstat-pairing.owner\" && \
+         mv -f \"$code_tmp\" \"{CODE_PATH}\"",
+        pairing_lock_command()
+    )
 }
 
 pub(crate) fn clear_code_command() -> String {
-    format!("rm -f \"{CODE_PATH}\"")
+    format!(
+        "{} IFS= read -r expected || exit 1; \
+         actual=$(cat \"$HOME/.tokenstat-pairing.owner\" 2>/dev/null) || exit 0; \
+         [ -n \"$expected\" ] && [ \"$actual\" = \"$expected\" ] || exit 0; \
+         rm -f \"{CODE_PATH}\" \"$HOME/.tokenstat-pairing.owner\"",
+        pairing_lock_command()
+    )
+}
+
+fn pairing_lock_command() -> &'static str {
+    "umask 077; lock=\"$HOME/.tokenstat-pairing.lock\"; tries=0; \
+     until mkdir \"$lock\" 2>/dev/null; do \
+     tries=$((tries + 1)); [ \"$tries\" -lt 50 ] || exit 1; sleep 0.1; done; \
+     trap 'rmdir \"$lock\"' EXIT; trap 'exit 1' HUP INT TERM;"
 }
 
 /// Turn the script's key=value lines into an answer a screen can read.
@@ -340,7 +363,7 @@ mod tests {
             .stdin
             .take()
             .unwrap()
-            .write_all(b"WXYZ-1234\n")
+            .write_all(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nWXYZ-1234\n")
             .unwrap();
         let output = child.wait_with_output().unwrap();
         assert!(output.status.success(), "{:?}", output);
@@ -353,6 +376,52 @@ mod tests {
                 0
             );
         }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn stale_cleanup_cannot_remove_a_successor_staging_file() {
+        use std::io::Write;
+        let root =
+            std::env::temp_dir().join(format!("tokenstat-stage-race-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let run = |command: String, input: &str| {
+            let mut child = std::process::Command::new("sh")
+                .args(["-c", &command])
+                .env("HOME", &root)
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(input.as_bytes())
+                .unwrap();
+            assert!(child.wait().unwrap().success());
+        };
+        run(
+            stage_code_command(),
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nWXYZ-1234\n",
+        );
+        run(
+            stage_code_command(),
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nABCD-5678\n",
+        );
+        run(clear_code_command(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n");
+        assert_eq!(
+            std::fs::read_to_string(root.join(".tokenstat-pairing")).unwrap(),
+            "ABCD-5678\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join(".tokenstat-pairing.owner")).unwrap(),
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"
+        );
+        run(clear_code_command(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n");
+        assert!(!root.join(".tokenstat-pairing").exists());
+        assert!(!root.join(".tokenstat-pairing.owner").exists());
+        assert!(!root.join(".tokenstat-pairing.lock").exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 

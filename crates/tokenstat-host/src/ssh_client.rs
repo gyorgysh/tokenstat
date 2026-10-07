@@ -483,20 +483,41 @@ fn call_inner(method: &str, params: &str) -> Result<Value, crate::error::Dispatc
             if plain.len() != 8 || !plain.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
                 return Err("A pairing code is eight letters or digits.".into());
             }
+            let stage_id: String = rand::random::<[u8; 16]>()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
             runtime()?.block_on(provision_exec(
                 p.open,
                 crate::ssh_provision::stage_code_command(),
-                Some(format!("{code}\n")),
+                Some(format!("{stage_id}\n{code}\n")),
             ))?;
-            Ok(json!({"staged": true, "path": crate::ssh_provision::CODE_PATH}))
+            Ok(
+                json!({"staged": true, "stageId": stage_id, "path": crate::ssh_provision::CODE_PATH}),
+            )
         }
         // And taken away again, because this product put it there.
         "ssh.provision.clearCode" => {
-            let p: OpenParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            #[derive(Deserialize)]
+            struct Clear {
+                #[serde(default, rename = "stageId")]
+                stage_id: Option<String>,
+                #[serde(flatten)]
+                open: OpenParams,
+            }
+            // Legacy clients without a receipt cannot delete a successor's
+            // staging file. The installer still consumes their file normally.
+            let p: Clear = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            let Some(stage_id) = p.stage_id else {
+                return Ok(json!({"cleared": false}));
+            };
+            if stage_id.len() != 32 || !stage_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err("The staging receipt is invalid.".into());
+            }
             runtime()?.block_on(provision_exec(
-                p,
+                p.open,
                 crate::ssh_provision::clear_code_command(),
-                None,
+                Some(format!("{stage_id}\n")),
             ))?;
             Ok(json!({"cleared": true}))
         }

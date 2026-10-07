@@ -459,7 +459,7 @@ final class ClientSetupModel {
             self.checkpoint(.installRequested)
             let code = try await Bridge.mintPairingCode().code
             try self.checkOwnership(owner, operation: operation)
-            try await Bridge.stagePairingCode(host, code: code, auth: auth)
+            let stageID = try await Bridge.stagePairingCode(host, code: code, auth: auth)
             var openedTerminal: SSHLiveTerminal?
             do {
                 try self.checkOwnership(owner, operation: operation)
@@ -492,7 +492,7 @@ final class ClientSetupModel {
                 openedTerminal?.stop()
                 if self.terminal === openedTerminal { self.terminal = nil }
                 if self.coordinator.generation == operation {
-                    try? await Bridge.clearPairingCode(host, auth: auth)
+                    try? await Bridge.clearPairingCode(host, stageID: stageID, auth: auth)
                 }
                 throw error
             }

@@ -3628,21 +3628,21 @@ extension Bridge {
     /// watching never sees it.
     static func stagePairingCode(
         _ host: SSHHost, code: String, auth: [String: Any], jump: [String: Any]? = nil
-    ) async throws {
-        struct Staged: Codable, Sendable { var staged: Bool }
+    ) async throws -> String {
+        struct Staged: Codable, Sendable { var staged: Bool; var stageId: String }
         var params = sessionParams(host, rows: 24, cols: 100, auth: auth, jump: jump)
         params["code"] = code
-        _ = try await background("ssh.provision.stageCode", params, as: Staged.self)
+        return try await background("ssh.provision.stageCode", params, as: Staged.self).stageId
     }
 
     /// And take it away again, because this app put it there.
     static func clearPairingCode(
-        _ host: SSHHost, auth: [String: Any], jump: [String: Any]? = nil
+        _ host: SSHHost, stageID: String, auth: [String: Any], jump: [String: Any]? = nil
     ) async throws {
         struct Cleared: Codable, Sendable { var cleared: Bool }
-        _ = try await background("ssh.provision.clearCode", sessionParams(
-            host, rows: 24, cols: 100, auth: auth, jump: jump
-        ), as: Cleared.self)
+        var params = sessionParams(host, rows: 24, cols: 100, auth: auth, jump: jump)
+        params["stageId"] = stageID
+        _ = try await background("ssh.provision.clearCode", params, as: Cleared.self)
     }
 
     /// The install line, composed by the host so every surface that shows it

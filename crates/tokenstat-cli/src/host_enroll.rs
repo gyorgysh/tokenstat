@@ -16,11 +16,16 @@ impl PairingCode {
             (None, None) => Ok(None),
             (Some(value), None) => Self::parse(value).map(Some),
             (None, Some(path)) => {
-                let mut reader: Box<dyn Read> = if path == Path::new("-") {
-                    Box::new(std::io::stdin())
-                } else {
-                    Box::new(open_pairing_file(path)?)
-                };
+                let (mut reader, opened): (Box<dyn Read>, Option<std::fs::Metadata>) =
+                    if path == Path::new("-") {
+                        (Box::new(std::io::stdin()), None)
+                    } else {
+                        let file = open_pairing_file(path)?;
+                        let metadata = file
+                            .metadata()
+                            .context("Could not inspect the opened pairing file")?;
+                        (Box::new(file), Some(metadata))
+                    };
                 let mut value = String::new();
                 reader
                     .by_ref()
@@ -35,8 +40,8 @@ impl PairingCode {
                 // keep the code in memory and retire the file even if enrollment
                 // fails later or the phone disconnects. Other input files belong
                 // to the caller and are left alone.
-                if let Some(dirs) = directories::BaseDirs::new() {
-                    remove_staged_file(path, dirs.home_dir())?;
+                if let (Some(dirs), Some(opened)) = (directories::BaseDirs::new(), opened) {
+                    remove_staged_file(path, dirs.home_dir(), &opened)?;
                 }
                 Ok(Some(code))
             }
@@ -66,7 +71,7 @@ impl PairingCode {
     }
 }
 
-fn remove_staged_file(path: &Path, home: &Path) -> Result<()> {
+fn remove_staged_file(path: &Path, home: &Path, opened: &std::fs::Metadata) -> Result<()> {
     // Compare canonical forms: `./~/.tokenstat-pairing`, double slashes, or a
     // hardlink spelling must still retire the wizard's file, and a symlink
     // pointing at it must not delete through the link check below.
@@ -91,7 +96,56 @@ fn remove_staged_file(path: &Path, home: &Path) -> Result<()> {
     #[cfg(not(unix))]
     let same = canonical_same;
     if same {
-        std::fs::remove_file(&staged).context("Could not remove the staged pairing-code file")?;
+        // Use the same lock as SSH staging/cleanup. Compare the file actually
+        // read, not the path reopened after a new attempt replaced it.
+        struct Lock(std::path::PathBuf);
+        impl Drop for Lock {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir(&self.0);
+            }
+        }
+        let lock = home.join(".tokenstat-pairing.lock");
+        let mut guard = None;
+        for _ in 0..50 {
+            match std::fs::create_dir(&lock) {
+                Ok(()) => {
+                    guard = Some(Lock(lock.clone()));
+                    break;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                Err(error) => return Err(error).context("Could not lock the pairing-code file"),
+            }
+        }
+        let _guard = guard.context("The pairing-code file is busy; retry setup")?;
+        let current = match std::fs::symlink_metadata(&staged) {
+            Ok(current) if current.is_file() => current,
+            Ok(_) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                return Err(error).context("Could not inspect the staged pairing-code file");
+            }
+        };
+        #[cfg(unix)]
+        let unchanged = {
+            use std::os::unix::fs::MetadataExt;
+            current.dev() == opened.dev() && current.ino() == opened.ino()
+        };
+        #[cfg(not(unix))]
+        let unchanged =
+            current.len() == opened.len() && current.modified().ok() == opened.modified().ok();
+        if unchanged {
+            std::fs::remove_file(&staged)
+                .context("Could not remove the staged pairing-code file")?;
+            match std::fs::remove_file(home.join(".tokenstat-pairing.owner")) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(error).context("Could not remove the pairing staging receipt");
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -188,9 +242,9 @@ mod tests {
         let other = home.join("my-code");
         std::fs::write(&staged, "WXYZ-1234").unwrap();
         std::fs::write(&other, "WXYZ-1234").unwrap();
-        remove_staged_file(&other, &home).unwrap();
+        remove_staged_file(&other, &home, &std::fs::metadata(&other).unwrap()).unwrap();
         assert!(other.is_file());
-        remove_staged_file(&staged, &home).unwrap();
+        remove_staged_file(&staged, &home, &std::fs::metadata(&staged).unwrap()).unwrap();
         assert!(!staged.exists());
         std::fs::remove_dir_all(home).unwrap();
     }
@@ -204,11 +258,39 @@ mod tests {
         let alias = home.join("alias-code");
         std::fs::write(&staged, "WXYZ-1234").unwrap();
         std::fs::hard_link(&staged, &alias).unwrap();
-        remove_staged_file(&alias, &home).unwrap();
+        remove_staged_file(&alias, &home, &std::fs::metadata(&alias).unwrap()).unwrap();
         // The reserved file is retired even when the read came through the
         // hardlink; the caller's own alias path is not what gets removed.
         assert!(!staged.exists());
         assert!(alias.is_file());
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_consumed_predecessor_cannot_delete_a_newly_staged_code() {
+        let home =
+            std::env::temp_dir().join(format!("tokenstat-enroll-race-{}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        let staged = home.join(".tokenstat-pairing");
+        std::fs::write(&staged, "WXYZ-1234").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let file = open_pairing_file(&staged).unwrap();
+        let opened = file.metadata().unwrap();
+        let next = home.join("next");
+        std::fs::write(&next, "ABCD-5678").unwrap();
+        std::fs::rename(&next, &staged).unwrap();
+        std::fs::write(home.join(".tokenstat-pairing.owner"), "successor").unwrap();
+        remove_staged_file(&staged, &home, &opened).unwrap();
+        assert_eq!(std::fs::read_to_string(&staged).unwrap(), "ABCD-5678");
+        assert_eq!(
+            std::fs::read_to_string(home.join(".tokenstat-pairing.owner")).unwrap(),
+            "successor"
+        );
+        assert!(!home.join(".tokenstat-pairing.lock").exists());
         std::fs::remove_dir_all(home).unwrap();
     }
 
