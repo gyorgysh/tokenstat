@@ -44,6 +44,7 @@ setup_state = (sources / 'Client/ClientSetupState.swift').read_text()
 setup_coordinator = plain((sources / 'Client/ClientSetupCoordinator.swift').read_text())
 owner = (sources / 'Features/Machines/SSHOperationOwner.swift').read_text()
 workbench = plain(block((sources / 'Client/ClientSSHWorkbench.swift').read_text(), '@MainActor @Observable\nfinal class ClientSSHWorkbench'))
+project_links = plain((sources / 'Client/ClientSSHProjectLinks.swift').read_text())
 setup_session = plain(block((sources / 'Client/ClientSetupSession.swift').read_text(), '@MainActor @Observable\nfinal class ClientSetupSession'))
 cache = block((sources / 'Client/ClientRootView.swift').read_text(), '@MainActor\nfinal class ClientSessionModels')
 connection = (sources / 'Features/Machines/SSHConnectionsView.swift').read_text()
@@ -106,6 +107,7 @@ enum SSHLibraryView { enum Section { case hosts, keys, snippets } }
     init(isOwnerCurrent: @escaping @MainActor () -> Bool = { true }) {}
     var sessions: [SSHLiveTerminal] = []; var selected: SSHLiveTerminal? { sessions.last }
     var foreground = true; var retirements = 0
+    func select(_ session: SSHLiveTerminal) {}
     func adopt(_ value: SSHLiveTerminal, startup: [SSHSnippet] = []) { sessions.append(value) }
     func setForeground(_ value: Bool) { foreground = value }
     func watch() async {}
@@ -125,8 +127,8 @@ enum SSHLibraryView { enum Section { case hosts, keys, snippets } }
         try await gate("setup.check"); return .init(distro: "Mock Linux", ready: true)
     }
     static func mintPairingCode() async throws -> PairingCode { try await gate("setup.mint"); return .init(code: "mock-code", expiresIn: 60) }
-    static func stagePairingCode(_ host: SSHHost, code: String, auth: [String: Any]) async throws { try await gate("setup.stage") }
-    static func clearPairingCode(_ host: SSHHost, auth: [String: Any]) async throws { try await gate("setup.clear") }
+    static func stagePairingCode(_ host: SSHHost, code: String, auth: [String: Any]) async throws -> String { try await gate("setup.stage"); return "mock-stage-receipt" }
+    static func clearPairingCode(_ host: SSHHost, stageID: String, auth: [String: Any]) async throws { precondition(stageID == "mock-stage-receipt"); try await gate("setup.clear") }
     static func installLine(allow: String?, name: String?, agents: [String], printInvite: Bool, codeFile: Bool) async throws -> InstallLine {
         try await gate("setup.line"); return .init(oneLine: "mock-install", annotated: "mock-install")
     }
@@ -204,7 +206,7 @@ enum SSHLibraryView { enum Section { case hosts, keys, snippets } }
 func fixture(_ id: String = "host") -> SSHHost {
     SSHHost(id: id, label: id, hostname: "mock.example", port: 22, username: "mock", tags: [], provider: nil, hostKeys: ["mock-fingerprint"])
 }
-''' + dtos + '\n' + '\n'.join(block(models, 'struct ' + name + ':') for name in ['ServerCheck', 'InstallLine', 'PairingCode']) + '\n' + block((sources / 'Features/Machines/SSHLibraryView.swift').read_text(), 'enum SSHLibraryRoute:') + '\n' + owner + drafts + library + vault + '\n' + workbench + '\n' + setup_session + '\n' + cache + '\n' + setup_state + '\n' + setup_coordinator + '\n' + setup + r'''
+''' + dtos + '\n' + '\n'.join(block(models, 'struct ' + name + ':') for name in ['ServerCheck', 'InstallLine', 'PairingCode']) + '\n' + block((sources / 'Features/Machines/SSHLibraryView.swift').read_text(), 'enum SSHLibraryRoute:') + '\n' + owner + drafts + library + vault + '\n' + project_links + '\n' + workbench + '\n' + setup_session + '\n' + cache + '\n' + setup_state + '\n' + setup_coordinator + '\n' + setup + r'''
 @MainActor final class ConnectHarness {
     var host: SSHHost; let model: SSHLibraryModel
     var password = "mock-password", selectedKeyID = ""

@@ -14,6 +14,7 @@ final class ClientSSHWorkbench {
 
     let library: SSHLibraryModel
     let sessions: SSHSessionsModel
+    let projectLinks: ClientSSHProjectLinks
     var vault: SSHVaultModel { library.vault }
     var section = SSHLibraryView.Section.hosts
     var route: SSHLibraryRoute? {
@@ -32,7 +33,21 @@ final class ClientSSHWorkbench {
     init(scope: WorkReference.Scope?) {
         let library = SSHLibraryModel(ownerScope: scope)
         self.library = library
+        projectLinks = ClientSSHProjectLinks(scope: scope, isOwnerCurrent: { library.ownership.claim() != nil })
         sessions = SSHSessionsModel(isOwnerCurrent: { library.ownership.claim() != nil })
+    }
+
+    func show(_ session: SSHLiveTerminal) {
+        guard active, library.ownership.claim() != nil,
+              sessions.sessions.contains(where: { $0 === session }) else { return }
+        sessions.select(session)
+        terminal = TerminalPresentation()
+    }
+
+    func rename(_ session: SSHLiveTerminal, to name: String) {
+        guard active, library.ownership.claim() != nil,
+              sessions.sessions.contains(where: { $0 === session }) else { return }
+        projectLinks.rename(session.id, to: name)
     }
 
     func connect(_ host: SSHHost) {
@@ -100,6 +115,12 @@ struct ClientSSHPresentations: ViewModifier {
         let request = workbench.connection
         let terminalRequest = workbench.terminal
         content
+            .onChange(of: workbench.sessions.sessions.map(\.id)) { _, ids in
+                if workbench.sessions.loaded { workbench.projectLinks.prune(available: Set(ids)) }
+            }
+            .onChange(of: workbench.sessions.loaded) { _, loaded in
+                if loaded { workbench.projectLinks.prune(available: Set(workbench.sessions.sessions.map(\.id))) }
+            }
             .sheet(item: Binding(
                 get: { workbench.connection },
                 set: { value in

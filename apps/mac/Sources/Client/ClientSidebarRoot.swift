@@ -303,6 +303,9 @@ struct ClientSidebarRoot: View {
                                 ForEach(sessions(in: folder)) { session in
                                     sessionRow(session, in: folder, peer: host.peerKey)
                                 }
+                                ClientProjectSSHRows(peer: host.peerKey,
+                                    workspace: ClientRemote.rawWorkspaceID(of: folder) ?? folder.id,
+                                    sidebar: true, rowHeight: rowHeight)
                                 ClientProjectChatRows(peer: host.peerKey, hostName: host.name,
                                     folder: folder, rowHeight: rowHeight,
                                     entry: projectChats.entry(peer: host.peerKey,
