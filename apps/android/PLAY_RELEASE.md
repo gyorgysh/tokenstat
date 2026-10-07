@@ -54,11 +54,16 @@ requires a matching upload-key signature on both the AAB and APK, checks APK
 - `tokenstat-<version>-release.aab`: upload to Play Console.
 - `tokenstat-<version>-release.apk`: direct installation using the upload key.
 - `tokenstat-<version>-<versionCode>-symbols.zip`: R8 mappings and native symbols.
+- `native-debug-symbols.zip`: native symbols ready for the Play Console upload slot.
 - `release-info.txt` and `SHA256SUMS`: source commit, signer and file hashes.
 
 The default output directory is `dist/android`. Nothing is uploaded or published
 by this command. A directly installed APK cannot replace a Play installation
 when Play uses a different app signing key.
+
+The AAB embeds native debug symbols automatically. The combined symbols archive
+is for local retention; upload `native-debug-symbols.zip` directly if Play requests
+separate symbols for an existing bundle.
 
 Before uploading, check the bundle with Google's `bundletool validate` and
 `bundletool dump config`; native-library alignment must be `PAGE_ALIGNMENT_16K`.

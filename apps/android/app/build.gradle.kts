@@ -43,12 +43,14 @@ val languageResources = tasks.register<GenerateLanguageResources>("languageResou
 android {
     namespace = "ai.tokenstat.tokenstat"
     compileSdk = 37
+    // Pin the stripping toolchain so AGP can package native debug symbols.
+    ndkVersion = "28.2.13676358"
 
     defaultConfig {
         applicationId = "ai.tokenstat.tokenstat"
         minSdk = 28
         targetSdk = 36
-        versionCode = 148
+        versionCode = 149
         versionName = "1.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true

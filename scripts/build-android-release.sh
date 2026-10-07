@@ -124,6 +124,14 @@ if [ ! -s "$mapping_dir/mapping.txt" ] || [ ! -s "$symbols" ]; then
     echo "error: release R8 mapping or native debug symbols are missing" >&2
     exit 1
 fi
+python3 - "$src" <<'PY'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    for abi in ("arm64-v8a", "x86_64"):
+        name = f"BUNDLE-METADATA/com.android.tools.build.debugsymbols/{abi}/libtokenstat_ffi.so.dbg"
+        if name not in archive.namelist():
+            raise SystemExit(f"error: App Bundle is missing native symbols for {abi}")
+PY
 
 version="$(
     awk -F'"' '/^[[:space:]]*versionName[[:space:]]*=/{ print $2; exit }' \
@@ -143,6 +151,7 @@ cp "$src" "$package_dir/$bundle_name"
 cp "$apk" "$package_dir/$apk_name"
 cp -R "$mapping_dir" "$scratch/symbols/mapping"
 cp "$symbols" "$scratch/symbols/native-debug-symbols.zip"
+cp "$symbols" "$package_dir/native-debug-symbols.zip"
 (
     cd "$scratch/symbols"
     zip -qr "$package_dir/$symbols_name" mapping native-debug-symbols.zip
@@ -166,14 +175,16 @@ APK 16 KB ZIP alignment verified.
 AAB: for Google Play upload. No upload or publication was performed.
 APK: for direct installation with the upload key; Play may use a different app signing key.
 Symbols archive: R8 mappings and native debug symbols for this build.
+Native symbols are embedded in the AAB; native-debug-symbols.zip is also ready for direct Play Console upload.
 Production acceptance checks: apps/android/PARITY.md and apps/android/PLAY_RELEASE.md.
 EOF
 (
     cd "$package_dir"
-    "${checksum[@]}" "$bundle_name" "$apk_name" "$symbols_name" release-info.txt > SHA256SUMS
+    "${checksum[@]}" "$bundle_name" "$apk_name" "$symbols_name" native-debug-symbols.zip release-info.txt > SHA256SUMS
 )
 mkdir -p "$OUT"
 cp "$package_dir/$bundle_name" "$package_dir/$apk_name" "$package_dir/$symbols_name" \
+    "$package_dir/native-debug-symbols.zip" \
     "$package_dir/release-info.txt" "$package_dir/SHA256SUMS" "$OUT/"
 
 echo "Verified upload certificate SHA-256: $expected_cert"
