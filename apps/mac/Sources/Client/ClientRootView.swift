@@ -431,6 +431,7 @@ struct ClientRootView: View {
         .environment(navigation)
         .environment(tabCustomization)
         .environment(editors)
+        .environment(sessionModels.models(for: WorkSessionContext.shared.scope).chats)
     }
 
     /// System routes wait for sign-in and reuse the saved-route availability
@@ -737,6 +738,7 @@ final class ClientSessionModels {
     @MainActor
     final class Models {
         let workspaces = ClientWorkspacesModel()
+        let chats = ClientChatSessions()
         let home = HomeModel()
         let insights = ClientInsightsModel()
         let devices = ClientDevicesModel()

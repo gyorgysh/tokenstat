@@ -156,6 +156,18 @@ final class ClientNavigationModel {
     /// is: locking the phone does not unmount it, and remounting blanks the
     /// transcript. The cover a tap presents is `presentedChat`, not this.
     var visibleChat: WorkReference? { didSet { if visibleChat != oldValue { routeLaunch.navigationChanged() } } }
+    @ObservationIgnored private var visibleChatOwner: UUID?
+
+    func showChat(_ reference: WorkReference?, owner: UUID) {
+        visibleChat = reference
+        visibleChatOwner = reference == nil ? nil : owner
+    }
+
+    func leaveChat(owner: UUID) {
+        guard visibleChatOwner == owner else { return }
+        visibleChatOwner = nil
+        visibleChat = nil
+    }
 
     /// A chat opened from a notification on the tab layout, where there is
     /// no sidebar to land the folder in. Dismissing it returns where you were.
@@ -194,6 +206,7 @@ final class ClientNavigationModel {
         section = .sessions
         requestedChat = nil
         visibleChat = nil
+        visibleChatOwner = nil
         presentedChat = nil
         presentedTaskBoard = nil
         suggestedPrompt = nil

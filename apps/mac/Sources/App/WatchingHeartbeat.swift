@@ -32,9 +32,7 @@ struct WatchingHeartbeat: ViewModifier {
     /// False while this pane is mounted but behind another destination.
     var isActive: Bool = true
 
-    /// One stable id for this mounted chat surface. A host uses it to keep
-    /// separate leases for a Mac and phone viewing the same conversation.
-    @State private var watcherID = UUID().uuidString
+    @Environment(\.scenePhase) private var scenePhase
 
     /// Comfortably inside the host's 30 second lease, so one slow or dropped
     /// request does not let a notification through.
@@ -42,8 +40,11 @@ struct WatchingHeartbeat: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .task(id: "\(conversationID ?? "")-\(peer ?? "")-\(isActive)") {
-                guard isActive, let id = conversationID, !id.isEmpty else { return }
+            .task(id: "\(conversationID ?? "")-\(peer ?? "")-\(isActive)-\(scenePhase == .active)") {
+                guard scenePhase == .active, isActive, let id = conversationID, !id.isEmpty else { return }
+                // A late release from the previous scene phase must never
+                // remove the foreground task's newly renewed lease.
+                let watcherID = UUID().uuidString
                 defer {
                     // Leaving the screen. The lease would expire anyway, and
                     // saying so makes the next half minute behave correctly.

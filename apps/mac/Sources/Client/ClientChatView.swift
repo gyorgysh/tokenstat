@@ -22,13 +22,38 @@ struct ClientChatView: View {
     /// returning to, creating the first one when this folder has none.
     var openConversationOnAppear = false
 
-    @State private var model = ChatModel()
-    @State private var loaded = false
+    @Environment(ClientChatSessions.self) private var sessions
+
+    var body: some View {
+        ClientChatContent(peer: peer, workspaceID: workspaceID, folderName: folderName,
+            hostName: hostName, folder: folder, openConversationOnAppear: openConversationOnAppear,
+            session: sessions.session(peer: peer, workspace: workspaceID))
+            .id(ClientChatSessions.Key(peer: peer, workspace: workspaceID, conversation: nil))
+    }
+}
+
+private struct ClientChatContent: View {
+    let peer: String
+    let workspaceID: String
+    let folderName: String
+    let hostName: String
+    let folder: WorkspaceFolder?
+    let openConversationOnAppear: Bool
+    let session: ClientChatSession
+    @State private var viewer = UUID()
+    private var model: ChatModel { session.model }
+    private var loaded: Bool {
+        get { session.loaded }
+        nonmutating set { session.loaded = newValue }
+    }
     @State private var search = ""
     @State private var agent = ""
     @State private var runningOnly = false
     @State private var alphabetical = false
-    @State private var retainedThread: ChatConversation?
+    private var retainedThread: ChatConversation? {
+        get { session.retainedThread }
+        nonmutating set { session.retainedThread = newValue }
+    }
     @State private var deleteAll = false
     @State private var deleteAllOwner: WorkReference.Scope?
     @State private var supportsDeleteAll = false
@@ -56,15 +81,14 @@ struct ClientChatView: View {
     /// stack keeps holding the thread, which then sits on top of the page that
     /// just opened. Nothing outside the stack can pop it, and the stack cannot
     /// be reached: `.id` does not rebuild a split view's detail column and
-    /// emptying a bound path does not reach this kind of push. `PullsView`
-    /// never had the bug because it swaps its detail in place, so this does
-    /// the same, and the state goes away with the view that owns it.
-    @State private var opened: ChatConversation?
+    /// emptying a bound path does not reach this kind of push. The retained
+    /// session keeps this selection while a fold replaces the presentation.
+    private var opened: ChatConversation? {
+        get { session.opened }
+        nonmutating set { session.opened = newValue }
+    }
     @State private var pendingDelete: ChatConversation?
     @State private var pendingDeleteOwner: WorkReference.Scope?
-    /// The launcher may skip the list once. Back from the thread must still
-    /// reach the list rather than immediately pushing the same chat again.
-    @State private var didOpenConversation = false
     /// A foreground refresh is in flight. Reopening the app onto yesterday's
     /// rows in silence reads as broken sync; the strip says what is happening
     /// until the fresh answer lands.
@@ -106,24 +130,35 @@ struct ClientChatView: View {
         // is an update on the same prober, not a teardown after this view
         // has left the window.
         .clientTabBarHidden(opened != nil)
+        .onAppear {
+            session.appear(viewer)
+            if let id = opened?.id {
+                navigation.showChat(navigation.reference(peer: peer, workspaceID: workspaceID, chatID: id), owner: viewer)
+            }
+        }
         .onChange(of: opened?.id, initial: true) { _, id in
             if let id {
-                navigation.visibleChat = navigation.reference(peer: peer, workspaceID: workspaceID, chatID: id)
-            } else if let old = navigation.visibleChat,
-                      old.hostIdentity == peer, old.workspaceID == workspaceID {
-                navigation.visibleChat = nil
+                navigation.showChat(navigation.reference(peer: peer, workspaceID: workspaceID, chatID: id), owner: viewer)
+            } else {
+                navigation.leaveChat(owner: viewer)
             }
         }
         .onDisappear {
+            session.disappear(viewer)
             // Locking the phone must not forget this thread. A tap on its
             // notification would otherwise remount it over itself.
-            guard scenePhase == .active,
-                  UIApplication.shared.applicationState == .active
-            else { return }
-            if let id = opened?.id, WorkDestinationResolver.sameConversation(navigation.visibleChat,
-                navigation.reference(peer: peer, workspaceID: workspaceID, chatID: id)) {
-                navigation.visibleChat = nil
-            }
+            guard scenePhase == .active else { return }
+            navigation.leaveChat(owner: viewer)
+        }
+        .task {
+            await session.load(workspaceID: workspaceID, peer: peer)
+            guard !Task.isCancelled, model.error == nil,
+                  model.isReady(for: workspaceID), model.peer == peer else { return }
+            if await openRequestedChat() { return }
+            if openConversationOnAppear { await session.openMostRecent() }
+        }
+        .onChange(of: navigation.requestedChat) { _, _ in
+            Task { await openRequestedChat() }
         }
     }
 
@@ -279,26 +314,6 @@ struct ClientChatView: View {
         } message: {
             Text(L10n.text("apple.clientchatview.the_transcript_stays_on_0_until_you_delete.2ccfbdf7", "\(hostName.isEmpty ? L10n.text("apple.clientchatview.the_computer.da52d93a") : hostName)"))
         }
-        .task {
-            guard !loaded else { return }
-            await reload()
-            guard !Task.isCancelled, model.error == nil,
-                  model.isReady(for: workspaceID), model.peer == peer else { return }
-            if await openRequestedChat() { return }
-            if openConversationOnAppear, !didOpenConversation {
-                didOpenConversation = true
-                if let recent = model.mostRecent {
-                    await model.select(recent)
-                    guard !Task.isCancelled else { return }
-                    opened = recent
-                } else {
-                    await create()
-                }
-            }
-        }
-        .onChange(of: navigation.requestedChat) { _, _ in
-            Task { await openRequestedChat() }
-        }
     }
 
     private func didDeleteChat(_ deleted: ChatConversation) {
@@ -355,8 +370,7 @@ struct ClientChatView: View {
     }
 
     private func reload() async {
-        await model.load(workspaceID: workspaceID, peer: peer, selectFirst: false)
-        loaded = true
+        await session.load(workspaceID: workspaceID, peer: peer, refresh: true)
         // A tap that arrived mid-reload found an empty list and returned
         // without consuming. Retry now that the folder has answered.
         await openRequestedChat()
@@ -397,7 +411,6 @@ struct ClientChatView: View {
         else { return false }
         // An explicit destination suppresses the launcher's most-recent/new
         // fallback, including when that conversation has been deleted.
-        didOpenConversation = true
         if opened?.id == id {
             navigation.requestedChat = nil
             return true
@@ -470,6 +483,8 @@ struct ClientChatThread: View {
     /// Bumped on send so the transcript scrolls to the end synchronously,
     /// instead of waiting for the first streamed token to trigger a pin.
     @State private var followPulse = 0
+    @State private var presenceOwner = UUID()
+    @State private var viewportPlaced = false
     /// Last instant (non-animated) pin. A scrollTo on a lazy stack walks
     /// every row in between, so silent pins share one ~150ms gate, same as
     /// the growth repins. Animated pins always go through.
@@ -818,10 +833,12 @@ struct ClientChatThread: View {
                     workspaceID: workspace, workspaceName: folderName, kind: .chat, itemID: id
                 )
             }
-            UserPresence.shared.chatSurface(showing: !isActive || id.isEmpty ? nil : id)
+            updatePresence()
         }
+        .onAppear { updatePresence() }
+        .onChange(of: scenePhase) { _, _ in updatePresence() }
         .onChange(of: isActive) { _, active in
-            UserPresence.shared.chatSurface(showing: active ? chatID : nil)
+            updatePresence()
             if !active { model.saveDraftNow() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
@@ -835,11 +852,12 @@ struct ClientChatThread: View {
         // presentation that goes with it is a tap that does nothing.
         .fullScreenCover(item: $previewFile) { file in
             ClientFilePreview(file: file) { previewFile = nil }
-                .ignoresSafeArea()
+                .ignoresSafeArea(.container, edges: [.top, .bottom])
         }
         .onDisappear {
             model.saveDraftNow()
-            UserPresence.shared.chatSurface(showing: nil)
+            keepViewport()
+            UserPresence.shared.leaveChatSurface(owner: presenceOwner)
         }
         // The host is on the other computer and cannot see this screen. Until
         // it is told, a turn finishing here pushed to this very phone.
@@ -856,6 +874,11 @@ struct ClientChatThread: View {
         } message: {
             Text(model.error.map { ClientTunnelCopy.display($0, host: hostName) } ?? "")
         }
+    }
+
+    private func updatePresence() {
+        UserPresence.shared.chatSurface(showing: isActive ? chatID : nil,
+            owner: presenceOwner, sceneActive: scenePhase == .active)
     }
 
     private func loadChat() async {
@@ -935,7 +958,7 @@ struct ClientChatThread: View {
                         onRemove: { model.removeQueued($0, owner: queueOwner) },
                         onSendNow: { item in
                             showNewest()
-                            follow.jump()
+                            resumeLatest()
                             followPulse += 1
                             Task { await model.sendNow(item, owner: queueOwner) }
                         },
@@ -1126,7 +1149,7 @@ struct ClientChatThread: View {
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: transcriptReady)
             .modifier(OpeningCover(
-                isOpening: model.openingConversation,
+                isOpening: model.openingConversation || hasPendingViewport,
                 ready: transcriptReady,
                 conversationID: model.selected?.id,
                 opening: $opening
@@ -1154,7 +1177,7 @@ struct ClientChatThread: View {
                         paused: follow.paused,
                         resume: {
                             showNewest()
-                            follow.jump()
+                            resumeLatest()
                             Task { await returnToLatest(proxy) }
                         },
                         pause: { follow.pause() }
@@ -1167,7 +1190,7 @@ struct ClientChatThread: View {
             }
             .onChange(of: followPulse) { _, _ in
                 showNewest()
-                follow.jump()
+                resumeLatest()
                 Task { await chaseLatest(proxy) }
             }
             .onChange(of: chat.running) { _, _ in
@@ -1196,6 +1219,7 @@ struct ClientChatThread: View {
                           generation == model.selectionGeneration else { return }
                     TranscriptReading.record(follow: follow, window: window,
                                              for: reference)
+                    keepViewport()
                 }
             }
             // A request that arrives mid-stream would otherwise be pushed off
@@ -1227,7 +1251,11 @@ struct ClientChatThread: View {
                 follow.suppressed = !model.approvals.isEmpty
                 window.nearTopChanged = { measuringRows = $0 }
                 installRepin(proxy)
-                pinToLatest(proxy, animated: false)
+                if model.viewportContinuity.claim(generation: model.selectionGeneration, owner: presenceOwner) != nil {
+                    follow.stopFollowing()
+                } else {
+                    pinToLatest(proxy, animated: false)
+                }
             }
             .task(id: model.readingIdentity) {
                 // A lazy stack does not know its own height until it has drawn
@@ -1237,12 +1265,20 @@ struct ClientChatThread: View {
                 // believing one is how a long chat opened in its middle.
                 let ticket = UUID()
                 settleTaskID = ticket
+                let kept = model.viewportContinuity.claim(generation: model.selectionGeneration, owner: presenceOwner)
+                if kept != nil { follow.stopFollowing() }
                 follow.settle(true)
-                window.followingEnd = true
-                showNewest()
-                pinToLatest(proxy, animated: false)
+                if kept != nil { follow.pinned = false }
+                window.followingEnd = kept == nil
+                if kept == nil {
+                    showNewest()
+                    pinToLatest(proxy, animated: false)
+                }
                 defer {
-                    if settleTaskID == ticket { follow.settle(false) }
+                    if settleTaskID == ticket {
+                        follow.settle(false)
+                        viewportPlaced = true
+                    }
                 }
                 // Fetch time does not spend the layout-settling budget. Slow
                 // hosts used to exhaust every correction before rows arrived.
@@ -1253,6 +1289,7 @@ struct ClientChatThread: View {
                 guard !Task.isCancelled else { return }
                 if await restoreReadingPlace(proxy) != .unavailable { return }
                 guard !Task.isCancelled else { return }
+                resumeLatest()
                 showNewest()
                 // Same as the Mac: hold the end until the conversation has
                 // stopped arriving, not for a fixed count of frames.
@@ -1404,11 +1441,15 @@ struct ClientChatThread: View {
     /// Whether the wireframe is up: an opening is under way, it has not
     /// settled, and no cached preview is standing in for it.
     private var showsSkeleton: Bool {
-        opening && !transcriptReady && model.recentMessagePreview.isEmpty
+        hasPendingViewport || (opening && !transcriptReady && model.recentMessagePreview.isEmpty)
+    }
+
+    private var hasPendingViewport: Bool {
+        !viewportPlaced && model.viewportContinuity.mark(generation: model.selectionGeneration) != nil
     }
 
     private var transcriptReady: Bool {
-        follow.arrived && !model.openingConversation
+        !hasPendingViewport && follow.arrived && !model.openingConversation
     }
 
 
@@ -1529,11 +1570,27 @@ struct ClientChatThread: View {
         scrollTo(TranscriptFollow.bottomID, proxy, animated: animated)
     }
 
-    /// Only an explicit search/shared-reading request overrides opening at
-    /// the latest turn. Passive reading history does not move a new selection.
+    private func resumeLatest() {
+        model.viewportContinuity.record(.latest, generation: model.selectionGeneration, owner: presenceOwner)
+        follow.jump()
+    }
+
+    private func keepViewport() {
+        guard !follow.scrolling, !follow.settling,
+              !follow.pinned || follow.atEnd else { return }
+        model.viewportContinuity.record(TranscriptReading.position(follow: follow, window: window),
+            generation: model.selectionGeneration, owner: presenceOwner)
+    }
+
+    /// Explicit navigation wins. Otherwise only the same live selection may
+    /// resume its viewport; passive history never moves a new selection.
     private func restoreReadingPlace(_ proxy: ScrollViewProxy) async -> TranscriptReading.Restoration {
         guard let reference = model.currentReference,
-              let mark = ChatReadingStore.shared.takeRequest(for: reference) else { return .unavailable }
+              let mark = ChatReadingStore.shared.takeRequest(for: reference)
+                ?? model.viewportContinuity.mark(generation: model.selectionGeneration) else { return .unavailable }
+        // Keep explicit navigation before the first await, so a cancelled
+        // presentation hands the same requested row to its successor.
+        model.viewportContinuity.record(.away(mark), generation: model.selectionGeneration, owner: presenceOwner)
         return await TranscriptReading.restore(mark, reference: reference, model: model, follow: follow) { id, point in
             placeRow(id, proxy, at: point)
         }
@@ -1588,7 +1645,7 @@ struct ClientChatThread: View {
         case .refused: return
         case .held:
             showNewest()
-            follow.jump()
+            resumeLatest()
             followPulse += 1
             return
         }
@@ -1602,7 +1659,7 @@ struct ClientChatThread: View {
             // keyboard and snap to the end so the next tokens are not off-screen
             // above a closed keyboard.
             showNewest()
-            follow.jump()
+            resumeLatest()
             followPulse += 1
             let queueOwner = model.currentReference
             Task { await model.sendNow(item, owner: queueOwner) }
@@ -1614,12 +1671,12 @@ struct ClientChatThread: View {
                 guard model.enqueue(text) != nil else { return }
                 model.clearDraft()
                 showNewest()
-                follow.jump()
+                resumeLatest()
                 followPulse += 1
                 return
             case .steering(let token):
                 showNewest()
-                follow.jump()
+                resumeLatest()
                 followPulse += 1
                 Task {
                     await model.finishBusyNote(token)
@@ -1631,7 +1688,7 @@ struct ClientChatThread: View {
         // the host has the words and put back when it refuses them.
         guard model.holdDraftForSending(text) else { return }
         showNewest()
-        follow.jump()
+        resumeLatest()
         followPulse += 1
         Task { await model.sendFromComposer() }
     }

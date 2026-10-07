@@ -67,7 +67,10 @@ struct ChatTimelineEvent {
         let follow = TranscriptFollowState()
         var placements = 0
         let restored = await TranscriptReading.restore(mark, reference: reference,
-            model: model, follow: follow) { _, _ in placements += 1 }
+            model: model, follow: follow) { _, _ in
+                assert(!follow.pinned, "reading restoration must not chase the latest turn")
+                placements += 1
+            }
         assert(restored == .restored && placements == 4 && follow.stops == 1)
         assert(!follow.settling)
         // Every placement first opens the row's step group, if it has one.

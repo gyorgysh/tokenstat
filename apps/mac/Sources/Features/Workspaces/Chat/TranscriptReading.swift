@@ -17,18 +17,21 @@ import SwiftUI
 enum TranscriptReading {
     enum Restoration { case restored, unavailable, interrupted }
 
+    static func position(follow: TranscriptFollowState, window: TranscriptWindow) -> ChatReadingPosition {
+        let anchor = window.anchor
+        return ChatReadingPosition.from(atEnd: follow.atEnd, pinned: follow.pinned,
+            anchorID: anchor?.id, anchorTop: anchor.map { Double($0.top) } ?? 0,
+            anchorHeight: anchor.map { Double($0.height) } ?? 0,
+            viewportHeight: Double(window.viewportHeight))
+    }
+
     /// Keep, or drop, this conversation's place.
     static func record(follow: TranscriptFollowState, window: TranscriptWindow,
                        for reference: WorkReference?,
                        into suppliedStore: ChatReadingStore? = nil) {
         guard let reference else { return }
         let store = suppliedStore ?? .shared
-        let anchor = window.anchor
-        switch ChatReadingPosition.from(atEnd: follow.atEnd, pinned: follow.pinned,
-                                        anchorID: anchor?.id,
-                                        anchorTop: anchor.map { Double($0.top) } ?? 0,
-                                        anchorHeight: anchor.map { Double($0.height) } ?? 0,
-                                        viewportHeight: Double(window.viewportHeight)) {
+        switch position(follow: follow, window: window) {
         case .latest: store.forget(for: reference)
         case let .away(mark): store.remember(mark, for: reference)
         case .unknown: break
@@ -75,7 +78,11 @@ enum TranscriptReading {
         } else {
             point = UnitPoint(x: 0.5, y: min(max(mark.offset, 0), 0.6))
         }
+        let wasPinned = follow.pinned
         follow.settle(true)
+        // Settling normally chases the end. Reading restoration owns a row,
+        // so growth and structural updates must not pin that row away.
+        follow.pinned = false
         var placements = 0
         var fetched = 0
         for _ in 0..<frames {
@@ -112,7 +119,10 @@ enum TranscriptReading {
             if placements > corrections { break }
         }
         follow.settle(false)
-        guard placements > 0 else { return .unavailable }
+        guard placements > 0 else {
+            follow.pinned = wasPinned
+            return .unavailable
+        }
         // The reader is above the latest turn on purpose, so the transcript
         // stops following it and offers the way back instead of chasing the
         // end under them.

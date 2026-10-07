@@ -239,6 +239,7 @@ final class ChatModel {
     /// that started them may mutate the currently displayed workspace/chat.
     private var loadGeneration: UInt64 = 0
     private(set) var selectionGeneration: UInt64 = 0
+    @ObservationIgnored let viewportContinuity = ChatViewportContinuity()
     /// Conversation a notification asked to open, consumed by the next load.
     private var pendingRevealID: String?
     /// The folder that reveal was asked for, so a load of a different one

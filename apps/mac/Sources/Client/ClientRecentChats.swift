@@ -282,8 +282,32 @@ struct ClientRecentChatView: View {
     let hostName: String
     let chatID: String
 
-    @State private var model = ChatModel()
-    @State private var loaded = false
+    @Environment(ClientChatSessions.self) private var sessions
+
+    var body: some View {
+        ClientRecentChatContent(peer: peer, workspaceID: workspaceID, folderName: folderName,
+            hostName: hostName, chatID: chatID,
+            session: sessions.session(peer: peer, workspace: workspaceID, conversation: chatID))
+            .id(ClientChatSessions.Key(peer: peer, workspace: workspaceID, conversation: chatID))
+    }
+}
+
+private struct ClientRecentChatContent: View {
+    let peer: String
+    let workspaceID: String
+    let folderName: String
+    let hostName: String
+    let chatID: String
+    let session: ClientChatSession
+    @State private var viewer = UUID()
+    private var model: ChatModel {
+        get { session.model }
+        nonmutating set { session.model = newValue }
+    }
+    private var loaded: Bool {
+        get { session.loaded }
+        nonmutating set { session.loaded = newValue }
+    }
     @State private var savedUnavailable = false
     @State private var accessAllowed: Bool?
     @State private var hostProtocol: Int?
@@ -365,6 +389,8 @@ struct ClientRecentChatView: View {
             loadGeneration &+= 1
             loadingLive = false
         }
+        .onAppear { session.appear(viewer) }
+        .onDisappear { session.disappear(viewer) }
     }
 
     private var thread: some View {
@@ -421,16 +447,13 @@ struct ClientRecentChatView: View {
             // The notification cover is `presentedChat`. Writing here would
             // hide the folder thread sitting under it.
             if navigation.presentedChat == nil {
-                navigation.visibleChat = navigation.reference(peer: peer, workspaceID: workspaceID, chatID: chatID)
+                navigation.showChat(navigation.reference(peer: peer, workspaceID: workspaceID, chatID: chatID), owner: viewer)
             }
         }
         .onDisappear {
-            guard scenePhase == .active,
-                  UIApplication.shared.applicationState == .active
-            else { return }
-            if navigation.presentedChat == nil, WorkDestinationResolver.sameConversation(navigation.visibleChat,
-                navigation.reference(peer: peer, workspaceID: workspaceID, chatID: chatID)) {
-                navigation.visibleChat = nil
+            guard scenePhase == .active else { return }
+            if navigation.presentedChat == nil {
+                navigation.leaveChat(owner: viewer)
             }
         }
     }
@@ -439,7 +462,7 @@ struct ClientRecentChatView: View {
         let generation = loadGeneration
         Task {
             guard visible, generation == loadGeneration else { return }
-            if needsSavedCopy { await loadSaved() } else { await load() }
+            if needsSavedCopy { await loadSaved() } else { await load(refresh: true) }
         }
     }
 
@@ -468,7 +491,7 @@ struct ClientRecentChatView: View {
         loaded = true
     }
 
-    private func load() async {
+    private func load(refresh: Bool = false) async {
         guard visible, !loadingLive, !needsSavedCopy, model.savedCopy == nil else { return }
         let generation = loadGeneration
         loadingLive = true
@@ -496,7 +519,7 @@ struct ClientRecentChatView: View {
         hostProtocol = nil
         liveItemExists = nil
         model.error = nil
-        loaded = false
+        if model.chats.isEmpty && model.selected == nil { loaded = false }
         do {
             await ClientDeviceName.publish()
             guard stillCurrent() else { return }
@@ -512,7 +535,7 @@ struct ClientRecentChatView: View {
             guard stillCurrent() else { return }
             hostProtocol = version
             guard version >= RemoteHostFeature.chat.minimumProtocol else { return }
-            await model.load(workspaceID: workspaceID, peer: peer, selectFirst: false)
+            await session.load(workspaceID: workspaceID, peer: peer, refresh: refresh)
             guard stillCurrent() else { return }
             loaded = true
             if model.error == nil {

@@ -59,6 +59,7 @@ final class UserPresence {
     /// person is on Insights or in a terminal, so it answers "which
     /// conversation would chat show" rather than "what are they looking at".
     private(set) var visibleConversationID: String?
+    @ObservationIgnored private var chatSurfaces = ChatSurfacePresence()
 
     private init() {}
 
@@ -66,6 +67,16 @@ final class UserPresence {
     /// goes away again.
     func chatSurface(showing id: String?) {
         visibleConversationID = id
+    }
+
+    func chatSurface(showing id: String?, owner: UUID, sceneActive: Bool) {
+        chatSurfaces.update(owner: owner, conversation: id, active: sceneActive)
+        visibleConversationID = chatSurfaces.visibleConversation
+    }
+
+    func leaveChatSurface(owner: UUID) {
+        chatSurfaces.remove(owner: owner)
+        visibleConversationID = chatSurfaces.visibleConversation
     }
 
     /// True when the app is in front, on screen, and somebody has touched this
@@ -97,14 +108,18 @@ final class UserPresence {
         }
         return secondsSinceInput < Self.idleAfter
         #else
-        return UIApplication.shared.applicationState == .active
+        return chatSurfaces.visibleConversation != nil
         #endif
     }
 
     /// True when this exact conversation is the one on screen and somebody is
     /// there to read it.
     func isWatching(conversation id: String) -> Bool {
+        #if os(macOS)
         visibleConversationID == id && isAtTheKeyboard
+        #else
+        chatSurfaces.isWatching(id)
+        #endif
     }
 
     /// Seconds since the last input event anywhere in this login session.
