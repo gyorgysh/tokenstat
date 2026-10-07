@@ -191,21 +191,95 @@ fn acquire_pairing_lock(lock: &Path) -> Result<PairingLock> {
     anyhow::bail!("The pairing-code file is busy; retry setup")
 }
 
-/// A dead pid, or an empty directory older than the shell's wait, is not a holder.
+/// Publish a nonempty reaper directory atomically, then quarantine the
+/// exact stale directory while that child prevents anyone from replacing it.
 fn reclaim_pairing_lock(lock: &Path) -> bool {
-    let stale = match std::fs::read_to_string(lock.join("pid")) {
-        Ok(text) => !process_alive(text.trim().parse().unwrap_or(0)),
-        Err(_) => std::fs::metadata(lock)
-            .and_then(|metadata| metadata.modified())
-            .ok()
-            .and_then(|modified| modified.elapsed().ok())
-            .is_some_and(|age| age >= PAIRING_LOCK_STALE),
+    let Ok(observed) = std::fs::symlink_metadata(lock) else {
+        return false;
     };
-    if !stale {
+    if !observed.is_dir() || !pairing_lock_stale(lock, &observed) {
         return false;
     }
-    let _ = std::fs::remove_file(lock.join("pid"));
-    std::fs::remove_dir(lock).is_ok()
+    let reap = lock.join("reap");
+    clean_dead_reaper(&reap);
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let prepared = lock.with_file_name(format!(".tokenstat-reaper-{}-{nonce}", std::process::id()));
+    if std::fs::create_dir(&prepared).is_err() {
+        return false;
+    }
+    let holder = format!("holder-{}-{nonce}", std::process::id());
+    if std::fs::write(prepared.join(&holder), "").is_err()
+        || std::fs::rename(&prepared, &reap).is_err()
+    {
+        let _ = std::fs::remove_file(prepared.join(&holder));
+        let _ = std::fs::remove_dir(&prepared);
+        return false;
+    }
+    let current = std::fs::symlink_metadata(lock).ok();
+    #[cfg(unix)]
+    let same = current.is_some_and(|current| {
+        use std::os::unix::fs::MetadataExt;
+        observed.dev() == current.dev() && observed.ino() == current.ino()
+    });
+    #[cfg(not(unix))]
+    let same = current.is_some_and(|current| observed.created().ok() == current.created().ok());
+    if same && pairing_lock_stale(lock, &observed) && std::fs::rename(lock, &prepared).is_ok() {
+        let _ = std::fs::remove_dir_all(&prepared);
+        return true;
+    }
+    let _ = std::fs::remove_file(reap.join(holder));
+    let _ = std::fs::remove_dir(reap);
+    false
+}
+
+fn clean_dead_reaper(reap: &Path) {
+    let Ok(entries) = std::fs::read_dir(reap) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if entry.file_type().is_ok_and(|kind| kind.is_dir())
+            && name
+                .to_str()
+                .is_some_and(|name| name.starts_with(".tokenstat-reaper."))
+        {
+            clean_dead_reaper(&entry.path());
+            continue;
+        }
+        let Some(pid) = name
+            .to_str()
+            .and_then(|name| name.strip_prefix("holder-"))
+            .and_then(|name| name.split('-').next())
+            .and_then(|pid| pid.parse::<i32>().ok())
+        else {
+            continue;
+        };
+        if pid > 0 && !process_alive(pid) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    // A new claimant is always nonempty, so competing cleaners cannot remove it.
+    let _ = std::fs::remove_dir(reap);
+}
+
+fn pairing_lock_stale(lock: &Path, observed: &std::fs::Metadata) -> bool {
+    if let Some(pid) = std::fs::read_to_string(lock.join("pid"))
+        .ok()
+        .and_then(|text| text.trim().parse::<i32>().ok())
+        .filter(|pid| *pid > 0)
+    {
+        return !process_alive(pid);
+    }
+    // Creating/truncating the pid file precedes writing it. Give that live
+    // acquisition the same grace period as a directory with no pid file.
+    observed
+        .modified()
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|age| age >= PAIRING_LOCK_STALE)
 }
 
 fn process_alive(pid: i32) -> bool {
@@ -339,6 +413,47 @@ mod tests {
         );
         assert!(!home.join(".tokenstat-pairing.lock").exists());
         std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_fresh_empty_pid_file_is_not_reclaimed() {
+        let lock = std::env::temp_dir().join(format!("tokenstat-empty-pid-{}", std::process::id()));
+        std::fs::create_dir(&lock).unwrap();
+        std::fs::write(lock.join("pid"), "").unwrap();
+        assert!(!reclaim_pairing_lock(&lock));
+        assert!(lock.join("pid").exists());
+        std::fs::remove_dir_all(lock).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_crashed_reclaimer_is_recovered() {
+        let lock =
+            std::env::temp_dir().join(format!("tokenstat-dead-reaper-{}", std::process::id()));
+        std::fs::create_dir(&lock).unwrap();
+        std::fs::write(lock.join("pid"), "2147483647\n").unwrap();
+        std::fs::create_dir(lock.join("reap")).unwrap();
+        std::fs::write(lock.join("reap/holder-2147483647-dead"), "").unwrap();
+        assert!(reclaim_pairing_lock(&lock));
+        assert!(!lock.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn another_reclaimer_owns_the_stale_directory() {
+        let lock = std::env::temp_dir().join(format!("tokenstat-reaper-{}", std::process::id()));
+        std::fs::create_dir(&lock).unwrap();
+        std::fs::write(lock.join("pid"), "2147483647\n").unwrap();
+        std::fs::create_dir(lock.join("reap")).unwrap();
+        let holder = lock
+            .join("reap")
+            .join(format!("holder-{}-held", std::process::id()));
+        std::fs::write(&holder, "").unwrap();
+        assert!(!reclaim_pairing_lock(&lock));
+        assert!(lock.join("pid").exists());
+        std::fs::remove_file(holder).unwrap();
+        std::fs::remove_dir(lock.join("reap")).unwrap();
+        assert!(reclaim_pairing_lock(&lock));
     }
 
     #[cfg(unix)]

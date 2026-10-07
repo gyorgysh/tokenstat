@@ -36,7 +36,9 @@ internal static class SshVaultScope
         var port = uri.IsDefaultPort ? "" : $":{uri.Port}";
         var path = uri.AbsolutePath.TrimEnd('/');
         if (path == "/") path = "";
-        return $"{uri.Scheme.ToLowerInvariant()}://{uri.IdnHost.ToLowerInvariant()}{port}{path}";
+        var host = uri.IdnHost.ToLowerInvariant();
+        if (uri.HostNameType == UriHostNameType.IPv6) host = $"[{host.Trim('[', ']')}]";
+        return $"{uri.Scheme.ToLowerInvariant()}://{host}{port}{path}";
     }
 }
 

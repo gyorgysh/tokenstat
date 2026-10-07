@@ -284,25 +284,31 @@ mod tests {
                     .is_err()
             );
         }
-        let scope = serde_json::json!({"kind":"account", "origin":"https://mock.example", "identity":"alice"});
+        let scope = serde_json::json!({"kind":"account", "origin":"https://mock.example", "identity":"example"});
         assert!(
-            validate_account(&scope, "https://mock.example", Some("alice"), Some("id-a")).is_ok()
+            validate_account(
+                &scope,
+                "https://mock.example",
+                Some("example"),
+                Some("id-a")
+            )
+            .is_ok()
         );
         assert!(
             validate_account(
                 &scope,
                 "https://MOCK.example:443/",
-                Some("alice"),
+                Some("example"),
                 Some("id-a")
             )
             .is_ok()
         );
-        let prefixed = serde_json::json!({"kind":"account", "origin":"https://mock.example/service", "identity":"alice"});
+        let prefixed = serde_json::json!({"kind":"account", "origin":"https://mock.example/service", "identity":"example"});
         assert!(
             validate_account(
                 &prefixed,
                 "https://MOCK.example:443/service/",
-                Some("alice"),
+                Some("example"),
                 Some("id-a")
             )
             .is_ok()
@@ -311,25 +317,31 @@ mod tests {
             validate_account(
                 &prefixed,
                 "https://mock.example/other",
-                Some("alice"),
+                Some("example"),
                 Some("id-a")
             )
             .is_err()
         );
         assert!(
-            validate_account(&scope, "http://mock.example", Some("alice"), Some("id-a")).is_err()
+            validate_account(&scope, "http://mock.example", Some("example"), Some("id-a")).is_err()
         );
         assert!(
             validate_account(
                 &scope,
                 "https://user@mock.example",
-                Some("alice"),
+                Some("example"),
                 Some("id-a")
             )
             .is_err()
         );
         assert!(
-            validate_account(&scope, "https://other.example", Some("alice"), Some("id-a")).is_err()
+            validate_account(
+                &scope,
+                "https://other.example",
+                Some("example"),
+                Some("id-a")
+            )
+            .is_err()
         );
         assert!(
             validate_account(&scope, "https://mock.example", Some("bob"), Some("id-b")).is_err()

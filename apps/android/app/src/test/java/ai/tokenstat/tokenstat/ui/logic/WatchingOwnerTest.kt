@@ -10,7 +10,7 @@ class WatchingOwnerTest {
     @Test fun renewedLoginHasDistinctOwnerAndReleaseKeepsOldReceipt() {
         fun account(receipt: String) = buildJsonObject {
             put("signedIn", true); put("host", "https://EXAMPLE.COM:443/service/")
-            put("handle", "alice"); put("accountSession", receipt)
+            put("handle", "example"); put("accountSession", receipt)
         }
         val old = WatchingOwner.from(account("old"))!!
         val next = WatchingOwner.from(account("next"))!!
@@ -22,6 +22,6 @@ class WatchingOwnerTest {
         val attached = scoped["_accountScope"] as JsonObject
         assertEquals("secret", scoped["password"].toString().trim('"'))
         assertEquals("https://example.com/service", attached["origin"].toString().trim('"'))
-        assertEquals("alice", attached["identity"].toString().trim('"'))
+        assertEquals("example", attached["identity"].toString().trim('"'))
     }
 }

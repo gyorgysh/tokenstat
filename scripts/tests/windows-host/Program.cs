@@ -246,12 +246,12 @@ local["key:gone"] = new JsonObject { ["id"] = "gone", ["secretRef"] = "wincred:g
 Tokenstat.AppServices.Host.Handler = (method, parameters) =>
 {
     if (method == "account.status")
-        return new JsonObject { ["signedIn"] = true, ["host"] = "https://MOCK.example:443/", ["handle"] = "alice" };
+        return new JsonObject { ["signedIn"] = true, ["host"] = "https://MOCK.example:443/", ["handle"] = "example" };
     if (method.StartsWith("ssh.vault.", StringComparison.Ordinal))
     {
         var scope = parameters?["_accountScope"] as JsonObject;
         Check(scope?["origin"]?.GetValue<string>() == "https://mock.example", "Vault origin was not canonical: " + scope);
-        Check(scope?["identity"]?.GetValue<string>() == "alice", "Vault call missing the account that started it");
+        Check(scope?["identity"]?.GetValue<string>() == "example", "Vault call missing the account that started it");
     }
     if (method == "ssh.vault.record.list") return new JsonObject { ["records"] = remote.DeepClone() };
     if (method == "ssh.vault.record.put") { pushed.Add(Format.Text(parameters, "id")); return new JsonObject(); }
@@ -293,10 +293,12 @@ try { await SshVaultSync.SyncAsync(); throw new Exception("Missing metadata save
 catch (InvalidOperationException) { }
 Check(SshSecrets.Get(originalSecret) == "test-private-key", "Failed metadata save destroyed the original private key");
 Console.WriteLine("PASS: rejected key update preserves the working credential");
+Check(SshVaultScope.CanonicalOrigin("https://[::1]:443/service/") == "https://[::1]/service",
+    "IPv6 vault origin must retain address brackets");
 var writes = 0;
 Tokenstat.AppServices.Host.Handler = (method, parameters) => method switch
 {
-    "account.status" => new JsonObject { ["signedIn"] = true, ["host"] = "https://MOCK.example:443/", ["handle"] = "alice" },
+    "account.status" => new JsonObject { ["signedIn"] = true, ["host"] = "https://MOCK.example:443/", ["handle"] = "example" },
     "ssh.vault.status" => new JsonObject { ["created"] = true, ["locked"] = true },
     _ => new JsonObject { ["writes"] = ++writes },
 };

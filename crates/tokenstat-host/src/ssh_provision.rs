@@ -72,8 +72,8 @@ pub(crate) fn stage_code_command() -> String {
          code_tmp=$(mktemp \"$HOME/.tokenstat-pairing-code.XXXXXX\") || {{ rm -f \"$owner_tmp\"; exit 1; }}; \
          trap 'rm -f \"$owner_tmp\" \"$code_tmp\"; if [ \"$held\" -eq 1 ]; then rm -f \"$lock/pid\"; rmdir \"$lock\" 2>/dev/null || true; fi' EXIT; \
          trap 'exit 1' HUP INT TERM; \
-         printf '%s\\n' \"$code\" > \"$code_tmp\" && \
-         printf '%s\\n%s\\n' \"$owner\" \"$code\" > \"$owner_tmp\" && \
+         printf '%s\\n' \"$code\" > \"$code_tmp\" || exit 1; \
+         printf '%s\\n%s\\n' \"$owner\" \"$code\" > \"$owner_tmp\" || exit 1; \
          {} \
          mv -f \"$owner_tmp\" \"$HOME/.tokenstat-pairing.owner\" && \
          mv -f \"$code_tmp\" \"{CODE_PATH}\"",
@@ -92,27 +92,54 @@ pub(crate) fn clear_code_command() -> String {
          bound=$(sed -n '2p' \"$owner_file\" 2>/dev/null || true); \
          live=$(sed -n '1p' \"$code_file\" 2>/dev/null || true); \
          [ -n \"$expected\" ] && [ \"$owner_id\" = \"$expected\" ] || exit 0; \
-         if [ -n \"$bound\" ] && [ \"$bound\" != \"$live\" ]; then exit 0; fi; \
+         [ -n \"$bound\" ] && [ \"$bound\" = \"$live\" ] || exit 0; \
          rm -f \"$code_file\" \"$owner_file\"",
         pairing_lock_acquire()
     )
 }
 
-/// Take `$HOME/.tokenstat-pairing.lock`, stealing one whose pid is dead or
-/// whose empty directory is older than the wait. A live holder writes its pid
-/// immediately. An empty directory younger than that wait is left alone.
+/// Reclaim under an atomically published, nonempty reaper directory. Move
+/// the old lock to its unique quarantine before deleting anything, so no
+/// cleanup can unlink the next holder's pid. Dead reapers remain recoverable.
 fn pairing_lock_acquire() -> &'static str {
-    "umask 077; lock=\"$HOME/.tokenstat-pairing.lock\"; held=0; tries=0; \
-     lock_mtime() { stat -c %Y \"$1\" 2>/dev/null || stat -f %m \"$1\" 2>/dev/null || echo 0; }; \
-     while ! mkdir \"$lock\" 2>/dev/null; do \
-       pid=$(cat \"$lock/pid\" 2>/dev/null || true); stale=0; \
-       if [ -n \"$pid\" ]; then kill -0 \"$pid\" 2>/dev/null || stale=1; \
-       else born=$(lock_mtime \"$lock\"); now=$(date +%s); \
-            [ \"$born\" -gt 0 ] && [ $((now - born)) -ge 5 ] && stale=1; fi; \
-       if [ \"$stale\" -eq 1 ]; then rm -f \"$lock/pid\"; rmdir \"$lock\" 2>/dev/null || true; fi; \
-       tries=$((tries + 1)); [ \"$tries\" -lt 50 ] || exit 1; sleep 0.1; \
-     done; \
-     held=1; printf '%s\\n' \"$$\" > \"$lock/pid\" || exit 1;"
+    r#"umask 077; lock="$HOME/.tokenstat-pairing.lock"; held=0; tries=0;
+lock_stat() { stat -c "$1" "$lock" 2>/dev/null || stat -f "$2" "$lock" 2>/dev/null; };
+lock_stale() {
+  pid=$(cat "$lock/pid" 2>/dev/null || true);
+  case "$pid" in ''|*[!0-9]*|0)
+    now=$(date +%s); [ "$born" -gt 0 ] && [ $((now - born)) -ge 5 ];;
+  *) command -v ps >/dev/null 2>&1 && ! ps -p "$pid" >/dev/null 2>&1;; esac;
+};
+reap_clean() {
+  for marker in "$lock/reap"/holder-* "$lock/reap"/.tokenstat-reaper.*/holder-*; do
+    [ -f "$marker" ] || continue;
+    name=${marker##*/}; owner=${name#holder-}; owner=${owner%%-*};
+    if command -v ps >/dev/null 2>&1 && ! ps -p "$owner" >/dev/null 2>&1; then
+      rm -f "$marker"; parent=${marker%/*}; [ "$parent" = "$lock/reap" ] || rmdir "$parent" 2>/dev/null || true;
+    fi;
+  done;
+  rmdir "$lock/reap" 2>/dev/null || true;
+};
+while ! mkdir "$lock" 2>/dev/null; do
+  identity=$(lock_stat '%d:%i' '%d:%i' || true); born=$(lock_stat '%Y' '%m' || echo 0);
+  if lock_stale; then
+    reap_clean;
+    prepared=$(mktemp -d "$HOME/.tokenstat-reaper.XXXXXX") || exit 1;
+    holder="holder-$$-${prepared##*/}"; : > "$prepared/$holder" || { rmdir "$prepared"; exit 1; };
+    if mv "$prepared" "$lock/reap" 2>/dev/null && [ -f "$lock/reap/$holder" ]; then
+      current=$(lock_stat '%d:%i' '%d:%i' || true);
+      if [ -n "$identity" ] && [ "$identity" = "$current" ] && lock_stale && mv "$lock" "$prepared" 2>/dev/null; then
+        rm -rf "$prepared";
+      else rm -f "$lock/reap/$holder"; rmdir "$lock/reap" 2>/dev/null || true; fi;
+    else
+      rm -f "$prepared/$holder" "$lock/reap/${prepared##*/}/$holder";
+      rmdir "$prepared" "$lock/reap/${prepared##*/}" 2>/dev/null || true;
+    fi;
+  fi;
+  tries=$((tries + 1)); [ "$tries" -lt 50 ] || exit 1; sleep 0.1;
+done;
+held=1; printf '%s\n' "$$" > "$lock/pid" || exit 1;
+"#
 }
 
 /// Turn the script's key=value lines into an answer a screen can read.
@@ -484,6 +511,111 @@ mod tests {
             std::fs::read_to_string(root.join(".tokenstat-pairing")).unwrap(),
             "WXYZ-1234\n"
         );
+        assert!(!root.join(".tokenstat-pairing.lock").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_failed_temp_write_does_not_publish_or_take_the_lock() {
+        use std::io::Write;
+        let root =
+            std::env::temp_dir().join(format!("tokenstat-stage-write-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(".tokenstat-pairing"), "CODE-KEEP\n").unwrap();
+        std::fs::write(
+            root.join(".tokenstat-pairing.owner"),
+            "owner-keep\nCODE-KEEP\n",
+        )
+        .unwrap();
+        let script = stage_code_command().replace("printf '%s\\n' \"$code\"", "false");
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", &script])
+            .env("HOME", &root)
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"new-owner\nCODE-NEW\n")
+            .unwrap();
+        assert!(!child.wait().unwrap().success());
+        assert_eq!(
+            std::fs::read_to_string(root.join(".tokenstat-pairing")).unwrap(),
+            "CODE-KEEP\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join(".tokenstat-pairing.owner")).unwrap(),
+            "owner-keep\nCODE-KEEP\n"
+        );
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 2);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn an_unbound_legacy_receipt_cannot_delete_a_code() {
+        use std::io::Write;
+        let root = std::env::temp_dir().join(format!("tokenstat-unbound-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(".tokenstat-pairing.owner"), "old-owner\n").unwrap();
+        std::fs::write(root.join(".tokenstat-pairing"), "CODE-KEEP\n").unwrap();
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", &clear_code_command()])
+            .env("HOME", &root)
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"old-owner\n")
+            .unwrap();
+        assert!(child.wait().unwrap().success());
+        assert_eq!(
+            std::fs::read_to_string(root.join(".tokenstat-pairing")).unwrap(),
+            "CODE-KEEP\n"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn competing_stale_reclaimers_never_share_the_critical_section() {
+        use std::io::Write;
+        let root =
+            std::env::temp_dir().join(format!("tokenstat-reclaim-race-{}", std::process::id()));
+        std::fs::create_dir_all(root.join(".tokenstat-pairing.lock/reap")).unwrap();
+        std::fs::write(root.join(".tokenstat-pairing.lock/pid"), "2147483647\n").unwrap();
+        std::fs::write(
+            root.join(".tokenstat-pairing.lock/reap/holder-2147483647-dead"),
+            "",
+        )
+        .unwrap();
+        let script = stage_code_command().replace(
+            "mv -f \"$owner_tmp\"",
+            "mkdir \"$HOME/critical\" || exit 93; sleep 0.02; rmdir \"$HOME/critical\"; mv -f \"$owner_tmp\"",
+        );
+        let mut children = Vec::new();
+        for index in 0..8 {
+            let mut child = std::process::Command::new("sh")
+                .args(["-c", &script])
+                .env("HOME", &root)
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            write!(child.stdin.take().unwrap(), "owner-{index}\nCODE-{index}\n").unwrap();
+            children.push(child);
+        }
+        for mut child in children {
+            assert!(child.wait().unwrap().success());
+        }
+        let owner = std::fs::read_to_string(root.join(".tokenstat-pairing.owner")).unwrap();
+        let code = std::fs::read_to_string(root.join(".tokenstat-pairing")).unwrap();
+        assert_eq!(owner.lines().nth(1), code.lines().next());
         assert!(!root.join(".tokenstat-pairing.lock").exists());
         std::fs::remove_dir_all(root).unwrap();
     }

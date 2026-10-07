@@ -2192,7 +2192,7 @@ mod tests {
     fn status_fixture() -> tokenstat_sync::profile::StatusResult {
         tokenstat_sync::profile::StatusResult {
             host: "https://test.example".into(),
-            handle: Some("alice".into()),
+            handle: Some("example".into()),
             account_id: Some("account-a".into()),
             tier: Some("supporter".into()),
             last_sync_at: None,
@@ -2208,14 +2208,14 @@ mod tests {
     #[test]
     fn initiating_scope_must_match_the_captured_accounts_proof() {
         let status = status_fixture();
-        for id in ["alice", "account-a"] {
+        for id in ["example", "account-a"] {
             let body = json!({"_accountScope":{"kind":"account","origin":"https://test.example","identity":id}}).to_string();
             assert!(verify_request_owner(&body, &status).is_ok());
         }
         for (kind, origin, id) in [
             ("account", "https://test.example", "bob"),
-            ("account", "https://other.example", "alice"),
-            ("local", "https://test.example", "alice"),
+            ("account", "https://other.example", "example"),
+            ("local", "https://test.example", "example"),
             ("account", "https://test.example", ""),
         ] {
             let body =
@@ -2236,7 +2236,7 @@ mod tests {
         assert!(VaultOwner::verified(&renamed).is_err());
         let mut styled = status_fixture();
         styled.host = "https://MOCK.example:443/".into();
-        let canonical = json!({"_accountScope":{"kind":"account","origin":"https://mock.example","identity":"alice"}}).to_string();
+        let canonical = json!({"_accountScope":{"kind":"account","origin":"https://mock.example","identity":"example"}}).to_string();
         assert!(verify_request_owner(&canonical, &styled).is_ok());
         let stored = VaultOwner::verified(&styled).unwrap();
         assert_eq!(stored.origin, "https://mock.example");
@@ -2245,7 +2245,7 @@ mod tests {
         assert!(verify_stored_owner(&stored_scope, &storage, false).is_ok());
         let mut prefixed = status_fixture();
         prefixed.host = "https://MOCK.example:443/service/".into();
-        let service = json!({"_accountScope":{"kind":"account","origin":"https://mock.example/service","identity":"alice"}}).to_string();
+        let service = json!({"_accountScope":{"kind":"account","origin":"https://mock.example/service","identity":"example"}}).to_string();
         assert!(verify_request_owner(&service, &prefixed).is_ok());
         assert_eq!(
             VaultOwner::verified(&prefixed).unwrap().origin,
