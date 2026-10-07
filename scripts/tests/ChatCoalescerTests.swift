@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with ChatCoalescer.swift ChatEvents.swift ChatDisplayItem.swift ChatTranscriptFold.swift ChatQuestion.swift MuseToolPresentation.swift.
+// Compile with ChatTranscriptProjector.swift ChatCoalescer.swift ChatEvents.swift ChatDisplayItem.swift ChatTranscriptFold.swift ChatQuestion.swift MuseToolPresentation.swift.
 import Foundation
-struct ChatAttachment: Hashable { var id: String; var name: String; var mediaType: String?; var size: UInt64? }
-struct ChatApproval: Codable, Hashable { var id: String; var decision: String? }
+struct ChatAttachment: Hashable, Sendable { var id: String; var name: String; var mediaType: String?; var size: UInt64? }
+struct ChatApproval: Codable, Hashable, Sendable { var id: String; var decision: String? }
 @main struct ChatCoalescerTests {
-    static func main() throws {
+    @MainActor static func main() async throws {
+        let projector = ChatTranscriptProjector()
         var cases = 0
         for seed in 1...250 {
             var state = UInt64(seed)
@@ -37,6 +38,8 @@ struct ChatApproval: Codable, Hashable { var id: String; var decision: String? }
             for running in [false, true] {
                 let reference = ChatDisplayItem.referenceCoalesce(events, defaultBackend: "codex", running: running)
                 let actual = ChatDisplayItem.coalesce(events, defaultBackend: "codex", running: running)
+                let projected = try await projector.project(events, backend: "codex", running: running)
+                precondition(projected == actual, "Worker changed transcript rows")
                 precondition(reference == actual, "Mismatch seed \(seed), running \(running)")
                 cases += 1
             }

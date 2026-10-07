@@ -35,9 +35,24 @@ final class ChatModel {
         runningSince[conversationID]
     }
     var selected: ChatConversation? {
-        didSet { noteRunningChats() }
+        didSet {
+            noteRunningChats()
+            if oldValue?.backend != selected?.backend || oldValue?.running != selected?.running {
+                refreshDisplayMetadata()
+            }
+        }
     }
-    var events: [ChatTimelineEvent] = []
+    private(set) var events: [ChatTimelineEvent] = [] {
+        didSet {
+            eventsRevision &+= 1
+            if events.isEmpty {
+                displayCache = []
+                displayKey = nil
+                foldKey = nil
+                hasRunningToolCacheKey = nil
+            }
+        }
+    }
     /// A prompt that has been sent and is not in `events` yet.
     ///
     /// The composer clears on Send. Without this the bubble is missing
@@ -1464,7 +1479,7 @@ final class ChatModel {
             if selectionGeneration == generation { openingConversation = false }
         }
         if let savedPage {
-            applySavedCopy(savedPage)
+            await applySavedCopy(savedPage)
             return
         }
         let openedLive = await openEvents(id: chat.id, generation: generation)
@@ -3032,7 +3047,8 @@ final class ChatModel {
         // Memoized via the same DisplayKey as displayItems itself: scanning
         // displayItems on every poll (400ms) and on every onChange was the
         // second per-frame cost after coalescing.
-        hasRunningToolCache(for: displayKey) ?? computeHasRunningTool()
+        _ = displayRevision
+        return hasRunningToolCache(for: displayKey) ?? computeHasRunningTool()
     }
 
     @ObservationIgnored private var hasRunningToolCacheKey: DisplayKey?
@@ -3201,21 +3217,57 @@ final class ChatModel {
 
     /// `displayItems` without the prompts still being sent.
     private var coalescedItems: [ChatDisplayItem] {
-        // Reading `events` here is also what tells Observation that a view
-        // depends on it, so the cheap path must still touch it.
-        let key = DisplayKey(
-            epoch: eventsEpoch,
-            count: events.count,
-            firstSeq: events.first?.seq,
-            lastSeq: events.last?.seq,
-            backend: selected?.backend,
-            running: selected?.running == true
-        )
-        if key != displayKey {
-            displayCache = ChatDisplayItem.coalesce(events, defaultBackend: key.backend, running: key.running)
-            displayKey = key
-        }
+        _ = displayRevision
         return displayCache
+    }
+
+    /// Build against a snapshot, then publish the records and rows together.
+    /// A prepend and a tail read can overlap: if either moved the window while
+    /// CPU work ran, rebuild against that window rather than losing its records.
+    @discardableResult
+    private func publishEvents(id: String, generation: UInt64,
+                               canPublish: () -> Bool = { true },
+                               rebasesWindow: Bool = true, recordsChanged: Bool = true,
+                               transform: ([ChatTimelineEvent]) -> [ChatTimelineEvent]) async -> Bool {
+        let initialRevision = eventsRevision
+        while !Task.isCancelled, selectionMatches(id: id, generation: generation), canPublish() {
+            guard rebasesWindow || eventsRevision == initialRevision else { return false }
+            let revision = eventsRevision
+            let backend = selected?.backend
+            let running = selected?.running == true
+            let next = transform(events)
+            guard let rows = try? await transcriptProjector.project(next, backend: backend, running: running),
+                  !Task.isCancelled, selectionMatches(id: id, generation: generation), canPublish() else { return false }
+            guard rebasesWindow || eventsRevision == initialRevision else { return false }
+            guard revision == eventsRevision, backend == selected?.backend,
+                  running == (selected?.running == true) else { continue }
+            if recordsChanged { events = next }
+            commitDisplay(rows)
+            return true
+        }
+        return false
+    }
+
+    private func commitDisplay(_ rows: [ChatDisplayItem]) {
+        let nextKey = DisplayKey(epoch: eventsRevision, count: events.count,
+            firstSeq: events.first?.seq, lastSeq: events.last?.seq,
+            backend: selected?.backend, running: selected?.running == true)
+        if displayKey != nextKey { displayRevision &+= 1 }
+        displayKey = nextKey
+        foldKey = nil
+        hasRunningToolCacheKey = nil
+        // Equal rows do not invalidate a visible transcript on metadata polls.
+        if displayCache != rows { displayCache = rows }
+    }
+
+    private func refreshDisplayMetadata() {
+        displayMetadataTask?.cancel()
+        guard !events.isEmpty, let id = selected?.id else { return }
+        let generation = selectionGeneration
+        displayMetadataTask = Task { [weak self] in
+            guard let self else { return }
+            _ = await self.publishEvents(id: id, generation: generation, recordsChanged: false) { $0 }
+        }
     }
 
     /// Parse the prose in the rows now, off the main thread.
@@ -3254,7 +3306,11 @@ final class ChatModel {
         var running: Bool
     }
 
-    @ObservationIgnored private var displayCache: [ChatDisplayItem] = []
+    private var displayCache: [ChatDisplayItem] = []
+    private var displayRevision: UInt64 = 0
+    @ObservationIgnored private var eventsRevision: UInt64 = 0
+    @ObservationIgnored private let transcriptProjector = ChatTranscriptProjector()
+    @ObservationIgnored private var displayMetadataTask: Task<Void, Never>?
     @ObservationIgnored private var displayKey: DisplayKey?
 
     /// The folded rows, held for the same reason as `displayCache`: a
@@ -3332,9 +3388,22 @@ final class ChatModel {
     /// than `seq` gives its records no identity of their own, and two
     /// different windows of the same size would otherwise look like one.
     @ObservationIgnored private var eventsEpoch: UInt64 = 0
+    @ObservationIgnored private var windowReplacementTicket: UUID?
+
+    private func beginWindowReplacement() -> UUID {
+        let ticket = UUID()
+        windowReplacementTicket = ticket
+        eventsEpoch &+= 1
+        return ticket
+    }
+
+    private func finishWindowReplacement(_ ticket: UUID) {
+        if windowReplacementTicket == ticket { windowReplacementTicket = nil }
+    }
 
     /// Everything a window of the timeline is, forgotten in one place.
     private func forgetWindow() {
+        windowReplacementTicket = nil
         eventsEpoch &+= 1
         offset = 0
         tailCursor = nil
@@ -3363,15 +3432,18 @@ final class ChatModel {
         guard !pagingUnavailable else {
             return await loadEvents(id: id, reset: true, generation: generation, quiet: quiet)
         }
+        let replacement = beginWindowReplacement()
+        let requestedEpoch = eventsEpoch
+        defer { finishWindowReplacement(replacement) }
         let requestedRevision = selected?.sendRevision
         do {
             let page = try await Bridge.chatEventPage(
                 id: id, cursor: nil, limit: ChatPaging.openPageEvents, peer: peer
             )
-            guard selectionMatches(id: id, generation: generation) else { return false }
+            guard selectionMatches(id: id, generation: generation), requestedEpoch == eventsEpoch else { return false }
             if let requestedRevision { contextRevision = max(contextRevision ?? 0, requestedRevision) }
-            eventsEpoch &+= 1
-            events = page.events
+            guard await publishEvents(id: id, generation: generation,
+                canPublish: { requestedEpoch == self.eventsEpoch }, rebasesWindow: false, transform: { _ in page.events }) else { return false }
             // A live page is the conversation again, not a copy of it.
             savedCopy = nil
             reconcileOutgoing()
@@ -3386,13 +3458,15 @@ final class ChatModel {
             // so. Otherwise a fully loaded conversation is indistinguishable
             // from one stuck mid-history. Empty chats stay quiet.
             reachedStart = !page.hasEarlier && !page.events.isEmpty
+            finishWindowReplacement(replacement)
             warmMarkdown()
             settleNotifications()
             keepOfflineCopy(id: id, title: selected?.title, page: page, sendRevision: requestedRevision)
             await loadResponseAttachments(id: id, generation: generation)
             return true
         } catch {
-            guard selectionMatches(id: id, generation: generation) else { return false }
+            guard !Task.isCancelled, selectionMatches(id: id, generation: generation),
+                  requestedEpoch == eventsEpoch else { return false }
             if isUnknownMethod(error) { pagingUnavailable = true }
             // Whatever went wrong, the conversation still has to appear. The
             // whole-timeline read is the behaviour every host has had.
@@ -3431,18 +3505,22 @@ final class ChatModel {
                 readingRestorationPulse &+= 1
             }
         }
+        let requestedEpoch = eventsEpoch
         do {
             let page = try await Bridge.chatEventPage(
                 id: id, cursor: cursor, limit: ChatPaging.pageEvents, peer: peer
             )
-            guard selectionMatches(id: id, generation: generation) else { return }
+            guard selectionMatches(id: id, generation: generation),
+                  requestedEpoch == eventsEpoch, cursor == earlierCursor else { return }
             if page.reset {
                 // The archive was trimmed while this was in flight, so the
                 // offsets under the cursor no longer mean anything. This page
                 // is the newest one: take it as the whole window rather than
                 // putting it in front of records it now sits after.
-                eventsEpoch &+= 1
-                events = page.events
+                let replacement = beginWindowReplacement()
+                let replacementEpoch = eventsEpoch
+                defer { finishWindowReplacement(replacement) }
+                guard await publishEvents(id: id, generation: generation, canPublish: { replacementEpoch == self.eventsEpoch }, rebasesWindow: false, transform: { _ in page.events }) else { return }
                 reconcileOutgoing()
                 offset = page.nextOffset
                 tailCursor = page.tailCursor
@@ -3453,9 +3531,13 @@ final class ChatModel {
                 // Pages do not overlap, but a trim or a retry could still put
                 // a record in two answers. Identity is the record's place in
                 // the archive, so a repeat is cheap to spot.
-                let oldest = events.first?.seq ?? UInt64.max
-                let fresh = page.events.filter { ($0.seq ?? 0) < oldest }
-                events.insert(contentsOf: fresh, at: 0)
+                guard await publishEvents(id: id, generation: generation, canPublish: {
+                    requestedEpoch == self.eventsEpoch && cursor == self.earlierCursor
+                }, transform: { held in
+                    let oldest = held.first?.seq ?? UInt64.max
+                    let fresh = page.events.filter { ($0.seq ?? 0) < oldest }
+                    return fresh + held
+                }) else { return }
                 warmMarkdown()
             }
             // Always, even for a page that carried nothing this window can
@@ -3473,7 +3555,8 @@ final class ChatModel {
             }
             await loadResponseAttachments(id: id, generation: generation)
         } catch {
-            if selectionMatches(id: id, generation: generation), isUnknownMethod(error) {
+            if !Task.isCancelled, selectionMatches(id: id, generation: generation),
+               requestedEpoch == eventsEpoch, isUnknownMethod(error) {
                 pagingUnavailable = true
             }
         }
@@ -3494,12 +3577,16 @@ final class ChatModel {
     @discardableResult
     private func loadEvents(id: String, reset: Bool, generation: UInt64, quiet: Bool = false) async -> Bool {
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return false }
+        guard reset || windowReplacementTicket == nil else { return false }
+        let replacement = reset ? beginWindowReplacement() : nil
+        let requestedEpoch = eventsEpoch
+        defer { if let replacement { finishWindowReplacement(replacement) } }
         let requestedRevision = selected?.sendRevision
         let requestedOffset = reset ? 0 : offset
         let requestedCursor = reset ? nil : tailCursor
         do {
             let chunk = try await Bridge.chatEvents(id: id, offset: requestedOffset, tailCursor: requestedCursor, peer: peer)
-            guard selectionMatches(id: id, generation: generation) else { return false }
+            guard selectionMatches(id: id, generation: generation), requestedEpoch == eventsEpoch else { return false }
             guard reset || (requestedOffset == offset && requestedCursor == tailCursor) else { return false }
             if chunk.reset {
                 let opened = await openEvents(id: id, generation: generation, quiet: quiet)
@@ -3515,17 +3602,17 @@ final class ChatModel {
                 return opened
             }
             if let requestedRevision { contextRevision = max(contextRevision ?? 0, requestedRevision) }
-            tailCursor = chunk.tailCursor
             // A poll that found nothing new must not write anything back. The
             // write is what redraws the transcript, and most polls of a
             // running turn arrive between records rather than on one.
             if !reset, chunk.events.isEmpty, chunk.nextOffset == offset {
+                tailCursor = chunk.tailCursor
                 await loadResponseAttachments(id: id, generation: generation)
                 return true
             }
             if reset {
-                eventsEpoch &+= 1
-                events = chunk.events
+                guard await publishEvents(id: id, generation: generation,
+                    canPublish: { requestedEpoch == self.eventsEpoch }, rebasesWindow: false, transform: { _ in chunk.events }) else { return false }
                 // A live page is the conversation again, not a copy of it.
                 savedCopy = nil
                 // The whole timeline, so there is nothing before it. Say so
@@ -3539,17 +3626,24 @@ final class ChatModel {
                     sendRevision: requestedRevision
                 )
             } else {
-                events.append(contentsOf: chunk.events)
+                guard await publishEvents(id: id, generation: generation, canPublish: {
+                    requestedEpoch == self.eventsEpoch && requestedOffset == self.offset && requestedCursor == self.tailCursor
+                }, transform: { held in
+                    held + chunk.events
+                }) else { return false }
             }
             reconcileOutgoing()
+            tailCursor = chunk.tailCursor
             offset = chunk.nextOffset
+            if let replacement { finishWindowReplacement(replacement) }
             settleNotifications()
             await loadResponseAttachments(id: id, generation: generation)
             return true
         } catch {
             // Background polls must not pop an error banner on an idle
             // screen; user-initiated loads still surface.
-            if !quiet, selectionMatches(id: id, generation: generation) {
+            if !Task.isCancelled, !quiet, selectionMatches(id: id, generation: generation),
+               requestedEpoch == eventsEpoch {
                 self.error = error.localizedDescription
             }
             return false
@@ -3582,13 +3676,17 @@ final class ChatModel {
               let copy = await WorkCacheStore.shared.savedConversation(for: reference),
               selectionMatches(id: id, generation: generation)
         else { return }
-        applySavedCopy(copy)
+        await applySavedCopy(copy)
     }
 
-    private func applySavedCopy(_ copy: CachedRecordPayload) {
+    private func applySavedCopy(_ copy: CachedRecordPayload) async {
+        guard events.isEmpty || savedCopy != nil, let id = selected?.id else { return }
+        let replacement = beginWindowReplacement()
+        let requestedEpoch = eventsEpoch
+        defer { finishWindowReplacement(replacement) }
+        let generation = selectionGeneration
         contextRevision = copy.sendRevision
-        eventsEpoch &+= 1
-        events = copy.page.events
+        guard await publishEvents(id: id, generation: generation, canPublish: { requestedEpoch == self.eventsEpoch }, rebasesWindow: false, transform: { _ in copy.page.events }) else { return }
         reconcileOutgoing()
         offset = copy.page.nextOffset
         tailCursor = nil
@@ -3849,6 +3947,7 @@ final class ChatModel {
             print("chat-selection model=\(ObjectIdentifier(self)) cause=\(reason) chat=\(selected?.id ?? "none") workspace=\(workspaceID ?? "none") generation=\(selectionGeneration)->\(selectionGeneration &+ 1) events=\(events.count)")
         }
         #endif
+        displayMetadataTask?.cancel()
         selectionGeneration &+= 1
     }
 

@@ -2,7 +2,7 @@
 
 import Foundation
 
-struct ChatToolState: Equatable {
+struct ChatToolState: Equatable, Sendable {
     var callId: String
     var verb: String
     var target: String
@@ -119,7 +119,7 @@ struct ChatToolState: Equatable {
 }
 
 /// A file the agent changed. One card, not a tool row plus a second copy.
-struct ChatEditState: Equatable {
+struct ChatEditState: Equatable, Sendable {
     var path: String
     var added: UInt32
     var removed: UInt32
@@ -217,7 +217,7 @@ enum ChatClock {
 /// Equatable so a transcript can skip the rows that did not move. A chat
 /// redraws whenever anything about it changes, and without this every visible
 /// row rebuilds itself because one of them grew by a word.
-struct ChatDisplayItem: Identifiable, Equatable {
+struct ChatDisplayItem: Identifiable, Equatable, Sendable {
     let id: String
     let kind: Kind
     /// Inclusive end of a coalesced text/thinking block in the loaded archive.
@@ -233,12 +233,12 @@ struct ChatDisplayItem: Identifiable, Equatable {
     /// A Compact line already says what its step was, so a lone step drops
     /// its card and shows only what it produced. Several steps under one
     /// line, a run of reads, keep a plain line each so each names its file.
-    enum PlainStep: Equatable {
+    enum PlainStep: Equatable, Sendable {
         case detail
         case line
     }
 
-    enum Kind: Equatable {
+    enum Kind: Equatable, Sendable {
         case user(String)
         case assistant(String, backend: String?)
         case turnSeparator(String)
