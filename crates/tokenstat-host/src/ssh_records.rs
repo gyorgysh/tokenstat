@@ -421,7 +421,7 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
             }
             item.updated_ms = SaveFlags::read(params).stamp(item.updated_ms);
             upsert(&mut store.hosts, item.clone(), |x| &x.id);
-            save_to(&path, &store)?;
+            save_to(path, &store)?;
             serde_json::to_value(item).map_err(|e| e.to_string())
         }
         "ssh.host.noteConnection" => {
@@ -459,7 +459,7 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
         "ssh.host.delete" => {
             let removed = remove(&mut store.hosts, params, |x| &x.id)?;
             if removed {
-                save_to(&path, &store)?;
+                save_to(path, &store)?;
             }
             Ok(json!({"removed": removed}))
         }
@@ -483,13 +483,13 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
             }
             item.updated_ms = SaveFlags::read(params).stamp(item.updated_ms);
             upsert(&mut store.keys, item.clone(), |x| &x.id);
-            save_to(&path, &store)?;
+            save_to(path, &store)?;
             serde_json::to_value(item).map_err(|e| e.to_string())
         }
         "ssh.key.delete" => {
             let removed = remove(&mut store.keys, params, |x| &x.id)?;
             if removed {
-                save_to(&path, &store)?;
+                save_to(path, &store)?;
             }
             Ok(json!({"removed": removed}))
         }
@@ -503,13 +503,13 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
             }
             item.updated_ms = SaveFlags::read(params).stamp(item.updated_ms);
             upsert(&mut store.snippets, item.clone(), |x| &x.id);
-            save_to(&path, &store)?;
+            save_to(path, &store)?;
             serde_json::to_value(item).map_err(|e| e.to_string())
         }
         "ssh.snippet.delete" => {
             let removed = remove(&mut store.snippets, params, |x| &x.id)?;
             if removed {
-                save_to(&path, &store)?;
+                save_to(path, &store)?;
             }
             Ok(json!({"removed": removed}))
         }
@@ -537,7 +537,7 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
             }
             item.updated_ms = SaveFlags::read(params).stamp(item.updated_ms);
             upsert(&mut store.folders, item.clone(), |x| &x.id);
-            save_to(&path, &store)?;
+            save_to(path, &store)?;
             serde_json::to_value(item).map_err(|e| e.to_string())
         }
         // Deleting a folder never deletes what is in it. Children move up one
@@ -570,7 +570,7 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
                         host.updated_ms = now;
                     }
                 }
-                save_to(&path, &store)?;
+                save_to(path, &store)?;
             }
             Ok(json!({"removed": removed}))
         }
@@ -602,7 +602,7 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
             host.sort = p.sort;
             host.updated_ms = now_ms();
             let moved = host.clone();
-            save_to(&path, &store)?;
+            save_to(path, &store)?;
             serde_json::to_value(moved).map_err(|e| e.to_string())
         }
 
@@ -638,7 +638,7 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
             let had = !host.host_keys.is_empty();
             host.host_keys.clear();
             if had {
-                save_to(&path, &store)?;
+                save_to(path, &store)?;
             }
             Ok(json!({"forgotten": had}))
         }
@@ -673,7 +673,7 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
                 imported += 1;
             }
             if imported > 0 {
-                save_to(&path, &store)?;
+                save_to(path, &store)?;
             }
             Ok(json!({"imported": imported, "found": candidates.len()}))
         }

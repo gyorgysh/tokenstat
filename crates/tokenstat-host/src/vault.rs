@@ -946,18 +946,18 @@ fn cache_remote_at(
     allow_rotation: bool,
 ) -> Result<(), String> {
     let mut store = read(storage)?;
-    if store.key_id.is_empty() {
-        if let Some(legacy) = legacy_baseline(legacy_path, &storage.owner, key)? {
-            validate_remote(&legacy, remote, key, allow_rotation)?;
-            if legacy.owner.is_none() {
-                let mut attributed = storage.clone();
-                attributed.path = legacy_path.to_owned();
-                write(&attributed, &legacy)?;
-            }
-            store = legacy;
-            store.owner = Some(storage.owner.clone());
-            store.locked = true;
+    if store.key_id.is_empty()
+        && let Some(legacy) = legacy_baseline(legacy_path, &storage.owner, key)?
+    {
+        validate_remote(&legacy, remote, key, allow_rotation)?;
+        if legacy.owner.is_none() {
+            let mut attributed = storage.clone();
+            attributed.path = legacy_path.to_owned();
+            write(&attributed, &legacy)?;
         }
+        store = legacy;
+        store.owner = Some(storage.owner.clone());
+        store.locked = true;
     }
     validate_remote(&store, remote, key, allow_rotation)?;
     store.schema_version = remote.schema_version;

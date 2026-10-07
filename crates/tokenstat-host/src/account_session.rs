@@ -129,10 +129,10 @@ impl AccountSnapshot {
     }
 
     fn validate_receipt(&self, body: &Value) -> Result<(), String> {
-        if let Some(receipt) = body.get("_accountSession") {
-            if receipt.as_str() != Some(self.id.as_str()) {
-                return Err(CHANGED.into());
-            }
+        if let Some(receipt) = body.get("_accountSession")
+            && receipt.as_str() != Some(self.id.as_str())
+        {
+            return Err(CHANGED.into());
         }
         Ok(())
     }

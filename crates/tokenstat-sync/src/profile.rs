@@ -582,14 +582,14 @@ pub(crate) fn decode_status_response(
         return Err(ProfileError::Message(TOKEN_REVOKED.into()));
     }
     if status.as_u16() == 403 {
-        return Err(refusal_error(&text, 403));
+        return Err(refusal_error(text, 403));
     }
     if !status.is_success() {
         return Err(ProfileError::Message(format!(
             "status request failed ({status}): {text}"
         )));
     }
-    let raw: Value = serde_json::from_str(&text)?;
+    let raw: Value = serde_json::from_str(text)?;
     Ok(status_from_value(host, raw))
 }
 /// Shared decoding for a status reply obtained with captured credentials.
@@ -1042,9 +1042,9 @@ pub(crate) fn decode_tunnel_response(
         )));
     }
     if !status.is_success() {
-        return Err(refusal_error(&text, status.as_u16()));
+        return Err(refusal_error(text, status.as_u16()));
     }
-    let body: TunnelTokenResponse = serde_json::from_str(&text)
+    let body: TunnelTokenResponse = serde_json::from_str(text)
         .map_err(|e| ProfileError::Message(format!("tunnel token response unreadable: {e}")))?;
     if body.token.is_empty() {
         return Err(ProfileError::Message("tunnel token response empty".into()));
