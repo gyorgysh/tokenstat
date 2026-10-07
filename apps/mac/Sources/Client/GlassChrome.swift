@@ -113,9 +113,9 @@ extension View {
     /// edge, and only that edge is worth hiding: the one that runs under the
     /// navigation bar is the system doing the job we would otherwise fake.
     @ViewBuilder
-    func clientHideScrollEdgeEffect(_ hidden: Bool = true, for edges: Edge.Set = .all) -> some View {
+    func clientHideScrollEdgeEffect(for edges: Edge.Set = .all) -> some View {
         if #available(iOS 26, *) {
-            scrollEdgeEffectHidden(hidden, for: edges)
+            scrollEdgeEffectHidden(true, for: edges)
         } else {
             self
         }
@@ -179,7 +179,7 @@ extension View {
     @ViewBuilder
     func clientBottomBar<Bar: View>(separated: Bool = false, @ViewBuilder bar: () -> Bar) -> some View {
         if separated {
-            // Wide chat readers end above their controls. A safe-area overlay
+            // Chat readers end above their controls. A safe-area overlay
             // keeps scrolling messages underneath the entire tall composer.
             VStack(spacing: 0) {
                 self

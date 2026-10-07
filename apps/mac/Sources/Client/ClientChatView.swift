@@ -758,7 +758,7 @@ struct ClientChatThread: View {
                             ChatDropExperience()
                         }
                     }
-                    .clientBottomBar(separated: usesBoundedComposer) {
+                    .clientBottomBar(separated: true) {
                         bar(chat)
                             .padding(.top, Theme.Space.s)
                     }
@@ -888,10 +888,6 @@ struct ClientChatThread: View {
         .sheet(isPresented: $showingSetup) {
             setupSheet
         }
-    }
-
-    private var usesBoundedComposer: Bool {
-        ClientLayout.hasRoom(horizontal: sizeClass, vertical: verticalSizeClass)
     }
 
     var body: some View {
@@ -1242,9 +1238,9 @@ struct ClientChatThread: View {
             // already hides the keyboard on scroll, and a transcript-wide
             // tap gate fires on attachment taps, link taps and text
             // selection too.
-            // Wide layouts confine material to the composer, including the
-            // home indicator. Keep the transcript and follow controls clear.
-            .clientHideScrollEdgeEffect(usesBoundedComposer, for: .bottom)
+            // The composer has its own area in every mobile layout. Keep the
+            // transcript and follow controls clear above it.
+            .clientHideScrollEdgeEffect(for: .bottom)
             // Cover the build-up, do not hide the stack. Opacity 0 is how a
             // lazy stack skipped measuring the last prompt until a later
             // layout (leave and come back) forced the real height.
