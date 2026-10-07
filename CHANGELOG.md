@@ -16,9 +16,12 @@ then begin the next one. Do not reconstruct release notes from commits at the en
 ### Added
 
 - Retained iPhone and iPad chat and SSH sessions across wide and compact
-  layouts, with project navigation, recent chats and explicit SSH project links.
-- Android tablet project section navigation and recent chat/terminal rows
-  beneath projects. Resizing keeps the open project and chat composition.
+  layouts, with project navigation, recent chats and active terminals in the
+  iPad sidebar. SSH connections appear in a separate Servers section.
+- Android tablet project section navigation keeps Terminals, Chats and Changes
+  within reach. Resizing keeps the open project and chat draft, and Recent Chats
+  stays separate from the project list.
+- Markdown tables in Android chats, with column widths that follow text size.
 
 ### Changed
 
@@ -42,6 +45,10 @@ then begin the next one. Do not reconstruct release notes from commits at the en
   read or publish its late mutation response.
 - Android setup cleanup and watching leases carry the receipts required by
   the updated shared backend.
+- Pairing cleanup preserves codes belonging to a newer setup attempt, and
+  interrupted setup locks recover without disrupting another active attempt.
+- Encrypted vault operations keep the account and server address that started
+  them, including custom server paths and IPv6 addresses.
 
 ## [1.3.0] - 2026-10-07
 
