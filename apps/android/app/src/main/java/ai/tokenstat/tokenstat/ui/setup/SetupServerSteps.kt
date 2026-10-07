@@ -262,10 +262,12 @@ class SetupConnectState {
             val code = minted.sshString("code")?.takeIf { it.isNotEmpty() }
                 ?: throw IllegalStateException(L10n.text("android.setupserversteps.the_account_did_not_return_a_pairing_code.1776d60f"))
             coroutineContext.ensureActive()
-            model.core(
+            val staged = model.core(
                 "ssh.provision.stageCode",
                 setupSessionParams(host, auth, rows = 24, cols = 100).with("code", JsonPrimitive(code)),
-            )
+            ).jsonObject
+            val stageId = staged.sshString("stageId")
+                ?: throw IllegalStateException(L10n.text("android.setupserversteps.missing_staging_receipt"))
             try {
                 coroutineContext.ensureActive()
                 val line = model.core(
@@ -306,11 +308,13 @@ class SetupConnectState {
                 installSessionId = id
             } catch (e: Exception) {
                 installSessionId = null
-                runCatching {
-                    model.core(
-                        "ssh.provision.clearCode",
-                        setupSessionParams(host, auth, rows = 24, cols = 100),
-                    )
+                withContext(kotlinx.coroutines.NonCancellable) {
+                    runCatching {
+                        model.core(
+                            "ssh.provision.clearCode",
+                            setupSessionParams(host, auth, rows = 24, cols = 100).with("stageId", JsonPrimitive(stageId)),
+                        )
+                    }
                 }
                 throw e
             }

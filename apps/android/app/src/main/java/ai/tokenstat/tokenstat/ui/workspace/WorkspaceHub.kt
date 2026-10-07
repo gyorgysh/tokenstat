@@ -19,6 +19,7 @@ import ai.tokenstat.tokenstat.ui.logic.HubCounts
 import ai.tokenstat.tokenstat.ui.logic.HubCountsParser
 import ai.tokenstat.tokenstat.ui.logic.HubSection
 import ai.tokenstat.tokenstat.ui.logic.TunnelCopy
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -312,6 +313,7 @@ fun WorkspaceHub(
     folder: JsonObject,
     modifier: Modifier = Modifier,
     initialSection: String? = null,
+    wideNavigation: Boolean = false,
     onBack: (() -> Unit)? = null,
     onOpenTerminal: (String?) -> Unit = {},
     onOpenBrowser: (BrowserOpenRequest) -> Unit = {},
@@ -371,6 +373,22 @@ fun WorkspaceHub(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+            }
+        }
+        if (wideNavigation && !presence.sectionHeaderHidden) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                HubSection.entries.forEach { destination ->
+                    TextButton(enabled = !worktreeBusy, onClick = { openSection = destination.key },
+                        modifier = Modifier.heightIn(min = 44.dp)) {
+                        Text(destination.label, fontWeight = if (section == destination.key) FontWeight.Bold else FontWeight.Normal)
+                    }
+                }
+                if (folder["git"] != null) {
+                    TextButton(enabled = !worktreeBusy, onClick = { openSection = "Worktrees" },
+                        modifier = Modifier.heightIn(min = 44.dp)) {
+                        Text(L10n.text("android.workspacehub.worktrees.aec2f93d"))
+                    }
+                }
             }
         }
         Spacer(Modifier.height(space.s))

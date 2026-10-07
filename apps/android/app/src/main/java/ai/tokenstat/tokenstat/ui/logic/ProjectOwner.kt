@@ -41,7 +41,7 @@ data class ProjectOwner private constructor(val key: String, val accountScope: S
 
         /// Matches WorkReference.Scope.account: retain an account service's
         /// path prefix, remove query/fragment, trailing slash and default port.
-        private fun canonicalOrigin(value: String?): String? {
+        internal fun canonicalOrigin(value: String?): String? {
             val parsed = runCatching { URI(value?.trim().orEmpty()) }.getOrNull() ?: return null
             val scheme = parsed.scheme?.lowercase() ?: return null
             val host = parsed.host?.lowercase()?.takeIf { it.isNotEmpty() } ?: return null

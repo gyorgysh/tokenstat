@@ -3337,6 +3337,7 @@ private fun WorkspacesScreen(
             folders = folders,
             sessions = sessions,
             chats = chats,
+            projectFirst = expanded,
             error = error,
             allowed = allowed,
             requesting = requesting,
@@ -3408,34 +3409,28 @@ private fun WorkspacesScreen(
             request = browsing,
             onClose = { browser = null },
         )
-    } else if (expanded && boundFolder != null && boundHost != null) {
-        Row(Modifier.fillMaxSize()) {
-            listPane(Modifier.width(340.dp))
-            VerticalDivider()
-            WorkspaceDetail(
-                model, boundHost, boundFolder, Modifier.weight(1f),
-                initialSection = initialSection,
-                onBack = null,
-                onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2")) },
-                onOpenBrowser = { browser = it },
-                onRecordChat = ::recordChatOpened,
-            onOpenProject = ::openRegisteredProject,
-                initialChatId = pendingChatId,
-                openConversationOnAppear = pendingOpenConversation,
-            )
-        }
     } else if (boundFolder != null && boundHost != null) {
-        WorkspaceDetail(
-            model, boundHost, boundFolder, Modifier.fillMaxSize(),
-            initialSection = initialSection,
-            onBack = { selectedFolderId = null; initialSection = null; pendingChatId = null; pendingOpenConversation = false },
-            onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2")) },
-            onOpenBrowser = { browser = it },
-            onRecordChat = ::recordChatOpened,
-            onOpenProject = ::openRegisteredProject,
-            initialChatId = pendingChatId,
-            openConversationOnAppear = pendingOpenConversation,
-        )
+        Row(Modifier.fillMaxSize()) {
+            if (expanded) {
+                listPane(Modifier.width(340.dp))
+                VerticalDivider()
+            }
+            // Keep the same composition and chat owner when the window resizes.
+            androidx.compose.runtime.key(boundHost.string("publicIdentity"), boundFolder.string("id")) {
+                WorkspaceDetail(
+                    model, boundHost, boundFolder, Modifier.weight(1f),
+                    initialSection = initialSection,
+                    wideNavigation = expanded,
+                    onBack = if (expanded) null else { { selectedFolderId = null; initialSection = null; pendingChatId = null; pendingOpenConversation = false } },
+                    onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2")) },
+                    onOpenBrowser = { browser = it },
+                    onRecordChat = ::recordChatOpened,
+                    onOpenProject = ::openRegisteredProject,
+                    initialChatId = pendingChatId,
+                    openConversationOnAppear = pendingOpenConversation,
+                )
+            }
+        }
     } else {
         listPane(Modifier.fillMaxSize())
     }
@@ -3480,6 +3475,7 @@ private data class WorkspaceTerminalRequest(val sessionId: String?, val workspac
 @Composable
 private fun WorkspaceList(
     model: AppViewModel,
+    projectFirst: Boolean = false,
     hosts: List<JsonObject>,
     thisMachine: JsonObject?,
     /// The machine this screen is about, which is the one being dialled and
@@ -3696,7 +3692,24 @@ private fun WorkspaceList(
                             (it.string("name") ?: "").contains(search, ignoreCase = true) ||
                             (it.string("path") ?: "").contains(search, ignoreCase = true)
                     }) { folder ->
-                        WorkspaceFolderRow(folder = folder, onOpen = { onFolder(folder) }, onRename = { renamingProject = folder }, peer = peer)
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            WorkspaceFolderRow(folder = folder, onOpen = { onFolder(folder) }, onRename = { renamingProject = folder }, peer = peer)
+                            if (projectFirst) {
+                                val id = folder.string("id")
+                                Column(Modifier.padding(start = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    if (WorkSection.SESSIONS in visibleSections) sessionRows.filter {
+                                        id != null && (it.string("workspaceId") ?: it.string("workspaceID")) == id
+                                    }.forEach { session ->
+                                        WorkspaceSessionRow(session = session, onOpen = { onSession(session) })
+                                    }
+                                    if (WorkSection.RECENT_CHATS in visibleSections) chatRows.filter {
+                                        id != null && it.string("workspaceId") == id
+                                    }.take(5).forEach { chat ->
+                                        WorkspaceChatRow(chat = chat, folderName = folder.string("name") ?: "", onOpen = { onChat(chat) })
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 WorkSection.RECENT_CHATS -> if (chatRows.isNotEmpty()) {
@@ -3821,6 +3834,7 @@ private fun WorkspaceList(
 private fun WorkspaceDetail(
     model: AppViewModel, host: JsonObject, folder: JsonObject, modifier: Modifier,
     initialSection: String? = null,
+    wideNavigation: Boolean = false,
     onBack: (() -> Unit)? = null,
     onOpenTerminal: (String?) -> Unit = {},
     onOpenBrowser: (BrowserOpenRequest) -> Unit = {},
@@ -3835,6 +3849,7 @@ private fun WorkspaceDetail(
         folder = folder,
         modifier = modifier.padding(cardPaddingDp),
         initialSection = initialSection,
+        wideNavigation = wideNavigation,
         onBack = onBack,
         onOpenTerminal = onOpenTerminal,
         onOpenBrowser = onOpenBrowser,

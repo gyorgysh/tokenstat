@@ -2648,5 +2648,6 @@
   "android.agentsetup.step_return": "3. When setup is complete, choose “I finished, check sign-in” and return to your draft.",
   "android.pullcreate.existing_help": "Open the existing pull request to update its description. Your writing is kept in this draft.",
   "android.agentsetup.legacy": "Open a workspace terminal and choose {0} to complete setup. Update tokenstat on the chat’s computer to use guided sign-in here.",
-  "android.paywallsheet.renewal_terms": "{0} every {1}. Renews automatically until cancelled. Payment is charged through Google Play. Cancel in Play subscriptions before the trial or current period ends to avoid the next charge."
+  "android.paywallsheet.renewal_terms": "{0} every {1}. Renews automatically until cancelled. Payment is charged through Google Play. Cancel in Play subscriptions before the trial or current period ends to avoid the next charge.",
+  "android.setupserversteps.missing_staging_receipt": "The server did not return a pairing staging receipt."
 }

@@ -1169,7 +1169,7 @@ fun ChatSection(
     // dropped beat does not let a banner through; released on the way out,
     // and expired by the host when no release ever arrives. Without this a
     // phone driving a chat buzzes about the turn on its own screen.
-    val watcherId = remember(projectOwner) { java.util.UUID.randomUUID().toString() }
+    val watchingOwner = ai.tokenstat.tokenstat.ui.logic.WatchingOwner.from(client.account)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var foreground by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     DisposableEffect(lifecycle) {
@@ -1183,24 +1183,23 @@ fun ChatSection(
         if (foreground && openId != null) VisibleChat.showing(machineId, openId)
         else VisibleChat.hidden()
     }
-    LaunchedEffect(openId, peer, foreground) {
+    LaunchedEffect(openId, peer, foreground, watchingOwner) {
+        val owner = watchingOwner ?: return@LaunchedEffect
         val id = openId ?: return@LaunchedEffect
         if (!foreground) return@LaunchedEffect
+        // A cancelled foreground lease cannot release its successor.
+        val watcherId = java.util.UUID.randomUUID().toString()
         try {
             while (true) {
                 runCatching {
-                    model.workspaceSection(peer, "app.watching", buildJsonObject {
-                        put("conversationId", id); put("watcherId", watcherId)
-                    })
+                    model.workspaceSection(peer, "app.watching", owner.parameters(id, watcherId))
                 }
                 delay(10_000)
             }
         } finally {
             kotlinx.coroutines.withContext(NonCancellable) {
                 runCatching {
-                    model.workspaceSection(peer, "app.stoppedWatching", buildJsonObject {
-                        put("conversationId", id); put("watcherId", watcherId)
-                    })
+                    model.workspaceSection(peer, "app.stoppedWatching", owner.parameters(id, watcherId))
                 }
             }
         }
