@@ -28,7 +28,6 @@ struct ChatToolState: Equatable {
     /// Display lines for one detail string, split once. See `snippet`.
     static func makeSnippet(verb: String, detail: String?) -> [String] {
         guard let detail, !detail.isEmpty else { return [] }
-        let lines = detail.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         // An edit's red/green lines must reach the row unprefixed: a blanket
         // "| " is what made every Tool row read as grey output and broke the
         // Show edit label. This covers both the old/new rendering ("- old")
@@ -40,17 +39,39 @@ struct ChatToolState: Equatable {
         // receive the same semantic coloring as Edit/NotebookEdit cards.
         let diffVerbs = ["Edit", "NotebookEdit", "Diff"]
         let isDiff = diffVerbs.contains(verb)
-        var out = lines.prefix(Self.snippetLineCap).map { line in
+        var out: [String] = []
+        out.reserveCapacity(Self.snippetLineCap + 1)
+        func append(_ line: Substring) {
             let shown = Self.clip(line)
             if isDiff, Self.isDiffLine(shown) {
-                return shown
+                out.append(shown)
+            } else {
+                out.append("| \(shown)")
             }
-            return "| \(shown)"
         }
-        if lines.count > Self.snippetLineCap {
-            out.append(L10n.text("apple.chatmodel.0_more.8bfcca49", "\(lines.count - Self.snippetLineCap)"))
+        // Count the omitted lines without materializing them. LF is the
+        // existing Character separator; CRLF is one different Character.
+        // ASCII newline boundaries are also valid String slice boundaries.
+        var start = detail.startIndex
+        var index = detail.utf8.startIndex
+        var previous: UInt8 = 0
+        var lineCount = 1
+        while index < detail.utf8.endIndex {
+            let byte = detail.utf8[index]
+            let next = detail.utf8.index(after: index)
+            if byte == 10, previous != 13 {
+                if out.count < Self.snippetLineCap { append(detail[start..<index]) }
+                lineCount += 1
+                start = next
+            }
+            previous = byte
+            index = next
         }
-        return Array(out)
+        if out.count < Self.snippetLineCap { append(detail[start...]) }
+        if lineCount > Self.snippetLineCap {
+            out.append(L10n.text("apple.chatmodel.0_more.8bfcca49", "\(lineCount - Self.snippetLineCap)"))
+        }
+        return out
     }
 
     /// A unified or old/new diff body line. File headers ("--- a/…",
@@ -75,7 +96,7 @@ struct ChatToolState: Equatable {
     /// took a second and a half, and a dozen took a third of one.
     ///
     /// The full text stays in `detail`, so copy still yields everything.
-    static func clip(_ line: String) -> String {
+    static func clip<S: StringProtocol>(_ line: S) -> String {
         // A hostile grapheme may contain thousands of combining marks.
         // Bound scalars before the usual display-column clipping.
         let scalars = line.unicodeScalars.prefix(Self.snippetColumnCap * 4 + 1)
