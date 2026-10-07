@@ -182,8 +182,10 @@ private struct ClientChatContent: View {
             if await openRequestedChat() { return }
             if openConversationOnAppear { await session.openMostRecent() }
         }
-        .onChange(of: navigation.requestedChat) { _, _ in
-            Task { await openRequestedChat() }
+        .task(id: requestedChatLoadIdentity) {
+            guard visible, loaded, model.error == nil,
+                  model.isReady(for: workspaceID), model.peer == peer else { return }
+            await openRequestedChat()
         }
         .onChange(of: model.selected?.id) { _, _ in publishChat() }
     }
@@ -194,6 +196,17 @@ private struct ClientChatContent: View {
             sessionKey: .init(peer: peer, workspace: workspaceID, conversation: nil), session: session,
             folderName: folderName, hostName: hostName, presentationID: presentationID,
             intent: publicationIntent, handoffID: handoffID, layout: publicationLayout)
+    }
+
+    // A sidebar tap may arrive before this retained reader's in-flight load
+    // finishes. Retry when it becomes ready, even though the request itself
+    // has not changed. Keep the request scoped to this exact project/account.
+    private var requestedChatLoadIdentity: String? {
+        guard let requested = navigation.requestedChat,
+              let id = WorkDestinationResolver.requestedConversation(requested,
+                scope: WorkSessionContext.shared.scope, peer: peer, workspaceID: workspaceID)
+        else { return nil }
+        return "\(navigation.requestedChatGeneration):\(visible):\(loaded):\(model.peer == peer):\(model.isReady(for: workspaceID)):\(model.error == nil):\(model.chats.contains { $0.id == id })"
     }
 
     private var list: some View {
@@ -739,14 +752,13 @@ struct ClientChatThread: View {
                 }
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
-                        // The bar is pinned, not the next row of a stack. Stacked,
                 transcript(chat)
                     .overlay {
                         if dropExperienceVisible {
                             ChatDropExperience()
                         }
                     }
-                    .clientBottomBar {
+                    .clientBottomBar(separated: usesBoundedComposer) {
                         bar(chat)
                             .padding(.top, Theme.Space.s)
                     }

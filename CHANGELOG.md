@@ -49,8 +49,10 @@ then begin the next one. Do not reconstruct release notes from commits at the en
   interrupted setup locks recover without disrupting another active attempt.
 - Encrypted vault operations keep the account and server address that started
   them, including custom server paths and IPv6 addresses.
-- iPad and unfolded iPhone Duo chats keep the bottom blur within the composer
+- iPad and unfolded iPhone Duo chats keep messages clear above the composer
   area. Layout settings now sit directly below Notifications.
+- Sidebar chat selections retry when a connecting machine's conversation
+  reader finishes loading, instead of leaving the project chat list open.
 - Mac terminals opened from sessions started on another device retain the
   Mac's measured size instead of replaying the other device's size on display.
 

@@ -177,8 +177,18 @@ extension View {
     /// leaving a slab of material under the composer. Below 26 there is no
     /// such bar, so the inset keeps a panel fill and a hairline.
     @ViewBuilder
-    func clientBottomBar<Bar: View>(@ViewBuilder bar: () -> Bar) -> some View {
-        if #available(iOS 26, *) {
+    func clientBottomBar<Bar: View>(separated: Bool = false, @ViewBuilder bar: () -> Bar) -> some View {
+        if separated {
+            // Wide chat readers end above their controls. A safe-area overlay
+            // keeps scrolling messages underneath the entire tall composer.
+            VStack(spacing: 0) {
+                self
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                bar()
+                    .background(Theme.background)
+            }
+        } else if #available(iOS 26, *) {
             safeAreaBar(edge: .bottom, spacing: 0, content: bar)
         } else {
             safeAreaInset(edge: .bottom, spacing: 0) {
