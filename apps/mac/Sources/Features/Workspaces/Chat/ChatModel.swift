@@ -1230,7 +1230,7 @@ final class ChatModel {
                 forgetWindow()
                 loadDraft(for: nil, scope: nil, hostIdentity: nil, workspaceID: nil)
             }
-            selectionGeneration &+= 1
+            advanceSelection("folder-load")
             discardSteerReservations()
         }
         folderID = workspaceID
@@ -1384,12 +1384,13 @@ final class ChatModel {
     }
 
     private func select(_ chat: ChatConversation?, savedPage: CachedRecordPayload?, fresh: Bool = false) async {
-        if savedPage == nil, let chat, chat.id == selected?.id, !events.isEmpty {
+        guard !Task.isCancelled else { return }
+        if savedPage == nil, let chat, chat.id == selected?.id {
             await refreshOpen(id: chat.id)
             return
         }
         rememberRecentMessages()
-        selectionGeneration &+= 1
+        advanceSelection("select")
         discardSteerReservations()
         let generation = selectionGeneration
         #if DEBUG
@@ -1566,7 +1567,7 @@ final class ChatModel {
     /// and what is before it is a page away again.
     func reopenAtLatest() async {
         guard let selected else { return }
-        selectionGeneration &+= 1
+        advanceSelection("explicit-latest")
         discardSteerReservations()
         let generation = selectionGeneration
         events = []
@@ -3840,6 +3841,15 @@ final class ChatModel {
     private func selectionMatches(id: String, generation: UInt64) -> Bool {
         selectionGeneration == generation && selected?.id == id
             && continuityScope == WorkSessionContext.shared.readingScope
+    }
+
+    private func advanceSelection(_ reason: String) {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["TOKENSTAT_VIEWPORT_TRACE"] == "1" {
+            print("chat-selection model=\(ObjectIdentifier(self)) cause=\(reason) chat=\(selected?.id ?? "none") workspace=\(workspaceID ?? "none") generation=\(selectionGeneration)->\(selectionGeneration &+ 1) events=\(events.count)")
+        }
+        #endif
+        selectionGeneration &+= 1
     }
 
     private func replace(_ chat: ChatConversation, preservePendingSteer: Bool = true) {

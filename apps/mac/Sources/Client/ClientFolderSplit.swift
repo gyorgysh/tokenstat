@@ -203,7 +203,10 @@ struct ClientFolderSplit: View {
 
     private func choose(_ item: WorkspaceSection) {
         if item == .browser { showPort = true }
-        else { section = item }
+        else {
+            if item != section { navigation.chooseNavigation() }
+            section = item
+        }
     }
 
     private var remoteFolder: WorkspaceFolder {

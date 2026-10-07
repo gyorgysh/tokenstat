@@ -21,6 +21,9 @@ final class ChatModel {
     var onLoad: (() async -> Void)?
     var onSelect: (() async -> Void)?
     var selected: ChatConversation?
+    var selectionGeneration: UInt64 = 0
+    var currentReference: WorkReference?
+    var completedSelections = 0
     var mostRecent: ChatConversation?
     var selections = 0
     var creates = 0
@@ -52,9 +55,14 @@ final class ChatModel {
         if let failure { error = failure }
     }
     func select(_ chat: ChatConversation) async {
+        guard !Task.isCancelled else { return }
         selections += 1
-        await onSelect?()
+        selectionGeneration &+= 1
+        let generation = selectionGeneration
         selected = chat
+        await onSelect?()
+        guard !Task.isCancelled, generation == selectionGeneration else { return }
+        completedSelections += 1
     }
     func create() async -> ChatConversation? {
         creates += 1
@@ -126,6 +134,94 @@ struct ClientChatSessionTests {
         await oldLayout.value
         await newLayout.value
         precondition(loading.model.loads == 1 && loading.loaded)
+
+        let selectionStore = ClientChatSessions(limit: 1)
+        let selection = selectionStore.session(peer: "m", workspace: "p", conversation: "b")
+        let selectionEntered = Signal(), selectionRelease = Signal(), selectionArrived = Signal()
+        selection.model.onSelect = { selectionEntered.signal(); await selectionRelease.wait() }
+        let oldSelectionLayout = Task { await selection.select(ChatConversation(id: "b")) }
+        await selectionEntered.wait()
+        oldSelectionLayout.cancel()
+        let newSelectionLayout = Task {
+            selectionArrived.signal()
+            await selection.select(ChatConversation(id: "b"))
+        }
+        await selectionArrived.wait()
+        await Task.yield()
+        _ = selectionStore.session(peer: "m", workspace: "elsewhere")
+        precondition(selectionStore.session(peer: "m", workspace: "p", conversation: "b") === selection,
+            "a shared opening cannot be evicted when its outgoing layout is cancelled")
+        precondition(selection.model.selections == 1 && !selection.canDiscard,
+            "a remount waits for the same opening while the transcript is still empty")
+        selectionRelease.signal()
+        await oldSelectionLayout.value
+        await newSelectionLayout.value
+        precondition(selection.model.selected?.id == "b" && selection.model.selections == 1)
+        precondition(selection.canDiscard, "the opening lease ends once the producer completes")
+
+        let cancelledSelection = ClientChatSession()
+        let cancelBeforeEntry = Signal()
+        let cancelledWaiter = Task {
+            await cancelBeforeEntry.wait()
+            await cancelledSelection.select(ChatConversation(id: "cancelled"))
+        }
+        cancelledWaiter.cancel()
+        cancelBeforeEntry.signal()
+        await cancelledWaiter.value
+        precondition(cancelledSelection.model.selections == 0 && cancelledSelection.model.selected == nil,
+            "a cancelled presentation cannot start a new selection")
+
+        // The stub models the real ChatModel's pre-await selection and
+        // generation/cancellation publication guards; no transport runs here.
+        let superseded = ClientChatSession()
+        let starts = [Signal(), Signal(), Signal()]
+        let finishes = [Signal(), Signal(), Signal()]
+        var nextSelection = 0
+        superseded.model.onSelect = {
+            let index = nextSelection
+            nextSelection += 1
+            starts[index].signal()
+            await finishes[index].wait()
+        }
+        let firstA = Task { await superseded.select(ChatConversation(id: "a")) }
+        await starts[0].wait()
+        let middleB = Task { await superseded.select(ChatConversation(id: "b")) }
+        await starts[1].wait()
+        let lastA = Task { await superseded.select(ChatConversation(id: "a")) }
+        await starts[2].wait()
+        finishes[0].signal()
+        await firstA.value
+        finishes[1].signal()
+        await middleB.value
+        precondition(!superseded.canDiscard && superseded.model.completedSelections == 0,
+            "old producer cleanup cannot release or publish over the newest opening")
+        finishes[2].signal()
+        await lastA.value
+        precondition(superseded.canDiscard && superseded.model.selected?.id == "a"
+            && superseded.model.selections == 3 && superseded.model.completedSelections == 1,
+            "A to B to A supersedes both old producers rather than reusing the first A")
+
+        let provenanceStore = ClientChatSessions()
+        let folderA = provenanceStore.session(peer: "mac", workspace: "project")
+        let recentB = provenanceStore.session(peer: "mac", workspace: "project", conversation: "b")
+        folderA.model.selected = ChatConversation(id: "a")
+        recentB.model.selected = ChatConversation(id: "b")
+        let referenceB = WorkReference(scope: .local(installationID: "test"), hostIdentity: "mac",
+            workspaceID: "project", kind: .conversation, itemID: "b")
+        let recentKey = ClientChatSessions.Key(peer: "mac", workspace: "project", conversation: "b")
+        precondition(recentKey.isStandaloneReader(for: referenceB))
+        precondition(!ClientChatSessions.Key(peer: "mac", workspace: "project", conversation: nil)
+            .isStandaloneReader(for: referenceB))
+        precondition(!ClientChatSessions.Key(peer: "other", workspace: "project", conversation: "b")
+            .isStandaloneReader(for: referenceB))
+        precondition(!ClientChatSessions.Key(peer: "mac", workspace: "other", conversation: "b")
+            .isStandaloneReader(for: referenceB))
+        precondition(!ClientChatSessions.Key(peer: "mac", workspace: "project", conversation: "a")
+            .isStandaloneReader(for: referenceB))
+        let foldedB = provenanceStore.session(peer: recentKey.peer, workspace: recentKey.workspace,
+            conversation: recentKey.conversation)
+        precondition(foldedB === recentB && foldedB !== folderA && folderA.model.selected?.id == "a",
+            "Recent B must retain its reader when the folder owns A")
 
         for firstChat in [false, true] {
             let launching = ClientChatSession()
@@ -216,6 +312,19 @@ struct ClientChatSessionTests {
         precondition(exactReader.model.draft.isEmpty && exactReader.model.attachments.isEmpty && exactReader.model.unconfirmedSend == nil)
         precondition(exactReader.canDiscard && otherHost.opened != nil && !otherHost.canDiscard)
 
+        // A launcher fallback cannot replace a row chosen during its await.
+        for firstChat in [false, true] {
+            let launching = ClientChatSession(), started = Signal(), finish = Signal()
+            if !firstChat { launching.model.mostRecent = ChatConversation(id: "recent") }
+            launching.model.onSelect = { started.signal(); await finish.wait() }
+            let fallback = Task { await launching.openMostRecent() }
+            await started.wait()
+            launching.opened = ChatConversation(id: "chosen")
+            finish.signal()
+            await fallback.value
+            precondition(launching.opened?.id == "chosen", "late recent/create fallback cannot overwrite an explicit row")
+        }
+
         let invalidated = ClientChatSession()
         let started = Signal(), finish = Signal()
         invalidated.model.onLoad = { started.signal(); await finish.wait() }
@@ -227,6 +336,6 @@ struct ClientChatSessionTests {
         invalidated.model.onLoad = nil
         await invalidated.load(workspaceID: "p", peer: "m")
         precondition(invalidated.model.loads == 2, "an invalidated in-flight read cannot mark the session reusable")
-        print("ClientChatSessionTests passed: 30 remounts, cancellation, refresh, mutation, isolation and eviction.")
+        print("ClientChatSessionTests passed: 30 remounts, shared opening, cancelled selection, reader provenance, refresh, mutation, isolation and eviction.")
     }
 }

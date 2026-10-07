@@ -19,6 +19,8 @@ struct ClientChatMenu: View {
     @State private var removing = false
     @State private var pendingDelete: ChatConversation?
     @State private var owner = WorkSessionContext.shared.scope
+    @State private var visible = false
+    @Environment(ClientNavigationModel.self) private var navigation
 
     private var ownsProject: Bool {
         owner != nil && owner == WorkSessionContext.shared.scope
@@ -31,16 +33,21 @@ struct ClientChatMenu: View {
                 .disabled(conversation.running || !ownsProject)
             if supportsFork {
                 Button(L10n.text("apple.clientchatmenu.fork_chat.dfbcbb35"), .copy) {
+                    let ticket = navigation.chatActionTicket()
                     copying = true
                     Task {
                         defer { copying = false }
-                        guard ownsProject else { return }
+                        @MainActor func isCurrent() -> Bool {
+                            visible && !Task.isCancelled && ownsProject
+                                && navigation.acceptsChatAction(ticket)
+                        }
+                        guard isCurrent() else { return }
                         do {
                             let copied = try await model.fork(conversation, in: workspaceID, peer: peer)
-                            guard ownsProject else { return }
+                            guard isCurrent() else { return }
                             onFork?(copied)
                         } catch {
-                            if ownsProject { model.error = error.localizedDescription }
+                            if isCurrent() { model.error = error.localizedDescription }
                         }
                     }
                 }.disabled(copying || !ownsProject)
@@ -79,6 +86,8 @@ struct ClientChatMenu: View {
         .menuIndicator(.hidden)
         .disabled(removing)
         .accessibilityLabel(L10n.text("apple.clientchatmenu.chat_actions.8ba35bb8"))
+        .onAppear { visible = true }
+        .onDisappear { visible = false }
         .task(id: peer) { supportsFork = await RemoteHostFeature.chatFork.isSupported(peer: peer) }
         .sheet(isPresented: $rename) {
             ClientNameEditor(title: L10n.text("apple.clientchatmenu.rename_chat.26076241"), initial: conversation.title) { title in

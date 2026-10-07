@@ -21,6 +21,53 @@ import SwiftUI
 @MainActor
 @Observable
 final class ClientNavigationModel {
+    let chatHandoff = ClientChatLayoutHandoff()
+    var restoredChatReader: ClientChatLayoutHandoff.Reader?
+    @ObservationIgnored private var restoringLayout = false
+
+    struct ChatActionTicket {
+        let scope: WorkReference.Scope?
+        let intent: UInt64
+        let layout: UInt64
+    }
+
+    func chatActionTicket() -> ChatActionTicket {
+        ChatActionTicket(scope: WorkSessionContext.shared.scope,
+            intent: chatHandoff.intent, layout: stackGeneration)
+    }
+
+    func acceptsChatAction(_ ticket: ChatActionTicket) -> Bool {
+        ticket.scope != nil && ticket.scope == WorkSessionContext.shared.scope
+            && ticket.intent == chatHandoff.intent && ticket.layout == stackGeneration
+    }
+
+    func chooseNavigation() {
+        guard !restoringLayout else { return }
+        chatHandoff.navigate()
+        pushedChat = nil
+        restoredChatReader = nil
+        visibleChat = nil
+        visibleChatOwner = nil
+        visibleChatSessionKey = nil
+    }
+
+    /// Synchronous layout writes are presentation changes, not new intent.
+    func restoreLayout(_ operation: () -> Void) {
+        let previous = restoringLayout
+        restoringLayout = true
+        defer { restoringLayout = previous }
+        operation()
+    }
+
+    /// Choosing a row/New/Fork inside a folder advances chat intent without
+    /// dismissing the folder presentation that contains those controls.
+    func chooseWithinChat(session: ClientChatSession, presentationID: UUID?) {
+        let pushes = presentationID != nil && pushedChat?.id == presentationID ? pushedChats : []
+        let fallback = restoredChatReader.flatMap { $0.session === session && $0.key.conversation == nil ? $0 : nil }
+        chooseNavigation()
+        pushedChats = pushes
+        restoredChatReader = fallback
+    }
     var showWorkSearch = false
     var ecosystemSearchTerm = ""
 
@@ -44,6 +91,7 @@ final class ClientNavigationModel {
     var destination: ClientTab = .home {
         didSet {
             if destination != oldValue {
+                chooseNavigation()
                 restoredRoute = nil
                 routeLaunch.navigationChanged()
             }
@@ -55,6 +103,8 @@ final class ClientNavigationModel {
             if restoredRoute != nil || oldValue != nil { restoredRouteGeneration &+= 1 }
             if restoredRoute != nil && restoredRoute != oldValue {
                 visibleChat = nil
+                visibleChatOwner = nil
+                visibleChatSessionKey = nil
                 visibleTerminal = nil
                 rememberedWorkspace = nil
                 rememberedWorkspaceOwner = nil
@@ -63,12 +113,16 @@ final class ClientNavigationModel {
     }
     func dismissRestoredRoute(generation: UInt64) {
         guard restoredRoute != nil, generation == restoredRouteGeneration else { return }
+        chooseNavigation()
         restoredRoute = nil
     }
 
     var rememberedWorkspace: WorkReference?
     private var rememberedWorkspaceOwner: UUID?
-    var visibleTerminal: WorkReference?
+    private(set) var visibleTerminal: WorkReference? {
+        didSet { if visibleTerminal == nil { visibleTerminalOwner = nil } }
+    }
+    @ObservationIgnored private var visibleTerminalOwner: String?
     var rememberedSection: WorkspaceSection?
     private let routeLaunch = WorkMobileRouteLaunch()
     private var restorationFinished = false
@@ -95,9 +149,15 @@ final class ClientNavigationModel {
             return WorkMobileRoute(scope: scope, tab: destination.rawValue,
                                    reference: terminal, section: "sessions")
         }
+        if let reader = chatHandoff.reader, reader.reference.scope == scope {
+            return WorkMobileRoute(scope: scope, tab: destination.rawValue,
+                reference: reader.reference, section: "chat")
+        }
         if let chat = visibleChat, chat.scope == scope {
             return WorkMobileRoute(scope: scope, tab: destination.rawValue, reference: chat, section: "chat")
         }
+        if let restoredRoute, restoredRoute.scope == scope,
+           restoredChatReader?.matches(restoredRoute) == true { return restoredRoute }
         if let folder = rememberedWorkspace, folder.scope == scope {
             return WorkMobileRoute(scope: scope, tab: destination.rawValue,
                                    reference: folder, section: rememberedSection?.rawValue)
@@ -125,6 +185,17 @@ final class ClientNavigationModel {
         rememberedWorkspace = nil
     }
 
+    func showTerminal(_ reference: WorkReference, owner: String) {
+        guard reference.scope == WorkSessionContext.shared.scope, reference.kind == .terminal else { return }
+        visibleTerminalOwner = owner
+        visibleTerminal = reference
+    }
+
+    func leaveTerminal(owner: String) {
+        guard visibleTerminalOwner == owner else { return }
+        visibleTerminal = nil
+    }
+
 
     /// Expansion is independent of the detail destination. Visiting Home or
     /// Devices must not fold the workspace tree, including after a split reset.
@@ -135,6 +206,7 @@ final class ClientNavigationModel {
         didSet {
             if let folderID { sidebarFolderID = folderID }
             if folderID != oldValue {
+                chooseNavigation()
                 restoredRoute = nil
                 routeLaunch.navigationChanged()
             }
@@ -143,15 +215,56 @@ final class ClientNavigationModel {
 
     /// Which project section the strip above the content is showing.
     var section: WorkspaceSection = .sessions {
-        didSet { if section != oldValue { restoredRoute = nil } }
+        didSet { if section != oldValue { chooseNavigation(); restoredRoute = nil } }
     }
     var projectSections: [ClientProjectChats.Key: WorkspaceSection] = [:]
     private(set) var projectOpenGeneration: UInt64 = 0
     var layoutGeneration: UInt64 = 0
+    var stackGeneration: UInt64 = 0
+    private(set) var pushedChatGeneration: UInt64 = 0
+    private(set) var pushedChats: [ClientOwnedPush] = [] {
+        didSet { pushedChatGeneration &+= 1 }
+    }
+    var pushedChat: ClientOwnedPush? {
+        get { pushedChats.last }
+        set { pushedChats = newValue.map { [$0] } ?? [] }
+    }
+
+    func pushOwned(_ push: ClientOwnedPush, from parent: UUID?) {
+        let prefix: [ClientOwnedPush]
+        if let parent, let index = pushedChats.firstIndex(where: { $0.id == parent }) {
+            prefix = Array(pushedChats.prefix(index + 1))
+        } else { prefix = [] }
+        let fallback: ClientChatLayoutHandoff.Reader? = restoredChatReader.flatMap { reader in
+            guard let parent, let route = restoredRoute, reader.matches(route),
+                  !prefix.isEmpty || parent == (reader.presentationID ?? reader.id) else { return nil }
+            return reader
+        }
+        chooseNavigation()
+        restoredChatReader = fallback
+        if prefix.isEmpty && fallback == nil { restoredRoute = nil }
+        pushedChats = prefix + [push]
+    }
+
+    func dismissPushedChat(generation: UInt64, layout: UInt64, depth: Int = 0) {
+        guard pushedChats.indices.contains(depth), generation == pushedChatGeneration,
+              layout == stackGeneration else { return }
+        let prefix = Array(pushedChats.prefix(depth))
+        let fallback = restoredChatReader
+        chooseNavigation()
+        restoredChatReader = fallback
+        pushedChats = prefix
+    }
 
     /// Conversation a notification asked to open, consumed by the chat list
     /// once that folder is on screen.
-    var requestedChat: WorkReference?
+    private(set) var requestedChatGeneration: UInt64 = 0
+    var requestedChat: WorkReference? {
+        didSet {
+            requestedChatGeneration &+= 1
+            if requestedChat != nil { chooseNavigation() }
+        }
+    }
     var projectChatAction: ClientProjectChatAction?
 
     /// The conversation the person is already in, as the folder thread or a
@@ -160,21 +273,47 @@ final class ClientNavigationModel {
     /// transcript. The cover a tap presents is `presentedChat`, not this.
     var visibleChat: WorkReference? { didSet { if visibleChat != oldValue { routeLaunch.navigationChanged() } } }
     @ObservationIgnored private var visibleChatOwner: UUID?
+    private(set) var visibleChatSessionKey: ClientChatSessions.Key?
 
-    func showChat(_ reference: WorkReference?, owner: UUID) {
+    func showChat(_ reference: WorkReference?, owner: UUID, sessionKey: ClientChatSessions.Key,
+                  session: ClientChatSession, folderName: String, hostName: String,
+                  presentationID: UUID?, intent: UInt64, handoffID: UUID?, layout: UInt64) {
+        guard layout == stackGeneration, let reference, reference.scope == WorkSessionContext.shared.scope,
+              chatHandoff.show(session: session, key: sessionKey, reference: reference, owner: owner,
+                folderName: folderName, hostName: hostName, presentationID: presentationID,
+                intent: intent, handoffID: handoffID) else { return }
         visibleChat = reference
-        visibleChatOwner = reference == nil ? nil : owner
+        visibleChatOwner = owner
+        visibleChatSessionKey = sessionKey
     }
 
     func leaveChat(owner: UUID) {
         guard visibleChatOwner == owner else { return }
         visibleChatOwner = nil
         visibleChat = nil
+        visibleChatSessionKey = nil
+    }
+
+    /// Back from a retained folder fallback still lands on that folder's list.
+    /// Its destination identifiers become workspace identifiers, not the chat
+    /// that was just closed; a later fold cannot reopen that conversation.
+    func leaveThread(session: ClientChatSession, presentationID: UUID? = nil) {
+        let fallback = restoredChatReader.flatMap { reader in
+            reader.session === session && reader.key.conversation == nil ? reader : nil
+        }
+        chooseWithinChat(session: session, presentationID: presentationID)
+        if let fallback {
+            restoredChatReader = fallback
+            let reference = WorkReference(scope: fallback.reference.scope, hostIdentity: fallback.key.peer,
+                workspaceID: fallback.key.workspace, kind: .workspace, itemID: nil)
+            restoredRoute = WorkMobileRoute(scope: reference.scope, tab: destination.rawValue,
+                reference: reference, section: "chat")
+        }
     }
 
     /// A chat opened from a notification on the tab layout, where there is
     /// no sidebar to land the folder in. Dismissing it returns where you were.
-    var presentedChat: PresentedChat? { didSet { if presentedChat != oldValue { routeLaunch.navigationChanged() } } }
+    var presentedChat: PresentedChat? { didSet { if presentedChat != oldValue { chatHandoff.suspend(); routeLaunch.navigationChanged() } } }
     var presentedTaskBoard: PresentedTaskBoard?
 
     /// True when this conversation is already on screen, so a tap should not
@@ -183,6 +322,7 @@ final class ClientNavigationModel {
         guard let target = reference(peer: peer, workspaceID: workspaceID, chatID: chatID) else { return false }
         return WorkDestinationResolver.sameConversation(presentedChat?.reference, target)
             || WorkDestinationResolver.sameConversation(visibleChat, target)
+            || (presentedChat == nil && WorkDestinationResolver.sameConversation(chatHandoff.reader?.reference, target))
     }
 
     func reference(peer: String, workspaceID: String, chatID: String) -> WorkReference? {
@@ -194,6 +334,7 @@ final class ClientNavigationModel {
 
     /// Remove the old account's entire navigation state before showing another.
     func reset() {
+        chooseNavigation()
         pendingPlace = nil
         accountRequest = nil
         homeEditorRequested = false
@@ -212,6 +353,7 @@ final class ClientNavigationModel {
         projectChatAction = nil
         visibleChat = nil
         visibleChatOwner = nil
+        visibleChatSessionKey = nil
         presentedChat = nil
         presentedTaskBoard = nil
         suggestedPrompt = nil
@@ -254,6 +396,7 @@ final class ClientNavigationModel {
 
     /// Selecting a folder implies the workspace plane, so both move together.
     func open(folderID: String?, section: WorkspaceSection = .sessions) {
+        chooseNavigation()
         projectOpenGeneration &+= 1
         requestedChat = nil
         restoredRoute = nil
@@ -267,11 +410,22 @@ final class ClientNavigationModel {
     /// so a push needs its own road.
     var workspacesPath: [ClientFolderPush] = []
 
+    func updateWorkspacesPath(_ path: [ClientFolderPush], layout: UInt64) {
+        guard layout == stackGeneration, path != workspacesPath else { return }
+        chooseNavigation()
+        workspacesPath = path
+    }
+
     /// Open a folder's section as a push on the Workspaces tab. New chat
     /// lands in that folder's chat, new session in its launcher.
-    func pushFolder(peerKey: String, hostName: String, folder: WorkspaceFolder, section: WorkspaceSection) {
-        workspacesPath.append(ClientFolderPush(peerKey: peerKey, hostName: hostName, folder: folder, section: section))
-        destination = .workspaces
+    func pushFolder(peerKey: String, hostName: String, folder: WorkspaceFolder, section: WorkspaceSection,
+                    restoringLayout: Bool = false) {
+        let push = {
+            self.chooseNavigation()
+            self.workspacesPath.append(ClientFolderPush(peerKey: peerKey, hostName: hostName, folder: folder, section: section))
+            self.destination = .workspaces
+        }
+        if restoringLayout { restoreLayout(push) } else { push() }
     }
 
     /// Show one machine on Devices, from anywhere.
@@ -298,12 +452,14 @@ final class ClientNavigationModel {
               let target = reference(peer: peer, workspaceID: route.workspaceID, chatID: chatID) else { return }
         let already = self.folderID == folderID && section == .chat
             && isShowing(peer: peer, workspaceID: route.workspaceID, chatID: chatID)
-        if !restoringLayout { projectOpenGeneration &+= 1 }
-        self.folderID = folderID
-        self.section = .chat
-        self.destination = .workspaces
-        if already { return }
-        self.requestedChat = target
+        let open = {
+            if !restoringLayout { self.chooseNavigation(); self.projectOpenGeneration &+= 1 }
+            self.folderID = folderID
+            self.section = .chat
+            self.destination = .workspaces
+            if !already { self.requestedChat = target }
+        }
+        if restoringLayout { restoreLayout(open) } else { open() }
     }
 }
 

@@ -342,7 +342,7 @@ struct ClientWorkspaceSessionsView: View {
                 ],
                 spacing: Theme.Space.s
             ) {
-                NavigationLink {
+                ClientOwnedNavigationLink {
                     RemoteHostFeatureGate(feature: .chat, peer: peer, hostName: hostName) {
                         ClientChatView(
                             peer: peer,

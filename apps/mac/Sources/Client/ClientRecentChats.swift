@@ -162,7 +162,7 @@ struct ClientRecentChatsSection: View {
                 .padding(.horizontal, 2)
 
                 ForEach(shown) { chat in
-                    NavigationLink {
+                    ClientOwnedNavigationLink {
                         ClientRecentChatView(
                             peer: peer,
                             workspaceID: chat.workspaceID,
@@ -281,13 +281,18 @@ struct ClientRecentChatView: View {
     let folderName: String
     let hostName: String
     let chatID: String
+    var retainedSession: ClientChatSession? = nil
 
     @Environment(ClientChatSessions.self) private var sessions
+    @Environment(ClientNavigationModel.self) private var navigation
+    @Environment(\.clientChatHandoffID) private var handoffID
 
     var body: some View {
         ClientRecentChatContent(peer: peer, workspaceID: workspaceID, folderName: folderName,
             hostName: hostName, chatID: chatID,
-            session: sessions.session(peer: peer, workspace: workspaceID, conversation: chatID))
+            session: sessions.session(peer: peer, workspace: workspaceID, conversation: chatID, retaining: retainedSession),
+            publicationIntent: navigation.chatHandoff.intent, handoffID: handoffID,
+            publicationLayout: navigation.stackGeneration)
             .id(ClientChatSessions.Key(peer: peer, workspace: workspaceID, conversation: chatID))
     }
 }
@@ -299,7 +304,11 @@ private struct ClientRecentChatContent: View {
     let hostName: String
     let chatID: String
     let session: ClientChatSession
+    @State var publicationIntent: UInt64
+    @State var handoffID: UUID?
+    @State var publicationLayout: UInt64
     @State private var viewer = UUID()
+    @Environment(\.clientChatPresentationID) private var presentationID
     private var model: ChatModel {
         get { session.model }
         nonmutating set { session.model = newValue }
@@ -389,7 +398,7 @@ private struct ClientRecentChatContent: View {
             loadGeneration &+= 1
             loadingLive = false
         }
-        .onAppear { session.appear(viewer) }
+        .onAppear { visible = true; session.appear(viewer); publishChat() }
         .onDisappear { session.disappear(viewer) }
     }
 
@@ -398,6 +407,7 @@ private struct ClientRecentChatContent: View {
             if model.chats.contains(where: { $0.id == chatID }) {
                 ClientChatThread(
                     model: model,
+                    session: session,
                     chatID: chatID,
                     folderName: folderName,
                     hostName: hostName,
@@ -447,15 +457,31 @@ private struct ClientRecentChatContent: View {
             // The notification cover is `presentedChat`. Writing here would
             // hide the folder thread sitting under it.
             if navigation.presentedChat == nil {
-                navigation.showChat(navigation.reference(peer: peer, workspaceID: workspaceID, chatID: chatID), owner: viewer)
+                publishChat()
             }
         }
+        .onChange(of: model.selected?.id) { _, _ in publishChat() }
+        .onChange(of: loaded) { _, _ in publishChat() }
         .onDisappear {
             guard scenePhase == .active else { return }
             if navigation.presentedChat == nil {
                 navigation.leaveChat(owner: viewer)
             }
         }
+    }
+
+    private func publishChat() {
+        guard visible, navigation.presentedChat == nil else { return }
+        guard !loaded || model.chats.contains(where: { $0.id == chatID }) || model.selected?.id == chatID else {
+            if model.error == nil, navigation.chatHandoff.reader?.session === session {
+                navigation.chooseNavigation()
+            }
+            return
+        }
+        navigation.showChat(navigation.reference(peer: peer, workspaceID: workspaceID, chatID: chatID), owner: viewer,
+            sessionKey: .init(peer: peer, workspace: workspaceID, conversation: chatID), session: session,
+            folderName: folderName, hostName: hostName, presentationID: presentationID,
+            intent: publicationIntent, handoffID: handoffID, layout: publicationLayout)
     }
 
     private func retry() {

@@ -227,6 +227,11 @@ jobs:
       - name: Run the standalone client tests
         run: bash scripts/run-swift-tests.sh
 
+      - name: Mobile chat navigation and transcript continuity
+        run: |
+          python3 scripts/check-chat-navigation.py
+          python3 scripts/check-transcript-layout.py
+
       - name: Validate Apple widget signing rules
         run: |
           python3 scripts/test_sign_mac_app.py

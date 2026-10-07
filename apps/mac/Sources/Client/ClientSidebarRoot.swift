@@ -81,6 +81,7 @@ struct ClientSidebarRoot: View {
                 // 820 point iPad the sidebar takes 300 of them.
                 GeometryReader { geo in
                     detail(width: geo.size.width)
+                        .modifier(ClientOwnedPushDestination(tab: navigation.destination))
                         // Fill the reader, top leading. Not `.frame(width:
                         // height:)` from the reading, whose default alignment
                         // is centre and which centres anything that does not
@@ -256,6 +257,7 @@ struct ClientSidebarRoot: View {
             Section {
                 ForEach(tabCustomization.visibleTabs) { tab in
                     Button {
+                        navigation.chooseNavigation()
                         navigation.restoredRoute = nil
                         navigation.destination = tab
                         navigation.folderID = nil
@@ -356,6 +358,7 @@ struct ClientSidebarRoot: View {
             guard let key = "12345".dropFirst(index).first else { continue }
             commands.append(
                 ClientShortcut(id: tab.rawValue, title: tab.label, key: KeyEquivalent(key)) {
+                    navigation.chooseNavigation()
                     navigation.restoredRoute = nil
                     navigation.destination = tab
                     navigation.folderID = nil
@@ -386,6 +389,7 @@ struct ClientSidebarRoot: View {
     /// rather than of what happens to be running.
     private func hostRow(_ host: ClientHost) -> some View {
         Button {
+            navigation.chooseNavigation()
             // The detail column lands on Workspaces, which draws this same
             // model: its connecting line, waiting-for-approval card and
             // errors are already there. Tapping from Home used to connect
@@ -637,7 +641,7 @@ struct ClientSidebarRoot: View {
             ClientRestoredRouteView(route: route)
                 .toolbar {
                     ToolbarItem(placement: .navigation) {
-                        Button { navigation.restoredRoute = nil } label: {
+                        Button { navigation.chooseNavigation(); navigation.restoredRoute = nil } label: {
                             ActionIcon.back.label(L10n.text("common.back"))
                         }
                     }

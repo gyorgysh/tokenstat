@@ -25,7 +25,7 @@ struct ClientContinueSection: View {
                 VStack(spacing: 0) {
                     ForEach(places) { place in
                         HStack(spacing: 0) {
-                            NavigationLink {
+                            ClientOwnedNavigationLink {
                                 ClientSavedPlaceView(place: place)
                             } label: {
                                 row(place)

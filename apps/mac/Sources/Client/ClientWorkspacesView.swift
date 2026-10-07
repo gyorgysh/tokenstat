@@ -394,7 +394,8 @@ struct ClientWorkspacesView: View {
             peerKey: peer,
             hostName: host.name,
             folder: folder,
-            section: navigation.section
+            section: navigation.section,
+            restoringLayout: true
         )
     }
 

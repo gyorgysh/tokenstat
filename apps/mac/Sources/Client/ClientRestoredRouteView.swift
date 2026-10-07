@@ -11,6 +11,11 @@ struct ClientRestoredRouteView: View {
 
     var body: some View {
         if route.scope == WorkSessionContext.shared.scope,
+           let reader = navigation.restoredChatReader, reader.matches(route) {
+            retainedReader(reader)
+                .environment(\.clientChatPresentationID, reader.presentationID ?? reader.id)
+                .id(reader.id)
+        } else if route.scope == WorkSessionContext.shared.scope,
            let reference = route.reference, let place = place(reference) {
             ClientSavedPlaceView(place: place,
                 restoredSection: reference.kind == .workspace
@@ -22,6 +27,16 @@ struct ClientRestoredRouteView: View {
             ClientEmptyState(kind: .unreachable, title: L10n.text("apple.clientrestoredrouteview.this_place_is_unavailable.4b4de423"),
                 message: L10n.text("apple.clientrestoredrouteview.return_to_your_projects_to_choose_where_to.d0ff81a3"))
                 .padding(Theme.Space.m)
+        }
+    }
+
+    @ViewBuilder private func retainedReader(_ reader: ClientChatLayoutHandoff.Reader) -> some View {
+        if reader.key.conversation == nil {
+            ClientChatView(peer: reader.key.peer, workspaceID: reader.key.workspace,
+                folderName: reader.folderName, hostName: reader.hostName, retainedSession: reader.session)
+        } else if let id = reader.reference.itemID {
+            ClientRecentChatView(peer: reader.key.peer, workspaceID: reader.key.workspace,
+                folderName: reader.folderName, hostName: reader.hostName, chatID: id, retainedSession: reader.session)
         }
     }
 
@@ -46,10 +61,11 @@ struct ClientRestoredDestination: ViewModifier {
 
     func body(content: Content) -> some View {
         let generation = navigation.restoredRouteGeneration
+        let layout = navigation.stackGeneration
         return content.navigationDestination(isPresented: Binding(
             get: { navigation.destination == tab && navigation.restoredRoute != nil },
             set: { shown in
-                if !shown, navigation.destination == tab {
+                if !shown, layout == navigation.stackGeneration, navigation.destination == tab {
                     navigation.dismissRestoredRoute(generation: generation)
                 }
             }

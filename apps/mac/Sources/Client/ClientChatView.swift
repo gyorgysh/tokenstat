@@ -21,13 +21,18 @@ struct ClientChatView: View {
     /// Launcher entry: skip the list and land in the conversation worth
     /// returning to, creating the first one when this folder has none.
     var openConversationOnAppear = false
+    var retainedSession: ClientChatSession? = nil
 
     @Environment(ClientChatSessions.self) private var sessions
+    @Environment(ClientNavigationModel.self) private var navigation
+    @Environment(\.clientChatHandoffID) private var handoffID
 
     var body: some View {
         ClientChatContent(peer: peer, workspaceID: workspaceID, folderName: folderName,
             hostName: hostName, folder: folder, openConversationOnAppear: openConversationOnAppear,
-            session: sessions.session(peer: peer, workspace: workspaceID))
+            session: sessions.session(peer: peer, workspace: workspaceID, retaining: retainedSession),
+            publicationIntent: navigation.chatHandoff.intent, handoffID: handoffID,
+            publicationLayout: navigation.stackGeneration)
             .id(ClientChatSessions.Key(peer: peer, workspace: workspaceID, conversation: nil))
     }
 }
@@ -40,7 +45,12 @@ private struct ClientChatContent: View {
     let folder: WorkspaceFolder?
     let openConversationOnAppear: Bool
     let session: ClientChatSession
+    @State var publicationIntent: UInt64
+    @State var handoffID: UUID?
+    @State var publicationLayout: UInt64
     @State private var viewer = UUID()
+    @State private var visible = false
+    @Environment(\.clientChatPresentationID) private var presentationID
     private var model: ChatModel { session.model }
     private var loaded: Bool {
         get { session.loaded }
@@ -104,14 +114,25 @@ private struct ClientChatContent: View {
             if let thread = opened ?? retainedThread {
                 ClientChatThread(
                     model: model,
+                    session: session,
                     chatID: thread.id,
                     folderName: folderName,
                     hostName: hostName,
                     folder: folder,
                     isActive: opened != nil,
-                    onBack: { retainedThread = opened; self.opened = nil },
+                    onBack: {
+                        guard visible, publicationLayout == navigation.stackGeneration else { return }
+                        navigation.leaveThread(session: session, presentationID: presentationID)
+                        publicationIntent = navigation.chatHandoff.intent
+                        publicationLayout = navigation.stackGeneration
+                        retainedThread = opened; self.opened = nil
+                    },
                     onFork: { copied in
-                        guard opened?.id == thread.id else { return }
+                        guard visible, publicationLayout == navigation.stackGeneration,
+                              opened?.id == thread.id else { return }
+                        navigation.chooseWithinChat(session: session, presentationID: presentationID)
+                        publicationIntent = navigation.chatHandoff.intent
+                        publicationLayout = navigation.stackGeneration
                         retainedThread = nil
                         opened = copied
                     },
@@ -131,19 +152,22 @@ private struct ClientChatContent: View {
         // has left the window.
         .clientTabBarHidden(opened != nil)
         .onAppear {
+            visible = true
             session.appear(viewer)
-            if let id = opened?.id {
-                navigation.showChat(navigation.reference(peer: peer, workspaceID: workspaceID, chatID: id), owner: viewer)
-            }
+            publishChat()
         }
-        .onChange(of: opened?.id, initial: true) { _, id in
+        .onChange(of: opened?.id, initial: true) { previous, id in
             if let id {
-                navigation.showChat(navigation.reference(peer: peer, workspaceID: workspaceID, chatID: id), owner: viewer)
+                publishChat(id)
             } else {
+                if previous != nil, navigation.chatHandoff.reader?.session === session {
+                    navigation.leaveThread(session: session, presentationID: presentationID)
+                }
                 navigation.leaveChat(owner: viewer)
             }
         }
         .onDisappear {
+            visible = false
             session.disappear(viewer)
             // Locking the phone must not forget this thread. A tap on its
             // notification would otherwise remount it over itself.
@@ -160,6 +184,15 @@ private struct ClientChatContent: View {
         .onChange(of: navigation.requestedChat) { _, _ in
             Task { await openRequestedChat() }
         }
+        .onChange(of: model.selected?.id) { _, _ in publishChat() }
+    }
+
+    private func publishChat(_ id: String? = nil) {
+        guard visible, let id = id ?? opened?.id else { return }
+        navigation.showChat(navigation.reference(peer: peer, workspaceID: workspaceID, chatID: id), owner: viewer,
+            sessionKey: .init(peer: peer, workspace: workspaceID, conversation: nil), session: session,
+            folderName: folderName, hostName: hostName, presentationID: presentationID,
+            intent: publicationIntent, handoffID: handoffID, layout: publicationLayout)
     }
 
     private var list: some View {
@@ -210,14 +243,24 @@ private struct ClientChatContent: View {
             }
             ForEach(filteredChats) { chat in
                 HStack {
-                    Button { opened = chat } label: {
+                    Button {
+                        guard visible, publicationLayout == navigation.stackGeneration else { return }
+                        navigation.chooseWithinChat(session: session, presentationID: presentationID)
+                        publicationIntent = navigation.chatHandoff.intent
+                        publicationLayout = navigation.stackGeneration
+                        opened = chat
+                    } label: {
                         row(chat, draft: model.draftReference(for: chat.id, in: workspaceID))
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }.buttonStyle(.plain)
                     ClientChatMenu(model: model, conversation: chat, peer: peer, workspaceID: workspaceID,
                                    hostName: hostName,
                                    onFork: { copied in
-                                       guard opened == nil else { return }
+                                       guard visible, publicationLayout == navigation.stackGeneration,
+                                             opened == nil else { return }
+                                       navigation.chooseWithinChat(session: session, presentationID: presentationID)
+                                       publicationIntent = navigation.chatHandoff.intent
+                                       publicationLayout = navigation.stackGeneration
                                        opened = copied
                                    }, onDelete: didDeleteChat)
                 }
@@ -394,8 +437,15 @@ private struct ClientChatContent: View {
     }
 
     private func create() async {
-        guard let created = await model.create(), !Task.isCancelled, model.selected?.id == created.id,
-              model.folderID == workspaceID else { return }
+        guard visible, !Task.isCancelled, publicationLayout == navigation.stackGeneration else { return }
+        navigation.chooseWithinChat(session: session, presentationID: presentationID)
+        publicationIntent = navigation.chatHandoff.intent
+        let intent = publicationIntent
+        let reader = model
+        guard let created = await reader.create(), !Task.isCancelled, visible,
+              publicationLayout == navigation.stackGeneration, intent == navigation.chatHandoff.intent,
+              session.model === reader, reader.selected?.id == created.id,
+              reader.folderID == workspaceID else { return }
         opened = created
     }
 
@@ -405,13 +455,28 @@ private struct ClientChatContent: View {
     /// the transcript.
     @discardableResult
     private func openRequestedChat() async -> Bool {
-        guard let requested = navigation.requestedChat,
+        guard visible, publicationLayout == navigation.stackGeneration,
+              !Task.isCancelled, let requested = navigation.requestedChat,
               let id = WorkDestinationResolver.requestedConversation(requested,
                   scope: WorkSessionContext.shared.scope, peer: peer, workspaceID: workspaceID)
         else { return false }
+        let request = navigation.requestedChatGeneration
+        let intent = navigation.chatHandoff.intent
+        let reader = session.model
+        let layout = publicationLayout
+        func stillCurrent() -> Bool {
+            visible && !Task.isCancelled && session.model === reader
+                && layout == navigation.stackGeneration
+                && request == navigation.requestedChatGeneration
+                && intent == navigation.chatHandoff.intent
+                && WorkDestinationResolver.sameConversation(navigation.requestedChat, requested)
+                && requested.scope == WorkSessionContext.shared.scope
+        }
         // An explicit destination suppresses the launcher's most-recent/new
         // fallback, including when that conversation has been deleted.
-        if opened?.id == id {
+        if opened?.id == id, reader.selected?.id == id {
+            publicationIntent = intent
+            publishChat(id)
             navigation.requestedChat = nil
             return true
         }
@@ -421,10 +486,11 @@ private struct ClientChatContent: View {
             }
             return true
         }
-        await model.select(chat)
-        guard WorkDestinationResolver.sameConversation(navigation.requestedChat, requested),
-              requested.scope == WorkSessionContext.shared.scope else { return false }
+        await session.select(chat)
+        guard stillCurrent(), reader.selected?.id == id else { return false }
+        publicationIntent = intent
         opened = chat
+        publishChat(id)
         navigation.requestedChat = nil
         return true
     }
@@ -460,6 +526,7 @@ private struct ClientReconnectBanner: View {
 /// One conversation: setup, transcript, glass composer.
 struct ClientChatThread: View {
     @Bindable var model: ChatModel
+    var session: ClientChatSession? = nil
     @State private var detail = ChatDetailPreference.shared
     let chatID: String
     let folderName: String
@@ -890,6 +957,7 @@ struct ClientChatThread: View {
     }
 
     private func loadChat() async {
+        guard !Task.isCancelled, isActive else { return }
         // A first task offered by setup, put in the composer rather than
         // sent. Only into an empty one, only once, and only for the folder
         // setup opened: any other thread mounting first must not consume it.
@@ -903,9 +971,11 @@ struct ClientChatThread: View {
         // re-scrolling every time it is pushed, including straight after
         // the launcher picked the conversation for you.
         if model.savedCopy == nil && (model.selected?.id != chat.id || model.transcriptItems.isEmpty) {
-            await model.select(chat)
+            guard !Task.isCancelled, isActive else { return }
+            if let session { await session.select(chat) }
+            else { await model.select(chat) }
         }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, isActive else { return }
         if let current = model.chats.first(where: { $0.id == chatID }) {
             ClientChatReadState.shared.markRead(peer: model.peer, chat: current)
         }
@@ -1645,6 +1715,7 @@ struct ClientChatThread: View {
     }
 
     private func resumeLatest() {
+        navigation.chatHandoff.chooseViewport(model: model)
         settleTaskID = UUID()
         stopHoldingViewport()
         readerMoved = false
@@ -1680,6 +1751,7 @@ struct ClientChatThread: View {
     private func beginViewportChoice() {
         guard isActive, follow.active,
               model.viewportContinuity.owns(generation: model.selectionGeneration, owner: presenceOwner) else { return }
+        navigation.chatHandoff.chooseViewport(model: model)
         stopHoldingViewport()
         readingFrames.cancelCapture()
         settleTaskID = UUID()
@@ -1794,7 +1866,7 @@ struct ClientChatThread: View {
         ClientViewportTrace.note(event,
             mark: mark ?? model.viewportContinuity.mark(generation: model.selectionGeneration),
             scroll: scrollAccess.view,
-            details: "generation=\(model.selectionGeneration) owner=\(presenceOwner) stamp=\(readingFrames.stamp) frames=\(readingFrames.frames.count) coordinates=\(String(describing: scrollAccess.readingCoordinates(globalFrame: readingFrames.globalFrame))) sample=\(String(describing: position)) placed=\(model.viewportContinuity.isPlaced(generation: model.selectionGeneration, owner: presenceOwner)) reader=\(readerMoved) pinned=\(follow.pinned) settling=\(follow.settling)")
+            details: "model=\(ObjectIdentifier(model)) chat=\(model.selected?.id ?? "none") workspace=\(model.workspaceID ?? "none") generation=\(model.selectionGeneration) owner=\(presenceOwner) stamp=\(readingFrames.stamp) frames=\(readingFrames.frames.count) coordinates=\(String(describing: scrollAccess.readingCoordinates(globalFrame: readingFrames.globalFrame))) sample=\(String(describing: position)) placed=\(model.viewportContinuity.isPlaced(generation: model.selectionGeneration, owner: presenceOwner)) reader=\(readerMoved) pinned=\(follow.pinned) settling=\(follow.settling)")
         #endif
     }
 

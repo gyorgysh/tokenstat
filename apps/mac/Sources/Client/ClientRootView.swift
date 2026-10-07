@@ -130,6 +130,7 @@ struct ClientRootView: View {
     /// Where the person was when the layout last swapped, waiting for the
     /// new layout to be on screen. See the `.task(id: layout)` below.
     @State private var layoutHandoff: WorkMobileRoute?
+    @State private var layoutHandoffIntent: UInt64 = 0
 
     private var layout: ClientLayoutMode {
         ClientLayout.mode(
@@ -199,11 +200,13 @@ struct ClientRootView: View {
                 )
                     .sessionScreens(sessionModels.models(for: WorkSessionContext.shared.scope))
                     .id(WorkSessionContext.shared.scope)
+                    .id(navigation.stackGeneration)
                     .transition(.opacity)
             } else {
                 tabs
                     .sessionScreens(sessionModels.models(for: WorkSessionContext.shared.scope))
                     .id(WorkSessionContext.shared.scope)
+                    .id(navigation.stackGeneration)
                     .transition(.opacity)
                     // Hiding the open tab lands on the first visible one
                     // rather than on a blank bar. The editor refuses the last
@@ -281,16 +284,23 @@ struct ClientRootView: View {
         .onChange(of: navigation.currentRoute) { _, _ in navigation.saveRoute() }
         .onChange(of: layout) { _, _ in
             navigation.layoutGeneration &+= 1
+            navigation.stackGeneration &+= 1
+            // An opening without a selected chat still belongs to this root
+            // push. Keep its snapshot while its shared producer finishes.
+            if navigation.pushedChat != nil, navigation.chatHandoff.reader == nil {
+                layoutHandoff = nil
+                return
+            }
             // Keep an exact destination above the subtree being replaced.
             if let route = navigation.currentRoute, route.reference != nil,
                navigation.presentedChat == nil,
                sessionModels.models(for: route.scope).workspaces.activeTerminal == nil {
-                // A conversation waits for the new layout and is reopened
-                // through its folder below. Pushed here on its own, Back
-                // from it skipped the folder's chat list.
                 if route.reference?.kind != .conversation {
-                    navigation.restoredRoute = route
+                    navigation.restoreLayout { navigation.restoredRoute = route }
                 }
+                _ = navigation.chatHandoff.begin(route: route)
+                navigation.restoreLayout { navigation.pushedChat = nil }
+                layoutHandoffIntent = navigation.chatHandoff.intent
                 layoutHandoff = route
             }
         }
@@ -304,19 +314,32 @@ struct ClientRootView: View {
         // layout tearing down, or offered to a navigation stack that did
         // not exist yet: folding an iPhone Duo on an open chat landed on the
         // tab's top level instead of the chat.
-        .task(id: layout) {
-            guard let route = layoutHandoff else { return }
+        .task(id: navigation.layoutGeneration) {
+            let delivery = navigation.chatHandoff.pending
+            guard let route = layoutHandoff ?? delivery?.route else { return }
+            let intent = delivery?.intent ?? layoutHandoffIntent
+            let layoutTicket = navigation.layoutGeneration
             layoutHandoff = nil
             await Task.yield()
             guard !Task.isCancelled, route.scope == WorkSessionContext.shared.scope,
+                  intent == navigation.chatHandoff.intent,
+                  layoutTicket == navigation.layoutGeneration,
                   navigation.presentedChat == nil,
                   sessionModels.models(for: route.scope).workspaces.activeTerminal == nil else { return }
-            if reopenConversation(route) { return }
-            if let tab = ClientTab(rawValue: route.tab), tabCustomization.visibleTabs.contains(tab),
-               navigation.destination != tab {
-                navigation.destination = tab
+            if let delivery, !navigation.chatHandoff.isCurrent(delivery, scope: WorkSessionContext.shared.scope) { return }
+            let reader = delivery?.reader ?? navigation.chatHandoff.reader
+                ?? navigation.restoredChatReader.flatMap { $0.matches(route) ? $0 : nil }
+            navigation.restoreLayout {
+                // Folder readers keep their list/back route when metadata is
+                // known. A missing folder still uses this exact source below.
+                if reader?.key.conversation == nil, reopenConversation(route) { return }
+                navigation.restoredChatReader = reader?.matches(route) == true ? reader : nil
+                if let tab = ClientTab(rawValue: route.tab), tabCustomization.visibleTabs.contains(tab),
+                   navigation.destination != tab {
+                    navigation.destination = tab
+                }
+                if navigation.restoredRoute != route { navigation.restoredRoute = route }
             }
-            if navigation.restoredRoute != route { navigation.restoredRoute = route }
         }
         .onChange(of: WorkSessionContext.shared.scope, initial: true) { oldScope, newScope in
             if oldScope != nil && oldScope != newScope {
@@ -439,6 +462,7 @@ struct ClientRootView: View {
         .environment(store)
         .environment(input)
         .environment(navigation)
+        .environment(\.clientChatHandoffID, navigation.chatHandoff.pending?.id)
         .environment(tabCustomization)
         .environment(editors)
         .environment(sessionModels.models(for: WorkSessionContext.shared.scope).chats)
@@ -501,14 +525,19 @@ struct ClientRootView: View {
     @ViewBuilder
     private var tabs: some View {
         @Bindable var navigation = navigation
+        let layoutTicket = navigation.stackGeneration
+        let path = Binding(get: { navigation.workspacesPath }, set: {
+            navigation.updateWorkspacesPath($0, layout: layoutTicket)
+        })
         if #available(iOS 18, *) {
             TabView(selection: $navigation.destination) {
                 ForEach(tabCustomization.tabs(including: navigation.destination)) { tab in
                     Tab(tab.label, systemImage: tab.symbol, value: tab) {
-                        NavigationStack(path: tab == .workspaces ? $navigation.workspacesPath : .constant([])) {
+                        NavigationStack(path: tab == .workspaces ? path : .constant([])) {
                             tab.content(workspaces: sessionModels.models(for: WorkSessionContext.shared.scope).workspaces)
                                 .clientChrome(showAccount: $showAccount)
                                 .modifier(ClientRestoredDestination(tab: tab))
+                                .modifier(ClientOwnedPushDestination(tab: tab))
                                 .navigationDestination(for: ClientFolderPush.self) { $0.destination }
                         }
                     }
@@ -523,10 +552,11 @@ struct ClientRootView: View {
         } else {
             TabView(selection: $navigation.destination) {
                 ForEach(tabCustomization.tabs(including: navigation.destination)) { tab in
-                    NavigationStack(path: tab == .workspaces ? $navigation.workspacesPath : .constant([])) {
+                    NavigationStack(path: tab == .workspaces ? path : .constant([])) {
                         tab.content(workspaces: sessionModels.models(for: WorkSessionContext.shared.scope).workspaces)
                             .clientChrome(showAccount: $showAccount)
                             .modifier(ClientRestoredDestination(tab: tab))
+                            .modifier(ClientOwnedPushDestination(tab: tab))
                             .navigationDestination(for: ClientFolderPush.self) { $0.destination }
                     }
                     .tabItem { Label(tab.label, systemImage: tab.symbol) }

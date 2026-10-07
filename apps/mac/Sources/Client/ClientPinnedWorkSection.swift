@@ -66,7 +66,7 @@ struct ClientPinnedWorkSection: View {
                 VStack(spacing: 0) {
                     ForEach(shelf) { row in
                         HStack(spacing: 0) {
-                            NavigationLink {
+                            ClientOwnedNavigationLink {
                                 ClientSavedPlaceView(place: row.place)
                             } label: {
                                 content(row.pin)

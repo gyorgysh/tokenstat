@@ -168,7 +168,7 @@ struct ClientWorkspaceDetailView: View {
             // Under Sessions, the same place the Mac puts it. This list is
             // written out rather than driven from `WorkspaceSection.allCases`,
             // which is why adding the case alone left the phone without it.
-            NavigationLink {
+            ClientOwnedNavigationLink {
                 RemoteHostFeatureGate(feature: .chat, peer: peer, hostName: hostName) {
                     ClientChatView(peer: peer, workspaceID: workspaceID, folderName: current.name, hostName: hostName, folder: current)
                 }

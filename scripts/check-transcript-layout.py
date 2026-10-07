@@ -140,3 +140,33 @@ assert "captureID == readingFrames.captureID" in mobile, "a newer gesture must r
 assert "readingDelivery.submit" in mobile, "passive reading corrections must be deferred and coalesced"
 assert "if watched || holdingReading" in mobile, "reading geometry must survive programmatic reflow independently of paging"
 assert "ticket == settleTaskID" in mobile, "same-presentation restoration predecessors must not mutate a successor"
+opening = mobile[mobile.index("private func loadChat() async {"):mobile.index("private func updateLiveActivity() async {")]
+assert opening.index("guard !Task.isCancelled, isActive else { return }") < opening.index("navigation.takeSuggestedPrompt"), "hidden or cancelled readers must not consume an offered draft"
+assert "if let session { await session.select(chat) }" in opening, "layout replacements must share the retained reader's opening"
+model = (root / "apps/mac/Sources/Features/Workspaces/Chat/ChatModel.swift").read_text()
+selection = model[model.index("private func select(_ chat: ChatConversation?"):model.index("rememberRecentMessages()", model.index("private func select(_ chat: ChatConversation?"))]
+assert "chat.id == selected?.id" in selection and "!events.isEmpty" not in selection, "an empty same-chat opening must refresh without changing selection generation"
+client_root = (root / "apps/mac/Sources/Client/ClientRootView.swift").read_text()
+assert "navigation.chatHandoff.pending" in client_root and "navigation.chatHandoff.isCurrent" in client_root, "folding must validate the retained source reader"
+assert "intent == navigation.chatHandoff.intent" in client_root and "layoutTicket == navigation.layoutGeneration" in client_root, "late layout delivery must reject explicit navigation and obsolete layout owners"
+assert client_root.count(".id(navigation.stackGeneration)") == 2, "both incoming layout subtrees must initialize presentation state after the stack epoch is established"
+handoff_source = (root / "apps/mac/Sources/Client/ClientChatLayoutHandoff.swift").read_text()
+link = handoff_source[handoff_source.index("struct ClientOwnedNavigationLink"):handoff_source.index("struct ClientOwnedPushDestination")]
+assert "navigationDestination" not in link and "navigation.pushOwned(ClientOwnedPush" in link, "lazy tiles and removable pins must not own destination registration"
+assert client_root.count(".modifier(ClientOwnedPushDestination(tab: tab))") == 2, "both tab implementations need stable root destination registration"
+sidebar = (root / "apps/mac/Sources/Client/ClientSidebarRoot.swift").read_text()
+assert ".modifier(ClientOwnedPushDestination(tab: navigation.destination))" in sidebar, "sidebar pushes must use their stable detail root"
+requested = mobile[mobile.index("private func openRequestedChat() async"):mobile.index("/// The slim strip both chat screens")]
+assert "request == navigation.requestedChatGeneration" in requested and "reader.selected?.id == id" in requested, "requested chat publication must reject superseded requests and selections"
+chat_menu = (root / "apps/mac/Sources/Client/ClientChatMenu.swift").read_text()
+fork_action = chat_menu[chat_menu.index('let ticket = navigation.chatActionTicket()'):chat_menu.index('}.disabled(copying')]
+assert fork_action.index('let ticket =') < fork_action.index('Task {'), "Fork must capture navigation ownership before launching its task"
+assert "navigation.acceptsChatAction(ticket)" in fork_action and "visible && !Task.isCancelled" in fork_action, "Fork delivery must validate intent, stack, account and visibility"
+assert fork_action.index('guard isCurrent() else') > fork_action.index('func isCurrent()'), "Fork must guard before its mutation"
+assert fork_action.index('guard isCurrent() else', fork_action.index('await model.fork')) < fork_action.index('onFork?(copied)'), "late Fork cannot navigate after its source leaves"
+terminal_screen = (root / "apps/mac/Sources/Client/ClientTerminalSession.swift").read_text()
+terminal_teardown = terminal_screen[terminal_screen.index('// Full-screen dismiss:'):terminal_screen.index('.confirmationDialog(', terminal_screen.index('// Full-screen dismiss:'))]
+assert 'navigation.leaveTerminal(owner: session.id)' in terminal_teardown and 'scenePhase ==' not in terminal_teardown, "owned terminal teardown must retire its route even while inactive"
+terminal_presentation = (root / "apps/mac/Sources/Client/ClientTerminalPresentation.swift").read_text()
+assert '.onChange(of: model.activeTerminal?.id)' in terminal_presentation and 'navigation.leaveTerminal(owner: previous)' in terminal_presentation, "authoritative terminal dismissal must clear its owned route"
+assert "opened = chat\n        publishChat(id)" in requested, "unchanged opened identifiers still need explicit guarded publication"
