@@ -245,6 +245,14 @@ remote.Add(mismatched);
 local["key:gone"] = new JsonObject { ["id"] = "gone", ["secretRef"] = "wincred:gone" };
 Tokenstat.AppServices.Host.Handler = (method, parameters) =>
 {
+    if (method == "account.status")
+        return new JsonObject { ["signedIn"] = true, ["host"] = "https://MOCK.example:443/", ["handle"] = "alice" };
+    if (method.StartsWith("ssh.vault.", StringComparison.Ordinal))
+    {
+        var scope = parameters?["_accountScope"] as JsonObject;
+        Check(scope?["origin"]?.GetValue<string>() == "https://mock.example", "Vault origin was not canonical: " + scope);
+        Check(scope?["identity"]?.GetValue<string>() == "alice", "Vault call missing the account that started it");
+    }
     if (method == "ssh.vault.record.list") return new JsonObject { ["records"] = remote.DeepClone() };
     if (method == "ssh.vault.record.put") { pushed.Add(Format.Text(parameters, "id")); return new JsonObject(); }
     var kind = method.Split('.')[1];
@@ -288,7 +296,7 @@ Console.WriteLine("PASS: rejected key update preserves the working credential");
 var writes = 0;
 Tokenstat.AppServices.Host.Handler = (method, parameters) => method switch
 {
-    "account.status" => new JsonObject { ["signedIn"] = true },
+    "account.status" => new JsonObject { ["signedIn"] = true, ["host"] = "https://MOCK.example:443/", ["handle"] = "alice" },
     "ssh.vault.status" => new JsonObject { ["created"] = true, ["locked"] = true },
     _ => new JsonObject { ["writes"] = ++writes },
 };

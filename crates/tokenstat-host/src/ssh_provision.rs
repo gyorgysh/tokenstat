@@ -61,37 +61,58 @@ pub(crate) fn parse_identity(output: &str) -> Result<Value, String> {
 }
 
 pub(crate) fn stage_code_command() -> String {
-    // Both material and its exact staging identity travel over stdin. Publish
-    // ownership first under the shared lock: an interrupted stage must never
-    // leave a new code carrying the preceding attempt's cleanup authority.
+    // Both material and its exact staging identity travel over stdin. The
+    // owner record names the code it published. Clear refuses a receipt whose
+    // code is not the one still on disk, so a kill between the two renames
+    // cannot delete the previous code. Temps are removed if the lock wait
+    // gives up. The lock itself is removed only after this attempt took it.
     format!(
-        "{} IFS= read -r owner || exit 1; IFS= read -r code || exit 1; \
+        "held=0; IFS= read -r owner || exit 1; IFS= read -r code || exit 1; \
          owner_tmp=$(mktemp \"$HOME/.tokenstat-pairing-owner.XXXXXX\") || exit 1; \
          code_tmp=$(mktemp \"$HOME/.tokenstat-pairing-code.XXXXXX\") || {{ rm -f \"$owner_tmp\"; exit 1; }}; \
-         trap 'rm -f \"$owner_tmp\" \"$code_tmp\"; rmdir \"$lock\"' EXIT; \
-         printf '%s\\n' \"$owner\" > \"$owner_tmp\" && \
+         trap 'rm -f \"$owner_tmp\" \"$code_tmp\"; if [ \"$held\" -eq 1 ]; then rm -f \"$lock/pid\"; rmdir \"$lock\" 2>/dev/null || true; fi' EXIT; \
+         trap 'exit 1' HUP INT TERM; \
          printf '%s\\n' \"$code\" > \"$code_tmp\" && \
+         printf '%s\\n%s\\n' \"$owner\" \"$code\" > \"$owner_tmp\" && \
+         {} \
          mv -f \"$owner_tmp\" \"$HOME/.tokenstat-pairing.owner\" && \
          mv -f \"$code_tmp\" \"{CODE_PATH}\"",
-        pairing_lock_command()
+        pairing_lock_acquire()
     )
 }
 
 pub(crate) fn clear_code_command() -> String {
     format!(
-        "{} IFS= read -r expected || exit 1; \
-         actual=$(cat \"$HOME/.tokenstat-pairing.owner\" 2>/dev/null) || exit 0; \
-         [ -n \"$expected\" ] && [ \"$actual\" = \"$expected\" ] || exit 0; \
-         rm -f \"{CODE_PATH}\" \"$HOME/.tokenstat-pairing.owner\"",
-        pairing_lock_command()
+        "held=0; trap 'if [ \"$held\" -eq 1 ]; then rm -f \"$lock/pid\"; rmdir \"$lock\" 2>/dev/null || true; fi' EXIT; \
+         trap 'exit 1' HUP INT TERM; \
+         {} IFS= read -r expected || exit 1; \
+         owner_file=\"$HOME/.tokenstat-pairing.owner\"; \
+         code_file=\"{CODE_PATH}\"; \
+         owner_id=$(sed -n '1p' \"$owner_file\" 2>/dev/null) || exit 0; \
+         bound=$(sed -n '2p' \"$owner_file\" 2>/dev/null || true); \
+         live=$(sed -n '1p' \"$code_file\" 2>/dev/null || true); \
+         [ -n \"$expected\" ] && [ \"$owner_id\" = \"$expected\" ] || exit 0; \
+         if [ -n \"$bound\" ] && [ \"$bound\" != \"$live\" ]; then exit 0; fi; \
+         rm -f \"$code_file\" \"$owner_file\"",
+        pairing_lock_acquire()
     )
 }
 
-fn pairing_lock_command() -> &'static str {
-    "umask 077; lock=\"$HOME/.tokenstat-pairing.lock\"; tries=0; \
-     until mkdir \"$lock\" 2>/dev/null; do \
-     tries=$((tries + 1)); [ \"$tries\" -lt 50 ] || exit 1; sleep 0.1; done; \
-     trap 'rmdir \"$lock\"' EXIT; trap 'exit 1' HUP INT TERM;"
+/// Take `$HOME/.tokenstat-pairing.lock`, stealing one whose pid is dead or
+/// whose empty directory is older than the wait. A live holder writes its pid
+/// immediately. An empty directory younger than that wait is left alone.
+fn pairing_lock_acquire() -> &'static str {
+    "umask 077; lock=\"$HOME/.tokenstat-pairing.lock\"; held=0; tries=0; \
+     lock_mtime() { stat -c %Y \"$1\" 2>/dev/null || stat -f %m \"$1\" 2>/dev/null || echo 0; }; \
+     while ! mkdir \"$lock\" 2>/dev/null; do \
+       pid=$(cat \"$lock/pid\" 2>/dev/null || true); stale=0; \
+       if [ -n \"$pid\" ]; then kill -0 \"$pid\" 2>/dev/null || stale=1; \
+       else born=$(lock_mtime \"$lock\"); now=$(date +%s); \
+            [ \"$born\" -gt 0 ] && [ $((now - born)) -ge 5 ] && stale=1; fi; \
+       if [ \"$stale\" -eq 1 ]; then rm -f \"$lock/pid\"; rmdir \"$lock\" 2>/dev/null || true; fi; \
+       tries=$((tries + 1)); [ \"$tries\" -lt 50 ] || exit 1; sleep 0.1; \
+     done; \
+     held=1; printf '%s\\n' \"$$\" > \"$lock/pid\" || exit 1;"
 }
 
 /// Turn the script's key=value lines into an answer a screen can read.
@@ -416,12 +437,100 @@ mod tests {
         );
         assert_eq!(
             std::fs::read_to_string(root.join(".tokenstat-pairing.owner")).unwrap(),
-            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nABCD-5678\n"
         );
         run(clear_code_command(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n");
         assert!(!root.join(".tokenstat-pairing").exists());
         assert!(!root.join(".tokenstat-pairing.owner").exists());
         assert!(!root.join(".tokenstat-pairing.lock").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_torn_owner_publish_cannot_delete_the_previous_code() {
+        use std::io::Write;
+        let root =
+            std::env::temp_dir().join(format!("tokenstat-stage-torn-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let run = |command: String, input: &str| {
+            let mut child = std::process::Command::new("sh")
+                .args(["-c", &command])
+                .env("HOME", &root)
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(input.as_bytes())
+                .unwrap();
+            assert!(child.wait().unwrap().success());
+        };
+        run(
+            stage_code_command(),
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nWXYZ-1234\n",
+        );
+        // The owner rename finished and the code rename did not.
+        std::fs::write(
+            root.join(".tokenstat-pairing.owner"),
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nABCD-5678\n",
+        )
+        .unwrap();
+        run(clear_code_command(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n");
+        run(clear_code_command(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n");
+        assert_eq!(
+            std::fs::read_to_string(root.join(".tokenstat-pairing")).unwrap(),
+            "WXYZ-1234\n"
+        );
+        assert!(!root.join(".tokenstat-pairing.lock").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_dead_or_aged_pairing_lock_is_reclaimed() {
+        use std::io::Write;
+        let root =
+            std::env::temp_dir().join(format!("tokenstat-stage-lock-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let run = |input: &str| {
+            let mut child = std::process::Command::new("sh")
+                .args(["-c", &stage_code_command()])
+                .env("HOME", &root)
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(input.as_bytes())
+                .unwrap();
+            let output = child.wait_with_output().unwrap();
+            assert!(output.status.success(), "{output:?}");
+        };
+        let dead = root.join(".tokenstat-pairing.lock");
+        std::fs::create_dir(&dead).unwrap();
+        std::fs::write(dead.join("pid"), "2147483647\n").unwrap();
+        run("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nWXYZ-1234\n");
+        assert_eq!(
+            std::fs::read_to_string(root.join(".tokenstat-pairing")).unwrap(),
+            "WXYZ-1234\n"
+        );
+        let aged = root.join(".tokenstat-pairing.lock");
+        std::fs::create_dir(&aged).unwrap();
+        std::fs::File::open(&aged)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(30))
+            .unwrap();
+        run("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nABCD-5678\n");
+        assert_eq!(
+            std::fs::read_to_string(root.join(".tokenstat-pairing")).unwrap(),
+            "ABCD-5678\n"
+        );
+        assert!(!aged.exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 

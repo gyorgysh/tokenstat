@@ -3,17 +3,55 @@ using System.Text.Json.Nodes;
 
 namespace Tokenstat.Pages;
 
+/// The account a vault call was started for. The host rejects it when a
+/// different login now holds the credentials.
+internal static class SshVaultScope
+{
+    public static JsonObject? From(JsonNode? status)
+    {
+        if (status is null || !Format.Flag(status, "signedIn")) return null;
+        var origin = CanonicalOrigin(Format.Text(status, "host"));
+        var handle = Format.Text(status, "handle");
+        var identity = handle.Length > 0 ? handle : Format.Text(status, "accountId");
+        if (origin is null || identity.Length == 0) return null;
+        return new JsonObject { ["kind"] = "account", ["origin"] = origin, ["identity"] = identity };
+    }
+
+    public static async Task<JsonObject> RequireAsync() =>
+        From(await AppServices.Host.CallAsync("account.status"))
+        ?? throw new InvalidOperationException("the signed-in account changed; retry from the current account");
+
+    public static async Task<JsonNode> CallAsync(string method, JsonObject? parameters, JsonObject scope)
+    {
+        var body = parameters?.DeepClone() as JsonObject ?? new JsonObject();
+        body["_accountScope"] = scope.DeepClone();
+        return await AppServices.Host.CallAsync(method, body);
+    }
+
+    internal static string? CanonicalOrigin(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw) || !Uri.TryCreate(raw.Trim(), UriKind.Absolute, out var uri)) return null;
+        if (uri.Scheme is not ("http" or "https") || uri.Host.Length == 0 || uri.UserInfo.Length > 0) return null;
+        if (!uri.IsDefaultPort && (uri.Port < 1 || uri.Port > 65535)) return null;
+        var port = uri.IsDefaultPort ? "" : $":{uri.Port}";
+        var path = uri.AbsolutePath.TrimEnd('/');
+        if (path == "/") path = "";
+        return $"{uri.Scheme.ToLowerInvariant()}://{uri.IdnHost.ToLowerInvariant()}{port}{path}";
+    }
+}
+
 internal static class SshVaultSync
 {
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private static readonly string[] Kinds = ["folder", "key", "host", "snippet"];
 
-    public static async Task SyncAsync()
+    public static async Task SyncAsync(JsonObject? scope = null)
     {
         await Gate.WaitAsync();
         try
         {
-            var answer = await AppServices.Host.CallAsync("ssh.vault.record.list");
+            scope ??= await SshVaultScope.RequireAsync();
+            var answer = await SshVaultScope.CallAsync("ssh.vault.record.list", null, scope);
             var records = answer["records"] as JsonArray ?? throw new InvalidOperationException(L10n.Text("windows.sshvaultsync.the_vault_returned_no_records.e0b54c7b"));
             var known = records.OfType<JsonNode>().Select(r => Format.Text(r, "id")).ToHashSet();
             var local = await ReadLocalAsync();
@@ -56,7 +94,7 @@ internal static class SshVaultSync
                         }
                         var stamp = Format.Long(remote, "updatedMs");
                         if (current is not null && Format.Long(current, "updatedMs") > stamp)
-                            await PushAsync(kind, current);
+                            await PushAsync(kind, current, scope);
                         else if (current is null || Format.Long(current, "updatedMs") < stamp
                             || (kind == "key" && !SshSecrets.Has(Format.Text(current, "secretRef"))))
                         {
@@ -88,7 +126,7 @@ internal static class SshVaultSync
                     throw new InvalidOperationException(L10n.Text("windows.sshvaultsync.some_vault_records_refer_to_missing_folder.e45a6137"));
             }
             foreach (var pair in local.Where(pair => !known.Contains(pair.Key)))
-                await PushAsync(pair.Key.Split(':', 2)[0], pair.Value);
+                await PushAsync(pair.Key.Split(':', 2)[0], pair.Value, scope);
         }
         finally { Gate.Release(); }
     }
@@ -116,7 +154,9 @@ internal static class SshVaultSync
             var account = await AppServices.Host.CallAsync("account.status");
             if (!Format.Flag(account, "signedIn"))
                 return await AppServices.Host.CallAsync(method, parameters);
-            var status = await AppServices.Host.CallAsync("ssh.vault.status");
+            var scope = SshVaultScope.From(account)
+                ?? throw new InvalidOperationException("the signed-in account changed; retry from the current account");
+            var status = await SshVaultScope.CallAsync("ssh.vault.status", null, scope);
             var problem = Format.Text(status, "unreachable");
             if (problem.Length > 0) throw new InvalidOperationException(problem);
             var synced = Format.Flag(status, "created");
@@ -124,8 +164,8 @@ internal static class SshVaultSync
                 throw new InvalidOperationException(L10n.Text("windows.sshvaultsync.unlock_the_ssh_vault_before_editing_synced.82afa69a"));
             var kind = method.Split('.')[1];
             if (synced && method.EndsWith(".delete", StringComparison.Ordinal))
-                await AppServices.Host.CallAsync("ssh.vault.record.delete", new JsonObject
-                { ["id"] = kind + ":" + Format.Text(parameters, "id") });
+                await SshVaultScope.CallAsync("ssh.vault.record.delete", new JsonObject
+                { ["id"] = kind + ":" + Format.Text(parameters, "id") }, scope);
             var moved = new HashSet<string>();
             if (synced && method == "ssh.folder.delete")
             {
@@ -142,11 +182,11 @@ internal static class SshVaultSync
                 // stamped moves so another client never restores the old tree.
                 foreach (var pair in await ReadLocalAsync())
                     if (moved.Contains(pair.Key))
-                        await PushAsync(pair.Key.Split(':', 2)[0], pair.Value);
+                        await PushAsync(pair.Key.Split(':', 2)[0], pair.Value, scope);
             }
             if (synced && method.EndsWith(".save", StringComparison.Ordinal))
             {
-                try { await PushAsync(kind, saved); }
+                try { await PushAsync(kind, saved, scope); }
                 catch (Exception ex) { throw new InvalidOperationException(L10n.Text("windows.sshvaultsync.saved_on_this_pc_but_vault_sync_failed_0.894e1add", $"{ex.Message}")); }
             }
             return saved;
@@ -154,7 +194,7 @@ internal static class SshVaultSync
         finally { Gate.Release(); }
     }
 
-    private static async Task PushAsync(string kind, JsonNode record)
+    private static async Task PushAsync(string kind, JsonNode record, JsonObject scope)
     {
         var copy = (JsonObject)record.DeepClone();
         if (kind == "key")
@@ -165,11 +205,11 @@ internal static class SshVaultSync
             copy["privateKey"] = material;
         }
         var envelope = new JsonObject { ["kind"] = kind, [kind] = copy };
-        await AppServices.Host.CallAsync("ssh.vault.record.put", new JsonObject
+        await SshVaultScope.CallAsync("ssh.vault.record.put", new JsonObject
         {
             ["id"] = kind + ":" + Format.Text(record, "id"),
             ["plaintext"] = envelope.ToJsonString(),
-        });
+        }, scope);
     }
 
 }

@@ -192,6 +192,7 @@ import ai.tokenstat.tokenstat.ui.marks.FeatureMark
 import ai.tokenstat.tokenstat.ui.marks.HarnessMark
 import ai.tokenstat.tokenstat.ui.ssh.SshSecrets
 import ai.tokenstat.tokenstat.ui.ssh.SshVaultSync
+import ai.tokenstat.tokenstat.ui.logic.withVaultScope
 import ai.tokenstat.tokenstat.ui.ssh.vaultEnvelopeOf
 import ai.tokenstat.tokenstat.ui.marks.TierMark
 import ai.tokenstat.tokenstat.notifications.PushRegistrar
@@ -2119,7 +2120,11 @@ private fun VaultDeleteDialog(
         // recovers these, so they are named before the button, not after.
         runCatching {
             val answer = ownerGuard.run {
-                model.core("ssh.vault.record.list", buildJsonObject { put("recovery", ""); put("tier", tier) })
+                model.core(
+                    "ssh.vault.record.list",
+                    buildJsonObject { put("recovery", ""); put("tier", tier) }
+                        .withVaultScope(model.state.value.account),
+                )
             } as? JsonObject
             val records = (answer?.get("records") as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
             val names = mutableListOf<String>()
@@ -2256,7 +2261,10 @@ private fun AndroidSSHScreenForAccount(
     fun currentVaultOwner() = accountOwner.isNotEmpty() && accountOwner == HomeStores.pinIdentity(model.state.value.account)
     val vaultOwnerGuard = remember(accountOwner) { ai.tokenstat.tokenstat.ui.ssh.VaultOperationGuard(::currentVaultOwner) }
     suspend fun ownedCore(method: String, params: JsonObject = buildJsonObject {}): JsonElement =
-        vaultOwnerGuard.run { model.core(method, params) }
+        vaultOwnerGuard.run {
+            val body = if (method.startsWith("ssh.vault.")) params.withVaultScope(model.state.value.account) else params
+            model.core(method, body)
+        }
     fun copyText(label: String, text: String) {
         scope.launch {
             clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(label, text)))

@@ -2,6 +2,7 @@
 package ai.tokenstat.tokenstat.ui.ssh
 
 import ai.tokenstat.tokenstat.ui.localization.L10n
+import ai.tokenstat.tokenstat.ui.logic.withVaultScope
 
 import ai.tokenstat.tokenstat.AppViewModel
 import android.content.Context
@@ -93,7 +94,10 @@ private class VaultSyncAccess(model: AppViewModel, isCurrentOwner: () -> Boolean
     private val model = model
 
     suspend fun core(method: String, params: JsonObject): JsonElement =
-        guard.run { model.core(method, params) }
+        guard.run {
+            val body = if (method.startsWith("ssh.vault.")) params.withVaultScope(model.state.value.account) else params
+            model.core(method, body)
+        }
 
     suspend fun <T> secret(operation: () -> T): T = guard.run {
         withContext(Dispatchers.IO) { guard.run { operation() } }

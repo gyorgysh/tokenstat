@@ -68,11 +68,18 @@ impl VaultOwner {
                     .map(|s| format!("handle:{}", s.trim()))
             })
             .ok_or("the account server did not identify this account")?;
-        Ok(Self {
-            origin: status.host.clone(),
-            identity,
-        })
+        // The same spelling heartbeat accepts. The cache key must not split
+        // `https://Example:443/` from `https://example`.
+        let origin = crate::account_session::canonical_origin(&status.host)
+            .ok_or("the account origin is not a valid http(s) service")?;
+        Ok(Self { origin, identity })
     }
+}
+
+fn origins_match(requested: &str, verified: &str) -> bool {
+    crate::account_session::canonical_origin(requested)
+        .zip(crate::account_session::canonical_origin(verified))
+        .is_some_and(|(left, right)| left == right)
 }
 
 #[derive(Clone)]
@@ -288,7 +295,10 @@ fn verify_stored_owner(params: &str, storage: &VaultStorage, required: bool) -> 
         };
     };
     if scope.get("kind").and_then(Value::as_str) == Some("account")
-        && scope.get("origin").and_then(Value::as_str) == Some(storage.owner.origin.as_str())
+        && scope
+            .get("origin")
+            .and_then(Value::as_str)
+            .is_some_and(|origin| origins_match(origin, &storage.owner.origin))
         && scope
             .get("identity")
             .and_then(Value::as_str)
@@ -1351,7 +1361,10 @@ fn verify_request_owner(
     };
     let identity = owner.get("identity").and_then(Value::as_str);
     let matches = owner.get("kind").and_then(Value::as_str) == Some("account")
-        && owner.get("origin").and_then(Value::as_str) == Some(status.host.as_str())
+        && owner
+            .get("origin")
+            .and_then(Value::as_str)
+            .is_some_and(|origin| origins_match(origin, &status.host))
         && identity.is_some_and(|id| {
             !id.is_empty()
                 && (Some(id) == status.account_id.as_deref()
@@ -2221,6 +2234,37 @@ mod tests {
         );
         renamed.handle = None;
         assert!(VaultOwner::verified(&renamed).is_err());
+        let mut styled = status_fixture();
+        styled.host = "https://MOCK.example:443/".into();
+        let canonical = json!({"_accountScope":{"kind":"account","origin":"https://mock.example","identity":"alice"}}).to_string();
+        assert!(verify_request_owner(&canonical, &styled).is_ok());
+        let stored = VaultOwner::verified(&styled).unwrap();
+        assert_eq!(stored.origin, "https://mock.example");
+        let storage = VaultStorage::new(stored, || Ok(()));
+        let stored_scope = json!({"_accountScope":{"kind":"account","origin":"https://MOCK.example:443/","identity":"account-a"}}).to_string();
+        assert!(verify_stored_owner(&stored_scope, &storage, false).is_ok());
+        let mut prefixed = status_fixture();
+        prefixed.host = "https://MOCK.example:443/service/".into();
+        let service = json!({"_accountScope":{"kind":"account","origin":"https://mock.example/service","identity":"alice"}}).to_string();
+        assert!(verify_request_owner(&service, &prefixed).is_ok());
+        assert_eq!(
+            VaultOwner::verified(&prefixed).unwrap().origin,
+            "https://mock.example/service"
+        );
+        let plain = VaultStorage::new(VaultOwner::verified(&status).unwrap(), || Ok(()));
+        let styled_storage = VaultStorage::new(
+            VaultOwner::verified(&{
+                let mut same = status_fixture();
+                same.host = "https://TEST.example:443/".into();
+                same
+            })
+            .unwrap(),
+            || Ok(()),
+        );
+        assert_eq!(plain.path, styled_storage.path);
+        clear_local(&storage).unwrap();
+        clear_local(&plain).unwrap();
+        clear_local(&styled_storage).unwrap();
     }
 
     #[test]

@@ -161,7 +161,7 @@ fn validate_account(
 }
 
 /// Match the client's account origin spelling without weakening origin checks.
-fn canonical_origin(raw: &str) -> Option<String> {
+pub(crate) fn canonical_origin(raw: &str) -> Option<String> {
     let mut url = reqwest::Url::parse(raw).ok()?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()

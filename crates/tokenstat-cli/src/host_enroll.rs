@@ -98,27 +98,7 @@ fn remove_staged_file(path: &Path, home: &Path, opened: &std::fs::Metadata) -> R
     if same {
         // Use the same lock as SSH staging/cleanup. Compare the file actually
         // read, not the path reopened after a new attempt replaced it.
-        struct Lock(std::path::PathBuf);
-        impl Drop for Lock {
-            fn drop(&mut self) {
-                let _ = std::fs::remove_dir(&self.0);
-            }
-        }
-        let lock = home.join(".tokenstat-pairing.lock");
-        let mut guard = None;
-        for _ in 0..50 {
-            match std::fs::create_dir(&lock) {
-                Ok(()) => {
-                    guard = Some(Lock(lock.clone()));
-                    break;
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                }
-                Err(error) => return Err(error).context("Could not lock the pairing-code file"),
-            }
-        }
-        let _guard = guard.context("The pairing-code file is busy; retry setup")?;
+        let _guard = acquire_pairing_lock(&home.join(".tokenstat-pairing.lock"))?;
         let current = match std::fs::symlink_metadata(&staged) {
             Ok(current) if current.is_file() => current,
             Ok(_) => return Ok(()),
@@ -176,6 +156,73 @@ fn open_pairing_file(path: &Path) -> Result<std::fs::File> {
     let file = std::fs::File::open(path).context("Could not open the pairing-code file")?;
     validate_file(&file.metadata()?)?;
     Ok(file)
+}
+
+const PAIRING_LOCK_STALE: std::time::Duration = std::time::Duration::from_secs(5);
+
+struct PairingLock(std::path::PathBuf);
+impl Drop for PairingLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(self.0.join("pid"));
+        let _ = std::fs::remove_dir(&self.0);
+    }
+}
+
+fn acquire_pairing_lock(lock: &Path) -> Result<PairingLock> {
+    for _ in 0..50 {
+        match std::fs::create_dir(lock) {
+            Ok(()) => {
+                if let Err(error) =
+                    std::fs::write(lock.join("pid"), format!("{}\n", std::process::id()))
+                {
+                    let _ = std::fs::remove_dir(lock);
+                    return Err(error).context("Could not record the pairing lock");
+                }
+                return Ok(PairingLock(lock.to_path_buf()));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                if !reclaim_pairing_lock(lock) {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+            Err(error) => return Err(error).context("Could not lock the pairing-code file"),
+        }
+    }
+    anyhow::bail!("The pairing-code file is busy; retry setup")
+}
+
+/// A dead pid, or an empty directory older than the shell's wait, is not a holder.
+fn reclaim_pairing_lock(lock: &Path) -> bool {
+    let stale = match std::fs::read_to_string(lock.join("pid")) {
+        Ok(text) => !process_alive(text.trim().parse().unwrap_or(0)),
+        Err(_) => std::fs::metadata(lock)
+            .and_then(|metadata| metadata.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age >= PAIRING_LOCK_STALE),
+    };
+    if !stale {
+        return false;
+    }
+    let _ = std::fs::remove_file(lock.join("pid"));
+    std::fs::remove_dir(lock).is_ok()
+}
+
+fn process_alive(pid: i32) -> bool {
+    if pid <= 0 {
+        return false;
+    }
+    // `ps` reports a live pid without signaling it. A missing `ps` is treated
+    // as live so a lock is not stolen just because the check could not run.
+    match std::process::Command::new("ps")
+        .args(["-p", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+    {
+        Ok(status) => status.success(),
+        Err(_) => true,
+    }
 }
 
 fn validate_file(metadata: &std::fs::Metadata) -> Result<()> {
@@ -291,6 +338,37 @@ mod tests {
             "successor"
         );
         assert!(!home.join(".tokenstat-pairing.lock").exists());
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dead_pairing_lock_is_reclaimed_and_a_live_one_is_not() {
+        let home =
+            std::env::temp_dir().join(format!("tokenstat-enroll-lock-{}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        let staged = home.join(".tokenstat-pairing");
+        std::fs::write(&staged, "WXYZ-1234").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let opened = open_pairing_file(&staged).unwrap().metadata().unwrap();
+        let dead = home.join(".tokenstat-pairing.lock");
+        std::fs::create_dir(&dead).unwrap();
+        std::fs::write(dead.join("pid"), "2147483647\n").unwrap();
+        remove_staged_file(&staged, &home, &opened).unwrap();
+        assert!(!staged.exists());
+        assert!(!dead.exists());
+
+        std::fs::write(&staged, "WXYZ-1234").unwrap();
+        std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let opened = open_pairing_file(&staged).unwrap().metadata().unwrap();
+        let live = home.join(".tokenstat-pairing.lock");
+        std::fs::create_dir(&live).unwrap();
+        std::fs::write(live.join("pid"), format!("{}\n", std::process::id())).unwrap();
+        let error = remove_staged_file(&staged, &home, &opened).unwrap_err();
+        assert!(error.to_string().contains("busy"), "{error}");
+        assert!(staged.is_file());
+        assert!(live.is_dir());
         std::fs::remove_dir_all(home).unwrap();
     }
 

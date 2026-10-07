@@ -14,13 +14,18 @@ internal static class SshVault
         var body = new StackPanel { Spacing = Theme.SpaceS };
         try
         {
-            var status = await AppServices.Host.CallAsync("ssh.vault.status");
+            var account = await AppServices.Host.CallAsync("account.status");
+            if (!Format.Flag(account, "signedIn"))
+                await AppServices.Host.CallAsync("ssh.vault.status");
+            var scope = SshVaultScope.From(account)
+                ?? throw new InvalidOperationException("the signed-in account changed; retry from the current account");
+            var status = await SshVaultScope.CallAsync("ssh.vault.status", null, scope);
             var problem = Format.Text(status, "unreachable");
             var created = Format.Flag(status, "created");
             var locked = Format.Flag(status, "locked");
             if (created && !locked && problem.Length == 0 && !Format.Flag(status, "needsRecreate"))
             {
-                try { await SshVaultSync.SyncAsync(); }
+                try { await SshVaultSync.SyncAsync(scope); }
                 catch (Exception ex) { body.Children.Add(Chrome.Banner(FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important)); }
             }
             body.Children.Add(new TextBlock
@@ -36,17 +41,17 @@ internal static class SshVault
             {
                 if (!created || locked)
                     body.Children.Add(ActionIconGlyph.Button(created ? L10n.Text("windows.sshvault.unlock_vault.75018776") : L10n.Text("windows.sshvault.create_vault.c8c44253"), ActionIcon.Security,
-                        async (_, _) => { await UnlockAsync(owner, created); await reload(); }));
+                        async (_, _) => { await UnlockAsync(owner, created, scope); await reload(); }));
                 else
                 {
                     body.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.sshvault.sync_vault.67cde0cd"), ActionIcon.Refresh, async (_, _) =>
                     {
-                        try { await SshVaultSync.SyncAsync(); await reload(); }
+                        try { await SshVaultSync.SyncAsync(scope); await reload(); }
                         catch (Exception ex) { body.Children.Add(Chrome.Banner(FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important)); }
                     }));
                     body.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.sshvault.lock_vault.441f34d1"), ActionIcon.Security, async (_, _) =>
                     {
-                        try { await AppServices.Host.CallAsync("ssh.vault.lock"); await reload(); }
+                        try { await SshVaultScope.CallAsync("ssh.vault.lock", null, scope); await reload(); }
                         catch (Exception ex) { body.Children.Add(Chrome.Banner(FriendlyError.Display(ex.Message), Theme.Danger, Symbol.Important)); }
                     }));
                 }
@@ -56,7 +61,7 @@ internal static class SshVault
         return Chrome.Card(L10n.Text("windows.sshvault.ssh_vault.1e6e22e7"), body);
     }
 
-    private static async Task UnlockAsync(UIElement owner, bool created)
+    private static async Task UnlockAsync(UIElement owner, bool created, JsonObject scope)
     {
         var password = new PasswordBox { PlaceholderText = L10n.Text("windows.sshvault.vault_password.1853752f") };
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
@@ -72,8 +77,8 @@ internal static class SshVault
             error.Text = L10n.Text("windows.sshvault.opening_vault.ea4c6380");
             try
             {
-                result = await AppServices.Host.CallAsync(created ? "ssh.vault.unlock" : "ssh.vault.create",
-                    new JsonObject { ["password"] = password.Password, ["migrate"] = true });
+                result = await SshVaultScope.CallAsync(created ? "ssh.vault.unlock" : "ssh.vault.create",
+                    new JsonObject { ["password"] = password.Password, ["migrate"] = true }, scope);
                 password.Password = "";
                 dialog.Hide();
             }
@@ -91,7 +96,7 @@ internal static class SshVault
                 Content = new TextBlock { Text = L10n.Text("windows.sshvault.keep_this_code_somewhere_safe_it_can_reset.f28683b9", $"{recovery}"),
                     IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap },
             });
-        try { await SshVaultSync.SyncAsync(); }
+        try { await SshVaultSync.SyncAsync(scope); }
         catch (Exception ex)
         {
             await Chrome.ShowDialog(owner, new ContentDialog { Title = L10n.Text("windows.sshvault.vault_sync.65415a6c"), Content = FriendlyError.Display(ex.Message), CloseButtonText = L10n.Text("common.close") });

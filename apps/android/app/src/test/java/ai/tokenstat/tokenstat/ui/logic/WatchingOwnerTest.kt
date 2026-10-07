@@ -1,5 +1,6 @@
 package ai.tokenstat.tokenstat.ui.logic
 
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.*
@@ -17,5 +18,10 @@ class WatchingOwnerTest {
         assertEquals("old", old.parameters("chat", "watcher")["_accountSession"].toString().trim('"'))
         assertEquals("https://example.com/service", old.scope["origin"].toString().trim('"'))
         assertNull(WatchingOwner.from(buildJsonObject { put("signedIn", false) }))
+        val scoped = buildJsonObject { put("password", "secret") }.withVaultScope(account("old"))
+        val attached = scoped["_accountScope"] as JsonObject
+        assertEquals("secret", scoped["password"].toString().trim('"'))
+        assertEquals("https://example.com/service", attached["origin"].toString().trim('"'))
+        assertEquals("alice", attached["identity"].toString().trim('"'))
     }
 }
