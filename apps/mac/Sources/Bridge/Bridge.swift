@@ -1038,6 +1038,10 @@ extension Bridge {
     /// Local hostd, or the same method on a peer. Chat is the same store
     /// either way, and the phone talks to it over the tunnel.
     private static let chatReadFlights = ChatReadFlights()
+    private struct ChatReadOwner: Encodable {
+        let scope: WorkReference.Scope
+        let generation: UInt64
+    }
 
     private static func chatInvoke<T: Decodable & Sendable>(
         peer: String?,
@@ -1056,17 +1060,19 @@ extension Bridge {
         if let expectedGeneration, generation != expectedGeneration { throw CancellationError() }
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
-        let owner = try scope.map { try encoder.encode($0) }
+        let owner = try scope.map { try encoder.encode(ChatReadOwner(scope: $0, generation: generation)) }
         if let scope, let owner, ChatReadFlights.reads.contains(method) {
             let encoded = try JSONSerialization.data(withJSONObject: params, options: [.sortedKeys])
             let key = ChatReadKey(owner: owner, peer: peer, method: method, parameters: encoded, patience: patience)
             return try await chatReadFlights.run(key) {
-                guard await WorkSessionContext.shared.scope == scope else { throw CancellationError() }
+                guard await MainActor.run(body: { WorkSessionContext.shared.scope == scope
+                    && WorkSessionContext.shared.generation == generation }) else { throw CancellationError() }
                 let arguments = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] ?? [:]
                 let result: Result<T, Error>
                 do { result = .success(try await chatTransport(peer: peer, method, arguments, patience: patience, as: type)) }
                 catch { result = .failure(error) }
-                guard await WorkSessionContext.shared.scope == scope else { throw CancellationError() }
+                guard await MainActor.run(body: { WorkSessionContext.shared.scope == scope
+                    && WorkSessionContext.shared.generation == generation }) else { throw CancellationError() }
                 return try result.get()
             }
         }
@@ -1081,14 +1087,19 @@ extension Bridge {
         if invalidates, let owner { await chatReadFlights.invalidate(owner: owner, peer: peer) }
         // The invalidation await must not carry earlier account authorization
         // into a mutation dispatched for the next account.
-        if let scope, await WorkSessionContext.shared.scope != scope { throw CancellationError() }
+        if let scope, !(await MainActor.run(body: { WorkSessionContext.shared.scope == scope
+            && WorkSessionContext.shared.generation == generation })) { throw CancellationError() }
         if let expectedGeneration, await WorkSessionContext.shared.generation != expectedGeneration { throw CancellationError() }
         do {
             let value: T = try await chatTransport(peer: peer, method, transportParams, patience: patience, as: type)
             if invalidates, let owner { await chatReadFlights.invalidate(owner: owner, peer: peer) }
+            if let scope, !(await MainActor.run(body: { WorkSessionContext.shared.scope == scope
+                && WorkSessionContext.shared.generation == generation })) { throw CancellationError() }
             return value
         } catch {
             if invalidates, let owner { await chatReadFlights.invalidate(owner: owner, peer: peer) }
+            if let scope, !(await MainActor.run(body: { WorkSessionContext.shared.scope == scope
+                && WorkSessionContext.shared.generation == generation })) { throw CancellationError() }
             throw error
         }
     }

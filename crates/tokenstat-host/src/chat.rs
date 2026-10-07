@@ -806,6 +806,62 @@ impl Store {
         })
     }
 
+    /// A daemon and an in-process client can share this archive. Verify the
+    /// durable index before serving a wire request instead of retaining the
+    /// startup snapshot forever or reporting an unreadable index as no chats.
+    pub fn refresh_index(&self) -> Result<(), String> {
+        match fs::metadata(&self.root) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return if self
+                    .conversations
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .is_empty()
+                {
+                    Ok(())
+                } else {
+                    Err("conversation archive is missing; the saved history was not changed".into())
+                };
+            }
+            Err(error) => return Err(format!("conversation archive could not be read: {error}")),
+        }
+        let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+        let mut memory = self
+            .conversations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        match fs::read(self.root.join("conversations.json")) {
+            Ok(bytes) => {
+                let index: Index = serde_json::from_slice(&bytes).map_err(
+                    |_| "conversation index could not be read; the saved history was not changed",
+                )?;
+                *memory = index.conversations;
+                Ok(())
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && memory.is_empty() => {
+                // A genuinely new archive has no index yet. Transcript files
+                // without their index are a storage failure, not an empty list.
+                let entries = fs::read_dir(&self.root).map_err(|error| error.to_string())?;
+                for entry in entries {
+                    if entry
+                        .map_err(|error| error.to_string())?
+                        .path()
+                        .join("events.ndjson")
+                        .exists()
+                    {
+                        return Err(
+                            "conversation index is missing; the saved history was not changed"
+                                .into(),
+                        );
+                    }
+                }
+                Ok(())
+            }
+            Err(error) => Err(format!("conversation index could not be read: {error}")),
+        }
+    }
+
     pub fn list(&self, workspace_id: &str) -> Vec<Conversation> {
         let mut rows: Vec<_> = self
             .conversations
@@ -2596,9 +2652,9 @@ impl Store {
         stable: bool,
     ) -> Result<EventChunk, String> {
         let _guard = self.transcript_guard()?;
-        self.get(id)?;
+        let chat = self.get(id)?;
         let path = self.events_path(id);
-        let end = file_len(&path);
+        let end = transcript_len(&path, chat.last_message_at_ms.is_some())?;
         let first = archive_generation(&path)?;
         let reset = cursor.is_some_and(|raw| parse_cursor(raw, end, first) != Some(offset));
         let start = offset.min(end);
@@ -2606,7 +2662,8 @@ impl Store {
             Vec::new()
         } else {
             records_with_positions(
-                &read_region(&path, start, end).unwrap_or_default(),
+                &read_region(&path, start, end)
+                    .ok_or("conversation could not be read; retry without changing the history")?,
                 start,
                 stable,
             )
@@ -2653,7 +2710,7 @@ impl Store {
         let _guard = self.transcript_guard()?;
         let chat = self.get(id)?;
         let path = self.events_path(id);
-        let len = file_len(&path);
+        let len = transcript_len(&path, chat.last_message_at_ms.is_some())?;
         let first = archive_generation(&path)?;
         let limit = if limit == 0 {
             PAGE_EVENTS
@@ -5672,6 +5729,16 @@ fn replace_chat_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+fn transcript_len(path: &Path, has_history: bool) -> Result<u64, String> {
+    match fs::metadata(path) {
+        Ok(meta) if meta.is_file() => Ok(meta.len()),
+        Ok(_) => Err("conversation history is not a readable file".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && !has_history => Ok(0),
+        Err(error) => Err(format!("conversation history could not be read: {error}")),
+    }
+}
+
+#[cfg(test)]
 fn file_len(path: &Path) -> u64 {
     fs::metadata(path).map(|meta| meta.len()).unwrap_or(0)
 }
@@ -5793,7 +5860,7 @@ fn read_back_checked(
     path: &Path,
     end: u64,
     limit: usize,
-    strict: bool,
+    _strict: bool,
 ) -> Result<(u64, Vec<u8>), String> {
     let mut start = end;
     let mut buffer: Vec<u8> = Vec::new();
@@ -5823,7 +5890,7 @@ fn read_back_checked(
             .min(PAGE_RECORD_BYTES + 1 - buffer.len() as u64);
         start -= chunk;
         let region = read_region(path, start, start + chunk);
-        if strict && region.is_none() {
+        if region.is_none() {
             return Err("conversation changed or could not be read; retry search".into());
         }
         let mut head = region.unwrap_or_default();
@@ -5943,6 +6010,51 @@ fn next_send_revision(revision: u64) -> Result<u64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unreadable_history_never_becomes_a_successful_empty_page() {
+        let root =
+            std::env::temp_dir().join(format!("tokenstat-history-read-{}", rand::random::<u64>()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("events.ndjson");
+        assert_eq!(transcript_len(&path, false).unwrap(), 0);
+        assert!(transcript_len(&path, true).is_err());
+        fs::write(&path, b"short\n").unwrap();
+        assert!(read_back(&path, 100, 10).is_err());
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(transcript_len(&path, false).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn wire_index_refresh_rejects_corruption_and_observes_another_writer() {
+        let root =
+            std::env::temp_dir().join(format!("tokenstat-index-read-{}", rand::random::<u64>()));
+        fs::create_dir_all(&root).unwrap();
+        let store = Store::load_at(root.clone());
+        store.refresh_index().unwrap();
+        fs::write(root.join("conversations.json"), b"invalid").unwrap();
+        assert!(store.refresh_index().is_err());
+        fs::write(root.join("conversations.json"), br#"{"conversations":[]}"#).unwrap();
+        store.refresh_index().unwrap();
+        let writer = Store::load_at(root.clone());
+        conversation_for_receipts(&writer, "external-chat");
+        assert!(store.list("workspace-a").is_empty());
+        store.refresh_index().unwrap();
+        assert_eq!(store.list("workspace-a").len(), 1);
+        fs::write(root.join("conversations.json"), b"invalid").unwrap();
+        assert!(store.refresh_index().is_err());
+        assert_eq!(store.list("workspace-a").len(), 1);
+        fs::remove_file(root.join("conversations.json")).unwrap();
+        assert!(store.refresh_index().is_err());
+        let cold = Store::load_at(root.clone());
+        // An orphaned transcript is retained and reported, never rebuilt/deleted.
+        fs::create_dir_all(root.join("orphan")).unwrap();
+        fs::write(root.join("orphan/events.ndjson"), b"{}\n").unwrap();
+        assert!(cold.refresh_index().is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn usage_reader_bounds_files_and_does_not_hide_read_errors() {

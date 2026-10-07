@@ -722,7 +722,13 @@ struct ClientChatThread: View {
         refreshing = true
         defer { refreshing = false }
         model.error = nil
-        await model.poll()
+        if let selected = model.selected, model.events.isEmpty {
+            // An older host could return an empty page at the archive's end.
+            // A tail poll at that cursor cannot recover the missing history.
+            await model.select(selected)
+        } else {
+            await model.poll()
+        }
     }
 
     private var chatPresentation: some View {

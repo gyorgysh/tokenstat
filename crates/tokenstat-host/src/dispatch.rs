@@ -2076,6 +2076,7 @@ fn handoff_call(method: &str, params: &str) -> Result<Value, DispatchError> {
     let p: Params = serde_json::from_str(params).map_err(|e| e.to_string())?;
     crate::workspaces::folder(&p.workspace_id)?;
     let store = crate::chat::shared();
+    store.refresh_index().envelope()?;
     match method {
         "work.continuity.get" => {
             if p.handoff.is_some() || p.attachment_ids.is_some() {
@@ -2143,6 +2144,10 @@ fn attach_branch_pulls(rows: &mut Value) {
 fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
     let p: ChatParams = parse(params)?;
     let store = crate::chat::shared();
+    // Refresh directory views, without adding disk/lock work to streaming polls.
+    if matches!(method, "chat.list" | "chat.recent") {
+        store.refresh_index().envelope()?;
+    }
     match method {
         "chat.list" => {
             let mut value = serde_json::to_value(

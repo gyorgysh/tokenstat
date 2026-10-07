@@ -167,7 +167,6 @@ fn canonical_origin(raw: &str) -> Option<String> {
         || url.host_str().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
-        || !matches!(url.path(), "" | "/")
     {
         return None;
     }
@@ -297,6 +296,25 @@ mod tests {
                 Some("id-a")
             )
             .is_ok()
+        );
+        let prefixed = serde_json::json!({"kind":"account", "origin":"https://mock.example/service", "identity":"alice"});
+        assert!(
+            validate_account(
+                &prefixed,
+                "https://MOCK.example:443/service/",
+                Some("alice"),
+                Some("id-a")
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_account(
+                &prefixed,
+                "https://mock.example/other",
+                Some("alice"),
+                Some("id-a")
+            )
+            .is_err()
         );
         assert!(
             validate_account(&scope, "http://mock.example", Some("alice"), Some("id-a")).is_err()

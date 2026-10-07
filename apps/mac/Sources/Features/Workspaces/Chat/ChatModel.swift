@@ -255,6 +255,7 @@ final class ChatModel {
     /// Async bridge calls may finish after navigation. Only the generation
     /// that started them may mutate the currently displayed workspace/chat.
     private var loadGeneration: UInt64 = 0
+    @ObservationIgnored private var setupLoadTask: Task<Void, Never>?
     private(set) var selectionGeneration: UInt64 = 0
     @ObservationIgnored let viewportContinuity = ChatViewportContinuity()
     /// Conversation a notification asked to open, consumed by the next load.
@@ -1181,6 +1182,10 @@ final class ChatModel {
                 loadDraft(for: nil, scope: nil, hostIdentity: nil, workspaceID: nil)
             }
             chatListCache = [:]
+            backends = []
+            personas = []
+            defaultPersonaID = nil
+            backendRefreshError = nil
             steerOverlay.removeAll()
             listMutations.removeAll()
             noteRunningChats()
@@ -1195,7 +1200,13 @@ final class ChatModel {
         let draftHost = route.peer ?? WorkSessionContext.shared.localHostIdentity
         if folderID != workspaceID || self.workspaceID != route.workspaceID || self.peer != route.peer {
             clearRecentMessagePreview()
-            if self.peer != route.peer { pagingUnavailable = false }
+            personas = []
+            defaultPersonaID = nil
+            if self.peer != route.peer {
+                pagingUnavailable = false
+                backends = []
+                backendRefreshError = nil
+            }
             // The folder is changing. Remember which conversation was open
             // before the clear below drops it, or coming back can only ever
             // find the first row.
@@ -1257,27 +1268,23 @@ final class ChatModel {
         adoptPeer(route.peer)
         if events.isEmpty { restoreRecentMessages() }
         loadQueue(for: selected?.id)
+        setupLoadTask?.cancel()
+        setupLoadTask = Task { [weak self] in
+            await self?.loadSetup(workspaceID: route.workspaceID, peer: route.peer,
+                                  generation: generation, scope: scope)
+        }
         let listRead = beginChatListRead(workspaceID: route.workspaceID, peer: route.peer, scope: scope)
         do {
-            async let loadedBackends = Bridge.chatBackends(peer: route.peer)
-            async let loadedPersonas = Bridge.chatPersonas(workspaceID: route.workspaceID, peer: route.peer)
-            async let loadedChats = Bridge.chats(workspaceID: route.workspaceID, peer: route.peer)
-            let loaded = try await (loadedBackends, loadedPersonas, loadedChats)
-            probe.error("load answered gen=\(generation)/\(self.loadGeneration) scopeThen=\(String(describing: scope?.identity)) scopeNow=\(String(describing: WorkSessionContext.shared.scope?.identity)) chats=\(loaded.2.count)")
+            // Catalog and persona failures must not hide a successful chat list.
+            let loaded = try await Bridge.chats(workspaceID: route.workspaceID, peer: route.peer)
+            probe.error("load answered gen=\(generation)/\(self.loadGeneration) scopeThen=\(String(describing: scope?.identity)) scopeNow=\(String(describing: WorkSessionContext.shared.scope?.identity)) chats=\(loaded.count)")
             guard generation == loadGeneration, scope == WorkSessionContext.shared.scope else {
                 // A superseded load must not touch the opening flag: load N+1
                 // may already have asserted opening=true in its folder-change
                 // block, and clearing it here would clobber the newer load.
                 return
             }
-            backends = loaded.0
-            backendRefreshError = nil
-            personas = loaded.1.personas
-            // The host says "" for a workspace that has chosen no persona.
-            // Nil here means the same thing, and every reader already handles
-            // it, so the empty string never gets past this line.
-            defaultPersonaID = loaded.1.defaultId.isEmpty ? nil : loaded.1.defaultId
-            chats = Self.uniqued(applyChatList(loaded.2, read: listRead, current: chats))
+            chats = Self.uniqued(applyChatList(loaded, read: listRead, current: chats))
             storeChatListCache(chats, folderID: workspaceID)
             if let owner = continuityOwner(folderID: workspaceID) {
                 let prefix = WorkReferenceKey.folder(scope: owner.scope, hostIdentity: owner.host, workspaceID: owner.workspace)
@@ -1343,12 +1350,48 @@ final class ChatModel {
             }
         } catch {
             if generation == loadGeneration {
-                self.error = error.localizedDescription
+                if !Task.isCancelled, !(error is CancellationError), scope == WorkSessionContext.shared.scope {
+                    self.error = error.localizedDescription
+                }
                 // A primed folder otherwise keeps its opening state with
                 // nothing coming to clear it.
                 openingConversation = false
             }
         }
+    }
+
+    /// Secondary menus have their own owner and cannot hold the transcript open.
+    private func loadSetup(workspaceID: String, peer: String?, generation: UInt64,
+                           scope: WorkReference.Scope?) async {
+        async let catalog: Void = loadBackendCatalog(peer: peer, generation: generation, scope: scope)
+        async let voices: Void = loadPersonaCatalog(workspaceID: workspaceID, peer: peer,
+                                                   generation: generation, scope: scope)
+        _ = await (catalog, voices)
+    }
+
+    private func loadBackendCatalog(peer: String?, generation: UInt64, scope: WorkReference.Scope?) async {
+        do {
+            let loaded = try await Bridge.chatBackends(peer: peer)
+            guard !Task.isCancelled, generation == loadGeneration,
+                  scope == WorkSessionContext.shared.scope else { return }
+            backends = loaded
+            backendRefreshError = nil
+        } catch {
+            guard !Task.isCancelled, generation == loadGeneration,
+                  scope == WorkSessionContext.shared.scope else { return }
+            backendRefreshError = error.localizedDescription
+        }
+    }
+
+    private func loadPersonaCatalog(workspaceID: String, peer: String?, generation: UInt64,
+                                    scope: WorkReference.Scope?) async {
+        do {
+            let loaded = try await Bridge.chatPersonas(workspaceID: workspaceID, peer: peer)
+            guard !Task.isCancelled, generation == loadGeneration,
+                  scope == WorkSessionContext.shared.scope else { return }
+            personas = loaded.personas
+            defaultPersonaID = loaded.defaultId.isEmpty ? nil : loaded.defaultId
+        } catch { /* Keep the last verified voices; a later open retries. */ }
     }
 
     private static func uniqued(_ chats: [ChatConversation]) -> [ChatConversation] {
@@ -3787,7 +3830,8 @@ final class ChatModel {
     /// earlier pages stay on the host, and the copy says so through the
     /// page's own `hasEarlier` flag.
     private func keepOfflineCopy(id: String, title: String?, page: ChatEventPage, sendRevision: UInt64?) {
-        guard let reference = currentReference, reference.itemID == id else { return }
+        guard let reference = currentReference, reference.itemID == id,
+              !page.events.isEmpty || selected?.lastMessageAtMs == nil else { return }
         let title = title ?? L10n.text("apple.chatmodel.conversation.ccca1817")
         let backend = selected?.backend
         Task {

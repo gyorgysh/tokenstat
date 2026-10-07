@@ -565,7 +565,16 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _creatingChat = true;
         try
         {
-            await RefreshCatalogAsync();
+            var generation = _openGeneration;
+            // Choosing a new agent needs its catalog; opening history does not.
+            var backends = CallChatAsync("chat.backends");
+            var personas = CallChatAsync("chat.personas", new JsonObject { ["workspaceId"] = _workspaceId });
+            await Task.WhenAll(backends, personas);
+            if (generation != _openGeneration || !IsLoaded) return;
+            _backends = AsArray(backends.Result);
+            _personas = AsArray(personas.Result, "personas");
+            await RefreshCatalogAsync(refreshMenus: false);
+            if (generation != _openGeneration || !IsLoaded) return;
             var saved = ChatLaunchChoice.Load();
             var chosen = DefaultBackend(saved?.Backend);
             var request = new JsonObject
@@ -2322,17 +2331,51 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             if (generation == _openGeneration) _chats = _steerOverlay.Apply(AsArray(listed), request, _chats);
             return;
         }
-        var backends = CallChatAsync("chat.backends");
-        var personas = CallChatAsync(
-            "chat.personas",
-            new JsonObject { ["workspaceId"] = _workspaceId });
-        await Task.WhenAll(chats, backends, personas);
-        if (generation != _openGeneration) return;
-        _chats = _steerOverlay.Apply(AsArray(chats.Result), request, _chats);
-        _backends = AsArray(backends.Result);
-        // Before the sign-in probe, which can take seconds to answer.
-        _personas = AsArray(personas.Result, "personas");
-        CheckSelectedSignIn();
+        // Secondary menus must never hide a successful conversation list.
+        _ = RefreshBackendCatalogAsync(generation);
+        _ = RefreshPersonaCatalogAsync(generation);
+        var loaded = await chats;
+        if (generation == _openGeneration)
+            _chats = _steerOverlay.Apply(AsArray(loaded), request, _chats);
+    }
+
+    private async Task RefreshBackendCatalogAsync(int generation)
+    {
+        try
+        {
+            var loaded = await CallChatAsync("chat.backends");
+            if (generation != _openGeneration) return;
+            _backends = AsArray(loaded);
+            RefreshCatalogPresentation();
+            CheckSelectedSignIn();
+        }
+        catch (Exception ex) { if (generation == _openGeneration) Banner(ex.Message); }
+    }
+
+    private async Task RefreshPersonaCatalogAsync(int generation)
+    {
+        try
+        {
+            var loaded = await CallChatAsync("chat.personas", new JsonObject { ["workspaceId"] = _workspaceId });
+            if (generation != _openGeneration) return;
+            _personas = AsArray(loaded, "personas");
+            RefreshCatalogPresentation();
+        }
+        catch (Exception ex) { if (generation == _openGeneration) Banner(ex.Message); }
+    }
+
+    private void RefreshCatalogPresentation()
+    {
+        if (!IsLoaded) return;
+        RenderInspector();
+        if (_openChat is null || _composerDock.Child is null) return;
+        // Refresh menus without clearing transcript rows or their scroll position.
+        var focus = _draft.FocusState;
+        _composerDock.Child = null;
+        _composerWell.Children.Clear();
+        _composerRow.Children.Clear();
+        _composerDock.Child = Composer();
+        if (focus != FocusState.Unfocused) _draft.Focus(focus);
     }
 
     private void CheckSelectedSignIn()

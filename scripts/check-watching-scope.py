@@ -14,7 +14,7 @@ def method(signature):
         depth += (source[end] == '{') - (source[end] == '}')
         end += 1
     return source[start:end]
-methods = '\n'.join(method(s) for s in ['    private static func chatInvoke<', '    static func watching(', '    static func stoppedWatching('])
+methods = '\n'.join(method(s) for s in ['    private struct ChatReadOwner:', '    private static func chatInvoke<', '    static func watching(', '    static func stoppedWatching('])
 heartbeat = (root / 'apps/mac/Sources/App/WatchingHeartbeat.swift').read_text()
 assert 'scope: WorkSessionContext.shared.scope' in heartbeat
 assert 'let owner = WorkSessionContext.shared.scope' in heartbeat

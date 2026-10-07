@@ -236,6 +236,9 @@ jobs:
           python3 scripts/check-workspace-refresh.py
           python3 scripts/check-tunnel-recovery.py
           python3 scripts/check-chat-polling.py
+          python3 scripts/check-chat-loading.py
+          python3 scripts/check-chat-empty-recovery.py
+          python3 scripts/check-chat-read-scope.py
           python3 scripts/check-watching-scope.py
           python3 scripts/check-vault-scope.py
           python3 scripts/check-ssh-workbench.py
@@ -262,6 +265,8 @@ jobs:
           dotnet-version: '8.0.x'
       - name: Run portable client state regressions
         run: bash scripts/run-windows-state-tests.sh
+      - name: Check independent Windows chat loading
+        run: python3 scripts/check-windows-chat-loading.py
 
   test:
     name: test ${{ matrix.os }}

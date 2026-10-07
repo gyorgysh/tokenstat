@@ -494,7 +494,7 @@ struct ChatView: View {
             }
         }
         #endif
-        .task(id: "\(workspaceID)-\(isActive)-\(String(describing: WorkSessionContext.shared.scope))") {
+        .task(id: "\(workspaceID)-\(isActive)-\(String(describing: WorkSessionContext.shared.scope))-\(WorkSessionContext.shared.generation)") {
             Logger(subsystem: "ai.tokenstat.tokenstat", category: "chatload")
                 .error("view task ws=\(workspaceID) active=\(isActive)")
             guard isActive, loadsWorkspace else { return }
@@ -508,7 +508,12 @@ struct ChatView: View {
             UserPresence.shared.chatSurface(showing: isActive ? model.selected?.id : nil)
         }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
-            Task { await model.resumeWaitingConnection() }
+            Task {
+                guard isActive else { return }
+                if loadsWorkspace { await model.load(workspaceID: workspaceID) }
+                else if let selected = model.selected { await model.select(selected) }
+                await model.resumeWaitingConnection()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .chatAttachmentCachePurged)) { _ in
             model.clearCachedAttachmentMemory()
@@ -532,7 +537,14 @@ struct ChatView: View {
         // keystroke. These two are the moments that can arrive sooner.
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { model.saveDraftNow() }
-            else { Task { await model.resumeWaitingConnection() } }
+            else {
+                Task {
+                    guard isActive else { return }
+                    if loadsWorkspace { await model.load(workspaceID: workspaceID) }
+                    else if let selected = model.selected { await model.select(selected) }
+                    await model.resumeWaitingConnection()
+                }
+            }
         }
         .onDisappear { model.saveDraftNow() }
         // And the same fact to the host, which is the one deciding whether a
