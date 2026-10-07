@@ -389,6 +389,9 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _root.Children.Clear();
         var header = ListHeader();
         _root.Children.Add(header);
+        // The archive is a new reading destination; retain drafts, but start
+        // at its header rather than the previous transcript scroll offset.
+        _scroll?.ChangeView(null, 0, null, true);
         var skeleton = Motion.SkeletonCard();
         _root.Children.Add(skeleton);
         _folderName = await FolderNameAsync();
@@ -434,6 +437,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 list.Children.Add(ChatCard(chat));
             }
             _root.Children.Add(list);
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (generation == _openGeneration && _openId is null && IsLoaded)
+                    _scroll?.ChangeView(null, 0, null, true);
+            });
         }
         catch (Exception ex)
         {

@@ -105,6 +105,7 @@ internal static class SidebarChrome
                     new TextBlock { Text = L10n.Text("windows.mainwindow_xaml.see_all_chats.e705024a"), FontSize = 11 } } };
             archive.Click += (_, _) => all();
             AutomationProperties.SetAutomationId(archive, "sidebar.chatAll");
+            AutomationProperties.SetName(archive, L10n.Text("windows.mainwindow_xaml.see_all_chats.e705024a"));
             Grid.SetColumn(archive, 1);
             grid.Children.Add(archive);
         }
