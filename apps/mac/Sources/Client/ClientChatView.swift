@@ -746,7 +746,7 @@ struct ClientChatThread: View {
                             ChatDropExperience()
                         }
                     }
-                    .clientBottomBar(bounded: usesBoundedComposer) {
+                    .clientBottomBar {
                         bar(chat)
                             .padding(.top, Theme.Space.s)
                     }
