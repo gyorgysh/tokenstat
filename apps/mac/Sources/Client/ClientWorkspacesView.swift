@@ -682,9 +682,14 @@ final class ClientWorkspacesModel {
     /// Full-screen terminal currently shown from the all-sessions list.
     var activeTerminal: ClientTerminalSession?
     @ObservationIgnored private var lastRecoverAt = Date.distantPast
+    @ObservationIgnored private var refreshGeneration = UUID()
+    @ObservationIgnored private var retired = false
+    @ObservationIgnored private var remoteRefresh: (ticket: UUID, peer: String, generation: UUID, task: Task<Void, Never>)?
 
     func refresh(account: Account?) async {
-        errorMessage = nil
+        guard !Task.isCancelled, !retired, ownerScope != nil, ownerScope == WorkSessionContext.shared.scope else { return }
+        let generation = UUID()
+        refreshGeneration = generation
         let thisID = account?.thisMachineID
         let machines = account?.machines ?? []
         // Who this phone is, from the host rather than from the account. A
@@ -692,12 +697,15 @@ final class ClientWorkspacesModel {
         // carries no kind and would otherwise list this phone as a host that
         // is asleep, which is the one device on the list that certainly is not.
         let identity = try? await Bridge.machineIdentity()
+        guard !Task.isCancelled, !retired, refreshGeneration == generation,
+              ownerScope == WorkSessionContext.shared.scope else { return }
         let selfKey = identity?.key.lowercased()
-        thisDeviceName = {
+        let nextDeviceName = {
             let label = identity?.label.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return label.isEmpty ? ClientDeviceName.marketing : label
         }()
-        hosts = machines.compactMap { machine -> ClientHost? in
+        if thisDeviceName != nextDeviceName { thisDeviceName = nextDeviceName }
+        let nextHosts = machines.compactMap { machine -> ClientHost? in
             guard machine.isHost else { return nil }
             if let thisID, let mid = machine.machineID, mid == thisID { return nil }
             if let selfKey, machine.publicIdentity?.lowercased() == selfKey { return nil }
@@ -714,6 +722,7 @@ final class ClientWorkspacesModel {
                 machineID: machine.machineID
             )
         }
+        if hosts != nextHosts { hosts = nextHosts }
         if let key = connectedKey {
             await reloadRemote(peerKey: key)
         }
@@ -739,6 +748,7 @@ final class ClientWorkspacesModel {
     /// nobody asked for. The latest tap wins; a tap on the host already
     /// dialling or already queued is a no-op.
     func connect(_ host: ClientHost) async {
+        guard !Task.isCancelled, !retired, ownerScope != nil, ownerScope == WorkSessionContext.shared.scope else { return }
         chosenPeer = host.peerKey
         if isConnecting == host.peerKey || pendingPeer == host.peerKey { return }
         pendingPeer = host.peerKey
@@ -761,6 +771,7 @@ final class ClientWorkspacesModel {
     /// is waiting or dialling, this drops, so redialling the last host cannot
     /// undo a machine somebody just picked.
     private func autoDial(_ host: ClientHost) async {
+        guard !Task.isCancelled, !retired, ownerScope != nil, ownerScope == WorkSessionContext.shared.scope else { return }
         guard isConnecting == nil, pendingPeer == nil else { return }
         await dial(host, recovering: false)
     }
@@ -839,11 +850,13 @@ final class ClientWorkspacesModel {
     /// `connect`, which queues, and the auto path through `autoDial`, which
     /// drops. Both end up here, never two at once.
     private func dial(_ host: ClientHost, recovering: Bool) async {
+        guard !Task.isCancelled, !retired, ownerScope != nil, ownerScope == WorkSessionContext.shared.scope else { return }
         let ecosystemLease = EcosystemPublisher.lease
         let ownerScope = WorkSessionContext.shared.scope
         let loadGeneration = UUID()
         func stillCurrent() -> Bool {
-            !Task.isCancelled && ownerScope == WorkSessionContext.shared.scope
+            !Task.isCancelled && !retired && self.ownerScope != nil && ownerScope == self.ownerScope
+                && ownerScope == WorkSessionContext.shared.scope
                 && EcosystemPublisher.lease == ecosystemLease
                 && remoteLoadGeneration == loadGeneration
                 && (chosenPeer == nil || chosenPeer == host.peerKey)
@@ -926,9 +939,10 @@ final class ClientWorkspacesModel {
                 let newChats = try? await loadedChats
                 guard stillCurrent() else { return }
                 publishEcosystem(newFolders, peer: host.peerKey, host: host.name, lease: ecosystemLease)
-                folders = newFolders
-                sessions = newSessions ?? []
-                recentChats = newChats ?? []
+                if folders != newFolders { folders = newFolders }
+                let nextSessions = newSessions ?? [], nextChats = newChats ?? []
+                if sessions != nextSessions { sessions = nextSessions }
+                if recentChats != nextChats { recentChats = nextChats }
                 connectedKey = host.peerKey
                 UserDefaults.standard.set(host.peerKey, forKey: "client.lastConnectedHost")
                 errorMessage = nil
@@ -1002,7 +1016,7 @@ final class ClientWorkspacesModel {
                 guard let allowed = try? await Bridge.workspaceAccessAllowed(peer: host.peerKey),
                       allowed
                 else { continue }
-                guard !Task.isCancelled, ownerScope == WorkSessionContext.shared.scope,
+                guard !Task.isCancelled, !retired, self.ownerScope == ownerScope, ownerScope == WorkSessionContext.shared.scope,
                       ecosystemLease == EcosystemPublisher.lease, self.remoteLoadGeneration == loadGeneration,
                       self.chosenPeer == nil || self.chosenPeer == host.peerKey else { return }
                 // Let go of the handle before connecting. The dial stops the
@@ -1030,7 +1044,17 @@ final class ClientWorkspacesModel {
         isConnecting == peerKey || pendingPeer == peerKey
     }
 
+    func deactivate() {
+        retired = true
+        refreshGeneration = UUID()
+        remoteRefresh?.task.cancel()
+        remoteRefresh = nil
+        disconnect()
+    }
+
     func disconnect() {
+        remoteRefresh?.task.cancel()
+        remoteRefresh = nil
         remoteLoadGeneration = UUID()
         pendingPeer = nil
         chosenPeer = nil
@@ -1068,30 +1092,46 @@ final class ClientWorkspacesModel {
     }
 
     private func reloadRemote(peerKey: String) async {
+        guard !Task.isCancelled, !retired, ownerScope != nil, ownerScope == WorkSessionContext.shared.scope else { return }
+        if let flight = remoteRefresh, flight.peer == peerKey, flight.generation == remoteLoadGeneration {
+            await flight.task.value
+            return
+        }
+        let ticket = UUID()
+        let task = Task<Void, Never> { [weak self] in
+            guard let self else { return }
+            await self.performRemoteRefresh(peerKey: peerKey)
+        }
+        remoteRefresh = (ticket, peerKey, remoteLoadGeneration, task)
+        await task.value
+        if remoteRefresh?.ticket == ticket { remoteRefresh = nil }
+    }
+
+    private func performRemoteRefresh(peerKey: String) async {
+        guard !Task.isCancelled, !retired, ownerScope != nil, ownerScope == WorkSessionContext.shared.scope else { return }
         let ecosystemLease = EcosystemPublisher.lease
         let ownerScope = WorkSessionContext.shared.scope
         guard isConnecting == nil, connectedKey == peerKey, chosenPeer == nil || chosenPeer == peerKey else { return }
-        let loadGeneration = UUID()
-        remoteLoadGeneration = loadGeneration
+        let loadGeneration = remoteLoadGeneration
         guard let peer = try? await Bridge.peers().first(where: { $0.key == peerKey }) else {
             return
         }
-        guard !Task.isCancelled, ownerScope == WorkSessionContext.shared.scope,
+        guard !Task.isCancelled, !retired, self.ownerScope == ownerScope, ownerScope == WorkSessionContext.shared.scope,
               EcosystemPublisher.lease == ecosystemLease, connectedKey == peerKey,
               chosenPeer == nil || chosenPeer == peerKey, remoteLoadGeneration == loadGeneration else { return }
         async let loadedFolders = try? Bridge.remoteWorkspaces(peer: peer)
         async let loadedSessions = try? ClientRemote.ptyList(peer: peer.key)
         async let loadedChats = try? ClientRemote.recentChats(peer: peer.key)
         let (newFolders, newSessions, newChats) = await (loadedFolders, loadedSessions, loadedChats)
-        guard !Task.isCancelled, ownerScope == WorkSessionContext.shared.scope,
+        guard !Task.isCancelled, !retired, self.ownerScope == ownerScope, ownerScope == WorkSessionContext.shared.scope,
               EcosystemPublisher.lease == ecosystemLease, connectedKey == peerKey,
               chosenPeer == nil || chosenPeer == peerKey, remoteLoadGeneration == loadGeneration else { return }
         if let newFolders {
             publishEcosystem(newFolders, peer: peerKey, host: hosts.first { $0.peerKey == peerKey }?.name ?? "Computer", lease: ecosystemLease)
-            folders = newFolders
+            if folders != newFolders { folders = newFolders }
         }
-        sessions = newSessions ?? sessions
-        recentChats = newChats ?? recentChats
+        if let newSessions, sessions != newSessions { sessions = newSessions }
+        if let newChats, recentChats != newChats { recentChats = newChats }
     }
 
     private func publishEcosystem(_ folders: [WorkspaceFolder], peer: String, host: String, lease: EcosystemPublicationLease?) {

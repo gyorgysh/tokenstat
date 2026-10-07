@@ -3857,29 +3857,37 @@ extension Bridge {
     ///
     /// `reconnect` drops a live socket: a path change (Wi-Fi to cellular)
     /// leaves a socket that still looks fresh on the old route.
+    private static let tunnelRecoveryFlights = TunnelRecoveryFlights()
+
     static func nudgeTunnel(reconnect: Bool = false) async {
-        if reconnect {
-            _ = try? await background("remote.nudge", ["reconnect": true], as: Nudged.self)
-        } else {
-            _ = try? await background("remote.nudge", as: Nudged.self)
-        }
+        await recoverTunnel(urgency: reconnect ? .reconnect : .soft)
     }
 
-    /// The nudge for coming back to the foreground.
-    ///
-    /// A plain nudge wakes the supervisor and drops the socket only when it
-    /// has not read in a keepalive. That is right for a machine that was
-    /// awake, and not enough for a phone: iOS suspends the process, the
-    /// socket the relay was talking to is gone, and the app can be back
-    /// inside the keepalive window with a connection that reads as fine and
-    /// answers nothing. Every dial to this device is then `no_such_peer`
-    /// until something else notices, which is what left a phone off the
-    /// tunnel until it was force quit. Asking what the tunnel thinks first
-    /// costs one local call and drops a socket only when the tunnel already
-    /// says it is not connected, so a healthy session keeps its channels.
+    /// Recheck on return without tearing down a healthy tunnel. Foreground
+    /// work supersedes an older soft check, and overlapping callers share it.
     static func nudgeTunnelOnForeground() async {
-        let offline = (try? await remoteStatus())?.tunnelOnline == false
-        await nudgeTunnel(reconnect: offline)
+        await recoverTunnel(urgency: .foreground)
+    }
+
+    private static func recoverTunnel(urgency: TunnelRecoveryFlights.Urgency) async {
+        let scope = await WorkSessionContext.shared.scope
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let owner = (try? encoder.encode(scope)) ?? Data()
+        await tunnelRecoveryFlights.run(owner: owner, urgency: urgency) {
+            guard !Task.isCancelled, await WorkSessionContext.shared.scope == scope else { return }
+            guard !Task.isCancelled else { return }
+            let reconnect: Bool
+            if urgency == .foreground {
+                reconnect = (try? await remoteStatus())?.tunnelOnline == false
+                guard !Task.isCancelled, await WorkSessionContext.shared.scope == scope else { return }
+            } else {
+                reconnect = urgency == .reconnect
+            }
+            guard !Task.isCancelled else { return }
+            let params: [String: Any] = reconnect ? ["reconnect": true] : [:]
+            _ = try? await background("remote.nudge", params, as: Nudged.self)
+        }
     }
 
     /// Ask hostd to remint after a plan change. A `not_on_this_plan` refusal

@@ -233,6 +233,8 @@ jobs:
           python3 scripts/check-transcript-layout.py
           python3 scripts/check-ssh-terminal-lifecycle.py
           python3 scripts/check-chat-projection.py
+          python3 scripts/check-workspace-refresh.py
+          python3 scripts/check-tunnel-recovery.py
 
       - name: Validate Apple widget signing rules
         run: |

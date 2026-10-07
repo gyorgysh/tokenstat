@@ -39,6 +39,7 @@ struct ClientRootView: View {
     /// edits it, and every screen that needs a tier or a machine list reads the
     /// same copy rather than starting a second sign-in state.
     @State private var account = AccountModel()
+    @State private var webAuth = ClientWebAuth()
     /// Whether this phone can reach the internet. Every screen in the client is
     /// account plane, which means every screen depends on the network, so the
     /// answer belongs at the root rather than in each of them.
@@ -221,6 +222,7 @@ struct ClientRootView: View {
                     .onChange(of: geo.size.width) { _, width in windowWidth = width }
             }
             ScreenSizeReporter()
+            ClientWebAuthAnchor(auth: webAuth)
         }
         .task {
             connectivity.start()
@@ -247,11 +249,11 @@ struct ClientRootView: View {
             }
             // Sign-in presents over the app rather than handing the URL to
             // Safari and hoping somebody comes back. See `ClientWebAuth`.
-            account.signInPresenter = { ClientWebAuth.shared.start($0) }
+            account.signInPresenter = { webAuth.start($0) }
             // The app closes the window the app opened. Without this the sheet
             // sits there after a successful approval, on top of a screen that
             // has already signed in behind it.
-            account.signInDismisser = { ClientWebAuth.shared.cancel() }
+            account.signInDismisser = { webAuth.cancel() }
             store.currentAccount = { account.account }
             store.onAccountChange = { updated in
                 account.account = updated
@@ -780,6 +782,7 @@ final class ClientSessionModels {
 
     func models(for scope: WorkReference.Scope?) -> Models {
         if let current, self.scope == scope { return current }
+        current?.workspaces.deactivate()
         let fresh = Models()
         self.scope = scope
         current = fresh
@@ -788,6 +791,7 @@ final class ClientSessionModels {
 
     /// Drop everything on sign-out, as unmounting the layouts used to.
     func reset() {
+        current?.workspaces.deactivate()
         scope = nil
         current = nil
     }
