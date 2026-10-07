@@ -1045,10 +1045,15 @@ extension Bridge {
         _ params: [String: Any] = [:],
         patience: TimeInterval = Patience.standard,
         expectedScope: WorkReference.Scope? = nil,
+        expectedGeneration: UInt64? = nil,
         as type: T.Type
     ) async throws -> T {
-        let scope = await WorkSessionContext.shared.scope
+        let (scope, generation, accountSession) = await MainActor.run {
+            (WorkSessionContext.shared.scope, WorkSessionContext.shared.generation,
+             WorkSessionContext.shared.accountSession)
+        }
         if let expectedScope, scope != expectedScope { throw CancellationError() }
+        if let expectedGeneration, generation != expectedGeneration { throw CancellationError() }
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         let owner = try scope.map { try encoder.encode($0) }
@@ -1065,13 +1070,21 @@ extension Bridge {
                 return try result.get()
             }
         }
+        var transportParams = params
+        let heartbeat = method == "app.watching" || method == "app.stoppedWatching"
+        if heartbeat, let scope {
+            transportParams["_accountScope"] = ["kind": scope.kind.rawValue,
+                "origin": scope.origin, "identity": scope.identity]
+            if let accountSession { transportParams["_accountSession"] = accountSession }
+        }
         let invalidates = owner != nil && ChatReadFlights.mutations.contains(method)
         if invalidates, let owner { await chatReadFlights.invalidate(owner: owner, peer: peer) }
         // The invalidation await must not carry earlier account authorization
         // into a mutation dispatched for the next account.
         if let scope, await WorkSessionContext.shared.scope != scope { throw CancellationError() }
+        if let expectedGeneration, await WorkSessionContext.shared.generation != expectedGeneration { throw CancellationError() }
         do {
-            let value: T = try await chatTransport(peer: peer, method, params, patience: patience, as: type)
+            let value: T = try await chatTransport(peer: peer, method, transportParams, patience: patience, as: type)
             if invalidates, let owner { await chatReadFlights.invalidate(owner: owner, peer: peer) }
             return value
         } catch {
@@ -1104,24 +1117,24 @@ extension Bridge {
     /// needed, and taking a chat screen down with an alert about a heartbeat
     /// would be the worse trade by a distance.
     static func watching(conversationID: String, watcherID: String, peer: String? = nil,
-                                  expectedScope: WorkReference.Scope? = nil) async {
+                                  expectedScope: WorkReference.Scope? = nil, expectedGeneration: UInt64? = nil) async {
         struct Ack: Codable, Sendable { var ok: Bool? }
         _ = try? await chatInvoke(
             peer: peer,
             "app.watching",
             ["conversationId": conversationID, "watcherId": watcherID],
-            expectedScope: expectedScope, as: Ack.self
+            expectedScope: expectedScope, expectedGeneration: expectedGeneration, as: Ack.self
         )
     }
 
     static func stoppedWatching(conversationID: String, watcherID: String, peer: String? = nil,
-                                  expectedScope: WorkReference.Scope? = nil) async {
+                                  expectedScope: WorkReference.Scope? = nil, expectedGeneration: UInt64? = nil) async {
         struct Ack: Codable, Sendable { var ok: Bool? }
         _ = try? await chatInvoke(
             peer: peer,
             "app.stoppedWatching",
             ["conversationId": conversationID, "watcherId": watcherID],
-            expectedScope: expectedScope, as: Ack.self
+            expectedScope: expectedScope, expectedGeneration: expectedGeneration, as: Ack.self
         )
     }
 

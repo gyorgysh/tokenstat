@@ -134,6 +134,7 @@ mod windows_screen;
 pub(crate) mod workspace_clone;
 pub mod workspace_policy;
 
+pub(crate) mod account_session;
 #[cfg(feature = "local-host")]
 mod todo;
 #[cfg(feature = "local-host")]

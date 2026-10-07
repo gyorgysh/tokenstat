@@ -278,18 +278,21 @@ impl VaultClient {
         Ok(())
     }
 
-    fn response(
+    fn raw_response(
         &self,
         method: Method,
         path: &str,
         body: Option<Vec<u8>>,
-    ) -> Result<Vec<u8>, VaultError> {
+    ) -> Result<(reqwest::StatusCode, Vec<u8>), VaultError> {
         self.ensure_current()?;
         let mut authorization =
             HeaderValue::from_str(&format!("Bearer {}", self.authentication.token.as_str()))
                 .map_err(|_| VaultError::NotSignedIn)?;
         authorization.set_sensitive(true);
-        let response_limit = if matches!(path, "/api/v1/me" | "/api/v1/machines/me") {
+        let response_limit = if matches!(
+            path,
+            "/api/v1/me" | "/api/v1/machines/me" | "/api/v1/tunnel/token"
+        ) {
             256 * 1024
         } else {
             32 * 1024 * 1024
@@ -309,11 +312,60 @@ impl VaultClient {
                 "vault response exceeded its size limit".into(),
             ));
         }
+        Ok((status, bytes))
+    }
+
+    fn response(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<Vec<u8>>,
+    ) -> Result<Vec<u8>, VaultError> {
+        let (status, bytes) = self.raw_response(method, path, body)?;
         if status.is_success() {
             Ok(bytes)
         } else {
             Err(read_error(status, &bytes))
         }
+    }
+
+    /// Opaque local credential identity; never a bearer or a server request field.
+    pub fn authentication_id(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hash = Sha256::new();
+        hash.update(b"tokenstat.local-account-owner.v1\0");
+        hash.update(self.authentication.host.as_bytes());
+        hash.update(b"\0");
+        hash.update(self.authentication.token.as_bytes());
+        hash.finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+
+    pub fn account_status(&self) -> Result<profile::StatusResult, ProfileError> {
+        let (status, bytes) = self
+            .raw_response(Method::GET, "/api/v1/me", None)
+            .map_err(|error| ProfileError::Message(error.to_string()))?;
+        profile::decode_status_response(
+            self.authentication.host.clone(),
+            status,
+            &String::from_utf8_lossy(&bytes),
+        )
+    }
+
+    pub fn mint_tunnel_token(&self, machine: &str) -> Result<profile::TunnelToken, ProfileError> {
+        let body = serde_json::to_vec(&serde_json::json!({"machine": machine}))?;
+        let (status, bytes) = self
+            .raw_response(Method::POST, "/api/v1/tunnel/token", Some(body))
+            .map_err(|error| ProfileError::Message(error.to_string()))?;
+        profile::decode_tunnel_response(status, &String::from_utf8_lossy(&bytes))
+    }
+
+    /// Compatibility with account servers predating scoped HELLO credentials.
+    pub fn legacy_tunnel_bearer(&self) -> Result<String, VaultError> {
+        self.ensure_current()?;
+        Ok(self.authentication.token.to_string())
     }
 
     fn send<T: DeserializeOwned>(
@@ -562,7 +614,7 @@ mod tests {
             if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
                 return Err(VaultError::Server("old transport failure".into()));
             }
-            Ok((reqwest::StatusCode::OK, br#"{"schemaVersion":4,"revision":1,"ciphertext":"fixture","nonce":"nonce","recoverySalt":"salt","recoveryWrap":"wrap","updatedAt":"now","id":"account-a","handle":"alice","tier":"supporter","machineId":"machine","publicIdentity":"identity","expiresAt":"later","enrolled":true,"requests":[]}"#.to_vec()))
+            Ok((reqwest::StatusCode::OK, br#"{"schemaVersion":4,"revision":1,"ciphertext":"fixture","nonce":"nonce","recoverySalt":"salt","recoveryWrap":"wrap","updatedAt":"now","id":"account-a","handle":"alice","tier":"supporter","machineId":"machine","publicIdentity":"identity","expiresAt":"later","enrolled":true,"requests":[],"token":"tunnel-fixture","expires_at":"2026-10-08T00:00:00Z","expires_in":3600,"machine":"machine"}"#.to_vec()))
         }
     }
     fn fixture() -> (
@@ -723,9 +775,70 @@ mod tests {
     }
 
     #[test]
+    fn profile_and_tunnel_routes_pin_held_success_and_failure_to_the_original_login() {
+        use std::sync::atomic::Ordering;
+        for tunnel in [false, true] {
+            for fail in [false, true] {
+                let (client, wire, current) = fixture();
+                let owner_id = client.authentication_id();
+                assert!(!owner_id.contains("dummy-a"));
+                let (started, waiting) = std::sync::mpsc::channel();
+                let (resume, held) = std::sync::mpsc::channel();
+                *wire.hold.lock().unwrap() = Some((started, held));
+                wire.fail.store(fail, Ordering::SeqCst);
+                let worker = std::thread::spawn(move || {
+                    if tunnel {
+                        client.mint_tunnel_token("machine").map(|_| ())
+                    } else {
+                        client.account_status().map(|_| ())
+                    }
+                });
+                waiting.recv_timeout(Duration::from_secs(5)).unwrap();
+                *current.lock().unwrap() = Authentication {
+                    host: "https://b.example".into(),
+                    token: Zeroizing::new("dummy-b".into()),
+                };
+                resume.send(()).unwrap();
+                assert!(
+                    worker
+                        .join()
+                        .unwrap()
+                        .unwrap_err()
+                        .to_string()
+                        .contains("account changed")
+                );
+                let calls = wire.calls.lock().unwrap();
+                assert_eq!(calls.len(), 1);
+                assert!(calls[0].1.starts_with("https://a.example/"));
+                assert_eq!(calls[0].2.to_str().unwrap(), "Bearer dummy-a");
+                let next = VaultClient {
+                    authentication: Arc::new(current.lock().unwrap().clone()),
+                    wire: wire.clone(),
+                    current: Arc::new(move || {
+                        Ok(Authentication {
+                            host: "https://b.example".into(),
+                            token: Zeroizing::new("dummy-b".into()),
+                        })
+                    }),
+                };
+                assert_ne!(owner_id, next.authentication_id());
+            }
+        }
+    }
+
+    #[test]
     fn every_vault_plan_and_registration_route_uses_the_captured_authentication() {
         let (client, wire, _) = fixture();
         let status = client.status().unwrap();
+        assert_eq!(
+            client.account_status().unwrap().account_id.as_deref(),
+            Some("account-a")
+        );
+        assert_eq!(
+            client.mint_tunnel_token("machine").unwrap().token,
+            "tunnel-fixture"
+        );
+        assert_eq!(client.legacy_tunnel_bearer().unwrap(), "dummy-a");
         assert_eq!(status.account_id.as_deref(), Some("account-a"));
         assert_eq!(status.host, "https://a.example");
         client.get().unwrap();
@@ -756,7 +869,7 @@ mod tests {
             .register_machine("machine", "identity", "label", "client")
             .unwrap();
         let calls = wire.calls.lock().unwrap();
-        assert_eq!(calls.len(), 11);
+        assert_eq!(calls.len(), 13);
         for (_, url, authorization) in calls.iter() {
             assert!(url.starts_with("https://a.example/api/v1/"));
             assert_eq!(authorization.to_str().unwrap(), "Bearer dummy-a");

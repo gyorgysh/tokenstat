@@ -10,6 +10,7 @@ struct Account {
     var accountId: String?
     var title: String?
     var machines: [Machine]
+    var accountSession: String? = nil
 }
 enum Bridge {
     struct Identity { let key: String }
@@ -36,6 +37,21 @@ enum Bridge {
         firstContext.update(account: Account(signedIn: true, host: scope.origin, handle: "alice", accountId: "acc_alice",
             title: "Alice", machines: []))
         assert(firstContext.scope == scope)
+        let beforeLogin = firstContext.generation
+        var sameAccount = Account(signedIn: true, host: scope.origin, handle: "alice", accountId: "acc_alice", title: "Alice", machines: [])
+        sameAccount.accountSession = "helper-one:login-one"
+        firstContext.update(account: sameAccount)
+        assert(firstContext.generation == beforeLogin + 1 && firstContext.scope == scope)
+        firstContext.update(account: sameAccount)
+        assert(firstContext.generation == beforeLogin + 1)
+        var purchaseReply = sameAccount
+        purchaseReply.accountSession = nil
+        firstContext.update(account: purchaseReply)
+        assert(firstContext.generation == beforeLogin + 1)
+        assert(firstContext.accountSession == "helper-one:login-one")
+        sameAccount.accountSession = "helper-two:login-one"
+        firstContext.update(account: sameAccount)
+        assert(firstContext.generation == beforeLogin + 2 && firstContext.scope == scope)
         // Neither a handle nor an id is the unknown state, not a scope.
         firstContext.update(account: Account(signedIn: true, host: scope.origin, handle: nil, accountId: nil,
             title: nil, machines: []))

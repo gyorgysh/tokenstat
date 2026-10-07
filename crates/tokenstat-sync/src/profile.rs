@@ -570,6 +570,14 @@ pub fn sync_status(host_flag: Option<&str>) -> Result<StatusResult, ProfileError
         .send()?;
     let status = resp.status();
     let text = limited_text(resp)?;
+    decode_status_response(host, status, &text)
+}
+
+pub(crate) fn decode_status_response(
+    host: String,
+    status: reqwest::StatusCode,
+    text: &str,
+) -> Result<StatusResult, ProfileError> {
     if status.as_u16() == 401 {
         return Err(ProfileError::Message(TOKEN_REVOKED.into()));
     }
@@ -584,7 +592,6 @@ pub fn sync_status(host_flag: Option<&str>) -> Result<StatusResult, ProfileError
     let raw: Value = serde_json::from_str(&text)?;
     Ok(status_from_value(host, raw))
 }
-
 /// Shared decoding for a status reply obtained with captured credentials.
 pub(crate) fn status_from_value(host: String, raw: Value) -> StatusResult {
     let handle = raw
@@ -1017,6 +1024,13 @@ pub fn mint_tunnel_token(
         .send()?;
     let status = resp.status();
     let text = limited_text(resp)?;
+    decode_tunnel_response(status, &text)
+}
+
+pub(crate) fn decode_tunnel_response(
+    status: reqwest::StatusCode,
+    text: &str,
+) -> Result<TunnelToken, ProfileError> {
     if status.as_u16() == 401 {
         return Err(ProfileError::Message(TOKEN_REVOKED.into()));
     }
@@ -1042,7 +1056,6 @@ pub fn mint_tunnel_token(
         machine: body.machine,
     })
 }
-
 /// Remove a machine from the account directory. The server deletes the
 /// machine's uploaded rows too, which is what makes this an explicit action
 /// rather than something a client does on its own: a stale machine id (a

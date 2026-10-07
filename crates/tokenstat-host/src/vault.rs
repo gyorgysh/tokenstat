@@ -221,8 +221,8 @@ struct PasswordParams {
 
 // Logout retires requests immediately, including ones suspended in HTTP or
 // queued behind operation serialization. Tokens can never revive that epoch.
-static AUTH_EPOCH: AtomicU64 = AtomicU64::new(1);
-static SIGNOUTS: AtomicU64 = AtomicU64::new(0);
+pub(crate) static AUTH_EPOCH: AtomicU64 = AtomicU64::new(1);
+pub(crate) static SIGNOUTS: AtomicU64 = AtomicU64::new(0);
 static SESSION_IDS: AtomicU64 = AtomicU64::new(1);
 fn next_session_id() -> String {
     static PROCESS_NONCE: OnceLock<String> = OnceLock::new();

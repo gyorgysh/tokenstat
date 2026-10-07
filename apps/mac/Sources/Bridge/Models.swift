@@ -1434,6 +1434,8 @@ struct Account: Codable, Sendable, Hashable {
     var signedIn: Bool
     var host: String
     var handle: String?
+    /// Opaque helper login lifetime, including helper restart and credential changes.
+    var accountSession: String? = nil
     /// The name the user chose to be shown as. The stable identity is the
     /// handle when claimed, else the server's id (`accountId`); this is
     /// only ever the label.
@@ -1483,7 +1485,7 @@ struct Account: Codable, Sendable, Hashable {
     /// left it nil on every decode, so no row in the machine list was ever
     /// the one you are sitting at.
     enum CodingKeys: String, CodingKey {
-        case signedIn, host, handle, displayName, tier, avatar, lastSyncAt
+        case signedIn, host, handle, displayName, tier, avatar, lastSyncAt, accountSession
         case thisMachineID = "thisMachineId"
         case accountId = "accountId"
         case machines, schemaCurrent

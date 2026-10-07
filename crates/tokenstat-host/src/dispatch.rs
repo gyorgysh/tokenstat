@@ -1602,28 +1602,39 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
         // revoked, which need different words.
         "account.status" => {
             let host = tokenstat_sync::profile::resolve_api_host(None).envelope()?;
-            match tokenstat_sync::sync_status(None) {
-                Ok(s) => serde_json::to_value(account_dto_from_status(s)).envelope(),
-                Err(e) if e.is_unauthenticated() => serde_json::to_value(AccountDto {
-                    signed_in: false,
-                    host,
-                    handle: None,
-                    account_id: None,
-                    display_name: None,
-                    tier: None,
-                    avatar: None,
-                    last_sync_at: None,
-                    this_machine_id: None,
-                    machines: Vec::new(),
-                    schema_current: None,
-                    machine_limit: None,
-                    hosts_linked: None,
-                    can_remote: None,
-                    sync_interval: None,
-                    billing: None,
-                    relay_usage: None,
-                })
-                .envelope(),
+            let owner = crate::account_session::AccountSnapshot::capture().envelope()?;
+            match owner.status(true) {
+                Ok(s) => {
+                    owner.ensure_current().envelope()?;
+                    let mut dto = serde_json::to_value(account_dto_from_status(s)).envelope()?;
+                    dto["accountSession"] = json!(owner.id);
+                    Ok(dto)
+                }
+                Err(e) if e.is_unauthenticated() => {
+                    owner.ensure_current().envelope()?;
+                    let mut dto = serde_json::to_value(AccountDto {
+                        signed_in: false,
+                        host,
+                        handle: None,
+                        account_id: None,
+                        display_name: None,
+                        tier: None,
+                        avatar: None,
+                        last_sync_at: None,
+                        this_machine_id: None,
+                        machines: Vec::new(),
+                        schema_current: None,
+                        machine_limit: None,
+                        hosts_linked: None,
+                        can_remote: None,
+                        sync_interval: None,
+                        billing: None,
+                        relay_usage: None,
+                    })
+                    .envelope()?;
+                    dto["accountSession"] = json!(owner.id);
+                    Ok(dto)
+                }
                 Err(e) => Err(e.to_string().into()),
             }
         }
@@ -1726,6 +1737,11 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                     .envelope()
                 }
                 tokenstat_sync::DeviceStatus::Confirmed(result) => {
+                    crate::vault::with_retired_session(|| {
+                        crate::remote::stop_tunnel();
+                        Ok::<_, String>(())
+                    })
+                    .envelope()?;
                     crate::account_activity::invalidate();
                     with_session(s, |b| {
                         b.pending_login = None;
@@ -1752,8 +1768,11 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
         }
 
         "account.logout" => {
-            crate::remote::stop_tunnel();
-            let host = crate::vault::with_retired_session(|| tokenstat_sync::logout(None)).envelope()?;
+            let host = crate::vault::with_retired_session(|| {
+                crate::remote::stop_tunnel();
+                tokenstat_sync::logout(None)
+            })
+            .envelope()?;
             // The remembered grid belongs to the account that just left.
             crate::account_activity::invalidate();
             with_session(s, |b| {
@@ -3459,12 +3478,26 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
         // spelling makes the parameter additive; current clients identify
         // their own lease so one device cannot release another's.
         let watcher = p.watcher_id.unwrap_or_else(|| "legacy".into());
-        if method == "app.watching" {
-            crate::presence::claim(&id, &watcher);
+        let owner = if crate::request_context::remote_peer().is_none() {
+            match crate::account_session::AccountSnapshot::for_request(params) {
+                Ok(owner) => owner,
+                Err(error) => return Some(Err(error.into())),
+            }
         } else {
-            crate::presence::release(&id, &watcher);
-        }
-        return Some(Ok(json!({ "ok": true })));
+            None
+        };
+        return Some(
+            crate::account_session::with_snapshot(owner, || {
+                crate::account_session::check_current()?;
+                if method == "app.watching" {
+                    crate::presence::claim(&id, &watcher);
+                } else {
+                    crate::presence::release(&id, &watcher);
+                }
+                Ok(json!({"ok": true}))
+            })
+            .map_err(Into::into),
+        );
     }
     if let Some(answer) = crate::cloud_import::call(method, params) {
         return Some(answer.map_err(DispatchError::from));

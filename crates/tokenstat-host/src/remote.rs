@@ -380,6 +380,7 @@ fn account_token() -> Result<String, String> {
 
 /// The HELLO credential in hand, and when it stops being usable.
 struct HeldCredential {
+    owner: String,
     token: String,
     /// When the relay stops accepting it, as a wall-clock instant in
     /// milliseconds since the epoch. `None` for the legacy login bearer, which
@@ -413,10 +414,12 @@ const CREDENTIAL_REFRESH_MARGIN: Duration = Duration::from_secs(600);
 /// moving target: each new token superseded the one the live socket was about
 /// to reconnect with.
 fn tunnel_hello_token(force: bool) -> Result<(String, Option<u64>), String> {
+    let owner = crate::account_session::current_or_capture()?;
     if !force
         && let Ok(guard) = held_credential().lock()
-        && let Some(held) = guard.as_ref()
+        && let Some(held) = guard.as_ref().filter(|held| held.owner == owner.id)
     {
+        owner.ensure_current()?;
         // The lifetime left, not None: the caller schedules the refresh
         // loop from what comes back, and a cache hit that said "no
         // expiry" would start a tunnel nothing ever refreshed.
@@ -431,7 +434,7 @@ fn tunnel_hello_token(force: bool) -> Result<(String, Option<u64>), String> {
             }
         }
     }
-    mint_hello_token()
+    crate::account_session::with_snapshot(Some(owner), mint_hello_token)
 }
 
 /// Seconds of wall clock between now and `at_ms`, or `None` once it is past.
@@ -473,25 +476,32 @@ fn credential_deadline_ms(token: &tokenstat_sync::profile::TunnelToken) -> i64 {
 /// `machine_not_registered`, which drives a single re-register before the
 /// second attempt.
 fn mint_hello_token() -> Result<(String, Option<u64>), String> {
+    let owner = crate::account_session::current_or_capture()?;
+    let client = owner
+        .client
+        .as_ref()
+        .ok_or("sign in to tokenstat.ai before enabling remote reach")?;
     let machine_id = tokenstat_sync::config::ensure_machine_id().map_err(|e| e.to_string())?;
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
     let first = !REGISTERED_THIS_PROCESS.swap(true, Ordering::AcqRel);
-    mint_hello_token_impl(
+    let result = mint_hello_token_impl(
         &machine_id,
         &identity,
         first,
         |mid, ident, kind| {
-            tokenstat_sync::profile::register_machine_identity_kind(
-                None,
-                mid,
-                &ident.public_key_hex(),
-                &tokenstat_identity::machine_label(),
-                kind,
-            )
-            .map_err(|e| e.to_string())
+            client
+                .register_machine(
+                    mid,
+                    &ident.public_key_hex(),
+                    &tokenstat_identity::machine_label(),
+                    kind,
+                )
+                .map_err(|e| e.to_string())
         },
-        |mid| tokenstat_sync::profile::mint_tunnel_token(None, mid),
-    )
+        |mid| client.mint_tunnel_token(mid),
+    );
+    owner.ensure_current()?;
+    result
 }
 
 /// Has this process already tried to register the machine with the account?
@@ -538,7 +548,7 @@ fn mint_hello_token_impl(
             // means the machine is on the account directory.
             set_tunnel_state(|state| state.registered = true);
             let deadline = credential_deadline_ms(&tok);
-            hold_credential(&tok.token, Some(deadline));
+            hold_pinned_credential(&tok.token, Some(deadline))?;
             // The lifetime the caller schedules from is measured against the
             // deadline rather than taken from `expires_in`, so a mint that took
             // ten seconds does not hand back a half-life ten seconds too long.
@@ -548,17 +558,43 @@ fn mint_hello_token_impl(
             // An account host from before tunnel tokens still accepts the sync
             // bearer on HELLO, if its relay has the legacy path open.
             eprintln!("remote: {reason}; falling back to the login bearer");
-            let legacy = account_token()?;
-            hold_credential(&legacy, None);
+            let owner = crate::account_session::current_or_capture()?;
+            let legacy = owner
+                .client
+                .as_ref()
+                .ok_or("not signed in")?
+                .legacy_tunnel_bearer()
+                .map_err(|error| error.to_string())?;
+            hold_pinned_credential(&legacy, None)?;
             Ok((legacy, None))
         }
         Err(error) => Err(format!("could not mint a tunnel credential: {error}")),
     }
 }
 
+fn hold_pinned_credential(token: &str, expires_at_ms: Option<i64>) -> Result<(), String> {
+    // The pure mint fixtures have no installed request context. Production
+    // minting always enters through tunnel_hello_token with a captured owner.
+    let Some(owner) = crate::account_session::current_snapshot() else {
+        return Ok(());
+    };
+    let mut guard = held_credential()
+        .lock()
+        .map_err(|_| "tunnel credential lock unavailable")?;
+    owner.ensure_current()?;
+    *guard = Some(HeldCredential {
+        owner: owner.id,
+        token: token.to_string(),
+        expires_at_ms,
+    });
+    Ok(())
+}
+
+#[cfg(test)]
 fn hold_credential(token: &str, expires_at_ms: Option<i64>) {
     if let Ok(mut guard) = held_credential().lock() {
         *guard = Some(HeldCredential {
+            owner: "test-owner".into(),
             token: token.to_string(),
             expires_at_ms,
         });
@@ -619,6 +655,9 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
     // Hold the whole start, network mints included. A second caller blocks
     // here and then re-checks, so at most one session is ever created.
     let _starting = STARTING.lock().unwrap_or_else(|e| e.into_inner());
+    let Ok(owner) = crate::account_session::current_or_capture() else {
+        return;
+    };
     // Already live: refresh HELLO and leave the supervisor alone.
     if tunnel_running().load(Ordering::Acquire) {
         if let Ok(guard) = tunnel_session().lock()
@@ -627,7 +666,11 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
             // The held credential, minted again only when it is close to
             // expiry. The live socket is already registered, so this is
             // about what the next reconnect will carry.
-            if let Ok((hello_token, _)) = tunnel_hello_token(false) {
+            if let Ok((hello_token, _)) =
+                crate::account_session::with_snapshot(Some(owner.clone()), || {
+                    tunnel_hello_token(false)
+                })
+            {
                 if let Some(existing) = guard.as_ref() {
                     existing.set_token(&hello_token);
                 }
@@ -670,28 +713,34 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
             return;
         }
     };
-    let (hello_token, expires_in) = match tunnel_hello_token(false) {
-        Ok(pair) => pair,
-        Err(error) => {
-            eprintln!("remote: tunnel is enabled but unavailable: {error}");
-            // The panel shows `error`, so a refusal the user can act on has to
-            // land there rather than only in the daemon's log.
-            set_tunnel_state(|state| {
-                state.registered = false;
-                state.connected = false;
-                state.error = Some(error.clone());
-            });
-            tunnel_running().store(false, Ordering::Release);
-            // A daemon that starts before the network is up, or while the
-            // account host is having a minute, used to stay off until somebody
-            // opened Machines and toggled the switch. Remote reach is meant to
-            // be the state of the machine, not the state of the last attempt.
-            if !is_permanent_start_error(&error) {
-                retry_start_later(session);
+    let (hello_token, expires_in) =
+        match crate::account_session::with_snapshot(Some(owner.clone()), || {
+            tunnel_hello_token(false)
+        }) {
+            Ok(pair) => pair,
+            Err(error) => {
+                if owner.ensure_current().is_err() {
+                    return;
+                }
+                eprintln!("remote: tunnel is enabled but unavailable: {error}");
+                // The panel shows `error`, so a refusal the user can act on has to
+                // land there rather than only in the daemon's log.
+                set_tunnel_state(|state| {
+                    state.registered = false;
+                    state.connected = false;
+                    state.error = Some(error.clone());
+                });
+                tunnel_running().store(false, Ordering::Release);
+                // A daemon that starts before the network is up, or while the
+                // account host is having a minute, used to stay off until somebody
+                // opened Machines and toggled the switch. Remote reach is meant to
+                // be the state of the machine, not the state of the last attempt.
+                if !is_permanent_start_error(&error) {
+                    retry_start_later(session);
+                }
+                return;
             }
-            return;
-        }
-    };
+        };
     // One persistent, multiplexed socket for the daemon's lifetime. It is
     // created here and reused by every dial, and the supervisor inside it
     // reconnects with backoff when the relay drops.
@@ -704,6 +753,9 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
                 return;
             }
         };
+        if owner.ensure_current().is_err() {
+            return;
+        }
         match guard.as_ref() {
             Some(existing) => {
                 // Already running: refresh the HELLO secret if we just minted.
@@ -720,20 +772,27 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
                 // supervisor so it can fix itself between two reconnects
                 // instead of waiting for somebody to toggle a switch.
                 // The relay refused what we hold, so this one must mint.
-                session.set_renew(Box::new(|| match tunnel_hello_token(true) {
-                    Ok((token, _)) => {
-                        set_tunnel_state(|state| state.error = None);
-                        Ok(token)
-                    }
-                    Err(error) => {
-                        set_tunnel_state(|state| state.error = Some(error.clone()));
-                        // Handed back as well as recorded: the supervisor puts
-                        // it into the refusal it reports, so the panel says
-                        // what the account actually answered instead of
-                        // restating the relay's symptom.
-                        Err(error)
-                    }
-                }));
+                let renewal_owner = owner.clone();
+                session.set_renew(Box::new(
+                    move || match crate::account_session::with_snapshot(
+                        Some(renewal_owner.clone()),
+                        || tunnel_hello_token(true),
+                    ) {
+                        Ok((token, _)) => {
+                            set_tunnel_state(|state| state.error = None);
+                            Ok(token)
+                        }
+                        Err(error) => {
+                            renewal_owner.ensure_current()?;
+                            set_tunnel_state(|state| state.error = Some(error.clone()));
+                            // Handed back as well as recorded: the supervisor puts
+                            // it into the refusal it reports, so the panel says
+                            // what the account actually answered instead of
+                            // restating the relay's symptom.
+                            Err(error)
+                        }
+                    },
+                ));
                 *guard = Some(session.clone());
                 session
             }
@@ -745,7 +804,8 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
     // Refresh the short-lived token at half-life so HELLO never races expiry.
     if let Some(ttl) = expires_in {
         let refresh_tunnel = Arc::clone(&tunnel);
-        std::thread::spawn(move || tunnel_token_refresh_loop(refresh_tunnel, ttl));
+        let refresh_owner = owner.clone();
+        std::thread::spawn(move || tunnel_token_refresh_loop(refresh_tunnel, ttl, refresh_owner));
     }
     std::thread::spawn(move || {
         // Inbound channels: the relay dialled us. Each is a fresh Noise
@@ -854,6 +914,7 @@ fn next_retry(previous: Option<u64>) -> u64 {
 fn tunnel_token_refresh_loop(
     tunnel: Arc<tokenstat_remote::tunnel::TunnelSession>,
     initial_ttl_secs: u64,
+    owner: crate::account_session::AccountSnapshot,
 ) {
     let mut ttl = initial_ttl_secs.max(300);
     // Set after a failed mint. Retrying at half-life again would put the next
@@ -876,14 +937,16 @@ fn tunnel_token_refresh_loop(
         {
             std::thread::sleep(Duration::from_secs(1));
         }
-        if !tunnel_running().load(Ordering::Acquire) {
+        if !tunnel_running().load(Ordering::Acquire) || owner.ensure_current().is_err() {
             return;
         }
         // Through the same door every other caller uses, so the held
         // credential is the one the socket carries. A refresh that minted
         // behind the cache would leave the next `remote.tunnel` request
         // handing the relay a token this loop had already superseded.
-        match tunnel_hello_token(true) {
+        match crate::account_session::with_snapshot(Some(owner.clone()), || {
+            tunnel_hello_token(true)
+        }) {
             Ok((token, expires_in)) => {
                 tunnel.set_token(&token);
                 ttl = expires_in.unwrap_or(ttl).max(300);
@@ -891,6 +954,9 @@ fn tunnel_token_refresh_loop(
                 set_tunnel_state(|state| state.error = None);
             }
             Err(e) => {
+                if owner.ensure_current().is_err() {
+                    return;
+                }
                 eprintln!("remote: tunnel token refresh failed: {e}");
                 set_tunnel_state(|state| {
                     state.error = Some(format!("tunnel credential renewal failed: {e}"));
@@ -2582,6 +2648,7 @@ pub(crate) fn dial_peer_for(
     purpose: ChannelPurpose,
 ) -> Result<(tokenstat_remote::Connection, &'static str), String> {
     crate::request_context::refuse_remote("outbound peer connections")?;
+    crate::account_session::check_current()?;
     let key = public_key_from_hex(peer_hex).map_err(|e| e.to_string())?;
     let store = PeerStore::load().map_err(|e| e.to_string())?;
     let peer = store
@@ -2838,6 +2905,7 @@ fn tunnel_dial(
     let started = std::time::Instant::now();
     let mut last = String::new();
     for attempt in 0..3 {
+        crate::account_session::check_current()?;
         if attempt > 0 && started.elapsed() >= DIAL_BUDGET {
             break;
         }
@@ -2917,9 +2985,19 @@ fn round_trip(
     connection: &mut tokenstat_remote::Connection,
     request: &[u8],
 ) -> Result<String, tokenstat_remote::RemoteError> {
+    let check = || {
+        crate::account_session::check_current().map_err(|error| {
+            tokenstat_remote::RemoteError::Io(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                error,
+            ))
+        })
+    };
+    check()?;
     connection.send(request)?;
-    let answer = connection.receive_within(MAX_MESSAGE, ANSWER_IDLE)?;
-    Ok(String::from_utf8_lossy_owned(answer))
+    let result = connection.receive_within(MAX_MESSAGE, ANSWER_IDLE);
+    check()?;
+    Ok(String::from_utf8_lossy_owned(result?))
 }
 
 fn checkout(peer: &str, purpose: ChannelPurpose) -> Option<tokenstat_remote::Connection> {
@@ -3259,9 +3337,16 @@ fn forward(params: &str) -> Result<Value, crate::error::DispatchError> {
         return Err("a remote call cannot ask a peer to make another remote call".into());
     }
 
+    let owner = if matches!(p.method.as_str(), "app.watching" | "app.stoppedWatching") {
+        crate::account_session::AccountSnapshot::for_request(&p.params.to_string())?
+    } else {
+        None
+    };
     forwarded_result(
         &p.method,
-        call_peer(&p.peer, &p.method, &p.params.to_string()),
+        crate::account_session::with_snapshot(owner, || {
+            call_peer(&p.peer, &p.method, &p.params.to_string())
+        }),
     )
 }
 

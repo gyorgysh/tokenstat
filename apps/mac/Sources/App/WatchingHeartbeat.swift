@@ -38,6 +38,7 @@ struct WatchingHeartbeat: ViewModifier {
         let conversation: String?
         let peer: String?
         let scope: WorkReference.Scope?
+        let generation: UInt64
         let active: Bool
     }
 
@@ -49,11 +50,13 @@ struct WatchingHeartbeat: ViewModifier {
         content
             .task(id: Identity(conversation: conversationID, peer: peer,
                                scope: WorkSessionContext.shared.scope,
+                               generation: WorkSessionContext.shared.generation,
                                active: isActive && scenePhase == .active)) {
                 guard scenePhase == .active, isActive, let id = conversationID, !id.isEmpty,
                       let owner = WorkSessionContext.shared.scope else { return }
                 // A late release from the previous scene phase must never
                 // remove the foreground task's newly renewed lease.
+                let ownerGeneration = WorkSessionContext.shared.generation
                 let watcherID = UUID().uuidString
                 defer {
                     // Leaving the screen. The lease would expire anyway, and
@@ -66,14 +69,15 @@ struct WatchingHeartbeat: ViewModifier {
                         await Bridge.stoppedWatching(
                             conversationID: leaving,
                             watcherID: watcher,
-                            peer: host, expectedScope: owner
+                            peer: host, expectedScope: owner, expectedGeneration: ownerGeneration
                         )
                     }
                 }
-                while !Task.isCancelled, WorkSessionContext.shared.scope == owner {
+                while !Task.isCancelled, WorkSessionContext.shared.scope == owner,
+                      WorkSessionContext.shared.generation == ownerGeneration {
                     if UserPresence.shared.isAtTheKeyboard {
                         await Bridge.watching(conversationID: id, watcherID: watcherID, peer: peer,
-                                              expectedScope: owner)
+                                              expectedScope: owner, expectedGeneration: ownerGeneration)
                     }
                     try? await Task.sleep(for: Self.beat)
                 }

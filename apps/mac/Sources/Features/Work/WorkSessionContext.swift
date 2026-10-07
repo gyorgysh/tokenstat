@@ -8,6 +8,7 @@ import Observation
 final class WorkSessionContext {
     static let shared = WorkSessionContext()
     private(set) var scope: WorkReference.Scope?
+    private(set) var accountSession: String?
     private(set) var generation: UInt64 = 0
     private(set) var localHostIdentity: String?
     /// Only saved-page ownership may use this fallback. Live routing continues
@@ -54,9 +55,14 @@ final class WorkSessionContext {
         } else {
             savedAccess.accountUnknown()
         }
-        if scope != next {
+        // Purchase replies from older helpers omit the receipt. Preserve the
+        // last verified lifetime only while the account identity stays equal.
+        let nextSession = account?.accountSession
+            ?? (next != nil && next == scope ? accountSession : nil)
+        if scope != next || accountSession != nextSession {
             generation &+= 1
             scope = next
+            accountSession = nextSession
         }
     }
 

@@ -21,14 +21,16 @@ assert 'let owner = WorkSessionContext.shared.scope' in heartbeat
 assert heartbeat.count('expectedScope: owner') == 2
 assert 'WorkSessionContext.shared.scope == owner' in heartbeat
 swift = r'''import Foundation
-@MainActor final class WorkSessionContext { static let shared = WorkSessionContext(); var scope: WorkReference.Scope? }
+@MainActor final class WorkSessionContext { static let shared = WorkSessionContext(); var scope: WorkReference.Scope?; var generation: UInt64 = 0; var accountSession: String? = "mock-receipt" }
 enum Bridge {
     enum Patience { static let standard: TimeInterval = 60 }
     private static let chatReadFlights = ChatReadFlights()
-    @MainActor static var calls: [String] = [], watcherIDs: [String] = []
+    @MainActor static var calls: [String] = [], watcherIDs: [String] = [], receipts: [String] = []
     @MainActor private static func chatTransport<T: Decodable & Sendable>(peer: String?, _ method: String,
         _ params: [String: Any], patience: TimeInterval, as type: T.Type) async throws -> T {
         calls.append(method); watcherIDs.append(params["watcherId"] as? String ?? "")
+        receipts.append(params["_accountSession"] as? String ?? "")
+        precondition(params["_accountScope"] != nil)
         return try JSONDecoder().decode(T.self, from: Data("{\"ok\":true}".utf8))
     }
 ''' + methods + r'''
@@ -51,6 +53,10 @@ enum Bridge {
         await Bridge.stoppedWatching(conversationID: "chat", watcherID: "lease-B", peer: "host", expectedScope: b)
         precondition(Bridge.calls == ["app.watching", "app.watching", "app.stoppedWatching"])
         precondition(Bridge.watcherIDs == ["lease-A", "lease-B", "lease-B"])
+        precondition(Bridge.receipts == ["mock-receipt", "mock-receipt", "mock-receipt"])
+        WorkSessionContext.shared.generation = 2
+        await Bridge.watching(conversationID: "chat", watcherID: "old-A", peer: "host", expectedScope: b, expectedGeneration: 1)
+        precondition(Bridge.calls.count == 3, "A-B-A reused a departed login generation")
         print("Heartbeat: actual Bridge dispatch rejects retired account/unknown scope and preserves exact watcher lease")
     }
 }
