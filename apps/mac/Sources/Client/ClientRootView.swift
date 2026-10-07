@@ -78,35 +78,22 @@ struct ClientRootView: View {
     /// each of them. One door instead: the intro on a first run, the sign-in
     /// screen after that.
     ///
-    /// On an iPad the intro is a sheet over that sign-in screen rather than
-    /// the whole window. Ten pages drawn for a phone, stretched across a
-    /// 13 inch display, is a phone screen wearing an iPad's clothes: art
-    /// floating in the middle of nowhere and a line of body text a foot wide.
-    /// A sheet is the platform's own answer to "one thing on top of the app",
-    /// it lands at a readable width without a single hardcoded number, and
-    /// the screen behind it is where the person is going anyway.
+    /// One root-owned intro sheet keeps its page during a fold or rotation.
+    /// The system form sizing supplies a readable width on larger windows.
+    @State private var introProgress = ClientIntroProgress()
+
     @ViewBuilder
     private var signedOut: some View {
-        if hasOnboarded {
-            ClientLoginView()
-                .transition(.opacity)
-        } else if sizeClass == .regular {
-            ClientLoginView()
-                .transition(.opacity)
-                .sheet(isPresented: Binding(
-                    get: { !hasOnboarded },
-                    // Dismissed by a swipe rather than by Get started: the
-                    // intro has still been seen, and putting it back would
-                    // trap somebody in a pitch they closed.
-                    set: { if !$0 { hasOnboarded = true } }
-                )) {
-                    ClientOnboarding()
-                        .clientIntroSheetSizing()
-                }
-        } else {
-            ClientOnboarding()
-                .transition(.opacity)
-        }
+        ClientLoginView()
+            .transition(.opacity)
+            .sheet(isPresented: Binding(
+                get: { !hasOnboarded },
+                // Explicit swipe dismissal is also a way to skip the intro.
+                set: { if !$0 { hasOnboarded = true } }
+            )) {
+                ClientOnboarding(flow: introProgress)
+                    .clientIntroSheetSizing()
+            }
     }
 
     /// Set once the intro has been seen or skipped. A signed-in phone never
