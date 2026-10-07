@@ -675,10 +675,18 @@ struct RootView: View {
             // relaunch left running instead of showing nothing over four live
             // shells. For the life of the shell, not the life of a screen,
             // because the sidebar draws them whichever screen is in front.
-            .task {
-                terminals.sshSessions = sshSessions
+            .task(id: WorkSessionContext.shared.generation) {
+                ssh.deactivate()
+                sshSessions.deactivate()
+                let library = SSHLibraryModel(ownerScope: WorkSessionContext.shared.scope)
+                let sessions = SSHSessionsModel(isOwnerCurrent: { library.ownership.claim() != nil })
+                ssh = library; sshSessions = sessions
+                terminals.sshSessions = sessions
                 await BridgeLaunch.wait()
-                await sshSessions.watch()
+                guard !Task.isCancelled else { return }
+                await library.ensureLoaded(vaultTier: SSHLibraryModel.paidTier(for: machines.vaultTier))
+                guard !Task.isCancelled else { return }
+                await sessions.watch()
             }
             // Sign-in goes into a sheet over this window rather than into the
             // whole browser, so the approval is the one-question page and not
@@ -2924,6 +2932,7 @@ struct RootView: View {
                 vaultTier: machines.vaultTier,
                 onOpenFolder: { openSSH(.hosts(folder: $0)) }
             )
+            .id(ObjectIdentifier(ssh))
             #else
             EmptyView()
             #endif
@@ -2984,7 +2993,7 @@ struct RootView: View {
         // and a sidebar that fills in after the first click is a sidebar that
         // moves under the pointer. After Machines, which is where the tier
         // that may write the vault comes from.
-        await ssh.load(vaultTier: SSHLibraryModel.paidTier(for: machines.vaultTier))
+        await ssh.ensureLoaded(vaultTier: SSHLibraryModel.paidTier(for: machines.vaultTier))
         guard !Task.isCancelled else { return }
         #endif
 

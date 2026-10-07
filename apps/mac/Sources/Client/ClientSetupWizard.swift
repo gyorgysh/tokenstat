@@ -52,20 +52,26 @@ struct ClientSetupWizard: View {
             await model.prepare(library: library)
             await account.load()
         }
-        .onChange(of: account.account) { _, now in
-            // A different account is a different setup. Land back on the doors
-            // and load that account's own draft, if it has one. An account
-            // arriving after a failure is also worth another prepare: the
-            // identity trails sign-in by moments. Silent either way. A fresh
-            // account event is not an entry attempt, so a failure still waits
-            // for a picked door before it gets a card.
-            guard model.shouldReprepare(for: now) else { return }
-            path = []
-            entryAttempted = false
-            Task { await model.prepare(library: library) }
-        }
+        .onChange(of: account.account) { _, now in accountDidChange(now) }
+        .onChange(of: WorkSessionContext.shared.generation) { _, _ in accountDidChange(account.account) }
         .onDisappear { model.cancelWork() }
         .environment(account)
+    }
+
+    /// Both account callbacks use the library's immutable lifetime, so their
+    /// delivery order cannot pair a new setup model with a retired library.
+    private func accountDidChange(_ now: Account?) {
+        let departed = library.ownership.captured.map {
+            $0.scope != WorkSessionContext.shared.scope || $0.generation != WorkSessionContext.shared.generation
+        } ?? false
+        if departed {
+            library.deactivate()
+            library = SSHLibraryModel(ownerScope: WorkSessionContext.shared.scope)
+        }
+        guard model.shouldReprepare(for: now) || departed else { return }
+        path = []; entryAttempted = false
+        let currentLibrary = library
+        Task { await model.prepare(library: currentLibrary) }
     }
 
     // MARK: - D0, the question

@@ -17,6 +17,27 @@ import SwiftUI
 @MainActor
 @Observable
 final class SSHVaultModel {
+    @ObservationIgnored private var foreground = true
+    @ObservationIgnored let ownership: SSHOperationOwner
+    @ObservationIgnored private var refreshGeneration: UInt64 = 0
+    init(ownerScope: WorkReference.Scope? = nil) {
+        ownership = SSHOperationOwner(scope: ownerScope)
+    }
+
+    func deactivate() {
+        let scope = ownership.captured?.scope
+        let sessionID = status?.vaultSession
+        let leftAccount = ownership.captured?.generation != WorkSessionContext.shared.generation
+        ownership.retire()
+        refreshGeneration &+= 1
+        recovery = nil
+        status = nil
+        error = nil
+        if leftAccount, let scope, let sessionID {
+            Task { await Bridge.retireSSHVault(scope: scope, sessionID: sessionID) }
+        }
+    }
+
     var status: SSHVaultStatus?
     /// Set only between generating a recovery code and confirming it. While
     /// it holds a code, it has not been written down yet, and that is the
@@ -40,7 +61,11 @@ final class SSHVaultModel {
     var unreachable: String? { status?.unreachable }
 
     func refresh() async {
-        if let fresh = try? await Bridge.sshVaultStatus() {
+        guard let owner = ownership.claim(), owner.scope.kind == .account else { return }
+        refreshGeneration &+= 1
+        let generation = refreshGeneration
+        if let fresh = try? await Bridge.sshVaultStatus(expectedScope: owner.scope, expectedGeneration: owner.generation),
+           ownership.permits(owner), generation == refreshGeneration {
             status = fresh
         }
     }
@@ -53,12 +78,15 @@ final class SSHVaultModel {
     /// open. Slow on purpose: this is a network call, and nothing here is
     /// worth a tighter loop than the pace somebody sets up a vault at.
     func watch() async {
-        while !Task.isCancelled {
+        if foreground { await refresh() }
+        while ownership.claim() != nil && !Task.isCancelled {
             try? await Task.sleep(for: .seconds(20))
             if Task.isCancelled { return }
-            await refresh()
+            if foreground { await refresh() }
         }
     }
+
+    func setForeground(_ value: Bool) { foreground = value }
 
     /// Say what this computer is, then ask again.
     ///
@@ -67,51 +95,67 @@ final class SSHVaultModel {
     /// It exists because being told your computer is not on your account and
     /// having nothing to press is the state this screen was in.
     func registerAndRefresh() async {
-        do {
-            try await Bridge.registerThisMachine()
-        } catch {
-            self.error = error.localizedDescription
-        }
+        // Vault reads republish the machine with their own captured bearer.
+        // A separate account.registerMachine call could adopt a new account.
         await refresh()
     }
 
     func rotateRecovery(password: String) async {
+        guard let owner = ownership.claim() else { return }
+        refreshGeneration &+= 1
         do {
-            recovery = try await Bridge.rotateSSHVaultRecovery(password: password).recovery
-            status = try await Bridge.sshVaultStatus()
-        } catch { self.error = error.localizedDescription }
+            let result = try await Bridge.rotateSSHVaultRecovery(password: password, expectedScope: owner.scope, expectedGeneration: owner.generation)
+            guard ownership.permits(owner) else { return }
+            recovery = result.recovery
+            error = nil
+            await refresh()
+        } catch { if ownership.permits(owner) { self.error = error.localizedDescription } }
     }
 
-    /// Forget the key held for this run, so the password is asked for again.
+    /// Local Lock succeeds even when the following status refresh is offline.
     func lock() async {
+        guard let owner = ownership.claim() else { return }
+        refreshGeneration &+= 1
         do {
-            try await Bridge.lockSSHVault()
-            status = try await Bridge.sshVaultStatus()
-        } catch { self.error = error.localizedDescription }
+            try await Bridge.lockSSHVault(expectedScope: owner.scope, expectedGeneration: owner.generation)
+            guard ownership.permits(owner) else { return }
+            status?.locked = true
+            error = nil
+            await refresh()
+        } catch { if ownership.permits(owner) { self.error = error.localizedDescription } }
     }
 
     func reset() async {
+        guard let owner = ownership.claim() else { return }
+        refreshGeneration &+= 1
         do {
-            try await Bridge.resetSSHVault()
+            try await Bridge.resetSSHVault(expectedScope: owner.scope, expectedGeneration: owner.generation)
+            guard ownership.permits(owner) else { return }
             recovery = nil
-            status = try await Bridge.sshVaultStatus()
-        } catch { self.error = error.localizedDescription }
+            status?.created = false
+            status?.recordCount = 0
+            status?.locked = false
+            error = nil
+            await refresh()
+        } catch { if ownership.permits(owner) { self.error = error.localizedDescription } }
     }
 
-    /// Change the password, having proved the current one.
     func changePassword(current: String, to next: String) async -> Bool {
+        guard let owner = ownership.claim() else { return false }
+        refreshGeneration &+= 1
         do {
-            let result = try await Bridge.setSSHVaultPassword(current: current, newPassword: next)
-            // A change made with the current password keeps the recovery code,
-            // so there is nothing new to show.
+            let result = try await Bridge.setSSHVaultPassword(current: current, newPassword: next, expectedScope: owner.scope, expectedGeneration: owner.generation)
+            guard ownership.permits(owner) else { return false }
             if let fresh = result.recovery { recovery = fresh }
-            status = try await Bridge.sshVaultStatus()
-            return true
+            error = nil
+            await refresh()
+            return ownership.permits(owner)
         } catch {
-            self.error = error.localizedDescription
+            if ownership.permits(owner) { self.error = error.localizedDescription }
             return false
         }
     }
+
 }
 
 /// The vault, as one quiet line above the host list.
@@ -460,12 +504,17 @@ struct SSHVaultScreen: View {
             }
         }
         .task { await vault.refresh() }
+        #if os(macOS)
         .task { await vault.watch() }
+        #endif
         // Coming back to the app is the moment somebody has most likely just
         // done something on another device.
+        #if os(macOS)
         .onChange(of: scenePhase) { _, phase in
+            vault.setForeground(phase == .active)
             if phase == .active { Task { await vault.refresh() } }
         }
+        #endif
     }
 
     /// What deleting costs, said differently depending on what can be opened.

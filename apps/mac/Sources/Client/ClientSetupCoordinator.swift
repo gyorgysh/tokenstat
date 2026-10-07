@@ -16,7 +16,7 @@ final class ClientSetupCoordinator {
     @ObservationIgnored private let store: ClientSetupStore
     @ObservationIgnored private var scope: ClientSetupScope?
     @ObservationIgnored private var task: Task<Void, Never>?
-    @ObservationIgnored private var generation = UUID()
+    @ObservationIgnored private(set) var generation = UUID()
 
     init(store: ClientSetupStore = ClientSetupStore()) { self.store = store }
 

@@ -17,14 +17,20 @@ enum SSHVaultBiometrics {
         }
     }
 
-    static func accountKey() async throws -> String {
+    @MainActor static func accountKey() async throws -> String {
+        let scope = WorkSessionContext.shared.scope
+        let generation = WorkSessionContext.shared.generation
         let account = try await Bridge.account()
+        guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
+              generation == WorkSessionContext.shared.generation else { throw CancellationError() }
         guard account.signedIn, let machine = account.thisMachineID else {
             throw failure(L10n.text("apple.sshvaultbiometrics.sign_in_before_enabling_biometric_vault_un.933f845b"))
         }
         guard let identity = WorkReference.Scope.accountIdentity(handle: account.handle, id: account.accountId) else {
             throw failure(L10n.text("apple.sshvaultbiometrics.the_account_did_not_answer_with_an_identit.3d868047"))
         }
+        guard let scope, scope.kind == .account,
+              WorkReference.Scope.account(origin: account.host, handle: identity) == scope else { throw CancellationError() }
         return [account.host, identity, machine].joined(separator: "\n")
     }
 
@@ -66,26 +72,26 @@ enum SSHVaultBiometrics {
         return status == errSecSuccess || status == errSecInteractionNotAllowed
     }
 
-    static func save(password: String, account: String) async throws {
-        try await Task.detached {
-            var error: Unmanaged<CFError>?
-            guard let access = SecAccessControlCreateWithFlags(nil,
-                kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly, .biometryCurrentSet, &error) else {
-                throw error?.takeRetainedValue() as Error? ?? failure(L10n.text("apple.sshvaultbiometrics.biometric_unlock_is_unavailable.77815eb1"))
+    @MainActor static func save(password: String, account: String,
+        shouldStore: @MainActor () -> Bool = { true }) async throws {
+        guard !Task.isCancelled, shouldStore() else { throw CancellationError() }
+        var error: Unmanaged<CFError>?
+        guard let access = SecAccessControlCreateWithFlags(nil,
+            kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly, .biometryCurrentSet, &error) else {
+            throw error?.takeRetainedValue() as Error? ?? failure(L10n.text("apple.sshvaultbiometrics.biometric_unlock_is_unavailable.77815eb1"))
+        }
+        try remove(account: account)
+        var query = query(account)
+        query[kSecAttrAccessControl as String] = access
+        query[kSecValueData as String] = Data(password.utf8)
+        let result = SecItemAdd(query as CFDictionary, nil)
+        guard result == errSecSuccess else {
+            if result == errSecMissingEntitlement {
+                throw failure(L10n.text("apple.sshvaultbiometrics.this_build_is_missing_the_signing_configur.d07d1aa5", "\(result)"))
             }
-            try remove(account: account)
-            var query = query(account)
-            query[kSecAttrAccessControl as String] = access
-            query[kSecValueData as String] = Data(password.utf8)
-            let result = SecItemAdd(query as CFDictionary, nil)
-            guard result == errSecSuccess else {
-                if result == errSecMissingEntitlement {
-                    throw failure(L10n.text("apple.sshvaultbiometrics.this_build_is_missing_the_signing_configur.d07d1aa5", "\(result)"))
-                }
-                let reason = SecCopyErrorMessageString(result, nil) as String? ?? L10n.text("apple.sshvaultbiometrics.unknown_keychain_error.b420987d")
-                throw failure(L10n.text("apple.sshvaultbiometrics.could_not_enable_biometric_unlock_0_keycha.caab6d3a", "\(reason)", "\(result)"))
-            }
-        }.value
+            let reason = SecCopyErrorMessageString(result, nil) as String? ?? L10n.text("apple.sshvaultbiometrics.unknown_keychain_error.b420987d")
+            throw failure(L10n.text("apple.sshvaultbiometrics.could_not_enable_biometric_unlock_0_keycha.caab6d3a", "\(reason)", "\(result)"))
+        }
     }
 
     static func load(account: String) async throws -> String {

@@ -3755,6 +3755,7 @@ dependencies = [
  "tokenstat-core",
  "tokenstat-identity",
  "tokenstat-paths",
+ "zeroize",
  "zip",
 ]
 

@@ -1753,7 +1753,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
 
         "account.logout" => {
             crate::remote::stop_tunnel();
-            let host = tokenstat_sync::logout(None).envelope()?;
+            let host = crate::vault::with_retired_session(|| tokenstat_sync::logout(None)).envelope()?;
             // The remembered grid belongs to the account that just left.
             crate::account_activity::invalidate();
             with_session(s, |b| {

@@ -7,7 +7,8 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
@@ -17,6 +18,7 @@ use hkdf::Hkdf;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use tokenstat_sync::vault::VaultClient;
 #[cfg(test)]
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::Zeroizing;
@@ -43,9 +45,86 @@ fn kdf_descriptor() -> String {
     format!("argon2id$v=19$m={KDF_MEMORY_KIB},t={KDF_PASSES},p={KDF_LANES}")
 }
 
-#[derive(Default, Deserialize, Serialize)]
+/// Server-proven account identity. Handles are a fallback for older servers.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct VaultOwner {
+    origin: String,
+    identity: String,
+}
+
+impl VaultOwner {
+    fn verified(status: &tokenstat_sync::profile::StatusResult) -> Result<Self, String> {
+        let identity = status
+            .account_id
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| format!("id:{}", s.trim()))
+            .or_else(|| {
+                status
+                    .handle
+                    .as_deref()
+                    .filter(|s| !s.trim().is_empty())
+                    .map(|s| format!("handle:{}", s.trim()))
+            })
+            .ok_or("the account server did not identify this account")?;
+        Ok(Self {
+            origin: status.host.clone(),
+            identity,
+        })
+    }
+}
+
+#[derive(Clone)]
+struct VaultStorage {
+    owner: VaultOwner,
+    path: PathBuf,
+    identities: Vec<String>,
+    current: Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
+}
+impl VaultStorage {
+    fn new(
+        owner: VaultOwner,
+        current: impl Fn() -> Result<(), String> + Send + Sync + 'static,
+    ) -> Self {
+        let encoded = serde_json::to_vec(&owner).expect("account identifiers serialize");
+        let fingerprint = hex(&Sha256::digest(encoded));
+        let identities = vec![
+            owner
+                .identity
+                .split_once(':')
+                .map_or(owner.identity.as_str(), |(_, value)| value)
+                .to_owned(),
+        ];
+        Self {
+            owner,
+            identities,
+            path: base_path().with_extension(format!("account-{fingerprint}.json")),
+            current: Arc::new(current),
+        }
+    }
+    fn ensure_current(&self) -> Result<(), String> {
+        (self.current)()
+    }
+}
+
+struct VaultContext {
+    client: VaultClient,
+    status: tokenstat_sync::profile::StatusResult,
+    storage: VaultStorage,
+}
+impl std::ops::Deref for VaultContext {
+    type Target = VaultClient;
+    fn deref(&self) -> &VaultClient {
+        &self.client
+    }
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct VaultStore {
+    #[serde(default)]
+    owner: Option<VaultOwner>,
     #[serde(default)]
     schema_version: u32,
     #[serde(default)]
@@ -140,12 +219,26 @@ struct PasswordParams {
     migrate: bool,
 }
 
+// Logout retires requests immediately, including ones suspended in HTTP or
+// queued behind operation serialization. Tokens can never revive that epoch.
+static AUTH_EPOCH: AtomicU64 = AtomicU64::new(1);
+static SIGNOUTS: AtomicU64 = AtomicU64::new(0);
+static SESSION_IDS: AtomicU64 = AtomicU64::new(1);
+fn next_session_id() -> String {
+    static PROCESS_NONCE: OnceLock<String> = OnceLock::new();
+    let nonce = PROCESS_NONCE.get_or_init(|| hex(&random32()));
+    format!("{nonce}:{}", SESSION_IDS.fetch_add(1, Ordering::SeqCst))
+}
+
 /// The vault key for this run of the daemon.
 ///
 /// Held after a successful unlock so the password is typed once and not on
 /// every record read. In memory only: it is never written anywhere, and it
 /// goes when the process does.
 struct VaultSession {
+    owner: Option<VaultOwner>,
+    proof: Option<VaultStorage>,
+    id: String,
     key: Option<Zeroizing<[u8; 32]>>,
     locked: bool,
     lock_generation: u64,
@@ -157,6 +250,9 @@ fn vault_session() -> &'static Mutex<VaultSession> {
     static SESSION: OnceLock<Mutex<VaultSession>> = OnceLock::new();
     SESSION.get_or_init(|| {
         Mutex::new(VaultSession {
+            owner: None,
+            proof: None,
+            id: next_session_id(),
             key: None,
             locked: true,
             lock_generation: 0,
@@ -164,9 +260,125 @@ fn vault_session() -> &'static Mutex<VaultSession> {
     })
 }
 
+/// Adopt only a server-proven current owner. Reading B retires A even if B
+/// never unlocks, so returning to A requires its password again.
+fn adopt_owner(storage: &VaultStorage) -> Result<(), String> {
+    storage.ensure_current()?;
+    let mut session = vault_session()
+        .lock()
+        .map_err(|_| "vault session lock poisoned")?;
+    if session.owner.as_ref() != Some(&storage.owner) {
+        session.key = None;
+        session.locked = true;
+        session.lock_generation = 0;
+        session.id = next_session_id();
+    }
+    session.owner = Some(storage.owner.clone());
+    session.proof = Some(storage.clone());
+    Ok(())
+}
+
+fn verify_stored_owner(params: &str, storage: &VaultStorage, required: bool) -> Result<(), String> {
+    let body: Value = serde_json::from_str(params).map_err(|e| e.to_string())?;
+    let Some(scope) = body.get("_accountScope") else {
+        return if required {
+            Err("account scope is required to retire a vault session".into())
+        } else {
+            Ok(())
+        };
+    };
+    if scope.get("kind").and_then(Value::as_str) == Some("account")
+        && scope.get("origin").and_then(Value::as_str) == Some(storage.owner.origin.as_str())
+        && scope
+            .get("identity")
+            .and_then(Value::as_str)
+            .is_some_and(|id| storage.identities.iter().any(|alias| alias == id))
+    {
+        Ok(())
+    } else {
+        Err("the signed-in account changed; retry from the current account".into())
+    }
+}
+
+/// Lock is local. It must clear its exact verified session before any disk or
+/// credential error, and must never wait for GET /me or use a new account.
+fn dispatch_local(method: &str, params: &str) -> Option<Result<Value, String>> {
+    if !matches!(method, "ssh.vault.lock" | "ssh.vault.retire") {
+        return None;
+    }
+    Some((|| {
+        let proof = {
+            let mut session = vault_session()
+                .lock()
+                .map_err(|_| "vault session lock poisoned")?;
+            let Some(proof) = session.proof.clone() else {
+                if method == "ssh.vault.retire" {
+                    let body: Value = serde_json::from_str(params).map_err(|e| e.to_string())?;
+                    if body.get("_accountScope").is_none() {
+                        return Err("account scope is required to retire a vault session".into());
+                    }
+                }
+                return Ok(json!({"locked": true}));
+            };
+            verify_stored_owner(params, &proof, method == "ssh.vault.retire")?;
+            if method == "ssh.vault.retire" {
+                let body: Value = serde_json::from_str(params).map_err(|e| e.to_string())?;
+                if body.get("_vaultSession").and_then(Value::as_str) != Some(session.id.as_str()) {
+                    return Err("the vault session changed; its successor remains open".into());
+                }
+            }
+            session.key = None;
+            session.locked = true;
+            if method == "ssh.vault.retire" {
+                session.owner = None;
+                session.proof = None;
+            }
+            proof
+        };
+        if method == "ssh.vault.lock" {
+            lock_session(&proof)?;
+        }
+        Ok(json!({"locked": true}))
+    })())
+}
+
+fn retire_session_memory() -> Result<(), String> {
+    let mut session = vault_session()
+        .lock()
+        .map_err(|_| "vault session lock poisoned")?;
+    session.id = next_session_id();
+    session.key = None;
+    session.locked = true;
+    session.owner = None;
+    session.proof = None;
+    Ok(())
+}
+struct SignoutLease;
+impl Drop for SignoutLease {
+    fn drop(&mut self) {
+        // Also fence work that tried to begin while the credential was being
+        // revoked. The final retirement runs for success, failure and unwind.
+        AUTH_EPOCH.fetch_add(1, Ordering::SeqCst);
+        let _ = retire_session_memory();
+        SIGNOUTS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Logout retires requests and memory before credential work, without waiting
+/// behind blocking HTTP operations. Their current checks prevent restoration.
+pub(crate) fn with_retired_session<T, E: std::fmt::Display>(
+    action: impl FnOnce() -> Result<T, E>,
+) -> Result<T, String> {
+    SIGNOUTS.fetch_add(1, Ordering::SeqCst);
+    let _retirement = SignoutLease;
+    AUTH_EPOCH.fetch_add(1, Ordering::SeqCst);
+    retire_session_memory()?;
+    action().map_err(|error| error.to_string())
+}
+
 /// Disk may lock a process, but can never unlock it. Only a password can.
-fn hydrate_locked(session: &mut VaultSession) {
-    match read() {
+fn hydrate_locked(session: &mut VaultSession, storage: &VaultStorage) {
+    match read(storage) {
         Ok(store) if !store.locked && store.lock_generation == session.lock_generation => {}
         _ => {
             session.locked = true;
@@ -175,16 +387,23 @@ fn hydrate_locked(session: &mut VaultSession) {
     }
 }
 
-fn forget_key() {
+fn forget_key(storage: &VaultStorage) {
     if let Ok(mut session) = vault_session().lock() {
+        if session.owner.as_ref() != Some(&storage.owner) {
+            return;
+        }
         session.key = None;
         session.locked = true;
     }
 }
 
-fn cached_key() -> Option<Zeroizing<[u8; 32]>> {
+fn cached_key(storage: &VaultStorage) -> Option<Zeroizing<[u8; 32]>> {
+    storage.ensure_current().ok()?;
     vault_session().lock().ok().and_then(|mut session| {
-        hydrate_locked(&mut session);
+        if session.owner.as_ref() != Some(&storage.owner) {
+            return None;
+        }
+        hydrate_locked(&mut session, storage);
         if session.locked {
             None
         } else {
@@ -193,35 +412,40 @@ fn cached_key() -> Option<Zeroizing<[u8; 32]>> {
     })
 }
 
-fn unlock_session(vmk: [u8; 32]) -> Result<(), String> {
+fn unlock_session(storage: &VaultStorage, vmk: [u8; 32]) -> Result<(), String> {
     let mut session = vault_session()
         .lock()
         .map_err(|_| "vault session lock poisoned")?;
+    storage.ensure_current()?;
     // Remain locked if writing fails, even when a key was already cached.
+    session.owner = Some(storage.owner.clone());
+    session.proof = Some(storage.clone());
+    session.id = next_session_id();
     session.key = None;
     session.locked = true;
-    let mut store = read()?;
+    let mut store = read(storage)?;
     store.locked = false;
-    write(&store)?;
+    write(storage, &store)?;
     session.lock_generation = store.lock_generation;
     session.key = Some(Zeroizing::new(vmk));
     session.locked = false;
     Ok(())
 }
 
-fn lock_session() -> Result<(), String> {
-    forget_key();
-    let mut store = read()?;
+fn lock_session(storage: &VaultStorage) -> Result<(), String> {
+    storage.ensure_current()?;
+    forget_key(storage);
+    let mut store = read(storage)?;
     store.locked = true;
     store.lock_generation = store
         .lock_generation
         .checked_add(1)
         .ok_or("vault lock generation exhausted")?;
-    write(&store)
+    write(storage, &store)
 }
 
-fn is_locked() -> bool {
-    cached_key().is_none()
+fn is_locked(storage: &VaultStorage) -> bool {
+    cached_key(storage).is_none()
 }
 
 fn mutation_stamp() -> Result<(u64, String), String> {
@@ -242,7 +466,7 @@ fn lock() -> &'static Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
-fn path() -> PathBuf {
+fn base_path() -> PathBuf {
     std::env::var_os("TOKENSTAT_SSH_VAULT_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
@@ -264,12 +488,30 @@ fn remove_if_present(path: &std::path::Path) -> Result<(), String> {
     }
 }
 
-fn clear_local() -> Result<(), String> {
+fn clear_local(storage: &VaultStorage) -> Result<(), String> {
+    storage.ensure_current()?;
     let _guard = lock().lock().map_err(|_| "vault lock poisoned")?;
-    let path = path();
+    let path = storage.path.clone();
     remove_if_present(&path)?;
     remove_if_present(&path.with_extension("tmp"))?;
     remove_if_present(&path.with_extension("legacy-backup.json"))?;
+    Ok(())
+}
+
+/// An acknowledged remote reset retires only this owner's migration floor.
+/// An unowned or another account's legacy cache remains untouched.
+fn clear_legacy_for_owner(storage: &VaultStorage, path: &std::path::Path) -> Result<(), String> {
+    storage.ensure_current()?;
+    let _guard = lock().lock().map_err(|_| "vault lock poisoned")?;
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.to_string()),
+    };
+    let legacy: VaultStore = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    if legacy.owner.as_ref() == Some(&storage.owner) {
+        remove_if_present(path)?;
+    }
     Ok(())
 }
 
@@ -280,9 +522,9 @@ fn paid_vault_tier(tier: Option<&str>) -> bool {
     )
 }
 
-fn verify_paid_account() -> Result<(), String> {
-    let status = tokenstat_sync::profile::sync_status(None).map_err(|e| e.to_string())?;
-    if paid_vault_tier(status.tier.as_deref()) {
+fn verify_paid_account(client: &VaultContext) -> Result<(), String> {
+    client.ensure_current().map_err(|e| e.to_string())?;
+    if paid_vault_tier(client.status.tier.as_deref()) {
         Ok(())
     } else {
         Err("SSH vault sync requires Supporter or higher".into())
@@ -556,18 +798,37 @@ fn decrypt_snapshot(
     Ok(snapshot)
 }
 
-fn read() -> Result<VaultStore, String> {
+fn read(storage: &VaultStorage) -> Result<VaultStore, String> {
+    storage.ensure_current()?;
     let _guard = lock().lock().map_err(|_| "vault lock poisoned")?;
-    match fs::read(path()) {
-        Ok(v) => serde_json::from_slice(&v).map_err(|e| e.to_string()),
+    match fs::read(storage.path.clone()) {
+        Ok(v) => {
+            let store: VaultStore = serde_json::from_slice(&v).map_err(|e| e.to_string())?;
+            if store.owner.as_ref() != Some(&storage.owner) {
+                return Err("vault cache belongs to another account".into());
+            }
+            Ok(store)
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(VaultStore::default()),
         Err(e) => Err(e.to_string()),
     }
 }
 
-fn write(store: &VaultStore) -> Result<(), String> {
+fn write(storage: &VaultStorage, store: &VaultStore) -> Result<(), String> {
+    storage.ensure_current()?;
+    if store
+        .owner
+        .as_ref()
+        .is_some_and(|owner| owner != &storage.owner)
+    {
+        return Err("vault cache belongs to another account".into());
+    }
+    let store = VaultStore {
+        owner: Some(storage.owner.clone()),
+        ..store.clone()
+    };
     let _guard = lock().lock().map_err(|_| "vault lock poisoned")?;
-    let path = path();
+    let path = storage.path.clone();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -581,7 +842,7 @@ fn write(store: &VaultStore) -> Result<(), String> {
         options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
     let mut file = options.open(&temp).map_err(|e| e.to_string())?;
-    file.write_all(&serde_json::to_vec_pretty(store).map_err(|e| e.to_string())?)
+    file.write_all(&serde_json::to_vec_pretty(&store).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
     file.sync_all().map_err(|e| e.to_string())?;
     drop(file);
@@ -635,12 +896,69 @@ fn validate_remote(
     Ok(())
 }
 
+/// An unowned cache cannot be attributed across different roots. Refuse that
+/// ambiguous migration; a same-key proof stamps its owner before other accounts
+/// can skip it. Already attributed caches retain their floor across rotation.
+fn legacy_baseline(
+    path: &std::path::Path,
+    owner: &VaultOwner,
+    key: &[u8; 32],
+) -> Result<Option<VaultStore>, String> {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.to_string()),
+    };
+    let legacy: VaultStore = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    if let Some(legacy_owner) = &legacy.owner {
+        return Ok((legacy_owner == owner).then_some(legacy));
+    }
+    if legacy.key_id.is_empty() && legacy.revision == 0 {
+        return Ok(None);
+    }
+    if legacy.key_id != key_id(key) {
+        return Err("the older vault cache has no verified account owner and a different encryption key; unlock its original vault before migrating".into());
+    }
+    let _authenticated = Zeroizing::new(open(
+        key,
+        &legacy.nonce,
+        &legacy.ciphertext,
+        &snapshot_context(legacy.revision),
+    )?);
+    Ok(Some(legacy))
+}
+
 fn cache_remote(
+    client: &VaultContext,
     remote: &tokenstat_sync::vault::RemoteVault,
     key: &[u8; 32],
     allow_rotation: bool,
 ) -> Result<(), String> {
-    let mut store = read()?;
+    client.ensure_current().map_err(|e| e.to_string())?;
+    cache_remote_at(&client.storage, &base_path(), remote, key, allow_rotation)
+}
+
+fn cache_remote_at(
+    storage: &VaultStorage,
+    legacy_path: &std::path::Path,
+    remote: &tokenstat_sync::vault::RemoteVault,
+    key: &[u8; 32],
+    allow_rotation: bool,
+) -> Result<(), String> {
+    let mut store = read(storage)?;
+    if store.key_id.is_empty() {
+        if let Some(legacy) = legacy_baseline(legacy_path, &storage.owner, key)? {
+            validate_remote(&legacy, remote, key, allow_rotation)?;
+            if legacy.owner.is_none() {
+                let mut attributed = storage.clone();
+                attributed.path = legacy_path.to_owned();
+                write(&attributed, &legacy)?;
+            }
+            store = legacy;
+            store.owner = Some(storage.owner.clone());
+            store.locked = true;
+        }
+    }
     validate_remote(&store, remote, key, allow_rotation)?;
     store.schema_version = remote.schema_version;
     store.revision = remote.revision;
@@ -654,40 +972,38 @@ fn cache_remote(
     store.password_wrap = remote.password_wrap.clone().unwrap_or_default();
     store.kdf = remote.kdf.clone().unwrap_or_default();
     store.key_id = key_id(key);
-    write(&store)
+    write(storage, &store)
 }
 
 fn remote_and_key(
+    client: &VaultContext,
     recovery: &str,
 ) -> Result<(tokenstat_sync::vault::RemoteVault, Zeroizing<[u8; 32]>), String> {
+    let storage = &client.storage;
     if !recovery.trim().is_empty() {
         return Err("a recovery code resets the password. It cannot unlock on its own.".into());
     }
-    let key = cached_key().ok_or(LOCKED)?;
-    let remote = remote_vault().map_err(|e| e.to_string())?;
-    if let Err(error) = cache_remote(&remote, &key, false) {
-        forget_key();
+    let key = cached_key(storage).ok_or(LOCKED)?;
+    let remote = remote_vault(client).map_err(|e| e.to_string())?;
+    if let Err(error) = cache_remote(client, &remote, &key, false) {
+        forget_key(storage);
         return Err(error);
     }
     Ok((remote, key))
 }
 
-fn enroll_self() -> Result<(), String> {
+fn enroll_self(client: &VaultContext) -> Result<(), String> {
     let identity =
         tokenstat_identity::MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
     let nonce = hex(&random32());
-    let request = with_machine_record(|| tokenstat_sync::vault::request_enrollment(&nonce))
+    let request = with_machine_record(client, || client.request_enrollment(&nonce))
         .map_err(|e| e.to_string())?;
     if request.nonce != nonce || request.public_identity != identity.public_key_hex() {
         return Err("enrollment response does not match this device identity".into());
     }
-    let result = tokenstat_sync::vault::approve_enrollment(
-        &request.machine_id,
-        &request.id,
-        PASSWORD_ONLY,
-        SCHEMA,
-    )
-    .map_err(|e| e.to_string())?;
+    let result = client
+        .approve_enrollment(&request.machine_id, &request.id, PASSWORD_ONLY, SCHEMA)
+        .map_err(|e| e.to_string())?;
     if !result.enrolled {
         return Err("server did not enroll this device".into());
     }
@@ -707,12 +1023,10 @@ fn enroll_self() -> Result<(), String> {
 /// One retry, because if the republish did not fix it the cause is the token
 /// rather than the record, and only signing in again replaces that.
 fn with_machine_record<T>(
+    client: &VaultContext,
     call: impl FnMut() -> Result<T, tokenstat_sync::vault::VaultError>,
 ) -> Result<T, tokenstat_sync::vault::VaultError> {
-    with_registration_retry(call, || {
-        tokenstat_sync::profile::publish_machine_identity(None)
-            .map_err(tokenstat_sync::vault::VaultError::Profile)
-    })
+    with_registration_retry(call, || client.publish_machine_identity())
 }
 
 fn with_registration_retry<T>(
@@ -741,8 +1055,10 @@ fn vault_exists(remote_found: bool, unreachable: bool, local_schema: u32) -> boo
     remote_found || (unreachable && local_schema >= 3)
 }
 
-fn remote_vault() -> Result<tokenstat_sync::vault::RemoteVault, tokenstat_sync::vault::VaultError> {
-    with_machine_record(tokenstat_sync::vault::get)
+fn remote_vault(
+    client: &VaultContext,
+) -> Result<tokenstat_sync::vault::RemoteVault, tokenstat_sync::vault::VaultError> {
+    with_machine_record(client, || client.get())
 }
 
 fn create_error(e: tokenstat_sync::vault::VaultError) -> String {
@@ -758,20 +1074,26 @@ fn create_error(e: tokenstat_sync::vault::VaultError) -> String {
 ///
 /// Returns the recovery code, which is shown once. It is not the way in, it is
 /// the way back when the password is forgotten.
-fn create_v4(password: &str) -> Result<String, String> {
+fn create_v4<'a>(
+    password: &str,
+    client: impl FnOnce() -> Result<&'a VaultContext, String>,
+) -> Result<String, String> {
     // The password before the plan. It is a pure check on what the caller
     // typed, so answering it first costs nothing and does not make somebody
     // with a short password wait on an account lookup to be told so.
     if let Some(problem) = tokenstat_core::passphrase::password_error(password) {
         return Err(problem);
     }
-    if !read()?.key_id.is_empty() {
+    let client = client()?;
+    let storage = &client.storage;
+    client.ensure_current().map_err(|e| e.to_string())?;
+    if !read(storage)?.key_id.is_empty() {
         return Err(
             "this device remembers an existing vault; remove it explicitly before creating another"
                 .into(),
         );
     }
-    verify_paid_account()?;
+    verify_paid_account(client)?;
     let recovery = generate_recovery();
     let vmk = Zeroizing::new(random32());
     let recovery_salt = hex(&random32());
@@ -787,26 +1109,28 @@ fn create_v4(password: &str) -> Result<String, String> {
         },
     )?;
     let kdf = kdf_descriptor();
-    let revision = tokenstat_sync::vault::create(&tokenstat_sync::vault::CreateVault {
-        schema_version: SCHEMA,
-        ciphertext: &ciphertext,
-        nonce: &nonce,
-        recovery_salt: &recovery_salt,
-        recovery_wrap: &recovery_wrap,
-        device_wrap: &device_wrap,
-        wrap_version: SCHEMA,
-        password_salt: &password_salt,
-        password_wrap: &password_wrap,
-        kdf: &kdf,
-    })
-    .map_err(create_error)?;
+    let revision = client
+        .create(&tokenstat_sync::vault::CreateVault {
+            schema_version: SCHEMA,
+            ciphertext: &ciphertext,
+            nonce: &nonce,
+            recovery_salt: &recovery_salt,
+            recovery_wrap: &recovery_wrap,
+            device_wrap: &device_wrap,
+            wrap_version: SCHEMA,
+            password_salt: &password_salt,
+            password_wrap: &password_wrap,
+            kdf: &kdf,
+        })
+        .map_err(create_error)?;
     if revision.revision != 1 {
         return Err("server returned an unexpected initial vault revision".into());
     }
     // The account now has revision 1. If the local writes below fail, a retry
     // would hit `AlreadyExists` with no local cache. Say so directly so the
     // recovery path (reset, then create again) is discoverable.
-    write(&VaultStore {
+    write(storage, &VaultStore {
+        owner: None,
         schema_version: SCHEMA,
         revision: revision.revision,
         ciphertext,
@@ -827,7 +1151,7 @@ fn create_v4(password: &str) -> Result<String, String> {
     // An unlock, not just a cached key. A lock left over from the vault this
     // one replaces would otherwise still be standing, and the vault this
     // device created seconds ago would answer that it is locked.
-    unlock_session(*vmk).map_err(|e| {
+    unlock_session(storage, *vmk).map_err(|e| {
         format!("vault was created but this device could not unlock it: {e}. Unlock it with your password")
     })?;
     Ok(recovery)
@@ -838,8 +1162,13 @@ fn create_v4(password: &str) -> Result<String, String> {
 ///
 /// The key lives only in this process. Enrollment grants API access but never
 /// stores an identity-encrypted copy of the key locally or on the server.
-fn unlock_with(password: &str, recovery: &str) -> Result<Zeroizing<[u8; 32]>, String> {
-    let remote = remote_vault().map_err(|e| e.to_string())?;
+fn unlock_with(
+    client: &VaultContext,
+    password: &str,
+    recovery: &str,
+) -> Result<Zeroizing<[u8; 32]>, String> {
+    let storage = &client.storage;
+    let remote = remote_vault(client).map_err(|e| e.to_string())?;
     let vmk = Zeroizing::new(if !recovery.trim().is_empty() {
         unwrap_recovery(&remote.recovery_wrap, recovery, &remote.recovery_salt)?
     } else if password.is_empty() {
@@ -860,14 +1189,15 @@ fn unlock_with(password: &str, recovery: &str) -> Result<Zeroizing<[u8; 32]>, St
     // otherwise be reported as a working unlock and fail later, on a read.
     decrypt_snapshot(&vmk, remote.revision, &remote.nonce, &remote.ciphertext)?;
     if remote.device_wrap.is_none() {
-        enroll_self()?;
+        enroll_self(client)?;
     }
-    cache_remote(&remote, &vmk, true)?;
-    unlock_session(*vmk)?;
+    cache_remote(client, &remote, &vmk, true)?;
+    unlock_session(storage, *vmk)?;
     Ok(vmk)
 }
 
 fn cache_written(
+    client: &VaultContext,
     mut remote: tokenstat_sync::vault::RemoteVault,
     key: &[u8; 32],
     revision: u64,
@@ -881,18 +1211,24 @@ fn cache_written(
     remote.revision = revision;
     remote.nonce = nonce;
     remote.ciphertext = ciphertext;
-    cache_remote(&remote, key, false)
+    cache_remote(client, &remote, key, false)
 }
 
 /// A rotation always replaces the master key, both recovery/password wraps,
 /// and every device enrollment together. Never emulate this with two requests.
-fn rotate_root(password: &str, recovery: &str, new_password: &str) -> Result<String, String> {
+fn rotate_root(
+    client: &VaultContext,
+    password: &str,
+    recovery: &str,
+    new_password: &str,
+) -> Result<String, String> {
+    let storage = &client.storage;
     if let Some(problem) = tokenstat_core::passphrase::password_error(new_password) {
         return Err(problem);
     }
-    let old_key = unlock_with(password, recovery)?;
-    let remote = remote_vault().map_err(|e| e.to_string())?;
-    validate_remote(&read()?, &remote, &old_key, false)?;
+    let old_key = unlock_with(client, password, recovery)?;
+    let remote = remote_vault(client).map_err(|e| e.to_string())?;
+    validate_remote(&read(storage)?, &remote, &old_key, false)?;
     let snapshot = decrypt_snapshot(&old_key, remote.revision, &remote.nonce, &remote.ciphertext)?;
     let key = Zeroizing::new(random32());
     let code = generate_recovery();
@@ -906,24 +1242,25 @@ fn rotate_root(password: &str, recovery: &str, new_password: &str) -> Result<Str
         .ok_or("vault revision exhausted")?;
     let (nonce, ciphertext) = encrypt_snapshot(&key, revision, &snapshot)?;
     let descriptor = kdf_descriptor();
-    let result = tokenstat_sync::vault::rotate(&tokenstat_sync::vault::RotateVault {
-        expected_revision: remote.revision,
-        vault: tokenstat_sync::vault::CreateVault {
-            schema_version: SCHEMA,
-            ciphertext: &ciphertext,
-            nonce: &nonce,
-            recovery_salt: &recovery_salt,
-            recovery_wrap: &recovery_wrap,
-            device_wrap: PASSWORD_ONLY,
-            wrap_version: SCHEMA,
-            password_salt: &password_salt,
-            password_wrap: &password_wrap,
-            kdf: &descriptor,
-        },
-    })
-    .map_err(|error| format!("vault key rotation failed: {error}"))?;
+    let result = client
+        .rotate(&tokenstat_sync::vault::RotateVault {
+            expected_revision: remote.revision,
+            vault: tokenstat_sync::vault::CreateVault {
+                schema_version: SCHEMA,
+                ciphertext: &ciphertext,
+                nonce: &nonce,
+                recovery_salt: &recovery_salt,
+                recovery_wrap: &recovery_wrap,
+                device_wrap: PASSWORD_ONLY,
+                wrap_version: SCHEMA,
+                password_salt: &password_salt,
+                password_wrap: &password_wrap,
+                kdf: &descriptor,
+            },
+        })
+        .map_err(|error| format!("vault key rotation failed: {error}"))?;
     if result.revision != revision {
-        forget_key();
+        forget_key(storage);
         return Err("server returned an unexpected vault revision".into());
     }
     let rotated = tokenstat_sync::vault::RemoteVault {
@@ -940,9 +1277,9 @@ fn rotate_root(password: &str, recovery: &str, new_password: &str) -> Result<Str
         wrap_version: None,
         updated_at: String::new(),
     };
-    forget_key();
-    cache_remote(&rotated, &key, true)?;
-    unlock_session(*key)?;
+    forget_key(storage);
+    cache_remote(client, &rotated, &key, true)?;
+    unlock_session(storage, *key)?;
     Ok(code)
 }
 
@@ -970,7 +1307,7 @@ fn operation_guard() -> Result<OperationGuard, String> {
     let process = OPERATIONS
         .lock()
         .map_err(|_| "vault operation lock poisoned")?;
-    let lock_path = path().with_extension("lock");
+    let lock_path = base_path().with_extension("lock");
     fs::create_dir_all(lock_path.parent().ok_or("invalid vault path")?)
         .map_err(|e| e.to_string())?;
     let mut options = fs::OpenOptions::new();
@@ -1004,69 +1341,191 @@ fn operation_guard() -> Result<OperationGuard, String> {
     })
 }
 
+fn verify_request_owner(
+    params: &str,
+    status: &tokenstat_sync::profile::StatusResult,
+) -> Result<(), String> {
+    let body: Value = serde_json::from_str(params).map_err(|e| e.to_string())?;
+    let Some(owner) = body.get("_accountScope") else {
+        return Ok(());
+    };
+    let identity = owner.get("identity").and_then(Value::as_str);
+    let matches = owner.get("kind").and_then(Value::as_str) == Some("account")
+        && owner.get("origin").and_then(Value::as_str) == Some(status.host.as_str())
+        && identity.is_some_and(|id| {
+            !id.is_empty()
+                && (Some(id) == status.account_id.as_deref()
+                    || Some(id) == status.handle.as_deref())
+        });
+    if matches {
+        Ok(())
+    } else {
+        Err("the signed-in account changed; retry from the current account".into())
+    }
+}
+
+/// Reject pure input errors before accessing any account or credential store.
+fn validate_request(method: &str, params: &str) -> Result<(), String> {
+    match method {
+        "ssh.vault.enrollment.request"
+        | "ssh.vault.enrollment.list"
+        | "ssh.vault.enrollment.approve" => {
+            return Err(
+                "enrollment is gone. Unlock the vault with your password on this device.".into(),
+            );
+        }
+        "ssh.vault.status"
+        | "ssh.vault.create"
+        | "ssh.vault.reset"
+        | "ssh.vault.unlock"
+        | "ssh.vault.lock"
+        | "ssh.vault.retire"
+        | "ssh.vault.password.set"
+        | "ssh.vault.record.list"
+        | "ssh.vault.record.put"
+        | "ssh.vault.record.delete"
+        | "ssh.vault.recovery.rotate" => {}
+        _ => return Err(format!("unknown SSH vault method: {method}")),
+    }
+    if matches!(
+        method,
+        "ssh.vault.unlock"
+            | "ssh.vault.record.list"
+            | "ssh.vault.record.put"
+            | "ssh.vault.record.delete"
+    ) {
+        let body: Value = serde_json::from_str(params).map_err(|e| e.to_string())?;
+        if body
+            .get("recovery")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+        {
+            return Err("a recovery code resets the password. It cannot unlock on its own.".into());
+        }
+    }
+    if method == "ssh.vault.create" {
+        let body: PasswordParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+        if let Some(problem) = tokenstat_core::passphrase::password_error(&body.password) {
+            return Err(problem);
+        }
+    }
+    Ok(())
+}
+
 pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
     if !method.starts_with("ssh.vault.") {
         return None;
     }
     Some((|| {
         crate::request_context::refuse_remote("SSH vault methods")?;
+        validate_request(method, params)?;
+        let epoch = AUTH_EPOCH.load(Ordering::SeqCst);
         let _operation = operation_guard()?;
-        match method {
-            "ssh.vault.status" => {
-                let local = read()?;
-                // What the account said, kept rather than discarded. Swallowing
-                // this made every failure to *reach* the vault look like the
-                // account not having one, so a machine the account did not know
-                // was told to create a second vault and then refused when it
-                // tried. The screen can only be honest if it is given the
-                // difference.
-                let answer = remote_vault();
-                let mut unreachable = match &answer {
-                    Ok(_) => None,
-                    // No vault on the account is an answer, not a failure.
-                    Err(tokenstat_sync::vault::VaultError::NotFound) => None,
-                    Err(error) => Some(error.to_string()),
-                };
-                let remote = answer.ok();
-                // The account answered, and what it said is that there is no
-                // vault. That is not the same as not being able to ask, which
-                // is what `unreachable` carries, and the difference is the
-                // whole of this: a vault is deleted on one device and every
-                // other device finds out here.
-                //
-                // Local state left over from the vault that used to exist is
-                // not evidence that one still does. It is the thing to clean
-                // up, and until it was, a Mac went on showing "Encrypted
-                // vault, 0 records" and offering to change the password of a
-                // vault an iPhone had deleted an hour earlier.
-                let gone = remote.is_none() && unreachable.is_none();
-                if gone && local.schema_version >= 3 {
-                    forget_key();
-                }
-                let created = vault_exists(
-                    remote.is_some(),
-                    unreachable.is_some(),
-                    local.schema_version,
-                );
-                let enrolled = remote
-                    .as_ref()
-                    .and_then(|value| value.device_wrap.as_ref())
-                    .is_some();
-                // A v2 vault has no password wrap. It cannot be opened by this
-                // build and the screen has to say so rather than asking for a
-                // password nothing will accept.
-                let needs_recreate = remote
-                    .as_ref()
-                    .is_some_and(|value| value.password_wrap.is_none());
-                let record_count = if let (Some(remote), Some(key)) =
-                    (remote.as_ref(), cached_key())
-                {
+        if AUTH_EPOCH.load(Ordering::SeqCst) != epoch {
+            return Err("the signed-in account changed; retry from the current account".into());
+        }
+        dispatch_request(method, params, || {
+            Ok(VaultClient::capture()
+                .map_err(|e| e.to_string())?
+                .with_retirement_guard(move || {
+                    if SIGNOUTS.load(Ordering::SeqCst) == 0
+                        && AUTH_EPOCH.load(Ordering::SeqCst) == epoch
+                    {
+                        Ok(())
+                    } else {
+                        Err(tokenstat_sync::vault::VaultError::AccountChanged)
+                    }
+                }))
+        })
+    })())
+}
+
+fn dispatch_request(
+    method: &str,
+    params: &str,
+    capture: impl FnOnce() -> Result<VaultClient, String>,
+) -> Result<Value, String> {
+    if let Some(result) = dispatch_local(method, params) {
+        return result;
+    }
+    let captured = capture()?;
+    captured.ensure_current().map_err(|e| e.to_string())?;
+    let status = captured.status().map_err(|e| e.to_string())?;
+    verify_request_owner(params, &status)?;
+    let owner = VaultOwner::verified(&status)?;
+    let owner_check = captured.clone();
+    let mut storage = VaultStorage::new(owner, move || {
+        owner_check.ensure_current().map_err(|e| e.to_string())
+    });
+    storage.identities = [status.account_id.as_ref(), status.handle.as_ref()]
+        .into_iter()
+        .flatten()
+        .filter(|id| !id.is_empty())
+        .cloned()
+        .collect();
+    adopt_owner(&storage)?;
+    let context = VaultContext {
+        client: captured,
+        status,
+        storage,
+    };
+    let client = &context;
+    let storage = &context.storage;
+    let result = match method {
+        "ssh.vault.status" => {
+            let local = read(storage)?;
+            // What the account said, kept rather than discarded. Swallowing
+            // this made every failure to *reach* the vault look like the
+            // account not having one, so a machine the account did not know
+            // was told to create a second vault and then refused when it
+            // tried. The screen can only be honest if it is given the
+            // difference.
+            let answer = remote_vault(client);
+            let mut unreachable = match &answer {
+                Ok(_) => None,
+                // No vault on the account is an answer, not a failure.
+                Err(tokenstat_sync::vault::VaultError::NotFound) => None,
+                Err(error) => Some(error.to_string()),
+            };
+            let remote = answer.ok();
+            // The account answered, and what it said is that there is no
+            // vault. That is not the same as not being able to ask, which
+            // is what `unreachable` carries, and the difference is the
+            // whole of this: a vault is deleted on one device and every
+            // other device finds out here.
+            //
+            // Local state left over from the vault that used to exist is
+            // not evidence that one still does. It is the thing to clean
+            // up, and until it was, a Mac went on showing "Encrypted
+            // vault, 0 records" and offering to change the password of a
+            // vault an iPhone had deleted an hour earlier.
+            let gone = remote.is_none() && unreachable.is_none();
+            if gone && local.schema_version >= 3 {
+                forget_key(storage);
+            }
+            let created = vault_exists(
+                remote.is_some(),
+                unreachable.is_some(),
+                local.schema_version,
+            );
+            let enrolled = remote
+                .as_ref()
+                .and_then(|value| value.device_wrap.as_ref())
+                .is_some();
+            // A v2 vault has no password wrap. It cannot be opened by this
+            // build and the screen has to say so rather than asking for a
+            // password nothing will accept.
+            let needs_recreate = remote
+                .as_ref()
+                .is_some_and(|value| value.password_wrap.is_none());
+            let record_count =
+                if let (Some(remote), Some(key)) = (remote.as_ref(), cached_key(storage)) {
                     match validate_remote(&local, remote, &key, false).and_then(|_| {
                         decrypt_snapshot(&key, remote.revision, &remote.nonce, &remote.ciphertext)
                     }) {
                         Ok(snapshot) => snapshot.records.iter().filter(|r| !r.deleted).count(),
                         Err(error) => {
-                            forget_key();
+                            forget_key(storage);
                             unreachable = Some(error);
                             0
                         }
@@ -1074,218 +1533,226 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 } else {
                     0
                 };
-                let locked = !needs_recreate && remote.is_some() && is_locked();
-                Ok(json!({
-                    "created": created,
-                    "recordCount": record_count,
-                    "enrolled": enrolled,
-                    "locked": locked,
-                    "needsRecreate": needs_recreate,
-                    "unreachable": unreachable
-                }))
-            }
-            "ssh.vault.create" => {
-                let p: PasswordParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-                Ok(json!({"recovery": create_v4(&p.password)?}))
-            }
-            "ssh.vault.reset" => {
-                tokenstat_sync::vault::remove().map_err(|e| e.to_string())?;
-                clear_local()?;
-                forget_key();
-
-                Ok(json!({"reset": true}))
-            }
-            "ssh.vault.unlock" => {
-                let p: PasswordParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-                if !p.recovery.trim().is_empty() {
-                    return Err(
-                        "a recovery code resets the password. It cannot unlock on its own.".into(),
-                    );
-                }
-                unlock_with(&p.password, "")?;
-                let recovery = if read()?.schema_version < SCHEMA {
-                    verify_paid_account()?;
-                    if !p.migrate {
-                        forget_key();
-                        return Err("update tokenstat to upgrade this vault securely".into());
-                    }
-                    Some(match rotate_root(&p.password, "", &p.password) {
-                        Ok(code) => code,
-                        Err(error) => {
-                            forget_key();
-                            return Err(error);
-                        }
-                    })
-                } else {
-                    None
-                };
-                Ok(json!({"unlocked": true, "recovery": recovery}))
-            }
-            "ssh.vault.lock" => {
-                lock_session()?;
-                Ok(json!({"locked": true}))
-            }
-            // Password changes and recovery resets replace the root key and
-            // all wraps atomically; old wraps cannot decrypt future snapshots.
-            "ssh.vault.password.set" => {
-                verify_paid_account()?;
-                let p: PasswordParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-                if let Some(problem) = tokenstat_core::passphrase::password_error(&p.new_password) {
-                    return Err(problem);
-                }
-                let recovery = rotate_root(&p.password, &p.recovery, &p.new_password)?;
-                Ok(json!({"changed": true, "recovery": recovery}))
-            }
-            "ssh.vault.enrollment.request"
-            | "ssh.vault.enrollment.list"
-            | "ssh.vault.enrollment.approve" => Err(
-                "enrollment is gone. Unlock the vault with your password on this device.".into(),
-            ),
-            "ssh.vault.record.list" => {
-                let p: RecoveryParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-                let (remote, vmk) = remote_and_key(&p.recovery)?;
-                let snapshot =
-                    decrypt_snapshot(&vmk, remote.revision, &remote.nonce, &remote.ciphertext)?;
-                // Tombstones must cross the bridge too. Filtering them here
-                // made deletes permanent on the writer but impossible to
-                // apply on another enrolled device.
-                Ok(json!({"records": snapshot.records}))
-            }
-            "ssh.vault.record.put" => {
-                verify_paid_account()?;
-                if read()?.schema_version < SCHEMA {
-                    return Err("unlock the vault to upgrade its encryption first".into());
-                }
-                let p: PutParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-                let mut last_conflict = None;
-                for _ in 0..4 {
-                    let (remote, vmk) = remote_and_key(&p.recovery)?;
-                    let mut snapshot =
-                        decrypt_snapshot(&vmk, remote.revision, &remote.nonce, &remote.ciphertext)?;
-                    let version = match snapshot.records.iter().find(|r| r.id == p.id) {
-                        Some(record) => record.version.checked_add(1).ok_or_else(|| {
-                            format!("vault record {} has an exhausted version", record.id)
-                        })?,
-                        None => 1,
-                    };
-                    snapshot.records.retain(|r| r.id != p.id);
-                    let (modified_at, device_id) = mutation_stamp()?;
-                    snapshot.records.push(PlainRecord {
-                        id: p.id.clone(),
-                        version,
-                        deleted: false,
-                        modified_at,
-                        device_id,
-                        plaintext: p.plaintext.clone(),
-                    });
-                    snapshot.records.sort_by(|a, b| a.id.cmp(&b.id));
-                    let next_revision = remote
-                        .revision
-                        .checked_add(1)
-                        .ok_or("vault revision exhausted")?;
-                    let (nonce, ciphertext) = encrypt_snapshot(&vmk, next_revision, &snapshot)?;
-                    match tokenstat_sync::vault::update(&tokenstat_sync::vault::UpdateVault {
-                        expected_revision: remote.revision,
-                        schema_version: SCHEMA,
-                        ciphertext: &ciphertext,
-                        nonce: &nonce,
-                        recovery_salt: None,
-                        recovery_wrap: None,
-                    }) {
-                        Ok(answer) => {
-                            cache_written(
-                                remote.clone(),
-                                &vmk,
-                                next_revision,
-                                nonce,
-                                ciphertext,
-                                answer.revision,
-                            )?;
-                            return Ok(json!({"id": p.id, "version": version}));
-                        }
-                        Err(tokenstat_sync::vault::VaultError::Conflict(revision)) => {
-                            last_conflict = Some(revision)
-                        }
-                        Err(e) => return Err(e.to_string()),
-                    }
-                }
-                Err(format!(
-                    "vault remained busy after conflict at revision {}",
-                    last_conflict.unwrap_or(0)
-                ))
-            }
-            "ssh.vault.record.delete" => {
-                verify_paid_account()?;
-                if read()?.schema_version < SCHEMA {
-                    return Err("unlock the vault to upgrade its encryption first".into());
-                }
-                let p: DeleteParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-                let mut last_conflict = None;
-                for _ in 0..4 {
-                    let (remote, vmk) = remote_and_key(&p.recovery)?;
-                    let mut snapshot =
-                        decrypt_snapshot(&vmk, remote.revision, &remote.nonce, &remote.ciphertext)?;
-                    let version = match snapshot.records.iter().find(|r| r.id == p.id) {
-                        Some(record) => record.version.checked_add(1).ok_or_else(|| {
-                            format!("vault record {} has an exhausted version", record.id)
-                        })?,
-                        None => 1,
-                    };
-                    snapshot.records.retain(|r| r.id != p.id);
-                    let (modified_at, device_id) = mutation_stamp()?;
-                    snapshot.records.push(PlainRecord {
-                        id: p.id.clone(),
-                        version,
-                        deleted: true,
-                        modified_at,
-                        device_id,
-                        plaintext: String::new(),
-                    });
-                    snapshot.records.sort_by(|a, b| a.id.cmp(&b.id));
-                    let next_revision = remote
-                        .revision
-                        .checked_add(1)
-                        .ok_or("vault revision exhausted")?;
-                    let (nonce, ciphertext) = encrypt_snapshot(&vmk, next_revision, &snapshot)?;
-                    match tokenstat_sync::vault::update(&tokenstat_sync::vault::UpdateVault {
-                        expected_revision: remote.revision,
-                        schema_version: SCHEMA,
-                        ciphertext: &ciphertext,
-                        nonce: &nonce,
-                        recovery_salt: None,
-                        recovery_wrap: None,
-                    }) {
-                        Ok(answer) => {
-                            cache_written(
-                                remote.clone(),
-                                &vmk,
-                                next_revision,
-                                nonce,
-                                ciphertext,
-                                answer.revision,
-                            )?;
-                            return Ok(json!({"id": p.id, "version": version, "deleted": true}));
-                        }
-                        Err(tokenstat_sync::vault::VaultError::Conflict(revision)) => {
-                            last_conflict = Some(revision)
-                        }
-                        Err(e) => return Err(e.to_string()),
-                    }
-                }
-                Err(format!(
-                    "vault remained busy after conflict at revision {}",
-                    last_conflict.unwrap_or(0)
-                ))
-            }
-            "ssh.vault.recovery.rotate" => {
-                verify_paid_account()?;
-                let p: PasswordParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-                let recovery = rotate_root(&p.password, "", &p.password)?;
-                Ok(json!({"recovery": recovery}))
-            }
-            _ => Err(format!("unknown SSH vault method: {method}")),
+            let locked = !needs_recreate && remote.is_some() && is_locked(storage);
+            let session_id = vault_session()
+                .lock()
+                .map_err(|_| "vault session lock poisoned")?
+                .id
+                .clone();
+            Ok(json!({
+                "vaultSession": session_id,
+                "created": created,
+                "recordCount": record_count,
+                "enrolled": enrolled,
+                "locked": locked,
+                "needsRecreate": needs_recreate,
+                "unreachable": unreachable
+            }))
         }
-    })())
+        "ssh.vault.create" => {
+            let p: PasswordParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            Ok(json!({"recovery": create_v4(&p.password, || Ok(client))?}))
+        }
+        "ssh.vault.reset" => {
+            client.remove().map_err(|e| e.to_string())?;
+            forget_key(storage);
+            clear_legacy_for_owner(storage, &base_path())?;
+            clear_local(storage)?;
+
+            Ok(json!({"reset": true}))
+        }
+        "ssh.vault.unlock" => {
+            let p: PasswordParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            if !p.recovery.trim().is_empty() {
+                return Err(
+                    "a recovery code resets the password. It cannot unlock on its own.".into(),
+                );
+            }
+            unlock_with(client, &p.password, "")?;
+            let recovery = if read(storage)?.schema_version < SCHEMA {
+                verify_paid_account(client)?;
+                if !p.migrate {
+                    forget_key(storage);
+                    return Err("update tokenstat to upgrade this vault securely".into());
+                }
+                Some(match rotate_root(client, &p.password, "", &p.password) {
+                    Ok(code) => code,
+                    Err(error) => {
+                        forget_key(storage);
+                        return Err(error);
+                    }
+                })
+            } else {
+                None
+            };
+            Ok(json!({"unlocked": true, "recovery": recovery}))
+        }
+        // Password changes and recovery resets replace the root key and
+        // all wraps atomically; old wraps cannot decrypt future snapshots.
+        "ssh.vault.password.set" => {
+            verify_paid_account(client)?;
+            let p: PasswordParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            if let Some(problem) = tokenstat_core::passphrase::password_error(&p.new_password) {
+                return Err(problem);
+            }
+            let recovery = rotate_root(client, &p.password, &p.recovery, &p.new_password)?;
+            Ok(json!({"changed": true, "recovery": recovery}))
+        }
+        "ssh.vault.enrollment.request"
+        | "ssh.vault.enrollment.list"
+        | "ssh.vault.enrollment.approve" => {
+            Err("enrollment is gone. Unlock the vault with your password on this device.".into())
+        }
+        "ssh.vault.record.list" => {
+            let p: RecoveryParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            let (remote, vmk) = remote_and_key(client, &p.recovery)?;
+            let snapshot =
+                decrypt_snapshot(&vmk, remote.revision, &remote.nonce, &remote.ciphertext)?;
+            // Tombstones must cross the bridge too. Filtering them here
+            // made deletes permanent on the writer but impossible to
+            // apply on another enrolled device.
+            Ok(json!({"records": snapshot.records}))
+        }
+        "ssh.vault.record.put" => {
+            verify_paid_account(client)?;
+            if read(storage)?.schema_version < SCHEMA {
+                return Err("unlock the vault to upgrade its encryption first".into());
+            }
+            let p: PutParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            let mut last_conflict = None;
+            for _ in 0..4 {
+                let (remote, vmk) = remote_and_key(client, &p.recovery)?;
+                let mut snapshot =
+                    decrypt_snapshot(&vmk, remote.revision, &remote.nonce, &remote.ciphertext)?;
+                let version = match snapshot.records.iter().find(|r| r.id == p.id) {
+                    Some(record) => record.version.checked_add(1).ok_or_else(|| {
+                        format!("vault record {} has an exhausted version", record.id)
+                    })?,
+                    None => 1,
+                };
+                snapshot.records.retain(|r| r.id != p.id);
+                let (modified_at, device_id) = mutation_stamp()?;
+                snapshot.records.push(PlainRecord {
+                    id: p.id.clone(),
+                    version,
+                    deleted: false,
+                    modified_at,
+                    device_id,
+                    plaintext: p.plaintext.clone(),
+                });
+                snapshot.records.sort_by(|a, b| a.id.cmp(&b.id));
+                let next_revision = remote
+                    .revision
+                    .checked_add(1)
+                    .ok_or("vault revision exhausted")?;
+                let (nonce, ciphertext) = encrypt_snapshot(&vmk, next_revision, &snapshot)?;
+                match client.update(&tokenstat_sync::vault::UpdateVault {
+                    expected_revision: remote.revision,
+                    schema_version: SCHEMA,
+                    ciphertext: &ciphertext,
+                    nonce: &nonce,
+                    recovery_salt: None,
+                    recovery_wrap: None,
+                }) {
+                    Ok(answer) => {
+                        cache_written(
+                            client,
+                            remote.clone(),
+                            &vmk,
+                            next_revision,
+                            nonce,
+                            ciphertext,
+                            answer.revision,
+                        )?;
+                        client.ensure_current().map_err(|e| e.to_string())?;
+                        return Ok(json!({"id": p.id, "version": version}));
+                    }
+                    Err(tokenstat_sync::vault::VaultError::Conflict(revision)) => {
+                        last_conflict = Some(revision)
+                    }
+                    Err(e) => return Err(e.to_string()),
+                }
+            }
+            Err(format!(
+                "vault remained busy after conflict at revision {}",
+                last_conflict.unwrap_or(0)
+            ))
+        }
+        "ssh.vault.record.delete" => {
+            verify_paid_account(client)?;
+            if read(storage)?.schema_version < SCHEMA {
+                return Err("unlock the vault to upgrade its encryption first".into());
+            }
+            let p: DeleteParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            let mut last_conflict = None;
+            for _ in 0..4 {
+                let (remote, vmk) = remote_and_key(client, &p.recovery)?;
+                let mut snapshot =
+                    decrypt_snapshot(&vmk, remote.revision, &remote.nonce, &remote.ciphertext)?;
+                let version = match snapshot.records.iter().find(|r| r.id == p.id) {
+                    Some(record) => record.version.checked_add(1).ok_or_else(|| {
+                        format!("vault record {} has an exhausted version", record.id)
+                    })?,
+                    None => 1,
+                };
+                snapshot.records.retain(|r| r.id != p.id);
+                let (modified_at, device_id) = mutation_stamp()?;
+                snapshot.records.push(PlainRecord {
+                    id: p.id.clone(),
+                    version,
+                    deleted: true,
+                    modified_at,
+                    device_id,
+                    plaintext: String::new(),
+                });
+                snapshot.records.sort_by(|a, b| a.id.cmp(&b.id));
+                let next_revision = remote
+                    .revision
+                    .checked_add(1)
+                    .ok_or("vault revision exhausted")?;
+                let (nonce, ciphertext) = encrypt_snapshot(&vmk, next_revision, &snapshot)?;
+                match client.update(&tokenstat_sync::vault::UpdateVault {
+                    expected_revision: remote.revision,
+                    schema_version: SCHEMA,
+                    ciphertext: &ciphertext,
+                    nonce: &nonce,
+                    recovery_salt: None,
+                    recovery_wrap: None,
+                }) {
+                    Ok(answer) => {
+                        cache_written(
+                            client,
+                            remote.clone(),
+                            &vmk,
+                            next_revision,
+                            nonce,
+                            ciphertext,
+                            answer.revision,
+                        )?;
+                        client.ensure_current().map_err(|e| e.to_string())?;
+                        return Ok(json!({"id": p.id, "version": version, "deleted": true}));
+                    }
+                    Err(tokenstat_sync::vault::VaultError::Conflict(revision)) => {
+                        last_conflict = Some(revision)
+                    }
+                    Err(e) => return Err(e.to_string()),
+                }
+            }
+            Err(format!(
+                "vault remained busy after conflict at revision {}",
+                last_conflict.unwrap_or(0)
+            ))
+        }
+        "ssh.vault.recovery.rotate" => {
+            verify_paid_account(client)?;
+            let p: PasswordParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            let recovery = rotate_root(client, &p.password, "", &p.password)?;
+            Ok(json!({"recovery": recovery}))
+        }
+        _ => Err(format!("unknown SSH vault method: {method}")),
+    };
+    context.ensure_current().map_err(|e| e.to_string())?;
+    result
 }
 
 #[cfg(test)]
@@ -1332,6 +1799,47 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn logout_does_not_wait_for_vault_serialization_and_retires_before_and_after_credential_work() {
+        let _held_http_operation = operation_guard().unwrap();
+        let epoch = AUTH_EPOCH.load(Ordering::SeqCst);
+        let storage = VaultStorage::new(
+            VaultOwner {
+                origin: "https://test.example".into(),
+                identity: "id:logout".into(),
+            },
+            move || {
+                if SIGNOUTS.load(Ordering::SeqCst) == 0
+                    && AUTH_EPOCH.load(Ordering::SeqCst) == epoch
+                {
+                    Ok(())
+                } else {
+                    Err("retired login lifetime".into())
+                }
+            },
+        );
+        unlock_session(&storage, [61; 32]).unwrap();
+        let result = with_retired_session(|| {
+            let session = vault_session().lock().unwrap();
+            assert!(session.key.is_none());
+            assert!(session.owner.is_none());
+            assert!(session.proof.is_none());
+            assert!(session.locked);
+            assert!(
+                storage.ensure_current().is_err(),
+                "requests must be retired before revocation starts"
+            );
+            Err::<(), _>("mock credential deletion failed")
+        });
+        assert_eq!(result.unwrap_err(), "mock credential deletion failed");
+        assert_eq!(SIGNOUTS.load(Ordering::SeqCst), 0);
+        assert!(
+            unlock_session(&storage, [61; 32]).is_err(),
+            "same old token cannot revive its retired epoch"
+        );
+        fs::remove_file(&storage.path).unwrap();
+    }
 
     #[test]
     fn paid_vault_tier_is_case_insensitive() {
@@ -1429,7 +1937,10 @@ mod tests {
         // The password is checked before the account, which is what makes this
         // hold on a machine with no account signed in. It failed on CI while
         // passing here for exactly that reason.
-        let refused = create_v4("short").unwrap_err();
+        let refused = create_v4("short", || {
+            panic!("invalid password must not acquire credentials")
+        })
+        .unwrap_err();
         assert!(refused.contains("12 characters"), "{refused}");
     }
 
@@ -1614,43 +2125,470 @@ mod tests {
 
     #[test]
     fn failed_lock_persistence_cannot_restore_a_cached_key() {
+        let owned = VaultStorage::new(
+            VaultOwner {
+                origin: "https://test.example".into(),
+                identity: "id:test".into(),
+            },
+            || Ok(()),
+        );
+        let storage = &owned;
         let _operation = operation_guard().unwrap();
-        write(&VaultStore {
-            schema_version: SCHEMA,
-            ..VaultStore::default()
-        })
+        write(
+            storage,
+            &VaultStore {
+                schema_version: SCHEMA,
+                ..VaultStore::default()
+            },
+        )
         .unwrap();
-        unlock_session([5; 32]).unwrap();
-        assert!(!is_locked());
+        unlock_session(storage, [5; 32]).unwrap();
+        assert!(!is_locked(storage));
         // Reproduce a failed atomic-write staging file without real vault data.
-        fs::create_dir(path().with_extension("tmp")).unwrap();
-        assert!(lock_session().is_err());
-        assert!(is_locked());
-        assert!(cached_key().is_none());
-        fs::remove_dir(path().with_extension("tmp")).unwrap();
-        unlock_session([5; 32]).unwrap();
-        assert!(!is_locked());
-        lock_session().unwrap();
+        fs::create_dir(storage.path.clone().with_extension("tmp")).unwrap();
+        assert!(lock_session(storage).is_err());
+        assert!(is_locked(storage));
+        assert!(cached_key(storage).is_none());
+        fs::remove_dir(storage.path.clone().with_extension("tmp")).unwrap();
+        unlock_session(storage, [5; 32]).unwrap();
+        assert!(!is_locked(storage));
+        lock_session(storage).unwrap();
         // An unlocked flag from another process must not unlock this session.
-        let mut store = read().unwrap();
+        let mut store = read(storage).unwrap();
         store.locked = false;
-        write(&store).unwrap();
-        assert!(is_locked());
+        write(storage, &store).unwrap();
+        assert!(is_locked(storage));
         // Legacy device wraps cannot bring an empty session back to life.
         store.device_wrap = wrap_for_device(
             &[5; 32],
             &tokenstat_identity::MachineIdentity::from_secret([9; 32]).public_key(),
         )
         .unwrap();
-        write(&store).unwrap();
-        forget_key();
-        assert!(cached_key().is_none());
-        clear_local().unwrap();
+        write(storage, &store).unwrap();
+        forget_key(storage);
+        assert!(cached_key(storage).is_none());
+        clear_local(storage).unwrap();
     }
 
     #[test]
     fn malformed_unicode_wraps_fail_without_panicking() {
         assert!(unhex(&"é".repeat(32)).is_err());
         assert!(unpack(&format!("{}é00", "0".repeat(47))).is_err());
+    }
+
+    fn status_fixture() -> tokenstat_sync::profile::StatusResult {
+        tokenstat_sync::profile::StatusResult {
+            host: "https://test.example".into(),
+            handle: Some("alice".into()),
+            account_id: Some("account-a".into()),
+            tier: Some("supporter".into()),
+            last_sync_at: None,
+            machines: vec![],
+            schema_min_v: None,
+            schema_max_v: None,
+            schema_current: None,
+            review_demo: false,
+            raw: Value::Null,
+        }
+    }
+
+    #[test]
+    fn initiating_scope_must_match_the_captured_accounts_proof() {
+        let status = status_fixture();
+        for id in ["alice", "account-a"] {
+            let body = json!({"_accountScope":{"kind":"account","origin":"https://test.example","identity":id}}).to_string();
+            assert!(verify_request_owner(&body, &status).is_ok());
+        }
+        for (kind, origin, id) in [
+            ("account", "https://test.example", "bob"),
+            ("account", "https://other.example", "alice"),
+            ("local", "https://test.example", "alice"),
+            ("account", "https://test.example", ""),
+        ] {
+            let body =
+                json!({"_accountScope":{"kind":kind,"origin":origin,"identity":id}}).to_string();
+            assert!(verify_request_owner(&body, &status).is_err());
+        }
+        let a = VaultOwner::verified(&status).unwrap();
+        assert_eq!(a.identity, "id:account-a");
+        let mut renamed = status.clone();
+        renamed.handle = Some("renamed".into());
+        assert_eq!(VaultOwner::verified(&renamed).unwrap(), a);
+        renamed.account_id = None;
+        assert_eq!(
+            VaultOwner::verified(&renamed).unwrap().identity,
+            "handle:renamed"
+        );
+        renamed.handle = None;
+        assert!(VaultOwner::verified(&renamed).is_err());
+    }
+
+    #[test]
+    fn account_caches_and_unlock_keys_reject_stale_cleanup_and_writes() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let _operation = operation_guard().unwrap();
+        let current = std::sync::Arc::new(AtomicUsize::new(0));
+        let a_check = current.clone();
+        let b_check = current.clone();
+        let a = VaultStorage::new(
+            VaultOwner {
+                origin: "https://test.example".into(),
+                identity: "id:a".into(),
+            },
+            move || {
+                if a_check.load(Ordering::SeqCst) == 0 {
+                    Ok(())
+                } else {
+                    Err("retired account".into())
+                }
+            },
+        );
+        let b = VaultStorage::new(
+            VaultOwner {
+                origin: "https://test.example".into(),
+                identity: "id:b".into(),
+            },
+            move || {
+                if b_check.load(Ordering::SeqCst) == 1 {
+                    Ok(())
+                } else {
+                    Err("retired account".into())
+                }
+            },
+        );
+        assert_ne!(a.path, b.path);
+        write(
+            &a,
+            &VaultStore {
+                schema_version: SCHEMA,
+                ciphertext: "A fixture ciphertext".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        unlock_session(&a, [7; 32]).unwrap();
+        assert_eq!(cached_key(&a).unwrap().as_ref(), &[7; 32]);
+        current.store(1, Ordering::SeqCst);
+        write(
+            &b,
+            &VaultStore {
+                schema_version: SCHEMA,
+                ciphertext: "B fixture ciphertext".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        unlock_session(&b, [9; 32]).unwrap();
+        let b_before = fs::read(&b.path).unwrap();
+        // Late A completion cannot release B's unlock or persist into B's cache.
+        forget_key(&a);
+        assert!(cached_key(&a).is_none());
+        assert!(read(&a).is_err());
+        assert!(write(&a, &VaultStore::default()).is_err());
+        assert!(lock_session(&a).is_err());
+        assert!(clear_local(&a).is_err());
+        assert_eq!(fs::read(&b.path).unwrap(), b_before);
+        assert_eq!(cached_key(&b).unwrap().as_ref(), &[9; 32]);
+        current.store(0, Ordering::SeqCst);
+        assert_eq!(read(&a).unwrap().ciphertext, "A fixture ciphertext");
+        assert!(
+            cached_key(&a).is_none(),
+            "Other account's VMK became available"
+        );
+        clear_local(&a).unwrap();
+        current.store(1, Ordering::SeqCst);
+        forget_key(&b);
+        clear_local(&b).unwrap();
+    }
+
+    #[test]
+    fn copying_another_accounts_cache_does_not_unlock_or_load_it() {
+        let _operation = operation_guard().unwrap();
+        let a = VaultStorage::new(
+            VaultOwner {
+                origin: "https://test.example".into(),
+                identity: "id:copy-a".into(),
+            },
+            || Ok(()),
+        );
+        let b = VaultStorage::new(
+            VaultOwner {
+                origin: "https://test.example".into(),
+                identity: "id:copy-b".into(),
+            },
+            || Ok(()),
+        );
+        write(
+            &a,
+            &VaultStore {
+                schema_version: SCHEMA,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        write(
+            &b,
+            &VaultStore {
+                schema_version: SCHEMA,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        unlock_session(&b, [8; 32]).unwrap();
+        fs::copy(&a.path, &b.path).unwrap();
+        assert!(read(&b).err().unwrap().contains("another account"));
+        assert!(cached_key(&b).is_none());
+        forget_key(&b);
+        clear_local(&a).unwrap();
+        clear_local(&b).unwrap();
+    }
+
+    #[test]
+    fn scoped_migration_preserves_same_and_rotated_root_floors_without_cross_account_adoption() {
+        let _operation = operation_guard().unwrap();
+        let temporary = tempfile::tempdir().unwrap();
+        let legacy_path = temporary.path().join("legacy.json");
+        let mut a = VaultStorage::new(
+            VaultOwner {
+                origin: "https://test.example".into(),
+                identity: "id:migration-a".into(),
+            },
+            || Ok(()),
+        );
+        let mut b = VaultStorage::new(
+            VaultOwner {
+                origin: "https://test.example".into(),
+                identity: "id:migration-b".into(),
+            },
+            || Ok(()),
+        );
+        a.path = temporary.path().join("a.json");
+        b.path = temporary.path().join("b.json");
+        let current_key = [31; 32];
+        let historical_key = [32; 32];
+        let remote = remote_fixture(&current_key, 20);
+        let legacy = local_fixture(&current_key, &remote);
+        fs::write(&legacy_path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        // An old valid password/root cannot discard a newer unowned floor.
+        assert!(
+            cache_remote_at(
+                &a,
+                &legacy_path,
+                &remote_fixture(&historical_key, 10),
+                &historical_key,
+                true
+            )
+            .is_err()
+        );
+        // Neither can an unrelated account silently adopt that ambiguous cache.
+        assert!(
+            cache_remote_at(
+                &b,
+                &legacy_path,
+                &remote_fixture(&historical_key, 30),
+                &historical_key,
+                true
+            )
+            .is_err()
+        );
+        assert!(!a.path.exists());
+        assert!(!b.path.exists());
+        assert!(
+            cache_remote_at(
+                &a,
+                &legacy_path,
+                &remote_fixture(&current_key, 19),
+                &current_key,
+                true
+            )
+            .is_err()
+        );
+        let unattributed: VaultStore =
+            serde_json::from_slice(&fs::read(&legacy_path).unwrap()).unwrap();
+        assert!(
+            unattributed.owner.is_none(),
+            "rejected replay must not stamp an owner"
+        );
+        cache_remote_at(&a, &legacy_path, &remote, &current_key, true).unwrap();
+        let attributed: VaultStore =
+            serde_json::from_slice(&fs::read(&legacy_path).unwrap()).unwrap();
+        assert_eq!(attributed.owner.as_ref(), Some(&a.owner));
+        assert_eq!(attributed.revision, 20);
+        // Simulate interrupted migration / loss of only the new scoped file.
+        fs::remove_file(&a.path).unwrap();
+        assert!(
+            cache_remote_at(
+                &a,
+                &legacy_path,
+                &remote_fixture(&historical_key, 10),
+                &historical_key,
+                true
+            )
+            .is_err()
+        );
+        cache_remote_at(
+            &a,
+            &legacy_path,
+            &remote_fixture(&historical_key, 21),
+            &historical_key,
+            true,
+        )
+        .unwrap();
+        assert_eq!(read(&a).unwrap().revision, 21);
+        // A proven A cache never imposes A's floor/key on B.
+        cache_remote_at(
+            &b,
+            &legacy_path,
+            &remote_fixture(&[33; 32], 1),
+            &[33; 32],
+            true,
+        )
+        .unwrap();
+        assert_eq!(read(&b).unwrap().revision, 1);
+        clear_legacy_for_owner(&b, &legacy_path).unwrap();
+        assert!(legacy_path.exists(), "B reset must preserve A's floor");
+        clear_legacy_for_owner(&a, &legacy_path).unwrap();
+        clear_local(&a).unwrap();
+        assert!(!legacy_path.exists());
+        // Recreated revision1 remains valid even when its scoped write was
+        // unavailable and the subsequent unlock must rebuild the cache.
+        cache_remote_at(
+            &a,
+            &legacy_path,
+            &remote_fixture(&[34; 32], 1),
+            &[34; 32],
+            true,
+        )
+        .unwrap();
+        assert_eq!(read(&a).unwrap().revision, 1);
+    }
+
+    #[test]
+    fn offline_lock_dispatch_retires_memory_without_acquiring_authentication_or_http() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let _operation = operation_guard().unwrap();
+        let current = Arc::new(AtomicBool::new(true));
+        let checked = current.clone();
+        let storage = VaultStorage::new(
+            VaultOwner {
+                origin: "https://test.example".into(),
+                identity: "id:offline-lock".into(),
+            },
+            move || {
+                if checked.load(Ordering::SeqCst) {
+                    Ok(())
+                } else {
+                    Err("retired credentials".into())
+                }
+            },
+        );
+        unlock_session(&storage, [41; 32]).unwrap();
+        let scope = json!({"_accountScope": {"kind": "account", "origin": storage.owner.origin, "identity": "offline-lock"}}).to_string();
+        let wrong = json!({"_accountScope": {"kind": "account", "origin": storage.owner.origin, "identity": "other"}}).to_string();
+        assert!(
+            dispatch_request("ssh.vault.lock", &wrong, || panic!(
+                "local lock must not acquire an HTTP client"
+            ))
+            .is_err()
+        );
+        assert!(cached_key(&storage).is_some());
+        let answer = dispatch_request("ssh.vault.lock", &scope, || {
+            panic!("offline lock must not GET /me")
+        })
+        .unwrap();
+        assert_eq!(answer["locked"], true);
+        assert!(cached_key(&storage).is_none());
+        unlock_session(&storage, [41; 32]).unwrap();
+        current.store(false, Ordering::SeqCst);
+        assert!(
+            dispatch_request("ssh.vault.lock", &scope, || panic!(
+                "retired lock must not acquire credentials"
+            ))
+            .is_err()
+        );
+        current.store(true, Ordering::SeqCst);
+        assert!(
+            cached_key(&storage).is_none(),
+            "credential error cannot leave the old VMK usable"
+        );
+        unlock_session(&storage, [41; 32]).unwrap();
+        fs::create_dir(storage.path.with_extension("tmp")).unwrap();
+        assert!(
+            dispatch_request("ssh.vault.lock", &scope, || panic!(
+                "disk failure must not request status"
+            ))
+            .is_err()
+        );
+        assert!(cached_key(&storage).is_none());
+        fs::remove_dir(storage.path.with_extension("tmp")).unwrap();
+        clear_local(&storage).unwrap();
+    }
+
+    #[test]
+    fn status_only_account_adoption_and_exact_logout_retirement_do_not_revive_prior_keys() {
+        let _operation = operation_guard().unwrap();
+        let a = VaultStorage::new(
+            VaultOwner {
+                origin: "https://test.example".into(),
+                identity: "id:adopt-a".into(),
+            },
+            || Ok(()),
+        );
+        let b = VaultStorage::new(
+            VaultOwner {
+                origin: "https://test.example".into(),
+                identity: "id:adopt-b".into(),
+            },
+            || Ok(()),
+        );
+        unlock_session(&a, [51; 32]).unwrap();
+        adopt_owner(&b).unwrap();
+        adopt_owner(&a).unwrap();
+        assert!(
+            cached_key(&a).is_none(),
+            "A→B status-only→A must require another password"
+        );
+        unlock_session(&b, [52; 32]).unwrap();
+        let a_scope = json!({"_accountScope": {"kind": "account", "origin": a.owner.origin, "identity": "adopt-a"}}).to_string();
+        assert!(
+            dispatch_request("ssh.vault.retire", &a_scope, || panic!(
+                "retirement is local"
+            ))
+            .is_err()
+        );
+        assert!(
+            dispatch_request("ssh.vault.retire", "{}", || panic!(
+                "retirement requires scope"
+            ))
+            .is_err()
+        );
+        assert!(
+            cached_key(&b).is_some(),
+            "late A retirement cannot erase B's key"
+        );
+        let b_id = vault_session().lock().unwrap().id.clone();
+        let b_scope = json!({"_accountScope": {"kind": "account", "origin": b.owner.origin, "identity": "adopt-b"}, "_vaultSession": b_id}).to_string();
+        dispatch_request("ssh.vault.retire", &b_scope, || {
+            panic!("logout retirement does not acquire new credentials")
+        })
+        .unwrap();
+        assert!(cached_key(&b).is_none());
+        adopt_owner(&b).unwrap();
+        assert!(
+            cached_key(&b).is_none(),
+            "retired proof cannot restore a VMK"
+        );
+        unlock_session(&b, [53; 32]).unwrap();
+        assert!(
+            dispatch_request("ssh.vault.retire", &b_scope, || panic!("local retirement")).is_err()
+        );
+        assert_eq!(
+            cached_key(&b).unwrap().as_ref(),
+            &[53; 32],
+            "old B retirement erased freshly unlocked B"
+        );
+        forget_key(&b);
+        clear_local(&a).unwrap();
+        clear_local(&b).unwrap();
     }
 }

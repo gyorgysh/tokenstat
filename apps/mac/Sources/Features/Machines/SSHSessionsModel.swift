@@ -36,13 +36,16 @@ final class SSHSessionsModel {
     @ObservationIgnored private var startupTickets: [String: UUID] = [:]
     @ObservationIgnored private var startups: [String: Startup] = [:]
     @ObservationIgnored private let startupSleep: @MainActor (UInt64) async throws -> Void
+    @ObservationIgnored private let isOwnerCurrent: @MainActor () -> Bool
     private struct Startup { var commands: [[UInt8]]; var next = 0 }
     private(set) var closeErrors: [String: String] = [:]
 
-    init(startupSleep: @escaping @MainActor (UInt64) async throws -> Void = {
+    init(isOwnerCurrent: @escaping @MainActor () -> Bool = { true },
+         startupSleep: @escaping @MainActor (UInt64) async throws -> Void = {
         try await Task.sleep(for: .milliseconds($0))
     }) {
         self.startupSleep = startupSleep
+        self.isOwnerCurrent = isOwnerCurrent
     }
 
     /// Which host each pane was last looking at, so returning to a server
@@ -146,7 +149,7 @@ final class SSHSessionsModel {
         }
     }
 
-    private func isCurrent(_ value: UInt64) -> Bool { active && foreground && epoch == value }
+    private func isCurrent(_ value: UInt64) -> Bool { active && foreground && epoch == value && isOwnerCurrent() }
 
     /// A reversible scene pause preserves terminal objects, read cursors and
     /// startup progress. A new foreground gets a fresh list attempt even if
@@ -177,7 +180,7 @@ final class SSHSessionsModel {
     /// model stays ignorant of the record store.
     @discardableResult
     func adopt(_ session: SSHLiveTerminal, startup: [SSHSnippet] = []) -> SSHLiveTerminal? {
-        guard active, !closingIDs.contains(session.id) else {
+        guard active, isOwnerCurrent(), !closingIDs.contains(session.id) else {
             session.detachPoll()
             return nil
         }
@@ -290,7 +293,7 @@ final class SSHSessionsModel {
     }
 
     func select(_ session: SSHLiveTerminal) {
-        guard active, sessions.contains(where: { $0 === session }) else { return }
+        guard active, isOwnerCurrent(), sessions.contains(where: { $0 === session }) else { return }
         #if os(macOS)
         if let hostID = session.hostID {
             var selection = paneSelection(for: hostID)
@@ -317,12 +320,12 @@ final class SSHSessionsModel {
 
     @discardableResult
     func close(_ session: SSHLiveTerminal) async -> Bool {
-        guard active, sessions.contains(where: { $0 === session }), closingIDs.insert(session.id).inserted else { return false }
+        guard active, isOwnerCurrent(), sessions.contains(where: { $0 === session }), closingIDs.insert(session.id).inserted else { return false }
         startupTasks.removeValue(forKey: session.id)?.cancel()
         startupTickets.removeValue(forKey: session.id)
         if let count = startups[session.id]?.commands.count { startups[session.id]?.next = count }
         let succeeded = await session.closeRemote()
-        guard active, sessions.contains(where: { $0 === session }) else { return false }
+        guard active, isOwnerCurrent(), sessions.contains(where: { $0 === session }) else { return false }
         guard succeeded else {
             closingIDs.remove(session.id)
             closeErrors[session.id] = session.error ?? L10n.text("apple.sshliveterminal.could_not_end_retry")

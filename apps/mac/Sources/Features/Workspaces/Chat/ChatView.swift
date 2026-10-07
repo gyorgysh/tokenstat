@@ -539,20 +539,17 @@ struct ChatView: View {
         // phone hears about this turn.
         .watching(conversationID: model.selected?.id, peer: model.peer,
                   isActive: isActive && model.savedCopy == nil)
-        .task(id: "\(model.selected?.id ?? "")-\(isActive)") {
-            guard isActive else { return }
-            // A daemon that has just started serves its curated fallbacks
-            // while it probes the agent CLIs. Give that a moment and look
-            // again, so a chat opened during the race does not keep a
-            // half-filled model list until the window is closed.
+        .task(id: ChatPollWatchIdentity(owner: model.pollingIdentity,
+                                       active: isActive && scenePhase == .active)) {
+            guard isActive, scenePhase == .active else { return }
+            await model.watchPolls()
+        }
+        .task(id: ChatPollWatchIdentity(owner: model.pollingIdentity,
+                                       active: isActive && scenePhase == .active)) {
+            guard isActive, scenePhase == .active else { return }
             try? await Task.sleep(for: .seconds(2))
             guard !Task.isCancelled else { return }
             await model.refillBackendsIfIncomplete()
-            while !Task.isCancelled {
-                try? await Task.sleep(for: model.pollInterval)
-                guard !Task.isCancelled else { return }
-                await model.poll()
-            }
         }
         .alert(L10n.text("apple.chatview.chat_unavailable.a45aae80"), isPresented: Binding(
             get: { isActive && model.error != nil },
@@ -739,8 +736,8 @@ struct ChatView: View {
                 window.followingEnd = (follow.pinned || follow.settling) && sliceOffset == 0
                 window.note(metrics)
             }
-            .overlay(alignment: .bottom) {
-                if model.approvals.isEmpty {
+            .transcriptFollowBar {
+                if model.approvals.isEmpty && (follow.showJump || model.busy) {
                     TranscriptFollowPill(
                         showJump: follow.showJump,
                         busy: model.busy,

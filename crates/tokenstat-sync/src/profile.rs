@@ -582,6 +582,11 @@ pub fn sync_status(host_flag: Option<&str>) -> Result<StatusResult, ProfileError
         )));
     }
     let raw: Value = serde_json::from_str(&text)?;
+    Ok(status_from_value(host, raw))
+}
+
+/// Shared decoding for a status reply obtained with captured credentials.
+pub(crate) fn status_from_value(host: String, raw: Value) -> StatusResult {
     let handle = raw
         .get("handle")
         .and_then(|v| v.as_str())
@@ -614,7 +619,7 @@ pub fn sync_status(host_flag: Option<&str>) -> Result<StatusResult, ProfileError
         .get("review_demo")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    Ok(StatusResult {
+    StatusResult {
         host,
         handle,
         tier,
@@ -626,7 +631,7 @@ pub fn sync_status(host_flag: Option<&str>) -> Result<StatusResult, ProfileError
         account_id,
         review_demo,
         raw,
-    })
+    }
 }
 
 /// Bind a StoreKit transaction JWS to the signed-in account.

@@ -74,67 +74,28 @@ struct SSHLibraryView: View {
     }
 
     @Environment(ClientStore.self) private var store
-    @State private var model = SSHLibraryModel()
-    @State private var section = Section.hosts
-    @State private var route: SSHLibraryRoute?
-    @State private var connecting: SSHHost?
-    /// Live sessions. Recreated with this screen, and that is fine: the shells
-    /// belong to the host process, so `reconcile` finds them again and reading
-    /// from offset zero replays what is still buffered. Leaving the screen
-    /// leaves them running, which is the whole change.
-    @State private var sessions = SSHSessionsModel()
-    @State private var showingTerminal = false
-    @State private var vault = SSHVaultModel()
-    @State private var showingVault = false
-    @State private var expanded: Set<String> = []
+    @Environment(ClientSSHWorkbench.self) private var workbench
+    private var model: SSHLibraryModel { workbench.library }
+    private var sessions: SSHSessionsModel { workbench.sessions }
+    private var vault: SSHVaultModel { workbench.vault }
+    private var section: Section { get { workbench.section } nonmutating set { workbench.section = newValue } }
+    private var route: SSHLibraryRoute? { get { workbench.route } nonmutating set { workbench.route = newValue } }
+    private var expanded: Set<String> { get { workbench.expanded } nonmutating set { workbench.expanded = newValue } }
+    private var connecting: SSHHost? {
+        get { workbench.connection?.host }
+        nonmutating set { if let newValue { workbench.connect(newValue) } }
+    }
+    private var showingVault: Bool { get { workbench.showingVault } nonmutating set { workbench.showingVault = newValue } }
+    private var showingTerminal: Bool {
+        get { workbench.terminal != nil }
+        nonmutating set { workbench.terminal = newValue ? .init() : nil }
+    }
 
     private var paidVaultTier: String? { SSHLibraryModel.paidTier(for: vaultTier) }
 
     private var signedInUnpaid: Bool { vaultTier != nil && paidVaultTier == nil }
 
-    var body: some View {
-        content
-            .task { await model.load(vaultTier: paidVaultTier) }
-            .task { await vault.refresh() }
-            .sheet(isPresented: $showingVault) {
-                SSHVaultScreen(
-                    vault: vault,
-                    tier: vaultTier ?? "",
-                    canWrite: paidVaultTier != nil,
-                    library: model
-                )
-            }
-            .task { await sessions.watch() }
-            .sheet(item: $connecting) { host in
-                SSHConnectForm(host: host, model: model) { session in
-                    sessions.adopt(
-                        session,
-                        startup: session.hostID.map { model.startupSnippets(for: $0) } ?? []
-                    )
-                    showingTerminal = true
-                }
-            }
-            .fullScreenCover(isPresented: $showingTerminal) {
-                if let session = sessions.selected {
-                    SSHLiveTerminalScreen(
-                        sessions: sessions,
-                        session: session,
-                        library: model,
-                        onNewSession: {
-                            guard let hostID = session.hostID,
-                                  let host = model.hosts.first(where: { $0.id == hostID })
-                            else { return }
-                            showingTerminal = false
-                            connecting = host
-                        }
-                    )
-                    // Keyed on the session, so switching tabs rebuilds the
-                    // screen around the new one rather than leaving the old
-                    // emulator mounted under a new title.
-                    .id(session.id)
-                }
-            }
-    }
+    var body: some View { content }
 
     // MARK: - The screen
 
@@ -151,7 +112,7 @@ struct SSHLibraryView: View {
             // Pushed onto whichever stack this screen was opened from, rather
             // than onto one of its own: Devices already owns a stack, and a
             // second one inside it draws a second title bar.
-            .navigationDestination(item: $route) { destination($0) }
+            .navigationDestination(item: Binding(get: { route }, set: { route = $0 })) { destination($0) }
     }
 
     @ViewBuilder
@@ -245,8 +206,8 @@ struct SSHLibraryView: View {
             // stand in for their own, which would announce one "SSH library"
             // where there are three tabs a person has to be able to tell
             // apart and select. The tabs say what they are.
-            SegmentedTabs(options: Section.allCases, selection: $section)
-            SearchField(text: $model.search, prompt: section.searchPrompt)
+            SegmentedTabs(options: Section.allCases, selection: Binding(get: { section }, set: { section = $0 }))
+            SearchField(text: Binding(get: { model.search }, set: { model.search = $0 }), prompt: section.searchPrompt)
         }
         .padding(Theme.Space.m)
     }

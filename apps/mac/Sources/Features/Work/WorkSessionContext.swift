@@ -8,6 +8,7 @@ import Observation
 final class WorkSessionContext {
     static let shared = WorkSessionContext()
     private(set) var scope: WorkReference.Scope?
+    private(set) var generation: UInt64 = 0
     private(set) var localHostIdentity: String?
     /// Only saved-page ownership may use this fallback. Live routing continues
     /// to require `scope`, which remains nil until the account answers.
@@ -53,7 +54,10 @@ final class WorkSessionContext {
         } else {
             savedAccess.accountUnknown()
         }
-        if scope != next { scope = next }
+        if scope != next {
+            generation &+= 1
+            scope = next
+        }
     }
 
     func resolveLocalHostIdentity() async {

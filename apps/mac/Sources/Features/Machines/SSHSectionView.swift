@@ -28,7 +28,7 @@ struct SSHSectionView: View {
     var onOpenFolder: (String) -> Void
 
     @State private var expanded: Set<String> = []
-    @State private var vault = SSHVaultModel()
+    private var vault: SSHVaultModel { model.vault }
     @State private var showingVault = false
 
     private var paidVaultTier: String? { SSHLibraryModel.paidTier(for: vaultTier) }
@@ -87,8 +87,7 @@ struct SSHSectionView: View {
         // and can fail, and a library that is empty because nothing loaded
         // must not look like a library with nothing in it.
         .task(id: vaultTier) {
-            guard !model.loaded else { return }
-            await model.load(vaultTier: SSHLibraryModel.paidTier(for: vaultTier))
+            await model.ensureLoaded(vaultTier: SSHLibraryModel.paidTier(for: vaultTier))
         }
     }
 

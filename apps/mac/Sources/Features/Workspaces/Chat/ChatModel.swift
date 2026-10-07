@@ -247,6 +247,8 @@ final class ChatModel {
         if peer != next {
             remoteSteer = nil
             steerProbeStarted = false
+            steerProbeTicket = nil
+            steerProbeOwner = nil
         }
         peer = next
     }
@@ -1124,6 +1126,8 @@ final class ChatModel {
 
     private var attachmentCacheGeneration: UInt64 = 0
     private var attemptedResponseAttachments: Set<String> = []
+    @ObservationIgnored private var attachmentDescriptorRevision: UInt64?
+    @ObservationIgnored private var attachmentDescriptors: [ChatAttachment] = []
     private(set) var loadingResponseAttachments: Set<String> = []
     private(set) var responseAttachmentErrors: [String: String] = [:]
 
@@ -1980,6 +1984,8 @@ final class ChatModel {
     /// One probe per busy stretch. A miss stays unknown until the turn ends,
     /// so a dropped packet is not remembered as an older host.
     @ObservationIgnored private var steerProbeStarted = false
+    @ObservationIgnored private var steerProbeTicket: UUID?
+    @ObservationIgnored private var steerProbeOwner: PollOwner?
     /// Set before any await so a poll and a queue drain cannot both send.
     @ObservationIgnored private var deliveringSteer: ChatSteerContext?
     @ObservationIgnored private var deliveringSteerToken: UInt64?
@@ -2595,15 +2601,60 @@ final class ChatModel {
         defaultPersonaID = saved?.id
     }
 
-    /// An idle conversation can receive a turn from another device. Keep
-    /// watching its event offset, then return to fast reads when work appears.
+    struct PollOwner: Hashable, Sendable {
+        let reference: WorkReference
+        let generation: UInt64
+    }
+    var pollingIdentity: PollOwner? {
+        guard savedCopy == nil, let reference = currentReference,
+              reference.scope == WorkSessionContext.shared.scope else { return nil }
+        return PollOwner(reference: reference, generation: selectionGeneration)
+    }
+    @ObservationIgnored private let eventPollLane = ChatPollLane<PollOwner>()
+    @ObservationIgnored private let statusPollLane = ChatPollLane<PollOwner>()
+    @ObservationIgnored private let approvalPollLane = ChatPollLane<PollOwner>()
+    @ObservationIgnored private let attachmentPollLane = ChatPollLane<PollOwner>()
+    @ObservationIgnored private let pollWatcher = ChatPollWatcher<PollOwner>()
+    @ObservationIgnored private var pollCadence = ChatPollCadence()
+    @ObservationIgnored private var cadenceOwner: PollOwner?
+
     var pollInterval: Duration {
-        busy || hasPendingResponseAttachments ? .milliseconds(400) : .seconds(2)
+        pollCadence.interval(busy: busy, attachments: hasPendingResponseAttachments,
+                             now: ProcessInfo.processInfo.systemUptime)
     }
 
-    private func refreshUsage(id: String, generation: UInt64) async {
+    func watchPolls() async {
+        guard !Task.isCancelled, let owner = pollingIdentity else { return }
+        await pollWatcher.watch(owner: owner, cycle: { [weak self] in
+            guard let self, self.pollingIdentity == owner else { return }
+            await self.poll(forceStatus: false)
+        }, interval: { [weak self] in self?.pollInterval ?? .seconds(2) }, stop: { [weak self] in
+            self?.cancelPollReads(owner: owner)
+        })
+    }
+
+    private func pollIsCurrent(_ owner: PollOwner) -> Bool {
+        !Task.isCancelled && pollingIdentity == owner
+    }
+
+    private func cancelPollReads(owner: PollOwner? = nil) {
+        if owner == nil || steerProbeOwner == owner {
+            steerProbeTicket = nil
+            steerProbeOwner = nil
+            steerProbeStarted = false
+        }
+        eventPollLane.cancel(owner: owner)
+        statusPollLane.cancel(owner: owner)
+        approvalPollLane.cancel(owner: owner)
+        if savedCopy == nil { attachmentPollLane.cancel(owner: owner) }
+    }
+
+    private func refreshUsage(id: String, generation: UInt64,
+                              permitsPublication: () -> Bool = { true }) async {
+        guard !Task.isCancelled, permitsPublication(), selectionMatches(id: id, generation: generation) else { return }
         let page = try? await Bridge.chatEventPage(id: id, cursor: nil, limit: 10, peer: peer)
-        guard selectionMatches(id: id, generation: generation), let usage = page?.usage, usage.isValid else { return }
+        guard !Task.isCancelled, permitsPublication(), selectionMatches(id: id, generation: generation),
+              let usage = page?.usage, usage.isValid else { return }
         conversationUsage = usage
         usageThrough = page?.events.compactMap(\.seq).max() ?? events.compactMap(\.seq).max()
     }
@@ -2633,17 +2684,73 @@ final class ChatModel {
         }
     }
 
-    func poll() async {
-        guard !Task.isCancelled, !openingConversation, savedCopy == nil, let selected else { return }
-        let generation = selectionGeneration
-        await loadEvents(id: selected.id, reset: false, generation: generation, quiet: true)
-        guard selectionMatches(id: selected.id, generation: generation) else { return }
-        await loadApprovals(id: selected.id, generation: generation, quiet: true)
-        guard selectionMatches(id: selected.id, generation: generation) else { return }
-        let listRead = beginChatListRead(workspaceID: selected.workspaceID, peer: peer)
+    /// Events, approvals and status share bounded independent producers.
+    /// Explicit refreshes await their reads. Live ticks start shared reads
+    /// without waiting, keeping metadata and attachment clocks responsive.
+    func poll(forceStatus: Bool = true) async {
+        guard !Task.isCancelled, !openingConversation, let owner = pollingIdentity else { return }
+        if cadenceOwner != owner { cadenceOwner = owner; pollCadence = ChatPollCadence() }
+        if let id = owner.reference.itemID {
+            scheduleResponseAttachments(id: id, generation: owner.generation)
+        }
+        let now = ProcessInfo.processInfo.systemUptime
+        let status = pollCadence.claimStatus(now: now, force: forceStatus)
+            ? startStatusPoll(owner: owner) : nil
+        let approvals = pollCadence.claimApprovals(now: now, force: forceStatus)
+            ? startApprovalPoll(owner: owner) : nil
+        let events = eventPollLane.start(owner: owner) { [weak self] permitsPublication in
+            guard let self, self.pollIsCurrent(owner), permitsPublication(),
+                  let id = owner.reference.itemID else { return }
+            let revision = self.eventsRevision
+            let success = await self.loadEvents(id: id, reset: false, generation: owner.generation,
+                quiet: true, onFreshEvents: { records in
+                    guard self.pollIsCurrent(owner), permitsPublication() else { return }
+                    if records.contains(where: { record in
+                        ["approval", "question", "answer", "answerWithdrawn"].contains(record.kind)
+                            || ["done", "failed"].contains(record.event?.kind ?? "")
+                    }) {
+                        _ = self.startStatusPoll(owner: owner, refresh: true)
+                        _ = self.startApprovalPoll(owner: owner, refresh: true)
+                    }
+                })
+            guard self.pollIsCurrent(owner), permitsPublication() else { return }
+            self.pollCadence.note(success: success, changed: self.eventsRevision != revision,
+                                  now: ProcessInfo.processInfo.systemUptime)
+        }
+        // A held event read must not hold the watcher's metadata clock.
+        // The lane keeps that read bounded while later ticks share it.
+        if forceStatus {
+            await events?.value
+            guard pollIsCurrent(owner) else { return }
+            await status?.value; await approvals?.value
+        }
+    }
+
+    private func startStatusPoll(owner: PollOwner, refresh: Bool = false) -> Task<Void, Never>? {
+        statusPollLane.start(owner: owner, refresh: refresh) { [weak self] permitsPublication in
+            guard let self else { return }
+            await self.performStatusPoll(owner: owner, permitsPublication: permitsPublication)
+        }
+    }
+
+    private func startApprovalPoll(owner: PollOwner, refresh: Bool = false) -> Task<Void, Never>? {
+        approvalPollLane.start(owner: owner, refresh: refresh) { [weak self] permitsPublication in
+            guard let self, self.pollIsCurrent(owner), permitsPublication(),
+                  let id = owner.reference.itemID else { return }
+            await self.loadApprovals(id: id, generation: owner.generation, quiet: true,
+                                     permitsPublication: permitsPublication)
+        }
+    }
+
+    private func performStatusPoll(owner: PollOwner, permitsPublication: () -> Bool) async {
+        guard pollIsCurrent(owner), permitsPublication(), let selected,
+              let id = owner.reference.itemID else { return }
+        let generation = owner.generation
+        let wasRunning = selected.running
+        let listRead = beginChatListRead(workspaceID: owner.reference.workspaceID, peer: peer)
         do {
-            let answer = try await Bridge.chats(workspaceID: selected.workspaceID, peer: peer)
-            guard selectionMatches(id: selected.id, generation: generation) else { return }
+            let answer = try await Bridge.chats(workspaceID: owner.reference.workspaceID, peer: peer)
+            guard pollIsCurrent(owner) && permitsPublication() else { return }
             let latest = applyChatList(answer, read: listRead, current: chats)
             // A poll that found nothing new must not write anything back.
             // Same rule as the event chunk below: the write is what redraws
@@ -2653,12 +2760,12 @@ final class ChatModel {
                 chats = latest
                 if let folderID { storeChatListCache(chats, folderID: folderID) }
             }
-            if let current = latest.first(where: { $0.id == selected.id }),
+            if let current = latest.first(where: { $0.id == id }),
                current != self.selected {
                 self.selected = current
-                if selected.running && !current.running {
-                    await refreshUsage(id: selected.id, generation: generation)
-                    guard selectionMatches(id: selected.id, generation: generation) else { return }
+                if wasRunning && !current.running {
+                    await refreshUsage(id: id, generation: generation, permitsPublication: permitsPublication)
+                    guard pollIsCurrent(owner) && permitsPublication() else { return }
                 }
                 #if !os(macOS)
                 if !Task.isCancelled {
@@ -2668,10 +2775,18 @@ final class ChatModel {
             }
             settleNotifications()
         } catch {}
-        guard !Task.isCancelled, selectionMatches(id: selected.id, generation: generation) else { return }
+        guard !Task.isCancelled, pollIsCurrent(owner) && permitsPublication() else { return }
         let claimed = claimSteerDelivery()
-        await noteSteerAvailability()
-        if let claimed { await performSteerDelivery(claimed) }
+        let claimedToken = deliveringSteerToken
+        await noteSteerAvailability(permitsPublication: permitsPublication)
+        if let claimed, let token = claimedToken,
+           deliveringSteer == claimed, deliveringSteerToken == token {
+            if pollIsCurrent(owner), permitsPublication() {
+                await performSteerDelivery(claimed)
+            } else {
+                finishSteerDelivery(claimed, token: token)
+            }
+        }
     }
 
     var busy: Bool {
@@ -2948,18 +3063,31 @@ final class ChatModel {
         noteSendFinished(token)
     }
 
-    /// Learn whether a remote host can carry a note, once per busy stretch.
-    /// A thrown probe stays unknown. The next turn may try again.
-    private func noteSteerAvailability() async {
+    /// Learn whether the current busy reader's remote host can carry a note.
+    /// Failed or canceled probes leave the next tick free to retry.
+    private func noteSteerAvailability(permitsPublication: () -> Bool = { true }) async {
         if !busy {
             steerProbeStarted = false
+            steerProbeTicket = nil
+            steerProbeOwner = nil
             return
         }
-        guard let peer, !peer.isEmpty, remoteSteer == nil, !steerProbeStarted else { return }
+        guard !Task.isCancelled, permitsPublication(), let owner = pollingIdentity,
+              let peer, !peer.isEmpty, remoteSteer == nil, !steerProbeStarted else { return }
+        let ticket = UUID()
+        steerProbeTicket = ticket
+        steerProbeOwner = owner
         steerProbeStarted = true
+        defer {
+            if steerProbeTicket == ticket {
+                steerProbeTicket = nil
+                steerProbeOwner = nil
+                steerProbeStarted = false
+            }
+        }
         let asked = peer
         let version = try? await Bridge.peerProtocolVersion(asked)
-        guard self.peer == asked else { return }
+        guard steerProbeTicket == ticket, pollIsCurrent(owner), permitsPublication(), self.peer == asked else { return }
         if let version {
             remoteSteer = version >= RemoteHostFeature.steer.minimumProtocol
         }
@@ -3440,7 +3568,7 @@ final class ChatModel {
             let page = try await Bridge.chatEventPage(
                 id: id, cursor: nil, limit: ChatPaging.openPageEvents, peer: peer
             )
-            guard selectionMatches(id: id, generation: generation), requestedEpoch == eventsEpoch else { return false }
+            guard !Task.isCancelled, selectionMatches(id: id, generation: generation), requestedEpoch == eventsEpoch else { return false }
             if let requestedRevision { contextRevision = max(contextRevision ?? 0, requestedRevision) }
             guard await publishEvents(id: id, generation: generation,
                 canPublish: { requestedEpoch == self.eventsEpoch }, rebasesWindow: false, transform: { _ in page.events }) else { return false }
@@ -3462,7 +3590,7 @@ final class ChatModel {
             warmMarkdown()
             settleNotifications()
             keepOfflineCopy(id: id, title: selected?.title, page: page, sendRevision: requestedRevision)
-            await loadResponseAttachments(id: id, generation: generation)
+            scheduleResponseAttachments(id: id, generation: generation)
             return true
         } catch {
             guard !Task.isCancelled, selectionMatches(id: id, generation: generation),
@@ -3553,7 +3681,7 @@ final class ChatModel {
             } else if !hasEarlier {
                 reachedStart = true
             }
-            await loadResponseAttachments(id: id, generation: generation)
+            scheduleResponseAttachments(id: id, generation: generation)
         } catch {
             if !Task.isCancelled, selectionMatches(id: id, generation: generation),
                requestedEpoch == eventsEpoch, isUnknownMethod(error) {
@@ -3575,7 +3703,8 @@ final class ChatModel {
     }
 
     @discardableResult
-    private func loadEvents(id: String, reset: Bool, generation: UInt64, quiet: Bool = false) async -> Bool {
+    private func loadEvents(id: String, reset: Bool, generation: UInt64, quiet: Bool = false,
+                            onFreshEvents: (([ChatTimelineEvent]) -> Void)? = nil) async -> Bool {
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return false }
         guard reset || windowReplacementTicket == nil else { return false }
         let replacement = reset ? beginWindowReplacement() : nil
@@ -3586,7 +3715,7 @@ final class ChatModel {
         let requestedCursor = reset ? nil : tailCursor
         do {
             let chunk = try await Bridge.chatEvents(id: id, offset: requestedOffset, tailCursor: requestedCursor, peer: peer)
-            guard selectionMatches(id: id, generation: generation), requestedEpoch == eventsEpoch else { return false }
+            guard !Task.isCancelled, selectionMatches(id: id, generation: generation), requestedEpoch == eventsEpoch else { return false }
             guard reset || (requestedOffset == offset && requestedCursor == tailCursor) else { return false }
             if chunk.reset {
                 let opened = await openEvents(id: id, generation: generation, quiet: quiet)
@@ -3607,9 +3736,10 @@ final class ChatModel {
             // running turn arrive between records rather than on one.
             if !reset, chunk.events.isEmpty, chunk.nextOffset == offset {
                 tailCursor = chunk.tailCursor
-                await loadResponseAttachments(id: id, generation: generation)
+                scheduleResponseAttachments(id: id, generation: generation)
                 return true
             }
+            if !reset { onFreshEvents?(chunk.events) }
             if reset {
                 guard await publishEvents(id: id, generation: generation,
                     canPublish: { requestedEpoch == self.eventsEpoch }, rebasesWindow: false, transform: { _ in chunk.events }) else { return false }
@@ -3637,7 +3767,7 @@ final class ChatModel {
             offset = chunk.nextOffset
             if let replacement { finishWindowReplacement(replacement) }
             settleNotifications()
-            await loadResponseAttachments(id: id, generation: generation)
+            scheduleResponseAttachments(id: id, generation: generation)
             return true
         } catch {
             // Background polls must not pop an error banner on an idle
@@ -3707,7 +3837,7 @@ final class ChatModel {
         settleNotifications()
         if let id = selected?.id {
             let generation = selectionGeneration
-            Task { await loadResponseAttachments(id: id, generation: generation) }
+            Task { scheduleResponseAttachments(id: id, generation: generation) }
         }
     }
 
@@ -3786,25 +3916,42 @@ final class ChatModel {
         )
     }
 
+    private func scheduleResponseAttachments(id: String, generation: UInt64) {
+        guard !Task.isCancelled, let reference = currentReference, selectionMatches(id: id, generation: generation),
+              responseAttachmentDescriptors.contains(where: { !attemptedResponseAttachments.contains($0.id) }) else { return }
+        let owner = PollOwner(reference: reference, generation: generation)
+        _ = attachmentPollLane.start(owner: owner) { [weak self] permitsPublication in
+            guard let self else { return }
+            while permitsPublication(), self.selectionMatches(id: id, generation: generation),
+                  self.currentReference == reference {
+                let revision = self.eventsRevision
+                await self.loadResponseAttachments(id: id, generation: generation)
+                if revision == self.eventsRevision { break }
+            }
+        }
+    }
+
+    /// Unchanged polls never walk the transcript again. Descriptors retain
+    /// attempted files so cancellation can retry without rebuilding the index.
+    private var responseAttachmentDescriptors: [ChatAttachment] {
+        if attachmentDescriptorRevision != eventsRevision {
+            attachmentDescriptors = events.compactMap { timeline in
+                guard let event = timeline.event, event.kind == "attachment", let id = event.id else { return nil }
+                return ChatAttachment(id: id, name: event.name ?? L10n.text("apple.chatmodel.attachment.040d2b36"),
+                                      mediaType: event.mediaType, size: event.size)
+            }
+            attachmentDescriptorRevision = eventsRevision
+        }
+        return attachmentDescriptors
+    }
+
     private func loadResponseAttachments(id: String, generation: UInt64) async {
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return }
-        let descriptors = events.compactMap { timeline -> ChatAttachment? in
-            guard let event = timeline.event,
-                  event.kind == "attachment",
-                  let attachmentID = event.id,
-                  !attemptedResponseAttachments.contains(attachmentID)
-            else { return nil }
-            return ChatAttachment(
-                id: attachmentID,
-                name: event.name ?? L10n.text("apple.chatmodel.attachment.040d2b36"),
-                mediaType: event.mediaType,
-                size: event.size
-            )
-        }
+        let descriptors = responseAttachmentDescriptors.filter { !attemptedResponseAttachments.contains($0.id) }
         // Keep background downloads bounded instead of fetching a whole page
         // of files concurrently. Navigation stops the remaining queue.
         for descriptor in descriptors {
-            guard selectionMatches(id: id, generation: generation) else { return }
+            guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return }
             await loadResponseAttachment(descriptor, id: id, generation: generation, userInitiated: false)
         }
     }
@@ -3826,21 +3973,22 @@ final class ChatModel {
         defer {
             if selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration {
                 loadingResponseAttachments.remove(attachment.id)
+                if Task.isCancelled { attemptedResponseAttachments.remove(attachment.id) }
             }
         }
         if let saved = await WorkSavedPreview.read(reference: previewReference, attachment: attachment.id) {
-            guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
+            guard !Task.isCancelled, selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
                   currentReference == previewReference, WorkCacheAccess.canRead(previewReference) else { return }
             responseAttachmentData[attachment.id] = saved
             return
         }
-        guard savedCopy == nil, selectionMatches(id: id, generation: generation),
+        guard !Task.isCancelled, savedCopy == nil, selectionMatches(id: id, generation: generation),
               memoryGeneration == attachmentCacheGeneration else { return }
         let cacheEpoch = await ChatAttachmentCache.shared.epoch()
-        guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
+        guard !Task.isCancelled, selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
                   currentReference == previewReference, WorkCacheAccess.canRead(previewReference) else { return }
         if let cached = await ChatAttachmentCache.shared.read(reference: previewReference, attachment: attachment.id) {
-            guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
+            guard !Task.isCancelled, selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
                   currentReference == previewReference, WorkCacheAccess.canRead(previewReference) else { return }
             responseAttachmentData[attachment.id] = cached
             if currentReference == previewReference, WorkCacheAccess.canSave(previewReference) {
@@ -3859,17 +4007,17 @@ final class ChatModel {
                   data.count <= ChatInbox.maxBytes else {
                 throw CocoaError(.fileReadCorruptFile)
             }
-            guard selectionMatches(id: id, generation: generation), currentReference == previewReference,
+            guard !Task.isCancelled, selectionMatches(id: id, generation: generation), currentReference == previewReference,
                   WorkCacheAccess.canSave(previewReference), memoryGeneration == attachmentCacheGeneration else { return }
             guard await ChatAttachmentCache.shared.write(data, reference: previewReference, attachment: attachment.id, epoch: cacheEpoch) else { return }
-            guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
+            guard !Task.isCancelled, selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
                   currentReference == previewReference, WorkCacheAccess.canRead(previewReference) else { return }
             responseAttachmentData[attachment.id] = data
             if currentReference == previewReference, WorkCacheAccess.canSave(previewReference) {
                 await WorkSavedPreview.save(reference: previewReference, attachment: attachment, data: data)
             }
         } catch {
-            guard selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
+            guard !Task.isCancelled, selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
                   currentReference == previewReference, WorkCacheAccess.canRead(previewReference) else { return }
             responseAttachmentErrors[attachment.id] = Self.downloadFailure(error)
         }
@@ -3916,12 +4064,13 @@ final class ChatModel {
         if selectionMatches(id: id, generation: generation) { instructionsLoaded = true }
     }
 
-    private func loadApprovals(id: String, generation: UInt64, quiet: Bool = false) async {
-        guard !Task.isCancelled, savedCopy == nil,
+    private func loadApprovals(id: String, generation: UInt64, quiet: Bool = false,
+                               permitsPublication: () -> Bool = { true }) async {
+        guard !Task.isCancelled, permitsPublication(), savedCopy == nil,
               selectionMatches(id: id, generation: generation) else { return }
         do {
             let loaded = try await Bridge.chatApprovals(id: id, peer: peer)
-            guard selectionMatches(id: id, generation: generation) else { return }
+            guard !Task.isCancelled, permitsPublication(), selectionMatches(id: id, generation: generation) else { return }
             // Unchanged approvals must not write back: the write redraws the
             // transcript, and this runs on every poll of a running turn.
             if approvals != loaded { approvals = loaded }
@@ -3930,7 +4079,7 @@ final class ChatModel {
         } catch {
             // A background poll must not pop an alert over an idle screen;
             // the rows keep the answers they already had.
-            if !quiet, selectionMatches(id: id, generation: generation) {
+            if !Task.isCancelled, permitsPublication(), !quiet, selectionMatches(id: id, generation: generation) {
                 self.error = error.localizedDescription
             }
         }
@@ -3947,6 +4096,10 @@ final class ChatModel {
             print("chat-selection model=\(ObjectIdentifier(self)) cause=\(reason) chat=\(selected?.id ?? "none") workspace=\(workspaceID ?? "none") generation=\(selectionGeneration)->\(selectionGeneration &+ 1) events=\(events.count)")
         }
         #endif
+        pollWatcher.cancel()
+        cancelPollReads()
+        attachmentPollLane.cancel()
+        cadenceOwner = nil
         displayMetadataTask?.cancel()
         selectionGeneration &+= 1
     }

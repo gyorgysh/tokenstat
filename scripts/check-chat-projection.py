@@ -131,7 +131,7 @@ func event(_ text: String, _ seq: UInt64) -> ChatTimelineEvent { .init(seq: seq,
 with tempfile.TemporaryDirectory() as directory:
     work = Path(directory)
     (work / 'Check.swift').write_text(swift)
-    subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '5', str(work / 'Check.swift'), '-o', str(work / 'check')], check=True)
+    subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '5', '-module-cache-path', str(work / 'ModuleCache'), str(work / 'Check.swift'), '-o', str(work / 'check')], check=True)
     subprocess.run([str(work / 'check')], check=True)
 # The actual application routes each nonempty mutation through publication.
 assert 'ChatDisplayItem.coalesce(events' not in source

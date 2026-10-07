@@ -235,6 +235,10 @@ jobs:
           python3 scripts/check-chat-projection.py
           python3 scripts/check-workspace-refresh.py
           python3 scripts/check-tunnel-recovery.py
+          python3 scripts/check-chat-polling.py
+          python3 scripts/check-watching-scope.py
+          python3 scripts/check-vault-scope.py
+          python3 scripts/check-ssh-workbench.py
 
       - name: Validate Apple widget signing rules
         run: |

@@ -66,5 +66,5 @@ enum Bridge {
 with tempfile.TemporaryDirectory() as directory:
     work = Path(directory)
     (work / 'Check.swift').write_text(swift)
-    subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '5', str(work / 'Check.swift'), str(root / 'apps/mac/Sources/Bridge/TunnelRecoveryFlights.swift'), '-o', str(work / 'check')], check=True)
+    subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '5', '-module-cache-path', str(work / 'ModuleCache'), str(work / 'Check.swift'), str(root / 'apps/mac/Sources/Bridge/TunnelRecoveryFlights.swift'), '-o', str(work / 'check')], check=True)
     subprocess.run([str(work / 'check')], check=True)

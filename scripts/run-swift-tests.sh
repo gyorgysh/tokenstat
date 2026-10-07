@@ -61,7 +61,7 @@ for test in "$tests"/*Tests.swift; do
     paths+=("$sources/Design/L10n.swift")
   fi
   echo "== $name"
-  if ! swiftc -parse-as-library -swift-version 5 -o "$work/$name" \
+  if ! swiftc -parse-as-library -swift-version 5 -module-cache-path "$work/ModuleCache" -o "$work/$name" \
       "$test" "${paths[@]}" 2> "$work/$name.log"; then
     echo "FAIL $name: did not compile" >&2
     sed 's/^/    /' "$work/$name.log" >&2

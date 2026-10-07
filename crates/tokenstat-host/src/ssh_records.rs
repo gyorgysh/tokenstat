@@ -343,10 +343,55 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
     })())
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HostTarget {
+    id: String,
+    hostname: String,
+    port: u16,
+    username: String,
+    #[serde(default)]
+    jump_host_id: Option<String>,
+    #[serde(default)]
+    host_keys: Vec<String>,
+}
+impl HostTarget {
+    fn find<'a>(&self, store: &'a mut Store) -> Result<&'a mut SshHost, String> {
+        let host = store
+            .hosts
+            .iter_mut()
+            .find(|host| host.id == self.id)
+            .ok_or("that host no longer exists")?;
+        if host.hostname != self.hostname
+            || host.port != self.port
+            || host.username != self.username
+            || host.jump_host_id != self.jump_host_id
+        {
+            return Err("the server address changed; connect using its current settings".into());
+        }
+        Ok(host)
+    }
+}
+#[derive(Deserialize)]
+struct ConnectedHost {
+    expected: HostTarget,
+}
+#[derive(Deserialize)]
+struct TrustedHost {
+    expected: HostTarget,
+    fingerprint: String,
+    #[serde(default, rename = "expectedJump")]
+    expected_jump: Option<HostTarget>,
+}
+
 fn call_inner(method: &str, params: &str) -> Result<Value, String> {
     let _guard = lock().lock().map_err(|e| e.to_string())?;
     let path = path()?;
-    let mut store = load_from(&path)?;
+    call_at(&path, method, params)
+}
+
+fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
+    let mut store = load_from(path)?;
     match method {
         "ssh.host.list" => serde_json::to_value(&store.hosts).map_err(|e| e.to_string()),
         "ssh.host.save" => {
@@ -378,6 +423,38 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
             upsert(&mut store.hosts, item.clone(), |x| &x.id);
             save_to(&path, &store)?;
             serde_json::to_value(item).map_err(|e| e.to_string())
+        }
+        "ssh.host.noteConnection" => {
+            let p: ConnectedHost = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            let host = p.expected.find(&mut store)?;
+            host.last_connected_ms = Some(host.last_connected_ms.unwrap_or(0).max(now_ms()));
+            let fresh = host.clone();
+            // Recency is device-local bookkeeping, not a merge edit.
+            save_to(path, &store)?;
+            serde_json::to_value(fresh).map_err(|e| e.to_string())
+        }
+        "ssh.host.trust" => {
+            let p: TrustedHost = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            required(&p.fingerprint, "fingerprint")?;
+            match (&p.expected.jump_host_id, &p.expected_jump) {
+                (None, None) => {}
+                (Some(id), Some(jump)) if id == &jump.id => {
+                    let current = jump.find(&mut store)?;
+                    if current.host_keys != jump.host_keys {
+                        return Err("the jump host identity changed; verify the route again".into());
+                    }
+                }
+                _ => return Err("the jump host changed; verify the route again".into()),
+            }
+            let host = p.expected.find(&mut store)?;
+            if host.host_keys != p.expected.host_keys {
+                return Err("the trusted server identity changed; verify it again".into());
+            }
+            host.host_keys = vec![p.fingerprint];
+            host.updated_ms = now_ms();
+            let fresh = host.clone();
+            save_to(path, &store)?;
+            serde_json::to_value(fresh).map_err(|e| e.to_string())
         }
         "ssh.host.delete" => {
             let removed = remove(&mut store.hosts, params, |x| &x.id)?;
@@ -847,6 +924,136 @@ mod tests {
             std::process::id(),
             SEQ.fetch_add(1, Ordering::Relaxed)
         ))
+    }
+
+    #[test]
+    fn connection_bookkeeping_and_trust_merge_fresh_records_and_reject_retargeting() {
+        let _guard = lock().lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("connections.json");
+        let initial = SshHost {
+            id: "host-atomic".into(),
+            label: "old label".into(),
+            hostname: "a.example".into(),
+            username: "root".into(),
+            port: 22,
+            initial_directory: "~".into(),
+            updated_ms: 100,
+            ..Default::default()
+        };
+        let expected = serde_json::to_value(&initial).unwrap();
+        let mut fresh = initial.clone();
+        fresh.label = "edited while connection was pending".into();
+        fresh.color = Some("blue".into());
+        fresh.updated_ms = 200;
+        save_to(
+            &path,
+            &Store {
+                hosts: vec![fresh.clone()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let reply = call_at(
+            &path,
+            "ssh.host.noteConnection",
+            &json!({"expected":expected}).to_string(),
+        )
+        .unwrap();
+        assert_eq!(reply["label"], fresh.label);
+        assert_eq!(reply["updatedMs"], 200);
+        assert!(reply["lastConnectedMs"].as_i64().unwrap() > 0);
+        let trusted = call_at(
+            &path,
+            "ssh.host.trust",
+            &json!({"expected":expected,"fingerprint":"SHA256:fixture-a"}).to_string(),
+        )
+        .unwrap();
+        assert_eq!(trusted["label"], fresh.label);
+        assert_eq!(trusted["color"], "blue");
+        assert_eq!(trusted["hostKeys"], json!(["SHA256:fixture-a"]));
+        let before = fs::read(&path).unwrap();
+        assert!(
+            call_at(
+                &path,
+                "ssh.host.trust",
+                &json!({"expected":expected,"fingerprint":"SHA256:late"}).to_string()
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read(&path).unwrap(), before);
+        let mut changed = load_from(&path).unwrap();
+        changed.hosts[0].hostname = "b.example".into();
+        save_to(&path, &changed).unwrap();
+        let before = fs::read(&path).unwrap();
+        for method in ["ssh.host.noteConnection", "ssh.host.trust"] {
+            assert!(
+                call_at(
+                    &path,
+                    method,
+                    &json!({"expected":expected,"fingerprint":"SHA256:late"}).to_string()
+                )
+                .is_err()
+            );
+            assert_eq!(fs::read(&path).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn trust_pins_the_resolved_jump_host_under_the_record_lock() {
+        let _guard = lock().lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("connections.json");
+        let jump = SshHost {
+            id: "jump".into(),
+            hostname: "jump.example".into(),
+            username: "mock".into(),
+            port: 22,
+            host_keys: vec!["SHA256:mock-jump".into()],
+            ..Default::default()
+        };
+        let host = SshHost {
+            id: "target".into(),
+            hostname: "private.example".into(),
+            username: "mock".into(),
+            port: 22,
+            jump_host_id: Some(jump.id.clone()),
+            ..Default::default()
+        };
+        let params = json!({"expected":host,"expectedJump":jump,"fingerprint":"SHA256:mock-final"})
+            .to_string();
+        let base = Store {
+            hosts: vec![host.clone(), jump.clone()],
+            ..Default::default()
+        };
+        for change in 0..6 {
+            let mut fresh = base.clone();
+            match change {
+                0 => fresh.hosts[1].hostname = "other.example".into(),
+                1 => fresh.hosts[1].port = 2222,
+                2 => fresh.hosts[1].username = "other".into(),
+                3 => fresh.hosts[1].host_keys = vec!["SHA256:new".into()],
+                4 => {
+                    fresh.hosts.remove(1);
+                }
+                _ => fresh.hosts[0].jump_host_id = Some("other-jump".into()),
+            }
+            save_to(&path, &fresh).unwrap();
+            let before = fs::read(&path).unwrap();
+            assert!(call_at(&path, "ssh.host.trust", &params).is_err());
+            assert_eq!(fs::read(&path).unwrap(), before);
+        }
+        save_to(&path, &base).unwrap();
+        assert!(
+            call_at(
+                &path,
+                "ssh.host.trust",
+                &json!({"expected":host,"fingerprint":"SHA256:mock-final"}).to_string()
+            )
+            .is_err()
+        );
+        let trusted = call_at(&path, "ssh.host.trust", &params).unwrap();
+        assert_eq!(trusted["hostKeys"], json!(["SHA256:mock-final"]));
     }
 
     #[test]

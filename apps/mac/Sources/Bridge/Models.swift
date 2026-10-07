@@ -529,6 +529,8 @@ struct SSHKeyMaterial: Codable, Sendable, Hashable {
 }
 
 struct SSHVaultStatus: Codable, Sendable, Hashable {
+    /// An opaque helper session, used only for exact local retirement.
+    var vaultSession: String? = nil
     var created: Bool
     var recordCount: Int
     var enrolled: Bool?

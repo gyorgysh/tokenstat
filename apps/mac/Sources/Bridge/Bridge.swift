@@ -1044,9 +1044,11 @@ extension Bridge {
         _ method: String,
         _ params: [String: Any] = [:],
         patience: TimeInterval = Patience.standard,
+        expectedScope: WorkReference.Scope? = nil,
         as type: T.Type
     ) async throws -> T {
         let scope = await WorkSessionContext.shared.scope
+        if let expectedScope, scope != expectedScope { throw CancellationError() }
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         let owner = try scope.map { try encoder.encode($0) }
@@ -1101,23 +1103,25 @@ extension Bridge {
     /// ignored because the consequence of one is a notification that was not
     /// needed, and taking a chat screen down with an alert about a heartbeat
     /// would be the worse trade by a distance.
-    static func watching(conversationID: String, watcherID: String, peer: String? = nil) async {
+    static func watching(conversationID: String, watcherID: String, peer: String? = nil,
+                                  expectedScope: WorkReference.Scope? = nil) async {
         struct Ack: Codable, Sendable { var ok: Bool? }
         _ = try? await chatInvoke(
             peer: peer,
             "app.watching",
             ["conversationId": conversationID, "watcherId": watcherID],
-            as: Ack.self
+            expectedScope: expectedScope, as: Ack.self
         )
     }
 
-    static func stoppedWatching(conversationID: String, watcherID: String, peer: String? = nil) async {
+    static func stoppedWatching(conversationID: String, watcherID: String, peer: String? = nil,
+                                  expectedScope: WorkReference.Scope? = nil) async {
         struct Ack: Codable, Sendable { var ok: Bool? }
         _ = try? await chatInvoke(
             peer: peer,
             "app.stoppedWatching",
             ["conversationId": conversationID, "watcherId": watcherID],
-            as: Ack.self
+            expectedScope: expectedScope, as: Ack.self
         )
     }
 
@@ -3002,6 +3006,16 @@ extension Bridge {
         try await background("ssh.host.list", as: [SSHHost].self)
     }
 
+    static func noteSSHConnection(expected host: SSHHost) async throws -> SSHHost {
+        try await background("ssh.host.noteConnection", ["expected": try payload(host)], as: SSHHost.self)
+    }
+
+    static func trustSSHHost(expected host: SSHHost, fingerprint: String, expectedJump: SSHHost? = nil) async throws -> SSHHost {
+        var arguments: [String: Any] = ["expected": try payload(host), "fingerprint": fingerprint]
+        if let expectedJump { arguments["expectedJump"] = try payload(expectedJump) }
+        return try await background("ssh.host.trust", arguments, as: SSHHost.self)
+    }
+
     static func saveSSHHost(_ host: SSHHost) async throws -> SSHHost {
         try await background("ssh.host.save", try payload(host), as: SSHHost.self)
     }
@@ -3172,8 +3186,48 @@ extension Bridge {
         _ = try await background("account.registerMachine", [:], as: Registered.self)
     }
 
-    static func sshVaultStatus() async throws -> SSHVaultStatus {
-        try await background("ssh.vault.status", [:], as: SSHVaultStatus.self)
+    /// Every vault operation keeps its caller's account through queued Rust
+    /// dispatch and response publication. The host verifies the scope against
+    /// its captured credentials; a late A call cannot operate on B's vault.
+    private static func vaultInvoke<T: Decodable & Sendable>(
+        _ method: String,
+        _ params: [String: Any] = [:],
+        patience: TimeInterval = Patience.standard,
+        expectedScope: WorkReference.Scope? = nil,
+        expectedGeneration: UInt64? = nil,
+        as type: T.Type
+    ) async throws -> T {
+        try Task.checkCancellation()
+        let owner = try await captureVaultOwner(expectedScope: expectedScope, expectedGeneration: expectedGeneration)
+        let scope = owner.scope
+        var arguments = params
+        arguments["_accountScope"] = ["kind": scope.kind.rawValue, "origin": scope.origin, "identity": scope.identity]
+        let result: Result<T, Error>
+        do { result = .success(try await background(method, arguments, patience: patience, as: type)) }
+        catch { result = .failure(error) }
+        try Task.checkCancellation()
+        _ = try await captureVaultOwner(expectedScope: scope, expectedGeneration: owner.generation)
+        return try result.get()
+    }
+
+    @MainActor private static func captureVaultOwner(expectedScope: WorkReference.Scope?,
+        expectedGeneration: UInt64?) throws -> SSHOperationOwner.Ticket {
+        try Task.checkCancellation()
+        guard let scope = WorkSessionContext.shared.scope, scope.kind == .account,
+              expectedScope == nil || expectedScope == scope,
+              expectedGeneration == nil || expectedGeneration == WorkSessionContext.shared.generation else { throw CancellationError() }
+        return SSHOperationOwner.Ticket(scope: scope, generation: WorkSessionContext.shared.generation)
+    }
+
+    @MainActor private static func prepareVaultBiometrics(expectedScope: WorkReference.Scope?,
+        expectedGeneration: UInt64?) throws -> SSHOperationOwner.Ticket {
+        let owner = try captureVaultOwner(expectedScope: expectedScope, expectedGeneration: expectedGeneration)
+        try? SSHVaultBiometrics.remove()
+        return owner
+    }
+
+    static func sshVaultStatus(expectedScope: WorkReference.Scope? = nil, expectedGeneration: UInt64? = nil) async throws -> SSHVaultStatus {
+        try await vaultInvoke("ssh.vault.status", expectedScope: expectedScope, expectedGeneration: expectedGeneration, as: SSHVaultStatus.self)
     }
 
     static func importDigitalOcean(token: String, username: String) async throws -> SSHHostImport {
@@ -3452,50 +3506,61 @@ extension Bridge {
 
     /// Create the account's one vault behind a password. Returns the recovery
     /// code, which is shown once and is the way back if the password is lost.
-    static func createSSHVault(password: String, tier: String) async throws -> SSHVaultRecovery {
-        try await background("ssh.vault.create", ["password": password, "tier": tier], patience: Patience.standard, as: SSHVaultRecovery.self)
+    static func createSSHVault(password: String, tier: String, expectedScope: WorkReference.Scope? = nil, expectedGeneration: UInt64? = nil) async throws -> SSHVaultRecovery {
+        try await vaultInvoke("ssh.vault.create", ["password": password, "tier": tier], patience: Patience.standard, expectedScope: expectedScope, expectedGeneration: expectedGeneration, as: SSHVaultRecovery.self)
     }
 
     /// Open the vault with the password, or with the recovery code.
-    static func unlockSSHVault(password: String = "", recovery: String = "", tier: String) async throws -> SSHVaultUnlock {
-        try await background("ssh.vault.unlock", ["password": password, "recovery": recovery, "tier": tier, "migrate": true], patience: Patience.standard, as: SSHVaultUnlock.self)
+    static func unlockSSHVault(password: String = "", recovery: String = "", tier: String, expectedScope: WorkReference.Scope? = nil, expectedGeneration: UInt64? = nil) async throws -> SSHVaultUnlock {
+        try await vaultInvoke("ssh.vault.unlock", ["password": password, "recovery": recovery, "tier": tier, "migrate": true], patience: Patience.standard, expectedScope: expectedScope, expectedGeneration: expectedGeneration, as: SSHVaultUnlock.self)
     }
 
     /// Change the password, or set one after proving the recovery code. A reset
     /// answers with a fresh recovery code, because it retires the one spent.
-    static func setSSHVaultPassword(current: String = "", recovery: String = "", newPassword: String) async throws -> SSHVaultPasswordChange {
+    static func setSSHVaultPassword(current: String = "", recovery: String = "", newPassword: String, expectedScope: WorkReference.Scope? = nil, expectedGeneration: UInt64? = nil) async throws -> SSHVaultPasswordChange {
         // Best effort, as in signOut: the password change must not fail
         // because a stale biometric entry could not be deleted.
-        try? SSHVaultBiometrics.remove()
-        return try await background("ssh.vault.password.set", ["password": current, "recovery": recovery, "newPassword": newPassword], patience: Patience.standard, as: SSHVaultPasswordChange.self)
+        let owner = try await prepareVaultBiometrics(expectedScope: expectedScope, expectedGeneration: expectedGeneration)
+        return try await vaultInvoke("ssh.vault.password.set", ["password": current, "recovery": recovery, "newPassword": newPassword], patience: Patience.standard, expectedScope: owner.scope, expectedGeneration: owner.generation, as: SSHVaultPasswordChange.self)
     }
 
-    static func lockSSHVault() async throws {
+    static func lockSSHVault(expectedScope: WorkReference.Scope? = nil, expectedGeneration: UInt64? = nil) async throws {
         struct Locked: Codable, Sendable { var locked: Bool }
-        _ = try await background("ssh.vault.lock", [:], as: Locked.self)
+        _ = try await vaultInvoke("ssh.vault.lock", [:], expectedScope: expectedScope, expectedGeneration: expectedGeneration, as: Locked.self)
     }
 
-    static func resetSSHVault() async throws {
+    /// Retirement is allowed after the account has left. The helper compares
+    /// the old verified scope and exact session ID; a successor stays open.
+    static func retireSSHVault(scope: WorkReference.Scope, sessionID: String) async {
+        guard scope.kind == .account, !sessionID.isEmpty else { return }
+        struct Locked: Codable, Sendable { var locked: Bool }
+        _ = try? await background("ssh.vault.retire", [
+            "_accountScope": ["kind": scope.kind.rawValue, "origin": scope.origin, "identity": scope.identity],
+            "_vaultSession": sessionID,
+        ], patience: Patience.interactive, as: Locked.self)
+    }
+
+    static func resetSSHVault(expectedScope: WorkReference.Scope? = nil, expectedGeneration: UInt64? = nil) async throws {
         // Best effort, as in signOut: vault deletion must not abort because
         // the biometric entry was already gone.
-        try? SSHVaultBiometrics.remove()
-        _ = try await background("ssh.vault.reset", [:], as: SSHVaultReset.self)
+        let owner = try await prepareVaultBiometrics(expectedScope: expectedScope, expectedGeneration: expectedGeneration)
+        _ = try await vaultInvoke("ssh.vault.reset", [:], expectedScope: owner.scope, expectedGeneration: owner.generation, as: SSHVaultReset.self)
     }
 
-    static func rotateSSHVaultRecovery(password: String) async throws -> SSHVaultRecovery {
-        try await background("ssh.vault.recovery.rotate", ["password": password], as: SSHVaultRecovery.self)
+    static func rotateSSHVaultRecovery(password: String, expectedScope: WorkReference.Scope? = nil, expectedGeneration: UInt64? = nil) async throws -> SSHVaultRecovery {
+        try await vaultInvoke("ssh.vault.recovery.rotate", ["password": password], expectedScope: expectedScope, expectedGeneration: expectedGeneration, as: SSHVaultRecovery.self)
     }
 
-    static func sshVaultRecords(recovery: String, tier: String) async throws -> [SSHVaultRecord] {
-        try await background("ssh.vault.record.list", ["recovery": recovery, "tier": tier], as: SSHVaultRecords.self).records
+    static func sshVaultRecords(recovery: String, tier: String, expectedScope: WorkReference.Scope? = nil, expectedGeneration: UInt64? = nil) async throws -> [SSHVaultRecord] {
+        try await vaultInvoke("ssh.vault.record.list", ["recovery": recovery, "tier": tier], expectedScope: expectedScope, expectedGeneration: expectedGeneration, as: SSHVaultRecords.self).records
     }
 
-    static func putSSHVaultRecord(id: String, plaintext: String, recovery: String = "", tier: String) async throws -> SSHVaultPut {
-        try await background("ssh.vault.record.put", ["id": id, "plaintext": plaintext, "recovery": recovery, "tier": tier], as: SSHVaultPut.self)
+    static func putSSHVaultRecord(id: String, plaintext: String, recovery: String = "", tier: String, expectedScope: WorkReference.Scope? = nil, expectedGeneration: UInt64? = nil) async throws -> SSHVaultPut {
+        try await vaultInvoke("ssh.vault.record.put", ["id": id, "plaintext": plaintext, "recovery": recovery, "tier": tier], expectedScope: expectedScope, expectedGeneration: expectedGeneration, as: SSHVaultPut.self)
     }
 
-    static func deleteSSHVaultRecord(id: String, recovery: String = "") async throws -> SSHVaultDelete {
-        try await background("ssh.vault.record.delete", ["id": id, "recovery": recovery], as: SSHVaultDelete.self)
+    static func deleteSSHVaultRecord(id: String, recovery: String = "", expectedScope: WorkReference.Scope? = nil, expectedGeneration: UInt64? = nil) async throws -> SSHVaultDelete {
+        try await vaultInvoke("ssh.vault.record.delete", ["id": id, "recovery": recovery], expectedScope: expectedScope, expectedGeneration: expectedGeneration, as: SSHVaultDelete.self)
     }
 
     static func openSSHWithKey(

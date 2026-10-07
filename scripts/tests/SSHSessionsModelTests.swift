@@ -109,7 +109,28 @@ enum TerminalSplitLayout: String { case single, side, stacked; var isSplit: Bool
         await foregroundReplacement()
         await closeRetry()
         await pausedStartupProgress()
+        await ownerChangesBeforeRootRerenders()
         print("SSH sessions: selection, shared reads, connection/close races, retired readers and startup ownership passed")
+    }
+
+    @MainActor static func ownerChangesBeforeRootRerenders() async {
+        var owned = true
+        let model = SSHSessionsModel(isOwnerCurrent: { owned })
+        let terminal = SSHLiveTerminal(id: "owned", hostID: "host")
+        model.adopt(terminal)
+        Bridge.hold = true
+        let read = Task { await model.reconcile() }
+        await waitForRead()
+        owned = false
+        Bridge.answer([SSHSummary(id: "stale-owner", hostID: "host")])
+        let accepted = await read.value
+        check(!accepted && model.sessions.count == 1 && terminal.alive)
+        let late = SSHLiveTerminal(id: "late-owner", hostID: "host")
+        check(model.adopt(late) == nil && late.detaches == 1 && late.stops == 0)
+        let closed = await model.close(terminal)
+        check(!closed && terminal.stops == 0)
+        model.deactivate()
+        check(terminal.detaches == 1 && terminal.stops == 0)
     }
 
     @MainActor static func waitForRead() async {

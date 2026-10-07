@@ -200,17 +200,27 @@ struct SSHHostEditor: View {
     let folderID: String?
     let onDone: () -> Void
 
-    @State private var host = SSHHost(
-        id: "", label: "", hostname: "", port: 22, username: "root",
-        initialDirectory: "~", credentialID: nil, jumpHostID: nil,
-        tags: [], provider: nil, hostKeys: []
-    )
-    @State private var loaded = false
-    @State private var working = false
-    @State private var error: String?
-    @State private var confirmingDelete = false
-    @State private var newEnvName = ""
-    @State private var newEnvValue = ""
+    @Bindable private var draft: SSHHostDraft
+    init(model: SSHLibraryModel, hostID: String?, folderID: String?, onDone: @escaping () -> Void) {
+        self.model = model; self.onDone = onDone
+        self.hostID = hostID; self.folderID = folderID
+        self.draft = model.drafts.draft(for: hostID.map(SSHLibraryRoute.host) ?? .newHost(folder: folderID), make: SSHHostDraft.init)
+    }
+    private var host: SSHHost { get { draft.host } nonmutating set { draft.host = newValue } }
+    private var loaded: Bool { get { draft.loaded } nonmutating set { draft.loaded = newValue } }
+    private var working: Bool { get { draft.working } nonmutating set { draft.working = newValue } }
+    private var error: String? { get { draft.error } nonmutating set { draft.error = newValue } }
+    private var confirmingDelete: Bool { get { draft.confirmingDelete } nonmutating set { draft.confirmingDelete = newValue } }
+    private var newEnvName: String { get { draft.newEnvName } nonmutating set { draft.newEnvName = newValue } }
+    private var newEnvValue: String { get { draft.newEnvValue } nonmutating set { draft.newEnvValue = newValue } }
+
+    private func claim() -> SSHOperationOwner.Ticket? {
+        guard draft.active else { return nil }
+        return model.ownership.claim()
+    }
+    private func permits(_ owner: SSHOperationOwner.Ticket) -> Bool {
+        draft.active && model.ownership.permits(owner)
+    }
 
     private var isNew: Bool { hostID == nil }
 
@@ -218,6 +228,8 @@ struct SSHHostEditor: View {
     /// `Environment.dismiss` would close the window. On the phone, `onDone`
     /// already pops the pushed screen by clearing the route.
     private func finish() {
+        guard claim() != nil else { return }
+        model.drafts.remove(hostID.map(SSHLibraryRoute.host) ?? .newHost(folder: folderID))
         onDone()
     }
 
@@ -229,16 +241,16 @@ struct SSHHostEditor: View {
                 }
                 SSHEditorSection(title: L10n.text("apple.sshlibraryeditors.connection.639a40e8")) {
                     SSHEditorField(label: L10n.text("apple.sshlibraryeditors.name.dcd1d522")) {
-                        TextField(L10n.text("apple.sshlibraryeditors.name.dcd1d522"), text: $host.label).textFieldStyle(.themed)
+                        TextField(L10n.text("apple.sshlibraryeditors.name.dcd1d522"), text: $draft.host.label).textFieldStyle(.themed)
                     }
                     SSHEditorField(label: L10n.text("apple.sshlibraryeditors.address.56ef8f20")) {
-                        TextField(L10n.text("apple.sshlibraryeditors.address.56ef8f20"), text: $host.hostname).textFieldStyle(.themed)
+                        TextField(L10n.text("apple.sshlibraryeditors.address.56ef8f20"), text: $draft.host.hostname).textFieldStyle(.themed)
                     }
                     SSHEditorField(label: L10n.text("apple.sshlibraryeditors.username.e3b89e9d")) {
-                        TextField(L10n.text("apple.sshlibraryeditors.username.e3b89e9d"), text: $host.username).textFieldStyle(.themed)
+                        TextField(L10n.text("apple.sshlibraryeditors.username.e3b89e9d"), text: $draft.host.username).textFieldStyle(.themed)
                     }
                     SSHEditorField(label: L10n.text("apple.sshlibraryeditors.port.72e9a59f")) {
-                        TextField(L10n.text("apple.sshlibraryeditors.port.72e9a59f"), value: $host.port, format: .number)
+                        TextField(L10n.text("apple.sshlibraryeditors.port.72e9a59f"), value: $draft.host.port, format: .number)
                             .textFieldStyle(.themed)
                             .frame(maxWidth: 100)
                     }
@@ -274,7 +286,7 @@ struct SSHHostEditor: View {
                             ForEach(model.hosts.filter { $0.id != host.id }) { Text($0.label).tag($0.id) }
                         }
                     }
-                    Toggle(L10n.text("apple.sshlibraryeditors.forward_the_ssh_agent.9a9a736c"), isOn: $host.agentForwarding)
+                    Toggle(L10n.text("apple.sshlibraryeditors.forward_the_ssh_agent.9a9a736c"), isOn: $draft.host.agentForwarding)
                         .toggleStyle(.brandCheckbox)
 
                     SSHEditorNote(text: L10n.text("apple.sshlibraryeditors.passwords_are_asked_for_when_you_connect_a.786d5eb5"))
@@ -290,8 +302,8 @@ struct SSHHostEditor: View {
                             ForEach(model.folders) { Text($0.name).tag($0.id) }
                         }
                     }
-                    SSHColorPicker(selection: $host.color)
-                    Toggle(L10n.text("apple.sshlibraryeditors.favourite.e39b2499"), isOn: $host.favorite)
+                    SSHColorPicker(selection: $draft.host.color)
+                    Toggle(L10n.text("apple.sshlibraryeditors.favourite.e39b2499"), isOn: $draft.host.favorite)
                         .toggleStyle(.brandCheckbox)
 
                 }
@@ -299,7 +311,7 @@ struct SSHHostEditor: View {
                 SSHEditorSection(title: L10n.text("apple.sshlibraryeditors.advanced.9f088dbe")) {
                     Stepper(
                         keepaliveLabel,
-                        value: $host.keepaliveSeconds,
+                        value: $draft.host.keepaliveSeconds,
                         in: 0...300,
                         step: 15
                     )
@@ -334,7 +346,7 @@ struct SSHHostEditor: View {
         }
         .navigationTitle(isNew ? L10n.text("apple.sshlibraryeditors.add_server.1099b2a9") : host.label)
         .task {
-            guard !loaded else { return }
+            guard claim() != nil, !loaded else { return }
             loaded = true
             if let hostID, let existing = model.hosts.first(where: { $0.id == hostID }) {
                 host = existing
@@ -342,7 +354,7 @@ struct SSHHostEditor: View {
                 host.folderID = folderID
             }
         }
-        .confirmationDialog(L10n.text("apple.sshlibraryeditors.delete_this_server.c1a65300"), isPresented: $confirmingDelete, titleVisibility: .visible) {
+        .confirmationDialog(L10n.text("apple.sshlibraryeditors.delete_this_server.c1a65300"), isPresented: $draft.confirmingDelete, titleVisibility: .visible) {
             Button(L10n.text("common.delete"), role: .destructive) {
                 // Leave first, then delete. The delete reloads the list,
                 // and a detail view still bound to the record that just left
@@ -377,8 +389,8 @@ struct SSHHostEditor: View {
             }
         }
         HStack(spacing: Theme.Space.s) {
-            TextField(L10n.text("apple.sshlibraryeditors.variable.e57e9987"), text: $newEnvName)
-            TextField(L10n.text("apple.sshlibraryeditors.value.8e37953d"), text: $newEnvValue)
+            TextField(L10n.text("apple.sshlibraryeditors.variable.e57e9987"), text: $draft.newEnvName)
+            TextField(L10n.text("apple.sshlibraryeditors.value.8e37953d"), text: $draft.newEnvValue)
             Button(L10n.text("common.add"), .create) {
                 let name = newEnvName.trimmingCharacters(in: .whitespaces)
                 guard !name.isEmpty else { return }
@@ -393,10 +405,13 @@ struct SSHHostEditor: View {
     }
 
     private func save() async {
+        guard let owner = claim(), !working else { return }
         working = true
-        defer { working = false }
+        defer { if permits(owner) { working = false } }
         if host.initialDirectory?.isEmpty != false { host.initialDirectory = "~" }
-        if await model.save(host: host) != nil {
+        let saved = await model.save(host: host)
+        guard permits(owner) else { return }
+        if saved != nil {
             finish()
         } else {
             error = model.error
@@ -440,16 +455,30 @@ struct SSHKeyEditor: View {
     let keyID: String?
     let onDone: () -> Void
 
-    @State private var label = L10n.text("apple.sshlibraryeditors.my_ssh_key.127c1dd4")
-    @State private var pem = ""
-    @State private var passphrase = ""
-    @State private var record: SSHKeyRecord?
-    @State private var loaded = false
-    @State private var working = false
-    @State private var error: String?
-    @State private var copied = false
-    @State private var confirmingDelete = false
-    @State private var algorithm = SSHKeyAlgorithm.ed25519
+    @Bindable private var draft: SSHKeyDraft
+    init(model: SSHLibraryModel, keyID: String?, onDone: @escaping () -> Void) {
+        self.model = model; self.onDone = onDone
+        self.keyID = keyID
+        self.draft = model.drafts.draft(for: keyID.map(SSHLibraryRoute.key) ?? .newKey, make: SSHKeyDraft.init)
+    }
+    private var label: String { get { draft.label } nonmutating set { draft.label = newValue } }
+    private var pem: String { get { draft.pem } nonmutating set { draft.pem = newValue } }
+    private var passphrase: String { get { draft.passphrase } nonmutating set { draft.passphrase = newValue } }
+    private var record: SSHKeyRecord? { get { draft.record } nonmutating set { draft.record = newValue } }
+    private var loaded: Bool { get { draft.loaded } nonmutating set { draft.loaded = newValue } }
+    private var working: Bool { get { draft.working } nonmutating set { draft.working = newValue } }
+    private var error: String? { get { draft.error } nonmutating set { draft.error = newValue } }
+    private var copied: Bool { get { draft.copied } nonmutating set { draft.copied = newValue } }
+    private var confirmingDelete: Bool { get { draft.confirmingDelete } nonmutating set { draft.confirmingDelete = newValue } }
+    private var algorithm: SSHKeyAlgorithm { get { draft.algorithm } nonmutating set { draft.algorithm = newValue } }
+
+    private func claim() -> SSHOperationOwner.Ticket? {
+        guard draft.active else { return nil }
+        return model.ownership.claim()
+    }
+    private func permits(_ owner: SSHOperationOwner.Ticket) -> Bool {
+        draft.active && model.ownership.permits(owner)
+    }
 
     private var isNew: Bool { keyID == nil }
 
@@ -457,6 +486,8 @@ struct SSHKeyEditor: View {
     /// `Environment.dismiss` would close the window. On the phone, `onDone`
     /// already pops the pushed screen by clearing the route.
     private func finish() {
+        guard claim() != nil else { return }
+        model.drafts.remove(keyID.map(SSHLibraryRoute.key) ?? .newKey)
         onDone()
     }
 
@@ -468,7 +499,7 @@ struct SSHKeyEditor: View {
                 }
                 SSHEditorSection(title: L10n.text("apple.sshlibraryeditors.key.99a52df3")) {
                     SSHEditorField(label: L10n.text("apple.sshlibraryeditors.name.dcd1d522")) {
-                        TextField(L10n.text("apple.sshlibraryeditors.name.dcd1d522"), text: $label).textFieldStyle(.themed)
+                        TextField(L10n.text("apple.sshlibraryeditors.name.dcd1d522"), text: $draft.label).textFieldStyle(.themed)
                     }
                     if let record {
                         SSHEditorField(label: L10n.text("apple.sshlibraryeditors.algorithm.d704d8af")) {
@@ -510,7 +541,7 @@ struct SSHKeyEditor: View {
                         SSHEditorField(label: L10n.text("apple.sshlibraryeditors.new_key_type.2ea9dfe1")) {
                             AppMenuPicker(options: SSHKeyAlgorithm.allCases.filter {
                                 $0 != .ecdsaP256TouchID || SSHVaultBiometrics.name == "Touch ID"
-                            }.map { (value: $0, label: $0.label) }, selection: $algorithm)
+                            }.map { (value: $0, label: $0.label) }, selection: $draft.algorithm)
                         }
                         SSHEditorNote(text: algorithm.explanation)
                         #if os(macOS)
@@ -521,9 +552,9 @@ struct SSHKeyEditor: View {
                         Button(L10n.text("apple.sshlibraryeditors.generate_key.3dbb721a"), .create) { Task { await generate() } }
                             .buttonStyle(AccentButtonStyle())
                         SSHEditorNote(text: L10n.text("apple.sshlibraryeditors.or_import_an_existing_private_key_below_th.d754e12b"))
-                        ThemedEditor(text: $pem, font: Theme.mono(11), minHeight: 160)
+                        ThemedEditor(text: $draft.pem, font: Theme.mono(11), minHeight: 160)
                         SSHEditorField(label: L10n.text("apple.sshlibraryeditors.private_key_passphrase_if_it_has_one.948cec1e")) {
-                            SecureField(L10n.text("apple.sshlibraryeditors.passphrase.e7611f05"), text: $passphrase).themedFieldBox()
+                            SecureField(L10n.text("apple.sshlibraryeditors.passphrase.e7611f05"), text: $draft.passphrase).themedFieldBox()
                         }
                         HStack(spacing: Theme.Space.s) {
                             Button(L10n.text("apple.sshlibraryeditors.import_pasted_key.92d28e76"), .upload) { Task { await importPasted() } }
@@ -544,14 +575,14 @@ struct SSHKeyEditor: View {
         }
         .navigationTitle(isNew ? L10n.text("apple.sshlibraryeditors.add_key.12626d65") : label)
         .task {
-            guard !loaded else { return }
+            guard claim() != nil, !loaded else { return }
             loaded = true
             if let keyID, let existing = model.keys.first(where: { $0.id == keyID }) {
                 record = existing
                 label = existing.label
             }
         }
-        .confirmationDialog(L10n.text("apple.sshlibraryeditors.delete_this_key.a5c8994b"), isPresented: $confirmingDelete, titleVisibility: .visible) {
+        .confirmationDialog(L10n.text("apple.sshlibraryeditors.delete_this_key.a5c8994b"), isPresented: $draft.confirmingDelete, titleVisibility: .visible) {
             Button(L10n.text("common.delete"), role: .destructive) {
                 let doomed = record
                 finish()
@@ -564,43 +595,50 @@ struct SSHKeyEditor: View {
     }
 
     private func generate() async {
+        guard let owner = claim(), !working else { return }
         guard !working else { return }
         let requestedAlgorithm = algorithm
         working = true
-        defer { working = false }
+        defer { if permits(owner) { working = false } }
         do {
             let material: SSHKeyMaterial
             switch requestedAlgorithm {
             case .ed25519:
                 material = try await Bridge.generateSSHKey()
+                guard permits(owner) else { return }
             case .ecdsaP256, .ecdsaP256TouchID:
                 let pem = await Task.detached { SSHKeyAlgorithm.makeP256PEM() }.value
+                guard permits(owner) else { return }
                 material = try await Bridge.inspectSSHKey(pem: pem, passphrase: nil)
+                guard permits(owner) else { return }
             }
             await keep(material, protected: false, biometric: requestedAlgorithm == .ecdsaP256TouchID)
         }
-        catch { self.error = error.localizedDescription }
+        catch { if permits(owner) { self.error = error.localizedDescription } }
     }
 
     private func importPasted() async {
+        guard let owner = claim(), !working else { return }
         guard !working else { return }
         let requestedPassphrase = passphrase
         working = true
-        defer { working = false }
+        defer { if permits(owner) { working = false } }
         do {
             let material = try await Bridge.inspectSSHKey(
                 pem: pem, passphrase: requestedPassphrase.isEmpty ? nil : requestedPassphrase
             )
+            guard permits(owner) else { return }
             await keep(material, protected: !requestedPassphrase.isEmpty)
-        } catch { self.error = error.localizedDescription }
+        } catch { if permits(owner) { self.error = error.localizedDescription } }
     }
 
     private func keep(_ material: SSHKeyMaterial, protected: Bool, biometric: Bool = false) async {
+        guard let owner = claim() else { return }
         do {
             let id = "key_\(UUID().uuidString)"
-            let reference = try await Task.detached {
-                try SSHSecretStore.store(material.privateKey, id: id, biometric: biometric)
-            }.value
+            // The store and ownership check are one actor turn. A detached
+            // store could import a key after this editor's account retired.
+            let reference = try SSHSecretStore.store(material.privateKey, id: id, biometric: biometric)
             let key = SSHKeyRecord(
                 id: id, label: label, algorithm: material.algorithm,
                 publicKey: material.publicKey, secretRef: reference,
@@ -608,24 +646,29 @@ struct SSHKeyEditor: View {
                 createdMs: Int64(Date().timeIntervalSince1970 * 1000),
                 passphraseProtected: protected
             )
-            if let saved = await model.save(key: key, privateKey: material.privateKey) {
+            let saved = await model.save(key: key, privateKey: material.privateKey,
+                onLocalFailure: { SSHSecretStore.delete(reference: reference) })
+            guard permits(owner) else { return }
+            if let saved {
                 record = saved
                 pem = ""
                 passphrase = ""
             } else {
-                SSHSecretStore.delete(reference: reference)
                 error = model.error
                 model.error = nil
             }
-        } catch { self.error = error.localizedDescription }
+        } catch { if permits(owner) { self.error = error.localizedDescription } }
     }
 
     private func rename() async {
+        guard let owner = claim(), !working else { return }
         guard var record else { return }
         working = true
-        defer { working = false }
+        defer { if permits(owner) { working = false } }
         record.label = label
-        if await model.save(key: record, privateKey: nil) != nil {
+        let saved = await model.save(key: record, privateKey: nil)
+        guard permits(owner) else { return }
+        if saved != nil {
             finish()
         } else {
             error = model.error
@@ -650,11 +693,25 @@ struct SSHSnippetEditor: View {
     let snippetID: String?
     let onDone: () -> Void
 
-    @State private var snippet = SSHSnippet(id: "", title: "", command: "", tags: [], hostIDs: [])
-    @State private var loaded = false
-    @State private var working = false
-    @State private var error: String?
-    @State private var confirmingDelete = false
+    @Bindable private var draft: SSHSnippetDraft
+    init(model: SSHLibraryModel, snippetID: String?, onDone: @escaping () -> Void) {
+        self.model = model; self.onDone = onDone
+        self.snippetID = snippetID
+        self.draft = model.drafts.draft(for: snippetID.map(SSHLibraryRoute.snippet) ?? .newSnippet, make: SSHSnippetDraft.init)
+    }
+    private var snippet: SSHSnippet { get { draft.snippet } nonmutating set { draft.snippet = newValue } }
+    private var loaded: Bool { get { draft.loaded } nonmutating set { draft.loaded = newValue } }
+    private var working: Bool { get { draft.working } nonmutating set { draft.working = newValue } }
+    private var error: String? { get { draft.error } nonmutating set { draft.error = newValue } }
+    private var confirmingDelete: Bool { get { draft.confirmingDelete } nonmutating set { draft.confirmingDelete = newValue } }
+
+    private func claim() -> SSHOperationOwner.Ticket? {
+        guard draft.active else { return nil }
+        return model.ownership.claim()
+    }
+    private func permits(_ owner: SSHOperationOwner.Ticket) -> Bool {
+        draft.active && model.ownership.permits(owner)
+    }
 
     private var isNew: Bool { snippetID == nil }
 
@@ -662,6 +719,8 @@ struct SSHSnippetEditor: View {
     /// `Environment.dismiss` would close the window. On the phone, `onDone`
     /// already pops the pushed screen by clearing the route.
     private func finish() {
+        guard claim() != nil else { return }
+        model.drafts.remove(snippetID.map(SSHLibraryRoute.snippet) ?? .newSnippet)
         onDone()
     }
 
@@ -684,7 +743,7 @@ struct SSHSnippetEditor: View {
             // wrong until a different destination remounted the column. A
             // scroll view answers the same demand by scrolling.
             SSHEditorBody(working: working) {
-                TextField(L10n.text("apple.sshlibraryeditors.name.dcd1d522"), text: $snippet.title)
+                TextField(L10n.text("apple.sshlibraryeditors.name.dcd1d522"), text: $draft.snippet.title)
                     .textFieldStyle(.themed)
                 Text(L10n.text("apple.sshlibraryeditors.command.71316697"))
                     .font(Theme.caption).foregroundStyle(.secondary)
@@ -695,7 +754,7 @@ struct SSHSnippetEditor: View {
                 // No infinite maximum. Inside a scroll view an unbounded
                 // height is a request for as much as the content wants, and a
                 // text editor's content grows with what is typed into it.
-                ThemedEditor(text: $snippet.command, minHeight: 140)
+                ThemedEditor(text: $draft.snippet.command, minHeight: 140)
                 if placeholders.isEmpty {
                     Text(L10n.text("apple.sshlibraryeditors.wrap_a_value_in_braces_to_be_asked_for_it.76780e5c"))
                         .font(Theme.caption).foregroundStyle(.secondary)
@@ -710,7 +769,7 @@ struct SSHSnippetEditor: View {
                         }
                     }
                 }
-                Toggle(L10n.text("apple.sshlibraryeditors.run_automatically_after_connecting.b531eae1"), isOn: $snippet.runOnConnect)
+                Toggle(L10n.text("apple.sshlibraryeditors.run_automatically_after_connecting.b531eae1"), isOn: $draft.snippet.runOnConnect)
                     .toggleStyle(.brandCheckbox)
                     .disabled(snippet.hostIDs.isEmpty || !placeholders.isEmpty)
                 if snippet.hostIDs.isEmpty {
@@ -736,13 +795,13 @@ struct SSHSnippetEditor: View {
         }
         .navigationTitle(isNew ? L10n.text("apple.sshlibraryeditors.add_snippet.a1f802b9") : snippet.title)
         .task {
-            guard !loaded else { return }
+            guard claim() != nil, !loaded else { return }
             loaded = true
             if let snippetID, let existing = model.snippets.first(where: { $0.id == snippetID }) {
                 snippet = existing
             }
         }
-        .confirmationDialog(L10n.text("apple.sshlibraryeditors.delete_this_snippet.58a04ce8"), isPresented: $confirmingDelete, titleVisibility: .visible) {
+        .confirmationDialog(L10n.text("apple.sshlibraryeditors.delete_this_snippet.58a04ce8"), isPresented: $draft.confirmingDelete, titleVisibility: .visible) {
             Button(L10n.text("common.delete"), role: .destructive) {
                 finish()
                 Task { await model.delete(snippet: snippet) }
@@ -752,10 +811,13 @@ struct SSHSnippetEditor: View {
     }
 
     private func save() async {
+        guard let owner = claim(), !working else { return }
         working = true
-        defer { working = false }
+        defer { if permits(owner) { working = false } }
         snippet.variables = placeholders
-        if await model.save(snippet: snippet) != nil {
+        let saved = await model.save(snippet: snippet)
+        guard permits(owner) else { return }
+        if saved != nil {
             finish()
         } else {
             error = model.error
@@ -771,11 +833,25 @@ struct SSHFolderEditor: View {
     let parentID: String?
     let onDone: () -> Void
 
-    @State private var folder = SSHFolder(id: "", name: "", parentID: nil, color: nil)
-    @State private var loaded = false
-    @State private var working = false
-    @State private var error: String?
-    @State private var confirmingDelete = false
+    @Bindable private var draft: SSHFolderDraft
+    init(model: SSHLibraryModel, folderID: String?, parentID: String?, onDone: @escaping () -> Void) {
+        self.model = model; self.onDone = onDone
+        self.folderID = folderID; self.parentID = parentID
+        self.draft = model.drafts.draft(for: folderID.map(SSHLibraryRoute.folder) ?? .newFolder(parent: parentID), make: SSHFolderDraft.init)
+    }
+    private var folder: SSHFolder { get { draft.folder } nonmutating set { draft.folder = newValue } }
+    private var loaded: Bool { get { draft.loaded } nonmutating set { draft.loaded = newValue } }
+    private var working: Bool { get { draft.working } nonmutating set { draft.working = newValue } }
+    private var error: String? { get { draft.error } nonmutating set { draft.error = newValue } }
+    private var confirmingDelete: Bool { get { draft.confirmingDelete } nonmutating set { draft.confirmingDelete = newValue } }
+
+    private func claim() -> SSHOperationOwner.Ticket? {
+        guard draft.active else { return nil }
+        return model.ownership.claim()
+    }
+    private func permits(_ owner: SSHOperationOwner.Ticket) -> Bool {
+        draft.active && model.ownership.permits(owner)
+    }
 
     private var isNew: Bool { folderID == nil }
 
@@ -783,6 +859,8 @@ struct SSHFolderEditor: View {
     /// `Environment.dismiss` would close the window. On the phone, `onDone`
     /// already pops the pushed screen by clearing the route.
     private func finish() {
+        guard claim() != nil else { return }
+        model.drafts.remove(folderID.map(SSHLibraryRoute.folder) ?? .newFolder(parent: parentID))
         onDone()
     }
 
@@ -794,7 +872,7 @@ struct SSHFolderEditor: View {
                 }
                 SSHEditorSection(title: L10n.text("apple.sshlibraryeditors.folder.74ccd433")) {
                     SSHEditorField(label: L10n.text("apple.sshlibraryeditors.name.dcd1d522")) {
-                        TextField(L10n.text("apple.sshlibraryeditors.name.dcd1d522"), text: $folder.name).textFieldStyle(.themed)
+                        TextField(L10n.text("apple.sshlibraryeditors.name.dcd1d522"), text: $draft.folder.name).textFieldStyle(.themed)
                     }
                     SSHEditorField(label: L10n.text("apple.sshlibraryeditors.inside.123a3ebc")) {
                         Picker(L10n.text("apple.sshlibraryeditors.inside.123a3ebc"), selection: Binding(
@@ -805,7 +883,7 @@ struct SSHFolderEditor: View {
                             ForEach(model.folders.filter { $0.id != folder.id }) { Text($0.name).tag($0.id) }
                         }
                     }
-                    SSHColorPicker(selection: $folder.color)
+                    SSHColorPicker(selection: $draft.folder.color)
                 }
                 SSHEditorNote(text: L10n.text("apple.sshlibraryeditors.deleting_a_folder_keeps_what_is_in_it_serv.285fdc6d"))
             }
@@ -821,7 +899,7 @@ struct SSHFolderEditor: View {
         }
         .navigationTitle(isNew ? L10n.text("apple.sshlibraryeditors.add_folder.5bbfc5a6") : folder.name)
         .task {
-            guard !loaded else { return }
+            guard claim() != nil, !loaded else { return }
             loaded = true
             if let folderID, let existing = model.folders.first(where: { $0.id == folderID }) {
                 folder = existing
@@ -829,7 +907,7 @@ struct SSHFolderEditor: View {
                 folder.parentID = parentID
             }
         }
-        .confirmationDialog(L10n.text("apple.sshlibraryeditors.delete_this_folder.76764808"), isPresented: $confirmingDelete, titleVisibility: .visible) {
+        .confirmationDialog(L10n.text("apple.sshlibraryeditors.delete_this_folder.76764808"), isPresented: $draft.confirmingDelete, titleVisibility: .visible) {
             Button(L10n.text("common.delete"), role: .destructive) {
                 finish()
                 Task { await model.delete(folder: folder) }
@@ -841,9 +919,12 @@ struct SSHFolderEditor: View {
     }
 
     private func save() async {
+        guard let owner = claim(), !working else { return }
         working = true
-        defer { working = false }
-        if await model.save(folder: folder) != nil {
+        defer { if permits(owner) { working = false } }
+        let saved = await model.save(folder: folder)
+        guard permits(owner) else { return }
+        if saved != nil {
             finish()
         } else {
             error = model.error
@@ -900,11 +981,24 @@ struct SSHConfigImportView: View {
     let model: SSHLibraryModel
     let onDone: () -> Void
 
-    @State private var candidates: [SSHConfigCandidate] = []
-    @State private var loading = true
-    @State private var working = false
-    @State private var imported: SSHConfigImport?
-    @State private var error: String?
+    @Bindable private var draft: SSHConfigDraft
+    init(model: SSHLibraryModel, onDone: @escaping () -> Void) {
+        self.model = model; self.onDone = onDone
+        self.draft = model.drafts.draft(for: .importConfig, make: SSHConfigDraft.init)
+    }
+    private var candidates: [SSHConfigCandidate] { get { draft.candidates } nonmutating set { draft.candidates = newValue } }
+    private var loading: Bool { get { draft.loading } nonmutating set { draft.loading = newValue } }
+    private var working: Bool { get { draft.working } nonmutating set { draft.working = newValue } }
+    private var imported: SSHConfigImport? { get { draft.imported } nonmutating set { draft.imported = newValue } }
+    private var error: String? { get { draft.error } nonmutating set { draft.error = newValue } }
+
+    private func claim() -> SSHOperationOwner.Ticket? {
+        guard draft.active else { return nil }
+        return model.ownership.claim()
+    }
+    private func permits(_ owner: SSHOperationOwner.Ticket) -> Bool {
+        draft.active && model.ownership.permits(owner)
+    }
 
     private var newCount: Int { candidates.filter { !$0.alreadySaved }.count }
 
@@ -912,6 +1006,8 @@ struct SSHConfigImportView: View {
     /// `Environment.dismiss` would close the window. On the phone, `onDone`
     /// already pops the pushed screen by clearing the route.
     private func finish() {
+        guard claim() != nil else { return }
+        model.drafts.remove(.importConfig)
         onDone()
     }
 
@@ -970,18 +1066,25 @@ struct SSHConfigImportView: View {
         }
         .navigationTitle(L10n.text("apple.sshlibraryeditors.import_from_ssh_config.1b6e8c38"))
         .task {
-            candidates = (try? await Bridge.sshConfigCandidates()) ?? []
-            loading = false
+            guard let owner = claim(), loading else { return }
+            let fresh = (try? await Bridge.sshConfigCandidates()) ?? []
+            guard permits(owner) else { return }
+            candidates = fresh; loading = false
         }
     }
 
     private func run() async {
+        guard let owner = claim(), !working else { return }
         working = true
-        defer { working = false }
+        defer { if permits(owner) { working = false } }
         do {
-            imported = try await Bridge.importSSHConfig()
-            candidates = (try? await Bridge.sshConfigCandidates()) ?? candidates
+            let result = try await Bridge.importSSHConfig()
+            guard permits(owner) else { return }
+            imported = result
+            let fresh = try? await Bridge.sshConfigCandidates()
+            guard permits(owner) else { return }
+            if let fresh { candidates = fresh }
             await model.reload()
-        } catch { self.error = error.localizedDescription }
+        } catch { if permits(owner) { self.error = error.localizedDescription } }
     }
 }

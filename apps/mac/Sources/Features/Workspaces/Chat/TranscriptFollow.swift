@@ -836,6 +836,22 @@ struct TranscriptFollowPill: View {
     }
 }
 
+/// Reserve the local control's height so the last response line stays readable.
+extension View {
+    @ViewBuilder
+    func transcriptFollowBar<Bar: View>(@ViewBuilder bar: () -> Bar) -> some View {
+        #if os(iOS)
+        if #available(iOS 26, *) {
+            safeAreaBar(edge: .bottom, spacing: 0, content: bar)
+        } else {
+            safeAreaInset(edge: .bottom, spacing: 0, content: bar)
+        }
+        #else
+        safeAreaInset(edge: .bottom, spacing: 0, content: bar)
+        #endif
+    }
+}
+
 /// Corrective scrolls must not re-enter the lazy layout that requested them.
 /// Keep only the latest correction and perform it after the current layout
 /// transaction. Geometry samples themselves still reach follow tracking.

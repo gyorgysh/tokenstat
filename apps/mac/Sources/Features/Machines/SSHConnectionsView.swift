@@ -14,25 +14,34 @@ import UIKit
 /// A screen in the library rather than a sheet, so the result is a list a
 /// person can read rather than a line at the bottom of a small box.
 struct CloudImportForm: View {
-    private enum Provider: String, CaseIterable { case digitalOcean = "DigitalOcean", aws = "AWS" }
     /// AWS import shells out to the AWS CLI, which only exists on the Mac.
     /// On the phone there is no CLI and no key to paste, so DigitalOcean
     /// stands alone there instead of offering a door that cannot open.
     #if os(macOS)
-    private var providers: [Provider] { Provider.allCases }
+    private var providers: [SSHCloudProvider] { SSHCloudProvider.allCases }
     #else
-    private var providers: [Provider] { [.digitalOcean] }
+    private var providers: [SSHCloudProvider] { [.digitalOcean] }
     #endif
     let model: SSHLibraryModel
     let onDone: () -> Void
-    @State private var token = ""
-    @State private var username = "root"
-    @State private var provider = Provider.digitalOcean
-    @State private var profile = "default"
-    @State private var region = ""
-    @State private var error: String?
-    @State private var importing = false
-    @State private var importedCount: Int?
+    @Bindable private var draft: SSHCloudDraft
+    init(model: SSHLibraryModel, onDone: @escaping () -> Void) {
+        self.model = model; self.onDone = onDone
+        self.draft = model.drafts.draft(for: .importCloud, make: SSHCloudDraft.init)
+    }
+    private var token: String { get { draft.token } nonmutating set { draft.token = newValue } }
+    private var username: String { get { draft.username } nonmutating set { draft.username = newValue } }
+    private var provider: SSHCloudProvider { get { draft.provider } nonmutating set { draft.provider = newValue } }
+    private var profile: String { get { draft.profile } nonmutating set { draft.profile = newValue } }
+    private var region: String { get { draft.region } nonmutating set { draft.region = newValue } }
+    private var error: String? { get { draft.error } nonmutating set { draft.error = newValue } }
+    private var importing: Bool { get { draft.importing } nonmutating set { draft.importing = newValue } }
+    private var importedCount: Int? { get { draft.importedCount } nonmutating set { draft.importedCount = newValue } }
+    private func permits(_ owner: SSHOperationOwner.Ticket) -> Bool { draft.active && model.ownership.permits(owner) }
+    private func finish() {
+        guard draft.active, model.ownership.claim() != nil else { return }
+        model.drafts.remove(.importCloud); onDone()
+    }
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -42,7 +51,7 @@ struct CloudImportForm: View {
                     }
                     SSHEditorSection(title: L10n.text("apple.sshconnectionsview.provider.472590ae")) {
                         SSHEditorField(label: L10n.text("apple.sshconnectionsview.import_from.f9e4378d")) {
-                            Picker(L10n.text("apple.sshconnectionsview.provider.472590ae"), selection: $provider) {
+                            Picker(L10n.text("apple.sshconnectionsview.provider.472590ae"), selection: $draft.provider) {
                                 ForEach(providers, id: \.self) {
                                     Text($0.rawValue).tag($0)
                                 }
@@ -50,7 +59,7 @@ struct CloudImportForm: View {
                         }
                         if provider == .digitalOcean {
                             SSHEditorField(label: L10n.text("apple.sshconnectionsview.read_only_api_token.8a4f07c1")) {
-                                SecureField(L10n.text("apple.sshconnectionsview.read_only_api_token.8a4f07c1"), text: $token)
+                                SecureField(L10n.text("apple.sshconnectionsview.read_only_api_token.8a4f07c1"), text: $draft.token)
                                     .themedFieldBox()
                             }
                             if let tokens = URL(string: "https://cloud.digitalocean.com/account/api/tokens") {
@@ -59,16 +68,16 @@ struct CloudImportForm: View {
                             }
                         } else {
                             SSHEditorField(label: L10n.text("apple.sshconnectionsview.aws_cli_profile.d16d28fb")) {
-                                TextField(L10n.text("apple.sshconnectionsview.aws_cli_profile.d16d28fb"), text: $profile)
+                                TextField(L10n.text("apple.sshconnectionsview.aws_cli_profile.d16d28fb"), text: $draft.profile)
                                     .textFieldStyle(.themed)
                             }
                             SSHEditorField(label: L10n.text("apple.sshconnectionsview.region.d3a008ef")) {
-                                TextField(L10n.text("apple.sshconnectionsview.region_optional.c59b0326"), text: $region)
+                                TextField(L10n.text("apple.sshconnectionsview.region_optional.c59b0326"), text: $draft.region)
                                     .textFieldStyle(.themed)
                             }
                         }
                         SSHEditorField(label: L10n.text("apple.sshconnectionsview.ssh_username.04940ab1")) {
-                            TextField(L10n.text("apple.sshconnectionsview.ssh_username.04940ab1"), text: $username)
+                            TextField(L10n.text("apple.sshconnectionsview.ssh_username.04940ab1"), text: $draft.username)
                                 .textFieldStyle(.themed)
                         }
                         SSHEditorNote(
@@ -101,9 +110,9 @@ struct CloudImportForm: View {
                         || (!(provider == .digitalOcean && token.isEmpty) && !username.isEmpty),
                     working: importing,
                     onSave: {
-                        if importedCount == nil { Task { await run() } } else { onDone() }
+                        if importedCount == nil { Task { await run() } } else { finish() }
                     },
-                    onCancel: onDone,
+                    onCancel: finish,
                     onDelete: nil
                 )
             }
@@ -111,21 +120,29 @@ struct CloudImportForm: View {
         }
     }
     private func run() async {
+        guard draft.active, !importing, let owner = model.ownership.claim() else { return }
+        let submittedToken = token, submittedUsername = username, submittedProvider = provider
+        let submittedProfile = profile, submittedRegion = region
         importing = true
+        defer { if permits(owner) { importing = false } }
         error = nil
         do {
             let result: SSHHostImport
-            if provider == .digitalOcean { result = try await Bridge.importDigitalOcean(token: token, username: username) }
-            else { result = try await Bridge.importAWS(profile: profile.isEmpty ? nil : profile, region: region.isEmpty ? nil : region, username: username) }
+            if submittedProvider == .digitalOcean { result = try await Bridge.importDigitalOcean(token: submittedToken, username: submittedUsername) }
+            else { result = try await Bridge.importAWS(profile: submittedProfile.isEmpty ? nil : submittedProfile, region: submittedRegion.isEmpty ? nil : submittedRegion, username: submittedUsername) }
             // Saving each one through the model is what puts it in the
             // encrypted vault as well, so an import reaches the phone the same
             // way a hand-typed host does.
-            for host in result.hosts { _ = await model.save(host: host) }
+            guard permits(owner) else { return }
+            for host in result.hosts {
+                guard permits(owner) else { return }
+                _ = await model.save(host: host)
+                guard permits(owner) else { return }
+            }
             token = ""
             importedCount = result.imported
         }
-        catch { self.error = error.localizedDescription }
-        importing = false
+        catch { if permits(owner) { self.error = error.localizedDescription } }
     }
 }
 
@@ -301,6 +318,8 @@ struct SSHVaultSetupSheet: View {
     @Binding var status: SSHVaultStatus?
     @Binding var recovery: String?
 
+    @State private var ownership = SSHOperationOwner(scope: WorkSessionContext.shared.scope)
+    @State private var operation: UUID?
     @State private var password = ""
     @State private var confirmPassword = ""
     @State private var enteredRecovery = ""
@@ -421,9 +440,16 @@ struct SSHVaultSetupSheet: View {
             footer
         }
         .modalFrame(width: 520, height: sheetHeight)
+        .onDisappear {
+            ownership.retire(); operation = nil
+            password = ""; confirmPassword = ""; enteredRecovery = ""
+        }
         .task {
+            guard let owner = ownership.claim() else { return }
             biometricName = SSHVaultBiometrics.name
-            biometricAccount = try? await SSHVaultBiometrics.accountKey()
+            let freshAccount = try? await SSHVaultBiometrics.accountKey()
+            guard ownership.permits(owner) else { return }
+            biometricAccount = freshAccount
             // Now the exact one. The opening guess was "this device has a saved
             // password"; this is "for the account signed in right now".
             biometricSaved = biometricAccount.map(SSHVaultBiometrics.contains) ?? false
@@ -609,110 +635,119 @@ struct SSHVaultSetupSheet: View {
 
     // MARK: - Doing it
 
+    private func permits(_ token: UUID, _ owner: SSHOperationOwner.Ticket) -> Bool {
+        operation == token && ownership.permits(owner)
+    }
+
     private func run() async {
+        guard !working, let owner = ownership.claim() else { return }
+        let token = UUID(); operation = token
         let submittedPassword = password
+        let submittedRecovery = enteredRecovery
         let enrollmentAccount = biometricAccount
         let shouldEnableBiometrics = enableBiometrics
-        working = true
-        error = nil
+        let existing = exists, resettingPassword = forgot
+        working = true; error = nil
         defer {
-            working = false
-            if passwordAccepted {
-                password = ""
-                confirmPassword = ""
-                enteredRecovery = ""
+            if operation == token {
+                working = false; operation = nil
+                if passwordAccepted { password = ""; confirmPassword = ""; enteredRecovery = "" }
             }
         }
         do {
-            if let biometricAccount = enrollmentAccount {
-                guard try await SSHVaultBiometrics.accountKey() == biometricAccount else {
-                    error = L10n.text("apple.sshconnectionsview.the_signed_in_account_changed_reopen_the_v.0d1b7357")
-                    return
-                }
+            if let enrollmentAccount {
+                let current = try await SSHVaultBiometrics.accountKey()
+                guard permits(token, owner) else { return }
+                guard current == enrollmentAccount else { throw CancellationError() }
             }
-            if exists {
-                if forgot {
-                    // A recovery unlock is a password reset. The code proves
-                    // who you are and buys one new password: unlocking on the
-                    // code alone would leave every other device asking for the
-                    // password nobody knows. The answer carries the fresh code
-                    // that replaces the one just spent.
-                    let result = try await Bridge.setSSHVaultPassword(
-                        recovery: enteredRecovery,
-                        newPassword: submittedPassword
-                    )
-                    recovery = result.recovery
+            let nextRecovery: String?
+            if existing {
+                if resettingPassword {
+                    nextRecovery = try await Bridge.setSSHVaultPassword(recovery: submittedRecovery,
+                        newPassword: submittedPassword, expectedScope: owner.scope, expectedGeneration: owner.generation).recovery
                 } else {
-                    recovery = try await Bridge.unlockSSHVault(password: submittedPassword, tier: tier).recovery
+                    nextRecovery = try await Bridge.unlockSSHVault(password: submittedPassword,
+                        tier: tier, expectedScope: owner.scope, expectedGeneration: owner.generation).recovery
                 }
             } else {
-                recovery = try await Bridge.createSSHVault(password: submittedPassword, tier: tier).recovery
+                nextRecovery = try await Bridge.createSSHVault(password: submittedPassword,
+                    tier: tier, expectedScope: owner.scope, expectedGeneration: owner.generation).recovery
             }
-            passwordAccepted = true
-            status = try await Bridge.sshVaultStatus()
-            if let biometricAccount = enrollmentAccount, try await SSHVaultBiometrics.accountKey() == biometricAccount {
+            guard permits(token, owner) else { return }
+            recovery = nextRecovery; passwordAccepted = true
+            let fresh = try? await Bridge.sshVaultStatus(expectedScope: owner.scope, expectedGeneration: owner.generation)
+            guard permits(token, owner) else { return }
+            if let fresh { status = fresh }
+            if let enrollmentAccount {
+                let current = try await SSHVaultBiometrics.accountKey()
+                guard permits(token, owner) else { return }
+                guard current == enrollmentAccount else { throw CancellationError() }
                 if shouldEnableBiometrics {
-                    try await SSHVaultBiometrics.save(password: submittedPassword, account: biometricAccount)
-                } else {
-                    try SSHVaultBiometrics.remove(account: biometricAccount)
-                }
+                    try await SSHVaultBiometrics.save(password: submittedPassword, account: enrollmentAccount,
+                        shouldStore: { permits(token, owner) })
+                    guard permits(token, owner) else { return }
+                } else { try SSHVaultBiometrics.remove(account: enrollmentAccount) }
             }
             dismiss()
         } catch {
+            guard permits(token, owner) else { return }
             self.error = error.localizedDescription
-            // "A vault already exists" means this screen was showing the wrong
-            // half of itself: something made one elsewhere while this was open.
-            // Re-reading the status flips it to unlock, so the next thing
-            // typed is the password rather than a second attempt at a create
-            // that cannot succeed.
-            if error.localizedDescription.lowercased().contains("vault already exists"),
-               let fresh = try? await Bridge.sshVaultStatus() {
-                status = fresh
-                password = ""
-                confirmPassword = ""
-                self.error = L10n.text("apple.sshconnectionsview.that_account_already_has_a_vault_enter_its.2a836a76")
+            if error.localizedDescription.lowercased().contains("vault already exists") {
+                let fresh = try? await Bridge.sshVaultStatus(expectedScope: owner.scope, expectedGeneration: owner.generation)
+                guard permits(token, owner) else { return }
+                if let fresh {
+                    status = fresh; password = ""; confirmPassword = ""
+                    self.error = L10n.text("apple.sshconnectionsview.that_account_already_has_a_vault_enter_its.2a836a76")
+                }
             }
         }
     }
 
     private func unlockWithBiometrics() async {
-        guard !working, let biometricAccount else { return }
-        working = true
-        error = nil
-        defer { working = false }
+        guard !working, let biometricAccount, let owner = ownership.claim() else { return }
+        let token = UUID(); operation = token
+        let keepBiometrics = enableBiometrics
+        working = true; error = nil
+        defer { if operation == token { working = false; operation = nil } }
         do {
             let saved = try await SSHVaultBiometrics.load(account: biometricAccount)
-            guard try await SSHVaultBiometrics.accountKey() == biometricAccount else {
-                error = L10n.text("apple.sshconnectionsview.the_signed_in_account_changed_reopen_the_v.0d1b7357")
-                return
-            }
-            recovery = try await Bridge.unlockSSHVault(password: saved, tier: tier).recovery
-            if !enableBiometrics { try SSHVaultBiometrics.remove(account: biometricAccount) }
-            status = try await Bridge.sshVaultStatus()
+            guard permits(token, owner) else { return }
+            let current = try await SSHVaultBiometrics.accountKey()
+            guard permits(token, owner) else { return }
+            guard current == biometricAccount else { throw CancellationError() }
+            let result = try await Bridge.unlockSSHVault(password: saved, tier: tier, expectedScope: owner.scope, expectedGeneration: owner.generation)
+            guard permits(token, owner) else { return }
+            recovery = result.recovery
+            if !keepBiometrics { try SSHVaultBiometrics.remove(account: biometricAccount) }
+            let fresh = try? await Bridge.sshVaultStatus(expectedScope: owner.scope, expectedGeneration: owner.generation)
+            guard permits(token, owner) else { return }
+            if let fresh { status = fresh }
             dismiss()
         } catch {
+            guard permits(token, owner) else { return }
             if error.localizedDescription.lowercased().contains("wrong password") {
                 try? SSHVaultBiometrics.remove(account: biometricAccount)
-                biometricSaved = false
-                enableBiometrics = false
+                biometricSaved = false; enableBiometrics = false
             }
             self.error = L10n.text("apple.sshconnectionsview.0_you_can_always_unlock_with_your_vault_pa.ac01e224", "\(error.localizedDescription)")
         }
     }
 
     private func resetVault() async {
-        working = true
-        error = nil
+        guard !working, let owner = ownership.claim() else { return }
+        let token = UUID(); operation = token
+        working = true; error = nil
+        defer { if operation == token { working = false; operation = nil } }
         do {
-            try await Bridge.resetSSHVault()
-            recovery = nil
-            biometricSaved = false
-            enableBiometrics = false
-            password = ""
-            confirmPassword = ""
-            status = try await Bridge.sshVaultStatus()
-        } catch { self.error = error.localizedDescription }
-        working = false
+            try await Bridge.resetSSHVault(expectedScope: owner.scope, expectedGeneration: owner.generation)
+            guard permits(token, owner) else { return }
+            recovery = nil; biometricSaved = false; enableBiometrics = false
+            password = ""; confirmPassword = ""; enteredRecovery = ""
+            status?.created = false; status?.locked = false; status?.recordCount = 0
+            let fresh = try? await Bridge.sshVaultStatus(expectedScope: owner.scope, expectedGeneration: owner.generation)
+            guard permits(token, owner) else { return }
+            if let fresh { status = fresh }
+        } catch { if permits(token, owner) { self.error = error.localizedDescription } }
     }
 }
 
@@ -788,6 +823,8 @@ struct SSHConnectForm: View {
     @State private var password = ""
     @State private var selectedKeyID = ""
     @State private var offeredFingerprint: String?
+    @State private var verifiedTarget: SSHHost?
+    @State private var verifiedJump: SSHHost?
     @State private var error: String?
     @State private var working = false
     /// The probe or connect in flight, so Cancel has something to stop.
@@ -797,6 +834,7 @@ struct SSHConnectForm: View {
     /// this sheet was a screen with nothing on it that did anything. Holding
     /// the task means leaving is leaving.
     @State private var inFlight: Task<Void, Never>?
+    @State private var attempt: UUID?
     var body: some View {
         ThemedSheet(
             title: host.label,
@@ -869,6 +907,7 @@ struct SSHConnectForm: View {
             .keyboardShortcut(.defaultAction)
         }
         .modalFrame(width: 540, height: 500)
+        .onDisappear { cancelAttempt() }
         .onAppear {
             if let credentialID = host.credentialID,
                model.keys.contains(where: { $0.id == credentialID })
@@ -908,132 +947,124 @@ struct SSHConnectForm: View {
         return model.keys.contains { $0.id == selectedKeyID }
     }
 
-    /// Begin, keeping hold of the work so it can be abandoned.
     private func start() {
-        inFlight?.cancel()
-        inFlight = Task { await continueConnection() }
+        guard !working, let owner = model.ownership.claim() else { return }
+        cancelAttempt(clearPassword: false)
+        let token = UUID()
+        let target = host
+        let key = model.key(selectedKeyID)
+        let jumpHost = target.jumpHostID.flatMap { id in model.hosts.first { $0.id == id } }
+        let jumpKey = jumpHost.flatMap { model.key($0.credentialID) }
+        let submittedPassword = password
+        let fingerprint = offeredFingerprint
+        attempt = token
+        working = true
+        inFlight = Task {
+            await continueConnection(token: token, owner: owner, target: target, key: key,
+                password: submittedPassword, jumpHost: jumpHost, jumpKey: jumpKey, fingerprint: fingerprint)
+        }
     }
 
-    /// Leave, whether or not something is still running.
-    ///
-    /// The underlying call may well keep going until the host answers or the
-    /// socket gives up: the cancel that matters to a person is the one that
-    /// gets them off this screen, and nothing here is waiting on the result
-    /// any more once the sheet is gone.
-    private func cancelAndClose() {
+    private func cancelAttempt(clearPassword: Bool = true) {
+        attempt = nil
         inFlight?.cancel()
         inFlight = nil
+        if clearPassword { password = "" }
         working = false
-        dismiss()
     }
 
-    private func continueConnection() async {
-        working = true
-        defer { working = false }
-        if host.hostKeys.isEmpty {
-            if let offeredFingerprint {
-                await trust(offeredFingerprint)
-            } else {
-                await probe()
-            }
-        } else {
-            await connect()
-        }
+    private func cancelAndClose() { cancelAttempt(); dismiss() }
+
+    private func permits(_ token: UUID, _ owner: SSHOperationOwner.Ticket) -> Bool {
+        attempt == token && model.ownership.permits(owner)
     }
-    private func probe() async {
+
+    private func targetIsCurrent(_ target: SSHHost, key: SSHKeyRecord?, jumpHost: SSHHost?, jumpKey: SSHKeyRecord?) -> Bool {
+        guard let fresh = model.hosts.first(where: { $0.id == target.id }),
+              target.sameConnectionTarget(as: fresh) else { return false }
+        if let key {
+            guard let freshKey = model.key(key.id), freshKey.secretRef == key.secretRef,
+                  freshKey.publicKey == key.publicKey else { return false }
+        }
+        if let jumpHost {
+            guard let freshJump = model.hosts.first(where: { $0.id == jumpHost.id }),
+                  jumpHost.sameConnectionTarget(as: freshJump) else { return false }
+            if let jumpKey {
+                guard let freshKey = model.key(jumpKey.id), freshKey.secretRef == jumpKey.secretRef,
+                      freshKey.publicKey == jumpKey.publicKey else { return false }
+            }
+        } else if target.jumpHostID != nil { return false }
+        return true
+    }
+
+    private func continueConnection(token: UUID, owner: SSHOperationOwner.Ticket, target: SSHHost,
+        key: SSHKeyRecord?, password submittedPassword: String, jumpHost: SSHHost?, jumpKey: SSHKeyRecord?, fingerprint: String?) async {
+        defer {
+            if attempt == token {
+                working = false
+                attempt = nil
+                inFlight = nil
+            }
+        }
+        guard permits(token, owner) else { return }
         do {
-            var jump: [String: Any]?
-            if let jumpID = host.jumpHostID,
-               let jumpHost = model.hosts.first(where: { $0.id == jumpID })
-            {
-                jump = try await Bridge.sshJumpPayload(jumpHost, key: model.key(jumpHost.credentialID))
+            guard targetIsCurrent(target, key: key, jumpHost: jumpHost, jumpKey: jumpKey) else {
+                throw CancellationError()
             }
-            let probed = try await Bridge.probeSSHHost(host, jump: jump).fingerprint
-            // The call carries on after a cancel, so its answer can arrive
-            // for a sheet somebody has already left. Say nothing then.
-            guard !Task.isCancelled else { return }
-            offeredFingerprint = probed
-        }
-        catch {
-            guard !Task.isCancelled else { return }
-            self.error = error.localizedDescription
-        }
-    }
-    private func trust(_ fingerprint: String) async {
-        // Same reason as the connect path: a save that lands after Cancel
-        // would write a trusted fingerprint the person backed out of, and
-        // report its failure onto a view that is gone.
-        guard !Task.isCancelled else { return }
-        host.hostKeys = [fingerprint]
-        let saved = await model.save(host: host) != nil
-        guard !Task.isCancelled else { return }
-        if saved {
-            offeredFingerprint = nil
-        } else {
-            // The editor follows `host.hostKeys`. Leave it in verification
-            // mode when persistence failed, or the trust action disappears
-            // and Connect can proceed with a fingerprint that was never kept.
-            host.hostKeys = []
-            error = model.error ?? L10n.text("apple.sshconnectionsview.the_trusted_fingerprint_could_not_be_saved.aab9c4fe")
-        }
-    }
-    private func connect() async {
-        do {
-            // Resolved here rather than in the host, because the private key
-            // lives in this device's vault and nowhere else.
-            var jump: [String: Any]?
-            if let jumpID = host.jumpHostID,
-               let jumpHost = model.hosts.first(where: { $0.id == jumpID })
-            {
-                jump = try await Bridge.sshJumpPayload(jumpHost, key: model.key(jumpHost.credentialID))
+            if target.hostKeys.isEmpty, let fingerprint {
+                guard let verifiedTarget, verifiedTarget.sameConnectionTarget(as: target),
+                      (verifiedJump == nil && jumpHost == nil)
+                        || (verifiedJump != nil && jumpHost != nil && verifiedJump!.sameConnectionTarget(as: jumpHost!)) else {
+                    offeredFingerprint = nil
+                    throw CancellationError()
+                }
+                let saved = await model.trust(host: target, fingerprint: fingerprint, expectedJump: verifiedJump)
+                guard permits(token, owner) else { return }
+                if let saved { host = saved; offeredFingerprint = nil }
+                else { error = model.error ?? L10n.text("apple.sshconnectionsview.the_trusted_fingerprint_could_not_be_saved.aab9c4fe") }
+                return
             }
-            let handle: SSHSessionHandle
-            let authPayload: [String: Any]
-            if let key = model.keys.first(where: { $0.id == selectedKeyID }) {
+            var jump: [String: Any]?
+            if let jumpHost {
+                jump = try await Bridge.sshJumpPayload(jumpHost, key: jumpKey)
+                guard permits(token, owner) else { return }
+                guard targetIsCurrent(target, key: key, jumpHost: jumpHost, jumpKey: jumpKey) else { throw CancellationError() }
+            }
+            if target.hostKeys.isEmpty {
+                let result = try await Bridge.probeSSHHost(target, jump: jump).fingerprint
+                guard permits(token, owner) else { return }
+                guard targetIsCurrent(target, key: key, jumpHost: jumpHost, jumpKey: jumpKey) else { throw CancellationError() }
+                offeredFingerprint = result
+                verifiedTarget = target
+                verifiedJump = jumpHost
+                return
+            }
+            let auth: [String: Any]
+            if let key {
                 if key.secretRef.hasPrefix("agent:") {
-                    let fingerprint = String(key.secretRef.dropFirst("agent:".count))
-                    authPayload = ["kind": "agent", "fingerprint": fingerprint]
-                    handle = try await Bridge.openSSHWithResolvedAuth(host, auth: authPayload, rows: 24, cols: 80, jump: jump)
+                    auth = ["kind": "agent", "fingerprint": String(key.secretRef.dropFirst("agent:".count))]
                 } else {
                     let pem = try await SSHSecretStore.loadForUse(reference: key.secretRef)
-                    // Same encoding for open and probe: nil passphrase is
-                    // NSNull, not missing, so the two calls cannot disagree.
-                    authPayload = ["kind": "privateKey", "pem": pem, "passphrase": NSNull()]
-                    handle = try await Bridge.openSSHWithResolvedAuth(host, auth: authPayload, rows: 24, cols: 80, jump: jump)
+                    guard permits(token, owner) else { return }
+                    auth = ["kind": "privateKey", "pem": pem, "passphrase": NSNull()]
                 }
-            } else {
-                authPayload = ["kind": "password", "password": password]
-                handle = try await Bridge.openSSHWithResolvedAuth(host, auth: authPayload, rows: 24, cols: 80, jump: jump)
-            }
-            // Cancelling does not reach the call that is already in flight, so
-            // a connection can land for a sheet somebody has left. Handing
-            // that session to the model would adopt a shell and push the
-            // terminal screen in front of a person who pressed Cancel to
-            // avoid exactly that. The shell is real and stays running: the
-            // bookkeeping poll finds it, and the session list is where it
-            // belongs rather than in front of them.
-            guard !Task.isCancelled else { return }
-            connected(SSHLiveTerminal(handle: handle, title: host.label, hostID: host.id))
-            await model.noteConnection(host)
-            // Clear secrets promptly; the probe below reuses the already
-            // resolved values instead of holding cleartext longer.
+            } else { auth = ["kind": "password", "password": submittedPassword] }
+            guard permits(token, owner) else { return }
+            guard targetIsCurrent(target, key: key, jumpHost: jumpHost, jumpKey: jumpKey) else { throw CancellationError() }
+            let handle = try await Bridge.openSSHWithResolvedAuth(target, auth: auth, rows: 24, cols: 80, jump: jump)
+            // A late shell remains in the host's session list. Retirement
+            // detaches readers and never closes a shell on another account.
+            guard permits(token, owner) else { return }
+            guard targetIsCurrent(target, key: key, jumpHost: jumpHost, jumpKey: jumpKey) else { throw CancellationError() }
+            model.recordConnection(target)
             password = ""
-            let probeAuth = authPayload
-            let probeJump = jump
-            let probeHost = host
+            connected(SSHLiveTerminal(handle: handle, title: target.label, hostID: target.id))
             dismiss()
-            // The library row shows what the server said about itself, and a
-            // plain Connect never asked: the setup wizard probes, this sheet
-            // did not. Refresh best effort with the same credential while it
-            // is still in memory, so the next visit names the distro.
-            // Scoped to this sheet's lifetime: no detached fire-and-forget
-            // holding credentials after dismiss, failures surface via model.
-            Task {
-                try? await Bridge.probeServerForSetup(probeHost, auth: probeAuth, jump: probeJump)
-            }
         } catch {
-            guard !Task.isCancelled else { return }
-            self.error = error.localizedDescription
+            guard permits(token, owner) else { return }
+            if error is CancellationError {
+                self.error = L10n.text("apple.sshconnectionsview.the_signed_in_account_changed_reopen_the_v.0d1b7357")
+            } else { self.error = error.localizedDescription }
         }
     }
 }

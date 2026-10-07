@@ -330,6 +330,18 @@ struct ClientRootView: View {
                 if navigation.restoredRoute != route { navigation.restoredRoute = route }
             }
         }
+        .task(id: WorkSessionContext.shared.generation) {
+            let retained = sessionModels.models(for: WorkSessionContext.shared.scope).ssh
+            retained.setForeground(scenePhase == .active)
+            await retained.watch(tier: account.account?.vaultTierForSsh)
+        }
+        .onChange(of: account.account?.vaultTierForSsh) { _, tier in
+            let retained = sessionModels.models(for: WorkSessionContext.shared.scope).ssh
+            Task {
+                guard account.account?.vaultTierForSsh == tier else { return }
+                await retained.library.ensureLoaded(vaultTier: SSHLibraryModel.paidTier(for: tier))
+            }
+        }
         .onChange(of: WorkSessionContext.shared.scope, initial: true) { oldScope, newScope in
             if oldScope != nil && oldScope != newScope {
                 navigation.reset()
@@ -363,6 +375,7 @@ struct ClientRootView: View {
             Task { await Bridge.nudgeTunnel(reconnect: true) }
         }
         .onChange(of: scenePhase) { _, phase in
+            sessionModels.models(for: WorkSessionContext.shared.scope).ssh.setForeground(phase == .active)
             if phase == .active { EcosystemWatchSync.shared.activate() }
             if phase != .active { navigation.saveRoute() }
             guard phase == .active, account.signedIn else { return }
@@ -435,6 +448,8 @@ struct ClientRootView: View {
         }
         .modifier(ClientTerminalPresentation(model: sessionModels.models(for: WorkSessionContext.shared.scope).workspaces))
         .modifier(ClientProjectChatActions())
+        .modifier(ClientSSHPresentations(workbench: sessionModels.models(for: WorkSessionContext.shared.scope).ssh,
+            tier: account.account?.vaultTierForSsh))
         // **Last in the chain, after every presentation.** A sheet or a cover
         // inherits the environment as it stood where its modifier is written,
         // not as it stands inside the view it is attached to, so an
@@ -458,6 +473,7 @@ struct ClientRootView: View {
         .environment(sessionModels.models(for: WorkSessionContext.shared.scope).chats)
         .environment(sessionModels.models(for: WorkSessionContext.shared.scope).projectChats)
         .environment(sessionModels.models(for: WorkSessionContext.shared.scope).workspaces)
+        .environment(sessionModels.models(for: WorkSessionContext.shared.scope).ssh)
     }
 
     /// System routes wait for sign-in and reuse the saved-route availability
@@ -775,15 +791,20 @@ final class ClientSessionModels {
         let home = HomeModel()
         let insights = ClientInsightsModel()
         let devices = ClientDevicesModel()
+        let ssh: ClientSSHWorkbench
+        init(scope: WorkReference.Scope?) { ssh = ClientSSHWorkbench(scope: scope) }
+        func deactivate() { workspaces.deactivate(); ssh.deactivate() }
     }
 
     private var scope: WorkReference.Scope?
     private var current: Models?
+    private var generation: UInt64?
 
     func models(for scope: WorkReference.Scope?) -> Models {
-        if let current, self.scope == scope { return current }
-        current?.workspaces.deactivate()
-        let fresh = Models()
+        if let current, self.scope == scope, generation == WorkSessionContext.shared.generation { return current }
+        current?.deactivate()
+        let fresh = Models(scope: scope)
+        generation = WorkSessionContext.shared.generation
         self.scope = scope
         current = fresh
         return fresh
@@ -791,8 +812,9 @@ final class ClientSessionModels {
 
     /// Drop everything on sign-out, as unmounting the layouts used to.
     func reset() {
-        current?.workspaces.deactivate()
+        current?.deactivate()
         scope = nil
+        generation = nil
         current = nil
     }
 }
@@ -803,6 +825,7 @@ private extension View {
         environment(models.home)
             .environment(models.insights)
             .environment(models.devices)
+            .environment(models.ssh)
     }
 }
 

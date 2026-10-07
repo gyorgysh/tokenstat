@@ -885,16 +885,10 @@ struct ClientChatThread: View {
                 do { try await Task.sleep(for: .seconds(2)) } catch { return }
             }
         }
-        .task(id: pollingIdentity) {
-            // Backgrounded chats stop polling. Every mounted conversation
-            // otherwise polls every 2s indefinitely, churning the view graph
-            // for a screen nobody sees.
+        .task(id: ChatPollWatchIdentity(owner: model.pollingIdentity,
+                                       active: scenePhase == .active && isActive)) {
             guard scenePhase == .active, isActive else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(for: model.pollInterval)
-                guard !Task.isCancelled else { return }
-                await model.poll()
-            }
+            await model.watchPolls()
         }
         // What is on screen, for the local notifier. Without this,
         // `isWatching()` is always false on iOS and on-device banners are
@@ -1275,8 +1269,8 @@ struct ClientChatThread: View {
                 stopHoldingViewport()
                 readerMoved = true
             })
-            .overlay(alignment: .bottom) {
-                if model.approvals.isEmpty {
+            .transcriptFollowBar {
+                if model.approvals.isEmpty && (follow.showJump || model.busy) {
                     TranscriptFollowPill(
                         showJump: follow.showJump,
                         busy: model.busy,

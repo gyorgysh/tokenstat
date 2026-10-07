@@ -64,6 +64,8 @@ final class ClientSetupModel {
         !manualInstall || expectedPeer != nil || ClientSetupIdentity.normalize(manualMachineKey) != nil
     }
 
+    @ObservationIgnored private var ownership = SSHOperationOwner()
+    @ObservationIgnored private var preparedOwner: SSHOperationOwner.Ticket?
     private let coordinator = ClientSetupCoordinator()
     var working: Bool { coordinator.working }
     var failure: ClientSetupFailure? {
@@ -95,14 +97,17 @@ final class ClientSetupModel {
     /// not navigate or show an entry failure on its behalf.
     @discardableResult
     func prepare(library: SSHLibraryModel) async -> Bool? {
+        guard let owner = ownership.claim() else { return nil }
         prepared = false
         let preparation = coordinator.beginPreparation()
         do {
             let key = try await Bridge.machineIdentity().key
+            try checkOwnership(owner)
             let account = try await Bridge.account()
+            try checkOwnership(owner)
             guard coordinator.preparation == preparation else { return nil }
-            if !library.loaded { await library.load() }
-            try Task.checkCancellation()
+            await library.ensureLoaded(vaultTier: library.vaultTier)
+            try checkOwnership(owner)
             guard account.signedIn else {
                 throw BridgeError.core(code: "signed_out", message: L10n.text("apple.clientsetupmodel.sign_in_before_setting_up_a_machine.31774d13"))
             }
@@ -112,14 +117,16 @@ final class ClientSetupModel {
             // written (see checkpoint).
             let identity = ClientSetupScope.accountIdentity(handle: account.handle, id: account.accountId)
             let scope = ClientSetupScope(origin: account.host, account: identity, deviceKey: key)
+            guard WorkReference.Scope.account(origin: account.host, handle: identity) == owner.scope else { throw CancellationError() }
             guard coordinator.finishPreparation(preparation, scope: scope) else { return nil }
             myKey = key
             self.scope = scope
             if machineName.isEmpty { machineName = "server" }
+            preparedOwner = owner
             prepared = true
             return true
         } catch {
-            guard !Task.isCancelled else { return nil }
+            guard ownership.permits(owner) else { return nil }
             guard coordinator.preparation == preparation else { return nil }
             coordinator.failPreparation(preparation, error: error)
             return false
@@ -133,12 +140,23 @@ final class ClientSetupModel {
     func accountChanged(_ account: Account?) -> Bool {
         let preparing = coordinator.preparation != nil
         guard prepared || preparing || scope != nil else { return false }
+        if preparing, let owner = ownership.captured, let account, account.signedIn,
+           owner.generation == WorkSessionContext.shared.generation,
+           owner.scope == WorkSessionContext.shared.scope,
+           WorkReference.Scope.account(origin: account.host,
+               handle: ClientSetupScope.accountIdentity(handle: account.handle, id: account.accountId)) == owner.scope {
+            return false
+        }
         if let scope, let account, account.signedIn,
+           preparedOwner?.generation == WorkSessionContext.shared.generation,
            account.host == scope.origin,
            ClientSetupScope.accountIdentity(handle: account.handle, id: account.accountId) == scope.account {
             return false
         }
         coordinator.clearAccount()
+        ownership.retire()
+        ownership = SSHOperationOwner(scope: WorkSessionContext.shared.scope)
+        preparedOwner = nil
         self.scope = nil
         myKey = nil
         prepared = false
@@ -156,6 +174,10 @@ final class ClientSetupModel {
         draftID = UUID()
         expectedPeer = nil
         finished = nil
+        // An account retirement releases this window's reader. The remote
+        // shell stays alive; only an explicit Reset/End closes it.
+        terminal?.detachPoll()
+        terminal = nil
         resetServer()
         return true
     }
@@ -225,6 +247,7 @@ final class ClientSetupModel {
     /// the person was doing. The draft is a convenience for coming back. Not
     /// being able to write it costs the resume, and nothing else.
     func checkpoint(_ milestone: ClientSetupMilestone) {
+        guard let owner = preparedOwner, ownership.permits(owner) else { return }
         resumingInstallation = milestone.needsReconciliation
         // An empty scope is shared by every account without one, so it is
         // never written. Setup proceeds without a saved draft, which only
@@ -280,6 +303,7 @@ final class ClientSetupModel {
     /// what "used once and not stored" means, and it is the whole difference
     /// between this and saving a credential.
     func authPayload(library: SSHLibraryModel) async throws -> [String: Any] {
+        guard let owner = ownership.claim(), preparedOwner == owner else { throw CancellationError() }
         switch credential {
         case .none:
             throw BridgeError.core(
@@ -307,9 +331,11 @@ final class ClientSetupModel {
                     "fingerprint": String(key.secretRef.dropFirst("agent:".count)),
                 ]
             }
+            let pem = try await SSHSecretStore.loadForUse(reference: key.secretRef)
+            try checkOwnership(owner)
             return [
                 "kind": "privateKey",
-                "pem": try await SSHSecretStore.loadForUse(reference: key.secretRef),
+                "pem": pem,
                 "passphrase": nil as Any? as Any,
             ]
         }
@@ -334,8 +360,9 @@ final class ClientSetupModel {
 
     /// Offer a distinct name when this account already has a server with it.
     func chooseAvailableMachineName() async throws {
+        guard let owner = ownership.claim(), preparedOwner == owner else { throw CancellationError() }
         let account = try await Bridge.account()
-        try Task.checkCancellation()
+        try checkOwnership(owner)
         guard account.signedIn, account.host == scope?.origin,
               ClientSetupScope.accountIdentity(handle: account.handle, id: account.accountId) == scope?.account else {
             throw BridgeError.core(code: "account_changed", message: L10n.text("apple.clientsetupmodel.your_account_changed_close_setup_and_open.f26f7449"))
@@ -362,11 +389,11 @@ final class ClientSetupModel {
         fingerprint = nil
         trusted = false
         check = nil
-        await run {
+        await run { owner, operation in
             var host = self.resolvedHost(library: library)
             host.hostKeys = []
             let fingerprint = try await Bridge.probeSSHHost(host).fingerprint
-            try Task.checkCancellation()
+            try self.checkOwnership(owner, operation: operation)
             self.fingerprint = fingerprint
         }
     }
@@ -377,7 +404,7 @@ final class ClientSetupModel {
     /// is the moment somebody says this server is theirs.
     func trust(library: SSHLibraryModel) async {
         guard let fingerprint else { return }
-        await run {
+        await run { owner, operation in
             var host = self.resolvedHost(library: library)
             host.hostKeys = [fingerprint]
             guard let saved = await library.save(host: host) else {
@@ -386,7 +413,7 @@ final class ClientSetupModel {
                     message: library.error ?? L10n.text("apple.clientsetupmodel.the_fingerprint_could_not_be_saved.42f0cc60")
                 )
             }
-            try Task.checkCancellation()
+            try self.checkOwnership(owner, operation: operation)
             self.pickedHostID = saved.id
             self.host = saved
             self.trusted = true
@@ -395,11 +422,12 @@ final class ClientSetupModel {
     }
 
     func inspect(library: SSHLibraryModel) async {
-        await run {
+        await run { owner, operation in
             let host = self.resolvedHost(library: library)
             let auth = try await self.authPayload(library: library)
+            try self.checkOwnership(owner, operation: operation)
             let check = try await Bridge.probeServerForSetup(host, auth: auth)
-            try Task.checkCancellation()
+            try self.checkOwnership(owner, operation: operation)
             self.check = check
             self.checkpoint(.checked)
             if self.machineName == "server", let distro = check.distro {
@@ -416,23 +444,25 @@ final class ClientSetupModel {
     /// shell history and, briefly, in `/proc`. It goes down its own channel
     /// into a `0600` file, and the line the person watches names that file.
     func install(library: SSHLibraryModel) async {
-        await run {
+        await run { owner, operation in
             let host = self.resolvedHost(library: library)
             let auth = try await self.authPayload(library: library)
+            try self.checkOwnership(owner, operation: operation)
             guard let myKey = self.myKey else {
                 throw BridgeError.core(code: "identity_unavailable",
                     message: L10n.text("apple.clientsetupmodel.this_device_s_identity_could_not_be_loaded.75e4a4e2"))
             }
             try await self.chooseAvailableMachineName()
-            try Task.checkCancellation()
+            try self.checkOwnership(owner, operation: operation)
             // Save before starting any remote mutation. Resume checks what
             // happened; it never assumes an interrupted install should rerun.
             self.checkpoint(.installRequested)
             let code = try await Bridge.mintPairingCode().code
-            try Task.checkCancellation()
+            try self.checkOwnership(owner, operation: operation)
             try await Bridge.stagePairingCode(host, code: code, auth: auth)
+            var openedTerminal: SSHLiveTerminal?
             do {
-                try Task.checkCancellation()
+                try self.checkOwnership(owner, operation: operation)
                 let line = try await Bridge.installLine(
                     allow: myKey,
                     name: self.machineName,
@@ -440,23 +470,30 @@ final class ClientSetupModel {
                     printInvite: self.printInvite,
                     codeFile: true
                 )
-                try Task.checkCancellation()
+                try self.checkOwnership(owner, operation: operation)
                 self.line = line
                 let handle = try await Bridge.openSSHWithResolvedAuth(
                     host, auth: auth, rows: 24, cols: 100
                 )
+                try self.checkOwnership(owner, operation: operation)
                 let terminal = SSHLiveTerminal(handle: handle, title: host.label, hostID: host.id)
-                guard !Task.isCancelled else { terminal.stop(); throw CancellationError() }
+                openedTerminal = terminal
                 self.terminal = terminal
                 // A moment for the shell to draw its prompt. Typing into a shell
                 // that has not started echoing yet loses the first characters.
                 try await Task.sleep(for: .milliseconds(700))
-                try Task.checkCancellation()
+                try self.checkOwnership(owner, operation: operation)
                 terminal.sendBytes(Array((line.oneLine + "\n").utf8))
             } catch {
-                self.terminal?.stop()
-                self.terminal = nil
-                try? await Bridge.clearPairingCode(host, auth: auth)
+                guard self.sameLifetime(owner) else {
+                    openedTerminal?.detachPoll()
+                    throw CancellationError()
+                }
+                openedTerminal?.stop()
+                if self.terminal === openedTerminal { self.terminal = nil }
+                if self.coordinator.generation == operation {
+                    try? await Bridge.clearPairingCode(host, auth: auth)
+                }
                 throw error
             }
         }
@@ -467,7 +504,7 @@ final class ClientSetupModel {
     /// Polled rather than assumed: the installer's output scrolling past is
     /// not the same as a machine that answers.
     func waitForMachine(library: SSHLibraryModel, account: AccountModel) async {
-        await run {
+        await run { owner, operation in
             if self.expectedPeer == nil {
                 if self.manualInstall {
                     guard let key = ClientSetupIdentity.normalize(self.manualMachineKey) else {
@@ -478,8 +515,9 @@ final class ClientSetupModel {
                 } else {
                     let host = self.resolvedHost(library: library)
                     let auth = try await self.authPayload(library: library)
+                    try self.checkOwnership(owner, operation: operation)
                     let key = try await Bridge.setupServerIdentity(host, auth: auth)
-                    try Task.checkCancellation()
+                    try self.checkOwnership(owner, operation: operation)
                     self.expectedPeer = key
                 }
             }
@@ -488,13 +526,14 @@ final class ClientSetupModel {
             // consent as typing it by hand. Approve it here so the tunnel calls
             // below are not refused as "not approved on this device".
             _ = try? await Bridge.pair(key: peer, label: self.machineName, address: "")
+            try self.checkOwnership(owner, operation: operation)
             self.checkpoint(.verifying)
             let deadline = Date().addingTimeInterval(180)
             while Date() < deadline {
-                try Task.checkCancellation()
+                try self.checkOwnership(owner, operation: operation)
                 // Use a fresh response, not AccountModel's retained offline snapshot.
                 let fresh = try await Bridge.account()
-                try Task.checkCancellation()
+                try self.checkOwnership(owner, operation: operation)
                 guard fresh.signedIn, fresh.host == self.scope?.origin,
                       ClientSetupScope.accountIdentity(handle: fresh.handle, id: fresh.accountId) == self.scope?.account else {
                     throw BridgeError.core(code: "account_changed", message: L10n.text("apple.clientsetupmodel.your_account_changed_close_setup_and_open.f26f7449"))
@@ -502,12 +541,14 @@ final class ClientSetupModel {
                 if fresh.machines.contains(where: {
                     $0.isHost && ClientSetupIdentity.matches($0.publicIdentity ?? "", expected: peer)
                 }) {
-                    guard try await Bridge.workspaceAccessAllowed(peer: peer) else {
+                    let allowed = try await Bridge.workspaceAccessAllowed(peer: peer)
+                    try self.checkOwnership(owner, operation: operation)
+                    guard allowed else {
                         throw BridgeError.core(code: "access_required",
                             message: L10n.text("apple.clientsetupmodel.this_machine_is_on_your_account_but_this_d.91e8c55e"))
                     }
                     let status = try await Bridge.provisionStatus(peer: peer)
-                    try Task.checkCancellation()
+                    try self.checkOwnership(owner, operation: operation)
                     guard ClientSetupIdentity.matches(status.machineKey, expected: peer) else {
                         throw BridgeError.core(code: "identity_mismatch",
                             message: L10n.text("apple.clientsetupmodel.the_machine_answered_with_a_different_iden.b83fb7ed"))
@@ -535,8 +576,23 @@ final class ClientSetupModel {
         ClientSetupFailure.from(error).explanation
     }
 
-    private func run(_ body: @escaping () async throws -> Void) async {
-        await coordinator.run { try await body() }
+    private func sameLifetime(_ owner: SSHOperationOwner.Ticket) -> Bool {
+        ownership.captured == owner && owner.scope == WorkSessionContext.shared.scope
+            && owner.generation == WorkSessionContext.shared.generation
+    }
+
+    private func checkOwnership(_ owner: SSHOperationOwner.Ticket, operation: UUID? = nil) throws {
+        guard ownership.permits(owner), operation == nil || coordinator.generation == operation else { throw CancellationError() }
+    }
+
+    private func run(_ body: @escaping (SSHOperationOwner.Ticket, UUID) async throws -> Void) async {
+        guard let owner = ownership.claim(), preparedOwner == owner else { return }
+        await coordinator.run {
+            let operation = self.coordinator.generation
+            try self.checkOwnership(owner, operation: operation)
+            try await body(owner, operation)
+            try self.checkOwnership(owner, operation: operation)
+        }
     }
 }
 

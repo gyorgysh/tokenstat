@@ -17,6 +17,62 @@ import SwiftUI
 @MainActor
 @Observable
 final class SSHLibraryModel {
+    @ObservationIgnored let ownership: SSHOperationOwner
+    @ObservationIgnored let drafts = SSHLibraryDraftStore()
+    @ObservationIgnored let vault: SSHVaultModel
+    @ObservationIgnored private var connectionNotes: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var loadTask: Task<Void, Never>?
+    @ObservationIgnored private var loadTicket: UUID?
+    @ObservationIgnored private var syncTicket: UUID?
+    @ObservationIgnored private var reconciledTier: String?
+
+    init(ownerScope: WorkReference.Scope? = nil) {
+        ownership = SSHOperationOwner(scope: ownerScope)
+        vault = SSHVaultModel(ownerScope: ownerScope)
+    }
+
+    /// The producer belongs to the retained library, so a folding view may
+    /// cancel its own wait without canceling the library's initial load.
+    func ensureLoaded(vaultTier: String?) async {
+        guard let owner = ownership.claim() else { return }
+        self.vaultTier = vaultTier
+        if vaultTier == nil { reconciledTier = nil }
+        if let loadTask { await loadTask.value }
+        else if !loaded {
+            let token = UUID()
+            loadTicket = token
+            let task = Task { [weak self] in
+                guard let self else { return }
+                await self.load(updateTier: false)
+                if self.loadTicket == token {
+                    self.loadTask = nil
+                    self.loadTicket = nil
+                }
+            }
+            loadTask = task
+            await task.value
+        }
+        guard ownership.permits(owner), loaded, let tier = self.vaultTier,
+              reconciledTier != tier, !vaultSyncing else { return }
+        reconciledTier = tier
+        await syncVault(tier: tier)
+    }
+
+    func deactivate() {
+        ownership.retire()
+        vault.deactivate()
+        drafts.retireAll()
+        for task in connectionNotes.values { task.cancel() }
+        connectionNotes.removeAll()
+        loadGeneration &+= 1
+        loadTask?.cancel()
+        loadTask = nil
+        loadTicket = nil
+        syncTicket = nil
+        vaultSyncing = false
+        connectRequest = nil
+    }
+
     var hosts: [SSHHost] = []
     var folders: [SSHFolder] = []
     var keys: [SSHKeyRecord] = []
@@ -44,7 +100,11 @@ final class SSHLibraryModel {
     /// On the model rather than in a view, because the two columns are drawn
     /// by different views and a selection that lives in one of them is a
     /// selection the other has to be handed.
-    var selection: SSHLibraryRoute?
+    var selection: SSHLibraryRoute? {
+        didSet {
+            if oldValue != selection, let oldValue { drafts.remove(oldValue) }
+        }
+    }
 
     /// A server somebody has asked to connect to.
     ///
@@ -78,29 +138,30 @@ final class SSHLibraryModel {
 
     private var loadGeneration: UInt64 = 0
 
-    func load(vaultTier: String? = nil) async {
+    func load(vaultTier: String? = nil, updateTier: Bool = true) async {
+        guard let owner = ownership.claim() else { return }
         loadGeneration &+= 1
         let generation = loadGeneration
-        self.vaultTier = vaultTier
+        if updateTier { self.vaultTier = vaultTier }
         do {
             async let hosts = Bridge.sshHosts()
             async let folders = Bridge.sshFolders()
             async let keys = Bridge.sshKeys()
             async let snippets = Bridge.sshSnippets()
             let (freshHosts, freshFolders, freshKeys, freshSnippets) = try await (hosts, folders, keys, snippets)
-            guard !Task.isCancelled, generation == loadGeneration else { return }
+            guard ownership.permits(owner), generation == loadGeneration else { return }
             self.hosts = freshHosts
             self.folders = freshFolders
             self.keys = freshKeys
             self.snippets = freshSnippets
             error = nil
             loaded = true
-            if let vaultTier { await syncVault(tier: vaultTier) }
-            if let fresh = try? await Bridge.sshKnownHosts(), !Task.isCancelled, generation == loadGeneration {
+            if updateTier, let vaultTier { await syncVault(tier: vaultTier) }
+            if let fresh = try? await Bridge.sshKnownHosts(), ownership.permits(owner), generation == loadGeneration {
                 knownHosts = fresh
             }
         } catch {
-            guard !Task.isCancelled, generation == loadGeneration else { return }
+            guard ownership.permits(owner), generation == loadGeneration else { return }
             self.error = error.localizedDescription
         }
     }
@@ -109,11 +170,21 @@ final class SSHLibraryModel {
     /// `load(vaultTier:)` sets that, so calling it to refresh would quietly
     /// turn vault mirroring off for the rest of the session.
     func reload() async {
-        hosts = (try? await Bridge.sshHosts()) ?? hosts
-        folders = (try? await Bridge.sshFolders()) ?? folders
-        keys = (try? await Bridge.sshKeys()) ?? keys
-        snippets = (try? await Bridge.sshSnippets()) ?? snippets
-        knownHosts = (try? await Bridge.sshKnownHosts()) ?? knownHosts
+        guard let owner = ownership.claim() else { return }
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        async let freshHosts = try? Bridge.sshHosts()
+        async let freshFolders = try? Bridge.sshFolders()
+        async let freshKeys = try? Bridge.sshKeys()
+        async let freshSnippets = try? Bridge.sshSnippets()
+        async let freshKnown = try? Bridge.sshKnownHosts()
+        let fresh = await (freshHosts, freshFolders, freshKeys, freshSnippets, freshKnown)
+        guard ownership.permits(owner), generation == loadGeneration else { return }
+        if let value = fresh.0 { hosts = value }
+        if let value = fresh.1 { folders = value }
+        if let value = fresh.2 { keys = value }
+        if let value = fresh.3 { snippets = value }
+        if let value = fresh.4 { knownHosts = value }
         dropMissingSelection()
     }
 
@@ -140,36 +211,51 @@ final class SSHLibraryModel {
     // MARK: - Writing
 
     func save(host: SSHHost) async -> SSHHost? {
+        guard let owner = ownership.claim() else { return nil }
         do {
             let saved = try await Bridge.saveSSHHost(host)
+            guard ownership.permits(owner) else { return nil }
             await mirror(id: "host:\(saved.id)", envelope: SSHVaultEnvelope(kind: "host", host: saved))
+            guard ownership.permits(owner) else { return nil }
             await reload()
+            guard ownership.permits(owner) else { return nil }
             return saved
         } catch {
+            guard ownership.permits(owner) else { return nil }
             self.error = error.localizedDescription
             return nil
         }
     }
 
     func save(folder: SSHFolder) async -> SSHFolder? {
+        guard let owner = ownership.claim() else { return nil }
         do {
             let saved = try await Bridge.saveSSHFolder(folder)
+            guard ownership.permits(owner) else { return nil }
             await mirror(id: "folder:\(saved.id)", envelope: SSHVaultEnvelope(kind: "folder", folder: saved))
+            guard ownership.permits(owner) else { return nil }
             await reload()
+            guard ownership.permits(owner) else { return nil }
             return saved
         } catch {
+            guard ownership.permits(owner) else { return nil }
             self.error = error.localizedDescription
             return nil
         }
     }
 
     func save(snippet: SSHSnippet) async -> SSHSnippet? {
+        guard let owner = ownership.claim() else { return nil }
         do {
             let saved = try await Bridge.saveSSHSnippet(snippet)
+            guard ownership.permits(owner) else { return nil }
             await mirror(id: "snippet:\(saved.id)", envelope: SSHVaultEnvelope(kind: "snippet", snippet: saved))
+            guard ownership.permits(owner) else { return nil }
             await reload()
+            guard ownership.permits(owner) else { return nil }
             return saved
         } catch {
+            guard ownership.permits(owner) else { return nil }
             self.error = error.localizedDescription
             return nil
         }
@@ -178,9 +264,11 @@ final class SSHLibraryModel {
     /// Keys are the one record with two halves: the description here, and the
     /// private bytes in the platform vault. The encrypted vault carries both,
     /// because a key that syncs without its private half is a row, not a key.
-    func save(key: SSHKeyRecord, privateKey: String?) async -> SSHKeyRecord? {
+    func save(key: SSHKeyRecord, privateKey: String?, onLocalFailure: () -> Void = {}) async -> SSHKeyRecord? {
+        guard let owner = ownership.claim() else { onLocalFailure(); return nil }
         do {
             let saved = try await Bridge.saveSSHKey(key)
+            guard ownership.permits(owner) else { return nil }
             if vaultTier != nil && !SSHSecretStore.requiresBiometrics(saved.secretRef) {
                 // An edit that carries no key material is still an edit the
                 // other devices need. Renaming used to skip the vault, which
@@ -195,11 +283,19 @@ final class SSHLibraryModel {
                         hardwareBacked: saved.hardwareBacked, updatedMs: saved.updatedMs
                     )
                     await mirror(id: "key:\(saved.id)", envelope: SSHVaultEnvelope(kind: "key", key: synced))
+                    guard ownership.permits(owner) else { return nil }
                 }
             }
             await reload()
+            guard ownership.permits(owner) else { return nil }
             return saved
         } catch {
+            // An explicit helper refusal means no local key record landed.
+            // A transport/decode failure is ambiguous, so retain its exact
+            // private half rather than deleting a possibly committed key.
+            if case let BridgeError.core(code, _) = error,
+               ["call_failed", "invalid_params", "method_not_found"].contains(code) { onLocalFailure() }
+            guard ownership.permits(owner) else { return nil }
             self.error = error.localizedDescription
             return nil
         }
@@ -217,9 +313,11 @@ final class SSHLibraryModel {
     /// only ever existed in the deleted vault cannot be recovered by anybody,
     /// which is said before the delete rather than discovered after it.
     func seedVaultFromThisDevice(tier: String) async {
+        guard let owner = ownership.claim() else { return }
         vaultTier = tier
         vaultError = nil
         await pushMissing(to: tier, alreadyInVault: [])
+        guard ownership.permits(owner) else { return }
         vaultSyncedAt = Date()
     }
 
@@ -247,33 +345,62 @@ final class SSHLibraryModel {
     }
 
     func delete(key: SSHKeyRecord) async {
+        guard let owner = ownership.claim() else { return }
         if SSHSecretStore.requiresBiometrics(key.secretRef) {
             do {
                 try await Bridge.deleteSSHKey(id: key.id)
+                guard ownership.permits(owner) else { return }
                 SSHSecretStore.delete(reference: key.secretRef)
                 await reload()
-            } catch { self.error = error.localizedDescription }
+                guard ownership.permits(owner) else { return }
+            } catch { if ownership.permits(owner) { self.error = error.localizedDescription } }
             return
         }
         await remove(vaultID: "key:\(key.id)") {
             try await Bridge.deleteSSHKey(id: key.id)
+            guard ownership.permits(owner) else { return }
             SSHSecretStore.delete(reference: key.secretRef)
         }
     }
 
     func move(host: SSHHost, to folderID: String?) async {
+        guard let owner = ownership.claim() else { return }
         do {
             let moved = try await Bridge.moveSSHHost(id: host.id, folderID: folderID, sort: host.sort)
+            guard ownership.permits(owner) else { return }
             await mirror(id: "host:\(moved.id)", envelope: SSHVaultEnvelope(kind: "host", host: moved))
+            guard ownership.permits(owner) else { return }
             await reload()
-        } catch { self.error = error.localizedDescription }
+            guard ownership.permits(owner) else { return }
+        } catch { if ownership.permits(owner) { self.error = error.localizedDescription } }
     }
 
     func forgetKnownHost(_ known: SSHKnownHost) async {
+        guard let owner = ownership.claim() else { return }
         do {
             _ = try await Bridge.forgetSSHKnownHost(id: known.hostID)
+            guard ownership.permits(owner) else { return }
             await reload()
-        } catch { self.error = error.localizedDescription }
+            guard ownership.permits(owner) else { return }
+        } catch { if ownership.permits(owner) { self.error = error.localizedDescription } }
+    }
+
+    /// Only the trusted identity changes. Pending verification cannot write
+    /// an old copy of a host over edits made while the server was answering.
+    func trust(host: SSHHost, fingerprint: String, expectedJump: SSHHost? = nil) async -> SSHHost? {
+        guard let owner = ownership.claim() else { return nil }
+        do {
+            let saved = try await Bridge.trustSSHHost(expected: host, fingerprint: fingerprint, expectedJump: expectedJump)
+            guard ownership.permits(owner) else { return nil }
+            await mirror(id: "host:\(saved.id)", envelope: SSHVaultEnvelope(kind: "host", host: saved))
+            guard ownership.permits(owner) else { return nil }
+            await reload()
+            guard ownership.permits(owner) else { return nil }
+            return saved
+        } catch {
+            if ownership.permits(owner) { self.error = error.localizedDescription }
+            return nil
+        }
     }
 
     /// Record that somebody actually used this host, so the list can lead with
@@ -286,10 +413,23 @@ final class SSHLibraryModel {
     /// rename would lose to a connection nobody thinks of as a change. Which
     /// server you reached for last is local recency and stays local.
     func noteConnection(_ host: SSHHost) async {
-        var updated = host
-        updated.lastConnectedMs = Int64(Date().timeIntervalSince1970 * 1000)
-        _ = try? await Bridge.applySSHHost(updated)
+        guard let owner = ownership.claim() else { return }
+        _ = try? await Bridge.noteSSHConnection(expected: host)
+        guard ownership.permits(owner) else { return }
         await reload()
+        guard ownership.permits(owner) else { return }
+    }
+
+    /// Bookkeeping belongs to the library and does not delay presenting a
+    /// connected terminal or keep its authentication payload alive.
+    func recordConnection(_ host: SSHHost) {
+        guard let owner = ownership.claim() else { return }
+        let token = UUID()
+        connectionNotes[token] = Task { [weak self] in
+            guard let self, self.ownership.permits(owner) else { return }
+            await self.noteConnection(host)
+            self.connectionNotes.removeValue(forKey: token)
+        }
     }
 
     /// Delete locally, then forget it in the vault.
@@ -300,18 +440,23 @@ final class SSHLibraryModel {
     /// showed a server sentence, and deleting appeared to be broken while
     /// nothing had been attempted.
     private func remove(vaultID: String, _ work: () async throws -> Void) async {
+        guard let owner = ownership.claim() else { return }
         do {
             try await work()
+            guard ownership.permits(owner) else { return }
         } catch {
+            guard ownership.permits(owner) else { return }
             self.error = error.localizedDescription
             return
         }
         if vaultTier != nil {
-            do { _ = try await Bridge.deleteSSHVaultRecord(id: vaultID) } catch {
+            do { _ = try await Bridge.deleteSSHVaultRecord(id: vaultID, expectedScope: owner.scope, expectedGeneration: owner.generation) } catch {
+                guard ownership.permits(owner) else { return }
                 vaultError = error.localizedDescription
             }
         }
         await reload()
+        guard ownership.permits(owner) else { return }
     }
 
     /// Copy a record into the encrypted vault for the other devices.
@@ -321,7 +466,8 @@ final class SSHLibraryModel {
     /// what it is rather than turning a save that worked into a save that
     /// looks like it did not.
     private func mirror(id: String, envelope: SSHVaultEnvelope) async {
-        guard let vaultTier else { return }
+        guard let owner = ownership.claim() else { return }
+        guard owner.scope.kind == .account, let vaultTier else { return }
         guard let data = try? JSONEncoder().encode(envelope),
               let plaintext = String(data: data, encoding: .utf8)
         else {
@@ -329,8 +475,10 @@ final class SSHLibraryModel {
             return
         }
         do {
-            _ = try await Bridge.putSSHVaultRecord(id: id, plaintext: plaintext, tier: vaultTier)
+            _ = try await Bridge.putSSHVaultRecord(id: id, plaintext: plaintext, tier: vaultTier, expectedScope: owner.scope, expectedGeneration: owner.generation)
+            guard ownership.permits(owner) else { return }
         } catch {
+            guard ownership.permits(owner) else { return }
             vaultError = error.localizedDescription
         }
     }
@@ -357,15 +505,20 @@ final class SSHLibraryModel {
     /// already says "Locked" on its own row, and reporting it twice on every
     /// load is how a normal state starts looking like a fault.
     func syncVault(tier: String, asked: Bool = false) async {
-        guard !vaultSyncing else { return }
+        guard let owner = ownership.claim() else { return }
+        guard owner.scope.kind == .account, !vaultSyncing else { return }
+        let token = UUID()
+        syncTicket = token
         vaultSyncing = true
-        defer { vaultSyncing = false }
+        defer { if syncTicket == token { syncTicket = nil; vaultSyncing = false } }
         vaultTier = tier
         vaultError = nil
-        guard let known = await pullVault(tier: tier, reporting: asked) else { return }
+        guard let known = await pullVault(tier: tier, reporting: asked), ownership.permits(owner) else { return }
         await pushMissing(to: tier, alreadyInVault: known)
+        guard ownership.permits(owner) else { return }
         vaultSyncedAt = Date()
         await reload()
+        guard ownership.permits(owner) else { return }
     }
 
     /// Sync because somebody asked, rather than because a screen appeared.
@@ -385,16 +538,24 @@ final class SSHLibraryModel {
     /// has not seen. A key with no private half on this device is skipped, not
     /// pushed as a row nothing can connect with.
     private func pushMissing(to tier: String, alreadyInVault known: Set<String>) async {
+        guard let owner = ownership.claim() else { return }
         for folder in folders where !known.contains("folder:\(folder.id)") {
+            guard ownership.permits(owner) else { return }
             await mirror(id: "folder:\(folder.id)", envelope: SSHVaultEnvelope(kind: "folder", folder: folder))
+            guard ownership.permits(owner) else { return }
         }
         for host in hosts where !known.contains("host:\(host.id)") {
+            guard ownership.permits(owner) else { return }
             await mirror(id: "host:\(host.id)", envelope: SSHVaultEnvelope(kind: "host", host: host))
+            guard ownership.permits(owner) else { return }
         }
         for snippet in snippets where !known.contains("snippet:\(snippet.id)") {
+            guard ownership.permits(owner) else { return }
             await mirror(id: "snippet:\(snippet.id)", envelope: SSHVaultEnvelope(kind: "snippet", snippet: snippet))
+            guard ownership.permits(owner) else { return }
         }
         for key in keys where !known.contains("key:\(key.id)") {
+            guard ownership.permits(owner) else { return }
             guard !SSHSecretStore.requiresBiometrics(key.secretRef) else { continue }
             guard let material = try? SSHSecretStore.load(reference: key.secretRef) else { continue }
             await mirror(id: "key:\(key.id)", envelope: SSHVaultEnvelope(
@@ -429,10 +590,13 @@ final class SSHLibraryModel {
     /// vault, and treating it as one would push this device's whole library
     /// at something that had just refused to answer.
     private func pullVault(tier: String, reporting: Bool = false) async -> Set<String>? {
+        guard let owner = ownership.claim() else { return nil }
         let records: [SSHVaultRecord]
         do {
-            records = try await Bridge.sshVaultRecords(recovery: "", tier: tier)
+            records = try await Bridge.sshVaultRecords(recovery: "", tier: tier, expectedScope: owner.scope, expectedGeneration: owner.generation)
+            guard ownership.permits(owner) else { return nil }
         } catch {
+            guard ownership.permits(owner) else { return nil }
             if reporting { vaultError = error.localizedDescription }
             return nil
         }
@@ -446,12 +610,14 @@ final class SSHLibraryModel {
         // pull that applied them in arrival order could drop a server for the
         // rest of the session. Sub-folders have the same rule about parents.
         for record in ordered(records) {
+            guard ownership.permits(owner) else { return nil }
             if record.deleted == true {
                 // A tombstone carries no timestamp, so there is nothing to
                 // compare it against. Deleting is explicit and re-creating is
                 // cheap, where ignoring a delete would leave a host somebody
                 // removed on their phone alive on every other device forever.
                 changed = await applyDeletion(record.id) || changed
+                guard ownership.permits(owner) else { return nil }
                 continue
             }
             guard let data = record.plaintext.data(using: .utf8),
@@ -462,10 +628,12 @@ final class SSHLibraryModel {
                     switch verdict(remote: host.updatedMs, local: hosts.first { $0.id == host.id }?.updatedMs) {
                     case .takeRemote:
                         _ = try await Bridge.applySSHHost(host)
+                        guard ownership.permits(owner) else { return nil }
                         changed = true
                     case .pushLocal:
                         if let mine = hosts.first(where: { $0.id == host.id }) {
                             await mirror(id: "host:\(mine.id)", envelope: SSHVaultEnvelope(kind: "host", host: mine))
+                            guard ownership.permits(owner) else { return nil }
                         }
                     case .same:
                         break
@@ -474,10 +642,12 @@ final class SSHLibraryModel {
                     switch verdict(remote: folder.updatedMs, local: folders.first { $0.id == folder.id }?.updatedMs) {
                     case .takeRemote:
                         _ = try await Bridge.applySSHFolder(folder)
+                        guard ownership.permits(owner) else { return nil }
                         changed = true
                     case .pushLocal:
                         if let mine = folders.first(where: { $0.id == folder.id }) {
                             await mirror(id: "folder:\(mine.id)", envelope: SSHVaultEnvelope(kind: "folder", folder: mine))
+                            guard ownership.permits(owner) else { return nil }
                         }
                     case .same:
                         break
@@ -486,20 +656,24 @@ final class SSHLibraryModel {
                     switch verdict(remote: snippet.updatedMs, local: snippets.first { $0.id == snippet.id }?.updatedMs) {
                     case .takeRemote:
                         _ = try await Bridge.applySSHSnippet(snippet)
+                        guard ownership.permits(owner) else { return nil }
                         changed = true
                     case .pushLocal:
                         if let mine = snippets.first(where: { $0.id == snippet.id }) {
                             await mirror(id: "snippet:\(mine.id)", envelope: SSHVaultEnvelope(kind: "snippet", snippet: mine))
+                            guard ownership.permits(owner) else { return nil }
                         }
                     case .same:
                         break
                     }
                 } else if let key = envelope.key {
                     changed = await applyKey(key) || changed
+                    guard ownership.permits(owner) else { return nil }
                 }
-            } catch { self.error = error.localizedDescription }
+            } catch { if ownership.permits(owner) { self.error = error.localizedDescription } }
         }
         if changed { await reload() }
+        guard ownership.permits(owner) else { return nil }
         return known
     }
 
@@ -507,6 +681,7 @@ final class SSHLibraryModel {
     /// can be here while the private half is not, which is what a freshly
     /// enrolled device looks like.
     private func applyKey(_ key: SSHVaultSyncedKey) async -> Bool {
+        guard let owner = ownership.claim() else { return false }
         let local = keys.first { $0.id == key.id }
         // A synced record must never replace this device's access control.
         if let local, SSHSecretStore.requiresBiometrics(local.secretRef) { return false }
@@ -520,8 +695,10 @@ final class SSHLibraryModel {
                     publicKey: key.publicKey, secretRef: reference,
                     hardwareBacked: key.hardwareBacked, updatedMs: key.updatedMs
                 ))
+                guard ownership.permits(owner) else { return false }
                 return true
             } catch {
+                guard ownership.permits(owner) else { return false }
                 self.error = error.localizedDescription
                 return false
             }
@@ -597,23 +774,29 @@ final class SSHLibraryModel {
     }
 
     private func applyDeletion(_ id: String) async -> Bool {
+        guard let owner = ownership.claim() else { return false }
         do {
             if let rest = id.after("host:") {
                 try await Bridge.deleteSSHHost(id: rest)
+                guard ownership.permits(owner) else { return false }
             } else if let rest = id.after("folder:") {
                 try await Bridge.deleteSSHFolder(id: rest)
+                guard ownership.permits(owner) else { return false }
             } else if let rest = id.after("snippet:") {
                 try await Bridge.deleteSSHSnippet(id: rest)
+                guard ownership.permits(owner) else { return false }
             } else if let rest = id.after("key:") {
                 if let key = keys.first(where: { $0.id == rest }) {
                     SSHSecretStore.delete(reference: key.secretRef)
                 }
                 try await Bridge.deleteSSHKey(id: rest)
+                guard ownership.permits(owner) else { return false }
             } else {
                 return false
             }
             return true
         } catch {
+            guard ownership.permits(owner) else { return false }
             self.error = error.localizedDescription
             return false
         }

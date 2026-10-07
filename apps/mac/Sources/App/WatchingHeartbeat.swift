@@ -34,14 +34,24 @@ struct WatchingHeartbeat: ViewModifier {
 
     @Environment(\.scenePhase) private var scenePhase
 
+    private struct Identity: Hashable {
+        let conversation: String?
+        let peer: String?
+        let scope: WorkReference.Scope?
+        let active: Bool
+    }
+
     /// Comfortably inside the host's 30 second lease, so one slow or dropped
     /// request does not let a notification through.
     private static let beat: Duration = .seconds(10)
 
     func body(content: Content) -> some View {
         content
-            .task(id: "\(conversationID ?? "")-\(peer ?? "")-\(isActive)-\(scenePhase == .active)") {
-                guard scenePhase == .active, isActive, let id = conversationID, !id.isEmpty else { return }
+            .task(id: Identity(conversation: conversationID, peer: peer,
+                               scope: WorkSessionContext.shared.scope,
+                               active: isActive && scenePhase == .active)) {
+                guard scenePhase == .active, isActive, let id = conversationID, !id.isEmpty,
+                      let owner = WorkSessionContext.shared.scope else { return }
                 // A late release from the previous scene phase must never
                 // remove the foreground task's newly renewed lease.
                 let watcherID = UUID().uuidString
@@ -56,13 +66,14 @@ struct WatchingHeartbeat: ViewModifier {
                         await Bridge.stoppedWatching(
                             conversationID: leaving,
                             watcherID: watcher,
-                            peer: host
+                            peer: host, expectedScope: owner
                         )
                     }
                 }
-                while !Task.isCancelled {
+                while !Task.isCancelled, WorkSessionContext.shared.scope == owner {
                     if UserPresence.shared.isAtTheKeyboard {
-                        await Bridge.watching(conversationID: id, watcherID: watcherID, peer: peer)
+                        await Bridge.watching(conversationID: id, watcherID: watcherID, peer: peer,
+                                              expectedScope: owner)
                     }
                     try? await Task.sleep(for: Self.beat)
                 }
