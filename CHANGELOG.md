@@ -11,6 +11,38 @@ then begin the next one. Do not reconstruct release notes from commits at the en
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-07
+
+### Added
+
+- Retained iPhone and iPad chat and SSH sessions across wide and compact
+  layouts, with project navigation, recent chats and explicit SSH project links.
+- Android tablet project section navigation and recent chat/terminal rows
+  beneath projects. Resizing keeps the open project and chat composition.
+
+### Changed
+
+- Chat transcript projection runs away from the Apple UI executor, with
+  bounded tool snippets, shared reads and stable reading-position handoffs.
+- SSH setup keeps wizard progress and drafts, preserves the six-step intro,
+  and uses exact staging receipts when cleaning up pairing codes.
+- Account, vault, tunnel and watching operations retain their original login
+  ownership through reconnects and account changes.
+
+### Fixed
+
+- Empty iOS transcript views reread the latest page on reconnect rather than
+  polling past history. Empty reads cannot replace a known history's offline copy.
+- Apple and Windows conversation lists can load while backend and persona
+  requests are slow or fail. Mac chat views retry on reconnect and foreground.
+- Transcript and conversation-index read failures report errors instead of
+  successful empty history. Directory reads refresh indexes written by another
+  helper, without adding index reads to streaming polls.
+- Same-account relogins cannot reuse an earlier login's pending Apple chat
+  read or publish its late mutation response.
+- Android setup cleanup and watching leases carry the receipts required by
+  the updated shared backend.
+
 ## [1.3.0] - 2026-10-07
 
 ### Added
