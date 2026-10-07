@@ -73,7 +73,7 @@ struct ClientProjectSSHRows: View {
                         Text(title(session)).lineLimit(1)
                         Spacer(minLength: 0)
                         if session.alive {
-                            Image(systemName: "circle.fill").font(.system(size: 6))
+                            Image(systemName: "circle.fill").font(Theme.fixed(6))
                                 .foregroundStyle(Theme.accent)
                                 .accessibilityLabel(L10n.text("common.running"))
                         }

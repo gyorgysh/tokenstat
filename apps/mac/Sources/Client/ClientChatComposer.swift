@@ -369,7 +369,7 @@ private struct ComposerChromeButton: ViewModifier {
             .environment(\.compactActions, true)
             // These glyphs occupy fixed touch targets; inherited accessibility
             // text sizes must not paint over the neighboring control.
-            .font(.system(size: 18, weight: .medium))
+            .font(Theme.fixed(18, weight: .medium))
             .foregroundStyle(Theme.accent)
             .frame(width: 44, height: 44)
             .contentShape(.rect)

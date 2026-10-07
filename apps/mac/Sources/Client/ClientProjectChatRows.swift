@@ -39,7 +39,7 @@ struct ClientProjectChatRows: View {
                         Spacer(minLength: 0)
                         if chat.running {
                             Image(systemName: "circle.fill")
-                                .font(.system(size: 6)).foregroundStyle(Theme.accent)
+                                .font(Theme.fixed(6)).foregroundStyle(Theme.accent)
                                 .accessibilityLabel(L10n.text("common.running"))
                         }
                     }

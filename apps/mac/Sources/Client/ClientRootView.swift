@@ -159,7 +159,7 @@ struct ClientRootView: View {
         return true
     }
 
-    var body: some View {
+    private var rootSurface: some View {
         Group {
             // Three doors after the host is up, not two: still checking,
             // could not check (usually offline), and a definitive answer.
@@ -224,6 +224,10 @@ struct ClientRootView: View {
             ScreenSizeReporter()
             ClientWebAuthAnchor(auth: webAuth)
         }
+    }
+
+    private var rootLifecycle: some View {
+        rootSurface
         .task {
             connectivity.start()
             input.start()
@@ -381,6 +385,10 @@ struct ClientRootView: View {
             guard phase == .active, account.signedIn else { return }
             Task { await Bridge.nudgeTunnelOnForeground() }
         }
+    }
+
+    private var rootPresentations: some View {
+        rootLifecycle
         .fullScreenCover(item: Binding(
             get: { savedAccess.reader },
             set: { if $0 == nil { savedAccess.endReading() } }
@@ -451,6 +459,12 @@ struct ClientRootView: View {
         .modifier(ClientProjectChatActions())
         .modifier(ClientSSHPresentations(workbench: sessionModels.models(for: WorkSessionContext.shared.scope).ssh,
             tier: account.account?.vaultTierForSsh))
+    }
+
+    // Separate type-checking boundaries keep this chain buildable on CI's
+    // Swift compiler while preserving the presentation/environment order.
+    var body: some View {
+        rootPresentations
         // **Last in the chain, after every presentation.** A sheet or a cover
         // inherits the environment as it stood where its modifier is written,
         // not as it stands inside the view it is attached to, so an
