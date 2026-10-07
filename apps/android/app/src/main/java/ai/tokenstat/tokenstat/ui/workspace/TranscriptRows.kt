@@ -30,6 +30,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -1042,10 +1043,12 @@ private fun parseMarkdown(text: String): List<MdBlock> {
 @Composable
 private fun MarkdownTableView(table: MarkdownTable, style: TextStyle, color: androidx.compose.ui.graphics.Color) {
     val colors = LocalTsColors.current
-    val widths = remember(table) {
+    val fontScale = LocalDensity.current.fontScale
+    val characterWidth = (style.fontSize.value.takeIf { it.isFinite() } ?: 15f) * 0.65f * fontScale
+    val widths = remember(table, characterWidth) {
         table.header.indices.map { column ->
             val length = (table.rows.map { it[column].length } + table.header[column].length).max()
-            (length.coerceIn(12, 40) * 7 + 24).dp
+            (length.coerceIn(12, 40) * characterWidth + 24).dp
         }
     }
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
