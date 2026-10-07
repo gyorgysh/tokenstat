@@ -137,6 +137,9 @@ ALLOWED = [
     # because the thread opens in place, see ClientChatView.
     ("Client/ClientChatView.swift", "opened = chat"),
     ("Client/ClientLaunchTile.swift", "Button(action: action)"),
+    # Retained navigation uses the caller's complete row or tile label,
+    # including its existing mark. This wrapper adds ownership, not chrome.
+    ("Client/ClientChatLayoutHandoff.swift", "navigation.pushOwned(ClientOwnedPush(id: presentationID,"),
     ("Client/ClientLoginView.swift", "Button(title) {"),
     ("Client/ClientOnboarding.swift", 'Button("Skip")'),
     # Billing interval is a two-option segmented pill. The text is the whole

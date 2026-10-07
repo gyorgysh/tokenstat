@@ -119,7 +119,8 @@ private struct ClientChatContent: View {
                     folderName: folderName,
                     hostName: hostName,
                     folder: folder,
-                    isActive: opened != nil,
+                    isActive: opened != nil && ChatViewportAttachment.isCurrentPresentation(visible: visible,
+                        layout: publicationLayout, currentLayout: navigation.stackGeneration),
                     onBack: {
                         guard visible, publicationLayout == navigation.stackGeneration else { return }
                         navigation.leaveThread(session: session, presentationID: presentationID)
@@ -908,7 +909,10 @@ struct ClientChatThread: View {
             updatePresence()
         }
         .onAppear { updatePresence() }
-        .onChange(of: scenePhase) { _, _ in updatePresence() }
+        .onChange(of: scenePhase) { _, _ in
+            updatePresence()
+            scrollAccess.refreshAttachment(retryVisibility: true)
+        }
         .onChange(of: isActive) { _, active in
             updatePresence()
             if !active { model.saveDraftNow() }
@@ -929,8 +933,7 @@ struct ClientChatThread: View {
         .onDisappear {
             model.saveDraftNow()
             traceViewport("disappear")
-            stopHoldingViewport()
-            settleTaskID = UUID()
+            retireViewport()
             follow.freeze()
             UserPresence.shared.leaveChatSurface(owner: presenceOwner)
         }
@@ -1290,6 +1293,7 @@ struct ClientChatThread: View {
             .transcriptEarlierPages(model, window: window, proxy: proxy)
             .onPreferenceChange(ClientTranscriptReadingFramesKey.self) { geometry in
                 readingFrames.replace(geometry)
+                scrollAccess.refreshAttachment()
                 keepViewport()
                 holdViewport(proxy)
             }
@@ -1354,28 +1358,40 @@ struct ClientChatThread: View {
                 follow.suppressed = !model.approvals.isEmpty
                 window.nearTopChanged = { measuringRows = $0 }
                 installRepin(proxy)
+                scrollAccess.refreshAttachment(retryVisibility: true)
                 guard isActive else { return }
-                if model.viewportContinuity.claim(generation: model.selectionGeneration, owner: presenceOwner) != nil {
+                if model.viewportContinuity.mark(generation: model.selectionGeneration) != nil {
                     follow.stopFollowing()
-                } else {
-                    pinToLatest(proxy, animated: false)
                 }
             }
             .onChange(of: isActive) { _, active in
-                if active { follow.active = true }
+                if active {
+                    follow.active = true
+                    scrollAccess.refreshAttachment(retryVisibility: true)
+                }
                 else {
                     traceViewport("hidden")
-                    stopHoldingViewport()
+                    retireViewport()
                     follow.freeze()
                 }
             }
-            .task(id: ChatPresentationIdentity(reading: model.readingIdentity, active: isActive)) {
+            .task(id: ClientChatViewportTaskIdentity(
+                presentation: ChatPresentationIdentity(reading: model.readingIdentity, active: isActive),
+                attachment: scrollAccess.attachmentIdentity, sceneActive: scenePhase == .active,
+                vacancy: model.viewportContinuity.vacancy)) {
                 // A lazy stack does not know its own height until it has drawn
                 // the rows, so the first scroll to the end lands on estimates.
                 // Hold the end across the frames the real heights take to
                 // arrive: every one of those says the end is far below, and
                 // believing one is how a long chat opened in its middle.
-                guard !Task.isCancelled, isActive, follow.active else { return }
+                guard !Task.isCancelled, isActive, follow.active, scenePhase == .active,
+                      let attachment = scrollAccess.attachmentIdentity,
+                      scrollAccess.matches(attachment) else {
+                    if !isActive || !follow.active || scenePhase != .active || !scrollAccess.isEligible {
+                        retireViewport()
+                    }
+                    return
+                }
                 viewportPlaced = false
                 readerMoved = false
                 readingFrames.cancelCapture()
@@ -1384,7 +1400,9 @@ struct ClientChatThread: View {
                 let reference = model.currentReference
                 let ticket = UUID()
                 settleTaskID = ticket
-                let kept = model.viewportContinuity.beginPlacement(generation: generation, owner: presenceOwner)
+                guard model.viewportContinuity.beginPlacement(generation: generation, owner: presenceOwner,
+                    eligible: scrollAccess.matches(attachment)) else { return }
+                let kept = model.viewportContinuity.mark(generation: generation)
                 traceViewport("begin", mark: kept)
                 var measurementCompleted = true
                 if kept != nil { follow.stopFollowing() }
@@ -1399,6 +1417,7 @@ struct ClientChatThread: View {
                     if settleTaskID == ticket {
                         follow.settle(false)
                         if !Task.isCancelled, isActive, follow.active,
+                           scenePhase == .active, scrollAccess.matches(attachment),
                            generation == model.selectionGeneration,
                            reference == model.currentReference,
                            model.viewportContinuity.owns(generation: generation, owner: presenceOwner) {
@@ -1415,18 +1434,21 @@ struct ClientChatThread: View {
                 while model.openingConversation {
                     try? await Task.sleep(for: .milliseconds(50))
                     guard !Task.isCancelled, isActive, follow.active,
+                          scenePhase == .active, scrollAccess.matches(attachment),
                           reference == model.currentReference,
                           model.viewportContinuity.canPlace(generation: generation, currentGeneration: model.selectionGeneration, owner: presenceOwner,
                               ticket: ticket, currentTicket: settleTaskID) else { return }
                 }
                 guard !Task.isCancelled, isActive, follow.active,
+                      scenePhase == .active, scrollAccess.matches(attachment),
                       reference == model.currentReference,
                       model.viewportContinuity.canPlace(generation: generation, currentGeneration: model.selectionGeneration, owner: presenceOwner,
                           ticket: ticket, currentTicket: settleTaskID) else { return }
-                let restored = await restoreReadingPlace(proxy)
+                let restored = await restoreReadingPlace(proxy, attachment: attachment)
                 if restored == .unmeasured { measurementCompleted = false; return }
                 if restored != .unavailable { return }
                 guard !Task.isCancelled, isActive, follow.active,
+                      scenePhase == .active, scrollAccess.matches(attachment),
                       model.viewportContinuity.canPlace(generation: generation, currentGeneration: model.selectionGeneration, owner: presenceOwner,
                           ticket: ticket, currentTicket: settleTaskID) else { return }
                 model.viewportContinuity.record(.latest, generation: generation, owner: presenceOwner)
@@ -1439,6 +1461,7 @@ struct ClientChatThread: View {
                 for _ in 0..<40 {
                     try? await Task.sleep(for: .milliseconds(50))
                     guard !Task.isCancelled, isActive, follow.active, !follow.abandoned,
+                          scenePhase == .active, scrollAccess.matches(attachment),
                           reference == model.currentReference,
                           model.viewportContinuity.canPlace(generation: generation, currentGeneration: model.selectionGeneration, owner: presenceOwner,
                               ticket: ticket, currentTicket: settleTaskID) else { return }
@@ -1683,8 +1706,12 @@ struct ClientChatThread: View {
     private func installRepin(_ proxy: ScrollViewProxy) {
         let state = follow
         let model = model
-        state.repin = { [weak state] in
-            guard let state, state.pinned, !state.sliceHidesNewest,
+        let access = scrollAccess
+        let owner = presenceOwner
+        state.repin = { [weak state, weak access] in
+            guard let state, state.active, let access, access.isEligible,
+                  model.viewportContinuity.owns(generation: model.selectionGeneration, owner: owner),
+                  state.pinned, !state.sliceHidesNewest,
                   model.approvals.isEmpty else { return false }
             state.markDrivenInstant()
             proxy.scrollTo(TranscriptFollow.bottomID, anchor: .bottom)
@@ -1701,7 +1728,9 @@ struct ClientChatThread: View {
     private func pinToLatest(_ proxy: ScrollViewProxy, animated: Bool) {
         // A pending request owns the view. Streaming text must not scroll it
         // out from under somebody who is reading it to decide.
-        guard isActive, follow.active, follow.pinned, model.approvals.isEmpty else { return }
+        guard isActive, follow.active, scenePhase == .active, scrollAccess.isEligible,
+              model.viewportContinuity.owns(generation: model.selectionGeneration, owner: presenceOwner),
+              follow.pinned, model.approvals.isEmpty else { return }
         guard canScrollToEnd else {
             follow.stopFollowing()
             return
@@ -1721,7 +1750,7 @@ struct ClientChatThread: View {
         readerMoved = false
         readingFrames.cancelCapture()
         viewportPlaced = true
-        model.viewportContinuity.record(.latest, generation: model.selectionGeneration, owner: presenceOwner)
+        model.viewportContinuity.chooseLatest(generation: model.selectionGeneration)
         if let reference = model.currentReference { ChatReadingStore.shared.requestLatest(for: reference) }
         model.viewportContinuity.completePlacement(generation: model.selectionGeneration, owner: presenceOwner)
         follow.settle(false)
@@ -1730,6 +1759,7 @@ struct ClientChatThread: View {
 
     private func keepViewport() {
         guard readingFrames.captureReady, readerMoved, isActive, follow.active, !follow.scrolling, !follow.settling,
+              scenePhase == .active, let attachment = scrollAccess.attachmentIdentity, scrollAccess.matches(attachment),
               !scrollAccess.readerIsTouching,
               model.viewportContinuity.isPlaced(generation: model.selectionGeneration, owner: presenceOwner),
               !follow.pinned || follow.atEnd else { return }
@@ -1767,12 +1797,14 @@ struct ClientChatThread: View {
     }
 
     private func captureReadingAfterQuiet() {
+        guard let attachment = scrollAccess.attachmentIdentity, scrollAccess.matches(attachment) else { return }
         let reference = model.currentReference
         let generation = model.selectionGeneration
         let captureID = readingFrames.captureID
         Task {
             try? await Task.sleep(for: .milliseconds(140))
             guard !Task.isCancelled, isActive, follow.active, !follow.scrolling, !follow.settling,
+                  scrollAccess.matches(attachment),
                   !scrollAccess.readerIsTouching,
                   reference == model.currentReference,
                   generation == model.selectionGeneration, readerMoved,
@@ -1784,6 +1816,7 @@ struct ClientChatThread: View {
             readingFrames.captureReady = true
             for _ in 0..<10 {
                 guard !Task.isCancelled, isActive, follow.active, !follow.scrolling, !follow.settling,
+                      scrollAccess.matches(attachment),
                       reference == model.currentReference,
                       generation == model.selectionGeneration,
                       captureID == readingFrames.captureID,
@@ -1818,11 +1851,20 @@ struct ClientChatThread: View {
         readingHold.reset()
     }
 
+    private func retireViewport() {
+        settleTaskID = UUID()
+        stopHoldingViewport()
+        readingFrames.cancelCapture()
+        follow.settle(false)
+        model.viewportContinuity.release(generation: model.selectionGeneration, owner: presenceOwner)
+    }
+
     /// A layout can move an older row after placement has converged. Perform
     /// measured corrections after layout, with a fixed budget and no history
     /// writes. Reader input and explicit latest always take over immediately.
     private func holdViewport(_ proxy: ScrollViewProxy) {
         guard viewportPlaced, preservesReadingMark, !follow.settling,
+              scenePhase == .active, let attachment = scrollAccess.attachmentIdentity, scrollAccess.matches(attachment),
               !scrollAccess.readerIsTouching,
               let reference = model.currentReference,
               let mark = model.viewportContinuity.mark(generation: model.selectionGeneration) else { return }
@@ -1830,6 +1872,7 @@ struct ClientChatThread: View {
         let ticket = settleTaskID
         readingDelivery.submit {
             guard viewportPlaced, preservesReadingMark, !follow.settling,
+                  scenePhase == .active, scrollAccess.matches(attachment),
                   !scrollAccess.readerIsTouching,
                   generation == model.selectionGeneration, reference == model.currentReference,
                   ticket == settleTaskID,
@@ -1872,8 +1915,10 @@ struct ClientChatThread: View {
 
     /// Explicit navigation wins. Otherwise only the same live selection may
     /// resume its viewport; passive history never moves a new selection.
-    private func restoreReadingPlace(_ proxy: ScrollViewProxy) async -> TranscriptReading.Restoration {
-        guard let reference = model.currentReference,
+    private func restoreReadingPlace(_ proxy: ScrollViewProxy, attachment: ChatViewportAttachmentIdentity) async -> TranscriptReading.Restoration {
+        guard scenePhase == .active, scrollAccess.matches(attachment),
+              model.viewportContinuity.owns(generation: model.selectionGeneration, owner: presenceOwner),
+              let reference = model.currentReference,
               let mark = ChatReadingStore.shared.takeRequest(for: reference)
                 ?? model.viewportContinuity.mark(generation: model.selectionGeneration) else { return .unavailable }
         // Keep explicit navigation before the first await, so a cancelled
@@ -1886,12 +1931,14 @@ struct ClientChatThread: View {
         return await TranscriptReading.restore(mark, reference: reference, model: model, follow: follow,
             isCurrent: {
                 generation == model.selectionGeneration && reference == model.currentReference
+                    && scenePhase == .active && scrollAccess.matches(attachment)
                     && ticket == settleTaskID
                     && model.viewportContinuity.owns(generation: generation, owner: presenceOwner)
                     && model.viewportContinuity.mark(generation: generation) == mark
             },
             correct: { id, mark in
                 guard isActive, follow.active, !Task.isCancelled,
+                      scenePhase == .active, scrollAccess.matches(attachment),
                       generation == model.selectionGeneration, reference == model.currentReference,
                       ticket == settleTaskID,
                       model.viewportContinuity.owns(generation: generation, owner: presenceOwner) else { return .interrupted }
@@ -1909,7 +1956,8 @@ struct ClientChatThread: View {
     /// Put one row where the reader had it, with the rest of the conversation
     /// below it and the earlier part one button above.
     private func placeRow(_ id: String, _ proxy: ScrollViewProxy, at point: UnitPoint) {
-        guard isActive, follow.active else { return }
+        guard isActive, follow.active, scenePhase == .active, scrollAccess.isEligible,
+              model.viewportContinuity.owns(generation: model.selectionGeneration, owner: presenceOwner) else { return }
         applySlice(TranscriptSlice.holding(id, in: model.transcriptItems, current: 0))
         follow.markDrivenInstant()
         var transaction = Transaction()
@@ -1920,7 +1968,8 @@ struct ClientChatThread: View {
     }
 
     private func scrollTo(_ id: String, _ proxy: ScrollViewProxy, animated: Bool) {
-        guard isActive, follow.active else { return }
+        guard isActive, follow.active, scenePhase == .active, scrollAccess.isEligible,
+              model.viewportContinuity.owns(generation: model.selectionGeneration, owner: presenceOwner) else { return }
         // Every scroll here is programmatic. Say so, or the frames of the
         // animation read as the reader leaving and unpin mid-flight.
         // Instant pins land on the same frame and only need a short window.
@@ -2042,16 +2091,153 @@ struct ClientChatThread: View {
 
 /// A weak reference to this transcript's own scroll view. Row placement uses
 /// its measured geometry after SwiftUI has revealed the target lazy row.
+private struct ClientChatViewportTaskIdentity: Hashable {
+    let presentation: ChatPresentationIdentity
+    let attachment: ChatViewportAttachmentIdentity?
+    let sceneActive: Bool
+    let vacancy: UInt64
+}
+
 @MainActor
 private final class ClientTranscriptScrollAccess {
-    weak var view: UIScrollView?
-    weak var reporter: UIView?
+    private(set) weak var view: UIScrollView?
+    private(set) weak var reporter: UIView?
+    private let attachment = ChatViewportAttachment()
+    private var reporterID: UUID?
+    private var retiredReporterID: UUID?
+    private var publicationQueued = false
+    private var readinessTask: Task<Void, Never>?
+    private var readinessTaskID: UUID?
+    private var readinessSource: ChatViewportAttachmentIdentity?
+
+    var attachmentIdentity: ChatViewportAttachmentIdentity? { attachment.identity }
+    var isEligible: Bool { liveAttachmentIdentity != nil }
+    func matches(_ identity: ChatViewportAttachmentIdentity) -> Bool { liveAttachmentIdentity == identity }
+
+    private var liveAttachmentIdentity: ChatViewportAttachmentIdentity? {
+        guard let identity = sourceIdentity, let view, let window = view.window, let reporter,
+              window.windowScene?.activationState == .foregroundActive else { return nil }
+        var ancestor: UIView? = reporter
+        while let current = ancestor {
+            guard !current.isHidden, current.alpha > 0.01 else { return nil }
+            ancestor = current.superview
+        }
+        let usable = view.convert(view.bounds.inset(by: view.adjustedContentInset), to: window)
+        guard ChatViewportAttachment.isVisible(usable: usable, window: window.bounds,
+                                              ancestorsVisible: true) else { return nil }
+        return identity
+    }
+
+    private var sourceIdentity: ChatViewportAttachmentIdentity? {
+        guard let view, let window = view.window, let reporter, let reporterID,
+              reporter.window === window else { return nil }
+        return ChatViewportAttachmentIdentity(reporter: reporterID,
+            scroll: ObjectIdentifier(view), window: ObjectIdentifier(window))
+    }
+
+    func bind(reporter: UIView, id: UUID) {
+        if self.reporter !== reporter {
+            cancelReadiness()
+            self.reporter = reporter
+            reporterID = id
+            attachment.register(reporter: id)
+        }
+        refreshAttachment()
+    }
+
+    func refreshAttachment(retryVisibility: Bool = false, from source: UIView? = nil) {
+        if let source, source !== reporter { return }
+        var ancestor = reporter?.superview
+        var scroll: UIScrollView?
+        while let current = ancestor {
+            if let found = current as? UIScrollView { scroll = found; break }
+            ancestor = current.superview
+        }
+        view = reporter?.window != nil && reporter?.window === scroll?.window ? scroll : nil
+        if retryVisibility || readinessSource != sourceIdentity { cancelReadiness() }
+        if retryVisibility { attachment.resetReadiness() }
+        if liveAttachmentIdentity != nil {
+            cancelReadiness()
+            attachment.resetReadiness()
+        }
+        startReadinessIfNeeded()
+        queuePublication()
+    }
+
+    func retire(reporter: UIView) {
+        guard self.reporter === reporter else { return }
+        cancelReadiness()
+        retiredReporterID = reporterID
+        reporterID = nil
+        self.reporter = nil
+        view = nil
+        queuePublication()
+    }
+
+    private func cancelReadiness() {
+        readinessTask?.cancel()
+        if let ticket = readinessTaskID { attachment.finishReadiness(ticket: ticket) }
+        readinessTask = nil
+        readinessTaskID = nil
+        readinessSource = nil
+    }
+
+    /// A fade can become visible without new geometry. Probe only this
+    /// attached instance for a bounded episode; hidden layout frames cannot
+    /// keep replenishing its budget.
+    private func startReadinessIfNeeded() {
+        guard readinessTask == nil, liveAttachmentIdentity == nil, let identity = sourceIdentity,
+              view?.window?.windowScene?.activationState == .foregroundActive,
+              let ticket = attachment.beginReadiness(identity) else { return }
+        readinessTaskID = ticket
+        readinessSource = identity
+        readinessTask = Task { [weak self] in
+            defer {
+                if self?.readinessTaskID == ticket, self?.attachment.finishReadiness(ticket: ticket) == true {
+                    self?.readinessTask = nil
+                    self?.readinessTaskID = nil
+                    self?.readinessSource = nil
+                }
+            }
+            for _ in 0..<12 {
+                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+                guard let self, !Task.isCancelled, self.readinessTaskID == ticket,
+                      self.sourceIdentity == identity,
+                      self.view?.window?.windowScene?.activationState == .foregroundActive,
+                      self.attachment.takeReadinessAttempt(identity, ticket: ticket) else { return }
+                self.refreshAttachment()
+                if self.liveAttachmentIdentity != nil { return }
+            }
+        }
+    }
+
+    /// Publish after UIKit/SwiftUI finish their update. Re-evaluate the current
+    /// reporter then, so queued teardown cannot resurrect a predecessor.
+    private func queuePublication() {
+        guard !publicationQueued else { return }
+        publicationQueued = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.publicationQueued = false
+            if let reporterID = self.reporterID {
+                let identity = self.liveAttachmentIdentity
+                if identity != nil {
+                    self.cancelReadiness()
+                    self.attachment.resetReadiness()
+                }
+                self.attachment.publish(identity, reporter: reporterID)
+            } else if let retired = self.retiredReporterID {
+                self.attachment.retire(reporter: retired)
+            }
+            self.retiredReporterID = nil
+        }
+    }
 
     /// SwiftUI global coordinates belong to its hierarchy root. Calibrate
     /// that root against this reporter's own window, including in a sheet
     /// or split column. No scene or window lookup is needed.
     func readingCoordinates(globalFrame: CGRect?) -> (visible: CGRect, originY: CGFloat)? {
-        guard let view, let window = view.window, let reporter,
+        guard isEligible, let view, let window = view.window, let reporter,
               reporter.window === window, let global = globalFrame else { return nil }
         let native = reporter.convert(reporter.bounds, to: window)
         let visible = view.convert(view.bounds.inset(by: view.adjustedContentInset), to: window)
@@ -2178,17 +2364,27 @@ private struct ClientTranscriptScrollReporter: UIViewRepresentable {
         let view = Reporter()
         view.isUserInteractionEnabled = false
         view.access = access
-        access.reporter = view
+        access.bind(reporter: view, id: view.id)
         return view
     }
 
     func updateUIView(_ view: Reporter, context: Context) {
         view.access = access
-        access.reporter = view
+        access.bind(reporter: view, id: view.id)
+    }
+
+    static func dismantleUIView(_ view: Reporter, coordinator: ()) {
+        view.access?.retire(reporter: view)
+        view.access = nil
     }
 
     final class Reporter: UIView {
+        let id = UUID()
         weak var access: ClientTranscriptScrollAccess?
+        override func didMoveToSuperview() {
+            super.didMoveToSuperview()
+            report()
+        }
         override func didMoveToWindow() {
             super.didMoveToWindow()
             report()
@@ -2198,14 +2394,7 @@ private struct ClientTranscriptScrollReporter: UIViewRepresentable {
             report()
         }
         private func report() {
-            var ancestor = superview
-            while let current = ancestor {
-                if let scroll = current as? UIScrollView {
-                    access?.view = scroll
-                    return
-                }
-                ancestor = current.superview
-            }
+            access?.refreshAttachment(from: self)
         }
     }
 }

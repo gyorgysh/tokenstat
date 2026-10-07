@@ -140,6 +140,32 @@ assert "captureID == readingFrames.captureID" in mobile, "a newer gesture must r
 assert "readingDelivery.submit" in mobile, "passive reading corrections must be deferred and coalesced"
 assert "if watched || holdingReading" in mobile, "reading geometry must survive programmatic reflow independently of paging"
 assert "ticket == settleTaskID" in mobile, "same-presentation restoration predecessors must not mutate a successor"
+assert "viewportContinuity.claim(" not in mobile, "onAppear must not let an unattached presentation steal the viewport"
+placement_task = mobile[mobile.index('.task(id: ClientChatViewportTaskIdentity('):mobile.index('.task(id: settleMood)')]
+assert "attachment: scrollAccess.attachmentIdentity" in placement_task and "vacancy: model.viewportContinuity.vacancy" in placement_task, "real attachment and owner vacancy must wake restoration"
+assert placement_task.index("scrollAccess.matches(attachment)") < placement_task.index("viewportContinuity.beginPlacement"), "attachment must be verified before acquiring a lease"
+assert "eligible: scrollAccess.matches(attachment)" in placement_task, "actual acquisition must deny unattached/hidden candidates"
+restore_source = mobile[mobile.index('private func restoreReadingPlace('):mobile.index('private func placeRow(')]
+assert restore_source.index('scrollAccess.matches(attachment)') < restore_source.index('ChatReadingStore.shared.takeRequest'), "unattached views cannot consume queued reading requests"
+assert 'model.viewportContinuity.release(generation: model.selectionGeneration, owner: presenceOwner)' in mobile, "teardown must release only its own lease and preserve the place"
+access_source = mobile[mobile.index('private final class ClientTranscriptScrollAccess'):mobile.index('private final class ClientTranscriptReadingFrames')]
+assert 'guard !current.isHidden, current.alpha > 0.01' in access_source and 'ChatViewportAttachment.isVisible' in access_source, "attachment must check local ancestor visibility and the local window intersection"
+assert 'window.windowScene?.activationState == .foregroundActive' in access_source, "background UIKit attachments cannot claim a foreground reader"
+assert 'DispatchQueue.main.async' in access_source and 'let identity = self.liveAttachmentIdentity' in access_source and 'attachment.publish(identity, reporter: reporterID)' in access_source, "attachment publication must be deferred and re-evaluate the live reporter"
+assert 'source !== reporter' in access_source and 'self.reporter === reporter' in access_source, "old reporter callbacks and dismantle must not affect a successor"
+assert 'model.viewportContinuity.chooseLatest(generation: model.selectionGeneration)' in mobile, "Latest before attachment must retire the old mark without claiming ownership"
+capture_source = mobile[mobile.index('private func keepViewport()'):mobile.index('private func captureReadingAfterQuiet()')]
+assert 'scenePhase == .active' in capture_source and 'scrollAccess.matches(attachment)' in capture_source, "direct Latest samples must also require the live foreground attachment"
+assert 'ChatViewportAttachment.isCurrentPresentation(visible: visible' in mobile, "obsolete folder wrappers cannot acquire a lease"
+recent = (root / "apps/mac/Sources/Client/ClientRecentChats.swift").read_text()
+assert 'isActive: ChatViewportAttachment.isCurrentPresentation(visible: visible' in recent, "obsolete recent wrappers cannot acquire a lease"
+assert 'rootCover: rootChatReference, currentCover: navigation.presentedChat?.reference' in recent, "stable root covers must validate the immutable current cover instead of underlying layout generation"
+assert 'scrollAccess.refreshAttachment(retryVisibility: true)' in mobile, "foreground and appearance changes must refresh actual attachment"
+assert 'if retryVisibility || readinessSource != sourceIdentity { cancelReadiness() }' in access_source, "a changed attachment or explicit retry must cancel an older readiness task before restarting"
+assert 'for _ in 0..<12' in access_source and 'attachment.beginReadiness(identity)' in access_source and 'attachment.takeReadinessAttempt(identity, ticket: ticket)' in access_source, "fade readiness must use a bounded episode that layout frames cannot replenish"
+assert 'self.sourceIdentity == identity' in access_source and 'self.readinessTaskID == ticket' in access_source, "deferred visibility probes must belong to their actual reporter/scroll/window and task"
+assert 'if liveAttachmentIdentity != nil {\n            cancelReadiness()\n            attachment.resetReadiness()' in access_source, "observed eligibility must end an old probe so a subsequent same-source fade can receive its own episode"
+assert 'self?.attachment.finishReadiness(ticket: ticket) == true' in access_source, "stale probe cleanup cannot clear a newer episode"
 opening = mobile[mobile.index("private func loadChat() async {"):mobile.index("private func updateLiveActivity() async {")]
 assert opening.index("guard !Task.isCancelled, isActive else { return }") < opening.index("navigation.takeSuggestedPrompt"), "hidden or cancelled readers must not consume an offered draft"
 assert "if let session { await session.select(chat) }" in opening, "layout replacements must share the retained reader's opening"

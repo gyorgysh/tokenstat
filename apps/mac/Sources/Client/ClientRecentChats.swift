@@ -282,6 +282,7 @@ struct ClientRecentChatView: View {
     let hostName: String
     let chatID: String
     var retainedSession: ClientChatSession? = nil
+    var rootChatReference: WorkReference? = nil
 
     @Environment(ClientChatSessions.self) private var sessions
     @Environment(ClientNavigationModel.self) private var navigation
@@ -289,7 +290,7 @@ struct ClientRecentChatView: View {
 
     var body: some View {
         ClientRecentChatContent(peer: peer, workspaceID: workspaceID, folderName: folderName,
-            hostName: hostName, chatID: chatID,
+            hostName: hostName, chatID: chatID, rootChatReference: rootChatReference,
             session: sessions.session(peer: peer, workspace: workspaceID, conversation: chatID, retaining: retainedSession),
             publicationIntent: navigation.chatHandoff.intent, handoffID: handoffID,
             publicationLayout: navigation.stackGeneration)
@@ -303,6 +304,7 @@ private struct ClientRecentChatContent: View {
     let folderName: String
     let hostName: String
     let chatID: String
+    let rootChatReference: WorkReference?
     let session: ClientChatSession
     @State var publicationIntent: UInt64
     @State var handoffID: UUID?
@@ -411,6 +413,10 @@ private struct ClientRecentChatContent: View {
                     chatID: chatID,
                     folderName: folderName,
                     hostName: hostName,
+                    isActive: ChatViewportAttachment.isCurrentPresentation(visible: visible,
+                        layout: publicationLayout, currentLayout: navigation.stackGeneration,
+                        rootCover: rootChatReference, currentCover: navigation.presentedChat?.reference,
+                        scope: WorkSessionContext.shared.scope),
                     onDelete: { deleted in
                         guard visible, deleted.id == chatID else { return }
                         let reference = navigation.reference(peer: peer, workspaceID: workspaceID, chatID: chatID)

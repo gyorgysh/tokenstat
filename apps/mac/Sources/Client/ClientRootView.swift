@@ -421,7 +421,8 @@ struct ClientRootView: View {
                     workspaceID: target.workspaceID,
                     folderName: target.folderName,
                     hostName: target.hostName,
-                    chatID: target.chatID
+                    chatID: target.chatID,
+                    rootChatReference: target.reference
                 )
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {

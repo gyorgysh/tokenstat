@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 import CoreGraphics
+import Observation
 
 /// The live viewport belongs to a model selection, rather than a layout.
 /// A new selection still opens at the latest turn. A replacement presentation
 /// of that same selection resumes its last measured row.
 @MainActor
+@Observable
 final class ChatViewportContinuity {
-    private var generation: UInt64?
-    private var owner: UUID?
-    private var place: ChatReadingMark?
-    private var placed = false
+    @ObservationIgnored private var generation: UInt64?
+    @ObservationIgnored private var owner: UUID?
+    @ObservationIgnored private var place: ChatReadingMark?
+    @ObservationIgnored private var placed = false
+    private(set) var vacancy: UInt64 = 0
 
     @discardableResult
     func claim(generation: UInt64, owner: UUID) -> ChatReadingMark? {
@@ -29,6 +32,13 @@ final class ChatViewportContinuity {
     }
 
     @discardableResult
+    func beginPlacement(generation: UInt64, owner: UUID, eligible: Bool) -> Bool {
+        guard eligible else { return false }
+        _ = beginPlacement(generation: generation, owner: owner)
+        return true
+    }
+
+    @discardableResult
     func completePlacement(generation: UInt64, owner: UUID) -> Bool {
         guard self.generation == generation, self.owner == owner else { return false }
         placed = true
@@ -41,6 +51,24 @@ final class ChatViewportContinuity {
 
     func owns(generation: UInt64, owner: UUID) -> Bool {
         self.generation == generation && self.owner == owner
+    }
+
+    /// Wake a displaced visible reader only when its current lease is free.
+    /// Teardown never changes the measured place or another owner's lease.
+    @discardableResult
+    func release(generation: UInt64, owner: UUID) -> Bool {
+        guard owns(generation: generation, owner: owner) else { return false }
+        self.owner = nil
+        placed = false
+        vacancy &+= 1
+        return true
+    }
+
+    /// Explicit Latest may arrive while a replacement waits for attachment.
+    /// It retires the place without letting that unattached view claim a lease.
+    func chooseLatest(generation: UInt64) {
+        guard self.generation == generation else { return }
+        place = nil
     }
 
     func canPlace(generation: UInt64, currentGeneration: UInt64, owner: UUID, ticket: UUID, currentTicket: UUID) -> Bool {
