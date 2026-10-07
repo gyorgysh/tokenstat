@@ -145,7 +145,12 @@ fn validate_account(
     id: Option<&str>,
 ) -> Result<(), String> {
     let matches = scope.get("kind").and_then(Value::as_str) == Some("account")
-        && scope.get("origin").and_then(Value::as_str) == Some(host)
+        && scope
+            .get("origin")
+            .and_then(Value::as_str)
+            .and_then(canonical_origin)
+            .zip(canonical_origin(host))
+            .is_some_and(|(requested, verified)| requested == verified)
         && scope
             .get("identity")
             .and_then(Value::as_str)
@@ -153,6 +158,22 @@ fn validate_account(
                 !identity.is_empty() && (Some(identity) == handle || Some(identity) == id)
             });
     if matches { Ok(()) } else { Err(CHANGED.into()) }
+}
+
+/// Match the client's account origin spelling without weakening origin checks.
+fn canonical_origin(raw: &str) -> Option<String> {
+    let mut url = reqwest::Url::parse(raw).ok()?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || !matches!(url.path(), "" | "/")
+    {
+        return None;
+    }
+    url.set_query(None);
+    url.set_fragment(None);
+    Some(url.as_str().trim_end_matches('/').to_owned())
 }
 
 pub(crate) fn current_snapshot() -> Option<AccountSnapshot> {
@@ -267,6 +288,27 @@ mod tests {
         let scope = serde_json::json!({"kind":"account", "origin":"https://mock.example", "identity":"alice"});
         assert!(
             validate_account(&scope, "https://mock.example", Some("alice"), Some("id-a")).is_ok()
+        );
+        assert!(
+            validate_account(
+                &scope,
+                "https://MOCK.example:443/",
+                Some("alice"),
+                Some("id-a")
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_account(&scope, "http://mock.example", Some("alice"), Some("id-a")).is_err()
+        );
+        assert!(
+            validate_account(
+                &scope,
+                "https://user@mock.example",
+                Some("alice"),
+                Some("id-a")
+            )
+            .is_err()
         );
         assert!(
             validate_account(&scope, "https://other.example", Some("alice"), Some("id-a")).is_err()
