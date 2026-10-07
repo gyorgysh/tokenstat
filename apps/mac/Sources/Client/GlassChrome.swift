@@ -113,9 +113,9 @@ extension View {
     /// edge, and only that edge is worth hiding: the one that runs under the
     /// navigation bar is the system doing the job we would otherwise fake.
     @ViewBuilder
-    func clientHideScrollEdgeEffect(for edges: Edge.Set = .all) -> some View {
+    func clientHideScrollEdgeEffect(_ hidden: Bool = true, for edges: Edge.Set = .all) -> some View {
         if #available(iOS 26, *) {
-            scrollEdgeEffectHidden(true, for: edges)
+            scrollEdgeEffectHidden(hidden, for: edges)
         } else {
             self
         }
@@ -177,8 +177,15 @@ extension View {
     /// leaving a slab of material under the composer. Below 26 there is no
     /// such bar, so the inset keeps a panel fill and a hairline.
     @ViewBuilder
-    func clientBottomBar<Bar: View>(@ViewBuilder bar: () -> Bar) -> some View {
-        if #available(iOS 26, *) {
+    func clientBottomBar<Bar: View>(bounded: Bool = false, @ViewBuilder bar: () -> Bar) -> some View {
+        if bounded {
+            // A tall tablet composer must not create a scroll-edge fade above
+            // its bounds, where the reading and follow controls remain visible.
+            safeAreaInset(edge: .bottom, spacing: 0) {
+                bar()
+                    .background(.ultraThinMaterial)
+            }
+        } else if #available(iOS 26, *) {
             safeAreaBar(edge: .bottom, spacing: 0, content: bar)
         } else {
             safeAreaInset(edge: .bottom, spacing: 0) {

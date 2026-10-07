@@ -255,6 +255,7 @@ private struct ClientAccountContent: View {
     @ViewBuilder
     private var thisDevicePane: some View {
         notificationsCard
+        layoutCard
         tabsCard
         LocalTrafficCard(traffic: model.remoteStatus?.traffic) {
             await model.loadTraffic()
@@ -262,7 +263,6 @@ private struct ClientAccountContent: View {
         LaunchSettings()
         ChatCacheSettings()
         SavedWorkSettings()
-        layoutCard
     }
 
     /// This device's tab bar and sidebar, arranged by the person holding it.

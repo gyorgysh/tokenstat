@@ -252,8 +252,12 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     /// it; the host skips the SIGWINCH when the agreement did not move, so a
     /// redundant claim costs nothing and a drifted one repaints.
     func terminalReturnedToFront() {
-        guard rows > 0, cols > 0 else { return }
-        eventStream.continuation.yield(.resize(rows: rows, cols: cols))
+        // Layout reports synchronously, while the observed rows/cols update
+        // on the next actor turn. A newly attached remote session still has
+        // its other viewer's size there. Replaying it after layout would undo
+        // this Mac's resize until the window moved again.
+        guard let size = reportedSize, size.rows > 0, size.cols > 0 else { return }
+        eventStream.continuation.yield(.resize(rows: size.rows, cols: size.cols))
     }
 
     /// The emulator, created on first access. Only call after attach.
