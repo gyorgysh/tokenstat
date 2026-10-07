@@ -16,7 +16,8 @@ import SwiftUI
 /// that: one card on an empty screen, asking for a sign-in before saying what
 /// the app was for. Nobody signs into a product they have not been told about.
 ///
-/// Three short pages explain the work, its computer and its projects. Sign-in stays a deliberate next step.
+/// Six short pages explain the work, the machine that holds it, usage and
+/// privacy. Sign-in stays a deliberate next step.
 ///
 /// Shown once. `hasOnboarded` is `@AppStorage`, so the second launch goes
 /// straight to the sign-in card, and a signed-in phone never sees this at all.
@@ -36,16 +37,34 @@ struct ClientOnboarding: View {
             body: L10n.text("apple.clientonboarding.run_coding_agents_on_your_computer_or_a_se.e496252a")
         ),
         OnboardingPage(
-            art: .onTheGo,
-            topic: L10n.text("apple.clientonboarding.machines.c061da19"),
-            title: L10n.text("apple.clientonboarding.choose_where_the_work_runs.0e0fe3ac"),
-            body: L10n.text("apple.clientonboarding.use_a_computer_you_own_or_a_cloud_server_c.d1c3ffac")
+            art: .agents,
+            topic: L10n.text("apple.clientonboarding.agents.279b44d2"),
+            title: L10n.text("apple.clientonboarding.keep_the_conversation_going.4656fe2c"),
+            body: L10n.text("apple.clientonboarding.give_an_agent_a_task_follow_its_progress_a.1c37d4c6")
         ),
         OnboardingPage(
             art: .workspaces,
             topic: L10n.text("common.projects"),
             title: L10n.text("apple.clientonboarding.go_from_the_chat_to_the_code.612842a3"),
             body: L10n.text("apple.clientonboarding.open_a_folder_or_clone_a_repository_read_a.1ff55f95")
+        ),
+        OnboardingPage(
+            art: .onTheGo,
+            topic: L10n.text("apple.clientonboarding.machines.c061da19"),
+            title: L10n.text("apple.clientonboarding.choose_where_the_work_runs.0e0fe3ac"),
+            body: L10n.text("apple.clientonboarding.use_a_computer_you_own_or_a_cloud_server_c.d1c3ffac")
+        ),
+        OnboardingPage(
+            art: .heatmap,
+            topic: L10n.text("apple.clientonboarding.usage.8d59829c"),
+            title: L10n.text("apple.clientonboarding.know_where_the_tokens_go.fc548566"),
+            body: L10n.text("apple.clientonboarding.see_activity_and_estimated_cost_by_tool_mo.feb3684a")
+        ),
+        OnboardingPage(
+            art: .privacy,
+            topic: L10n.text("apple.clientonboarding.privacy.54a57c31"),
+            title: L10n.text("apple.clientonboarding.your_machines_your_say.71812757"),
+            body: L10n.text("apple.clientonboarding.remote_work_travels_over_an_end_to_end_enc.6cfdbc5b")
         ),
     ]
 

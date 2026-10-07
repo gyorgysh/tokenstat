@@ -11,9 +11,10 @@ import Foundation
             precondition(borrowed === progress && borrowed.page == 1)
         }
         precondition(progress.advance() && progress.page == 2)
-        precondition(!progress.advance() && progress.page == 2)
-        progress.back(); precondition(progress.page == 1)
-        precondition(ClientIntroProgress.pageCount == 3)
-        print("Intro: three pages, retained progress and bounded Back/Continue passed")
+        for expected in 3..<6 { precondition(progress.advance() && progress.page == expected) }
+        precondition(!progress.advance() && progress.page == 5)
+        progress.back(); precondition(progress.page == 4)
+        precondition(ClientIntroProgress.pageCount == 6)
+        print("Intro: six pages, retained progress and bounded Back/Continue passed")
     }
 }

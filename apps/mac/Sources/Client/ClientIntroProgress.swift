@@ -4,7 +4,7 @@ import Observation
 /// Retained by the scene root; responsive presentations only borrow it.
 @MainActor @Observable
 final class ClientIntroProgress {
-    static let pageCount = 3
+    static let pageCount = 6
     var page = 0
     @discardableResult func advance() -> Bool {
         guard page < Self.pageCount - 1 else { return false }
