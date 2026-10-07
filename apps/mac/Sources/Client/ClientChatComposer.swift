@@ -68,33 +68,27 @@ struct ClientChatComposer: View {
                 ChatDraftNotice(unconfirmed: unconfirmed,
                                 checkAgain: { Task { await model.checkUnconfirmedSend() } })
             }
-            HStack(alignment: .top, spacing: Theme.Space.s) {
-                ChatComposerControls(
-                    model: model,
-                    chat: chat,
-                    locked: running,
-                    compact: true
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                // Only while there is a keyboard to put away. A control that
-                // cannot do anything is one the eye still has to read past
-                // every time, and this row is already three controls wide on
-                // a phone.
-                if focused {
-                    Button(L10n.text("apple.clientchatcomposer.hide_keyboard.f6b0718e"), .hideKeyboard, action: hideKeyboard)
-                        .modifier(ComposerChromeButton())
-                        .transition(controlTransition)
+            ChatComposerControls(
+                model: model,
+                chat: chat,
+                locked: running,
+                compact: true
+            ) {
+                HStack(spacing: Theme.Space.s) {
+                    // Show Hide only when the keyboard can be dismissed.
+                    if focused {
+                        Button(L10n.text("apple.clientchatcomposer.hide_keyboard.f6b0718e"), .hideKeyboard, action: hideKeyboard)
+                            .modifier(ComposerChromeButton())
+                            .transition(controlTransition)
+                    }
+                    // Stop stays here even when a queued draft enables Send.
+                    if running {
+                        Button(L10n.text("common.stop"), .stop, action: onStop)
+                            .modifier(ComposerChromeButton())
+                            .transition(controlTransition)
+                    }
+                    expandToggle
                 }
-                // Stay in this row whenever a turn is running. Parking it on
-                // send, then jumping it up here the moment a queued draft
-                // appears, grew the bar and put a glass circle where a
-                // 44-point glyph belongs.
-                if running {
-                    Button(L10n.text("common.stop"), .stop, action: onStop)
-                        .modifier(ComposerChromeButton())
-                        .transition(controlTransition)
-                }
-                expandToggle
             }
             if !attachments.isEmpty {
                 strip
@@ -113,7 +107,7 @@ struct ClientChatComposer: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: canSend)
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: running)
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: expanded)
@@ -248,7 +242,7 @@ struct ClientChatComposer: View {
             .textFieldStyle(.plain)
             .font(ClientType.body)
             .lineLimit(expanded ? 8...18 : 1...6)
-            .frame(minHeight: expanded ? 180 : 0, alignment: .topLeading)
+            .frame(minWidth: 0, maxWidth: .infinity, minHeight: expanded ? 180 : 0, alignment: .topLeading)
             .focused($focused)
             .padding(.vertical, 8)
             .submitLabel(.send)

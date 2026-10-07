@@ -196,3 +196,20 @@ assert 'navigation.leaveTerminal(owner: session.id)' in terminal_teardown and 's
 terminal_presentation = (root / "apps/mac/Sources/Client/ClientTerminalPresentation.swift").read_text()
 assert '.onChange(of: model.activeTerminal?.id)' in terminal_presentation and 'navigation.leaveTerminal(owner: previous)' in terminal_presentation, "authoritative terminal dismissal must clear its owned route"
 assert "opened = chat\n        publishChat(id)" in requested, "unchanged opened identifiers still need explicit guarded publication"
+
+# Focused chrome must not subtract width from the mode/permission row. This
+# source gate complements native checks of actual SwiftUI intrinsic sizing.
+composer = (root / "apps/mac/Sources/Client/ClientChatComposer.swift").read_text()
+setup = (root / "apps/mac/Sources/Features/Workspaces/Chat/ChatSetupHeader.swift").read_text()
+compact = setup[setup.index("private var compactLayout:"):setup.index("private var content:")]
+agent_row, pill_rows = compact.split("ViewThatFits(in: .horizontal)", 1)
+assert "agentField" in agent_row and "chrome" in agent_row and "pills(" not in agent_row, "focus/running chrome must share only the flexible agent row"
+assert "chrome" not in pill_rows and pill_rows.count("pills(fitsWidth: true)") == 2, "both horizontal and stacked pill candidates must receive the whole row width"
+assert "VStack(alignment: .leading, spacing: Theme.Space.s)" in pill_rows, "narrow or large-text controls need a stacked fallback"
+pills = setup[setup.index("struct ChatCompactPills:"):setup.index("/// Capture before scheduling")]
+assert "var fitsWidth = false" in pills and ".fixedSize(horizontal: !fitsWidth, vertical: true)" in pills, "mobile groups must permit label wrapping while preserving desktop's default intrinsic width"
+assert ".frame(maxWidth: fitsWidth ? .infinity : nil, alignment: .leading)" in pills and ".frame(minHeight: 44)" in pills, "wrapping groups must accept their local width and preserve touch targets"
+field = composer[composer.index("private var field:"):composer.index("private func hideKeyboard()")]
+assert ".frame(minWidth: 0, maxWidth: .infinity," in field, "the writing field must shrink to its local offered width"
+assert ".frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)" in composer, "the composer must accept the containing chat's width"
+assert "extension ChatComposerControls where Chrome == EmptyView" in setup, "desktop callers must retain a chrome-free default"

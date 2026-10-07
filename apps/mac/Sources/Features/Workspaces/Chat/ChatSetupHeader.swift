@@ -329,15 +329,25 @@ struct ChatFastModeButton: View {
 ///
 /// Full setup stays in the inspector. These controls must not stretch across
 /// the well: each takes its own width, the field is the message.
-struct ChatComposerControls: View {
+struct ChatComposerControls<Chrome: View>: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
     var locked: Bool
     /// Phones use the two-row arrangement directly; desktops fit the
     /// horizontal controls first, then use the same compact arrangement.
     var compact = false
+    let chrome: Chrome
 
     @State private var pickingAgent = false
+
+    init(model: ChatModel, chat: ChatConversation, locked: Bool, compact: Bool = false,
+         @ViewBuilder chrome: () -> Chrome) {
+        self.model = model
+        self.chat = chat
+        self.locked = locked
+        self.compact = compact
+        self.chrome = chrome()
+    }
 
     var body: some View {
         layout
@@ -361,15 +371,19 @@ struct ChatComposerControls: View {
     @ViewBuilder
     private var layout: some View {
         if model.savedCopy != nil {
-            Label(L10n.text("apple.chatsetupheader.draft_on_this_device.8c266c9c"), systemImage: ActionIcon.edit.symbol)
-                .font(Theme.caption)
-                .foregroundStyle(.secondary)
+            if compact {
+                HStack(spacing: Theme.Space.s) {
+                    savedCopyLabel
+                    Spacer(minLength: 0)
+                    chrome
+                }
+            } else {
+                savedCopyLabel
+            }
         } else if compact {
-            // Two rows, both of which fit. One row does not: the two pill
-            // groups alone are most of a phone's width, so the agent field
-            // was pushing them past the edge of the bar. The field takes the
-            // width that is left on its own row and truncates in the middle,
-            // where the interesting part of a model id is not.
+            // Keyboard and expansion actions share only the agent's row.
+            // Putting them beside the whole stack subtracts their width
+            // from the pills too, widening the transcript when focused.
             compactLayout
         } else {
             ViewThatFits(in: .horizontal) {
@@ -380,13 +394,27 @@ struct ChatComposerControls: View {
         }
     }
 
+    private var savedCopyLabel: some View {
+        Label(L10n.text("apple.chatsetupheader.draft_on_this_device.8c266c9c"), systemImage: ActionIcon.edit.symbol)
+            .font(Theme.caption)
+            .foregroundStyle(.secondary)
+    }
+
     private var compactLayout: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            agentField
-                .frame(maxWidth: .infinity, alignment: .leading)
-            HStack(alignment: .center, spacing: Theme.Space.s) {
-                pills
-                Spacer(minLength: 0)
+            HStack(alignment: .top, spacing: Theme.Space.s) {
+                agentField
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                chrome
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: Theme.Space.s) {
+                    pills(fitsWidth: true)
+                }
+                .fixedSize(horizontal: true, vertical: true)
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    pills(fitsWidth: true)
+                }
             }
         }
     }
@@ -394,7 +422,8 @@ struct ChatComposerControls: View {
     @ViewBuilder
     private var content: some View {
         agentField
-        pills
+        pills()
+        chrome
     }
 
     private var agentField: some View {
@@ -402,13 +431,14 @@ struct ChatComposerControls: View {
     }
 
     @ViewBuilder
-    private var pills: some View {
+    private func pills(fitsWidth: Bool = false) -> some View {
         ChatCompactPills(
             options: [
                 (value: "plan", label: L10n.text("apple.chatsetupheader.plan.fa8ed0bd")),
                 (value: "execute", label: L10n.text("apple.chatsetupheader.execute.e3a67d95")),
             ],
-            selection: modeBinding
+            selection: modeBinding,
+            fitsWidth: fitsWidth
         )
         .disabled(locked)
         if isBypassOnly {
@@ -418,7 +448,8 @@ struct ChatComposerControls: View {
             // nothing to switch to, like the setup form's locked toggle.
             ChatCompactPills(
                 options: [(value: "bypass", label: L10n.text("apple.chatsetupheader.don_t_ask.15dae980"))],
-                selection: autonomyBinding
+                selection: autonomyBinding,
+                fitsWidth: fitsWidth
             )
             .disabled(true)
         } else {
@@ -427,7 +458,8 @@ struct ChatComposerControls: View {
                     (value: "standard", label: L10n.text("apple.chatsetupheader.ask_first.4a9e8cf3")),
                     (value: "bypass", label: L10n.text("apple.chatsetupheader.don_t_ask.15dae980")),
                 ],
-                selection: autonomyBinding
+                selection: autonomyBinding,
+                fitsWidth: fitsWidth
             )
             .disabled(locked)
         }
@@ -453,6 +485,12 @@ struct ChatComposerControls: View {
     private func enforceBypassOnly() {
         guard isBypassOnly, chat.autonomy != "bypass", !chat.running else { return }
         performSetupChange(model: model, chat: chat) { await model.update(autonomy: "bypass") }
+    }
+}
+
+extension ChatComposerControls where Chrome == EmptyView {
+    init(model: ChatModel, chat: ChatConversation, locked: Bool, compact: Bool = false) {
+        self.init(model: model, chat: chat, locked: locked, compact: compact) { EmptyView() }
     }
 }
 
@@ -874,6 +912,7 @@ extension View {
 struct ChatCompactPills: View {
     var options: [(value: String, label: String)]
     @Binding var selection: String
+    var fitsWidth = false
 
     var body: some View {
         HStack(spacing: 4) {
@@ -900,7 +939,8 @@ struct ChatCompactPills: View {
         }
         .padding(3)
         .chatControlChrome(cornerRadius: 10)
-        .fixedSize(horizontal: true, vertical: true)
+        .fixedSize(horizontal: !fitsWidth, vertical: true)
+        .frame(maxWidth: fitsWidth ? .infinity : nil, alignment: .leading)
     }
 }
 
