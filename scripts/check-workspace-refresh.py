@@ -118,7 +118,7 @@ with tempfile.TemporaryDirectory() as directory:
     subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '5', '-module-cache-path', str(work / 'ModuleCache'), str(work / 'Check.swift'), str(root / 'apps/mac/Sources/Design/L10n.swift'), '-o', str(work / 'check')], check=True)
     subprocess.run([str(work / 'check')], check=True)
 client = (root / 'apps/mac/Sources/Client/ClientRootView.swift').read_text()
-assert 'func deactivate() { workspaces.deactivate(); ssh.deactivate() }' in client
+assert 'func deactivate() { workspaces.deactivate(); ssh.deactivate(); setup.deactivate() }' in client
 assert client.count('current?.deactivate()') == 2
 auth = (root / 'apps/mac/Sources/Client/ClientWebAuth.swift').read_text()
 assert 'UIApplication.shared' not in auth and 'connectedScenes' not in auth

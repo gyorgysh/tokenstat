@@ -24,7 +24,7 @@ struct ClientWorkspacesView: View {
     @State private var model: ClientWorkspacesModel
     @State private var pendingClose: (peer: String, info: PtySessionInfo)?
     @State private var notificationOpen = NotificationOpen.shared
-    @State private var showSetup = false
+    @Environment(ClientSetupSession.self) private var setup
     @State private var customizing = false
     @State private var addingFirstProject = false
     @State private var layout = WorkspacesLayout.shared
@@ -122,7 +122,7 @@ struct ClientWorkspacesView: View {
                             message: L10n.text("apple.clientworkspacesview.tokenstat_runs_agents_on_a_machine_that_st.93fe9732"),
                             actionTitle: L10n.text("apple.clientworkspacesview.set_up_a_machine.43e10e13"),
                             actionIcon: .connect,
-                            action: { showSetup = true },
+                            action: { setup.open() },
                             art: .connect
                         )
                     } else {
@@ -202,9 +202,6 @@ struct ClientWorkspacesView: View {
                 guard requested else { return }
                 navigation.workspacesEditorRequested = false
                 customizing = true
-            }
-            .fullScreenCover(isPresented: $showSetup) {
-                ClientSetupWizard()
             }
             .navigationTitle(L10n.text("common.projects"))
             .navigationBarTitleDisplayMode(.inline)

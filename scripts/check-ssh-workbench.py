@@ -44,6 +44,7 @@ setup_state = (sources / 'Client/ClientSetupState.swift').read_text()
 setup_coordinator = plain((sources / 'Client/ClientSetupCoordinator.swift').read_text())
 owner = (sources / 'Features/Machines/SSHOperationOwner.swift').read_text()
 workbench = plain(block((sources / 'Client/ClientSSHWorkbench.swift').read_text(), '@MainActor @Observable\nfinal class ClientSSHWorkbench'))
+setup_session = plain(block((sources / 'Client/ClientSetupSession.swift').read_text(), '@MainActor @Observable\nfinal class ClientSetupSession'))
 cache = block((sources / 'Client/ClientRootView.swift').read_text(), '@MainActor\nfinal class ClientSessionModels')
 connection = (sources / 'Features/Machines/SSHConnectionsView.swift').read_text()
 form = block(connection, 'struct SSHConnectForm: View {')
@@ -203,7 +204,7 @@ enum SSHLibraryView { enum Section { case hosts, keys, snippets } }
 func fixture(_ id: String = "host") -> SSHHost {
     SSHHost(id: id, label: id, hostname: "mock.example", port: 22, username: "mock", tags: [], provider: nil, hostKeys: ["mock-fingerprint"])
 }
-''' + dtos + '\n' + '\n'.join(block(models, 'struct ' + name + ':') for name in ['ServerCheck', 'InstallLine', 'PairingCode']) + '\n' + block((sources / 'Features/Machines/SSHLibraryView.swift').read_text(), 'enum SSHLibraryRoute:') + '\n' + owner + drafts + library + vault + '\n' + workbench + '\n' + cache + '\n' + setup_state + '\n' + setup_coordinator + '\n' + setup + r'''
+''' + dtos + '\n' + '\n'.join(block(models, 'struct ' + name + ':') for name in ['ServerCheck', 'InstallLine', 'PairingCode']) + '\n' + block((sources / 'Features/Machines/SSHLibraryView.swift').read_text(), 'enum SSHLibraryRoute:') + '\n' + owner + drafts + library + vault + '\n' + workbench + '\n' + setup_session + '\n' + cache + '\n' + setup_state + '\n' + setup_coordinator + '\n' + setup + r'''
 @MainActor final class ConnectHarness {
     var host: SSHHost; let model: SSHLibraryModel
     var password = "mock-password", selectedKeyID = ""
@@ -217,10 +218,11 @@ func fixture(_ id: String = "host") -> SSHHost {
 ''' + form_methods + r'''
 }
 @MainActor final class WizardHarness {
-    let model = ClientSetupModel()
-    var library = SSHLibraryModel()
-    var path: [SetupStep] = []
-    var entryAttempted = false
+    let session = ClientSetupSession(scope: WorkSessionContext.shared.scope)
+    var model: ClientSetupModel { session.model }
+    var library: SSHLibraryModel { get { session.library } set { session.library = newValue } }
+    var path: [SetupStep] { get { session.path } set { session.path = newValue } }
+    var entryAttempted: Bool { get { session.entryAttempted } set { session.entryAttempted = newValue } }
 ''' + wizard_change + r'''
 }
 @MainActor func until(_ condition: () -> Bool) async {
@@ -406,6 +408,33 @@ func fixture(_ id: String = "host") -> SSHHost {
             precondition(!Bridge.calls.contains("setup.clear") && SSHLiveTerminal.totalStops == stops && model.terminal == nil)
             clean()
         }
+        // Root setup presentation survives thirty remounts with a single
+        // preparation and exact dismissal; retirement wipes held secrets.
+        context.set(a); Bridge.accountReply.handle = "alice"
+        let setupCache = ClientSessionModels()
+        let setupRoot = setupCache.models(for: a).setup
+        setupRoot.open(); let presentationID = setupRoot.presentation!.id
+        setupRoot.path = [.where]; setupRoot.model.host.hostname = "draft.mock.example"
+        setupRoot.model.password = "mock-unsent"
+        Bridge.hold = ["setup.identity"]
+        let setupWaiters = (0..<30).map { _ in Task { await setupRoot.prepare() } }
+        await until { Bridge.pending["setup.identity"] != nil }
+        setupWaiters[0].cancel()
+        for _ in 0..<100 { await Task.yield() }
+        precondition(Bridge.calls.filter { $0 == "setup.identity" }.count == 1)
+        for _ in 0..<30 {
+            precondition(setupCache.models(for: a).setup === setupRoot)
+            precondition(setupRoot.path == [.where] && setupRoot.model.password == "mock-unsent")
+        }
+        Bridge.finish("setup.identity"); for waiter in setupWaiters { await waiter.value }
+        precondition(setupRoot.model.prepared)
+        setupRoot.close(presentationID); precondition(setupRoot.model.password.isEmpty)
+        setupRoot.open(); let successor = setupRoot.presentation!.id
+        setupRoot.close(presentationID); precondition(setupRoot.presentation?.id == successor)
+        let heldModel = setupRoot.model; heldModel.password = "mock-successor"
+        context.set(b); _ = setupCache.models(for: b)
+        precondition(heldModel.password.isEmpty && setupRoot.presentation == nil)
+        clean()
         // Both actual wizard callbacks delegate here. Their order and a held
         // preparation must not leave B with A's library or restart B twice.
         for firstCallback in ["account", "generation"] {
@@ -462,3 +491,14 @@ wizard_source = (sources / 'Client/ClientSetupWizard.swift').read_text()
 assert '.onChange(of: account.account) { _, now in accountDidChange(now) }' in wizard_source
 assert '.onChange(of: WorkSessionContext.shared.generation) { _, _ in accountDidChange(account.account) }' in wizard_source
 print('SSH workbench root lifetime, presentation environment, watcher and credential cleanup integration guards passed')
+
+setup_wizard = (sources / 'Client/ClientSetupWizard.swift').read_text()
+assert '.onDisappear { model.cancelWork() }' not in setup_wizard
+assert '@Bindable var session: ClientSetupSession' in setup_wizard
+assert '.modifier(ClientSetupPresentation(' in client
+assert client.rfind('.environment(sessionModels.models(for: WorkSessionContext.shared.scope).setup)') > client.index('.modifier(ClientSetupPresentation(')
+for entry in ['ClientGettingStarted.swift', 'ClientDevicesView.swift', 'ClientWorkspacesView.swift']:
+    text = (sources / 'Client' / entry).read_text()
+    assert '@Environment(ClientSetupSession.self)' in text and 'setup.open()' in text
+    assert 'ClientSetupWizard()' not in text
+print('Setup root presentation, immutable dismissals and adaptive ownership integration guards passed')

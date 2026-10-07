@@ -28,7 +28,7 @@ struct ClientDevicesView: View {
     @Environment(ClientNavigationModel.self) private var navigation
     /// The session's, from `ClientSessionModels`, so a layout swap keeps it.
     @Environment(ClientDevicesModel.self) private var model
-    @State private var showSetup = false
+    @Environment(ClientSetupSession.self) private var setup
     @State private var search = ""
 
     private var machines: [Machine] { account.account?.machines ?? [] }
@@ -46,7 +46,7 @@ struct ClientDevicesView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 HStack(spacing: Theme.Space.m) {
-                    Button(L10n.text("common.add_device"), .create) { showSetup = true }
+                    Button(L10n.text("common.add_device"), .create) { setup.open() }
                     NavigationLink {
                         SSHLibraryView(vaultTier: account.account?.vaultTierForSsh)
                     } label: {
@@ -65,7 +65,7 @@ struct ClientDevicesView: View {
                             message: L10n.text("apple.clientdevicesview.connect_a_computer_you_own_or_give_tokenst.d19be274"),
                             actionTitle: L10n.text("apple.clientdevicesview.set_up_a_machine.43e10e13"),
                             actionIcon: .connect,
-                            action: { showSetup = true },
+                            action: { setup.open() },
                             art: .connect
                         )
                     }
@@ -114,9 +114,6 @@ struct ClientDevicesView: View {
         }
         .background(Theme.background)
         .searchable(text: $search, prompt: L10n.text("apple.clientdevicesview.search_devices.3aebaefc"))
-        .fullScreenCover(isPresented: $showSetup) {
-            ClientSetupWizard()
-        }
         // One push, driven from outside this tab: Workspaces sends a machine
         // here rather than growing a device screen of its own. A binding
         // rather than a path because the stack belongs to `ClientRootView`,

@@ -29,7 +29,7 @@ import SwiftUI
 struct ClientGettingStarted: View {
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
-    @State private var showSetup = false
+    @Environment(ClientSetupSession.self) private var setup
 
     /// The account's own name for this phone, when it has one. "Signed in" is
     /// true of somebody's account, and naming the device makes it true of the
@@ -46,9 +46,6 @@ struct ClientGettingStarted: View {
         }
         .padding(Theme.Space.m)
         .cardSurface()
-        .fullScreenCover(isPresented: $showSetup) {
-            ClientSetupWizard()
-        }
     }
 
     private var header: some View {
@@ -82,7 +79,7 @@ struct ClientGettingStarted: View {
                 state: .now,
                 actionTitle: L10n.text("apple.clientgettingstarted.set_up_a_machine.43e10e13"),
                 actionIcon: .connect,
-                action: { showSetup = true }
+                action: { setup.open() }
             ),
         ]
     }

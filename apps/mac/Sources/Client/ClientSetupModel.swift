@@ -567,6 +567,16 @@ final class ClientSetupModel {
 
     func cancelWork() { coordinator.cancel() }
 
+    /// Explicit dismissal/account retirement releases local work and secrets.
+    /// A layout replacement does neither, and never ends the remote shell.
+    func retire() {
+        ownership.retire()
+        coordinator.cancel()
+        password = ""
+        terminal?.detachPoll()
+        terminal = nil
+    }
+
     /// A message about this machine, rather than about the protocol.
     ///
     /// One classification, shared with the screens that show a recovery
@@ -577,8 +587,7 @@ final class ClientSetupModel {
     }
 
     private func sameLifetime(_ owner: SSHOperationOwner.Ticket) -> Bool {
-        ownership.captured == owner && owner.scope == WorkSessionContext.shared.scope
-            && owner.generation == WorkSessionContext.shared.generation
+        ownership.permits(owner)
     }
 
     private func checkOwnership(_ owner: SSHOperationOwner.Ticket, operation: UUID? = nil) throws {

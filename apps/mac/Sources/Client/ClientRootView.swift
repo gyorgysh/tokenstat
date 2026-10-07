@@ -447,6 +447,7 @@ struct ClientRootView: View {
             }
         }
         .modifier(ClientTerminalPresentation(model: sessionModels.models(for: WorkSessionContext.shared.scope).workspaces))
+        .modifier(ClientSetupPresentation(session: sessionModels.models(for: WorkSessionContext.shared.scope).setup))
         .modifier(ClientProjectChatActions())
         .modifier(ClientSSHPresentations(workbench: sessionModels.models(for: WorkSessionContext.shared.scope).ssh,
             tier: account.account?.vaultTierForSsh))
@@ -474,6 +475,7 @@ struct ClientRootView: View {
         .environment(sessionModels.models(for: WorkSessionContext.shared.scope).projectChats)
         .environment(sessionModels.models(for: WorkSessionContext.shared.scope).workspaces)
         .environment(sessionModels.models(for: WorkSessionContext.shared.scope).ssh)
+        .environment(sessionModels.models(for: WorkSessionContext.shared.scope).setup)
     }
 
     /// System routes wait for sign-in and reuse the saved-route availability
@@ -792,8 +794,12 @@ final class ClientSessionModels {
         let insights = ClientInsightsModel()
         let devices = ClientDevicesModel()
         let ssh: ClientSSHWorkbench
-        init(scope: WorkReference.Scope?) { ssh = ClientSSHWorkbench(scope: scope) }
-        func deactivate() { workspaces.deactivate(); ssh.deactivate() }
+        let setup: ClientSetupSession
+        init(scope: WorkReference.Scope?) {
+            ssh = ClientSSHWorkbench(scope: scope)
+            setup = ClientSetupSession(scope: scope)
+        }
+        func deactivate() { workspaces.deactivate(); ssh.deactivate(); setup.deactivate() }
     }
 
     private var scope: WorkReference.Scope?

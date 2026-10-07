@@ -20,16 +20,26 @@ struct ClientSetupWizard: View {
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
 
-    @State private var model = ClientSetupModel()
-    @State private var library = SSHLibraryModel()
-    @State private var path: [SetupStep] = []
+    @Bindable var session: ClientSetupSession
+    private var model: ClientSetupModel { session.model }
+    private var library: SSHLibraryModel {
+        get { session.library }
+        nonmutating set { session.library = newValue }
+    }
+    private var path: [SetupStep] {
+        get { session.path }
+        nonmutating set { session.path = newValue }
+    }
     /// Set when a picked door fails to start. The doors show no failure until
     /// then. prepare() runs on open and stays silent; the check reruns on
     /// entry instead.
-    @State private var entryAttempted = false
+    private var entryAttempted: Bool {
+        get { session.entryAttempted }
+        nonmutating set { session.entryAttempted = newValue }
+    }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack(path: $session.path) {
             doors
                 .navigationTitle(L10n.text("apple.clientsetupwizard.set_up_a_machine.43e10e13"))
                 .navigationBarTitleDisplayMode(.inline)
@@ -44,17 +54,16 @@ struct ClientSetupWizard: View {
                     }
                 }
                 .navigationDestination(for: SetupStep.self) { step in
-                    ClientSetupServerStep(step: step, model: model, library: library, path: $path, onFinish: { dismiss() })
+                    ClientSetupServerStep(step: step, model: model, library: library, path: $session.path, onFinish: { dismiss() })
                 }
         }
         .tint(Theme.accent)
         .task {
-            await model.prepare(library: library)
+            await session.prepare()
             await account.load()
         }
         .onChange(of: account.account) { _, now in accountDidChange(now) }
         .onChange(of: WorkSessionContext.shared.generation) { _, _ in accountDidChange(account.account) }
-        .onDisappear { model.cancelWork() }
         .environment(account)
     }
 
@@ -65,6 +74,7 @@ struct ClientSetupWizard: View {
             $0.scope != WorkSessionContext.shared.scope || $0.generation != WorkSessionContext.shared.generation
         } ?? false
         if departed {
+            session.cancelPreparation()
             library.deactivate()
             library = SSHLibraryModel(ownerScope: WorkSessionContext.shared.scope)
         }
@@ -112,7 +122,7 @@ struct ClientSetupWizard: View {
                         SetupFailureBanner(
                             failure: failure,
                             onDismiss: { model.failure = nil },
-                            onRecover: { recover($0, model: model, path: $path) }
+                            onRecover: { recover($0, model: model, path: $session.path) }
                         )
                     }
                 }
@@ -182,8 +192,13 @@ struct ClientSetupWizard: View {
             path = steps
             return
         }
+        let presentationID = session.presentation?.id
+        let currentModel = model
+        let currentLibrary = library
         Task { @MainActor in
-            guard let ready = await model.prepare(library: library) else { return }
+            guard let ready = await currentModel.prepare(library: currentLibrary),
+                  session.presentation?.id == presentationID,
+                  session.model === currentModel else { return }
             if ready {
                 entryAttempted = false
                 path = steps
