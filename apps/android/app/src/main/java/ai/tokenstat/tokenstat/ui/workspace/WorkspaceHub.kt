@@ -19,8 +19,16 @@ import ai.tokenstat.tokenstat.ui.logic.HubCounts
 import ai.tokenstat.tokenstat.ui.logic.HubCountsParser
 import ai.tokenstat.tokenstat.ui.logic.HubSection
 import ai.tokenstat.tokenstat.ui.logic.TunnelCopy
+import androidx.compose.foundation.background
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -334,11 +342,23 @@ fun WorkspaceHub(
     // Each tap on a Sessions "start chat" tile is a fresh instruction to open
     // the conversation worth returning to, even on an already-open Chat page.
     var chatNonce by rememberSaveable(folder.str("id")) { mutableStateOf(0) }
-    val section = openSection
+    // Wide projects open directly in their workbench; compact navigation keeps
+    // the overview. Deriving the default preserves the selected chat on resize.
+    val section = openSection ?: HubSection.SESSIONS.key.takeIf { wideNavigation }
+    var isRepo by remember(peer, workspace) { mutableStateOf((folder["git"] as? JsonObject)?.bol("isRepo") == true) }
+    LaunchedEffect(peer, workspace, wideNavigation) {
+        if (wideNavigation) {
+            val status = runCatching {
+                model.workspaceSection(peer, "workspace.status", buildJsonObject { put("id", workspace) }) as? JsonObject
+            }.getOrNull()
+            isRepo = (status?.get("git") as? JsonObject)?.bol("isRepo") ?: isRepo
+        }
+    }
     val protocol = rememberWorkspaceHostProtocol(model, peer, workspace, section)
     // A section is a push inside the folder, and the folder is a push inside
     // Workspaces. Back steps out one at a time rather than closing the app.
-    BackHandler(enabled = section != null) { openSection = null }
+    BackHandler(enabled = !wideNavigation && section != null) { openSection = null }
+    BackHandler(enabled = wideNavigation && onBack != null) { onBack?.invoke() }
     // A folder is a push, like the Apple clients push it: this screen owns
     // the header from here down, so the app toolbar steps aside.
     HideTopBar()
@@ -351,7 +371,7 @@ fun WorkspaceHub(
             modifier = if (presence.sectionHeaderHidden) Modifier.height(0.dp) else Modifier,
         ) {
             if (presence.sectionHeaderHidden) return@Row
-            if (section != null) {
+            if (section != null && !wideNavigation) {
                 IconButton(enabled = !worktreeBusy, onClick = { openSection = null }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, L10n.text("android.workspacehub.back_to_0.c8f69409", "${folderName}"))
                 }
@@ -375,18 +395,50 @@ fun WorkspaceHub(
                 )
             }
         }
-        if (wideNavigation && !presence.sectionHeaderHidden) {
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                HubSection.entries.forEach { destination ->
-                    TextButton(enabled = !worktreeBusy, onClick = { openSection = destination.key },
-                        modifier = Modifier.heightIn(min = 44.dp)) {
-                        Text(destination.label, fontWeight = if (section == destination.key) FontWeight.Bold else FontWeight.Normal)
+        if (wideNavigation) {
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                // Keep the primary destinations visible and put the remainder
+                // in a menu when the detail column cannot fit the whole strip.
+                val primary = if (maxWidth >= 1400.dp) HubSection.entries else
+                    listOf(HubSection.SESSIONS, HubSection.CHAT, HubSection.CHANGES)
+                val overflow = HubSection.entries.filter { it !in primary }
+                var moreOpen by remember { mutableStateOf(false) }
+                val moreSelected = overflow.firstOrNull { it.key == section }
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    primary.forEach { destination ->
+                        TextButton(enabled = !worktreeBusy, onClick = { openSection = destination.key },
+                            modifier = Modifier.heightIn(min = 44.dp)
+                                .background(if (section == destination.key) colors.accentSoft else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(8.dp))
+                                .semantics { selected = section == destination.key }) {
+                            Icon(hubIcon(destination), null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.size(space.xs))
+                            Text(destination.label, fontWeight = if (section == destination.key) FontWeight.Bold else FontWeight.Normal)
+                        }
                     }
-                }
-                if (folder["git"] != null) {
-                    TextButton(enabled = !worktreeBusy, onClick = { openSection = "Worktrees" },
-                        modifier = Modifier.heightIn(min = 44.dp)) {
-                        Text(L10n.text("android.workspacehub.worktrees.aec2f93d"))
+                    if (overflow.isNotEmpty() || isRepo) {
+                        Box {
+                            TextButton(enabled = !worktreeBusy, onClick = { moreOpen = true },
+                                modifier = Modifier.heightIn(min = 44.dp)
+                                    .background(if (moreSelected != null || section == "Worktrees") colors.accentSoft else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(8.dp))
+                                    .semantics { selected = moreSelected != null || section == "Worktrees" }) {
+                                Icon(moreSelected?.let(::hubIcon) ?: Icons.Default.MoreHoriz, null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.size(space.xs))
+                                Text(moreSelected?.label ?: if (section == "Worktrees") L10n.text("android.workspacehub.worktrees.aec2f93d") else L10n.text("android.sshrows.more_actions.f8d46c25"))
+                            }
+                            DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
+                                overflow.forEach { destination ->
+                                    DropdownMenuItem(text = { Text(destination.label) },
+                                        leadingIcon = { Icon(hubIcon(destination), null) },
+                                        modifier = Modifier.semantics { selected = section == destination.key },
+                                        onClick = { moreOpen = false; openSection = destination.key })
+                                }
+                                if (isRepo) {
+                                    DropdownMenuItem(text = { Text(L10n.text("android.workspacehub.worktrees.aec2f93d")) },
+                                        leadingIcon = { Icon(Icons.Default.AccountTree, null) },
+                                        onClick = { moreOpen = false; openSection = "Worktrees" })
+                                }
+                            }
+                        }
                     }
                 }
             }
