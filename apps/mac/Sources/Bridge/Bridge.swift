@@ -1037,6 +1037,8 @@ extension Bridge {
 extension Bridge {
     /// Local hostd, or the same method on a peer. Chat is the same store
     /// either way, and the phone talks to it over the tunnel.
+    private static let chatReadFlights = ChatReadFlights()
+
     private static func chatInvoke<T: Decodable & Sendable>(
         peer: String?,
         _ method: String,
@@ -1044,9 +1046,43 @@ extension Bridge {
         patience: TimeInterval = Patience.standard,
         as type: T.Type
     ) async throws -> T {
-        if let peer {
-            return try await onPeer(peer, method, params, patience: patience, as: type)
+        let scope = await WorkSessionContext.shared.scope
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let owner = try scope.map { try encoder.encode($0) }
+        if let scope, let owner, ChatReadFlights.reads.contains(method) {
+            let encoded = try JSONSerialization.data(withJSONObject: params, options: [.sortedKeys])
+            let key = ChatReadKey(owner: owner, peer: peer, method: method, parameters: encoded, patience: patience)
+            return try await chatReadFlights.run(key) {
+                guard await WorkSessionContext.shared.scope == scope else { throw CancellationError() }
+                let arguments = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] ?? [:]
+                let result: Result<T, Error>
+                do { result = .success(try await chatTransport(peer: peer, method, arguments, patience: patience, as: type)) }
+                catch { result = .failure(error) }
+                guard await WorkSessionContext.shared.scope == scope else { throw CancellationError() }
+                return try result.get()
+            }
         }
+        let invalidates = owner != nil && ChatReadFlights.mutations.contains(method)
+        if invalidates, let owner { await chatReadFlights.invalidate(owner: owner, peer: peer) }
+        // The invalidation await must not carry earlier account authorization
+        // into a mutation dispatched for the next account.
+        if let scope, await WorkSessionContext.shared.scope != scope { throw CancellationError() }
+        do {
+            let value: T = try await chatTransport(peer: peer, method, params, patience: patience, as: type)
+            if invalidates, let owner { await chatReadFlights.invalidate(owner: owner, peer: peer) }
+            return value
+        } catch {
+            if invalidates, let owner { await chatReadFlights.invalidate(owner: owner, peer: peer) }
+            throw error
+        }
+    }
+
+    private static func chatTransport<T: Decodable & Sendable>(
+        peer: String?, _ method: String, _ params: [String: Any],
+        patience: TimeInterval, as type: T.Type
+    ) async throws -> T {
+        if let peer { return try await onPeer(peer, method, params, patience: patience, as: type) }
         return try await background(method, params, patience: patience, as: type)
     }
 
