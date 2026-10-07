@@ -119,19 +119,12 @@ fi
 "$build_tools/zipalign" -c -P 16 4 "$apk" >/dev/null
 
 mapping_dir="$ROOT/apps/android/app/build/outputs/mapping/release"
-symbols="$ROOT/apps/android/app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip"
+symbols="$scratch/native-debug-symbols.zip"
+python3 "$ROOT/scripts/android-bundle-symbols.py" "$src" "$symbols"
 if [ ! -s "$mapping_dir/mapping.txt" ] || [ ! -s "$symbols" ]; then
     echo "error: release R8 mapping or native debug symbols are missing" >&2
     exit 1
 fi
-python3 - "$src" <<'PY'
-import sys, zipfile
-with zipfile.ZipFile(sys.argv[1]) as archive:
-    for abi in ("arm64-v8a", "x86_64"):
-        name = f"BUNDLE-METADATA/com.android.tools.build.debugsymbols/{abi}/libtokenstat_ffi.so.dbg"
-        if name not in archive.namelist():
-            raise SystemExit(f"error: App Bundle is missing native symbols for {abi}")
-PY
 
 version="$(
     awk -F'"' '/^[[:space:]]*versionName[[:space:]]*=/{ print $2; exit }' \

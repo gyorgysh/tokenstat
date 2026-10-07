@@ -426,15 +426,9 @@ jobs:
 
       - name: Verify native symbols are embedded
         run: |
-          python3 - <<'PY'
-          import zipfile
-          from pathlib import Path
-          bundle = next(Path("apps/android/app/build/outputs/bundle/release").glob("*.aab"))
-          with zipfile.ZipFile(bundle) as archive:
-              for abi in ("arm64-v8a", "x86_64"):
-                  name = f"BUNDLE-METADATA/com.android.tools.build.debugsymbols/{abi}/libtokenstat_ffi.so.dbg"
-                  assert name in archive.namelist(), f"Missing native symbols: {name}"
-          PY
+          python3 scripts/android-bundle-symbols.py \
+            apps/android/app/build/outputs/bundle/release/app-release.aab \
+            apps/android/app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip
 
       - name: Keep native debug symbols with the bundle
         uses: actions/upload-artifact@v7
