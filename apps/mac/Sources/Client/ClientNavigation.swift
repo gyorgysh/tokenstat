@@ -141,15 +141,18 @@ final class ClientNavigationModel {
         }
     }
 
-    /// Which of that folder's sections is showing. The sidebar lists them, so
-    /// the detail column draws one section rather than the sections again.
+    /// Which project section the strip above the content is showing.
     var section: WorkspaceSection = .sessions {
         didSet { if section != oldValue { restoredRoute = nil } }
     }
+    var projectSections: [ClientProjectChats.Key: WorkspaceSection] = [:]
+    private(set) var projectOpenGeneration: UInt64 = 0
+    var layoutGeneration: UInt64 = 0
 
     /// Conversation a notification asked to open, consumed by the chat list
     /// once that folder is on screen.
     var requestedChat: WorkReference?
+    var projectChatAction: ClientProjectChatAction?
 
     /// The conversation the person is already in, as the folder thread or a
     /// Recents push. A notification tap for this id leaves that window as it
@@ -204,7 +207,9 @@ final class ClientNavigationModel {
         folderID = nil
         sidebarFolderID = nil
         section = .sessions
+        projectSections = [:]
         requestedChat = nil
+        projectChatAction = nil
         visibleChat = nil
         visibleChatOwner = nil
         presentedChat = nil
@@ -249,6 +254,8 @@ final class ClientNavigationModel {
 
     /// Selecting a folder implies the workspace plane, so both move together.
     func open(folderID: String?, section: WorkspaceSection = .sessions) {
+        projectOpenGeneration &+= 1
+        requestedChat = nil
         restoredRoute = nil
         self.folderID = folderID
         self.section = section
@@ -284,13 +291,14 @@ final class ClientNavigationModel {
     /// If that thread is already the one on screen, only the destination
     /// moves. Setting `requestedChat` again would re-select it and blank the
     /// transcript.
-    func openChat(folderID: String, chatID: String) {
+    func openChat(folderID: String, chatID: String, restoringLayout: Bool = false) {
         guard !folderID.isEmpty, !chatID.isEmpty else { return }
         let route = WorkDestinationResolver.route(folderID: folderID)
         guard let peer = route.peer,
               let target = reference(peer: peer, workspaceID: route.workspaceID, chatID: chatID) else { return }
         let already = self.folderID == folderID && section == .chat
             && isShowing(peer: peer, workspaceID: route.workspaceID, chatID: chatID)
+        if !restoringLayout { projectOpenGeneration &+= 1 }
         self.folderID = folderID
         self.section = .chat
         self.destination = .workspaces

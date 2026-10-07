@@ -284,7 +284,11 @@ final class ChatModel {
             workspaceID: owner.workspace, kind: .conversation, itemID: chatID)
         if draftReference == reference {
             draftReference = nil
-            draftConversationID = nil
+            // Keep the old conversation identity until selection swaps the
+            // composer. Clearing both would make a nil selection keep its
+            // deleted draft, attachments and unresolved receipt in memory.
+            draftSaveTask?.cancel()
+            draftSaveTask = nil
         }
         ChatDraftStore.shared.clear(for: reference)
         // And the place somebody had reached in it. There is nothing left to
@@ -671,18 +675,23 @@ final class ChatModel {
 
     @ObservationIgnored private var recentMessages = ChatRecentMessages<ChatDisplayItem>()
     @ObservationIgnored private var steerOverlay = ChatSteerOverlay()
+    @ObservationIgnored private var listMutations = ChatListMutations<ChatConversation>()
+    private struct ChatListRead {
+        let steer: ChatSteerOverlay.Read
+        let mutations: ChatListMutations<ChatConversation>.Read
+    }
 
-    private func beginChatListRead(workspaceID: String, peer: String?, scope: WorkReference.Scope? = nil) -> ChatSteerOverlay.Read? {
+    private func beginChatListRead(workspaceID: String, peer: String?, scope: WorkReference.Scope? = nil) -> ChatListRead? {
         guard let scope = scope ?? continuityScope,
               scope == WorkSessionContext.shared.scope,
               let host = peer ?? WorkSessionContext.shared.localHostIdentity else { return nil }
         let owner = WorkReferenceKey.folder(scope: scope, hostIdentity: host, workspaceID: workspaceID)
-        return steerOverlay.beginRead(owner: owner)
+        return ChatListRead(steer: steerOverlay.beginRead(owner: owner), mutations: listMutations.beginRead(owner: owner))
     }
 
-    private func applyChatList(_ rows: [ChatConversation], read: ChatSteerOverlay.Read?, current: [ChatConversation]) -> [ChatConversation] {
+    private func applyChatList(_ rows: [ChatConversation], read: ChatListRead?, current: [ChatConversation]) -> [ChatConversation] {
         guard let read else { return rows }
-        return steerOverlay.apply(rows, read: read, current: current)
+        return steerOverlay.apply(listMutations.apply(rows, read: read.mutations, current: current), read: read.steer, current: current)
     }
 
     private func steerMutationSnapshot(_ reference: WorkReference) -> ChatSteerOverlay.Mutation? {
@@ -1154,6 +1163,7 @@ final class ChatModel {
             }
             chatListCache = [:]
             steerOverlay.removeAll()
+            listMutations.removeAll()
             noteRunningChats()
             previewCacheEpoch &+= 1
             recentMessages.removeAll()
@@ -1808,6 +1818,10 @@ final class ChatModel {
     }
 
     private func publishSidebarConversation(_ conversation: ChatConversation, in folderID: String) {
+        if let owner = continuityOwner(folderID: folderID) {
+            listMutations.replace(conversation, owner: WorkReferenceKey.folder(scope: owner.scope,
+                hostIdentity: owner.host, workspaceID: owner.workspace))
+        }
         var list = sidebarChats(in: folderID)
         let conversation = ChatSteerOverlay.preservingNote(in: conversation,
             from: list.first { $0.id == conversation.id })
@@ -1826,6 +1840,28 @@ final class ChatModel {
     @discardableResult
     func remove(_ chat: ChatConversation) async -> Bool {
         await remove(chat, in: folderID)
+    }
+
+    /// A sibling mobile reader already completed the host deletion. Retire
+    /// this copy without sending another mutation or choosing another chat.
+    func forgetRemovedConversation(_ id: String) async {
+        previewCacheEpoch &+= 1
+        if let folderID, let owner = continuityOwner(folderID: folderID) {
+            let key = WorkReferenceKey.folder(scope: owner.scope,
+                hostIdentity: owner.host, workspaceID: owner.workspace)
+            listMutations.remove(id, owner: key)
+            recentMessages.remove(key + WorkReferenceKey.encode(id))
+            forgetDraft(chatID: id, folderID: folderID)
+        }
+        if selected?.id == id { clearRecentMessagePreview() }
+        chats.removeAll { $0.id == id }
+        if let folderID { storeChatListCache(chats, folderID: folderID) }
+        if selected?.id == id { await select(nil) }
+    }
+
+    func acceptRenamedConversation(_ chat: ChatConversation) {
+        guard let folderID, workspaceID == chat.workspaceID else { return }
+        publishSidebarConversation(chat, in: folderID)
     }
 
     /// Delete one conversation shown in the sidebar.
@@ -1849,6 +1885,10 @@ final class ChatModel {
             try await Bridge.removeChat(id: chat.id, peer: targetPeer)
             guard context == loadGeneration, scope == WorkSessionContext.shared.scope else { return false }
             error = nil
+            if let folder = folderID ?? self.folderID, let owner = continuityOwner(folderID: folder) {
+                listMutations.remove(chat.id, owner: WorkReferenceKey.folder(scope: owner.scope,
+                    hostIdentity: owner.host, workspaceID: owner.workspace))
+            }
             // Only this chat. Every other warm conversation is still right.
             previewCacheEpoch &+= 1
             if let cacheKey { recentMessages.remove(cacheKey) }

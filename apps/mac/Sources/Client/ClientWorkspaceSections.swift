@@ -61,6 +61,7 @@ struct ClientWorkspaceDetailView: View {
 
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(ClientNavigationModel.self) private var navigation
 
     /// Regular both ways only: an iPad, or an iPhone Duo opened out. A large
     /// iPhone in landscape is regular across but compact down, and that is
@@ -77,7 +78,8 @@ struct ClientWorkspaceDetailView: View {
                 stacked
             }
         }
-        .rememberWorkspace(peer: peer, folder: folder)
+        .rememberWorkspace(peer: peer, folder: folder,
+            section: usesWorkspaceLayout ? navigation.projectSections[.init(peer: peer, workspace: workspaceID)] ?? .sessions : nil)
         .onReceive(NotificationCenter.default.publisher(for: GitCommitTarget.didChange)) { note in
             guard !usesWorkspaceLayout,
                   note.object as? GitCommitTarget == GitCommitTarget(peer: peer, workspaceID: workspaceID) else { return }

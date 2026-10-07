@@ -15,23 +15,36 @@ import SwiftUI
 /// `ChatReadingPosition`; this is the part that needs a scroll view.
 @MainActor
 enum TranscriptReading {
-    enum Restoration { case restored, unavailable, interrupted }
+    enum Restoration { case restored, unavailable, unmeasured, interrupted }
+    enum MeasuredPlacement { case placed, settled, unavailable, interrupted }
 
-    static func position(follow: TranscriptFollowState, window: TranscriptWindow) -> ChatReadingPosition {
-        let anchor = window.anchor
+    static func position(follow: TranscriptFollowState, window: TranscriptWindow,
+                         includingContainingRow: Bool = false) -> ChatReadingPosition {
+        let anchor = includingContainingRow
+            ? ChatReadingPosition.anchor(in: window.rowFrames, viewportHeight: Double(window.viewportHeight))
+            : window.anchor.map { (id: $0.id, top: Double($0.top), height: Double($0.height)) }
         return ChatReadingPosition.from(atEnd: follow.atEnd, pinned: follow.pinned,
-            anchorID: anchor?.id, anchorTop: anchor.map { Double($0.top) } ?? 0,
-            anchorHeight: anchor.map { Double($0.height) } ?? 0,
+            anchorID: anchor?.id, anchorTop: anchor?.top ?? 0,
+            anchorHeight: anchor?.height ?? 0,
             viewportHeight: Double(window.viewportHeight))
     }
 
     /// Keep, or drop, this conversation's place.
     static func record(follow: TranscriptFollowState, window: TranscriptWindow,
                        for reference: WorkReference?,
+                       includingContainingRow: Bool = false,
+                       into suppliedStore: ChatReadingStore? = nil) {
+        record(position(follow: follow, window: window, includingContainingRow: includingContainingRow),
+               for: reference, into: suppliedStore)
+    }
+
+    /// A mobile viewport samples once for both durable history and its live
+    /// layout handoff. Both stores receive the same measured mark and date.
+    static func record(_ position: ChatReadingPosition, for reference: WorkReference?,
                        into suppliedStore: ChatReadingStore? = nil) {
         guard let reference else { return }
         let store = suppliedStore ?? .shared
-        switch position(follow: follow, window: window) {
+        switch position {
         case .latest: store.forget(for: reference)
         case let .away(mark): store.remember(mark, for: reference)
         case .unknown: break
@@ -64,9 +77,11 @@ enum TranscriptReading {
     /// the end of a long conversation would.
     static func restore(_ mark: ChatReadingMark, reference: WorkReference, model: ChatModel,
                         follow: TranscriptFollowState,
+                        isCurrent: () -> Bool = { true },
+                        correct: ((String, ChatReadingMark) -> MeasuredPlacement)? = nil,
                         place: (String, UnitPoint) -> Void) async -> Restoration {
         let generation = model.selectionGeneration
-        guard !Task.isCancelled, model.currentReference == reference else { return .interrupted }
+        guard !Task.isCancelled, isCurrent(), model.currentReference == reference else { return .interrupted }
         // Inside a long row the reader was partway down it, so the row's
         // own fraction puts them back there. Otherwise the row's top goes
         // where it was in the viewport.
@@ -74,7 +89,7 @@ enum TranscriptReading {
         // gutter instead of scrolling the padded leading edge sideways.
         let point: UnitPoint
         if mark.within > 0 {
-            point = UnitPoint(x: 0.5, y: min(max(mark.within, 0), 0.9))
+            point = UnitPoint(x: 0.5, y: correct == nil ? min(max(mark.within, 0), 0.9) : 0)
         } else {
             point = UnitPoint(x: 0.5, y: min(max(mark.offset, 0), 0.6))
         }
@@ -84,11 +99,12 @@ enum TranscriptReading {
         // so growth and structural updates must not pin that row away.
         follow.pinned = false
         var placements = 0
+        var measurements = 0
         var fetched = 0
         for _ in 0..<frames {
             try? await Task.sleep(for: frame)
             guard model.currentReference == reference,
-                  model.selectionGeneration == generation else { return .interrupted }
+                  model.selectionGeneration == generation, isCurrent() else { return .interrupted }
             if Task.isCancelled {
                 follow.settle(false)
                 return .interrupted
@@ -114,7 +130,21 @@ enum TranscriptReading {
             // A kept row may be folded into a step group. Open it, so the
             // reader lands on the row itself, unless the mark was the closed
             // group's own header.
-            place(model.readingRow(rowID), point)
+            let visibleRow = model.readingRow(rowID)
+            let correction = placements > 0 ? correct?(visibleRow, mark) : nil
+            switch correction {
+            case .placed: measurements += 1
+            case .settled:
+                follow.settle(false)
+                follow.stopFollowing()
+                return .restored
+            case .interrupted:
+                follow.settle(false)
+                follow.stopFollowing()
+                return .interrupted
+            case .unavailable: continue
+            case nil: place(visibleRow, point)
+            }
             placements += 1
             if placements > corrections { break }
         }
@@ -127,6 +157,7 @@ enum TranscriptReading {
         // stops following it and offers the way back instead of chasing the
         // end under them.
         follow.stopFollowing()
+        if correct != nil, measurements == 0 { return .unmeasured }
         return .restored
     }
 }

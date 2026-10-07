@@ -5661,5 +5661,6 @@
   "apple.sidebarappearance.opacity": "Sidebar opacity",
   "apple.sidebarappearance.subtitle": "The sidebar on this Mac.",
   "apple.sidebarappearance.title": "Appearance",
-  "apple.clientpaywallview.renewal_terms": "{0}. Renews automatically until cancelled. Payment is charged to your Apple ID. Turn off auto-renewal in Apple ID subscriptions at least 24 hours before the trial or current period ends to avoid the next charge."
+  "apple.clientpaywallview.renewal_terms": "{0}. Renews automatically until cancelled. Payment is charged to your Apple ID. Turn off auto-renewal in Apple ID subscriptions at least 24 hours before the trial or current period ends to avoid the next charge.",
+  "apple.clientprojectchatactions.chat_action_failed": "Chat action failed"
 }

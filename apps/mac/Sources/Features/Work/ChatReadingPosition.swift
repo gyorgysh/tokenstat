@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
+import CoreGraphics
 
 /// What a transcript's geometry says about where the reading is.
 ///
@@ -15,6 +16,32 @@ enum ChatReadingPosition: Equatable {
     /// The rows have not said where they are, so this frame knows nothing.
     /// Whatever was kept before is still the best answer.
     case unknown
+
+    /// Reading can be inside a tall message. Paging's insertion anchor has
+    /// different rules, so keep that anchor independent of this measurement.
+    static func anchor(in frames: [String: CGRect], viewportHeight: Double,
+                       viewportTop: Double = 0, frameOffsetY: Double = 0)
+        -> (id: String, top: Double, height: Double)? {
+        guard viewportHeight.isFinite, viewportHeight > 0,
+              viewportTop.isFinite, frameOffsetY.isFinite else { return nil }
+        let visible = frames.filter { $0.value.height > 0
+            && Double($0.value.maxY) + frameOffsetY > viewportTop
+            && Double($0.value.minY) + frameOffsetY < viewportTop + viewportHeight }
+        let containing = visible.filter { Double($0.value.minY) + frameOffsetY <= viewportTop }
+            .max { $0.value.minY < $1.value.minY }
+        guard let picked = containing ?? visible.min(by: { $0.value.minY < $1.value.minY }) else { return nil }
+        return (picked.key, Double(picked.value.minY) + frameOffsetY - viewportTop,
+                Double(picked.value.height))
+    }
+
+    static func correction(for mark: ChatReadingMark, rowTop: Double,
+                           rowHeight: Double, viewportHeight: Double) -> Double? {
+        guard rowTop.isFinite, rowHeight.isFinite, viewportHeight.isFinite,
+              rowHeight > 0, viewportHeight > 0 else { return nil }
+        let desired = mark.within > 0 ? -min(max(mark.within, 0), 1) * rowHeight
+            : min(max(mark.offset, 0), 0.6) * viewportHeight
+        return rowTop - desired
+    }
 
     /// `top` is the row's top edge measured from the top of the viewport, in
     /// the same points `viewportHeight` is in. The mark keeps their ratio,

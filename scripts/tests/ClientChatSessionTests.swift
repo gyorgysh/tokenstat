@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-// Compile with ClientChatSession.swift and Singleflight.swift using swiftc -parse-as-library, then run.
+// Compile with ClientChatSession.swift Singleflight.swift ChatDraftTransition.swift WorkReference.swift.
 import Foundation
 import Observation
 
-struct ChatConversation: Equatable { let id: String }
+struct ChatConversation: Equatable { let id: String; var title: String = "" }
 
 @MainActor
 final class ChatModel {
@@ -30,6 +30,20 @@ final class ChatModel {
     private var workspace: String?
     func isReady(for workspaceID: String) -> Bool { workspace == workspaceID }
     func saveDraftNow() { saves += 1 }
+    func acceptRenamedConversation(_ chat: ChatConversation) {
+        if selected?.id == chat.id { selected = chat }
+    }
+    func forgetRemovedConversation(_ id: String) async {
+        if selected?.id == id {
+            // Real draft transition after the durable reference is detached,
+            // retaining the deleted ID until select(nil) swaps the composer.
+            if ChatDraftTransition.resolve(incoming: nil, reference: nil,
+                current: id, currentReference: nil) == .swap(nil) {
+                draft = ""; attachments = []; unconfirmedSend = nil
+            }
+            selected = nil; busy = false
+        }
+    }
     func load(workspaceID: String, peer: String, selectFirst: Bool) async {
         loads += 1
         self.peer = peer
@@ -180,6 +194,39 @@ struct ClientChatSessionTests {
             precondition(store.session(peer: "m", workspace: "protected") === protected,
                 "active work and pending writing must not be evicted")
         }
-        print("ClientChatSessionTests passed: 30 remounts, cancellation, refresh, isolation and eviction.")
+        let mutations = ClientChatSessions()
+        let folderReader = mutations.session(peer: "mac", workspace: "p")
+        let exactReader = mutations.session(peer: "mac", workspace: "p", conversation: "a")
+        let otherHost = mutations.session(peer: "other", workspace: "p", conversation: "a")
+        for reader in [folderReader, exactReader, otherHost] {
+            reader.opened = ChatConversation(id: "a")
+            reader.retainedThread = reader.opened
+            reader.model.selected = reader.opened
+            reader.model.busy = true
+            reader.model.draft = "Unsent words"
+            reader.model.attachments = ["attachment"]
+            reader.model.unconfirmedSend = "receipt"
+        }
+        let renamed = ChatConversation(id: "a", title: "New title")
+        mutations.renamed(renamed, peer: "mac", workspace: "p")
+        precondition(exactReader.opened == renamed && exactReader.model.selected == renamed)
+        precondition(otherHost.opened?.title == "")
+        await mutations.removed("a", peer: "mac", workspace: "p")
+        precondition(folderReader.opened == nil && exactReader.retainedThread == nil && exactReader.model.selected == nil)
+        precondition(exactReader.model.draft.isEmpty && exactReader.model.attachments.isEmpty && exactReader.model.unconfirmedSend == nil)
+        precondition(exactReader.canDiscard && otherHost.opened != nil && !otherHost.canDiscard)
+
+        let invalidated = ClientChatSession()
+        let started = Signal(), finish = Signal()
+        invalidated.model.onLoad = { started.signal(); await finish.wait() }
+        let oldRead = Task { await invalidated.load(workspaceID: "p", peer: "m") }
+        await started.wait()
+        invalidated.invalidate()
+        finish.signal()
+        await oldRead.value
+        invalidated.model.onLoad = nil
+        await invalidated.load(workspaceID: "p", peer: "m")
+        precondition(invalidated.model.loads == 2, "an invalidated in-flight read cannot mark the session reusable")
+        print("ClientChatSessionTests passed: 30 remounts, cancellation, refresh, mutation, isolation and eviction.")
     }
 }

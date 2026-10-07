@@ -160,6 +160,16 @@ extension View {
         }
     }
 
+    /// Reserve project controls above the content using the local safe area.
+    @ViewBuilder
+    func clientTopBar<Bar: View>(@ViewBuilder bar: () -> Bar) -> some View {
+        if #available(iOS 26, *) {
+            safeAreaBar(edge: .top, spacing: 0, content: bar)
+        } else {
+            safeAreaInset(edge: .top, spacing: 0, content: bar)
+        }
+    }
+
     /// Pin chrome to the bottom of the screen, including the home indicator.
     ///
     /// iOS 26's `safeAreaBar` is the tab bar's treatment: Liquid Glass the

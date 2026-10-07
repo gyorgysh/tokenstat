@@ -9,6 +9,8 @@ struct ClientTerminalActions: ViewModifier {
     let folderName: String
     let info: PtySessionInfo
     let onDuplicate: (PtySessionInfo) -> Void
+    var onClose: (() -> Void)? = nil
+    @Environment(\.colorScheme) private var colorScheme
     @State private var owner = WorkSessionContext.shared.scope
     @State private var rename = false
     @State private var error: String?
@@ -36,7 +38,7 @@ struct ClientTerminalActions: ViewModifier {
                         }
                         let copied = try await ClientRemote.ptySpawn(peer: peer, workspaceID: workspaceID,
                             command: shell.command, args: shell.args, rows: info.rows, cols: info.cols,
-                            dark: UITraitCollection.current.userInterfaceStyle == .dark)
+                            dark: colorScheme == .dark)
                         guard owner == WorkSessionContext.shared.scope else { throw ClientActionOwnership.changed }
                         let copiedReference = owner.map { WorkReference(scope: $0, hostIdentity: peer, workspaceID: workspaceID, kind: .terminal, itemID: copied.id) }
                         SidebarTerminalNames.shared.rename(copiedReference, to: title + " copy", folderName: folderName)
@@ -52,6 +54,9 @@ struct ClientTerminalActions: ViewModifier {
                         error = L10n.text("apple.clientterminalactions.pinned_work_holds_eight_items_unpin_one_be.e716eb5e")
                     }
                 }
+            }
+            if let onClose {
+                Button(L10n.text("common.close"), role: .destructive, action: onClose)
             }
         }
         .sheet(isPresented: $rename) {

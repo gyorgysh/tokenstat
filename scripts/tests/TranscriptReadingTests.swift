@@ -53,6 +53,7 @@ struct ChatTimelineEvent {
 }
 @MainActor final class TranscriptWindow {
     var anchor: Anchor?
+    var rowFrames: [String: CGRect] = [:]
     var viewportHeight: CGFloat = 800
     struct Anchor { let id: String; let top: CGFloat; let height: CGFloat = 44 }
 }
@@ -152,6 +153,53 @@ struct ChatTimelineEvent {
         let deepRestored = await TranscriptReading.restore(deep, reference: reference,
             model: model, follow: follow) { _, point in deepPoint = point }
         assert(deepRestored == .restored && deepPoint == UnitPoint(x: 0.5, y: 0.5))
+
+        var proxyReveals = 0
+        var measuredAttempts = 0
+        let measured = await TranscriptReading.restore(deep, reference: reference,
+            model: model, follow: follow, correct: { _, saved in
+                assert(saved == deep && !follow.pinned)
+                measuredAttempts += 1
+                return measuredAttempts == 1 ? .unavailable : .placed
+            }) { _, point in
+                proxyReveals += 1
+                assert(point == UnitPoint(x: 0.5, y: 0), "Initial reveal must not apply an unmeasured fraction")
+            }
+        assert(measured == .restored && proxyReveals == 1 && measuredAttempts == 4,
+               "Missing geometry must wait without reissuing the proxy reveal")
+        let interruptedMeasurement = await TranscriptReading.restore(deep, reference: reference,
+            model: model, follow: follow, correct: { _, _ in .interrupted }) { _, _ in }
+        assert(interruptedMeasurement == .interrupted && !follow.settling)
+        var settledChecks = 0
+        let converged = await TranscriptReading.restore(deep, reference: reference,
+            model: model, follow: follow, correct: { _, _ in
+                settledChecks += 1
+                return .settled
+            }) { _, _ in }
+        assert(converged == .restored && settledChecks == 1,
+               "Converged geometry must finish without waiting for another stamp")
+        let unmeasured = await TranscriptReading.restore(deep, reference: reference,
+            model: model, follow: follow, correct: { _, _ in .unavailable }) { _, _ in }
+        assert(unmeasured == .unmeasured && !follow.settling,
+               "A proxy reveal is not a measured within-row restoration")
+        var current = true
+        var obsoletePlacements = 0
+        let superseded = await TranscriptReading.restore(deep, reference: reference,
+            model: model, follow: follow, isCurrent: { current }, correct: { _, _ in
+                assertionFailure("Measured after explicit latest intent")
+                return .unavailable
+            }) { _, _ in current = false; obsoletePlacements += 1 }
+        assert(superseded == .interrupted && obsoletePlacements == 1)
+        let firstTicket = UUID()
+        var currentTicket = firstTicket
+        let stopsBeforeReplacement = follow.stops
+        let replacedInSameView = await TranscriptReading.restore(deep, reference: reference,
+            model: model, follow: follow, isCurrent: { firstTicket == currentTicket }) { _, _ in
+                currentTicket = UUID()
+                follow.settle(true)
+            }
+        assert(replacedInSameView == .interrupted && follow.settling && follow.stops == stopsBeforeReplacement,
+               "A canceled same-owner placement must not clear its successor's settling state")
 
         // Collapsed group headers name their first step. Restore that step
         // rather than treating the drawn header as a missing archive event.

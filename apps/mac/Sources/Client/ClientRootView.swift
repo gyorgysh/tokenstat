@@ -158,7 +158,7 @@ struct ClientRootView: View {
         }) else { return false }
         if layout == .sidebar {
             navigation.restoredRoute = nil
-            navigation.openChat(folderID: folder.id, chatID: chatID)
+            navigation.openChat(folderID: folder.id, chatID: chatID, restoringLayout: true)
         } else {
             let hostName = workspaces.hosts.first { $0.peerKey == reference.hostIdentity }?.name ?? ""
             navigation.restoredRoute = nil
@@ -280,9 +280,11 @@ struct ClientRootView: View {
         }
         .onChange(of: navigation.currentRoute) { _, _ in navigation.saveRoute() }
         .onChange(of: layout) { _, _ in
+            navigation.layoutGeneration &+= 1
             // Keep an exact destination above the subtree being replaced.
             if let route = navigation.currentRoute, route.reference != nil,
-               navigation.presentedChat == nil {
+               navigation.presentedChat == nil,
+               sessionModels.models(for: route.scope).workspaces.activeTerminal == nil {
                 // A conversation waits for the new layout and is reopened
                 // through its folder below. Pushed here on its own, Back
                 // from it skipped the folder's chat list.
@@ -291,6 +293,11 @@ struct ClientRootView: View {
                 }
                 layoutHandoff = route
             }
+        }
+        .onChange(of: ClientLayout.hasRoom(horizontal: sizeClass, vertical: verticalSizeClass)) { _, _ in
+            // A compact/regular project swap can happen without changing
+            // the root's tab/sidebar mode. Async launch handoffs follow both.
+            navigation.layoutGeneration &+= 1
         }
         // And put it back once the new layout is mounted. Set only in the
         // same update as the swap, the route could be cleared by the old
@@ -302,7 +309,8 @@ struct ClientRootView: View {
             layoutHandoff = nil
             await Task.yield()
             guard !Task.isCancelled, route.scope == WorkSessionContext.shared.scope,
-                  navigation.presentedChat == nil else { return }
+                  navigation.presentedChat == nil,
+                  sessionModels.models(for: route.scope).workspaces.activeTerminal == nil else { return }
             if reopenConversation(route) { return }
             if let tab = ClientTab(rawValue: route.tab), tabCustomization.visibleTabs.contains(tab),
                navigation.destination != tab {
@@ -412,6 +420,8 @@ struct ClientRootView: View {
                     }
             }
         }
+        .modifier(ClientTerminalPresentation(model: sessionModels.models(for: WorkSessionContext.shared.scope).workspaces))
+        .modifier(ClientProjectChatActions())
         // **Last in the chain, after every presentation.** A sheet or a cover
         // inherits the environment as it stood where its modifier is written,
         // not as it stands inside the view it is attached to, so an
@@ -432,6 +442,8 @@ struct ClientRootView: View {
         .environment(tabCustomization)
         .environment(editors)
         .environment(sessionModels.models(for: WorkSessionContext.shared.scope).chats)
+        .environment(sessionModels.models(for: WorkSessionContext.shared.scope).projectChats)
+        .environment(sessionModels.models(for: WorkSessionContext.shared.scope).workspaces)
     }
 
     /// System routes wait for sign-in and reuse the saved-route availability
@@ -739,6 +751,7 @@ final class ClientSessionModels {
     final class Models {
         let workspaces = ClientWorkspacesModel()
         let chats = ClientChatSessions()
+        let projectChats = ClientProjectChats()
         let home = HomeModel()
         let insights = ClientInsightsModel()
         let devices = ClientDevicesModel()

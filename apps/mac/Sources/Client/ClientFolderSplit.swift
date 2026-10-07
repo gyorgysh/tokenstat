@@ -8,20 +8,23 @@
 #if !os(macOS)
 import SwiftUI
 
-/// Regular-width folder: sections stay on the leading side, like the Mac workspace.
-///
-/// Compact still pushes. This is only mounted when the size class is regular.
+/// A project workbench. Sections sit above the content, like the Mac, leaving
+/// the available width to the work instead of a second navigation column.
 struct ClientFolderSplit: View {
     let peer: String
     let hostName: String
     let folder: WorkspaceFolder
 
-    @State private var section: WorkspaceSection = .sessions
+    var selection: Binding<WorkspaceSection>? = nil
+    @Environment(ClientNavigationModel.self) private var navigation
+    @State private var owner = WorkSessionContext.shared.scope
+    @State private var reloadRevision = UUID()
     @State private var live: WorkspaceFolder?
     @State private var counts = WorkspaceSectionCounts()
     @State private var pullCounts = PullCountStore.shared
     @State private var errorMessage: String?
     @State private var showPort = false
+    @State private var showWorktrees = false
     @State private var portText = "5173"
     @State private var browserSession: ProjectBrowserSession?
     @State private var isOpeningPort = false
@@ -43,8 +46,13 @@ struct ClientFolderSplit: View {
         return merged
     }
 
-    /// Job views measure what remains after this column themselves.
-    private static let sectionsColumn: CGFloat = 280
+    private var section: WorkspaceSection {
+        get { selection?.wrappedValue ?? navigation.projectSections[.init(peer: peer, workspace: workspaceID)] ?? .sessions }
+        nonmutating set {
+            navigation.projectSections[.init(peer: peer, workspace: workspaceID)] = newValue
+            selection?.wrappedValue = newValue
+        }
+    }
 
     var body: some View {
         split
@@ -65,6 +73,18 @@ struct ClientFolderSplit: View {
             Task { await reload() }
         }
         .sheet(isPresented: $showPort) { portSheet.onAppear { portText = BrowserHistory.shared.portSuggestion(for: browserOwner) } }
+        .sheet(isPresented: $showWorktrees) {
+            RemoteHostFeatureGate(feature: .worktrees, peer: peer, hostName: hostName) {
+                ProjectWorktreeSheet(folder: remoteFolder) { created in
+                    showWorktrees = false
+                    var remote = created
+                    remote.id = "remote:\(peer):\(created.id)"
+                    remote.machineID = peer
+                    remote.machineLabel = hostName
+                    navigation.pushFolder(peerKey: peer, hostName: hostName, folder: remote, section: .sessions)
+                }
+            }
+        }
         .fullScreenCover(item: Binding(
             get: { browserSession },
             set: { if $0 == nil { closeBrowser() } }
@@ -76,43 +96,122 @@ struct ClientFolderSplit: View {
     }
 
     private var split: some View {
-        HStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    header
-                    if let errorMessage {
-                        ClientErrorCard(message: errorMessage) {
-                            Task { await reload() }
-                        }
-                    }
-                    ForEach(WorkspaceSection.allCases) { item in
-                        Button {
-                            if item == .browser {
-                                showPort = true
-                            } else {
-                                section = item
-                            }
-                        } label: {
-                            ClientSectionRow(
-                                section: item,
-                                count: count(for: item),
-                                isSelected: item == section && item != .browser,
-                                showsChevron: false
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        if item == .history, current.git?.isRepo == true {
-                            ClientProjectWorktreesButton(peer: peer, hostName: hostName, folder: current)
-                        }
-                    }
-                }
-                .padding(Theme.Space.m)
+        VStack(spacing: 0) {
+            if section == .sessions {
+                ClientFolderBranchRow(peer: peer, workspaceID: workspaceID, folder: current,
+                                      onChanged: { await reload() })
+                    .padding(.horizontal, Theme.Space.m)
+                    .padding(.vertical, Theme.Space.xs)
             }
-            .frame(width: Self.sectionsColumn)
-            .background(Theme.background)
-            ThemeRule.vertical
+            if let errorMessage {
+                ClientErrorCard(message: errorMessage) { Task { await reload() } }
+                    .padding(Theme.Space.s)
+            }
             detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .clientHideScrollEdgeEffect(for: .top)
         }
+        .clientTopBar {
+            VStack(spacing: 0) {
+                sectionsStrip
+                ThemeRule()
+            }
+            .background(Theme.background)
+        }
+    }
+
+    private var sectionsStrip: some View {
+        ViewThatFits(in: .horizontal) {
+            sectionButtons(WorkspaceSection.allCases, showsCounts: true)
+            sectionButtons(WorkspaceSection.allCases, showsCounts: false)
+            sectionButtons([.sessions, .chat, .changes], showsCounts: false,
+                           more: WorkspaceSection.allCases.filter { ![.sessions, .chat, .changes].contains($0) })
+            sectionButtons([section], showsCounts: false,
+                           more: WorkspaceSection.allCases.filter { $0 != section })
+            sectionMenu(WorkspaceSection.allCases)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Theme.Space.s)
+        .padding(.vertical, Theme.Space.xs)
+    }
+
+    private func sectionButtons(_ choices: [WorkspaceSection], showsCounts: Bool,
+                                more: [WorkspaceSection] = []) -> some View {
+        HStack(spacing: Theme.Space.xs) {
+            ForEach(choices) { item in
+                Button { choose(item) } label: {
+                    HStack(spacing: Theme.Space.xs) {
+                        Label(item.label, systemImage: item.symbol)
+                        if showsCounts, let value = count(for: item), value > 0 {
+                            Text("\(value)").monospacedDigit().foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(ClientType.caption.weight(item == section ? .semibold : .regular))
+                    .foregroundStyle(item == section ? Theme.accent : Color.secondary)
+                    .padding(.horizontal, Theme.Space.s)
+                    .frame(minHeight: Theme.Control.heightComfortable)
+                    .background(item == section ? Theme.accentSoft : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 8))
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(item == section ? .isSelected : [])
+            }
+            if !more.isEmpty {
+                sectionMenu(more)
+            } else if current.git?.isRepo == true {
+                Button { showWorktrees = true } label: {
+                    Label(L10n.text("apple.clientworkspacesections.worktrees.aec2f93d"), systemImage: "arrow.triangle.branch")
+                        .font(ClientType.caption)
+                        .padding(.horizontal, Theme.Space.s)
+                        .frame(minHeight: Theme.Control.heightComfortable)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func sectionMenu(_ choices: [WorkspaceSection]) -> some View {
+        let selected = choices.first { $0 == section }
+        return Menu {
+            ForEach(choices) { item in
+                Button { choose(item) } label: {
+                    Label(count(for: item).flatMap { $0 > 0 ? "\(item.label), \($0)" : nil } ?? item.label,
+                          systemImage: item.symbol)
+                }
+                .accessibilityAddTraits(item == section ? .isSelected : [])
+            }
+            if current.git?.isRepo == true {
+                Button(L10n.text("apple.clientworkspacesections.worktrees.aec2f93d"), systemImage: "arrow.triangle.branch") {
+                    showWorktrees = true
+                }
+            }
+        } label: {
+            Label(selected?.label ?? L10n.text("apple.shellchrome.more.d47d7cb0"),
+                  systemImage: selected?.symbol ?? "ellipsis")
+                .font(ClientType.caption.weight(selected == nil ? .regular : .semibold))
+                .foregroundStyle(selected == nil ? Color.secondary : Theme.accent)
+                .padding(.horizontal, Theme.Space.s)
+                .frame(minHeight: Theme.Control.heightComfortable)
+                .background(selected == nil ? Color.clear : Theme.accentSoft,
+                            in: RoundedRectangle(cornerRadius: 8))
+        }
+        .accessibilityLabel(selected?.label ?? L10n.text("apple.shellchrome.more_sections.a8e35e36"))
+        .accessibilityAddTraits(selected == nil ? [] : .isSelected)
+    }
+
+    private func choose(_ item: WorkspaceSection) {
+        if item == .browser { showPort = true }
+        else { section = item }
+    }
+
+    private var remoteFolder: WorkspaceFolder {
+        var remote = current
+        remote.id = "remote:\(peer):\(workspaceID)"
+        remote.machineID = peer
+        remote.machineLabel = hostName
+        return remote
     }
 
     @ViewBuilder
@@ -122,30 +221,9 @@ struct ClientFolderSplit: View {
             hostName: hostName,
             folder: folder,
             current: current,
-            section: section
+            section: section,
+            workbench: true
         )
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            Text(hostName)
-                .font(ClientType.caption)
-                .foregroundStyle(.secondary)
-            Text(current.path)
-                .font(ClientType.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .truncationMode(.middle)
-            ClientFolderBranchRow(
-                peer: peer,
-                workspaceID: workspaceID,
-                folder: current,
-                onChanged: { await reload() }
-            )
-        }
-        .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface()
     }
 
     private func count(for section: WorkspaceSection) -> Int? {
@@ -192,16 +270,24 @@ struct ClientFolderSplit: View {
     }
 
     private func reload() async {
+        let revision = UUID()
+        reloadRevision = revision
+        let owner = owner
+        guard owner != nil, owner == WorkSessionContext.shared.scope else { return }
         async let status = try? ClientRemote.status(peer: peer, workspace: workspaceID)
         async let counted = ClientRemote.summaries(peer: peer)
-        if let fresh = await status { live = fresh }
+        let fresh = await status
         let summaries: [WorkspaceSummary]
         do {
             summaries = try await counted
         } catch {
+            guard !Task.isCancelled, owner == WorkSessionContext.shared.scope, reloadRevision == revision else { return }
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
             return
         }
+        guard !Task.isCancelled, owner == WorkSessionContext.shared.scope, reloadRevision == revision else { return }
+        if let fresh, fresh != live { live = fresh }
+        errorMessage = nil
         guard let summary = summaries.first(where: { $0.id == workspaceID }) else {
             counts.changes = current.git?.files.count ?? counts.changes
             return
@@ -250,10 +336,7 @@ struct ClientFolderSplit: View {
 
 /// One of a folder's sections, drawn on its own.
 ///
-/// Extracted so the phone's folder split and the iPad's sidebar mount the same
-/// screen for the same row. The split lists the sections beside the content;
-/// the sidebar lists them in the sidebar and gives the whole detail column to
-/// this. Two lists, one set of screens.
+/// Shared by compact pushes and the project workbench's section strip.
 struct ClientWorkspaceSectionDetail: View {
     let peer: String
     let hostName: String
@@ -262,6 +345,7 @@ struct ClientWorkspaceSectionDetail: View {
     let folder: WorkspaceFolder
     var current: WorkspaceFolder?
     let section: WorkspaceSection
+    var workbench = false
     private var workspaceID: String {
         ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
     }
@@ -275,7 +359,8 @@ struct ClientWorkspaceSectionDetail: View {
     @ViewBuilder private var sectionContent: some View {
         switch section {
         case .sessions:
-            ClientWorkspaceSessionsView(peer: peer, hostName: hostName, folder: folder)
+            ClientWorkspaceSessionsView(peer: peer, hostName: hostName, folder: folder,
+                title: workbench ? folderNow.name : nil)
         case .chat:
             RemoteHostFeatureGate(feature: .chat, peer: peer, hostName: hostName) {
                 ClientChatView(peer: peer, workspaceID: workspaceID, folderName: folderNow.name, hostName: hostName, folder: folderNow)

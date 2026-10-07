@@ -22,7 +22,7 @@ struct ClientWorkspacesView: View {
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(\.scenePhase) private var scenePhase
     @State private var model: ClientWorkspacesModel
-    @State private var pendingClose: PtySessionInfo?
+    @State private var pendingClose: (peer: String, info: PtySessionInfo)?
     @State private var notificationOpen = NotificationOpen.shared
     @State private var showSetup = false
     @State private var customizing = false
@@ -260,16 +260,6 @@ struct ClientWorkspacesView: View {
             .onReceive(NotificationCenter.default.publisher(for: .tokenstatEntitlementDidChange)) { _ in
                 Task { await model.refresh(account: account.account) }
             }
-            .fullScreenCover(item: $model.activeTerminal) { session in
-                ClientTerminalScreen(
-                    session: session,
-                    hostName: model.hosts.first { $0.peerKey == model.connectedKey }?.name ?? "",
-                    onClose: { model.activeTerminal = nil },
-                    onClosedProcess: {
-                        Task { await model.refresh(account: account.account) }
-                    }
-                )
-            }
             .confirmationDialog(
                 L10n.text("apple.clientworkspacesview.close_this_session.2b66ce2d"),
                 isPresented: Binding(
@@ -279,14 +269,14 @@ struct ClientWorkspacesView: View {
                 titleVisibility: .visible
             ) {
                 Button(L10n.text("common.close"), role: .destructive) {
-                    if let session = pendingClose {
-                        Task { await model.closeSession(session) }
+                    if let target = pendingClose {
+                        Task { await model.closeSession(target.info, expectedPeer: target.peer) }
                     }
                     pendingClose = nil
                 }
                 Button(L10n.text("apple.clientworkspacesview.keep_it.fdce5da2"), role: .cancel) { pendingClose = nil }
             } message: {
-                Text(model.hosts.first { $0.peerKey == model.connectedKey }.map {
+                Text(model.hosts.first { $0.peerKey == pendingClose?.peer }.map {
                     L10n.text("apple.clientworkspacesview.stops_the_process_on_0.7aa0b494", "\($0.name)")
                 } ?? L10n.text("apple.clientworkspacesview.stops_the_process_on_the_computer.c5651cd1"))
             }
@@ -497,7 +487,7 @@ struct ClientWorkspacesView: View {
                         .listRowBackground(Color.clear)
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             Button(L10n.text("common.close"), role: .destructive) {
-                                pendingClose = session
+                                if let peer = model.connectedKey { pendingClose = (peer, session) }
                             }
                         }
                     }
@@ -683,6 +673,7 @@ final class ClientWorkspacesModel {
     /// on a second machine to the first one.
     private(set) var chosenPeer: String?
     @ObservationIgnored private var remoteLoadGeneration = UUID()
+    @ObservationIgnored private let ownerScope = WorkSessionContext.shared.scope
     private(set) var errorMessage: String?
     /// What this phone is called. It is never in the host list (it cannot dial
     /// itself), so it gets one line of its own.
@@ -1051,22 +1042,25 @@ final class ClientWorkspacesModel {
         recentChats = []
     }
 
-    func openSession(_ info: PtySessionInfo) {
-        guard let peer = connectedKey else { return }
+    func openSession(_ info: PtySessionInfo, peer: String? = nil) {
+        guard ownerScope != nil, ownerScope == WorkSessionContext.shared.scope,
+              let peer = peer ?? connectedKey else { return }
         activeTerminal = ClientTerminalSession(peer: peer, info: info)
     }
 
-    func closeSession(_ info: PtySessionInfo) async {
-        guard let peer = connectedKey else { return }
+    func closeSession(_ info: PtySessionInfo, expectedPeer: String? = nil) async {
+        guard let peer = expectedPeer ?? connectedKey,
+              peer == connectedKey, let owner = ownerScope,
+              owner == WorkSessionContext.shared.scope else { return }
+        let closing = activeTerminal.flatMap { $0.peer == peer && $0.hostID == info.id ? $0 : nil }
         do {
-            if activeTerminal?.hostID == info.id {
-                try await activeTerminal?.close()
-                activeTerminal = nil
-            } else {
-                try await ClientRemote.ptyClose(peer: peer, id: info.id)
-            }
-            sessions.removeAll { $0.id == info.id }
+            if let closing { try await closing.close() }
+            else { try await ClientRemote.ptyClose(peer: peer, id: info.id) }
+            guard owner == WorkSessionContext.shared.scope else { return }
+            if let closing, activeTerminal === closing { activeTerminal = nil }
+            if connectedKey == peer { sessions.removeAll { $0.id == info.id } }
         } catch {
+            guard owner == WorkSessionContext.shared.scope, connectedKey == peer else { return }
             let host = hosts.first { $0.peerKey == peer }?.name
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: host)
         }

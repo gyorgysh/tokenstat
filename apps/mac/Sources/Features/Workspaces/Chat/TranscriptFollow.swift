@@ -482,6 +482,7 @@ final class TranscriptFollowState {
             let retreated = moved
                 && !grew
                 && !shrank
+                && (pinned || Date() >= programmaticUntil)
                 && metrics.distanceFromBottom > lastDistanceFromBottom + 8
             lastContentHeight = metrics.contentHeight
             lastOffset = metrics.distanceFromTop

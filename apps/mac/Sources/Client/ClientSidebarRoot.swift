@@ -47,8 +47,8 @@ struct ClientSidebarRoot: View {
     /// destination rather than a value still goes through this path, as an
     /// entry with a type of the framework's own.
     @State private var detailPath = NavigationPath()
-    @State private var summaries: [String: WorkspaceSummary] = [:]
-    @State private var pullCounts = PullCountStore.shared
+    @Environment(ClientProjectChats.self) private var projectChats
+    @State private var pendingClose: (peer: String, info: PtySessionInfo)?
     @State private var columns = NavigationSplitViewVisibility.all
     /// A path only knows about value-based links. Changes still opens a diff
     /// through a view-based link, so changing the sidebar destination also
@@ -153,9 +153,6 @@ struct ClientSidebarRoot: View {
         .onChange(of: notificationOpen.request) { _, _ in
             Task { await fulfillNotification() }
         }
-        .onChange(of: workspaces.connectedKey) { _, _ in
-            Task { await loadSummaries() }
-        }
         // The same three moments the Workspaces screen watches. This layout
         // never mounts that screen until somebody picks Workspaces, so
         // without these an iPad with a keyboard opened to an empty tree and
@@ -176,19 +173,19 @@ struct ClientSidebarRoot: View {
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
             Task { await workspaces.recoverAfterNetworkChange(account: account.account) }
         }
-        .fullScreenCover(item: Binding(
-            get: { workspaces.activeTerminal },
-            set: { workspaces.activeTerminal = $0 }
-        )) { session in
-            ClientTerminalScreen(
-                session: session,
-                hostName: workspaces.hosts.first { $0.peerKey == workspaces.connectedKey }?.name ?? "",
-                onClose: { workspaces.activeTerminal = nil },
-                onClosedProcess: {
-                    Task { await workspaces.refresh(account: account.account) }
+        .confirmationDialog(L10n.text("apple.clientworkspacesview.close_this_session.2b66ce2d"),
+            isPresented: Binding(get: { pendingClose != nil }, set: { if !$0 { pendingClose = nil } }),
+            titleVisibility: .visible) {
+                if let target = pendingClose {
+                    Button(L10n.text("common.close"), role: .destructive) {
+                        pendingClose = nil
+                        Task { await workspaces.closeSession(target.info, expectedPeer: target.peer) }
+                    }
                 }
-            )
-        }
+                Button(L10n.text("apple.clientworkspacesview.keep_it.fdce5da2"), role: .cancel) { pendingClose = nil }
+            } message: {
+                Text(L10n.text("apple.clientworkspacesview.stops_the_process_on_the_computer.c5651cd1"))
+            }
     }
 
     private func reload() async {
@@ -198,23 +195,7 @@ struct ClientSidebarRoot: View {
         // refresh could leave a just-awake Mac looking disconnected.
         await account.load()
         await workspaces.refresh(account: account.account)
-        // Before the summaries, not after: the tree has nothing to count
-        // until a host is connected, and `loadSummaries` bails on a nil
-        // `connectedKey`. Dialling first is what fills the sidebar on open.
         await workspaces.autoConnectLastHost()
-        await loadSummaries()
-    }
-
-    /// Counts for every folder on the connected machine. Quiet on failure:
-    /// the tree is still usable without its numbers, and the chip in the bar
-    /// is what says the machine is not answering.
-    private func loadSummaries() async {
-        guard let peer = workspaces.connectedKey else {
-            summaries = [:]
-            return
-        }
-        guard let list = try? await ClientRemote.summaries(peer: peer) else { return }
-        summaries = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
     }
 
     /// How tall a row is here. See `SidebarMetrics`.
@@ -313,18 +294,20 @@ struct ClientSidebarRoot: View {
                             ClientAllTasksLink(peer: host.peerKey, hostName: host.name)
                         }
                         ForEach(workspaces.folders) { folder in
-                            folderRow(folder)
+                            folderRow(folder, peer: host.peerKey)
                             // Keep the last opened folder expanded when the
                             // detail column moves to a different destination.
                             if navigation.sidebarFolderID == folder.id {
-                                ForEach(WorkspaceSection.allCases) { item in
-                                    sectionRow(item, in: folder)
-                                    if item == .sessions {
-                                        ForEach(sessions(in: folder)) { session in
-                                            sessionRow(session)
-                                        }
-                                    }
+                                ForEach(sessions(in: folder)) { session in
+                                    sessionRow(session, in: folder, peer: host.peerKey)
                                 }
+                                ClientProjectChatRows(peer: host.peerKey, hostName: host.name,
+                                    folder: folder, rowHeight: rowHeight,
+                                    entry: projectChats.entry(peer: host.peerKey,
+                                        workspace: ClientRemote.rawWorkspaceID(of: folder) ?? folder.id),
+                                    workspaces: workspaces)
+                                    .id(ClientProjectChats.Key(peer: host.peerKey,
+                                        workspace: ClientRemote.rawWorkspaceID(of: folder) ?? folder.id))
                             }
                         }
                     }
@@ -443,11 +426,11 @@ struct ClientSidebarRoot: View {
         .clientSidebarRowChrome()
     }
 
-    private func folderRow(_ folder: WorkspaceFolder) -> some View {
+    private func folderRow(_ folder: WorkspaceFolder, peer: String) -> some View {
         Button {
             navigation.open(
                 folderID: folder.id,
-                section: navigation.folderID == folder.id ? navigation.section : .sessions
+                section: .sessions
             )
         } label: {
             folderLabel(folder)
@@ -458,6 +441,8 @@ struct ClientSidebarRoot: View {
         }
         .buttonStyle(.plain)
         .clientSidebarRowChrome()
+        .modifier(ClientProjectRename(peer: peer,
+            folder: folder, onChanged: { await reload() }))
     }
 
     private func folderLabel(_ folder: WorkspaceFolder) -> some View {
@@ -479,73 +464,6 @@ struct ClientSidebarRoot: View {
                     .lineLimit(1)
                 gitLine(folder)
             }
-        }
-    }
-
-    /// One of an open folder's sections, with what it holds.
-    ///
-    /// The Mac's row: glyph, word, count on the right, and nothing drawn for a
-    /// zero. A column of grey zeroes is a wall of them.
-    private func sectionRow(_ section: WorkspaceSection, in folder: WorkspaceFolder) -> some View {
-        Button {
-            navigation.open(folderID: folder.id, section: section)
-        } label: {
-            sectionLabel(section, in: folder)
-                .clientSidebarRowSurface(
-                    isSelected: navigation.folderID == folder.id
-                        && navigation.section == section,
-                    height: rowHeight
-                )
-        }
-        .buttonStyle(.plain)
-        .clientSidebarRowChrome()
-    }
-
-    private func sectionLabel(
-        _ section: WorkspaceSection,
-        in folder: WorkspaceFolder
-    ) -> some View {
-        HStack(spacing: Theme.Space.s) {
-            Image(systemName: section.symbol)
-                .font(Theme.font(12))
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
-            Text(section.label)
-                .font(ClientType.caption)
-            Spacer(minLength: 0)
-            if let count = count(section, in: folder), count > 0 {
-                Text("\(count)")
-                    .font(ClientType.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.leading, Theme.Space.m)
-    }
-
-    /// What a section row says on its right. Nil where a count would be a
-    /// guess: Files and Browser are not collections this side has counted.
-    private func count(_ section: WorkspaceSection, in folder: WorkspaceFolder) -> Int? {
-        guard let summary = summaries[ClientRemote.rawWorkspaceID(of: folder) ?? folder.id] else {
-            return nil
-        }
-        switch section {
-        case .sessions: return summary.sessions
-        case .chat: return summary.chats
-        case .changes: return summary.changed ?? folder.git?.files.count
-        case .history: return nil
-        case .pulls:
-            return summary.pulls
-                ?? pullCounts.count(
-                    workspaceID: ClientRemote.rawWorkspaceID(of: folder) ?? folder.id,
-                    peer: workspaces.connectedKey
-                )
-        case .todo: return summary.tasks
-        case .notes: return summary.notes
-        case .workflows: return summary.workflowsRunning > 0
-            ? summary.workflowsRunning
-            : summary.workflows
-        case .automations: return summary.automations
-        case .files, .browser: return nil
         }
     }
 
@@ -597,20 +515,24 @@ struct ClientSidebarRoot: View {
         }
     }
 
-    private func sessionRow(_ session: PtySessionInfo) -> some View {
+    private func sessionRow(_ session: PtySessionInfo, in folder: WorkspaceFolder, peer: String) -> some View {
         Button {
             workspaces.openSession(session)
         } label: {
-            sessionLabel(session)
+            sessionLabel(session, peer: peer, workspaceID: ClientRemote.rawWorkspaceID(of: folder) ?? folder.id)
                 .clientSidebarRowSurface(isSelected: false, height: rowHeight)
         }
         .buttonStyle(.plain)
         .clientSidebarRowChrome()
+        .modifier(ClientTerminalActions(peer: peer,
+            workspaceID: ClientRemote.rawWorkspaceID(of: folder) ?? folder.id, folderName: folder.name,
+            info: session, onDuplicate: { copied in workspaces.openSession(copied, peer: peer) },
+            onClose: { pendingClose = (peer, session) }))
     }
 
-    private func sessionLabel(_ session: PtySessionInfo) -> some View {
+    private func sessionLabel(_ session: PtySessionInfo, peer: String, workspaceID: String) -> some View {
         Label {
-            Text(sessionTitle(session)).lineLimit(1)
+            Text(sessionTitle(session, peer: peer, workspaceID: workspaceID)).lineLimit(1)
         } icon: {
             Image(systemName: session.alive ? "terminal.fill" : "terminal")
                 .foregroundStyle(session.alive ? Theme.accent : .secondary)
@@ -619,7 +541,9 @@ struct ClientSidebarRoot: View {
         .padding(.leading, Theme.Space.l)
     }
 
-    private func sessionTitle(_ session: PtySessionInfo) -> String {
+    private func sessionTitle(_ session: PtySessionInfo, peer: String, workspaceID: String) -> String {
+        if let name = SidebarTerminalNames.shared.name(peer: peer,
+            workspaceID: workspaceID, sessionID: session.id) { return name }
         if let harness = harnessID(forCommand: session.command) { return harnessName(harness) }
         return URL(fileURLWithPath: session.command).lastPathComponent
     }
@@ -689,19 +613,22 @@ struct ClientSidebarRoot: View {
     /// The sessions running in one folder, matched on the directory rather
     /// than on a label: two checkouts can share a basename.
     private func sessions(in folder: WorkspaceFolder) -> [PtySessionInfo] {
-        workspaces.sessions.filter { $0.cwd == folder.path }
+        let workspace = ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
+        return workspaces.sessions.filter {
+            guard $0.hidden != true else { return false }
+            if let id = $0.workspaceID, !id.isEmpty { return id == workspace }
+            return $0.cwd == folder.path || $0.cwd.hasPrefix(folder.path + "/")
+        }
     }
 
     // MARK: - Detail
 
     /// What counts as a different page in the detail column.
     ///
-    /// The folder and the section are in here as well as the destination,
-    /// because moving between two folders, or between Chat and Changes in
-    /// one, is the same kind of move as leaving Workspaces entirely: whatever
-    /// the last page pushed should not still be on top.
+    /// Explicit sidebar navigation dismisses pushed detail pages. Strip
+    /// selection keeps the workbench and sidebar mounted.
     private var detailIdentity: String {
-        "\(navigation.destination)-\(navigation.folderID ?? "")-\(navigation.section)-\(navigation.restoredRouteGeneration)"
+        "\(navigation.destination)-\(navigation.folderID ?? "")-\(navigation.projectOpenGeneration)-\(navigation.restoredRouteGeneration)"
     }
 
     @ViewBuilder
@@ -720,14 +647,10 @@ struct ClientSidebarRoot: View {
            let folder = workspaces.folders.first(where: { $0.id == id }),
            let peer = workspaces.connectedKey
         {
-            // The sections are in the sidebar, so the detail column is the
-            // section. Drawing the folder split here would list them twice.
-            ClientWorkspaceSectionDetail(
-                peer: peer,
+            ClientFolderSplit(peer: peer,
                 hostName: workspaces.hosts.first { $0.peerKey == peer }?.name ?? "",
                 folder: folder,
-                section: navigation.section
-            )
+                selection: Binding(get: { navigation.section }, set: { navigation.section = $0 }))
         } else {
             switch navigation.destination {
             case .home: ClientHomeView()

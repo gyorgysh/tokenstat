@@ -478,6 +478,11 @@ struct ClientChatThread: View {
     @State private var scrollTarget: String?
     @State private var follow = TranscriptFollowState()
     @State private var window = TranscriptWindow()
+    @State private var scrollAccess = ClientTranscriptScrollAccess()
+    @State private var readingFrames = ClientTranscriptReadingFrames()
+    @State private var readingHold = ChatReadingHold()
+    @State private var readingDelivery = TranscriptScrollDelivery()
+    @State private var readerMoved = false
     @State private var settleMood: PersonaMood?
     @State private var settleTaskID = UUID()
     /// Bumped on send so the transcript scrolls to the end synchronously,
@@ -758,7 +763,7 @@ struct ClientChatThread: View {
                         ClientChatMenu(model: model, conversation: chat, peer: tools.peer,
                             workspaceID: tools.workspaceID, hostName: hostName, onFork: onFork,
                             onSetup: { showingSetup = true }, onHandoff: { showingHandoff = true },
-                            onDelete: onDelete)
+                            onDelete: onDelete, onViewportChoice: beginViewportChoice)
                             .id(chat.id)
                     }
                 }
@@ -856,7 +861,10 @@ struct ClientChatThread: View {
         }
         .onDisappear {
             model.saveDraftNow()
-            keepViewport()
+            traceViewport("disappear")
+            stopHoldingViewport()
+            settleTaskID = UUID()
+            follow.freeze()
             UserPresence.shared.leaveChatSurface(owner: presenceOwner)
         }
         // The host is on the other computer and cannot see this screen. Until
@@ -1081,7 +1089,10 @@ struct ClientChatThread: View {
                                     animatesRunning: !model.isShowingCachedTranscript && item.id == spinning,
                                     expandsOutput: detail.level == .detailed,
                                     compactTools: detail.level == .minimal,
-                                    toggleGroup: { model.toggleGroup($0) },
+                                    toggleGroup: {
+                                        beginViewportChoice()
+                                        model.toggleGroup($0)
+                                    },
                                     answerQuestion: { question, text in
                                         Task { await model.answerQuestion(question, answer: text) }
                                     },
@@ -1100,10 +1111,11 @@ struct ClientChatThread: View {
                         // Also wherever the reader has stopped above the
                         // latest turn: that place is worth keeping. Never
                         // mid-scroll, which is a report per row per frame.
-                        .transcriptRowFrame(
+                        .clientTranscriptRowFrame(
                             item.id,
-                            watched: !follow.scrolling
-                                && ((model.hasEarlier && measuringRows) || !follow.atEnd)
+                            watched: (!follow.scrolling || (follow.settling && !follow.pinned))
+                                && ((model.hasEarlier && measuringRows) || !follow.atEnd),
+                            holdingReading: preservesReadingMark
                         )
                     }
                     if sliceOffset == 0 {
@@ -1128,6 +1140,13 @@ struct ClientChatThread: View {
                 .padding(.top, Theme.Space.m)
                 .padding(.bottom, Theme.Space.l)
                 .chatScrollContent()
+                .background {
+                    GeometryReader { geometry in
+                        ClientTranscriptScrollReporter(access: scrollAccess)
+                            .preference(key: ClientTranscriptReadingFramesKey.self,
+                                value: ClientTranscriptReadingGeometry(globalFrame: geometry.frame(in: .global)))
+                    }
+                }
             }
             .scrollDismissesKeyboard(.immediately)
             // No tap-to-dismiss gesture here: `.scrollDismissesKeyboard`
@@ -1155,6 +1174,14 @@ struct ClientChatThread: View {
                 opening: $opening
             ))
             .chatScrollMetrics { metrics in
+                guard isActive, follow.active else { return }
+                if scrollAccess.readerIsMoving {
+                    if readingFrames.captureReady || !readerMoved {
+                        readingFrames.cancelCapture()
+                        stopHoldingViewport()
+                    }
+                    if !readerMoved { readerMoved = true }
+                }
                 #if DEBUG
                 TranscriptProbe.shared.noteMetrics()
                 TranscriptProbe.shared.pinned = follow.pinned
@@ -1169,6 +1196,12 @@ struct ClientChatThread: View {
                 window.followingEnd = (follow.pinned || follow.settling) && sliceOffset == 0
                 window.note(metrics)
             }
+            .modifier(ClientTranscriptReadingGesture {
+                guard isActive, follow.active else { return }
+                readingFrames.cancelCapture()
+                stopHoldingViewport()
+                readerMoved = true
+            })
             .overlay(alignment: .bottom) {
                 if model.approvals.isEmpty {
                     TranscriptFollowPill(
@@ -1185,6 +1218,11 @@ struct ClientChatThread: View {
                 }
             }
             .transcriptEarlierPages(model, window: window, proxy: proxy)
+            .onPreferenceChange(ClientTranscriptReadingFramesKey.self) { geometry in
+                readingFrames.replace(geometry)
+                keepViewport()
+                holdViewport(proxy)
+            }
             .onChange(of: structureToken) { _, _ in
                 if !follow.atEnd { pinToLatest(proxy, animated: !model.busy) }
             }
@@ -1209,18 +1247,12 @@ struct ClientChatThread: View {
             // somewhere. Wait a beat for the rows to say where they are:
             // they report on the update this change itself causes.
             .onChange(of: follow.scrolling) { _, moving in
-                guard !moving else { return }
-                let reference = model.currentReference
-                let generation = model.selectionGeneration
-                Task {
-                    try? await Task.sleep(for: .milliseconds(140))
-                    guard !Task.isCancelled, !follow.scrolling, !follow.settling,
-                          reference == model.currentReference,
-                          generation == model.selectionGeneration else { return }
-                    TranscriptReading.record(follow: follow, window: window,
-                                             for: reference)
-                    keepViewport()
-                }
+                readingFrames.cancelCapture()
+                guard !moving, isActive, follow.active else { return }
+                captureReadingAfterQuiet()
+            }
+            .onChange(of: detail.level) { _, _ in
+                beginViewportChoice()
             }
             // A request that arrives mid-stream would otherwise be pushed off
             // a short viewport before anybody saw it.
@@ -1248,24 +1280,43 @@ struct ClientChatThread: View {
             }
             #endif
             .onAppear {
+                follow.active = isActive
                 follow.suppressed = !model.approvals.isEmpty
                 window.nearTopChanged = { measuringRows = $0 }
                 installRepin(proxy)
+                guard isActive else { return }
                 if model.viewportContinuity.claim(generation: model.selectionGeneration, owner: presenceOwner) != nil {
                     follow.stopFollowing()
                 } else {
                     pinToLatest(proxy, animated: false)
                 }
             }
-            .task(id: model.readingIdentity) {
+            .onChange(of: isActive) { _, active in
+                if active { follow.active = true }
+                else {
+                    traceViewport("hidden")
+                    stopHoldingViewport()
+                    follow.freeze()
+                }
+            }
+            .task(id: ChatPresentationIdentity(reading: model.readingIdentity, active: isActive)) {
                 // A lazy stack does not know its own height until it has drawn
                 // the rows, so the first scroll to the end lands on estimates.
                 // Hold the end across the frames the real heights take to
                 // arrive: every one of those says the end is far below, and
                 // believing one is how a long chat opened in its middle.
+                guard !Task.isCancelled, isActive, follow.active else { return }
+                viewportPlaced = false
+                readerMoved = false
+                readingFrames.cancelCapture()
+                stopHoldingViewport()
+                let generation = model.selectionGeneration
+                let reference = model.currentReference
                 let ticket = UUID()
                 settleTaskID = ticket
-                let kept = model.viewportContinuity.claim(generation: model.selectionGeneration, owner: presenceOwner)
+                let kept = model.viewportContinuity.beginPlacement(generation: generation, owner: presenceOwner)
+                traceViewport("begin", mark: kept)
+                var measurementCompleted = true
                 if kept != nil { follow.stopFollowing() }
                 follow.settle(true)
                 if kept != nil { follow.pinned = false }
@@ -1277,19 +1328,39 @@ struct ClientChatThread: View {
                 defer {
                     if settleTaskID == ticket {
                         follow.settle(false)
-                        viewportPlaced = true
+                        if !Task.isCancelled, isActive, follow.active,
+                           generation == model.selectionGeneration,
+                           reference == model.currentReference,
+                           model.viewportContinuity.owns(generation: generation, owner: presenceOwner) {
+                            if measurementCompleted {
+                                model.viewportContinuity.completePlacement(generation: generation, owner: presenceOwner)
+                            }
+                            viewportPlaced = true
+                            holdViewport(proxy)
+                        }
                     }
                 }
                 // Fetch time does not spend the layout-settling budget. Slow
                 // hosts used to exhaust every correction before rows arrived.
                 while model.openingConversation {
                     try? await Task.sleep(for: .milliseconds(50))
-                    guard !Task.isCancelled else { return }
+                    guard !Task.isCancelled, isActive, follow.active,
+                          reference == model.currentReference,
+                          model.viewportContinuity.canPlace(generation: generation, currentGeneration: model.selectionGeneration, owner: presenceOwner,
+                              ticket: ticket, currentTicket: settleTaskID) else { return }
                 }
-                guard !Task.isCancelled else { return }
-                if await restoreReadingPlace(proxy) != .unavailable { return }
-                guard !Task.isCancelled else { return }
-                resumeLatest()
+                guard !Task.isCancelled, isActive, follow.active,
+                      reference == model.currentReference,
+                      model.viewportContinuity.canPlace(generation: generation, currentGeneration: model.selectionGeneration, owner: presenceOwner,
+                          ticket: ticket, currentTicket: settleTaskID) else { return }
+                let restored = await restoreReadingPlace(proxy)
+                if restored == .unmeasured { measurementCompleted = false; return }
+                if restored != .unavailable { return }
+                guard !Task.isCancelled, isActive, follow.active,
+                      model.viewportContinuity.canPlace(generation: generation, currentGeneration: model.selectionGeneration, owner: presenceOwner,
+                          ticket: ticket, currentTicket: settleTaskID) else { return }
+                model.viewportContinuity.record(.latest, generation: generation, owner: presenceOwner)
+                follow.jump()
                 showNewest()
                 // Same as the Mac: hold the end until the conversation has
                 // stopped arriving, not for a fixed count of frames.
@@ -1297,7 +1368,10 @@ struct ClientChatThread: View {
                 var correctionPins = 0
                 for _ in 0..<40 {
                     try? await Task.sleep(for: .milliseconds(50))
-                    guard !Task.isCancelled, !follow.abandoned else { return }
+                    guard !Task.isCancelled, isActive, follow.active, !follow.abandoned,
+                          reference == model.currentReference,
+                          model.viewportContinuity.canPlace(generation: generation, currentGeneration: model.selectionGeneration, owner: presenceOwner,
+                              ticket: ticket, currentTicket: settleTaskID) else { return }
                     // A lazy-stack scroll walks every row between here and
                     // the end. Limit settling corrections; geometry-based
                     // repinning handles later height changes.
@@ -1557,7 +1631,7 @@ struct ClientChatThread: View {
     private func pinToLatest(_ proxy: ScrollViewProxy, animated: Bool) {
         // A pending request owns the view. Streaming text must not scroll it
         // out from under somebody who is reading it to decide.
-        guard follow.pinned, model.approvals.isEmpty else { return }
+        guard isActive, follow.active, follow.pinned, model.approvals.isEmpty else { return }
         guard canScrollToEnd else {
             follow.stopFollowing()
             return
@@ -1571,15 +1645,157 @@ struct ClientChatThread: View {
     }
 
     private func resumeLatest() {
+        settleTaskID = UUID()
+        stopHoldingViewport()
+        readerMoved = false
+        readingFrames.cancelCapture()
+        viewportPlaced = true
         model.viewportContinuity.record(.latest, generation: model.selectionGeneration, owner: presenceOwner)
+        if let reference = model.currentReference { ChatReadingStore.shared.requestLatest(for: reference) }
+        model.viewportContinuity.completePlacement(generation: model.selectionGeneration, owner: presenceOwner)
+        follow.settle(false)
         follow.jump()
     }
 
     private func keepViewport() {
-        guard !follow.scrolling, !follow.settling,
+        guard readingFrames.captureReady, readerMoved, isActive, follow.active, !follow.scrolling, !follow.settling,
+              !scrollAccess.readerIsTouching,
+              model.viewportContinuity.isPlaced(generation: model.selectionGeneration, owner: presenceOwner),
               !follow.pinned || follow.atEnd else { return }
-        model.viewportContinuity.record(TranscriptReading.position(follow: follow, window: window),
-            generation: model.selectionGeneration, owner: presenceOwner)
+        let position = readingPosition()
+        traceViewport("sample", position: position)
+        // A preference pass can arrive before the local native reporter.
+        // Keep gesture permission until fresh geometry supplies a real row.
+        guard position != .unknown else { return }
+        TranscriptReading.record(position, for: model.currentReference)
+        model.viewportContinuity.recordMeasurement(position,
+            generation: model.selectionGeneration, owner: presenceOwner, readerInitiated: readerMoved)
+        traceViewport("capture")
+        readerMoved = false
+        readingFrames.captureReady = false
+    }
+
+    /// A deliberate row jump or disclosure changes what the reader chose to
+    /// see. Retire the old hold now; measure the new choice after it settles.
+    private func beginViewportChoice() {
+        guard isActive, follow.active,
+              model.viewportContinuity.owns(generation: model.selectionGeneration, owner: presenceOwner) else { return }
+        stopHoldingViewport()
+        readingFrames.cancelCapture()
+        settleTaskID = UUID()
+        follow.settle(false)
+        viewportPlaced = true
+        readerMoved = true
+        if let reference = model.currentReference {
+            _ = ChatReadingStore.shared.takeRequest(for: reference)
+        }
+        model.viewportContinuity.record(.latest, generation: model.selectionGeneration, owner: presenceOwner)
+        model.viewportContinuity.completePlacement(generation: model.selectionGeneration, owner: presenceOwner)
+        captureReadingAfterQuiet()
+    }
+
+    private func captureReadingAfterQuiet() {
+        let reference = model.currentReference
+        let generation = model.selectionGeneration
+        let captureID = readingFrames.captureID
+        Task {
+            try? await Task.sleep(for: .milliseconds(140))
+            guard !Task.isCancelled, isActive, follow.active, !follow.scrolling, !follow.settling,
+                  !scrollAccess.readerIsTouching,
+                  reference == model.currentReference,
+                  generation == model.selectionGeneration, readerMoved,
+                  captureID == readingFrames.captureID else { return }
+            if viewportPlaced, model.viewportContinuity.owns(generation: generation, owner: presenceOwner) {
+                model.viewportContinuity.completePlacement(generation: generation, owner: presenceOwner)
+            }
+            guard model.viewportContinuity.isPlaced(generation: generation, owner: presenceOwner) else { return }
+            readingFrames.captureReady = true
+            for _ in 0..<10 {
+                guard !Task.isCancelled, isActive, follow.active, !follow.scrolling, !follow.settling,
+                      reference == model.currentReference,
+                      generation == model.selectionGeneration,
+                      captureID == readingFrames.captureID,
+                      model.viewportContinuity.owns(generation: generation, owner: presenceOwner),
+                      readingFrames.captureReady, readerMoved else { return }
+                keepViewport()
+                if !readerMoved { return }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
+    }
+
+    private func readingPosition() -> ChatReadingPosition {
+        if follow.atEnd, follow.pinned { return .latest }
+        guard let coordinates = scrollAccess.readingCoordinates(globalFrame: readingFrames.globalFrame) else { return .unknown }
+        let anchor = ChatReadingPosition.anchor(in: readingFrames.frames,
+            viewportHeight: Double(coordinates.visible.height),
+            viewportTop: Double(coordinates.visible.minY), frameOffsetY: Double(coordinates.originY))
+        return ChatReadingPosition.from(atEnd: follow.atEnd, pinned: follow.pinned,
+            anchorID: anchor?.id, anchorTop: anchor?.top ?? 0, anchorHeight: anchor?.height ?? 0,
+            viewportHeight: Double(coordinates.visible.height))
+    }
+
+    private var preservesReadingMark: Bool {
+        isActive && follow.active && !readerMoved
+            && model.viewportContinuity.owns(generation: model.selectionGeneration, owner: presenceOwner)
+            && model.viewportContinuity.mark(generation: model.selectionGeneration) != nil
+    }
+
+    private func stopHoldingViewport() {
+        readingDelivery.cancel()
+        readingHold.reset()
+    }
+
+    /// A layout can move an older row after placement has converged. Perform
+    /// measured corrections after layout, with a fixed budget and no history
+    /// writes. Reader input and explicit latest always take over immediately.
+    private func holdViewport(_ proxy: ScrollViewProxy) {
+        guard viewportPlaced, preservesReadingMark, !follow.settling,
+              !scrollAccess.readerIsTouching,
+              let reference = model.currentReference,
+              let mark = model.viewportContinuity.mark(generation: model.selectionGeneration) else { return }
+        let generation = model.selectionGeneration
+        let ticket = settleTaskID
+        readingDelivery.submit {
+            guard viewportPlaced, preservesReadingMark, !follow.settling,
+                  !scrollAccess.readerIsTouching,
+                  generation == model.selectionGeneration, reference == model.currentReference,
+                  ticket == settleTaskID,
+                  model.viewportContinuity.mark(generation: generation) == mark,
+                  let coordinates = scrollAccess.readingCoordinates(globalFrame: readingFrames.globalFrame) else { return }
+            readingHold.prepare(mark: mark, viewport: coordinates.visible)
+            guard readingHold.canCorrect else { return }
+            let rows = model.transcriptItems
+            let closedHeader = rows.first { row in
+                guard case let .group(group) = row.kind else { return false }
+                return !group.open && row.id == "g:\(mark.eventID)"
+            }?.id
+            guard let id = closedHeader ?? ChatReadingAnchor.resolve(mark.eventID, items: rows, events: model.events) else { return }
+            // A native reflow can briefly report the end. Kept reading intent
+            // owns this correction and suppresses any pending end repin.
+            if follow.pinned { follow.stopFollowing() }
+            if let frame = readingFrames.frames[id] {
+                let result = scrollAccess.correct(mark, frame: frame,
+                    globalFrame: readingFrames.globalFrame, follow: follow)
+                if result == .placed { readingHold.corrected() }
+                if result == .settled {
+                    model.viewportContinuity.completePlacement(generation: generation, owner: presenceOwner)
+                }
+            } else if readingHold.takeReveal() {
+                let point = UnitPoint(x: 0.5, y: mark.within > 0 ? 0 : min(max(mark.offset, 0), 0.6))
+                placeRow(id, proxy, at: point)
+            }
+        }
+    }
+
+    private func traceViewport(_ event: String, mark: ChatReadingMark? = nil,
+                               position: ChatReadingPosition? = nil) {
+        #if DEBUG
+        ClientViewportTrace.note(event,
+            mark: mark ?? model.viewportContinuity.mark(generation: model.selectionGeneration),
+            scroll: scrollAccess.view,
+            details: "generation=\(model.selectionGeneration) owner=\(presenceOwner) stamp=\(readingFrames.stamp) frames=\(readingFrames.frames.count) coordinates=\(String(describing: scrollAccess.readingCoordinates(globalFrame: readingFrames.globalFrame))) sample=\(String(describing: position)) placed=\(model.viewportContinuity.isPlaced(generation: model.selectionGeneration, owner: presenceOwner)) reader=\(readerMoved) pinned=\(follow.pinned) settling=\(follow.settling)")
+        #endif
     }
 
     /// Explicit navigation wins. Otherwise only the same live selection may
@@ -1591,7 +1807,29 @@ struct ClientChatThread: View {
         // Keep explicit navigation before the first await, so a cancelled
         // presentation hands the same requested row to its successor.
         model.viewportContinuity.record(.away(mark), generation: model.selectionGeneration, owner: presenceOwner)
-        return await TranscriptReading.restore(mark, reference: reference, model: model, follow: follow) { id, point in
+        traceViewport("restore", mark: mark)
+        let generation = model.selectionGeneration
+        let ticket = settleTaskID
+        var lastFrameStamp = readingFrames.stamp
+        return await TranscriptReading.restore(mark, reference: reference, model: model, follow: follow,
+            isCurrent: {
+                generation == model.selectionGeneration && reference == model.currentReference
+                    && ticket == settleTaskID
+                    && model.viewportContinuity.owns(generation: generation, owner: presenceOwner)
+                    && model.viewportContinuity.mark(generation: generation) == mark
+            },
+            correct: { id, mark in
+                guard isActive, follow.active, !Task.isCancelled,
+                      generation == model.selectionGeneration, reference == model.currentReference,
+                      ticket == settleTaskID,
+                      model.viewportContinuity.owns(generation: generation, owner: presenceOwner) else { return .interrupted }
+                guard readingFrames.stamp != lastFrameStamp,
+                      let frame = readingFrames.frames[id] else { return .unavailable }
+                let result = scrollAccess.correct(mark, frame: frame, globalFrame: readingFrames.globalFrame, follow: follow)
+                if result == .placed { lastFrameStamp = readingFrames.stamp }
+                return result
+            }) { id, point in
+            lastFrameStamp = readingFrames.stamp
             placeRow(id, proxy, at: point)
         }
     }
@@ -1599,6 +1837,7 @@ struct ClientChatThread: View {
     /// Put one row where the reader had it, with the rest of the conversation
     /// below it and the earlier part one button above.
     private func placeRow(_ id: String, _ proxy: ScrollViewProxy, at point: UnitPoint) {
+        guard isActive, follow.active else { return }
         applySlice(TranscriptSlice.holding(id, in: model.transcriptItems, current: 0))
         follow.markDrivenInstant()
         var transaction = Transaction()
@@ -1609,12 +1848,14 @@ struct ClientChatThread: View {
     }
 
     private func scrollTo(_ id: String, _ proxy: ScrollViewProxy, animated: Bool) {
+        guard isActive, follow.active else { return }
         // Every scroll here is programmatic. Say so, or the frames of the
         // animation read as the reader leaving and unpin mid-flight.
         // Instant pins land on the same frame and only need a short window.
         // The end always exists. Anything else may sit outside the built
         // slice: slide to it first, or the scroll lands nowhere.
         if id != TranscriptFollow.bottomID {
+            beginViewportChoice()
             // A target folded into a step group opens it first.
             model.revealRow(id)
             applySlice(TranscriptSlice.revealing(id, in: model.transcriptItems))
@@ -1723,6 +1964,176 @@ struct ClientChatThread: View {
             try? await Task.sleep(for: .seconds(3))
             guard dropNoticeGeneration == generation else { return }
             dropNotice = nil
+        }
+    }
+}
+
+/// A weak reference to this transcript's own scroll view. Row placement uses
+/// its measured geometry after SwiftUI has revealed the target lazy row.
+@MainActor
+private final class ClientTranscriptScrollAccess {
+    weak var view: UIScrollView?
+    weak var reporter: UIView?
+
+    /// SwiftUI global coordinates belong to its hierarchy root. Calibrate
+    /// that root against this reporter's own window, including in a sheet
+    /// or split column. No scene or window lookup is needed.
+    func readingCoordinates(globalFrame: CGRect?) -> (visible: CGRect, originY: CGFloat)? {
+        guard let view, let window = view.window, let reporter,
+              reporter.window === window, let global = globalFrame else { return nil }
+        let native = reporter.convert(reporter.bounds, to: window)
+        let visible = view.convert(view.bounds.inset(by: view.adjustedContentInset), to: window)
+        guard visible.height > 0, visible.minY.isFinite, native.minY.isFinite,
+              global.minY.isFinite else { return nil }
+        return (visible, native.minY - global.minY)
+    }
+
+    var readerIsMoving: Bool {
+        guard let view else { return false }
+        return view.isDragging || view.isDecelerating
+    }
+
+    var readerIsTouching: Bool {
+        guard let view else { return false }
+        return view.isTracking || view.isDragging || view.isDecelerating
+    }
+
+    func correct(_ mark: ChatReadingMark, frame: CGRect, globalFrame: CGRect?, follow: TranscriptFollowState)
+        -> TranscriptReading.MeasuredPlacement {
+        guard let view, let coordinates = readingCoordinates(globalFrame: globalFrame) else { return .unavailable }
+        guard !view.isTracking, !view.isDragging, !view.isDecelerating else { return .interrupted }
+        #if DEBUG
+        ClientViewportTrace.note("correct", mark: mark, scroll: view, frame: frame,
+            details: "visible=\(coordinates.visible) originY=\(coordinates.originY)")
+        #endif
+        guard let delta = ChatReadingPosition.correction(for: mark,
+            rowTop: Double(frame.minY + coordinates.originY - coordinates.visible.minY),
+            rowHeight: Double(frame.height),
+            viewportHeight: Double(coordinates.visible.height)) else { return .unavailable }
+        let minimum = -view.adjustedContentInset.top
+        let maximum = max(minimum, view.contentSize.height - view.bounds.height + view.adjustedContentInset.bottom)
+        let offset = min(max(view.contentOffset.y + CGFloat(delta), minimum), maximum)
+        if abs(offset - view.contentOffset.y) <= 0.5 { return .settled }
+        follow.markDrivenInstant()
+        view.setContentOffset(CGPoint(x: view.contentOffset.x, y: offset), animated: false)
+        return .placed
+    }
+}
+
+/// Paging owns its named-coordinate dictionary and may clear it. Reading
+/// measurements belong to this presentation and never invalidate the body.
+@MainActor
+private final class ClientTranscriptReadingFrames {
+    var frames: [String: CGRect] = [:]
+    var globalFrame: CGRect?
+    var stamp: UInt64 = 0
+    var captureReady = false
+    var captureID = UUID()
+    func cancelCapture() {
+        captureReady = false
+        captureID = UUID()
+    }
+    func replace(_ geometry: ClientTranscriptReadingGeometry) {
+        frames = geometry.frames
+        globalFrame = geometry.globalFrame
+        stamp &+= 1
+    }
+}
+
+private struct ClientTranscriptReadingGeometry: Equatable {
+    var frames: [String: CGRect] = [:]
+    var globalFrame: CGRect?
+}
+
+private struct ClientTranscriptReadingFramesKey: PreferenceKey {
+    static let defaultValue = ClientTranscriptReadingGeometry()
+    static func reduce(value: inout ClientTranscriptReadingGeometry, nextValue: () -> ClientTranscriptReadingGeometry) {
+        let next = nextValue()
+        value.frames.merge(next.frames, uniquingKeysWith: { _, latest in latest })
+        if let globalFrame = next.globalFrame { value.globalFrame = globalFrame }
+    }
+}
+
+private extension View {
+    func clientTranscriptRowFrame(_ id: String, watched: Bool, holdingReading: Bool) -> some View {
+        background {
+            if watched || holdingReading {
+                GeometryReader { geometry in
+                    Color.clear
+                        .preference(key: TranscriptRowFrameKey.self,
+                            value: watched ? [id: geometry.frame(in: .named(TranscriptFollow.spaceName))] : [:])
+                        .preference(key: ClientTranscriptReadingFramesKey.self,
+                            value: ClientTranscriptReadingGeometry(frames: [id: geometry.frame(in: .global)]))
+                }
+            }
+        }
+    }
+}
+
+private struct ClientTranscriptReadingGesture: ViewModifier {
+    let moved: () -> Void
+    func body(content: Content) -> some View {
+        if #available(iOS 18, *) {
+            content.onScrollPhaseChange { _, phase in
+                if phase == .interacting || phase == .decelerating { moved() }
+            }
+        } else {
+            content
+        }
+    }
+}
+
+#if DEBUG
+@MainActor
+private enum ClientViewportTrace {
+    private static let enabled = ProcessInfo.processInfo.environment["TOKENSTAT_VIEWPORT_TRACE"] == "1"
+    static func note(_ event: String, mark: ChatReadingMark? = nil, scroll: UIScrollView? = nil,
+                     frame: CGRect? = nil, details: String = "") {
+        guard enabled else { return }
+        let place = mark.map { "row=\($0.eventID) offset=\($0.offset) within=\($0.within)" } ?? "latest"
+        let geometry = scroll.map {
+            "offset=\($0.contentOffset) bounds=\($0.bounds) insets=\($0.adjustedContentInset) content=\($0.contentSize)"
+        } ?? "no-scroll"
+        print("chat-viewport \(event) \(place) frame=\(String(describing: frame)) \(geometry) \(details)")
+    }
+}
+#endif
+
+private struct ClientTranscriptScrollReporter: UIViewRepresentable {
+    let access: ClientTranscriptScrollAccess
+
+    func makeUIView(context: Context) -> Reporter {
+        let view = Reporter()
+        view.isUserInteractionEnabled = false
+        view.access = access
+        access.reporter = view
+        return view
+    }
+
+    func updateUIView(_ view: Reporter, context: Context) {
+        view.access = access
+        access.reporter = view
+    }
+
+    final class Reporter: UIView {
+        weak var access: ClientTranscriptScrollAccess?
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            report()
+        }
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            report()
+        }
+        private func report() {
+            var ancestor = superview
+            while let current = ancestor {
+                if let scroll = current as? UIScrollView {
+                    access?.view = scroll
+                    return
+                }
+                ancestor = current.superview
+            }
         }
     }
 }

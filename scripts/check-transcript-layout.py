@@ -84,6 +84,17 @@ estimate.note(metrics(600))
 estimate.note(metrics(500, 1100))
 assert(estimate.pinned, "a single lazy-height correction must not release follow")
 
+let restored = TranscriptFollowState()
+restored.note(metrics(600))
+restored.settle(true)
+restored.pinned = false
+restored.markDrivenInstant()
+restored.note(metrics(500))
+assert(!restored.abandoned, "measured reading restoration must not abandon itself")
+restored.markDriven(duration: -1)
+restored.note(metrics(400))
+assert(restored.abandoned, "reader movement must still interrupt reading restoration")
+
 let hidden = TranscriptFollowState()
 hidden.note(metrics(600))
 hidden.sliceHidesNewest = true
@@ -115,3 +126,17 @@ with tempfile.TemporaryDirectory(prefix="tokenstat-layout-test-") as directory:
         + slice + metrics + delivery + follow + tests
     )
     subprocess.run(["swift", str(path)], check=True)
+
+mobile = (root / "apps/mac/Sources/Client/ClientChatView.swift").read_text()
+assert "keepViewport(allowLatest:" not in mobile, "outgoing layouts must not sample transitional rows"
+assert "generation == model.selectionGeneration, readerMoved," in mobile, "programmatic settling must not persist reader geometry"
+assert "readerInitiated: readerMoved" in mobile, "only a reader or explicit row action replaces the kept viewport"
+assert "guard position != .unknown else { return }" in mobile, "unmeasured geometry must retain permission for a fresh sample"
+assert "TranscriptReading.record(position, for: model.currentReference)" in mobile, "durable and live reading stores must receive one sample"
+assert "view.bounds.inset(by: view.adjustedContentInset)" in mobile, "reading must use the dynamically inset native viewport"
+assert "reporter.window === window" in mobile, "coordinate conversion must use the local reporter's own window"
+assert "reporterGlobalFrame" not in mobile, "moving calibration and row frames must arrive in one preference payload"
+assert "captureID == readingFrames.captureID" in mobile, "a newer gesture must retire an old capture retry"
+assert "readingDelivery.submit" in mobile, "passive reading corrections must be deferred and coalesced"
+assert "if watched || holdingReading" in mobile, "reading geometry must survive programmatic reflow independently of paging"
+assert "ticket == settleTaskID" in mobile, "same-presentation restoration predecessors must not mutate a successor"

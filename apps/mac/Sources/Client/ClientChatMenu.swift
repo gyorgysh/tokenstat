@@ -12,6 +12,7 @@ struct ClientChatMenu: View {
     var onSetup: (() -> Void)?
     var onHandoff: (() -> Void)?
     var onDelete: ((ChatConversation) -> Void)?
+    var onViewportChoice: (() -> Void)?
     @State private var rename = false
     @State private var supportsFork = false
     @State private var copying = false
@@ -59,6 +60,7 @@ struct ClientChatMenu: View {
                     model.anyGroupOpen ? L10n.text("apple.chatdetail.collapse_steps") : L10n.text("apple.chatdetail.expand_steps"),
                     model.anyGroupOpen ? .collapse : .preview
                 ) {
+                    onViewportChoice?()
                     model.setAllGroups(open: !model.anyGroupOpen)
                 }
             }

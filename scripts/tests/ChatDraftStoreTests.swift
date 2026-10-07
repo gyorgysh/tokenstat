@@ -292,6 +292,10 @@ final class Notified: @unchecked Sendable {
         // No conversation before and none now is not a change.
         assert(ChatDraftTransition.resolve(incoming: nil, reference: nil,
             current: nil, currentReference: nil) == .keep)
+        // Deleting a selected chat detaches its durable reference before
+        // clearing selection. Its old ID must still force a composer swap.
+        assert(ChatDraftTransition.resolve(incoming: nil, reference: nil,
+            current: "deleted", currentReference: nil) == .swap(nil))
         // A conversation that cannot be keyed still replaces one that could.
         assert(ChatDraftTransition.resolve(incoming: "one", reference: nil,
             current: "two", currentReference: two) == .swap(nil))

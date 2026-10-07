@@ -18,6 +18,7 @@ final class ClientChatSession {
     @ObservationIgnored private let opening = Singleflight<Void>()
     @ObservationIgnored private var viewers: Set<UUID> = []
     @ObservationIgnored private var reusable = false
+    @ObservationIgnored private var revision: UInt64 = 0
 
     func appear(_ viewer: UUID) { viewers.insert(viewer) }
     func disappear(_ viewer: UUID) {
@@ -38,10 +39,11 @@ final class ClientChatSession {
         guard refresh || !reusable || model.error != nil || model.peer != peer
             || !model.isReady(for: workspaceID) else { return }
         await loading.run { [self] in
+            let requestedRevision = revision
             model.error = nil
             await model.load(workspaceID: workspaceID, peer: peer, selectFirst: false)
             loaded = true
-            reusable = model.error == nil && model.peer == peer && model.isReady(for: workspaceID)
+            reusable = revision == requestedRevision && model.error == nil && model.peer == peer && model.isReady(for: workspaceID)
         }
     }
 
@@ -57,6 +59,8 @@ final class ClientChatSession {
             }
         }
     }
+
+    func invalidate() { revision &+= 1; reusable = false }
 }
 
 @MainActor
@@ -89,5 +93,23 @@ final class ClientChatSessions {
         let session = ClientChatSession()
         sessions[key] = session
         return session
+    }
+
+    func renamed(_ chat: ChatConversation, peer: String, workspace: String) {
+        for (key, session) in sessions where key.peer == peer && key.workspace == workspace {
+            session.invalidate()
+            session.model.acceptRenamedConversation(chat)
+            if session.opened?.id == chat.id { session.opened = chat }
+            if session.retainedThread?.id == chat.id { session.retainedThread = chat }
+        }
+    }
+
+    func removed(_ id: String, peer: String, workspace: String) async {
+        for (key, session) in sessions where key.peer == peer && key.workspace == workspace {
+            session.invalidate()
+            if session.opened?.id == id { session.opened = nil }
+            if session.retainedThread?.id == id { session.retainedThread = nil }
+            await session.model.forgetRemovedConversation(id)
+        }
     }
 }

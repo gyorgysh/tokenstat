@@ -20,10 +20,18 @@ struct ClientWorkspaceSessionsView: View {
     let peer: String
     let hostName: String
     let folder: WorkspaceFolder
+    var title: String? = nil
 
     @State private var sessions: [PtySessionInfo] = []
     @State private var catalog: [RemoteLaunchProfile] = []
-    @State private var openSession: ClientTerminalSession?
+    @Environment(ClientWorkspacesModel.self) private var workspaces
+    @Environment(ClientNavigationModel.self) private var navigation
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var owner = WorkSessionContext.shared.scope
+    private var openSession: ClientTerminalSession? {
+        get { workspaces.activeTerminal }
+        nonmutating set { workspaces.activeTerminal = newValue }
+    }
     @State private var errorMessage: String?
     @State private var isLaunching = false
     @State private var launchingID: String?
@@ -102,7 +110,7 @@ struct ClientWorkspaceSessionsView: View {
             }
         }
         .background(Theme.background)
-        .navigationTitle(L10n.text("apple.clientworkspacedetailview.sessions.6fa3cbf4"))
+        .navigationTitle(title ?? L10n.text("apple.clientworkspacedetailview.sessions.6fa3cbf4"))
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
             // Its own key. The section list this was pushed from pulls on
@@ -152,13 +160,6 @@ struct ClientWorkspaceSessionsView: View {
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task { await recoverAfterNetworkChange() }
-        }
-        .fullScreenCover(item: $openSession) { session in
-            ClientTerminalScreen(
-                session: session,
-                hostName: hostName,
-                onClosedProcess: { Task { await reload() } }
-            )
         }
         .confirmationDialog(
             L10n.text("apple.clientworkspacedetailview.close_this_session.2b66ce2d"),
@@ -622,7 +623,8 @@ struct ClientWorkspaceSessionsView: View {
                         }
                         .buttonStyle(.plain)
                         .modifier(ClientTerminalActions(peer: peer, workspaceID: workspaceID, folderName: folder.name,
-                            info: session, onDuplicate: { copied in sessions.append(copied); openExisting(copied) }))
+                            info: session, onDuplicate: { copied in sessions.append(copied); openExisting(copied) },
+                            onClose: { pendingClose = session }))
                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: Theme.Space.s, trailing: 0))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
@@ -681,15 +683,16 @@ struct ClientWorkspaceSessionsView: View {
     }
 
     private func closeSession(_ info: PtySessionInfo) async {
+        guard let owner, owner == WorkSessionContext.shared.scope else { return }
+        let closing = openSession.flatMap { $0.peer == peer && $0.hostID == info.id ? $0 : nil }
         do {
-            if openSession?.hostID == info.id {
-                try await openSession?.close()
-                openSession = nil
-            } else {
-                try await ClientRemote.ptyClose(peer: peer, id: info.id)
-            }
+            if let closing { try await closing.close() }
+            else { try await ClientRemote.ptyClose(peer: peer, id: info.id) }
+            guard owner == WorkSessionContext.shared.scope else { return }
+            if let closing, openSession === closing { openSession = nil }
             sessions.removeAll { $0.id == info.id }
         } catch {
+            guard owner == WorkSessionContext.shared.scope else { return }
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
     }
@@ -724,7 +727,9 @@ struct ClientWorkspaceSessionsView: View {
     }
 
     private func launch(_ profile: RemoteLaunchProfile) async {
-        guard profile.installed, !isOffGrid(profile) else { return }
+        guard profile.installed, !isOffGrid(profile), !isLaunching,
+              let owner, owner == WorkSessionContext.shared.scope else { return }
+        let layoutGeneration = navigation.layoutGeneration
         isLaunching = true
         launchingID = profile.id
         defer {
@@ -732,7 +737,7 @@ struct ClientWorkspaceSessionsView: View {
             launchingID = nil
         }
         errorMessage = nil
-        let dark = UITraitCollection.current.userInterfaceStyle == .dark
+        let dark = colorScheme == .dark
         let pending = ClientTerminalSession(
             peer: peer,
             pendingCommand: profile.command,
@@ -756,11 +761,13 @@ struct ClientWorkspaceSessionsView: View {
                 cols: 100,
                 dark: dark
             )
+            guard owner == WorkSessionContext.shared.scope else { pending.stop(); return }
             pending.attach(info: info)
             await reload()
         } catch {
             pending.stop()
-            openSession = nil
+            guard owner == WorkSessionContext.shared.scope else { return }
+            if openSession === pending { openSession = nil }
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
             return
         }
@@ -779,6 +786,11 @@ struct ClientWorkspaceSessionsView: View {
         }
         if let proxy = URL(string: browser.transportURL) { _ = await Self.waitForPage(proxy) }
         guard browser.owner == browserOwner, !Task.isCancelled else {
+            browser.close()
+            return
+        }
+        guard owner == WorkSessionContext.shared.scope, openSession === pending,
+              navigation.layoutGeneration == layoutGeneration else {
             browser.close()
             return
         }

@@ -238,12 +238,15 @@ ALLOWED = [
     ("Client/ClientWorkspaceNotesView.swift", "startEditing(note)"),
     # The note title/preview is the full clickable row; no redundant action glyph.
     ("Features/Todo/NotesView.swift", "model.selectCard(note.id)"),
-    # The iPad sidebar's tree. A folder, one of its sections and a session in
-    # it are each a whole row: the glyph is inside the label the row draws,
+    # The project tree. Folders and sessions are whole rows: the glyph is
+    # inside the label the row draws,
     # and a second one on the button would be the same mark twice.
     ("Client/ClientSidebarRoot.swift", "folderLabel(folder)"),
-    ("Client/ClientSidebarRoot.swift", "sectionLabel(section, in: folder)"),
-    ("Client/ClientSidebarRoot.swift", "sessionLabel(session)"),
+    ("Client/ClientSidebarRoot.swift", "sessionLabel(session, peer: peer"),
+    # Project chats lead with their HarnessMark. The expander is the same
+    # quiet, whole-row Show more control used by the Mac's history window.
+    ("Client/ClientProjectChatRows.swift", "navigation.openChat(folderID: folder.id, chatID: chat.id)"),
+    ("Client/ClientProjectChatRows.swift", "entry.expanded.toggle()"),
     ("Client/PhoneHeatmap.swift", "onSelect?(day)"),
     # Whole-row launch into the SSH library. The terminal glyph is already
     # inside the label, and a second one on the button would duplicate it.
