@@ -110,6 +110,9 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
     Some(match method {
         "host.updateCheck" => check(),
         "host.updateApply" => apply(params),
+        // What a restart would end, without the release check `updateCheck`
+        // makes, so the app can ask before an update closes somebody's work.
+        "host.liveWork" => Ok(json!({ "liveWork": live_work() })),
         _ => return None,
     })
 }
@@ -136,6 +139,16 @@ fn cli_path_for(exe: &Path) -> Result<PathBuf, String> {
         "tokenstat"
     };
     let path = exe.with_file_name(name);
+    // On Windows `tokenstat.exe` beside the daemon is the desktop app's own
+    // `Tokenstat.exe` when this daemon shipped inside it: one file, two
+    // spellings. Replacing it would put the CLI where the app should launch.
+    if tokenstat_sync::update::is_desktop_app_dir(exe) {
+        return Err(format!(
+            "this daemon belongs to the tokenstat desktop application at {}, \
+             which updates the whole folder itself",
+            exe.parent().unwrap_or(exe).display()
+        ));
+    }
     if !path.is_file() {
         return Err(format!(
             "the tokenstat command line tool is not beside this daemon at {}. \
@@ -177,9 +190,13 @@ fn app_managed_helper() -> bool {
     }
 }
 
+/// On Windows the application ships this daemon in its own folder and
+/// replaces the folder as a whole when it updates.
 #[cfg(not(target_os = "macos"))]
 fn app_managed_helper() -> bool {
-    false
+    std::env::current_exe()
+        .map(|exe| tokenstat_sync::update::is_desktop_app_dir(&exe))
+        .unwrap_or(false)
 }
 
 /// Terminals and agent turns this daemon owns right now.
@@ -271,15 +288,21 @@ fn apply(params: &str) -> Result<Value, String> {
             // arrangement. Do what actually helps and say what happens next.
             if app_managed_helper() {
                 let staged = stage_app_image();
+                let detail = if staged.is_some() {
+                    "The tokenstat application owns this helper and replaces it \
+                     when it updates itself. Its download is on this machine and \
+                     checked; open tokenstat there to finish."
+                } else {
+                    "The tokenstat application owns this helper and replaces it \
+                     when it updates itself. Open tokenstat there to update."
+                };
                 return Ok(json!({
                     "hostVersion": env!("CARGO_PKG_VERSION"),
                     "appManaged": true,
                     "restarting": false,
                     "restartPending": false,
                     "appImage": staged,
-                    "detail": "The tokenstat application owns this helper and replaces it \
-                               when it updates itself. Its download is on this machine and \
-                               checked; open tokenstat there to finish.",
+                    "detail": detail,
                 }));
             }
             return Err(reason);
@@ -532,6 +555,21 @@ mod tests {
         assert!(error.contains("one place"), "{error}");
         std::fs::write(root.path().join(cli), []).unwrap();
         assert_eq!(cli_path_for(&daemon).unwrap(), root.path().join(cli));
+    }
+
+    /// The Windows desktop app ships this daemon beside `Tokenstat.exe`,
+    /// which a case-insensitive filesystem also calls `tokenstat.exe`. The
+    /// scheduler must never take the application's launcher for the CLI.
+    #[test]
+    fn the_desktop_application_folder_is_not_a_command_line_install() {
+        let root = tempfile::tempdir().unwrap();
+        let daemon = root.path().join("tokenstat-hostd.exe");
+        std::fs::write(&daemon, []).unwrap();
+        std::fs::write(root.path().join("tokenstat.exe"), []).unwrap();
+        std::fs::write(root.path().join("tokenstat"), []).unwrap();
+        std::fs::write(root.path().join("Tokenstat.dll"), []).unwrap();
+        let error = cli_path_for(&daemon).expect_err("the app's launcher is not the CLI");
+        assert!(error.contains("desktop application"), "{error}");
     }
 
     /// A test binary has no supervisor, so nothing in here may ever decide to

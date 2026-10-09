@@ -242,4 +242,6 @@ pub use tokenstat_pty::warm_shell_pool;
 /// branch they last worked on with its cached pull request.
 /// Version 31 adds Live Activity registration and stable chat turn identity.
 /// Version 32 adds host-driven terminal Live Activity updates.
-pub const PROTOCOL_VERSION: &str = "32";
+/// Version 33 adds `pulls.commitAvatars`, the public author pictures a
+/// history list draws for everyone who has one.
+pub const PROTOCOL_VERSION: &str = "33";

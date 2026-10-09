@@ -28,6 +28,7 @@ struct ClientWorkspaceHistoryView: View {
     @State private var commits: [Commit] = []
     @State private var errorMessage: String?
     @State private var loaded = false
+    @State private var pictures = HistoryAvatarIndex.empty
 
     private var current: WorkspaceFolder { live ?? folder }
 
@@ -51,6 +52,13 @@ struct ClientWorkspaceHistoryView: View {
             await ClientRefresh.pull("workspace-history-\(workspaceID)") { await load() }
         }
         .task { await load() }
+        .task(id: pictureKey) {
+            let from = commits.first(where: { !$0.unpushed })?.id ?? ""
+            pictures = .empty
+            let loaded = (try? await Bridge.commitAvatars(workspaceID: workspaceID, peer: peer, oid: from)) ?? .empty
+            guard !Task.isCancelled else { return }
+            pictures = loaded.normalized()
+        }
         .onReceive(NotificationCenter.default.publisher(for: GitCommitTarget.didChange)) { note in
             guard note.object as? GitCommitTarget == GitCommitTarget(peer: peer, workspaceID: workspaceID) else { return }
             Task { await load() }
@@ -88,7 +96,12 @@ struct ClientWorkspaceHistoryView: View {
                 } label: {
                     ClientCommitRow(
                         commit: commit,
-                        avatar: commit.mine == true ? account?.account?.avatar : nil
+                        avatar: pictures.url(
+                            commitID: commit.id,
+                            email: commit.email,
+                            mine: commit.mine == true,
+                            accountAvatar: account?.account?.avatar
+                        )
                     )
                 }
                 .buttonStyle(.plain)
@@ -98,6 +111,14 @@ struct ClientWorkspaceHistoryView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.top, Theme.Space.xl)
         }
+    }
+
+    /// Newest pushed commit, so a later unpushed commit can reuse that
+    /// author's picture by email. The peer is part of the key because two
+    /// machines can host the same workspace id.
+    private var pictureKey: String {
+        let from = commits.first(where: { !$0.unpushed })?.id ?? ""
+        return "\(peer)|\(workspaceID)|\(from)"
     }
 
     private var place: String {

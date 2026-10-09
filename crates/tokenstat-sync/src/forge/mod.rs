@@ -4,10 +4,12 @@
 //! in the private credential store and never enter the archive or account sync.
 
 mod auth;
+mod avatars;
 mod model;
 mod query;
 mod write;
 
+pub use avatars::{CommitAvatars, commit_avatars};
 pub use auth::{
     APP_SLUG, Credential, CredentialSource, DeviceLogin, DeviceStatus, ForgeError, credential,
     device_poll, device_start, set_token, sign_out,

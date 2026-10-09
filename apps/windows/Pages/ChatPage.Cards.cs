@@ -500,9 +500,12 @@ internal sealed partial class ChatPage
             FontSize = 13,
             FontWeight = FontWeights.Medium,
             Opacity = group.Running ? 1 : 0.75,
-            Foreground = group.Running ? Theme.AccentBrush : null,
             VerticalAlignment = VerticalAlignment.Center,
         };
+        // Only set when it differs: an explicit null Foreground is no brush
+        // at all in WinUI, which drew the verb invisible but still took its
+        // width, so each line started at a different indent.
+        if (group.Running) title.Foreground = Theme.AccentBrush;
         row.Children.Add(title);
         var subject = group.Style == ChatStepGroupStyle.Thought
             ? group.Preview ?? ""
@@ -659,10 +662,10 @@ internal sealed partial class ChatPage
             Text = StepGroupTitle(group),
             FontSize = 13,
             FontWeight = FontWeights.Medium,
-            Foreground = group.Running ? Theme.AccentBrush : null,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
         };
+        if (group.Running) title.Foreground = Theme.AccentBrush;
         Grid.SetColumn(title, 2);
         row.Children.Add(title);
 
@@ -1218,15 +1221,16 @@ internal sealed partial class ChatPage
         var subject = item.Kind == ItemKind.Edit ? item.Path : item.Target;
         var expanded = _expandedCards.TryGetValue(item.Id, out var open) && open;
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        row.Children.Add(new TextBlock
+        var word = new TextBlock
         {
             Text = SeatStep.Word(verb, item.Running),
             FontSize = 13,
             FontWeight = FontWeights.Medium,
             Opacity = item.Running ? 1 : 0.75,
-            Foreground = item.Running ? Theme.AccentBrush : null,
             VerticalAlignment = VerticalAlignment.Center,
-        });
+        };
+        if (item.Running) word.Foreground = Theme.AccentBrush;
+        row.Children.Add(word);
         row.Children.Add(new TextBlock
         {
             Text = ChatDetailFold.ShortSubject(verb, subject),

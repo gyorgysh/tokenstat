@@ -648,7 +648,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             SetLoading(true);
             try
             {
-                await _web.EnsureCoreWebView2Async();
+                await _web.EnsureCoreWebView2Async(await WebViewEnvironment.GetAsync());
                 if (!operation.IsCurrent || _loadedUrl != url) return;
                 InstallResourceFilter();
                 _web.Source = new Uri(url);

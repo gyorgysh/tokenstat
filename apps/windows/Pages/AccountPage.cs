@@ -305,22 +305,45 @@ internal sealed class AccountPage : Page, IToolbarItems
         }
         var tier = Format.Text(account, "tier", "");
         var host = Format.Text(account, "host");
-        var body = new StackPanel { Spacing = Theme.SpaceS };
-        var nameRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+        // Same shape as the Mac identity row: the picture, then the name with
+        // its tier mark, the handle and the server, and the profile link at
+        // the trailing edge. A plain panel, not a titled card: the picture
+        // and the name are the heading.
+        var row = new Grid { ColumnSpacing = Theme.SpaceM };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var avatar = Marks.Avatar(url: Format.Text(account, "avatar"), name: name, handle: handle, size: 64);
+        avatar.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(avatar);
+
+        var who = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
+        // A left-aligned grid, not a horizontal stack: a stack measures the
+        // name at any width it likes, so a long one would clip instead of
+        // ending in an ellipsis. The star column hugs a short name and gives
+        // way to the tier mark beside a long one.
+        var nameRow = new Grid { ColumnSpacing = Theme.SpaceS, HorizontalAlignment = HorizontalAlignment.Left };
+        nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         nameRow.Children.Add(new TextBlock
         {
             Text = name,
             FontSize = 22,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
         });
-        if (!string.IsNullOrEmpty(tier))
+        // The crown, star or shield the profile page uses. Free has no mark.
+        if (Marks.TierMark(tier, 17) is { } mark)
         {
-            nameRow.Children.Add(Chrome.TierBadge(tier));
+            mark.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(mark, 1);
+            nameRow.Children.Add(mark);
         }
-        body.Children.Add(nameRow);
+        who.Children.Add(nameRow);
         if (!string.IsNullOrEmpty(handle))
         {
-            body.Children.Add(new TextBlock
+            who.Children.Add(new TextBlock
             {
                 Text = "@" + handle,
                 Opacity = 0.7,
@@ -329,17 +352,49 @@ internal sealed class AccountPage : Page, IToolbarItems
         }
         if (!string.IsNullOrEmpty(host))
         {
-            body.Children.Add(new TextBlock { Text = host, Opacity = 0.55, FontSize = 12 });
+            who.Children.Add(new TextBlock { Text = host, Opacity = 0.45, FontSize = 12 });
         }
-        if (!string.IsNullOrEmpty(handle) && !string.IsNullOrEmpty(host))
+        Grid.SetColumn(who, 1);
+        row.Children.Add(who);
+
+        if (!string.IsNullOrEmpty(handle) && !string.IsNullOrEmpty(host)
+            && Uri.TryCreate(host.TrimEnd('/') + "/" + Uri.EscapeDataString(handle), UriKind.Absolute, out var profile))
         {
             // The profile is a public page and this is the only place in the
             // app that knows its address.
-            var url = host.TrimEnd('/') + "/" + handle;
-            body.Children.Add(ActionIconGlyph.Button(
-                L10n.Text("windows.accountpage.view_profile.d4788f25"), ActionIcon.External, (_, _) => Open(url)));
+            var url = profile.AbsoluteUri;
+            var label = L10n.Text("windows.accountpage.view_profile.d4788f25");
+            var link = new HyperlinkButton
+            {
+                Foreground = Theme.AccentBrush,
+                Padding = new Thickness(Theme.SpaceS, 4, Theme.SpaceS, 4),
+                VerticalAlignment = VerticalAlignment.Center,
+                Content = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 6,
+                    Children =
+                    {
+                        ActionIcon.External.Mark(12),
+                        new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center },
+                    },
+                },
+            };
+            link.Click += (_, _) => Open(url);
+            ToolTipService.SetToolTip(link, url);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(link, label);
+            Grid.SetColumn(link, 2);
+            row.Children.Add(link);
         }
-        return Chrome.Card(L10n.Text("common.account"), body);
+        return new Border
+        {
+            Background = Theme.PanelBrush,
+            BorderBrush = Theme.BorderBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(Theme.CardRadius),
+            Padding = new Thickness(Theme.CardPadding),
+            Child = row,
+        };
     }
 
     /// <summary>
@@ -1622,7 +1677,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         if (update.IsReady)
         {
             body.Children.Add(new TextBlock { Text = L10n.Text("windows.accountpage.v_0_is_ready.3e648cdc", $"{update.Latest}") });
-            body.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.accountpage.relaunch.8bd85e54"), ActionIcon.Refresh, (_, _) => update.Relaunch()));
+            body.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.accountpage.relaunch.8bd85e54"), ActionIcon.Refresh, async (s, _) => await update.RelaunchAsync((s as UIElement)?.XamlRoot)));
         }
         else if (update.Current == AppUpdateModel.Stage.Failed)
         {

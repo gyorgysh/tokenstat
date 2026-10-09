@@ -412,7 +412,7 @@ pub(crate) fn needs_access(method: &str, stream_kind: Option<&str>) -> bool {
         // Replacing this machine's binaries and restarting its daemon is
         // host management, not reading. An approved device that was never
         // let in must not drive it.
-        "host.updateCheck" | "host.updateApply" => true,
+        "host.updateCheck" | "host.updateApply" | "host.liveWork" => true,
         m if m.starts_with("pulls.") => true,
         m if m.starts_with("pty.") => true,
         m if m.starts_with("workflow.") => true,
@@ -1232,6 +1232,7 @@ mod tests {
             "host.logs",
             "host.updateCheck",
             "host.updateApply",
+            "host.liveWork",
             "work.search",
             "work.continuity.get",
             "work.continuity.put",

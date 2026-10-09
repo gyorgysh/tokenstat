@@ -32,6 +32,8 @@ struct Params {
     verdict: Option<tokenstat_sync::forge::Verdict>,
     merge_method: Option<tokenstat_sync::forge::MergeMethod>,
     refresh: bool,
+    /// A commit id: where `pulls.commitAvatars` starts reading history.
+    oid: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -393,6 +395,7 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
         }
         "pulls.list" => list(&p),
         "pulls.branch" => branch(&p),
+        "pulls.commitAvatars" => commit_avatars(&p),
         "pulls.prepareCreate" => prepare_create(&p),
         "pulls.create" => create(&p),
         "pulls.view" => view(&p),
@@ -645,6 +648,45 @@ fn diff(p: &Params) -> Result<Value, String> {
     let value = tokenstat_workspace::git::split_unified(&raw);
     remember(diff_cache(), key, value.clone());
     serde_json::to_value(value).map_err(|error| error.to_string())
+}
+
+/// How long a history screen's author pictures are reused. Long enough that
+/// paging through history and switching tabs never asks again, which matters
+/// without a sign-in: the forge allows 60 anonymous requests an hour.
+const AVATAR_TTL: Duration = Duration::from_secs(10 * 60);
+
+type AvatarKey = (String, String);
+
+fn avatar_cache() -> &'static Mutex<HashMap<AvatarKey, (Instant, Value)>> {
+    static CACHE: OnceLock<Mutex<HashMap<AvatarKey, (Instant, Value)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Public profile pictures for the authors of this workspace's commits, so a
+/// history row shows who wrote it whoever that is, not only this machine's
+/// own git identity.
+fn commit_avatars(p: &Params) -> Result<Value, String> {
+    let repo = repo_for(&p.workspace_id, "pulls.commitAvatars")?;
+    let key = (p.workspace_id.clone(), p.oid.to_ascii_lowercase());
+    {
+        let mut cache = avatar_cache().lock().unwrap_or_else(PoisonError::into_inner);
+        cache.retain(|_, (at, _)| at.elapsed() < AVATAR_TTL);
+        if let Some((_, value)) = cache.get(&key) {
+            return Ok(value.clone());
+        }
+    }
+    let oid = Some(p.oid.as_str()).filter(|oid| !oid.is_empty());
+    let value = serde_json::to_value(
+        tokenstat_sync::forge::commit_avatars(&repo, oid).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
+    let mut cache = avatar_cache().lock().unwrap_or_else(PoisonError::into_inner);
+    // Bounded: one entry per screen of history, a handful of folders.
+    if cache.len() >= 64 {
+        cache.clear();
+    }
+    cache.insert(key, (Instant::now(), value.clone()));
+    Ok(value)
 }
 
 fn availability(workspace_id: &str) -> Result<Value, String> {

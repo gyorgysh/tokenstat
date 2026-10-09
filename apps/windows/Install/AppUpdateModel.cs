@@ -185,6 +185,14 @@ internal sealed class AppUpdateModel
             {
                 Newer = false;
             }
+            // The host reports the older of itself and this app. The zip
+            // replaces both, but only a release newer than this app is worth
+            // fetching: an outdated helper still holding the pipe would
+            // otherwise make an up-to-date app download itself forever.
+            if (Newer && AppInstaller.CompareVersions(Latest, AppInfo.Version) <= 0)
+            {
+                Newer = false;
+            }
             // Compare the skip against the fresh release, so skipping one
             // version still lets automatic checks discover later versions.
             if (!Newer || string.IsNullOrEmpty(Latest) || IsSkipped)
@@ -199,6 +207,16 @@ internal sealed class AppUpdateModel
             // A failed request cannot truthfully report "up to date".
             Current = Stage.Failed;
             Failure = ex.Message;
+            Changed?.Invoke();
+            return;
+        }
+
+        // Already downloaded, verified, and waiting from an earlier check or an
+        // earlier launch: offer the restart instead of fetching it again.
+        if (await Task.Run(AppInstaller.ReadyStagedVersion) is string staged
+            && AppInstaller.CompareVersions(staged, Latest) >= 0)
+        {
+            Current = Stage.ReadyToRelaunch;
             Changed?.Invoke();
             return;
         }
@@ -250,7 +268,62 @@ internal sealed class AppUpdateModel
         }
     }
 
-    public void Relaunch() => AppInstaller.Relaunch();
+    /// <summary>
+    /// Hand off to the swap script and exit. When that cannot start, say so
+    /// on the card rather than leaving a Restart button that does nothing.
+    /// </summary>
+    /// <summary>
+    /// Restart to update, asking first when the swap would end running
+    /// terminals or agent turns: the swap has to stop the helper that owns
+    /// them, and that is the person's call, not the button's.
+    /// </summary>
+    public async Task RelaunchAsync(Microsoft.UI.Xaml.XamlRoot? root)
+    {
+        long live = 0;
+        try
+        {
+            var answer = await AppServices.Host.CallAsync("host.liveWork", null, TimeSpan.FromSeconds(3));
+            live = OptLong(answer, "liveWork") ?? 0;
+        }
+        catch
+        {
+            // An older helper without the method, or none at all: nothing to ask about.
+        }
+        if (live > 0 && root is not null)
+        {
+            var confirm = new Microsoft.UI.Xaml.Controls.ContentDialog
+            {
+                XamlRoot = root,
+                Title = L10n.Text("windows.appupdatemodel.restart_ends_running_work.title"),
+                Content = live == 1
+                    ? L10n.Text("windows.appupdatemodel.restart_ends_running_work.body.one")
+                    : L10n.Text("windows.appupdatemodel.restart_ends_running_work.body.other", $"{live}"),
+                PrimaryButtonText = L10n.Text("windows.updatecard.restart.6b983a81"),
+                CloseButtonText = L10n.Text("common.cancel"),
+                DefaultButton = Microsoft.UI.Xaml.Controls.ContentDialogButton.Close,
+            };
+            if (await confirm.ShowAsync() != Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary)
+            {
+                return;
+            }
+        }
+        Relaunch();
+    }
+
+    public void Relaunch()
+    {
+        try
+        {
+            AppInstaller.Relaunch();
+        }
+        catch (Exception ex)
+        {
+            Current = Stage.Failed;
+            Failure = ex.Message;
+            FailureDismissed = false;
+            Changed?.Invoke();
+        }
+    }
 
     /// <summary>
     /// A <c>-dev.</c> zip is an Actions artifact, never an update. Both

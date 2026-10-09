@@ -9,6 +9,7 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json.Nodes;
+using Tokenstat.Design;
 
 namespace Tokenstat.Install;
 
@@ -87,6 +88,13 @@ internal static class AppInstaller
             {
                 throw new Failure(L10n.Text("windows.appinstaller.the_download_did_not_contain_the_complete.484b8f83"));
             }
+            // A stale host can hand back an older release than this app. Staging
+            // it would turn the next restart into a downgrade.
+            var staged = VersionOf(stagedExe);
+            if (staged is null || CompareVersions(staged, AppInfo.Version) <= 0)
+            {
+                throw new Failure(L10n.Text("windows.appinstaller.the_download_is_not_newer.5b1e0c2a", staged ?? "?", AppInfo.Version));
+            }
             VerifyPublisher(CurrentExe(), stagedExe);
             WritePending(dest, staging);
         }
@@ -94,6 +102,34 @@ internal static class AppInstaller
         {
             try { Directory.Delete(staging, recursive: true); } catch { /* Preserve the original failure. */ }
             throw;
+        }
+        finally
+        {
+            DeleteDownload(zipPath);
+        }
+    }
+
+    /// <summary>
+    /// The zip is about 100 MB and is never read again once extracted or
+    /// refused: a retry downloads afresh. Its folder goes too when it is the
+    /// host's own per-download temp folder.
+    /// </summary>
+    private static void DeleteDownload(string zipPath)
+    {
+        try
+        {
+            File.Delete(zipPath);
+            var folder = Path.GetDirectoryName(zipPath);
+            if (folder is not null
+                && Path.GetFileName(folder).StartsWith("tokenstat-update-", StringComparison.Ordinal)
+                && !Directory.EnumerateFileSystemEntries(folder).Any())
+            {
+                Directory.Delete(folder);
+            }
+        }
+        catch
+        {
+            // Temp files are the system's to sweep if this cannot.
         }
     }
 
@@ -110,10 +146,91 @@ internal static class AppInstaller
 
     public static bool StagingReady => IsStagingReady(StagingDirectory);
 
+    /// <summary>
+    /// The version already verified and waiting beside the install, when it is
+    /// newer than this app. A staged folder that is not newer is leftover from
+    /// an earlier cycle and is removed, so a restart can never downgrade.
+    /// </summary>
+    public static string? ReadyStagedVersion()
+    {
+        var staging = StagingDirectory;
+        if (!IsStagingReady(staging))
+        {
+            return null;
+        }
+        var version = VersionOf(Path.Combine(staging, "Tokenstat.exe"));
+        if (version is not null && CompareVersions(version, AppInfo.Version) > 0)
+        {
+            return version;
+        }
+        try { Directory.Delete(staging, recursive: true); } catch { /* Retried on the next check. */ }
+        return null;
+    }
+
     private static bool IsStagingReady(string staging) =>
         File.Exists(Path.Combine(staging, "Tokenstat.exe"))
         && File.Exists(Path.Combine(staging, "tokenstat-hostd.exe"))
         && File.Exists(Path.Combine(staging, "PENDING-UPDATE.txt"));
+
+    /// <summary>The release version stamped into an app executable, without build metadata.</summary>
+    internal static string? VersionOf(string exe)
+    {
+        try
+        {
+            var product = FileVersionInfo.GetVersionInfo(exe).ProductVersion;
+            var version = product?.Split('+')[0].Trim();
+            return string.IsNullOrEmpty(version) ? null : version;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Semantic version order: numeric major.minor.patch, then a release sorts
+    /// above any prerelease of the same numbers. Build metadata is ignored.
+    /// </summary>
+    internal static int CompareVersions(string left, string right)
+    {
+        static (int[] numbers, string? pre) Parse(string value)
+        {
+            var core = value.Trim().TrimStart('v', 'V').Split('+')[0];
+            var dash = core.IndexOf('-');
+            var pre = dash >= 0 ? core[(dash + 1)..] : null;
+            var parts = (dash >= 0 ? core[..dash] : core).Split('.');
+            var numbers = new int[3];
+            for (var i = 0; i < 3 && i < parts.Length; i++)
+            {
+                _ = int.TryParse(parts[i], out numbers[i]);
+            }
+            return (numbers, pre);
+        }
+        var (a, aPre) = Parse(left);
+        var (b, bPre) = Parse(right);
+        for (var i = 0; i < 3; i++)
+        {
+            if (a[i] != b[i]) return a[i].CompareTo(b[i]);
+        }
+        if (aPre is null) return bPre is null ? 0 : 1;
+        if (bPre is null) return -1;
+        var aIds = aPre.Split('.');
+        var bIds = bPre.Split('.');
+        for (var i = 0; i < Math.Min(aIds.Length, bIds.Length); i++)
+        {
+            var aNumeric = long.TryParse(aIds[i], out var aNumber);
+            var bNumeric = long.TryParse(bIds[i], out var bNumber);
+            var order = (aNumeric, bNumeric) switch
+            {
+                (true, true) => aNumber.CompareTo(bNumber),
+                (true, false) => -1,
+                (false, true) => 1,
+                _ => string.CompareOrdinal(aIds[i], bIds[i]),
+            };
+            if (order != 0) return order;
+        }
+        return aIds.Length.CompareTo(bIds.Length);
+    }
 
     /// <summary>
     /// Swap the staged folder into place and start the fresh copy.
@@ -137,34 +254,78 @@ internal static class AppInstaller
         }
         var helper = Path.Combine(Path.GetTempPath(), $"tokenstat-apply-update-{Guid.NewGuid():N}.ps1");
         var exe = Path.Combine(dest, "Tokenstat.exe");
+        var log = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "logs", "update.log");
+        // A folder cannot be renamed while anything holds a file inside it.
+        // The scheduled task can restart hostd from the old folder mid-swap,
+        // and WebView2 browser processes outlive the app by a moment (older
+        // builds kept their profile inside the install folder). So the swap
+        // stops whatever still runs from either folder and retries for a
+        // while, rather than giving up on the first sharing violation and
+        // relaunching the old version.
         var script = string.Join(Environment.NewLine, new[]
         {
-            $"$dest = '{Escape(dest)}'",
+            $"$dest = '{Escape(dest.TrimEnd('\\'))}'",
             $"$staging = '{Escape(staging)}'",
             $"$prev = '{Escape(dest.TrimEnd('\\') + ".prev")}'",
             $"$exe = '{Escape(exe)}'",
+            $"$log = '{Escape(log)}'",
             // $pid is powershell's own id, so the parent travels as $waitPid.
             $"$waitPid = {Environment.ProcessId}",
+            "function Log($message) { try { Add-Content -LiteralPath $log -Value ((Get-Date).ToString('o') + ' ' + $message) } catch { } }",
+            "function Stop-Stragglers {",
+            "  $roots = @($dest + '\\', $prev + '\\')",
+            "  Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {",
+            "    $p = $_",
+            "    $roots | Where-Object {",
+            "      ($p.ExecutablePath -and $p.ExecutablePath.StartsWith($_, [StringComparison]::OrdinalIgnoreCase)) -or",
+            "      ($p.Name -eq 'msedgewebview2.exe' -and $p.CommandLine -and $p.CommandLine.IndexOf($_, [StringComparison]::OrdinalIgnoreCase) -ge 0)",
+            "    }",
+            "  } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+            "}",
             "$deadline = (Get-Date).AddSeconds(30)",
             "while (Get-Process -Id $waitPid -ErrorAction SilentlyContinue) {",
-            "  if ((Get-Date) -gt $deadline) { exit 1 }",
+            "  if ((Get-Date) -gt $deadline) { Log 'app did not exit; update not applied'; exit 1 }",
             "  Start-Sleep -Milliseconds 200",
             "}",
-            "Start-Sleep -Milliseconds 400",
-            "$ErrorActionPreference = 'Stop'",
-            "try {",
-            "  if (Test-Path -LiteralPath $prev) { Remove-Item -LiteralPath $prev -Recurse -Force }",
-            "  if (Test-Path -LiteralPath $dest) { Rename-Item -LiteralPath $dest -NewName (Split-Path $prev -Leaf) }",
-            "  Rename-Item -LiteralPath $staging -NewName (Split-Path $dest -Leaf)",
-            "} catch {",
-            "  if ((Test-Path -LiteralPath $prev) -and -not (Test-Path -LiteralPath $dest)) {",
-            "    Rename-Item -LiteralPath $prev -NewName (Split-Path $dest -Leaf)",
+            "Log ('applying ' + $staging)",
+            "$moved = $false",
+            "$deadline = (Get-Date).AddSeconds(30)",
+            "while ($true) {",
+            "  Stop-Stragglers",
+            "  try {",
+            "    if (Test-Path -LiteralPath $prev) { Remove-Item -LiteralPath $prev -Recurse -Force -ErrorAction Stop }",
+            "    if (Test-Path -LiteralPath $dest) { Rename-Item -LiteralPath $dest -NewName (Split-Path $prev -Leaf) -ErrorAction Stop }",
+            "    $moved = $true",
+            "    break",
+            "  } catch {",
+            "    Log ('old folder busy: ' + $_.Exception.Message)",
+            "    if ((Get-Date) -gt $deadline) { break }",
+            "    Start-Sleep -Milliseconds 500",
             "  }",
-            "  if (Test-Path -LiteralPath $exe) { Start-Process -FilePath $exe -WorkingDirectory $dest }",
-            "  exit 1",
             "}",
-            "Start-Process -FilePath $exe -WorkingDirectory $dest",
-            "if (Test-Path -LiteralPath $prev) { Remove-Item -LiteralPath $prev -Recurse -Force -ErrorAction SilentlyContinue }",
+            "if ($moved) {",
+            "  try {",
+            "    Rename-Item -LiteralPath $staging -NewName (Split-Path $dest -Leaf) -ErrorAction Stop",
+            "  } catch {",
+            "    Log ('could not move the new version in: ' + $_.Exception.Message)",
+            "    $moved = $false",
+            "    if ((Test-Path -LiteralPath $prev) -and -not (Test-Path -LiteralPath $dest)) {",
+            "      Rename-Item -LiteralPath $prev -NewName (Split-Path $dest -Leaf) -ErrorAction SilentlyContinue",
+            "    }",
+            "  }",
+            "}",
+            "if ($moved) { Log 'update applied' } else { Log 'update not applied; restarting the installed version' }",
+            "if (Test-Path -LiteralPath $exe) { Start-Process -FilePath $exe -WorkingDirectory $dest }",
+            // Older builds kept the browser profile inside the install folder.
+            // Carry it out before the old folder goes, so an update does not
+            // sign anybody out of the sites they use in the app.
+            $"$profile = '{Escape(Tokenstat.Pages.WebViewEnvironment.ProfileFolder)}'",
+            "$legacy = Join-Path $prev 'Tokenstat.exe.WebView2'",
+            "if ($moved -and (Test-Path -LiteralPath $legacy) -and -not (Test-Path -LiteralPath $profile)) {",
+            "  try { Move-Item -LiteralPath $legacy -Destination $profile -ErrorAction Stop } catch { Log ('browser profile kept in place: ' + $_.Exception.Message) }",
+            "}",
+            "if ($moved -and (Test-Path -LiteralPath $prev)) { Remove-Item -LiteralPath $prev -Recurse -Force -ErrorAction SilentlyContinue }",
             "Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue",
         });
         File.WriteAllText(helper, script);
@@ -175,6 +336,11 @@ internal static class AppInstaller
             Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{helper}\"",
             UseShellExecute = false,
             CreateNoWindow = true,
+            // Never the app's own working directory, which is the install
+            // folder: a process whose current directory is inside a folder
+            // keeps that folder from being renamed, so the helper would block
+            // the very swap it exists to make.
+            WorkingDirectory = Path.GetTempPath(),
         }) ?? throw new Failure(L10n.Text("windows.appinstaller.could_not_start_the_update_helper_please_t.e9b2275b"));
         Environment.Exit(0);
     }
@@ -191,18 +357,49 @@ internal static class AppInstaller
         {
             return;
         }
-        VerifyPublisher(CurrentExe(), Path.Combine(staging, "Tokenstat.exe"));
+        var stagedExe = Path.Combine(staging, "Tokenstat.exe");
+        // Never a downgrade: the staged version must be newer than the one
+        // installed, the same rule the relaunch path applies.
+        var installedVersion = VersionOf(Path.Combine(dest, "Tokenstat.exe"));
+        var stagedVersion = VersionOf(stagedExe);
+        if (stagedVersion is null
+            || (installedVersion is not null && CompareVersions(stagedVersion, installedVersion) <= 0))
+        {
+            return;
+        }
+        VerifyPublisher(CurrentExe(), stagedExe);
         var prev = dest.TrimEnd('\\') + ".prev";
         if (Directory.Exists(prev))
         {
             try { Directory.Delete(prev, true); } catch { /* ignore */ }
         }
+        // Same patience as the relaunch script: a helper the task scheduler
+        // restarts, or a browser process still closing, can hold the folder
+        // for a moment.
+        var moved = false;
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (!moved)
+        {
+            SelfInstall.StopRelatedProcesses();
+            try
+            {
+                if (Directory.Exists(dest))
+                {
+                    Directory.Move(dest, prev);
+                }
+                moved = true;
+            }
+            catch (IOException) when (DateTime.UtcNow < deadline)
+            {
+                Thread.Sleep(500);
+            }
+            catch
+            {
+                return;
+            }
+        }
         try
         {
-            if (Directory.Exists(dest))
-            {
-                Directory.Move(dest, prev);
-            }
             Directory.Move(staging, dest);
         }
         catch

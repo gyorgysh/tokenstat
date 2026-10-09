@@ -403,8 +403,9 @@ struct Avatar: View {
 /// Identity card shown while the pointer is on an author mark.
 ///
 /// A row-level `.help` steals the tooltip from the mark inside it, so History
-/// (and any other list of people) needs its own overlay. No network: the
-/// picture is the one the row already had, and anyone else stays a letter.
+/// (and any other list of people) needs its own overlay. The picture is the
+/// one the row already resolved, including a teammate's public forge picture.
+/// Someone with no picture stays a letter. The card does not fetch.
 struct AuthorHoverCard: View {
     var url: String?
     var name: String

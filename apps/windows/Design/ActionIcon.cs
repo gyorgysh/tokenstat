@@ -239,6 +239,35 @@ internal static class ActionIconGlyph
         _ => Microsoft.UI.Xaml.Controls.Symbol.Placeholder,
     };
 
+    /// <summary>
+    /// The action's mark drawn at <paramref name="size"/> pixels. Glyphs are
+    /// set at that font size rather than shrunk from their 20px default inside
+    /// a Viewbox, which is a scale transform and rasterizes soft. A Symbol's
+    /// value is its Segoe code point, so a SymbolIcon becomes the same glyph.
+    /// Path marks are geometry and still scale cleanly in a Viewbox.
+    /// </summary>
+    public static FrameworkElement Mark(this ActionIcon icon, double size)
+    {
+        var element = icon.Icon();
+        switch (element)
+        {
+            case SymbolIcon symbol:
+                return new FontIcon
+                {
+                    Glyph = char.ToString((char)(int)symbol.Symbol),
+                    FontFamily = IconFont,
+                    FontSize = size,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+            case FontIcon glyph:
+                glyph.FontSize = size;
+                glyph.VerticalAlignment = VerticalAlignment.Center;
+                return glyph;
+            default:
+                return new Viewbox { Width = size, Height = size, Child = element, VerticalAlignment = VerticalAlignment.Center };
+        }
+    }
+
     public static Button Button(string title, ActionIcon icon, RoutedEventHandler click)
     {
         var btn = new Button
@@ -257,7 +286,7 @@ internal static class ActionIconGlyph
                 Spacing = 6,
                 Children =
                 {
-                    new Viewbox { Width = 12, Height = 12, Child = icon.Icon() },
+                    icon.Mark(12),
                     new TextBlock { Text = title, VerticalAlignment = VerticalAlignment.Center },
                 },
             },

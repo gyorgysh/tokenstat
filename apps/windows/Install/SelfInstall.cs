@@ -38,6 +38,25 @@ internal static class SelfInstall
 
     public static string InstalledExe => Path.Combine(InstallDirectory, "Tokenstat.exe");
 
+    /// <summary>
+    /// Where hostd runs from: its data folder, never the install folder. A
+    /// child hostd starts without a directory of its own inherits this one,
+    /// and anything still sitting in the install folder keeps an update from
+    /// swapping it. Vendor installers that compile C# also resolve
+    /// references from here first, and the install folder's .NET facades
+    /// break them.
+    /// </summary>
+    public static string HostWorkingDirectory
+    {
+        get
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat");
+            try { Directory.CreateDirectory(dir); } catch { /* Fall back below. */ }
+            return Directory.Exists(dir) ? dir : Path.GetTempPath();
+        }
+    }
+
     public static bool IsRunningFromInstall
     {
         get
@@ -332,7 +351,7 @@ internal static class SelfInstall
         // schtasks cannot express restart-on-failure, so this fallback stays
         // degraded next to the script; it only runs when the script is gone.
         var quoted = hostdExe.Replace("'", "''");
-        var work = (Path.GetDirectoryName(hostdExe) ?? InstallDirectory).Replace("'", "''");
+        var work = HostWorkingDirectory.Replace("'", "''");
         var launch = $"powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command \\\"$child = Start-Process -FilePath '{quoted}' -WorkingDirectory '{work}' -WindowStyle Hidden -PassThru; $null = $child.Handle; $child.WaitForExit(); exit $child.ExitCode\\\"";
         RunSchTasks($"/Create /TN \"{HostTaskName}\" /TR \"{launch}\" /SC ONLOGON /RL LIMITED /F");
         RunSchTasks($"/Run /TN \"{HostTaskName}\"");

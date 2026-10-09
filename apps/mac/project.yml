@@ -38,7 +38,7 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.4.0"
+    MARKETING_VERSION: "1.4.1"
     # The build number, and it counts releases: one higher on every tagged
     # version, never reused, never reset by a marketing version change. It sat
     # at "2" through fourteen releases, which the App Store will not take (a
@@ -243,7 +243,8 @@ settings:
     # 145 includes those fixes for TestFlight device testing.
     # 147 is 1.4.0 with retained mobile workspaces and chat recovery.
     # 149 separates mobile composers and moves Layout below Notifications.
-    CURRENT_PROJECT_VERSION: "149"
+    # 150 is 1.4.1: Windows updates, sharp icons, and author pictures in history.
+    CURRENT_PROJECT_VERSION: "150"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,

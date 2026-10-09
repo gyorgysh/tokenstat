@@ -171,39 +171,76 @@ fn download_client() -> Result<reqwest::blocking::Client, UpdateError> {
 /// Compare two version strings (`0.1.0`, `v0.1.0`, `0.1.0-rc.1`).
 ///
 /// Returns `Ordering::Greater` when `a` is newer than `b`.
+/// Semantic version order. Numbers compare as numbers, a release sorts above
+/// any prerelease of the same numbers, prerelease identifiers compare one by
+/// one (numeric ones numerically, so `preview.10` is after `preview.9`), and
+/// build metadata after `+` is ignored.
 pub fn version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     let pa = parse_version(a);
     let pb = parse_version(b);
     pa.cmp(&pb)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct VersionParts {
     major: u64,
     minor: u64,
     patch: u64,
-    /// Empty means release. Non-empty prerelease sorts before the release.
-    pre: Option<String>,
+    /// Empty means release.
+    pre: Vec<PreIdent>,
+}
+
+/// One dot-separated prerelease identifier. Numeric sorts before text.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum PreIdent {
+    Num(u64),
+    Text(String),
+}
+
+impl Ord for VersionParts {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (self.major, self.minor, self.patch)
+            .cmp(&(other.major, other.minor, other.patch))
+            .then_with(|| match (self.pre.is_empty(), other.pre.is_empty()) {
+                (true, true) => std::cmp::Ordering::Equal,
+                (true, false) => std::cmp::Ordering::Greater,
+                (false, true) => std::cmp::Ordering::Less,
+                // Vec order: identifier by identifier, then the longer wins.
+                (false, false) => self.pre.cmp(&other.pre),
+            })
+    }
+}
+
+impl PartialOrd for VersionParts {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 fn parse_version(raw: &str) -> VersionParts {
     let s = raw.trim().trim_start_matches('v');
+    let s = s.split_once('+').map_or(s, |(core, _build)| core);
     let (num, pre) = match s.split_once('-') {
-        Some((n, p)) => (n, Some(p.to_string())),
-        None => (s, None),
+        Some((n, p)) => (n, p),
+        None => (s, ""),
     };
     let mut parts = num.split('.');
     let major = parts.next().and_then(|x| x.parse().ok()).unwrap_or(0);
     let minor = parts.next().and_then(|x| x.parse().ok()).unwrap_or(0);
     let patch = parts.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+    let pre = pre
+        .split('.')
+        .filter(|ident| !ident.is_empty())
+        .map(|ident| match ident.parse() {
+            Ok(number) => PreIdent::Num(number),
+            Err(_) => PreIdent::Text(ident.to_string()),
+        })
+        .collect();
     VersionParts {
         major,
         minor,
         patch,
-        // Ord: None > Some, so release > prerelease of same numbers.
-        // PartialOrd on Option: None < Some by default actually...
-        // We want release (no pre) > prerelease. So invert: use a flag.
-        pre: pre.map(|p| format!("0-{p}")).or(Some("1".into())),
+        pre,
     }
 }
 
@@ -859,7 +896,25 @@ fn require_cli_path(dest: &Path) -> Result<(), UpdateError> {
             dest.display()
         )));
     }
+    if is_desktop_app_dir(dest) {
+        return Err(UpdateError::Message(format!(
+            "refusing to update {}: that is the tokenstat desktop application, which \
+             updates its whole folder itself",
+            dest.display()
+        )));
+    }
     Ok(())
+}
+
+/// Whether `exe` sits in the Windows desktop application's folder.
+///
+/// Windows paths are case-insensitive, so the app's `Tokenstat.exe` and the
+/// CLI's `tokenstat.exe` are one file there. Writing the CLI over it leaves an
+/// install that launches a console tool instead of the application. The .NET
+/// app always ships `Tokenstat.dll` beside its launcher; the CLI never does.
+pub fn is_desktop_app_dir(exe: &Path) -> bool {
+    exe.with_file_name("Tokenstat.dll").is_file()
+        || exe.with_file_name("Tokenstat.deps.json").is_file()
 }
 
 pub fn apply_update() -> Result<ApplyReport, UpdateError> {
@@ -2126,7 +2181,40 @@ mod tests {
         }
     }
 
+    /// The Windows app's `Tokenstat.exe` and the CLI's `tokenstat.exe` are one
+    /// path on a case-insensitive filesystem. An update pointed there would
+    /// replace the application's launcher with a console tool.
+    #[test]
+    fn an_update_never_replaces_the_desktop_application() {
+        let root = tempfile::tempdir().unwrap();
+        let name = if cfg!(windows) {
+            "tokenstat.exe"
+        } else {
+            "tokenstat"
+        };
+        let exe = root.path().join(name);
+        std::fs::write(&exe, []).unwrap();
+        assert!(super::require_cli_path(&exe).is_ok());
+        std::fs::write(root.path().join("Tokenstat.dll"), []).unwrap();
+        let error = super::require_cli_path(&exe)
+            .expect_err("the desktop application folder must be refused")
+            .to_string();
+        assert!(error.contains("desktop application"), "{error}");
+    }
+
     use super::*;
+
+    #[test]
+    fn prerelease_identifiers_compare_numerically_and_build_metadata_is_ignored() {
+        use std::cmp::Ordering::*;
+        assert_eq!(version_cmp("1.4.0-preview.10", "1.4.0-preview.9"), Greater);
+        assert_eq!(version_cmp("1.4.0-preview.9", "1.4.0"), Less);
+        assert_eq!(version_cmp("1.4.0-dev.94.923e683", "1.4.0-dev.100"), Less);
+        assert_eq!(version_cmp("1.4.0-alpha", "1.4.0-alpha.1"), Less);
+        assert_eq!(version_cmp("1.4.0-1", "1.4.0-alpha"), Less);
+        assert_eq!(version_cmp("1.3.9+updatetest", "1.3.9"), Equal);
+        assert_eq!(version_cmp("1.3.9+updatetest", "1.4.0"), Less);
+    }
 
     #[test]
     fn newer_release_sorts_above_current() {

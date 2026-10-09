@@ -80,12 +80,18 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
             if (item.Content is TerminalPage terminal) terminal.Release();
             _tabStrip.Forget(item);
         };
+        _tabs.Loaded += (_, _) => RunAfterLoad();
         Content = _tabs;
         Open(WorkspaceSection.Launcher);
     }
 
     public void Open(WorkspaceSection section)
     {
+        if (MustDefer)
+        {
+            WhenLoaded(() => Open(section));
+            return;
+        }
         if (section == WorkspaceSection.Browser)
         {
             if (_browser.ShowLastTab()) return;
@@ -146,6 +152,11 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
 
     public void OpenBrowser(string url, string host, int port, bool unlisten, string? peer)
     {
+        if (MustDefer)
+        {
+            WhenLoaded(() => OpenBrowser(url, host, port, unlisten, peer));
+            return;
+        }
         if (ActivePage is ChatPage)
         {
             CompanionBrowser.AddTab(url, host, port, unlisten, peer);
@@ -156,6 +167,11 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
 
     public void OpenReview(string title, UIElement content)
     {
+        if (MustDefer)
+        {
+            WhenLoaded(() => OpenReview(title, content));
+            return;
+        }
         var tab = _tabStrip.Open("review:" + title, title, () => content);
         tab.Content = content;
         tab.IconSource = new FontIconSource { Glyph = "\uE8A5" };
@@ -172,8 +188,78 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
         return null;
     }
 
+    /// <summary>
+    /// Run once the tab strip is in the live tree. Adding a tab to a TabView
+    /// that is not loaded yet (a workbench created by the same click that
+    /// opens its Chat tab, or one returned to from another page) fails
+    /// natively inside WinUI with E_INVALIDARG and takes the app down.
+    /// </summary>
+    public void WhenLoaded(Action action) => Defer(action, abandon: null);
+
+    /// <summary>
+    /// <see cref="WhenLoaded"/> for async work, so the caller still sees its
+    /// failure. Canceled when the workbench was left before it ever loaded.
+    /// </summary>
+    public Task WhenLoadedAsync(Func<Task> work)
+    {
+        var done = new TaskCompletionSource();
+        Defer(async () =>
+        {
+            try { await work(); done.TrySetResult(); }
+            catch (Exception ex) { done.TrySetException(ex); }
+        }, abandon: () => done.TrySetCanceled());
+        return done.Task;
+    }
+
+    private readonly List<(Action Run, Action? Abandon, DateTime Queued)> _afterLoad = new();
+
+    /// <summary>
+    /// Long enough for a page to load after the click that asked for it.
+    /// Work still waiting after this belongs to a visit that never finished,
+    /// and replaying it on some later visit would open what nobody asked for.
+    /// </summary>
+    private static readonly TimeSpan DeferLimit = TimeSpan.FromSeconds(10);
+
+    private void Defer(Action action, Action? abandon)
+    {
+        if (_tabs.IsLoaded && _afterLoad.Count == 0) action();
+        else _afterLoad.Add((action, abandon, DateTime.UtcNow));
+    }
+
+    /// <summary>
+    /// After the load pass, not inside it: a tab added from the Loaded
+    /// handler fails the same way as one added before it.
+    /// </summary>
+    private void RunAfterLoad()
+    {
+        if (_afterLoad.Count == 0) return;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (!_tabs.IsLoaded) return;
+            var pending = _afterLoad.ToArray();
+            _afterLoad.Clear();
+            foreach (var (run, abandon, queued) in pending)
+            {
+                if (DateTime.UtcNow - queued <= DeferLimit) run();
+                else abandon?.Invoke();
+            }
+        });
+    }
+
+    /// <summary>
+    /// Adding to the TabView now would fail: it is not loaded yet, or earlier
+    /// work is still queued and must keep its order. The first tab is part of
+    /// construction and is exempt.
+    /// </summary>
+    private bool MustDefer => (!_tabs.IsLoaded || _afterLoad.Count > 0) && _tabs.TabItems.Count > 0;
+
     private void OpenSurface(string key, string label, Func<Page> create, bool closable = true)
     {
+        if (MustDefer)
+        {
+            WhenLoaded(() => OpenSurface(key, label, create, closable));
+            return;
+        }
         var tab = _tabStrip.Open(key, label, () => create(), closable);
         if (tab.IconSource is null && !key.StartsWith("terminal:"))
         {

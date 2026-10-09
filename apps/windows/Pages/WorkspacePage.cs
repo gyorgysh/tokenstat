@@ -510,7 +510,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                 continue;
             }
             var filePath = path;
-            var line = new Grid();
+            var line = new Grid { ColumnSpacing = Theme.SpaceS };
             line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -518,6 +518,8 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             {
                 IsChecked = session.Paths.Contains(filePath),
                 VerticalAlignment = VerticalAlignment.Center,
+                // WinUI reserves 120px for a label this box does not have.
+                MinWidth = 0,
             };
             ToolTipService.SetToolTip(check, L10n.Text("windows.workspacepage.include_in_the_next_commit.5d7f428d"));
             check.Checked += async (_, _) =>
@@ -531,20 +533,42 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                 await LoadAsync();
             };
             line.Children.Add(check);
-            var label = new TextBlock
+            // The file name first, then what happened to it and where it
+            // lives, each on one trimmed line. The full path wrapped beside
+            // three labelled buttons collapsed to one letter per line in the
+            // inspector's narrow column.
+            var slash = Math.Max(path.LastIndexOf('/'), path.LastIndexOf('\\'));
+            var fileName = slash >= 0 ? path[(slash + 1)..] : path;
+            var folder = slash > 0 ? path[..slash] : "";
+            var label = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
+            label.Children.Add(new TextBlock
             {
-                Text = string.IsNullOrEmpty(kind) ? path : $"{WorkspaceGit.KindLabel(kind)} · {path}",
-                TextWrapping = TextWrapping.Wrap,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
+                Text = fileName,
+                FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+            var detail = string.Join(" · ", new[] { string.IsNullOrEmpty(kind) ? "" : WorkspaceGit.KindLabel(kind), folder }
+                .Where(part => part.Length > 0));
+            if (detail.Length > 0)
+            {
+                label.Children.Add(new TextBlock
+                {
+                    Text = detail,
+                    FontSize = 12,
+                    Opacity = 0.6,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                });
+            }
+            ToolTipService.SetToolTip(label, path);
             Grid.SetColumn(label, 1);
             line.Children.Add(label);
             var actions = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
-                Spacing = Theme.SpaceS,
+                Spacing = 2,
+                VerticalAlignment = VerticalAlignment.Center,
             };
-            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.workspacepage.stage.de838855"), ActionIcon.Apply, async (_, _) =>
+            actions.Children.Add(Buttons.ToolbarIcon(ActionIcon.Apply, L10n.Text("windows.workspacepage.stage.de838855"), async (_, _) =>
             {
                 var paths = new JsonArray { JsonValue.Create(filePath) };
                 await GitwriteAsync("workspace.stage", new JsonObject
@@ -553,7 +577,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     ["paths"] = paths,
                 });
             }));
-            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.workspacepage.unstage.033f86f9"), ActionIcon.Restore, async (_, _) =>
+            actions.Children.Add(Buttons.ToolbarIcon(ActionIcon.Restore, L10n.Text("windows.workspacepage.unstage.033f86f9"), async (_, _) =>
             {
                 var paths = new JsonArray { JsonValue.Create(filePath) };
                 await GitwriteAsync("workspace.unstage", new JsonObject
@@ -562,7 +586,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     ["paths"] = paths,
                 });
             }));
-            actions.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.workspacepage.diff.7ecf4628"), ActionIcon.Compare, async (_, _) =>
+            actions.Children.Add(Buttons.ToolbarIcon(ActionIcon.Compare, L10n.Text("windows.workspacepage.diff.7ecf4628"), async (_, _) =>
             {
                 await ShowDiffAsync(filePath);
             }));

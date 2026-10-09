@@ -11,6 +11,24 @@ then begin the next one. Do not reconstruct release notes from commits at the en
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-10-09
+
+### Changed
+
+- Commit history shows a public picture beside each author when one is available, on Mac, iPhone, iPad and Windows. Your own commits keep your account picture when you have set one.
+- The Windows account page shows the picture, name, tier mark, handle and server, with a link to the profile.
+- Windows toolbar and sidebar icons are drawn at the size they appear.
+
+### Fixed
+
+- A Windows update installs only a release newer than the app already running. A staged copy that is not newer is removed, so a restart cannot replace the app with an older one.
+- Restarting to finish a Windows update asks first while a terminal session or an agent turn is still running. The restart ends that work.
+- The Windows helper starts outside the install folder, so an update can replace the folder. Browser data that an older build stored there moves with the app, and signed-in sites stay signed in.
+- A development copy of the Windows helper left running no longer keeps the installed app attached to that older helper.
+- Windows chat rows keep their action labels visible. A changed file in the project inspector shows its name first, then what happened to it, instead of a path that wraps to one letter per line.
+- Opening a Windows chat tab while its tab strip is still loading no longer quits the app.
+- Installing an agent on Windows runs from the home folder, so the installer does not load the app's own libraries and fail.
+
 ## [1.4.0] - 2026-10-07
 
 ### Added

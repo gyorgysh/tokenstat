@@ -18,6 +18,8 @@ internal static class RemoteFeatureGate
     public const int PullsMinProtocol = 3;
     public const int FolderPickerMinProtocol = 7;
     public const int CloneRepositoryMinProtocol = 7;
+    /// Version 33 adds `pulls.commitAvatars`.
+    public const int CommitAvatarsMinProtocol = 33;
 
     public static long? ProtocolOf(JsonNode? status)
     {

@@ -6,7 +6,9 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 using System.Diagnostics;
+using System.IO.Pipes;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using Tokenstat.Install;
 
 namespace Tokenstat.Host;
@@ -18,7 +20,7 @@ internal static class HostProcess
     /// same change, or this app will restart a helper that already speaks the
     /// methods it was built for, or leave one that does not.
     /// </summary>
-    private const string ExpectedProtocolVersion = "32";
+    private const string ExpectedProtocolVersion = "33";
 
     public static void EnsureRunning() => EnsureRunning(replaceOld: true);
 
@@ -68,7 +70,7 @@ internal static class HostProcess
                 FileName = hostd,
                 UseShellExecute = false,
                 CreateNoWindow = true,
-                WorkingDirectory = Path.GetDirectoryName(hostd) ?? SelfInstall.InstallDirectory,
+                WorkingDirectory = SelfInstall.HostWorkingDirectory,
             });
         }
         catch (Exception ex)
@@ -164,10 +166,18 @@ internal static class HostProcess
             var command = xml.Substring(open + "<Command>".Length, close - open - "<Command>".Length);
             // Repair both old direct actions and hidden wrappers that exit
             // before hostd or wait for its surviving descendants. Both can
-            // prevent restart-on-failure from working.
+            // prevent restart-on-failure from working. Also wrappers that
+            // still start hostd inside the install folder, which pins the
+            // folder against an update's swap.
+            // Quoted the way the script writes it, then as the task XML may
+            // escape it, so a path with an apostrophe or ampersand still reads
+            // as current instead of re-registering on every launch.
+            var expected = "-WorkingDirectory '" + SelfInstall.HostWorkingDirectory.TrimEnd('\\').Replace("'", "''") + "'";
+            var current = xml.Contains(expected, StringComparison.OrdinalIgnoreCase)
+                || xml.Contains(System.Security.SecurityElement.Escape(expected), StringComparison.OrdinalIgnoreCase);
             return command.Trim().EndsWith("tokenstat-hostd.exe", StringComparison.OrdinalIgnoreCase)
                 || (command.Trim().EndsWith("powershell.exe", StringComparison.OrdinalIgnoreCase)
-                    && !xml.Contains("$child.WaitForExit()", StringComparison.OrdinalIgnoreCase));
+                    && (!xml.Contains("$child.WaitForExit()", StringComparison.OrdinalIgnoreCase) || !current));
         }
         catch
         {
@@ -180,6 +190,31 @@ internal static class HostProcess
     /// </summary>
     private static void StopOldHelper()
     {
+        // The helper holding this user's pipe is the one in the way. A copy
+        // left running from a development build would otherwise keep the
+        // pipe, every replacement would exit with "another host is already
+        // listening", and this app would keep talking to a helper from another
+        // release. A helper some other installer supervises is left alone: its
+        // supervisor would only start it again and the two would trade the
+        // pipe on every launch.
+        if (PipeServerProcessId() is int owner)
+        {
+            try
+            {
+                using var process = Process.GetProcessById(owner);
+                var path = process.MainModule?.FileName;
+                if (string.Equals(process.ProcessName, "tokenstat-hostd", StringComparison.OrdinalIgnoreCase)
+                    && path is not null && (IsManagedHelper(path) || IsDevelopmentBuild(path)))
+                {
+                    process.Kill(entireProcessTree: true);
+                    process.WaitForExit(4000);
+                }
+            }
+            catch
+            {
+                // Already gone, or not ours to stop.
+            }
+        }
         foreach (var process in Process.GetProcessesByName("tokenstat-hostd"))
         {
             try
@@ -203,6 +238,13 @@ internal static class HostProcess
             }
         }
     }
+
+    /// <summary>A helper built in a source checkout rather than installed.</summary>
+    private static bool IsDevelopmentBuild(string path) =>
+        path.Contains(@"\apps\windows\bin\", StringComparison.OrdinalIgnoreCase)
+        || path.Contains(@"\target\debug\", StringComparison.OrdinalIgnoreCase)
+        || path.Contains(@"\target\release\", StringComparison.OrdinalIgnoreCase)
+        || path.Contains(@"-pc-windows-msvc\", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsManagedHelper(string path)
     {
@@ -269,6 +311,24 @@ internal static class HostProcess
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool WaitNamedPipe(string lpNamedPipeName, uint nTimeOut);
+
+    /// <summary>The process serving this user's host pipe, when one answers.</summary>
+    private static int? PipeServerProcessId()
+    {
+        try
+        {
+            using var pipe = new NamedPipeClientStream(".", HostClient.PipeName, PipeDirection.InOut);
+            pipe.Connect(500);
+            return GetNamedPipeServerProcessId(pipe.SafePipeHandle, out var pid) && pid != 0 ? (int)pid : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetNamedPipeServerProcessId(SafePipeHandle pipe, out uint serverProcessId);
 
     private static void TryInstallTask(string hostd)
     {

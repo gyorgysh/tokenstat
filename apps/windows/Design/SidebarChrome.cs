@@ -179,7 +179,7 @@ internal static class SidebarChrome
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        content.Children.Add(new Viewbox { Width = 14, Height = 14, Child = icon.Icon() });
+        content.Children.Add(icon.Mark(14));
         var text = new TextBlock { Text = label, FontSize = 13, VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis };
         Grid.SetColumn(text, 1);

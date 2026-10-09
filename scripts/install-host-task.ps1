@@ -112,8 +112,13 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 # terminal must not delay crash recovery. Capture the handle before waiting
 # so Windows PowerShell retains the exited process's status.
 # The C# schtasks fallback in SelfInstall mirrors this shape.
+# hostd runs from its data folder, never the install folder: a child it starts
+# without a directory of its own inherits this one, and anything left sitting
+# in the install folder keeps an app update from swapping that folder.
 $BinQuoted = $Bin -replace "'", "''"
-$WorkDirQuoted = (Split-Path -Parent $Bin) -replace "'", "''"
+$WorkDir = Join-Path $env:LOCALAPPDATA "tokenstat"
+New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
+$WorkDirQuoted = $WorkDir -replace "'", "''"
 $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument `
     "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command `"`$child = Start-Process -FilePath '$BinQuoted' -WorkingDirectory '$WorkDirQuoted' -WindowStyle Hidden -PassThru; `$null = `$child.Handle; `$child.WaitForExit(); exit `$child.ExitCode`""
 $Principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited

@@ -2208,6 +2208,33 @@ extension Bridge {
         return try await background("pulls.list", params, as: [PullSummary].self)
     }
 
+    /// Public author pictures for a history list.
+    ///
+    /// An older paired computer returns an empty index, because it has no
+    /// method to ask. A missing forge or a failed request throws, and the
+    /// history list treats that the same way: initials, and the commits
+    /// still show.
+    static func commitAvatars(workspaceID: String, peer: String? = nil, oid: String) async throws -> HistoryAvatarIndex {
+        var params: [String: Any] = ["workspaceId": workspaceID]
+        if !oid.isEmpty { params["oid"] = oid }
+        if let peer {
+            guard await RemoteHostFeature.commitAvatars.isSupported(peer: peer) else { return .empty }
+            return try await onPeer(
+                peer, "pulls.commitAvatars", params, patience: Patience.interactive, as: HistoryAvatarIndex.self
+            )
+        }
+        if let target = remoteWorkspace(workspaceID) {
+            guard await RemoteHostFeature.commitAvatars.isSupported(peer: target.peer) else { return .empty }
+            params["workspaceId"] = target.workspace
+            return try await onPeer(
+                target.peer, "pulls.commitAvatars", params, patience: Patience.interactive, as: HistoryAvatarIndex.self
+            )
+        }
+        return try await background(
+            "pulls.commitAvatars", params, patience: Patience.interactive, as: HistoryAvatarIndex.self
+        )
+    }
+
     static func pullView(
         workspaceID: String,
         peer: String? = nil,

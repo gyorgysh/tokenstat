@@ -40,6 +40,7 @@ enum RemoteHostFeature: Hashable {
     case chatRemoveAll
     case liveActivities
     case terminalLiveActivities
+    case commitAvatars
 
     var title: String {
         switch self {
@@ -71,6 +72,7 @@ enum RemoteHostFeature: Hashable {
         case .chatRemoveAll: L10n.text("apple.clientremotefeaturegate.deleting_all_chats.978c2f5e")
         case .steer: L10n.text("apple.clientremotefeaturegate.notes_on_the_next_step.a272bf5a")
         case .liveActivities, .terminalLiveActivities: "Live Activities"
+        case .commitAvatars: "Author pictures"
         }
     }
 
@@ -100,6 +102,8 @@ enum RemoteHostFeature: Hashable {
     /// Version 25 adds a short note that rides the next tool step.
     /// Version 30 adds the reviewed fast-forward pull, `pulls.branch`, and
     /// the branch and pull request beside each conversation.
+    /// Version 33 adds `pulls.commitAvatars`, so history can show a public
+    /// picture for every author the forge knows.
     var minimumProtocol: Int {
         switch self {
         case .worktrees: 24
@@ -135,6 +139,7 @@ enum RemoteHostFeature: Hashable {
         case .steer: 25
         case .liveActivities: 31
         case .terminalLiveActivities: 32
+        case .commitAvatars: 33
         }
     }
 
@@ -168,6 +173,7 @@ enum RemoteHostFeature: Hashable {
         case .chatRemoveAll: "trash"
         case .steer: "text.bubble"
         case .liveActivities, .terminalLiveActivities: "waveform"
+        case .commitAvatars: "person.crop.circle"
         }
     }
 

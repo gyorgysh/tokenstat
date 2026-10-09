@@ -64,7 +64,7 @@ internal sealed class TerminalSurface : Grid
             claimed = true;
             var web = _web;
             var generation = _generation;
-            await web.EnsureCoreWebView2Async();
+            await web.EnsureCoreWebView2Async(await WebViewEnvironment.GetAsync());
             if (_closed || generation != _generation || !ReferenceEquals(web, _web))
             {
                 try { web.Close(); } catch { /* Closed while the runtime was starting. */ }

@@ -84,8 +84,9 @@ struct WorkspaceInspector: View {
     #if os(macOS)
     @Bindable var automations: AutomationsModel
     #endif
-    /// The signed-in account, for the picture beside your own commits in
-    /// History. Nil signs in nobody and draws monograms throughout.
+    /// The signed-in account. History uses its picture for commits this
+    /// repository counts as yours, and the forge's public pictures for
+    /// everyone else. Nil signs in nobody, so those rows stay monograms.
     var account: Account?
     /// Dismisses the pane. Owned by the root view, which is the only place the
     /// inspector's presence is decided.
@@ -218,6 +219,9 @@ struct WorkspaceHistoryView: View {
     /// For the picture beside a commit of your own. Optional so the view can
     /// still be built without an account in front of it.
     var account: Account?
+    /// Forge pictures for the authors of the list on screen. Empty until the
+    /// lookup returns, and empty for good when there is nothing to show.
+    @State private var pictures = HistoryAvatarIndex.empty
 
     var body: some View {
         historyBody
@@ -229,6 +233,24 @@ struct WorkspaceHistoryView: View {
                 guard let id = folder?.id else { return }
                 await model.loadHistory(for: id)
             }
+            .task(id: pictureRequest) {
+                let request = pictureRequest
+                pictures = .empty
+                guard !request.workspaceID.isEmpty else { return }
+                let loaded = (try? await Bridge.commitAvatars(workspaceID: request.workspaceID, oid: request.from)) ?? .empty
+                guard !Task.isCancelled else { return }
+                pictures = loaded.normalized()
+            }
+    }
+
+    /// The newest pushed commit is where the forge page starts. Unpushed
+    /// commits share their author's picture by email. An empty id asks the
+    /// forge for the default branch instead.
+    private var pictureRequest: HistoryPictureRequest {
+        let id = folder?.id ?? ""
+        let commits = model.history[id] ?? []
+        let from = commits.first(where: { !$0.unpushed })?.id ?? ""
+        return HistoryPictureRequest(workspaceID: id, from: from)
     }
 
     @ViewBuilder
@@ -260,13 +282,16 @@ struct WorkspaceHistoryView: View {
                             ForEach(commits) { commit in
                                 CommitRow(
                                     commit: commit,
-                                    // Your own commits carry your picture. For
-                                    // anyone else the app has no picture to
-                                    // show and will not go looking for one: an
-                                    // avatar service would mean sending a
-                                    // colleague's address off this machine on
-                                    // every history load.
-                                    avatar: commit.mine == true ? account?.avatar : nil,
+                                    // Yours uses the account picture. Everyone
+                                    // else uses the public picture the forge
+                                    // already has for that author. A miss
+                                    // draws initials.
+                                    avatar: pictures.url(
+                                        commitID: commit.id,
+                                        email: commit.email,
+                                        mine: commit.mine == true,
+                                        accountAvatar: account?.avatar
+                                    ),
                                     isOpen: model.isFront(.commit(commit.id), in: folder.id)
                                 ) {
                                     Task { await model.showCommit(commit.id, in: folder.id) }
@@ -302,8 +327,8 @@ struct WorkspaceHistoryView: View {
 /// not left this machine yet.
 private struct CommitRow: View {
     let commit: Commit
-    /// The account picture, for a commit this account authored. Nil draws the
-    /// author's monogram instead.
+    /// Account picture for a commit of yours, or the author's public forge
+    /// picture. Nil draws the author's monogram.
     let avatar: String?
     let isOpen: Bool
     let action: () -> Void

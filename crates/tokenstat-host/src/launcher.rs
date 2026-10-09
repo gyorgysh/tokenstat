@@ -841,6 +841,18 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
         cmd.arg("-c").arg(command);
         cmd
     };
+    // From the home folder, never the host's own working directory. On
+    // Windows hostd runs from the app's install folder, a self-contained .NET
+    // app that ships facade `System.dll` and friends. Windows PowerShell's
+    // `Add-Type` compiles with csc, which resolves references from the current
+    // directory first, so an installer that compiles C# (Codex does) picks up
+    // the facades and fails with "Win32Exception has been forwarded to
+    // System.Private.CoreLib".
+    cmd.current_dir(if home.is_empty() {
+        std::env::temp_dir()
+    } else {
+        PathBuf::from(&home)
+    });
     cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());

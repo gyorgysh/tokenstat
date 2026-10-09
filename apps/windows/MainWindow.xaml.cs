@@ -381,7 +381,8 @@ public sealed partial class MainWindow : Window
                 var workbench = WorkspaceTabs(workspaceId);
                 var liveTag = LiveRoute.Join(SidebarLive.ChatPrefix, workspaceId, chatId);
                 if (FindNavItem(liveTag) is not null) { _lastNavTag = liveTag; RestoreSelection(liveTag); }
-                if (workbench.ActivePage is ChatPage page) _ = page.RevealAsync(chatId);
+                // The Chat tab may still be waiting for the strip to load.
+                workbench.WhenLoaded(() => { if (workbench.ActivePage is ChatPage page) _ = page.RevealAsync(chatId); });
             });
         };
         AppServices.OpenInsightsDay = (date) =>
@@ -725,7 +726,9 @@ public sealed partial class MainWindow : Window
             // Finish the native row's selection before opening its action.
             await Task.Yield();
             NavigateTo("ws:" + id + ":Chat");
-            if (WorkspaceTabs(id).ActivePage is ChatPage chat) await chat.BeginNewChatAsync();
+            var workbench = WorkspaceTabs(id);
+            try { await workbench.WhenLoadedAsync(async () => { if (workbench.ActivePage is ChatPage chat) await chat.BeginNewChatAsync(); }); }
+            catch (OperationCanceledException) { /* The folder was left before it loaded. */ }
         }
         ContextMenus.AddAsync(menu, L10n.Text("windows.mainwindow_xaml.new_chat.db18382a"), NewChat);
         WorkPinMenu.Add(menu, id, "", name, name);
@@ -1051,7 +1054,17 @@ public sealed partial class MainWindow : Window
             RebuildToolbar();
         }
         popover.Closed += (_, _) => Restore();
-        try { popover.ShowAt(page, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.Full }); }
+        // From the trailing edge, where the docked inspector sits and where
+        // its toggle is, not centred over the page like a dialog: the right
+        // edges line up and it drops from the top.
+        try
+        {
+            popover.ShowAt(page, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions
+            {
+                Position = new Windows.Foundation.Point(Math.Max(0, page.ActualWidth - Theme.SpaceS), Theme.SpaceS),
+                Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedRight,
+            });
+        }
         catch { Restore(); throw; }
     }
 
@@ -1330,7 +1343,8 @@ public sealed partial class MainWindow : Window
         }
         _lastNavTag = chatTag;
         Show(chatTag);
-        if (WorkspaceTabs(folder).ActivePage is ChatPage chat) _ = chat.ShowChatsAsync();
+        var chatsBench = WorkspaceTabs(folder);
+        chatsBench.WhenLoaded(() => { if (chatsBench.ActivePage is ChatPage chat) _ = chat.ShowChatsAsync(); });
         RefreshUpdateBadge();
     }
 
@@ -2332,7 +2346,8 @@ public sealed partial class MainWindow : Window
                 {
                     NavigateTo("ws:" + id + ":Chat");
                     var workbench = WorkspaceTabs(id);
-                    if (workbench.ActivePage is ChatPage page) await page.BeginNewChatAsync();
+                    try { await workbench.WhenLoadedAsync(async () => { if (workbench.ActivePage is ChatPage page) await page.BeginNewChatAsync(); }); }
+                    catch (OperationCanceledException) { /* The folder was left before it loaded. */ }
                 };
                 menu.Items.Add(item);
             }

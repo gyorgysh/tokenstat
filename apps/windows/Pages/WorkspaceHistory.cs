@@ -58,7 +58,9 @@ internal static class WorkspaceHistory
         string ownHandle = "", ownName = "";
         try { var status = await AppServices.Host.CallAsync("account.status"); var account = status["account"] ?? status; ownAccount = account; ownAvatar = Format.Text(account, "avatar"); ownHandle = Format.Text(account, "handle"); ownName = Format.Text(account, "displayName"); }
         catch { /* History remains usable while account status is unavailable. */ }
+        var publicAvatars = HistoryAvatars.PublicAsync(workspaceId, array);
         var ownEmails = await HistoryAvatars.OwnEmailsAsync(ownAccount, array);
+        var faces = await publicAvatars;
         var list = new StackPanel { Spacing = 4 };
         foreach (var commit in array)
         {
@@ -118,7 +120,8 @@ internal static class WorkspaceHistory
             var content = new Grid { ColumnSpacing = Theme.SpaceS };
             content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var avatar = Marks.Avatar(url: ownEmails.Contains(Format.Text(commit, "email")) || Format.Flag(commit, "mine") || (ownHandle.Length > 0 && author.Equals(ownHandle, StringComparison.OrdinalIgnoreCase)) || (ownName.Length > 0 && author.Equals(ownName, StringComparison.OrdinalIgnoreCase)) ? ownAvatar : null, name: author, size: 30);
+            var mine = ownEmails.Contains(Format.Text(commit, "email")) || Format.Flag(commit, "mine") || (ownHandle.Length > 0 && author.Equals(ownHandle, StringComparison.OrdinalIgnoreCase)) || (ownName.Length > 0 && author.Equals(ownName, StringComparison.OrdinalIgnoreCase));
+            var avatar = Marks.Avatar(url: HistoryAvatars.For(commit, mine, ownAvatar, faces), name: author, size: 30);
             avatar.VerticalAlignment = VerticalAlignment.Top;
             content.Children.Add(avatar);
             Grid.SetColumn(body, 1);
@@ -188,6 +191,60 @@ internal static class WorkspaceHistory
 /// linked computer can identify the same author here without changing Git config.
 internal static class HistoryAvatars
 {
+    /// <summary>
+    /// The forge's public profile pictures for these commits' authors, by
+    /// commit id and by email. Every author gets their own picture, not only
+    /// this machine's git identity. Empty when the folder has no forge remote,
+    /// the forge cannot be reached, or it does not answer in a few seconds:
+    /// initials are a fine fallback and must never hold the list back.
+    /// </summary>
+    internal static async Task<JsonNode?> PublicAsync(string workspaceId, JsonArray commits)
+    {
+        // Start from the newest commit the forge can know; local-only commits
+        // are matched through their author's email instead.
+        var from = commits.FirstOrDefault(c => !Format.Flag(c, "unpushed")) is JsonNode pushed
+            ? Format.Text(pushed, "id")
+            : "";
+        try
+        {
+            Task<JsonNode> call;
+            if (Tokenstat.Navigation.RemoteWorkspaces.TrySplit(workspaceId, out var peer, out var inner))
+            {
+                var spoken = await Tokenstat.Navigation.RemoteFeatureGate.PeerProtocolAsync(peer);
+                if (spoken is null || spoken < Tokenstat.Navigation.RemoteFeatureGate.CommitAvatarsMinProtocol)
+                {
+                    return null;
+                }
+                call = Tokenstat.Navigation.RemoteWorkspaces.CallOnPeerAsync(peer, "pulls.commitAvatars",
+                    new JsonObject { ["workspaceId"] = inner, ["oid"] = from }, TimeSpan.FromSeconds(6));
+            }
+            else
+            {
+                call = AppServices.Host.CallAsync("pulls.commitAvatars",
+                    new JsonObject { ["workspaceId"] = workspaceId, ["oid"] = from }, TimeSpan.FromSeconds(6));
+            }
+            var done = await Task.WhenAny(call, Task.Delay(TimeSpan.FromSeconds(6)));
+            return done == call && call.IsCompletedSuccessfully ? call.Result : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The picture for one commit: the account's own upload for commits that
+    /// are ours, otherwise the author's public forge picture, otherwise none.
+    /// </summary>
+    internal static string? For(JsonNode? commit, bool mine, string? ownAvatar, JsonNode? publicAvatars)
+    {
+        if (mine && !string.IsNullOrEmpty(ownAvatar)) return ownAvatar;
+        var byCommit = Format.Text(publicAvatars?["byCommit"], Format.Text(commit, "id").ToLowerInvariant());
+        if (byCommit.Length > 0) return byCommit;
+        var byEmail = Format.Text(publicAvatars?["byEmail"], Format.Text(commit, "email").Trim().ToLowerInvariant());
+        return byEmail.Length > 0 ? byEmail : null;
+    }
+
     private static readonly Dictionary<string, (DateTime At, Task<Dictionary<string, string>> Task)> Cache = new();
     internal static async Task<HashSet<string>> OwnEmailsAsync(JsonNode? account, JsonArray commits)
     {

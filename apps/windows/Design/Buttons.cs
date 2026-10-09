@@ -85,7 +85,7 @@ internal static class Buttons
             Foreground = isAccent ? Theme.AccentBrush : Theme.Brush(static () => Theme.ControlGlyph),
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
-            Content = new Viewbox { Width = 14, Height = 14, Child = icon.Icon() },
+            Content = icon.Mark(14),
         };
         button.Resources["ButtonBackgroundPointerOver"] = Theme.Brush(static () => Theme.RowHighlight);
         button.Resources["ButtonBackgroundPressed"] = Theme.AccentSoftBrush;
@@ -138,7 +138,7 @@ internal static class Buttons
                 Spacing = 6,
                 Children =
                 {
-                    new Viewbox { Width = 12, Height = 12, Child = icon.Icon() },
+                    icon.Mark(12),
                     new TextBlock { Text = title, VerticalAlignment = VerticalAlignment.Center },
                 },
             },
