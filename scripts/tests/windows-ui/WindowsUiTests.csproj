@@ -34,6 +34,7 @@
     <Compile Include="../../../apps/windows/Navigation/NavigationRows.cs" Link="NavigationRows.cs" />
     <Compile Include="../../../apps/windows/Navigation/NavigationExpansion.cs" Link="NavigationExpansion.cs" />
     <Compile Include="../../../apps/windows/Pages/TerminalSurface.cs" Link="TerminalSurface.cs" />
+    <Compile Include="../../../apps/windows/Pages/WebViewEnvironment.cs" Link="WebViewEnvironment.cs" />
     <Compile Include="../../../apps/windows/Pages/TerminalPalette.cs" Link="TerminalPalette.cs" />
     <Compile Include="../../../apps/windows/Design/NativeContentLayout.cs" Link="NativeContentLayout.cs" />
     <Compile Include="../../../apps/windows/Design/ContextMenus.cs" Link="ContextMenus.cs" />
