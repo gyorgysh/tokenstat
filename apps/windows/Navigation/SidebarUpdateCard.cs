@@ -103,7 +103,7 @@ internal static class SidebarUpdateCard
         body.Children.Add(head);
         body.Children.Add(Caption(L10n.Text("windows.updatecard.v_0_is_installed_restart_when_you_re_ready.e317415f", $"{update.Latest}")));
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        var restart = Buttons.Primary(L10n.Text("windows.updatecard.restart.6b983a81"), ActionIcon.Refresh, async (s, _) => await update.RelaunchAsync((s as UIElement)?.XamlRoot), small: true);
+        var restart = Buttons.Primary(L10n.Text("windows.updatecard.restart.6b983a81"), ActionIcon.Refresh, async (s, _) => await UpdateRestart.AskAsync(update, (s as UIElement)?.XamlRoot), small: true);
         ToolTipService.SetToolTip(restart, L10n.Text("windows.updatecard.restarts_tokenstat_to_finish_the_update_sa.2c3392cc"));
         actions.Children.Add(restart);
         var skip = Buttons.Secondary(L10n.Text("common.skip"), ActionIcon.Dismiss, (_, _) => update.SkipThisVersion(), small: true);

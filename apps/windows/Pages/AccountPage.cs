@@ -1677,7 +1677,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         if (update.IsReady)
         {
             body.Children.Add(new TextBlock { Text = L10n.Text("windows.accountpage.v_0_is_ready.3e648cdc", $"{update.Latest}") });
-            body.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.accountpage.relaunch.8bd85e54"), ActionIcon.Refresh, async (s, _) => await update.RelaunchAsync((s as UIElement)?.XamlRoot)));
+            body.Children.Add(ActionIconGlyph.Button(L10n.Text("windows.accountpage.relaunch.8bd85e54"), ActionIcon.Refresh, async (s, _) => await Tokenstat.Install.UpdateRestart.AskAsync(update, (s as UIElement)?.XamlRoot)));
         }
         else if (update.Current == AppUpdateModel.Stage.Failed)
         {

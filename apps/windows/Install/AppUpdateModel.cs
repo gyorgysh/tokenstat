@@ -269,15 +269,13 @@ internal sealed class AppUpdateModel
     }
 
     /// <summary>
-    /// Hand off to the swap script and exit. When that cannot start, say so
-    /// on the card rather than leaving a Restart button that does nothing.
+    /// Restart to update. When work is still running, <paramref name="confirm"/>
+    /// is asked first: the swap stops the helper that owns those sessions,
+    /// and that is the person's call. A null confirm means nobody is there
+    /// to ask, so the restart proceeds. When the swap cannot start, the
+    /// failure lands on the card rather than leaving a button that does nothing.
     /// </summary>
-    /// <summary>
-    /// Restart to update, asking first when the swap would end running
-    /// terminals or agent turns: the swap has to stop the helper that owns
-    /// them, and that is the person's call, not the button's.
-    /// </summary>
-    public async Task RelaunchAsync(Microsoft.UI.Xaml.XamlRoot? root)
+    public async Task RelaunchAsync(Func<long, Task<bool>>? confirm = null)
     {
         long live = 0;
         try
@@ -289,23 +287,9 @@ internal sealed class AppUpdateModel
         {
             // An older helper without the method, or none at all: nothing to ask about.
         }
-        if (live > 0 && root is not null)
+        if (live > 0 && confirm is not null && !await confirm(live))
         {
-            var confirm = new Microsoft.UI.Xaml.Controls.ContentDialog
-            {
-                XamlRoot = root,
-                Title = L10n.Text("windows.appupdatemodel.restart_ends_running_work.title"),
-                Content = live == 1
-                    ? L10n.Text("windows.appupdatemodel.restart_ends_running_work.body.one")
-                    : L10n.Text("windows.appupdatemodel.restart_ends_running_work.body.other", $"{live}"),
-                PrimaryButtonText = L10n.Text("windows.updatecard.restart.6b983a81"),
-                CloseButtonText = L10n.Text("common.cancel"),
-                DefaultButton = Microsoft.UI.Xaml.Controls.ContentDialogButton.Close,
-            };
-            if (await confirm.ShowAsync() != Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary)
-            {
-                return;
-            }
+            return;
         }
         Relaunch();
     }
