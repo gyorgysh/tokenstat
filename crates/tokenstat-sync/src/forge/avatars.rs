@@ -17,7 +17,9 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::{CredentialSource, ForgeError, HttpFailure, Repo, auth, credential, response_text, rest_base};
+use super::{
+    CredentialSource, ForgeError, HttpFailure, Repo, auth, credential, response_text, rest_base,
+};
 
 /// Pictures by commit id and by author email, lowercased.
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
@@ -57,7 +59,9 @@ pub fn commit_avatars(repo: &Repo, from: Option<&str>) -> Result<CommitAvatars, 
     let from = from.filter(|oid| is_commit_id(oid));
     match page(repo, from) {
         // Unknown to the forge: start from its default branch instead.
-        Err(HttpFailure::NotFound) | Err(HttpFailure::Forge(ForgeError::Api(_))) if from.is_some() => {
+        Err(HttpFailure::NotFound) | Err(HttpFailure::Forge(ForgeError::Api(_)))
+            if from.is_some() =>
+        {
             page(repo, None).map_err(Into::into)
         }
         result => result.map_err(Into::into),
@@ -86,13 +90,19 @@ fn page(repo: &Repo, from: Option<&str>) -> Result<CommitAvatars, HttpFailure> {
         }
         response_text(request.send().map_err(ForgeError::from)?)
     };
-    let text = match stored.as_ref().map(|credential| send(Some(credential.bearer()))) {
+    let text = match stored
+        .as_ref()
+        .map(|credential| send(Some(credential.bearer())))
+    {
         None => send(None)?,
         Some(Ok(text)) => text,
         Some(Err(HttpFailure::Unauthorized)) => match stored.as_ref().map(|c| c.source()) {
             // A stale app token: refresh once, as every other forge read does.
             Some(CredentialSource::Tokenstat) => {
-                let bearer = stored.as_ref().map(|c| c.bearer().to_string()).unwrap_or_default();
+                let bearer = stored
+                    .as_ref()
+                    .map(|c| c.bearer().to_string())
+                    .unwrap_or_default();
                 let refreshed = auth::refresh_stored(&repo.host, &bearer)?;
                 send(Some(refreshed.bearer()))?
             }
@@ -125,7 +135,9 @@ fn decode(raw: &str) -> Result<CommitAvatars, ForgeError> {
         {
             avatars.by_email.entry(email).or_insert_with(|| url.clone());
         }
-        avatars.by_commit.insert(commit.sha.to_ascii_lowercase(), url);
+        avatars
+            .by_commit
+            .insert(commit.sha.to_ascii_lowercase(), url);
     }
     Ok(avatars)
 }
@@ -148,10 +160,16 @@ mod tests {
           {"sha":"dddd","commit":{"author":{"email":"x@example.com"}},"author":{"avatar_url":"javascript:alert(1)"}}
         ]"#;
         let avatars = decode(raw).unwrap();
-        assert_eq!(avatars.by_commit.get("aaaa").map(String::as_str), Some("https://avatars.example/u/1"));
+        assert_eq!(
+            avatars.by_commit.get("aaaa").map(String::as_str),
+            Some("https://avatars.example/u/1")
+        );
         assert_eq!(avatars.by_commit.len(), 2);
         // The newest picture for an email wins.
-        assert_eq!(avatars.by_email.get("ada@example.com").map(String::as_str), Some("https://avatars.example/u/1"));
+        assert_eq!(
+            avatars.by_email.get("ada@example.com").map(String::as_str),
+            Some("https://avatars.example/u/1")
+        );
         assert!(!avatars.by_email.contains_key("ghost@example.com"));
         assert!(!avatars.by_email.contains_key("x@example.com"));
     }

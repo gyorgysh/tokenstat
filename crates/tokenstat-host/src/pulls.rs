@@ -669,7 +669,9 @@ fn commit_avatars(p: &Params) -> Result<Value, String> {
     let repo = repo_for(&p.workspace_id, "pulls.commitAvatars")?;
     let key = (p.workspace_id.clone(), p.oid.to_ascii_lowercase());
     {
-        let mut cache = avatar_cache().lock().unwrap_or_else(PoisonError::into_inner);
+        let mut cache = avatar_cache()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         cache.retain(|_, (at, _)| at.elapsed() < AVATAR_TTL);
         if let Some((_, value)) = cache.get(&key) {
             return Ok(value.clone());
@@ -680,7 +682,9 @@ fn commit_avatars(p: &Params) -> Result<Value, String> {
         tokenstat_sync::forge::commit_avatars(&repo, oid).map_err(|error| error.to_string())?,
     )
     .map_err(|error| error.to_string())?;
-    let mut cache = avatar_cache().lock().unwrap_or_else(PoisonError::into_inner);
+    let mut cache = avatar_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
     // Bounded: one entry per screen of history, a handful of folders.
     if cache.len() >= 64 {
         cache.clear();

@@ -9,11 +9,11 @@ mod model;
 mod query;
 mod write;
 
-pub use avatars::{CommitAvatars, commit_avatars};
 pub use auth::{
     APP_SLUG, Credential, CredentialSource, DeviceLogin, DeviceStatus, ForgeError, credential,
     device_poll, device_start, set_token, sign_out,
 };
+pub use avatars::{CommitAvatars, commit_avatars};
 pub use model::{
     Availability, BranchPull, CheckState, ForgeConnection, MergeMethod, PullActor, PullCheck,
     PullDetail, PullFile, PullReview, PullSummary, Repo, Scope, State, TimelineEvent, TimelinePage,
