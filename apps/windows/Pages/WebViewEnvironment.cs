@@ -23,10 +23,7 @@ internal static class WebViewEnvironment
     private static readonly object Gate = new();
     private static Task<CoreWebView2Environment>? _environment;
 
-    public static string ProfileFolder => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "tokenstat",
-        "WebView2");
+    public static string ProfileFolder => WebViewProfile.Folder;
 
     public static Task<CoreWebView2Environment> GetAsync()
     {

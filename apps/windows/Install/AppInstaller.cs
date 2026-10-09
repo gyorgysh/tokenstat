@@ -320,7 +320,7 @@ internal static class AppInstaller
             // Older builds kept the browser profile inside the install folder.
             // Carry it out before the old folder goes, so an update does not
             // sign anybody out of the sites they use in the app.
-            $"$profile = '{Escape(Tokenstat.Pages.WebViewEnvironment.ProfileFolder)}'",
+            $"$profile = '{Escape(Tokenstat.Pages.WebViewProfile.Folder)}'",
             "$legacy = Join-Path $prev 'Tokenstat.exe.WebView2'",
             "if ($moved -and (Test-Path -LiteralPath $legacy) -and -not (Test-Path -LiteralPath $profile)) {",
             "  try { Move-Item -LiteralPath $legacy -Destination $profile -ErrorAction Stop } catch { Log ('browser profile kept in place: ' + $_.Exception.Message) }",

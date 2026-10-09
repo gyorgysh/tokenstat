@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../../apps/windows/Install/AppInstaller.cs" Link="AppInstaller.cs" />
+    <Compile Include="../../../apps/windows/Pages/WebViewProfile.cs" Link="WebViewProfile.cs" />
     <Compile Include="../../../apps/windows/Install/SelfInstall.cs" Link="SelfInstall.cs" />
     <Compile Include="../../../apps/windows/Host/HostProcess.cs" Link="HostProcess.cs" />
     <Compile Include="../../../apps/windows/AppServices.cs" Link="AppServices.cs" />
